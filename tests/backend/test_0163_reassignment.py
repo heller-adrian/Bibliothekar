@@ -37,6 +37,10 @@ def edit_drop_second(db: Path, ids):
     )
 
 
+def _segments(db: Path):
+    return list_event_reassignments(db, 'j', 'src')['reassignment_segments']
+
+
 def test_planned_removed_family_must_be_reassigned_and_queue_clears(tmp_path):
     db=tmp_path/'db.sqlite3'; ids=seed(db,source_status='planned')
     result=edit_drop_second(db,ids)
@@ -45,7 +49,7 @@ def test_planned_removed_family_must_be_reassigned_and_queue_clears(tmp_path):
     state=list_event_reassignments(db,'j','src')
     assert [int(f['family_id']) for f in state['families']] == [ids[1]]
 
-    assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='existing_no_event',target_event_id='target')
+    assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='existing_no_event',target_event_id='target',segments=state['reassignment_segments'])
     assert assigned['pending_family_count'] == 0
     assert assigned['source_resort_required'] is False
     with database_connection(db) as c:
@@ -58,7 +62,7 @@ def test_applied_removed_family_keeps_target_for_reapply(tmp_path):
     db=tmp_path/'db.sqlite3'; ids=seed(db,source_status='applied')
     result=edit_drop_second(db,ids)
     assert result['resort_required'] is True
-    assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='existing_no_event',target_event_id='target')
+    assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='existing_no_event',target_event_id='target',segments=_segments(db))
     assert assigned['pending_family_count'] == 0
     assert assigned['source_resort_required'] is True
     with database_connection(db) as c:
@@ -72,7 +76,7 @@ def test_applied_removed_family_keeps_target_for_reapply(tmp_path):
 def test_new_event_can_be_created_from_removed_family(tmp_path):
     db=tmp_path/'db.sqlite3'; ids=seed(db,source_status='planned')
     edit_drop_second(db,ids)
-    assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='new_event',new_event_name='Neues Ziel')
+    assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='new_event',new_event_name='Neues Ziel',segments=_segments(db))
     assert assigned['pending_family_count'] == 0
     target_id=assigned['target']['event_id']
     with database_connection(db) as c:
