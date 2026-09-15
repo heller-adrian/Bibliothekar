@@ -3020,8 +3020,8 @@ EVENTS_HTML = r"""<!doctype html>
             <strong>Neu-Zuordnung vor Archivprüfung</strong><br>
             ${Number(archiveReassignData.family_count)} herausfallende ${Number(archiveReassignData.family_count)===1?"Familie benötigt":"Familien benötigen"} noch ein Ziel.
           </section>`;
-          html += `<div data-archive-reassign-families style="display:grid;gap:8px;margin-top:10px">${(archiveReassignData.families||[]).map(f =>
-            `<label class="card" style="padding:10px;display:flex;gap:10px;align-items:center"><input type="checkbox" data-archive-family value="${Number(f.family_id)}" checked><span><strong>${escapeHtml(f.original_stem||f.family_key||f.family_id)}</strong><br><span class="muted">${escapeHtml(String(f.selected_capture_time||"").slice(0,19))} · ${Number(f.file_count||0)} Dateien</span></span></label>`
+          html += `<div data-archive-reassign-segments style="display:grid;gap:8px;margin-top:10px">${(archiveReassignData.reassignment_segments||[]).map(s =>
+            `<label class="card" style="padding:10px;display:flex;gap:10px;align-items:center"><input type="checkbox" data-archive-segment data-family-ids="${escapeHtml(JSON.stringify(s.family_ids||[]))}" checked><span><strong>${escapeHtml(String(s.day_key||""))} · ${escapeHtml(String(s.start_time||""))}–${escapeHtml(String(s.end_time||""))}</strong><br><span class="muted">${Number(s.family_count||0)} Familien · ${Number(s.file_count||0)} Dateien</span></span></label>`
           ).join("")}</div>`;
           html += `<label class="edit-field" style="margin-top:10px"><span>Ziel</span><select id="archive-reassign-target"><option value="new">Neues Ereignis erstellen</option><option value="new-no-event">Neues „Ohne Ereignis“ erstellen</option>${targetOptions}</select></label>`;
           html += `<label id="archive-reassign-name-row" class="edit-field"><span>Name des neuen Ereignisses / Unterereignisses</span><input id="archive-reassign-name" type="text" placeholder="Name"></label>`;
@@ -3071,8 +3071,9 @@ EVENTS_HTML = r"""<!doctype html>
         const archiveAssignButton = changeRequestBody.querySelector("#archive-reassign-apply");
         if (archiveAssignButton) archiveAssignButton.addEventListener("click", async () => {
           const message = changeRequestBody.querySelector("#archive-reassign-message");
-          const familyIds = [...changeRequestBody.querySelectorAll("[data-archive-family]:checked")].map(x => Number(x.value));
-          if (!familyIds.length) { if (message) message.textContent = "Wähle mindestens eine Familie aus."; return; }
+          const selectedSegments = [...changeRequestBody.querySelectorAll("[data-archive-segment]:checked")];
+          const familyIds = [...new Set(selectedSegments.flatMap(x => { try { return JSON.parse(x.dataset.familyIds || "[]").map(Number); } catch (_) { return []; } }))];
+          if (!familyIds.length) { if (message) message.textContent = "Wähle mindestens ein Tages-/Zeitsegment aus."; return; }
           const value = archiveTarget.value;
           let targetMode="new_event", targetEventId=null, targetChildEventId=null;
           if (value === "new-no-event") targetMode="new_no_event";
