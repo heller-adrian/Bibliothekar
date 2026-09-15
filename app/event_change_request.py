@@ -302,7 +302,7 @@ def propose_event_change(
                 preview.get("selected_file_count", 0),
                 preview.get("selected_family_count", 0),
                 json.dumps(preview.get("no_event_segments", []), ensure_ascii=False),
-                json.dumps(normalized_child_segments, ensure_ascii=False),
+                json.dumps(preview.get("child_segments", []), ensure_ascii=False),
                 "aenderbar_vorschlagen",
                 version,
                 now,
