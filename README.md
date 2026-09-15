@@ -72,3 +72,9 @@ Immich-Anbindung.
 ## Status
 
 Das Projekt befindet sich aktiv in Entwicklung und ist noch nicht für unbegleitete Produktivinstallationen freigegeben.
+
+## Lizenz
+
+Bibliothekar ist freie Open-Source-Software unter der GNU Affero General Public License v3.0.
+
+Siehe [LICENSE](LICENSE).
