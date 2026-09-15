@@ -159,37 +159,46 @@ def list_event_reassignments(database_path: Path, job_id: str, event_id: str) ->
             "same_job": str(target["job_id"]) == job_id,
         })
 
-    # Canonical released ranges come from the source definition, never
-    # from family min/max capture times. This is especially important after
-    # deleting or shortening a timed event.
-    pending_days = sorted({str(r["selected_capture_time"] or "")[:10] for r in rows if r["selected_capture_time"]})
-    reassignment_time_ranges: dict[str, dict[str, str]] = {}
-    with database_connection(database_path) as connection:
-        if str(source["event_kind"]) == "no_event":
-            defined = connection.execute(
-                "SELECT day_key,start_time,end_time FROM event_time_segments WHERE event_id=? ORDER BY start_datetime,id",
-                (event_id,),
-            ).fetchall()
-            for seg in defined:
-                day=str(seg["day_key"] or "")
-                if day in pending_days:
-                    reassignment_time_ranges[day]={"start_time":str(seg["start_time"]),"end_time":str(seg["end_time"])}
+    # 0.21.2: released time pieces are persisted when the source definition
+    # changes. They are the canonical reassignment units; family capture times
+    # decide membership only, never the displayed/created range boundaries.
+    segment_groups: dict[tuple[str,str], list[Any]] = {}
+    fallback_by_day: dict[str,list[Any]] = {}
+    for row in rows:
+        a=str(row["released_start_datetime"] or "")[:19]
+        b=str(row["released_end_datetime"] or "")[:19]
+        if a and b:
+            segment_groups.setdefault((a,b),[]).append(row)
         else:
-            children = connection.execute(
-                "SELECT start_datetime,end_datetime FROM events WHERE parent_event_id=? ORDER BY start_datetime,id",
-                (event_id,),
-            ).fetchall()
-            definitions = list(children) if children else [source]
-            for day in pending_days:
-                day_start=f"{day}T00:00:00"; day_end=f"{day}T23:59:59"
-                pieces=[]
-                for definition in definitions:
-                    a=max(day_start,str(definition["start_datetime"] or "")[:19])
-                    b=min(day_end,str(definition["end_datetime"] or "")[:19])
-                    if a <= b:
-                        pieces.append((a,b))
-                if pieces:
-                    reassignment_time_ranges[day]={"start_time":min(a for a,_ in pieces)[11:16],"end_time":max(b for _,b in pieces)[11:16]}
+            day=str(row["selected_capture_time"] or "")[:10]
+            fallback_by_day.setdefault(day,[]).append(row)
+    reassignment_segments=[]
+    for (a,b),items in sorted(segment_groups.items()):
+        reassignment_segments.append({
+            "segment_key": f"{a}/{b}", "day_key": a[:10],
+            "start_time": a[11:16], "end_time": b[11:16],
+            "start_datetime": a, "end_datetime": b,
+            "family_ids": [int(item["family_id"]) for item in items],
+            "family_count": len(items),
+            "file_count": sum(int(item["file_count"] or 0) for item in items),
+        })
+    for day,items in sorted(fallback_by_day.items()):
+        captures=[str(item["selected_capture_time"] or "")[:19] for item in items if item["selected_capture_time"]]
+        if captures:
+            a=min(captures); b=max(captures)
+            reassignment_segments.append({
+                "segment_key": f"fallback:{day}", "day_key": day,
+                "start_time": a[11:16], "end_time": b[11:16],
+                "start_datetime": a, "end_datetime": b,
+                "family_ids": [int(item["family_id"]) for item in items],
+                "family_count": len(items),
+                "file_count": sum(int(item["file_count"] or 0) for item in items),
+                "fallback": True,
+            })
+    reassignment_time_ranges = {
+        seg["day_key"]: {"start_time":seg["start_time"],"end_time":seg["end_time"]}
+        for seg in reassignment_segments
+    }
 
     return {
         "source_event": {
@@ -208,6 +217,7 @@ def list_event_reassignments(database_path: Path, job_id: str, event_id: str) ->
         "new_no_event_supported": not bool(target_list),
         "pending_months": pending_months,
         "reassignment_time_ranges": reassignment_time_ranges,
+        "reassignment_segments": reassignment_segments,
     }
 
 

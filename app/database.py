@@ -2838,10 +2838,41 @@ def delete_planned_event(
             )
             connection.execute("DELETE FROM event_reapply_removed_families WHERE event_id=?", (event_id,))
             if family_ids:
+                if str(event["event_kind"] or "event") == "no_event":
+                    delete_definition_rows = connection.execute(
+                        "SELECT start_datetime,end_datetime FROM event_time_segments WHERE event_id=? ORDER BY start_datetime,id",
+                        (event_id,),
+                    ).fetchall()
+                else:
+                    delete_definition_rows = connection.execute(
+                        "SELECT start_datetime,end_datetime FROM events WHERE parent_event_id=? ORDER BY start_datetime,id",
+                        (event_id,),
+                    ).fetchall()
+                delete_ranges = (
+                    [(str(r["start_datetime"])[:19],str(r["end_datetime"])[:19]) for r in delete_definition_rows]
+                    if delete_definition_rows else
+                    [(str(event["start_datetime"])[:19],str(event["end_datetime"])[:19])]
+                )
+                from app.released_ranges import split_intervals_by_day, range_for_capture
+                delete_ranges = split_intervals_by_day(delete_ranges)
+                fp = ",".join("?" for _ in family_ids)
+                delete_capture_rows = connection.execute(
+                    f"SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN ({fp})",
+                    (job_id,*family_ids),
+                ).fetchall()
+                delete_range_by_family = {
+                    int(r["id"]): range_for_capture(str(r["selected_capture_time"] or "")[:19], delete_ranges)
+                    for r in delete_capture_rows
+                }
                 connection.executemany(
-                    """INSERT INTO event_reapply_removed_families(event_id,job_id,family_id,created_at)
-                       VALUES (?,?,?,?)""",
-                    [(event_id, job_id, fid, now) for fid in family_ids],
+                    """INSERT INTO event_reapply_removed_families(
+                           event_id,job_id,family_id,created_at,released_start_datetime,released_end_datetime)
+                       VALUES (?,?,?,?,?,?)""",
+                    [(
+                        event_id,job_id,fid,now,
+                        delete_range_by_family.get(fid)[0] if delete_range_by_family.get(fid) else None,
+                        delete_range_by_family.get(fid)[1] if delete_range_by_family.get(fid) else None,
+                    ) for fid in family_ids],
                 )
             connection.execute(
                 "DELETE FROM event_assignments WHERE event_id=? OR event_id IN (SELECT id FROM events WHERE parent_event_id=?)",
@@ -3146,6 +3177,26 @@ def update_event_definition(
         ).fetchall()
         old_assigned_ids = {int(row["family_id"]) for row in old_assigned_rows}
 
+        # Preserve the old canonical time definition so every released family
+        # can carry the exact free segment that produced the reassignment task.
+        # This avoids reconstructing time truth from min/max capture timestamps.
+        if str(event["event_kind"] or "event") == "no_event":
+            old_definition_rows = connection.execute(
+                "SELECT start_datetime,end_datetime FROM event_time_segments WHERE event_id=? ORDER BY start_datetime,id",
+                (event_id,),
+            ).fetchall()
+            old_definition_ranges = [(str(r["start_datetime"])[:19], str(r["end_datetime"])[:19]) for r in old_definition_rows]
+        else:
+            old_definition_rows = connection.execute(
+                "SELECT start_datetime,end_datetime FROM events WHERE parent_event_id=? ORDER BY start_datetime,id",
+                (event_id,),
+            ).fetchall()
+            old_definition_ranges = (
+                [(str(r["start_datetime"])[:19], str(r["end_datetime"])[:19]) for r in old_definition_rows]
+                if old_definition_rows else
+                [(str(event["start_datetime"])[:19], str(event["end_datetime"])[:19])]
+            )
+
         placeholders = ",".join("?" for _ in requested_ids)
         rows = connection.execute(
             f"SELECT id, selected_capture_time FROM file_families WHERE job_id = ? AND id IN ({placeholders})",
@@ -3193,6 +3244,21 @@ def update_event_definition(
             uses_time_range = bool(preview["uses_time_range"]) or bool(multi_segments)
             assignment_start = f"{start_date}T{preview['start_time']}:00" if uses_time_range and not multi_segments else parent_start
             assignment_end = f"{end_date}T{preview['end_time']}:59" if uses_time_range and not multi_segments else parent_end
+        if event_kind == "no_event":
+            new_definition_ranges = [(seg["start_datetime"], seg["end_datetime"]) for seg in no_event_segments]
+        elif multi_segments:
+            new_definition_ranges = [
+                (f"{start_date}T{str(seg.get('start_time') or '00:00')}:00",
+                 f"{end_date}T{str(seg.get('end_time') or '23:59')}:59")
+                for seg in multi_segments
+            ]
+        else:
+            new_definition_ranges = [(assignment_start, assignment_end)]
+        from app.released_ranges import subtract_intervals, split_intervals_by_day
+        released_definition_ranges = split_intervals_by_day(
+            subtract_intervals(old_definition_ranges, new_definition_ranges)
+        )
+
         if cascade_confirmed and str(preview.get("event_kind") or "event") == "event":
             from app.event_timeline import apply_cascade_for_interval
             cascade_result = apply_cascade_for_interval(
@@ -3371,11 +3437,25 @@ def update_event_definition(
             (event_id,),
         )
         if removed_ids:
+            rp = ",".join("?" for _ in removed_ids)
+            removed_capture_rows = connection.execute(
+                f"SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN ({rp})",
+                (job_id,*removed_ids),
+            ).fetchall()
+            from app.released_ranges import range_for_capture
+            released_by_family = {
+                int(r["id"]): range_for_capture(str(r["selected_capture_time"] or "")[:19], released_definition_ranges)
+                for r in removed_capture_rows
+            }
             connection.executemany(
                 """INSERT INTO event_reapply_removed_families
-                   (event_id, job_id, family_id, created_at)
-                   VALUES (?, ?, ?, ?)""",
-                [(event_id, job_id, family_id, now) for family_id in removed_ids],
+                   (event_id, job_id, family_id, created_at, released_start_datetime, released_end_datetime)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                [(
+                    event_id, job_id, family_id, now,
+                    released_by_family.get(family_id)[0] if released_by_family.get(family_id) else None,
+                    released_by_family.get(family_id)[1] if released_by_family.get(family_id) else None,
+                ) for family_id in removed_ids],
             )
 
         connection.execute(
