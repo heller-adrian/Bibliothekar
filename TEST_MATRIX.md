@@ -56,9 +56,9 @@ Statuswerte:
 
 | ID | Test |
 |---|---|
-| T060 | herausfallende Familien zu bestehendem Ereignis |
-| T061 | herausfallende Familien zu neuem Ereignis |
-| T062 | herausfallende Familien zu Ohne Ereignis |
+| T060 | herausfallende Tages-/Zeitsegmente zu bestehendem Ereignis |
+| T061 | herausfallende Tages-/Zeitsegmente zu neuem Ereignis |
+| T062 | herausfallende Tages-/Zeitsegmente zu Ohne Ereignis |
 | T063 | neues Unterereignis eines bestehenden Oberereignisses |
 | T064 | Änderung verwerfen |
 | T065 | Reassignment-Zustand nach Neustart erhalten |
@@ -66,17 +66,21 @@ Statuswerte:
 
 ## Archiv
 
+Archivtests T080–T088 werden ausschließlich gegen die beschreibbare QA-Testbibliothek
+`/mnt/storage/ki-workspace/hermes/bibliothekar-qa/archive-test-library` ausgeführt. Die reale
+Kamerabibliothek `/mnt/storage/fotos/Kamerabibliothek` bleibt read-only und ist niemals Testziel.
+
 | ID | Test |
 |---|---|
-| T080 | applied Ereignis archivieren |
-| T081 | Archivprüfung |
-| T082 | archived Ereignis umbenennen |
-| T083 | archived Zeitraum ändern |
-| T084 | archived einfaches Ereignis zu Oberereignis umbauen |
-| T085 | herausfallende Dateien einem neuen Unterereignis zuordnen |
-| T086 | manuellen Änderungsauftrag erzeugen |
-| T087 | manuelle Verschiebung anschließend prüfen |
-| T088 | Archivbestand niemals automatisch verändern |
+| T080 | applied Ereignis in QA-Testbibliothek archivieren |
+| T081 | Archivprüfung gegen realen QA-Dateibestand |
+| T082 | archived Ereignis umbenennen und IST→SOLL prüfen |
+| T083 | archived Zeitraum ändern; herausfallende Segmente erkennen |
+| T084 | archived einfaches Ereignis zu Oberereignis mit Unterereignissen umbauen |
+| T085 | herausfallende Dateien einem neuen oder bestehenden Unterereignis zuordnen |
+| T086 | manuellen Änderungsauftrag mit konkreten Pfaden erzeugen |
+| T087 | manuelle Verschiebung in QA-Testbibliothek anschließend vollständig prüfen |
+| T088 | reale Kamerabibliothek niemals verändern; Schreibzugriff muss ausgeschlossen bleiben |
 
 ## Sicherheits- und Wiederanlauf
 
