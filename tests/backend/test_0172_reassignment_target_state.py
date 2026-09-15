@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.database import database_connection, delete_planned_event
-from app.event_reassignment import assign_event_reassignments
+from app.event_reassignment import assign_event_reassignments, list_event_reassignments
 from app.events_ui import EVENTS_HTML
 from tests.backend.test_0171_stability import _seed_two_planned, NOW
 
@@ -14,6 +14,10 @@ def _make_applied(db: Path):
     return fids
 
 
+def _segments(db: Path):
+    return list_event_reassignments(db, 'j', 'b')['reassignment_segments']
+
+
 def test_delete_reassignment_new_event_ignores_source_event_being_deleted(tmp_path):
     db = tmp_path / 'db.sqlite3'
     fids = _make_applied(db)
@@ -22,7 +26,7 @@ def test_delete_reassignment_new_event_ignores_source_event_being_deleted(tmp_pa
     assert result['removed_family_ids'] == fids[4:]
 
     reassigned = assign_event_reassignments(
-        db, 'j', 'b', fids[4:], target_mode='new_event', new_event_name='Ersatz Abend'
+        db, 'j', 'b', fids[4:], target_mode='new_event', new_event_name='Ersatz Abend', segments=_segments(db)
     )
     assert reassigned['status'] == 'reassigned'
     assert reassigned['pending_family_count'] == 0
@@ -40,7 +44,7 @@ def test_delete_reassignment_new_no_event_ignores_source_event_being_deleted(tmp
     delete_planned_event(db, 'j', 'b')
 
     reassigned = assign_event_reassignments(
-        db, 'j', 'b', fids[4:], target_mode='new_no_event'
+        db, 'j', 'b', fids[4:], target_mode='new_no_event', segments=_segments(db)
     )
     assert reassigned['pending_family_count'] == 0
     with database_connection(db) as c:
