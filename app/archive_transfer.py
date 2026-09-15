@@ -1,0 +1,593 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
+from typing import Any
+import hashlib
+import json
+import os
+import uuid
+
+from app.database import database_connection
+from app.archive_locations import record_family_anchor, record_verified_file_location
+
+
+class ArchiveVerificationError(RuntimeError):
+    pass
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+
+    with path.open("rb") as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+
+    return digest.hexdigest()
+
+
+def _safe_relative(value: Any) -> PurePosixPath:
+    raw = str(value or "").strip().replace("\\", "/")
+    path = PurePosixPath(raw)
+
+    if (
+        not raw
+        or path.is_absolute()
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ArchiveVerificationError(
+            "Unsicherer relativer Archivpfad: " + raw
+        )
+
+    return path
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _event_files(
+    database_path: Path,
+    job_id: str,
+    event_id: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    with database_connection(database_path) as connection:
+        event = connection.execute(
+            """
+            SELECT *
+            FROM events
+            WHERE id = ?
+              AND job_id = ?
+              AND parent_event_id IS NULL
+            """,
+            (event_id, job_id),
+        ).fetchone()
+
+        if event is None:
+            raise ArchiveVerificationError(
+                "Ereignis wurde nicht gefunden."
+            )
+
+        rows = connection.execute(
+            """
+            WITH event_tree AS (
+                SELECT id
+                FROM events
+                WHERE id = ?
+
+                UNION ALL
+
+                SELECT child.id
+                FROM events AS child
+                JOIN event_tree AS parent
+                    ON child.parent_event_id = parent.id
+            ),
+            assigned_families AS (
+                SELECT DISTINCT family_id
+                FROM event_assignments
+                WHERE event_id IN (
+                    SELECT id FROM event_tree
+                )
+                  AND family_id IS NOT NULL
+            ),
+            assigned_files AS (
+                SELECT DISTINCT file_id
+                FROM event_assignments
+                WHERE event_id IN (
+                    SELECT id FROM event_tree
+                )
+                  AND file_id IS NOT NULL
+            )
+            SELECT DISTINCT
+                files.id AS file_id,
+                files.family_id,
+                files.current_relative_path,
+                files.original_relative_path,
+                files.original_filename,
+                files.current_root_kind,
+                files.size_bytes,
+                files.sha256_current,
+                files.sha256_original
+            FROM files
+            WHERE files.job_id = ?
+              AND (
+                    files.family_id IN (
+                        SELECT family_id
+                        FROM assigned_families
+                    )
+                    OR files.id IN (
+                        SELECT file_id
+                        FROM assigned_files
+                    )
+                  )
+            ORDER BY
+                files.current_relative_path,
+                files.id
+            """,
+            (event_id, job_id),
+        ).fetchall()
+
+    return dict(event), [dict(row) for row in rows]
+
+
+def latest_archive_verification(
+    database_path: Path,
+    job_id: str,
+    event_id: str,
+) -> dict[str, Any] | None:
+    with database_connection(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT *
+            FROM event_archive_verifications
+            WHERE job_id = ?
+              AND event_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (job_id, event_id),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    result = dict(row)
+    raw_details = result.pop("details_json", None)
+    result["details"] = json.loads(raw_details) if raw_details else None
+    result["verified"] = result.get("status") == "verified"
+    return result
+
+
+def list_archive_candidates(
+    database_path: Path,
+    archive_root: Path,
+) -> dict[str, Any]:
+    archive_root = archive_root.expanduser().resolve(strict=False)
+    available = archive_root.exists() and archive_root.is_dir()
+    readable = available and os.access(archive_root, os.R_OK | os.X_OK)
+
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            """
+            WITH RECURSIVE event_tree AS (
+                SELECT
+                    parent.id AS root_event_id,
+                    parent.id AS event_id
+                FROM events AS parent
+                WHERE parent.parent_event_id IS NULL
+
+                UNION ALL
+
+                SELECT
+                    tree.root_event_id,
+                    child.id
+                FROM event_tree AS tree
+                JOIN events AS child
+                    ON child.parent_event_id = tree.event_id
+            ),
+            event_files AS (
+                SELECT DISTINCT
+                    tree.root_event_id,
+                    files.id AS file_id
+                FROM event_tree AS tree
+                JOIN event_assignments AS assignments
+                    ON assignments.event_id = tree.event_id
+                JOIN files
+                    ON files.family_id = assignments.family_id
+                   AND assignments.family_id IS NOT NULL
+
+                UNION
+
+                SELECT DISTINCT
+                    tree.root_event_id,
+                    files.id AS file_id
+                FROM event_tree AS tree
+                JOIN event_assignments AS assignments
+                    ON assignments.event_id = tree.event_id
+                JOIN files
+                    ON files.id = assignments.file_id
+                   AND assignments.file_id IS NOT NULL
+            ),
+            event_file_counts AS (
+                SELECT
+                    event_files.root_event_id AS event_id,
+                    COUNT(DISTINCT files.id) AS file_count,
+                    COUNT(DISTINCT files.family_id) AS family_count,
+                    COALESCE(SUM(files.size_bytes), 0) AS total_size_bytes
+                FROM event_files
+                JOIN files
+                    ON files.id = event_files.file_id
+                GROUP BY event_files.root_event_id
+            )
+            SELECT
+                events.id AS event_id,
+                events.job_id,
+                events.name,
+                events.folder_name,
+                events.status,
+                events.start_datetime,
+                events.end_datetime,
+                events.created_at AS event_created_at,
+                events.applied_at,
+                events.archived_at,
+                COALESCE(counts.file_count, 0) AS file_count,
+                COALESCE(counts.family_count, 0) AS family_count,
+                COALESCE(counts.total_size_bytes, 0) AS total_size_bytes,
+                latest_verification.id AS verification_id,
+                latest_verification.status AS verification_status,
+                latest_verification.verified_file_count,
+                latest_verification.missing_file_count,
+                latest_verification.mismatched_file_count,
+                latest_verification.completed_at AS verification_completed_at,
+                latest_release.id AS release_id,
+                latest_release.status AS release_status,
+                latest_release.deleted_file_count AS release_deleted_file_count,
+                latest_release.completed_at AS release_completed_at,
+                (SELECT COUNT(*) FROM event_reapply_removed_families pr
+                 WHERE pr.job_id=events.job_id AND pr.target_event_id IS NULL) AS pending_reassignment_count,
+                (SELECT COUNT(*) FROM event_mutations em
+                 WHERE em.job_id=events.job_id AND em.status IN ('pending_reassignment','pending_apply','manual_archive')) AS active_mutation_count
+            FROM events
+            LEFT JOIN event_file_counts AS counts
+                ON counts.event_id = events.id
+            LEFT JOIN event_archive_verifications AS latest_verification
+                ON latest_verification.id = (
+                    SELECT verification.id
+                    FROM event_archive_verifications AS verification
+                    WHERE verification.event_id = events.id
+                      AND verification.job_id = events.job_id
+                    ORDER BY verification.created_at DESC, verification.id DESC
+                    LIMIT 1
+                )
+            LEFT JOIN event_ssd_releases AS latest_release
+                ON latest_release.id = (
+                    SELECT release.id
+                    FROM event_ssd_releases AS release
+                    WHERE release.event_id = events.id
+                      AND release.job_id = events.job_id
+                    ORDER BY release.created_at DESC, release.id DESC
+                    LIMIT 1
+                )
+            WHERE events.parent_event_id IS NULL
+              AND events.status IN ('applied', 'archived')
+            ORDER BY events.created_at DESC, events.id DESC
+            """
+        ).fetchall()
+
+    candidates: list[dict[str, Any]] = []
+
+    for row in rows:
+        item = dict(row)
+        item["archive_verification_ready"] = bool(readable)
+        item["archive_root"] = str(archive_root)
+        item["verified"] = item.get("verification_status") == "verified"
+        item["released"] = (
+            item.get("release_status") == "completed"
+            or item.get("status") == "archived"
+        )
+        item["ssd_release_ready"] = (
+            item["verified"]
+            and not item["released"]
+            and item.get("status") == "applied"
+            and int(item.get("pending_reassignment_count") or 0) == 0
+            and int(item.get("active_mutation_count") or 0) == 0
+        )
+        item["ssd_release_block_reason"] = (
+            "Offene Neu-Zuordnung/Ereignisänderung zuerst abschließen."
+            if (int(item.get("pending_reassignment_count") or 0) > 0 or int(item.get("active_mutation_count") or 0) > 0)
+            else None
+        )
+        item["ssd_release_available"] = True
+        candidates.append(item)
+
+    return {
+        "archive_root": str(archive_root),
+        "archive_available": bool(available),
+        "archive_readable": bool(readable),
+        "candidate_count": sum(1 for item in candidates if not item["released"]),
+        "verified_count": sum(1 for item in candidates if item["verified"] and not item["released"]),
+        "released_count": sum(1 for item in candidates if item["released"]),
+        "blocked_count": sum(1 for item in candidates if item.get("verification_status") == "failed"),
+        "candidates": candidates,
+    }
+
+
+def verify_event_archive(
+    database_path: Path,
+    archive_root: Path,
+    job_id: str,
+    event_id: str,
+) -> dict[str, Any]:
+    archive_root = archive_root.expanduser().resolve(strict=False)
+
+    if not archive_root.exists() or not archive_root.is_dir():
+        raise ArchiveVerificationError(
+            "Die Kamerabibliothek ist nicht als lesbarer Ordner eingebunden."
+        )
+
+    if not os.access(archive_root, os.R_OK | os.X_OK):
+        raise ArchiveVerificationError(
+            "Die Kamerabibliothek ist nicht lesbar eingebunden."
+        )
+
+    event, files = _event_files(
+        database_path,
+        job_id,
+        event_id,
+    )
+
+    if str(event.get("status")) not in {"applied", "archived"}:
+        raise ArchiveVerificationError(
+            "Nur angewendete oder archivierte Ereignisse können geprüft werden."
+        )
+
+    if not files:
+        raise ArchiveVerificationError(
+            "Dem Ereignis sind keine Dateien zugeordnet."
+        )
+
+    verification_id = "ARCHIVE_" + uuid.uuid4().hex.upper()
+    created_at = _now()
+    total_size = sum(int(row["size_bytes"]) for row in files)
+
+    with database_connection(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO event_archive_verifications (
+                id,
+                job_id,
+                event_id,
+                status,
+                archive_root,
+                file_count,
+                total_size_bytes,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?)
+            """,
+            (
+                verification_id,
+                job_id,
+                event_id,
+                str(archive_root),
+                len(files),
+                total_size,
+                created_at,
+                created_at,
+            ),
+        )
+
+    results: list[dict[str, Any]] = []
+    verified_count = 0
+    verified_bytes = 0
+    missing_count = 0
+    mismatched_count = 0
+
+    for row in files:
+        try:
+            relative = _safe_relative(
+                row.get("current_relative_path")
+                or row.get("original_relative_path")
+            )
+            candidate = archive_root.joinpath(*relative.parts).resolve(strict=False)
+
+            if not _is_relative_to(candidate, archive_root):
+                raise ArchiveVerificationError("Archivpfad verlässt die Kamerabibliothek.")
+
+            expected_size = int(row["size_bytes"])
+            expected_sha256 = str(
+                row.get("sha256_current")
+                or row.get("sha256_original")
+                or ""
+            ).strip()
+
+            if not expected_sha256:
+                raise ArchiveVerificationError("Gespeicherte SHA-256-Summe fehlt.")
+
+            if not candidate.is_file():
+                status = "missing"
+                actual_size = None
+                actual_sha256 = None
+                error_message = "Datei fehlt in der Kamerabibliothek."
+                missing_count += 1
+            else:
+                actual_size = int(candidate.stat().st_size)
+
+                if actual_size != expected_size:
+                    status = "size_mismatch"
+                    actual_sha256 = None
+                    error_message = "Dateigröße weicht ab."
+                    mismatched_count += 1
+                else:
+                    actual_sha256 = _sha256_file(candidate)
+
+                    if actual_sha256 != expected_sha256:
+                        status = "sha256_mismatch"
+                        error_message = "SHA-256-Summe weicht ab."
+                        mismatched_count += 1
+                    else:
+                        status = "verified"
+                        error_message = None
+                        verified_count += 1
+                        verified_bytes += expected_size
+
+            result = {
+                "file_id": int(row["file_id"]),
+                "expected_relative_path": relative.as_posix(),
+                "expected_size_bytes": expected_size,
+                "expected_sha256": expected_sha256,
+                "status": status,
+                "actual_size_bytes": actual_size,
+                "actual_sha256": actual_sha256,
+                "error_message": error_message,
+            }
+
+        except Exception as error:
+            result = {
+                "file_id": int(row["file_id"]),
+                "expected_relative_path": str(
+                    row.get("current_relative_path")
+                    or row.get("original_relative_path")
+                    or ""
+                ),
+                "expected_size_bytes": int(row["size_bytes"]),
+                "expected_sha256": str(
+                    row.get("sha256_current")
+                    or row.get("sha256_original")
+                    or ""
+                ),
+                "status": "unsafe_path",
+                "actual_size_bytes": None,
+                "actual_sha256": None,
+                "error_message": str(error),
+            }
+            mismatched_count += 1
+
+        results.append(result)
+
+    final_status = (
+        "verified"
+        if verified_count == len(files)
+        and missing_count == 0
+        and mismatched_count == 0
+        else "failed"
+    )
+    completed_at = _now()
+    details = {
+        "event_name": event.get("name"),
+        "folder_name": event.get("folder_name"),
+        "files": results,
+    }
+
+    with database_connection(database_path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO event_archive_verification_files (
+                verification_id,
+                file_id,
+                expected_relative_path,
+                expected_size_bytes,
+                expected_sha256,
+                status,
+                actual_size_bytes,
+                actual_sha256,
+                error_message
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    verification_id,
+                    item["file_id"],
+                    item["expected_relative_path"],
+                    item["expected_size_bytes"],
+                    item["expected_sha256"],
+                    item["status"],
+                    item["actual_size_bytes"],
+                    item["actual_sha256"],
+                    item["error_message"],
+                )
+                for item in results
+            ],
+        )
+
+        connection.execute(
+            """
+            UPDATE event_archive_verifications
+            SET
+                status = ?,
+                verified_file_count = ?,
+                verified_size_bytes = ?,
+                missing_file_count = ?,
+                mismatched_file_count = ?,
+                details_json = ?,
+                error_message = ?,
+                updated_at = ?,
+                completed_at = ?
+            WHERE id = ?
+            """,
+            (
+                final_status,
+                verified_count,
+                verified_bytes,
+                missing_count,
+                mismatched_count,
+                json.dumps(details, ensure_ascii=False, sort_keys=True),
+                None if final_status == "verified" else "Archivprüfung ist nicht vollständig erfolgreich.",
+                completed_at,
+                completed_at,
+                verification_id,
+            ),
+        )
+
+        if final_status == "verified":
+            family_by_file = {int(row["file_id"]): int(row["family_id"]) for row in files if row.get("family_id") is not None}
+            paths_by_family: dict[int, list[str]] = {}
+            for item in results:
+                family_id = family_by_file.get(int(item["file_id"]))
+                if family_id is not None and item.get("status") == "verified":
+                    paths_by_family.setdefault(family_id, []).append(str(item["expected_relative_path"]))
+            for family_id, verified_paths in paths_by_family.items():
+                record_family_anchor(connection, event_id, family_id, verified_paths, completed_at)
+            for item in results:
+                family_id = family_by_file.get(int(item["file_id"]))
+                if family_id is not None and item.get("status") == "verified":
+                    record_verified_file_location(
+                        connection, event_id, family_id, int(item["file_id"]),
+                        str(item["expected_relative_path"]), completed_at,
+                    )
+
+    return {
+        "id": verification_id,
+        "job_id": job_id,
+        "event_id": event_id,
+        "status": final_status,
+        "verified": final_status == "verified",
+        "archive_root": str(archive_root),
+        "file_count": len(files),
+        "verified_file_count": verified_count,
+        "total_size_bytes": total_size,
+        "verified_size_bytes": verified_bytes,
+        "missing_file_count": missing_count,
+        "mismatched_file_count": mismatched_count,
+        "files": results,
+        "ssd_release_ready": final_status == "verified",
+        "ssd_release_available": True,
+        "message": (
+            "Kamerabibliothek vollständig identisch geprüft."
+            if final_status == "verified"
+            else "Kamerabibliothek ist noch nicht vollständig identisch."
+        ),
+    }

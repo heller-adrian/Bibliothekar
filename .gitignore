@@ -1,0 +1,52 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime-Daten
+database/
+logs/
+config/settings.json
+removable-sources/
+testdb/
+source-backups/
+checkpoints/
+
+# QA-Laufdaten
+qa/test-runs/*
+!qa/test-runs/.gitkeep
+qa/fixtures/runtime/
+
+# Umgebungsdaten / Geheimnisse
+.env
+.env.*
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+
+# Datenbanken
+*.db
+*.sqlite
+*.sqlite3
+*.sqlitedb
+
+# IDE / Betriebssystem
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Temporäres
+tmp/
+temp/
+*.tmp
+*.log

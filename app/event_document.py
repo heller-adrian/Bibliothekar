@@ -1,0 +1,366 @@
+"""Portable Ereignisbeschreibung: ``event.json``.
+
+Jedes Ereignis erhält im gemeinsamen Arbeitsbereich eine portable
+``event.json``. Sie ist die **primäre** Beschreibung des Ereignisses
+(Name, Zeitraum, Struktur, Unterereignis, Dateizuordnung mit Prüfsummen,
+Ordneroptionen). SQLite ist der **sekundäre Index** und wird konsistent
+nachgeführt; bei Abweichung regeneriert die App das Dokument aus dem
+lebhaften SQLite-Zustand.
+
+Das Modul ist bewusst ohne Seiteneffekt auf SQLite *schreibend* gehalten:
+Es baut und schreibt Dokumente, lädt sie ein und erkennt Abweichungen.
+Das eigentliche Nachführen des Index passiert in ``event_editing``.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
+from typing import Any, Iterator
+import hashlib
+import json
+import os
+
+from app.database import database_connection
+
+from app.workspace_layout import WORK_DIRECTORY_NAME
+
+EVENT_DOCUMENT_VERSION = 1
+EVENT_DOCUMENT_FILENAME = "event.json"
+
+
+class EventDocumentError(RuntimeError):
+    pass
+
+
+def event_document_path(
+    workspace_root: Path,
+    year: str,
+    folder_name: str,
+) -> Path:
+    """Pfad einer event.json aus Jahr + Ereignisordnername."""
+
+    work_root = Path(workspace_root) / WORK_DIRECTORY_NAME
+    return work_root / str(year)[:4] / str(folder_name) / EVENT_DOCUMENT_FILENAME
+
+
+def _iso_date(value: Any) -> str:
+    return str(value or "")[:10]
+
+
+def _iso_time(value: Any) -> str:
+    raw = str(value or "")
+    return raw[11:16] if len(raw) >= 16 else ""
+
+
+def _fsync_directory(path: Path) -> None:
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _families_of_event(
+    connection: Any,
+    job_id: str,
+    event_id: str,
+) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        """
+        SELECT
+            ff.id AS family_id,
+            ff.family_key,
+            ff.selected_capture_time,
+            ff.capture_time_confidence,
+            COUNT(f.id) AS file_count,
+            COALESCE(SUM(f.size_bytes), 0) AS total_size_bytes
+        FROM file_families AS ff
+        JOIN event_assignments AS ea ON ea.family_id = ff.id
+        JOIN events AS assigned ON assigned.id = ea.event_id
+        JOIN files AS f ON f.family_id = ff.id AND f.job_id = ff.job_id
+        WHERE assigned.job_id = ?
+          AND (assigned.id = ? OR assigned.parent_event_id = ?)
+          AND ea.family_id IS NOT NULL
+        GROUP BY ff.id
+        ORDER BY ff.selected_capture_time, ff.id
+        """,
+        (job_id, event_id, event_id),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def build_event_document_from_db(
+    database_path: Path,
+    workspace_root: Path,
+    job_id: str,
+    event_id: str,
+) -> dict[str, Any] | None:
+    """Eines Ereignisses aus dem lebhaften SQLite-Zustand bauen.
+
+    Gibt ``None`` zurück, wenn das Ereignis unbekannt ist oder kein
+    angewendetes Ereignis mit mindestens einer zugeordneten Familie ist
+    (nur dann existiert ein Ereignisordner).
+    """
+
+    with database_connection(database_path) as connection:
+        event = connection.execute(
+            "SELECT * FROM events WHERE id = ? AND job_id = ?",
+            (event_id, job_id),
+        ).fetchone()
+
+        if event is None or str(event["event_level"]) != "parent":
+            return None
+
+        if str(event["status"]) != "applied" or event["archived_at"]:
+            return None
+
+        child = connection.execute(
+            "SELECT * FROM events WHERE parent_event_id = ? ORDER BY start_datetime LIMIT 1",
+            (event_id,),
+        ).fetchone()
+        child_dict = dict(child) if child is not None else None
+
+        families = _families_of_event(connection, job_id, event_id)
+
+        file_rows = connection.execute(
+            """
+            SELECT f.current_relative_path, f.original_filename, f.size_bytes,
+                   f.sha256_current, f.sha256_original
+            FROM files AS f
+            JOIN file_families AS ff ON ff.id = f.family_id
+            WHERE f.job_id = ?
+              AND ff.id IN (
+                  SELECT family_id
+                  FROM event_assignments AS ea
+                  JOIN events AS assigned ON assigned.id = ea.event_id
+                  WHERE assigned.job_id = ?
+                    AND (assigned.id = ? OR assigned.parent_event_id = ?)
+              )
+            ORDER BY f.current_relative_path
+            """,
+            (job_id, job_id, event_id, event_id),
+        ).fetchall()
+
+    if not families:
+        return None
+
+    entries: list[dict[str, Any]] = []
+
+    for row in file_rows:
+        relative_path = str(row["current_relative_path"] or "")
+        if not relative_path:
+            continue
+        parts = PurePosixPath(relative_path).parts
+        ordered = bool(parts) and "Alle" in parts
+        entries.append({
+            "relative_path": relative_path,
+            "filename": parts[-1] if ordered else str(row["original_filename"]),
+            "size_bytes": int(row["size_bytes"] or 0),
+            "sha256": str(row["sha256_current"] or row["sha256_original"] or ""),
+            "ordered": ordered,
+        })
+
+    if not entries:
+        return None
+
+    preserve_day_folders = bool(event["preserve_day_folders"])
+
+    structure_lines = [
+        str(_iso_date(event["start_datetime"]))[:4],
+        f"└── {event['folder_name']}",
+    ]
+    if child_dict is not None:
+        structure_lines.append(f"    └── {child_dict['folder_name']}")
+    day_keys = sorted({
+        str(row["selected_capture_time"] or "")[:10]
+        for row in families
+        if row["selected_capture_time"]
+    })
+    if preserve_day_folders and day_keys:
+        structure_lines.extend(f"        └── {day}" for day in day_keys)
+    structure_lines.extend(["            ├── Alle", "            ├── Sortiert", "            └── Export"])
+
+    return {
+        "document_version": EVENT_DOCUMENT_VERSION,
+        "source": "kamera-automatisierung",
+        "source_app_version": None,
+        "event": {
+            "id": str(event["id"]),
+            "name": str(event["name"]),
+            "event_kind": str(event["event_kind"] or "event"),
+            "start_date": _iso_date(event["start_datetime"]),
+            "end_date": _iso_date(event["end_datetime"]),
+            "start_time": _iso_time(child_dict["start_datetime"]) if child_dict else "",
+            "end_time": _iso_time(child_dict["end_datetime"]) if child_dict else "",
+            "uses_time_range": bool(child_dict),
+            "preserve_day_folders": preserve_day_folders,
+            "folder_name": str(event["folder_name"]),
+            "status": str(event["status"]),
+            "applied_at": event["applied_at"],
+            "edited_at": event["edited_at"],
+            "revision": int(event["revision"] or 1),
+            "notes": str(event["notes"] or ""),
+        },
+        "child_event": (
+            {
+                "id": str(child_dict["id"]),
+                "name": str(child_dict["name"]),
+                "folder_name": str(child_dict["folder_name"]),
+                "start_datetime": str(child_dict["start_datetime"]),
+                "end_datetime": str(child_dict["end_datetime"]),
+            }
+            if child_dict is not None
+            else None
+        ),
+        "families": [
+            {
+                "family_id": int(row["family_id"]),
+                "family_key": str(row["family_key"]),
+                "selected_capture_time": row["selected_capture_time"],
+                "capture_time_confidence": row["capture_time_confidence"],
+                "file_count": int(row["file_count"]),
+                "total_size_bytes": int(row["total_size_bytes"]),
+            }
+            for row in families
+        ],
+        "files": entries,
+        "structure": "\n".join(structure_lines),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_by": "kamera-automatisierung event.json",
+    }
+
+
+def write_event_document(
+    workspace_root: Path,
+    document: dict[str, Any],
+    *,
+    app_version: str | None = None,
+) -> Path:
+    """Ein Ereignisdokument atomar in seinen Ordner schreiben."""
+
+    event = dict(document.get("event") or {})
+    year = str(event.get("start_date") or "")[:4]
+    folder_name = str(event.get("folder_name") or "")
+
+    if not year or not folder_name:
+        raise EventDocumentError("Für die event.json fehlen Jahr oder Ereignisordner.")
+    if "/" in folder_name or "\\" in folder_name or folder_name in {".", ".."}:
+        raise EventDocumentError("Ungültiger Ereignisordnername für event.json.")
+
+    if app_version:
+        document = dict(document)
+        document["source_app_version"] = app_version
+        document["generated_at"] = datetime.now(timezone.utc).isoformat()
+
+    path = event_document_path(workspace_root, year, folder_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True)
+    encoded = payload.encode("utf-8")
+    digest_prefix = hashlib.sha256(encoded).hexdigest()[:12]
+
+    target = path.resolve(strict=False)
+    work_root = (Path(workspace_root) / WORK_DIRECTORY_NAME).resolve(strict=False)
+    try:
+        target.relative_to(work_root)
+    except ValueError as error:
+        raise EventDocumentError("Der event.json-Pfad verlässt den Arbeitsbereich.") from error
+
+    tmp = path.with_name(f"{EVENT_DOCUMENT_FILENAME}.tmp.{digest_prefix}")
+    try:
+        with tmp.open("wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, target)
+        _fsync_directory(path.parent)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+    return target
+
+
+def read_event_document(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def discover_event_documents(workspace_root: Path) -> Iterator[Path]:
+    work_root = Path(workspace_root) / WORK_DIRECTORY_NAME
+    if not work_root.is_dir():
+        return
+    yield from sorted(work_root.glob(f"*/*/{EVENT_DOCUMENT_FILENAME}"))
+
+
+def load_event_document(workspace_root: Path, event_id: str) -> dict[str, Any] | None:
+    """Ein Dokument über die Ereignis-ID laden (durchsucht den Arbeitsbereich)."""
+
+    for path in discover_event_documents(workspace_root):
+        try:
+            document = read_event_document(path)
+        except (OSError, ValueError):
+            continue
+        if str((document.get("event") or {}).get("id") or "") == str(event_id):
+            return document
+    return None
+
+
+def event_document_matches_db(
+    database_path: Path,
+    workspace_root: Path,
+    job_id: str,
+    event_id: str,
+    document: dict[str, Any],
+) -> dict[str, Any]:
+    """Gleiche ein Dokument mit dem SQLite-Zustand ab (nur lesend).
+
+    Liefert eine Liste der Felder, in denen sich Dokument und Index
+    unterscheiden – Grundlage für „event.json ist führend, SQLite wird
+    nachgeführt".
+    """
+
+    try:
+        fresh = build_event_document_from_db(database_path, workspace_root, job_id, event_id)
+    except Exception:
+        return {"ok": False, "mismatches": ["db_unverfügbar"]}
+
+    if fresh is None:
+        # SQLite kennt das Ereignis nicht mehr als angewendet – dann ist das
+        # Dokument überholt.
+        return {"ok": False, "mismatches": ["nicht_mehr_anewendet"]}
+
+    drift: list[str] = []
+    doc_event = document.get("event") or {}
+    fresh_event = fresh["event"]
+
+    for key in ("id", "name", "event_kind", "start_date", "end_date",
+                 "uses_time_range", "preserve_day_folders", "folder_name",
+                 "revision", "status"):
+        if str(doc_event.get(key)) != str(fresh_event.get(key)):
+            drift.append(str(key))
+
+    doc_families = {int(f.get("family_id")) for f in document.get("families") or []}
+    fresh_families = {int(f["family_id"]) for f in fresh["families"]}
+    if doc_families != fresh_families:
+        drift.append("families")
+
+    return {"ok": not drift, "mismatches": drift, "fresh": fresh}
+
+
+def sync_event_document_after_change(
+    database_path: Path,
+    workspace_root: Path,
+    job_id: str,
+    event_id: str,
+) -> None:
+    """
+    Nach dem Sortieren (oder anderen Änderungen) das portable event.json 
+    aus dem aktuellen SQLite-Zustand neu schreiben, um die Synchronität zu wahren.
+    """
+    document = build_event_document_from_db(database_path, workspace_root, job_id, event_id)
+    if document:
+        write_event_document(workspace_root, document)

@@ -1,0 +1,554 @@
+"""Neu-Zuordnung von Familien, die bei einer Ereignisbearbeitung herausfallen.
+
+0.16.3 baut bewusst auf der 0.16.2-Reapply-Warteschlange auf. Dadurch bleibt
+bei angewendeten Ereignissen die Dateioperation Teil desselben geprüften
+Nachsortierlaufs und es entsteht kein zweiter, konkurrierender Move-Workflow.
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable
+
+from app.database import database_connection, create_planned_event
+from app.event_structure import build_event_preview
+
+
+class EventReassignmentError(ValueError):
+    pass
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_ids(values: Iterable[Any]) -> list[int]:
+    result = sorted({int(v) for v in values if int(v) > 0})
+    if not result:
+        raise EventReassignmentError("Es wurden keine herausfallenden Familien ausgewählt.")
+    return result
+
+
+def _root_event(connection, event_id: str):
+    return connection.execute(
+        "SELECT * FROM events WHERE id = ? AND parent_event_id IS NULL",
+        (event_id,),
+    ).fetchone()
+
+
+def _assignment_event_id(connection, target, capture_time: str) -> str:
+    children = connection.execute(
+        "SELECT * FROM events WHERE parent_event_id = ? ORDER BY start_datetime, id",
+        (target["id"],),
+    ).fetchall()
+    for child in children:
+        start = str(child["start_datetime"] or "")[:19]
+        end = str(child["end_datetime"] or "")[:19]
+        if start <= capture_time[:19] <= end:
+            return str(child["id"])
+    return str(target["id"])
+
+
+
+
+def reconcile_stale_event_reassignments(connection, job_id: str | None = None, event_id: str | None = None) -> int:
+    """Remove pending reassignment rows that are no longer actually unassigned.
+
+    A row with target_event_id IS NULL represents user work only while the family
+    has no active event assignment. If the family has meanwhile been assigned
+    again (including back to the edited source event), the durable queue row is
+    stale and must not create a task or block further editing.
+    """
+    clauses=["r.target_event_id IS NULL"]
+    params=[]
+    if job_id is not None:
+        clauses.append("r.job_id=?"); params.append(str(job_id))
+    if event_id is not None:
+        clauses.append("r.event_id=?"); params.append(str(event_id))
+    where=" AND ".join(clauses)
+    rows=connection.execute(f"""
+        SELECT r.job_id,r.event_id,r.family_id
+        FROM event_reapply_removed_families r
+        WHERE {where}
+          AND EXISTS (
+            SELECT 1
+            FROM event_assignments ea
+            JOIN events e ON e.id=ea.event_id
+            WHERE ea.family_id=r.family_id
+              AND e.job_id=r.job_id
+              AND e.status IN ('draft','planned','applied','archived')
+          )
+    """, params).fetchall()
+    if rows:
+        connection.executemany(
+            "DELETE FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id=? AND target_event_id IS NULL",
+            [(str(r['job_id']),str(r['event_id']),int(r['family_id'])) for r in rows],
+        )
+    return len(rows)
+
+
+def list_event_reassignments(database_path: Path, job_id: str, event_id: str) -> dict[str, Any]:
+    with database_connection(database_path) as connection:
+        if reconcile_stale_event_reassignments(connection, job_id, event_id):
+            connection.commit()
+        source = _root_event(connection, event_id)
+        if source is None or str(source["job_id"]) != job_id:
+            raise EventReassignmentError("Quellereignis wurde nicht gefunden.")
+
+        rows = connection.execute(
+            """
+            SELECT r.*, ff.family_key, ff.original_stem, ff.selected_capture_time,
+                   COUNT(f.id) AS file_count, COALESCE(SUM(f.size_bytes), 0) AS total_size_bytes
+            FROM event_reapply_removed_families r
+            JOIN file_families ff ON ff.id = r.family_id AND ff.job_id = r.job_id
+            LEFT JOIN files f ON f.family_id = ff.id AND f.job_id = ff.job_id
+            WHERE r.job_id = ? AND r.event_id = ? AND r.target_event_id IS NULL
+            GROUP BY r.event_id, r.family_id
+            ORDER BY ff.selected_capture_time, ff.id
+            """,
+            (job_id, event_id),
+        ).fetchall()
+
+        captures = [str(r["selected_capture_time"] or "")[:19] for r in rows if r["selected_capture_time"]]
+        min_capture = min(captures) if captures else None
+        max_capture = max(captures) if captures else None
+
+        pending_months = sorted({capture[:7] for capture in captures if len(capture) >= 7})
+        target_rows = []
+        if pending_months:
+            placeholders = ",".join("?" for _ in pending_months)
+            target_rows = connection.execute(
+                f"""
+                SELECT id, job_id, name, start_datetime, end_datetime, status,
+                       event_kind, folder_name, preserve_day_folders, linkage_kind,
+                       substr(start_datetime,1,7) AS month_key, updated_at
+                FROM events
+                WHERE parent_event_id IS NULL
+                  AND (id <> ? OR (? = 'no_event' AND id = ?))
+                  AND event_kind = 'no_event'
+                  AND status IN ('planned','applied','archived')
+                  AND substr(start_datetime,1,7) IN ({placeholders})
+                ORDER BY CASE WHEN job_id=? THEN 0 ELSE 1 END,
+                         CASE status WHEN 'planned' THEN 1 WHEN 'applied' THEN 2 ELSE 3 END,
+                         updated_at DESC, id DESC
+                """,
+                (event_id, str(source["event_kind"]), event_id, *pending_months, job_id),
+            ).fetchall()
+
+    # Mehrere Sicherungen können technisch eigene Event-Zeilen für denselben
+    # Monatsordner besitzen. In der UI soll diese Sammlung dennoch nur einmal
+    # erscheinen. Bevorzugt wird eine Zeile aus derselben Sicherung.
+    target_list = []
+    seen_months: set[str] = set()
+    for target in target_rows:
+        month_key = str(target["month_key"] or "")
+        if not month_key or month_key in seen_months:
+            continue
+        seen_months.add(month_key)
+        target_list.append({
+            "event_id": str(target["id"]),
+            "job_id": str(target["job_id"]),
+            "name": str(target["name"]),
+            "status": str(target["status"]),
+            "event_kind": str(target["event_kind"]),
+            "folder_name": str(target["folder_name"]),
+            "month_key": month_key,
+            "start_datetime": target["start_datetime"],
+            "end_datetime": target["end_datetime"],
+            "same_job": str(target["job_id"]) == job_id,
+        })
+
+    return {
+        "source_event": {
+            "id": str(source["id"]), "name": str(source["name"]),
+            "status": str(source["status"]), "job_id": str(source["job_id"]),
+        },
+        "families": [dict(r) for r in rows],
+        "family_count": len(rows),
+        "capture_start": min_capture,
+        "capture_end": max_capture,
+        "targets": target_list,
+        "new_event_supported": True,
+        # Eine Monats-Sammlung ist eindeutig. Sobald fuer einen der betroffenen
+        # Monate bereits ein Ziel existiert, darf die UI keine zweite Sammlung
+        # fuer denselben Monat anbieten.
+        "new_no_event_supported": not bool(target_list),
+        "pending_months": pending_months,
+    }
+
+
+def _create_linked_followup(connection, job_id: str, target, family_ids: list[int], now: str) -> dict[str, Any]:
+    status = str(target["status"])
+    linkage = {
+        "planned": "planned_extension",
+        "applied": "applied_followup",
+        "archived": "archived_manual",
+    }[status]
+    prefix = {
+        "planned": "Ergänzung",
+        "applied": "Nachtrag",
+        "archived": "Später zuzuordnen",
+    }[status]
+    event_id = "EVENT_" + uuid.uuid4().hex.upper()
+    name = f"{prefix}: {target['name']}"
+    connection.execute(
+        """
+        INSERT INTO events (
+            id, job_id, parent_event_id, event_level, name,
+            start_datetime, end_datetime, uses_time_range, folder_name,
+            status, created_at, updated_at, event_kind, preserve_day_folders,
+            revision, applied_at, archived_at, linked_event_id, linkage_kind
+        ) VALUES (?, ?, NULL, 'parent', ?, ?, ?, 0, ?, 'planned', ?, ?,
+                  'event', ?, 1, NULL, NULL, ?, ?)
+        """,
+        (event_id, job_id, name, target["start_datetime"], target["end_datetime"],
+         target["folder_name"], now, now, int(target["preserve_day_folders"] or 0),
+         target["id"], linkage),
+    )
+    connection.executemany(
+        "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'manual',?)",
+        [(event_id, fid, now) for fid in family_ids],
+    )
+    return {
+        "event_id": event_id, "name": name, "status": "planned",
+        "folder_name": str(target["folder_name"]),
+        "preserve_day_folders": bool(target["preserve_day_folders"]),
+        "linkage_kind": linkage, "linked_target_status": status,
+    }
+
+
+def _create_new_event(
+    database_path: Path, job_id: str, family_ids: list[int], name: str,
+    *, ignore_event_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise EventReassignmentError("Für das neue Ereignis fehlt ein Name.")
+    with database_connection(database_path) as connection:
+        placeholders = ",".join("?" for _ in family_ids)
+        rows = connection.execute(
+            f"""
+            SELECT ff.id AS family_id, ff.family_key, ff.selected_capture_time,
+                   ff.capture_time_confidence, COUNT(f.id) AS file_count,
+                   COALESCE(SUM(f.size_bytes),0) AS total_size_bytes
+            FROM file_families ff
+            LEFT JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
+            WHERE ff.job_id=? AND ff.id IN ({placeholders})
+            GROUP BY ff.id ORDER BY ff.selected_capture_time, ff.id
+            """,
+            (job_id, *family_ids),
+        ).fetchall()
+    if len(rows) != len(family_ids):
+        raise EventReassignmentError("Mindestens eine Familie wurde nicht gefunden.")
+    captures = [str(r["selected_capture_time"] or "")[:19] for r in rows]
+    if any(not c for c in captures):
+        raise EventReassignmentError("Für ein neues Ereignis benötigen alle Familien ein Aufnahmedatum.")
+    start_date = min(captures)[:10]
+    end_date = max(captures)[:10]
+    available = [{
+        "family_id": int(r["family_id"]), "family_key": r["family_key"],
+        "selected_capture_time": r["selected_capture_time"],
+        "capture_time_confidence": r["capture_time_confidence"],
+        "day_key": str(r["selected_capture_time"])[:10], "has_date": True,
+        "file_count": int(r["file_count"] or 0), "total_size_bytes": int(r["total_size_bytes"] or 0),
+        "review_required_count": 0,
+    } for r in rows]
+    same_day = start_date == end_date
+    preview = build_event_preview({
+        "event_kind": "event", "event_name": clean_name,
+        "start_date": start_date, "end_date": end_date,
+        "uses_time_range": same_day,
+        "child_event_name": clean_name if same_day else "",
+        "start_time": min(captures)[11:16] if same_day else "00:00",
+        "end_time": max(captures)[11:16] if same_day else "23:59",
+        "preserve_day_folders": start_date != end_date,
+        "selected_day_keys": sorted({a["day_key"] for a in available}),
+        "selected_family_ids": family_ids,
+    }, available)
+    created = create_planned_event(database_path, job_id, preview, ignore_event_ids=ignore_event_ids)
+    event = created["parent_event"]
+    return {
+        "event_id": str(event["id"]),
+        "name": str(event["name"]),
+        "status": "planned", "folder_name": str(event["folder_name"]),
+        "preserve_day_folders": bool(event.get("preserve_day_folders")),
+        "linkage_kind": "", "linked_target_status": "planned",
+    }
+
+
+
+def _selected_capture_rows(connection, job_id: str, family_ids: list[int]):
+    placeholders = ",".join("?" for _ in family_ids)
+    rows = connection.execute(
+        f"SELECT id, selected_capture_time FROM file_families WHERE job_id=? AND id IN ({placeholders}) ORDER BY selected_capture_time,id",
+        (job_id, *family_ids),
+    ).fetchall()
+    if len(rows) != len(family_ids) or any(not row["selected_capture_time"] for row in rows):
+        raise EventReassignmentError("Für die Neu-Zuordnung fehlen Aufnahmezeiten.")
+    return rows
+
+
+def _capture_month(rows) -> str:
+    months = {str(row["selected_capture_time"] or "")[:7] for row in rows}
+    if len(months) != 1 or "" in months:
+        raise EventReassignmentError(
+            "Eine „Ohne Ereignis“-Zuordnung muss innerhalb eines Monats liegen. "
+            "Wähle Familien aus demselben Monat gemeinsam aus."
+        )
+    return next(iter(months))
+
+
+def _no_event_segments_for_rows(rows) -> list[dict[str, str]]:
+    by_day: dict[str, list[str]] = {}
+    for row in rows:
+        cap = str(row["selected_capture_time"] or "")[:19]
+        by_day.setdefault(cap[:10], []).append(cap)
+    return [
+        {"day_key": day, "start_time": min(values)[11:16], "end_time": max(values)[11:16]}
+        for day, values in sorted(by_day.items())
+    ]
+
+
+def _create_new_no_event(
+    database_path: Path, job_id: str, family_ids: list[int],
+    *, ignore_event_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    with database_connection(database_path) as connection:
+        rows = _selected_capture_rows(connection, job_id, family_ids)
+        month = _capture_month(rows)
+        existing = connection.execute(
+            """SELECT id,job_id,status,folder_name FROM events
+               WHERE parent_event_id IS NULL AND event_kind='no_event'
+                 AND status IN ('planned','applied','archived')
+                 AND substr(start_datetime,1,7)=?
+               ORDER BY updated_at DESC,id DESC LIMIT 1""",
+            (month,),
+        ).fetchone()
+        if existing is not None:
+            raise EventReassignmentError(
+                f"Für {month[5:7]}.{month[:4]} existiert bereits eine „Ohne Ereignis“-Sammlung. "
+                "Wähle diese vorhandene Sammlung als Ziel."
+            )
+        placeholders = ",".join("?" for _ in family_ids)
+        families = connection.execute(
+            f"""SELECT ff.id AS family_id, ff.family_key, ff.selected_capture_time,
+                       ff.capture_time_confidence, COUNT(f.id) AS file_count,
+                       COALESCE(SUM(f.size_bytes),0) AS total_size_bytes
+                FROM file_families ff LEFT JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
+                WHERE ff.job_id=? AND ff.id IN ({placeholders})
+                GROUP BY ff.id ORDER BY ff.selected_capture_time,ff.id""",
+            (job_id,*family_ids),
+        ).fetchall()
+    available = [{
+        "family_id": int(r["family_id"]), "family_key": r["family_key"],
+        "selected_capture_time": r["selected_capture_time"],
+        "capture_time_confidence": r["capture_time_confidence"],
+        "day_key": str(r["selected_capture_time"])[:10], "has_date": True,
+        "file_count": int(r["file_count"] or 0), "total_size_bytes": int(r["total_size_bytes"] or 0),
+        "review_required_count": 0,
+    } for r in families]
+    preview = build_event_preview({
+        "event_kind": "no_event",
+        "event_name": "Ohne Ereignis",
+        "no_event_segments": _no_event_segments_for_rows(rows),
+        "selected_family_ids": family_ids,
+    }, available)
+    created = create_planned_event(database_path, job_id, preview, ignore_event_ids=ignore_event_ids)
+    event = created["parent_event"]
+    return {
+        "event_id": str(event["id"]), "name": str(event["name"]),
+        "status": "planned", "folder_name": str(event["folder_name"]),
+        "preserve_day_folders": False, "linkage_kind": "",
+        "linked_target_status": "planned",
+    }
+
+
+def _create_cross_job_no_event_extension(connection, job_id: str, target, family_ids: list[int], now: str) -> dict[str, Any]:
+    rows = _selected_capture_rows(connection, job_id, family_ids)
+    month = _capture_month(rows)
+    target_month = str(target["start_datetime"] or "")[:7]
+    if month != target_month:
+        raise EventReassignmentError("Die ausgewählten Familien passen nicht zum Monat dieser „Ohne Ereignis“-Sammlung.")
+    if str(target["status"]) == "archived":
+        info = _create_linked_followup(connection, job_id, target, family_ids, now)
+        # Semantisch bleibt der Nachtrag Teil der Ohne-Ereignis-Sammlung.
+        connection.execute("UPDATE events SET event_kind='no_event' WHERE id=?", (info["event_id"],))
+        return info
+
+    event_id = "EVENT_" + uuid.uuid4().hex.upper()
+    captures = [str(row["selected_capture_time"])[:19] for row in rows]
+    connection.execute(
+        """INSERT INTO events (
+            id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,
+            folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,
+            applied_at,archived_at,linked_event_id,linkage_kind,timeline_model,resort_required
+        ) VALUES (?,?,NULL,'parent','Ohne Ereignis',?,?,0,?,'planned',?,?,'no_event',0,1,NULL,NULL,?,
+                  'planned_extension','segments',0)""",
+        (event_id,job_id,min(captures),max(captures),target["folder_name"],now,now,target["id"]),
+    )
+    connection.executemany(
+        "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
+        [(event_id,fid,now) for fid in family_ids],
+    )
+    for seg in _no_event_segments_for_rows(rows):
+        day=seg["day_key"]; start=f"{day}T{seg['start_time']}:00"; end=f"{day}T{seg['end_time']}:59"
+        connection.execute(
+            """INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (event_id,job_id,day,seg["start_time"],seg["end_time"],start,end,'reassignment',now,now),
+        )
+    return {
+        "event_id": event_id, "name": "Ohne Ereignis", "status": "planned",
+        "folder_name": str(target["folder_name"]), "preserve_day_folders": False,
+        "linkage_kind": "planned_extension", "linked_target_status": str(target["status"]),
+    }
+
+
+def assign_event_reassignments(
+    database_path: Path, job_id: str, event_id: str, family_ids: Iterable[Any],
+    *, target_mode: str, target_event_id: str | None = None, new_event_name: str | None = None,
+) -> dict[str, Any]:
+    selected = _normalize_ids(family_ids)
+    now = _now()
+
+    with database_connection(database_path) as connection:
+        source = _root_event(connection, event_id)
+        if source is None or str(source["job_id"]) != job_id:
+            raise EventReassignmentError("Quellereignis wurde nicht gefunden.")
+        source_status = str(source["status"])
+        if source_status not in {"draft", "planned", "applied"}:
+            raise EventReassignmentError("Diese Neu-Zuordnung ist für noch nicht archivierte Ereignisse vorgesehen.")
+        placeholders = ",".join("?" for _ in selected)
+        pending = connection.execute(
+            f"SELECT family_id FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id IN ({placeholders})",
+            (job_id, event_id, *selected),
+        ).fetchall()
+        if {int(r["family_id"]) for r in pending} != set(selected):
+            raise EventReassignmentError("Mindestens eine Familie ist nicht mehr zur Neu-Zuordnung offen.")
+
+    # Validate reassignment against the mutation target state. The source
+    # event may still exist in SQLite for rollback while being deleted or
+    # shortened; it must not block the time that this very mutation releases.
+    ignored_for_target = {str(event_id)}
+
+    if target_mode == "new_event":
+        target_info = _create_new_event(
+            database_path, job_id, selected, str(new_event_name or ""),
+            ignore_event_ids=ignored_for_target,
+        )
+    elif target_mode == "new_no_event":
+        target_info = _create_new_no_event(
+            database_path, job_id, selected, ignore_event_ids=ignored_for_target,
+        )
+    elif target_mode == "existing_no_event":
+        if not target_event_id:
+            raise EventReassignmentError("Die „Ohne Ereignis“-Sammlung fehlt.")
+        with database_connection(database_path) as connection:
+            target = _root_event(connection, target_event_id)
+            if target is None or str(target["status"]) not in {"planned", "applied", "archived"}:
+                raise EventReassignmentError("Die „Ohne Ereignis“-Sammlung ist nicht mehr verfügbar.")
+            if str(target["event_kind"]) != "no_event":
+                raise EventReassignmentError("Als bestehendes Ziel ist nur „Ohne Ereignis“ zulässig.")
+
+            captures = _selected_capture_rows(connection, job_id, selected)
+            selected_month = _capture_month(captures)
+            target_month = str(target["start_datetime"] or "")[:7]
+            if selected_month != target_month:
+                raise EventReassignmentError("Die ausgewählten Familien passen nicht zum Monat dieser „Ohne Ereignis“-Sammlung.")
+
+            if str(target["job_id"]) != job_id:
+                target_info = _create_cross_job_no_event_extension(connection, job_id, target, selected, now)
+                connection.commit()
+            elif str(target["status"]) == "archived":
+                # Archiv bleibt strikt read-only. Der vorhandene Follow-up-Mechanismus
+                # erzeugt den global sichtbaren manuellen Arbeitsauftrag.
+                target_info = _create_linked_followup(connection, job_id, target, selected, now)
+            else:
+                # Direkte Zuordnung und segmentweises Erweitern des Sammelereignisses.
+                by_day: dict[str, list[str]] = {}
+                for row in captures:
+                    cap = str(row["selected_capture_time"])[:19]
+                    by_day.setdefault(cap[:10], []).append(cap)
+                    connection.execute(
+                        "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
+                        (target["id"], int(row["id"]), now),
+                    )
+                for day, values in by_day.items():
+                    a, b = min(values), max(values)
+                    existing = connection.execute(
+                        """SELECT * FROM event_time_segments WHERE event_id=? AND day_key=?
+                           ORDER BY start_datetime""", (target["id"], day)
+                    ).fetchall()
+                    merged_start, merged_end = a, b
+                    remove_ids=[]
+                    for seg in existing:
+                        # Same-day no-event pieces are a collection; when a newly
+                        # reassigned family touches/extends a piece, merge it.
+                        if str(seg["end_datetime"]) >= merged_start and str(seg["start_datetime"]) <= merged_end:
+                            merged_start=min(merged_start,str(seg["start_datetime"]))
+                            merged_end=max(merged_end,str(seg["end_datetime"]))
+                            remove_ids.append(int(seg["id"]))
+                    if remove_ids:
+                        connection.executemany("DELETE FROM event_time_segments WHERE id=?", [(i,) for i in remove_ids])
+                    connection.execute(
+                        """INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        (target["id"], job_id, day, merged_start[11:16], merged_end[11:16], merged_start, merged_end, 'reassignment', now, now),
+                    )
+                connection.execute("UPDATE events SET timeline_model='segments', revision=revision+1, updated_at=? WHERE id=?", (now,target["id"]))
+                if str(target["status"]) == "applied":
+                    connection.execute("UPDATE events SET resort_required=1 WHERE id=?", (target["id"],))
+                target_info = {
+                    "event_id": str(target["id"]), "name": str(target["name"]),
+                    "status": str(target["status"]), "folder_name": str(target["folder_name"]),
+                    "preserve_day_folders": bool(target["preserve_day_folders"]),
+                    "linkage_kind": str(target["linkage_kind"] or ""),
+                    "linked_target_status": str(target["status"]),
+                }
+            connection.commit()
+    elif target_mode == "existing_event":
+        raise EventReassignmentError(
+            "Normale bestehende Ereignisse sind kein Ziel für eine Neu-Zuordnung. "
+            "Passe stattdessen deren Zeitraum an oder erstelle ein neues Ereignis."
+        )
+    else:
+        raise EventReassignmentError("Unbekannte Zielart für die Neu-Zuordnung.")
+
+    with database_connection(database_path) as connection:
+        if source_status == "applied":
+            connection.executemany(
+                """
+                UPDATE event_reapply_removed_families
+                SET target_event_id=?, target_status=?, target_kind=?, target_name=?,
+                    target_folder_name=?, target_preserve_day_folders=?, target_linkage_kind=?, reassigned_at=?
+                WHERE job_id=? AND event_id=? AND family_id=?
+                """,
+                [(
+                    target_info["event_id"], target_info["linked_target_status"], target_mode,
+                    target_info["name"], target_info["folder_name"],
+                    int(bool(target_info["preserve_day_folders"])), target_info["linkage_kind"], now,
+                    job_id, event_id, fid,
+                ) for fid in selected],
+            )
+        else:
+            # planned: Es gibt noch keine angewendete SSD-Struktur, daher genügt
+            # die neue DB-Zuordnung und die Warteschlange kann sofort verschwinden.
+            connection.executemany(
+                "DELETE FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id=?",
+                [(job_id, event_id, fid) for fid in selected],
+            )
+        connection.execute(
+            "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'event_families_reassigned','event',?,?,?)",
+            (job_id, event_id, __import__('json').dumps({"family_ids": selected, "target": target_info}, ensure_ascii=False, sort_keys=True), now),
+        )
+        from app.event_mutation import advance_job_mutation_after_reassignment
+        advance_job_mutation_after_reassignment(connection, job_id)
+        connection.commit()
+
+    state = list_event_reassignments(database_path, job_id, event_id)
+    return {
+        "status": "reassigned", "family_ids": selected, "target": target_info,
+        "pending_family_count": state["family_count"],
+        "source_resort_required": source_status == "applied",
+    }
