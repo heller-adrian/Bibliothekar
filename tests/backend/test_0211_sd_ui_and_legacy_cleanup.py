@@ -7,7 +7,7 @@ from app import main, source_helper
 
 
 def test_0211_version_keeps_schema_22():
-    assert main.APP_VERSION == "0.21.1"
+    assert main.APP_VERSION == "0.21.2"
 
 
 def test_source_helper_flattens_nested_findmnt_and_cleans_legacy_mount(monkeypatch):
@@ -41,7 +41,6 @@ def test_source_helper_flattens_nested_findmnt_and_cleans_legacy_mount(monkeypat
 def test_import_page_has_separate_sd_and_generic_source_details():
     html = main.INDEX_HTML if hasattr(main, "INDEX_HTML") else None
     if html is None:
-        # The page is assembled in the endpoint source; inspect source text as a stable UI contract.
         from pathlib import Path
         html = Path(main.__file__).read_text()
     assert 'id="sd-source-detail"' in html
