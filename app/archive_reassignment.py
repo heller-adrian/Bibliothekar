@@ -125,6 +125,8 @@ def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[in
             days={str(x['selected_capture_time'] or '')[:10] for x in caps}
             if len(days)!=1: raise ArchiveReassignmentError('Ein neues Unterereignis wird aus genau einem Tag angelegt.')
             day=next(iter(days)); start=f'{day}T{st}:00'; end=f'{day}T{et}:59'
+            if not (str(t['start_datetime'])[:19] <= start <= end <= str(t['end_datetime'])[:19]):
+                raise ArchiveReassignmentError('Das neue Unterereignis muss vollständig im Zeitraum des Oberereignisses liegen.')
             if not all(start <= str(x['selected_capture_time'] or '')[:19] <= end for x in caps): raise ArchiveReassignmentError('Nicht alle ausgewählten Familien liegen im eingegebenen Zeitbereich.')
             overlap=c.execute("SELECT 1 FROM events WHERE parent_event_id=? AND start_datetime<=? AND end_datetime>=? LIMIT 1",(t['id'],end,start)).fetchone()
             if overlap: raise ArchiveReassignmentError('Der neue Zeitbereich überschneidet sich mit einem vorhandenen Unterereignis.')
@@ -137,13 +139,18 @@ def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[in
         if target['kind']=='existing_event' and not all(str(target['start'])[:19] <= cap <= str(target['end'])[:19] for cap in captures.values()):
             raise ArchiveReassignmentError('Mindestens ein ausgewähltes Zeitsegment liegt außerhalb des bestehenden Zielereignisses.')
 
-        overlaps = continuous_event_overlaps(
-            c, str(cr['job_id']), str(target['start'])[:19], str(target['end'])[:19],
-            exclude_event_id=str(target.get('event_id') or cr['event_id']) if target['kind'] in {'existing_event','new_child'} else str(cr['event_id']),
-        )
-        if overlaps and target['kind'] not in {'existing_no_event'}:
-            names = sorted({str(r['name']) for r in overlaps})
-            raise ArchiveReassignmentError('Dieses Ziel würde sich mit einem anderen Ereignis überschneiden: ' + ', '.join(names))
+        # Existing archived targets already own their timeline interval. Adding
+        # families or a child inside that parent must not be rejected because
+        # the still-unmodified source event overlaps until the change request
+        # is finished. Only newly created root targets extend the timeline.
+        if target['kind'] in {'new_event','new_no_event'}:
+            overlaps = continuous_event_overlaps(
+                c, str(cr['job_id']), str(target['start'])[:19], str(target['end'])[:19],
+                exclude_event_id=str(cr['event_id']),
+            )
+            if overlaps:
+                names = sorted({str(r['name']) for r in overlaps})
+                raise ArchiveReassignmentError('Dieses Ziel würde sich mit einem anderen Ereignis überschneiden: ' + ', '.join(names))
 
         ph=','.join('?' for _ in fids)
         for fid in fids:
