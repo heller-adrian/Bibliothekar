@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: ${{ github.workspace }}
+      PYTEST_ADDOPTS: ''
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,7 +25,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest httpx
-      - name: Compile application
-        run: python -m compileall -q app
-      - name: Run backend regression suite
-        run: pytest -q tests/backend
+      - name: Compile application and QA helpers
+        run: python -m compileall -q app qa
+      - name: Validate archive QA shell harness
+        run: bash -n qa/archive_e2e/*.sh
+      - name: Collect complete backend regression suite
+        run: pytest --collect-only -q -o addopts='' tests/backend
+      - name: Run complete backend regression suite without fail-fast
+        run: pytest -q -o addopts='' tests/backend
