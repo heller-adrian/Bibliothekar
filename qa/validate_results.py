@@ -9,10 +9,23 @@ from pathlib import Path
 
 VALID_STATUSES = {"PASS", "FAIL", "BLOCKED", "SKIPPED"}
 ARCHIVE_IDS = {f"T{i:03d}" for i in range(80, 89)}
+ARCHIVE_PLAN_IDS = {f"T{i:03d}" for i in range(82, 88)}
 EXPECTED_REVISION = "627c5515e533e167e45354ccaa71f988f104ae08"
 EXPECTED_ARCHIVE_ROOT = "/mnt/storage/ki-workspace/hermes/bibliothekar-qa/archive-test-library"
 PRODUCTION_ARCHIVE = "/mnt/storage/fotos/Kamerabibliothek"
 PRODUCTION_DATABASE_PREFIX = "/mnt/apps/appdata/kamera-automatisierung/database"
+EVIDENCE_EMPTY_FIELDS = (
+    "missing_files",
+    "unexpected_files",
+    "missing_directories",
+    "unexpected_directories",
+    "size_mismatches",
+    "sha256_mismatches",
+    "duplicate_sha256",
+    "split_families",
+    "symlinks",
+    "errors",
+)
 
 
 def fail(message: str) -> None:
@@ -108,6 +121,114 @@ def validate_archive_isolation(results: dict[str, dict], isolation_path: Path | 
         fail("Reale Kamerabibliothek wurde als QA-Archiv verwendet")
 
 
+def resolve_evidence_path(run_root: Path, value: object, label: str, test_id: str) -> Path:
+    text = str(value or "").strip()
+    if not text:
+        fail(f"{test_id}: filesystem_check benötigt {label}")
+    path = Path(text)
+    if not path.is_absolute():
+        path = run_root / path
+    path = path.resolve()
+    try:
+        path.relative_to(run_root.resolve())
+    except ValueError:
+        fail(f"{test_id}: {label} liegt außerhalb des QA-Laufordners: {path}")
+    if not path.is_file():
+        fail(f"{test_id}: {label} fehlt: {path}")
+    return path
+
+
+def validate_one_filesystem_check(test_id: str, check: dict, run_root: Path, require_plan: bool) -> None:
+    step = str(check.get("step") or "").strip()
+    if not step:
+        fail(f"{test_id}: filesystem_check ohne step")
+    status = str(check.get("status") or "").upper()
+    if status not in {"PASS", "FAIL"}:
+        fail(f"{test_id}/{step}: filesystem_check braucht PASS oder FAIL")
+
+    expected_path = resolve_evidence_path(run_root, check.get("expected"), "expected", test_id)
+    evidence_path = resolve_evidence_path(run_root, check.get("evidence"), "evidence", test_id)
+    if require_plan:
+        resolve_evidence_path(run_root, check.get("plan"), "plan", test_id)
+
+    expected = json.loads(expected_path.read_text(encoding="utf-8"))
+    if expected.get("archive_root") not in {None, EXPECTED_ARCHIVE_ROOT}:
+        fail(f"{test_id}/{step}: SOLL-Manifest verwendet falsches QA-Archiv")
+
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    if evidence.get("archive_root") != EXPECTED_ARCHIVE_ROOT:
+        fail(f"{test_id}/{step}: Dateisystemnachweis stammt nicht aus dem freigegebenen QA-Archiv")
+    if evidence.get("status") != status:
+        fail(
+            f"{test_id}/{step}: Status in results.json ({status}) und Evidence "
+            f"({evidence.get('status')!r}) widersprechen sich"
+        )
+
+    required_fields = {
+        "expected_file_count",
+        "actual_file_count",
+        "expected_directory_count",
+        "actual_directory_count",
+        *EVIDENCE_EMPTY_FIELDS,
+    }
+    missing_fields = sorted(field for field in required_fields if field not in evidence)
+    if missing_fields:
+        fail(f"{test_id}/{step}: Evidence unvollständig: {', '.join(missing_fields)}")
+
+    if status == "PASS":
+        if int(evidence["expected_file_count"]) != int(evidence["actual_file_count"]):
+            fail(f"{test_id}/{step}: PASS trotz unterschiedlicher Dateianzahl")
+        if int(evidence["expected_directory_count"]) != int(evidence["actual_directory_count"]):
+            fail(f"{test_id}/{step}: PASS trotz unterschiedlicher Ordneranzahl")
+        for field in EVIDENCE_EMPTY_FIELDS:
+            if evidence.get(field):
+                fail(f"{test_id}/{step}: PASS trotz nichtleerem Evidence-Feld {field}")
+
+
+def validate_archive_filesystem_evidence(results: dict[str, dict], results_path: Path) -> None:
+    run_root = results_path.resolve().parent
+    for test_id in sorted(ARCHIVE_IDS):
+        record = results.get(test_id)
+        if not record:
+            continue
+        status = record["status"]
+        checks = record.get("filesystem_checks")
+
+        if status == "PASS":
+            if not isinstance(checks, list) or not checks:
+                fail(
+                    f"{test_id}: PASS ist ohne mindestens einen realen Dateisystem-Abgleich "
+                    "gegen den erwarteten IST→SOLL-Zustand unzulässig"
+                )
+        elif checks is None:
+            continue
+
+        if checks is not None and not isinstance(checks, list):
+            fail(f"{test_id}: filesystem_checks muss eine Liste sein")
+
+        for check in checks or []:
+            if not isinstance(check, dict):
+                fail(f"{test_id}: filesystem_checks enthält keinen Objekteintrag")
+            validate_one_filesystem_check(
+                test_id,
+                check,
+                run_root,
+                require_plan=test_id in ARCHIVE_PLAN_IDS,
+            )
+
+        if status == "PASS":
+            failed_checks = [
+                str(check.get("step") or "?")
+                for check in checks
+                if str(check.get("status") or "").upper() != "PASS"
+            ]
+            if failed_checks:
+                fail(
+                    f"{test_id}: PASS trotz fehlgeschlagener Dateisystemprüfung(en): "
+                    + ", ".join(failed_checks)
+                )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Prüft, dass ein Hermes-QA-Bericht den gesamten aktuellen TEST_MATRIX-Umfang abdeckt."
@@ -140,6 +261,7 @@ def main() -> int:
         fail("QA-Bericht enthält unbekannte Test-IDs: " + ", ".join(unknown))
 
     validate_archive_isolation(results, args.archive_isolation)
+    validate_archive_filesystem_evidence(results, args.results)
 
     counts = {status: 0 for status in sorted(VALID_STATUSES)}
     for test_id in expected:
