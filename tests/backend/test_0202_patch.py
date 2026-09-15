@@ -27,7 +27,7 @@ def test_0202_ui_contracts_present():
     assert 'Vorschau ausblenden' in WORKSPACE_HTML
     assert 'dialogPreview.hidden' in WORKSPACE_HTML
     assert 'reassignment_time_ranges' in WORKSPACE_HTML
-    assert 'reassignment_time_ranges' in EVENTS_HTML
+    assert 'reassignment_segments' in EVENTS_HTML
     assert 'edit-noevent-existing-ranges' in EVENTS_HTML
     assert 'Zeitblock ${i+1}' in EVENTS_HTML
     assert 'Monat/Jahr' in WORKSPACE_HTML
