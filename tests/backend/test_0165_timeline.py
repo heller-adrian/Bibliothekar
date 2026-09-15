@@ -1,5 +1,4 @@
 from pathlib import Path
-import pytest
 
 from app.database import database_connection, initialize_database, list_global_tasks, create_planned_event, update_event_definition
 from app.event_structure import build_event_preview
@@ -47,14 +46,16 @@ def test_normal_event_editor_has_no_family_checkboxes_and_global_widget():
     for html in (EVENTS_HTML,index(),WORKSPACE_HTML,TRANSFER_HTML):
         assert 'global-task-fab' in html
 
-def test_existing_normal_target_is_rejected(tmp_path):
+def test_existing_normal_target_accepts_matching_family(tmp_path):
     db=tmp_path/'db.sqlite3'; seed_job(db); fid=add_family(db,'A','2026-07-15T09:00:00')
     with database_connection(db) as c:
         for eid,name,kind in [('src','Quelle','event'),('normal','Normal','event')]:
             c.execute("INSERT INTO events(id,job_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision) VALUES (?, 'j','parent',?,'2026-07-15T00:00:00','2026-07-15T23:59:59',0,?,'planned',?,?,?,0,1)",(eid,name,name,NOW,NOW,kind))
         c.execute("INSERT INTO event_reapply_removed_families(event_id,job_id,family_id,created_at) VALUES ('src','j',?,?)",(fid,NOW)); c.commit()
-    with pytest.raises(Exception):
-        assign_event_reassignments(db,'j','src',[fid],target_mode='existing_event',target_event_id='normal')
+    result=assign_event_reassignments(db,'j','src',[fid],target_mode='existing_event',target_event_id='normal')
+    assert result['target']['event_id']=='normal'
+    with database_connection(db) as c:
+        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id='normal' AND family_id=?",(fid,)).fetchone()[0] == 1
 
 def test_archive_ui_renders_concrete_paths():
     from app.events_ui import EVENTS_HTML
@@ -68,7 +69,6 @@ def test_cascade_preview_detects_edge_overlap(tmp_path):
             c.execute("INSERT INTO events(id,job_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision) VALUES (?, 'j','parent',?,'2026-07-15T00:00:00','2026-07-15T23:59:59',0,?,'planned',?,?,'event',0,1)",(eid,name,name,NOW,NOW))
             c.execute("INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision) VALUES (?, 'j',?,'child',?,?,?,1,?,'planned',?,?,'event',0,1)",(eid+'c',eid,name,start,end,name,NOW,NOW))
         c.commit()
-    
     with database_connection(db) as c:
         p=cascade_preview_for_interval(c,'j','a','2026-07-15T08:00:00','2026-07-15T14:00:59')
     assert p['items'] and p['items'][0]['action']=='trim_start'
