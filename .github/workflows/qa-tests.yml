@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  pytest:
+  backend-regression:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: ${{ github.workspace }}
@@ -27,7 +27,18 @@ jobs:
           pip install -r requirements.txt pytest httpx
       - name: Compile application and QA helpers
         run: python -m compileall -q app qa
-      - name: Validate archive QA shell harness
+      - name: Validate archive QA shell syntax
+        run: bash -n qa/archive_e2e/*.sh
+      - name: Collect complete backend regression suite
+        run: pytest --collect-only -q -o addopts='' tests/backend
+      - name: Run complete backend regression suite without fail-fast
+        run: pytest -q -o addopts='' tests/backend
+
+  archive-isolation-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate archive QA shell syntax
         run: bash -n qa/archive_e2e/*.sh
       - name: Exercise isolated archive QA harness
         run: |
@@ -44,7 +55,7 @@ jobs:
           bash qa/archive_e2e/start_isolated_archive_qa.sh "$CI_SOURCE"
 
           test -f "$QA_ROOT/runs/$QA_RUN_ID/database/kamera.sqlite3"
-          python - "$QA_ROOT/runs/$QA_RUN_ID/isolation.json" <<'PY'
+          python3 - "$QA_ROOT/runs/$QA_RUN_ID/isolation.json" <<'PY'
           import json
           import sys
           from pathlib import Path
@@ -54,9 +65,7 @@ jobs:
           assert data['product_revision'] == '627c5515e533e167e45354ccaa71f988f104ae08'
           assert data['production_archive_mounted'] is False
           assert data['production_database_mounted'] is False
-          assert data['database'].startswith(data['workspace'].rsplit('/workspace', 1)[0])
+          run_root = data['workspace'].rsplit('/workspace', 1)[0]
+          assert data['database'].startswith(run_root + '/')
+          assert data['archive_root'].endswith('/archive-test-library')
           PY
-      - name: Collect complete backend regression suite
-        run: pytest --collect-only -q -o addopts='' tests/backend
-      - name: Run complete backend regression suite without fail-fast
-        run: pytest -q -o addopts='' tests/backend
