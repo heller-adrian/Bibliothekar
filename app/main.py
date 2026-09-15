@@ -6700,6 +6700,7 @@ def api_assign_event_reassignments(job_id: str, event_id: str, body: dict) -> JS
             target_mode=str(body.get("target_mode") or ""),
             target_event_id=body.get("target_event_id"),
             new_event_name=body.get("new_event_name"),
+            segments=body.get("segments") or [],
         )
         return JSONResponse(content=result)
     except EventReassignmentError as exc:

@@ -2558,18 +2558,12 @@ EVENTS_HTML = r"""<!doctype html>
         const child=t.event_kind === "event" && t.status !== "archived" ? `<option value="__child__:${escapeHtml(t.event_id)}" data-kind="new_child" data-parent-id="${escapeHtml(t.event_id)}">Neues Unterereignis in · ${escapeHtml(t.name)}</option>` : "";
         return existing+child;
       }).join("");
-      const byDay=new Map();
-      for (const f of families) {
-        const day=String(f.selected_capture_time||"").slice(0,10)||"Ohne Datum";
-        if (!byDay.has(day)) byDay.set(day,[]);
-        byDay.get(day).push(f);
-      }
-      const dayGroups=[...byDay.entries()].map(([day,items])=>{
-        const files=items.reduce((n,f)=>n+Number(f.file_count||0),0);
-        const explicitRange=(data.reassignment_time_ranges||{})[day] || null;
-        const timeText=explicitRange ? ` · ${explicitRange.start_time}–${explicitRange.end_time}` : "";
-        const ids=items.map(f=>Number(f.family_id)).join(",");
-        return `<label class="card" style="display:flex;align-items:center;gap:10px;padding:10px 12px"><input type="checkbox" data-reassign-day data-family-ids="${escapeHtml(ids)}" data-day="${escapeHtml(day)}" checked style="width:18px;height:18px;flex:0 0 auto"><span style="min-width:0"><strong>${escapeHtml(germanDay(day))}${escapeHtml(timeText)}</strong><br><span class="muted">${items.length} Familien · ${files} Dateien · nur gemeinsam zuordenbar</span></span></label>`;
+      const exactSegments=data.reassignment_segments || [];
+      const dayGroups=exactSegments.map(segment=>{
+        const ids=(segment.family_ids||[]).map(Number).join(",");
+        const day=segment.day_key || String(segment.start_datetime||"").slice(0,10);
+        const fallback=segment.fallback ? " · Legacy-Zeitraum aus Aufnahmen" : "";
+        return `<label class="card" style="display:flex;align-items:center;gap:10px;padding:10px 12px"><input type="checkbox" data-reassign-day data-family-ids="${escapeHtml(ids)}" data-day="${escapeHtml(day)}" data-start="${escapeHtml(segment.start_datetime||"")}" data-end="${escapeHtml(segment.end_datetime||"")}" checked style="width:18px;height:18px;flex:0 0 auto"><span style="min-width:0"><strong>${escapeHtml(germanDay(day))} · ${escapeHtml(segment.start_time||"")}–${escapeHtml(segment.end_time||"")}</strong><br><span class="muted">${Number(segment.family_count||0)} Familien · ${Number(segment.file_count||0)} Dateien · nur gemeinsam zuordenbar${escapeHtml(fallback)}</span></span></label>`;
       }).join("");
       const newNoEventOption = data.new_no_event_supported ? '<option value="__new_no_event__">Neues „Ohne Ereignis“ erstellen</option>' : '';
       reassignmentBody.innerHTML = `
@@ -2589,6 +2583,7 @@ EVENTS_HTML = r"""<!doctype html>
       document.getElementById("reassignment-apply").addEventListener("click", async () => {
         const selectedDays=[...reassignmentBody.querySelectorAll('[data-reassign-day]:checked')];
         const selectedIds=[...new Set(selectedDays.flatMap(i=>String(i.dataset.familyIds||"").split(",").filter(Boolean).map(Number)))];
+        const selectedSegments=selectedDays.map(i=>({start_datetime:i.dataset.start,end_datetime:i.dataset.end,day_key:i.dataset.day}));
         if (!selectedIds.length) { document.getElementById("reassignment-message").textContent = "Bitte mindestens ein Tages-/Zeitsegment auswählen."; return; }
         const opt = target.selectedOptions[0];
         const isNew = target.value === "__new__";
@@ -2599,7 +2594,7 @@ EVENTS_HTML = r"""<!doctype html>
         try {
           const assigned = await requestJson(`/api/jobs/${encodeURIComponent(ctx.jobId)}/events/${encodeURIComponent(ctx.eventId)}/reassignments`, {
             method:"POST", headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({family_ids:selectedIds, target_mode:targetMode, target_event_id:(isNew||isNewNoEvent) ? null : (isNewChild ? opt.dataset.parentId : target.value), new_event_name:(isNew||isNewChild) ? document.getElementById("reassignment-new-name").value : null})
+            body:JSON.stringify({family_ids:selectedIds, segments:selectedSegments, target_mode:targetMode, target_event_id:(isNew||isNewNoEvent) ? null : (isNewChild ? opt.dataset.parentId : target.value), new_event_name:(isNew||isNewChild) ? document.getElementById("reassignment-new-name").value : null})
           });
           if (assigned?.target?.status === "applied" && assigned?.target?.event_id) {
             if (!ctx.autoTargetIds.includes(assigned.target.event_id)) ctx.autoTargetIds.push(assigned.target.event_id);

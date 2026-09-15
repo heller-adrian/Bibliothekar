@@ -30,6 +30,26 @@ def _normalize_ids(values: Iterable[Any]) -> list[int]:
     return result
 
 
+def _normalize_reassignment_segments(values: Iterable[Any] | None) -> list[dict[str,str]]:
+    result=[]
+    seen=set()
+    for value in values or []:
+        if not isinstance(value,dict):
+            raise EventReassignmentError("Ein Tages-/Zeitsegment ist ungültig.")
+        start=str(value.get("start_datetime") or "")[:19]
+        end=str(value.get("end_datetime") or "")[:19]
+        if len(start)!=19 or len(end)!=19 or start>end or start[:10] != end[:10]:
+            raise EventReassignmentError("Ein Tages-/Zeitsegment besitzt ungültige Grenzen.")
+        key=(start,end)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({"day_key":start[:10],"start_datetime":start,"end_datetime":end,
+                       "start_time":start[11:16],"end_time":end[11:16]})
+    result.sort(key=lambda x:(x["start_datetime"],x["end_datetime"]))
+    return result
+
+
 def _root_event(connection, event_id: str):
     return connection.execute(
         "SELECT * FROM events WHERE id = ? AND parent_event_id IS NULL",
@@ -142,6 +162,8 @@ def list_event_reassignments(database_path: Path, job_id: str, event_id: str) ->
     seen_months: set[str] = set()
     for target in target_rows:
         month_key = str(target["month_key"] or "")
+        if str(target["event_kind"]) != "no_event" and str(target["status"]) == "archived":
+            continue
         if str(target["event_kind"]) == "no_event":
             if not month_key or month_key in seen_months:
                 continue
@@ -214,7 +236,7 @@ def list_event_reassignments(database_path: Path, job_id: str, event_id: str) ->
         # Eine Monats-Sammlung ist eindeutig. Sobald fuer einen der betroffenen
         # Monate bereits ein Ziel existiert, darf die UI keine zweite Sammlung
         # fuer denselben Monat anbieten.
-        "new_no_event_supported": not bool(target_list),
+        "new_no_event_supported": not any(str(item.get("event_kind")) == "no_event" for item in target_list),
         "pending_months": pending_months,
         "reassignment_time_ranges": reassignment_time_ranges,
         "reassignment_segments": reassignment_segments,
@@ -263,7 +285,7 @@ def _create_linked_followup(connection, job_id: str, target, family_ids: list[in
 
 def _create_new_event(
     database_path: Path, job_id: str, family_ids: list[int], name: str,
-    *, ignore_event_ids: set[str] | None = None,
+    *, ignore_event_ids: set[str] | None = None, segment: dict[str,str] | None = None,
 ) -> dict[str, Any]:
     clean_name = str(name or "").strip()
     if not clean_name:
@@ -287,8 +309,8 @@ def _create_new_event(
     captures = [str(r["selected_capture_time"] or "")[:19] for r in rows]
     if any(not c for c in captures):
         raise EventReassignmentError("Für ein neues Ereignis benötigen alle Familien ein Aufnahmedatum.")
-    start_date = min(captures)[:10]
-    end_date = max(captures)[:10]
+    start_date = (segment["start_datetime"] if segment else min(captures))[:10]
+    end_date = (segment["end_datetime"] if segment else max(captures))[:10]
     available = [{
         "family_id": int(r["family_id"]), "family_key": r["family_key"],
         "selected_capture_time": r["selected_capture_time"],
@@ -303,8 +325,8 @@ def _create_new_event(
         "start_date": start_date, "end_date": end_date,
         "uses_time_range": same_day,
         "child_event_name": clean_name if same_day else "",
-        "start_time": min(captures)[11:16] if same_day else "00:00",
-        "end_time": max(captures)[11:16] if same_day else "23:59",
+        "start_time": (segment["start_time"] if segment else min(captures)[11:16]) if same_day else "00:00",
+        "end_time": (segment["end_time"] if segment else max(captures)[11:16]) if same_day else "23:59",
         "preserve_day_folders": start_date != end_date,
         "selected_day_keys": sorted({a["day_key"] for a in available}),
         "selected_family_ids": family_ids,
@@ -355,7 +377,7 @@ def _no_event_segments_for_rows(rows) -> list[dict[str, str]]:
 
 def _create_new_no_event(
     database_path: Path, job_id: str, family_ids: list[int],
-    *, ignore_event_ids: set[str] | None = None,
+    *, ignore_event_ids: set[str] | None = None, segments: list[dict[str,str]] | None = None,
 ) -> dict[str, Any]:
     with database_connection(database_path) as connection:
         rows = _selected_capture_rows(connection, job_id, family_ids)
@@ -394,7 +416,7 @@ def _create_new_no_event(
     preview = build_event_preview({
         "event_kind": "no_event",
         "event_name": "Ohne Ereignis",
-        "no_event_segments": _no_event_segments_for_rows(rows),
+        "no_event_segments": (segments or _no_event_segments_for_rows(rows)),
         "selected_family_ids": family_ids,
     }, available)
     created = create_planned_event(database_path, job_id, preview, ignore_event_ids=ignore_event_ids)
@@ -407,7 +429,7 @@ def _create_new_no_event(
     }
 
 
-def _create_cross_job_no_event_extension(connection, job_id: str, target, family_ids: list[int], now: str) -> dict[str, Any]:
+def _create_cross_job_no_event_extension(connection, job_id: str, target, family_ids: list[int], now: str, segments: list[dict[str,str]] | None = None) -> dict[str, Any]:
     rows = _selected_capture_rows(connection, job_id, family_ids)
     month = _capture_month(rows)
     target_month = str(target["start_datetime"] or "")[:7]
@@ -434,8 +456,10 @@ def _create_cross_job_no_event_extension(connection, job_id: str, target, family
         "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
         [(event_id,fid,now) for fid in family_ids],
     )
-    for seg in _no_event_segments_for_rows(rows):
-        day=seg["day_key"]; start=f"{day}T{seg['start_time']}:00"; end=f"{day}T{seg['end_time']}:59"
+    for seg in (segments or _no_event_segments_for_rows(rows)):
+        day=seg["day_key"]
+        start=seg.get("start_datetime") or f"{day}T{seg['start_time']}:00"
+        end=seg.get("end_datetime") or f"{day}T{seg['end_time']}:59"
         connection.execute(
             """INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?)""",
@@ -448,7 +472,7 @@ def _create_cross_job_no_event_extension(connection, job_id: str, target, family
     }
 
 
-def _create_child_in_existing_event(connection, job_id: str, target, family_ids: list[int], name: str, now: str) -> dict[str, Any]:
+def _create_child_in_existing_event(connection, job_id: str, target, family_ids: list[int], name: str, now: str, segments: list[dict[str,str]] | None = None) -> dict[str, Any]:
     clean_name=str(name or "").strip()
     if not clean_name:
         raise EventReassignmentError("Für das neue Unterereignis fehlt ein Name.")
@@ -459,7 +483,14 @@ def _create_child_in_existing_event(connection, job_id: str, target, family_ids:
     day_keys={c[:10] for c in captures}
     if len(day_keys) != 1:
         raise EventReassignmentError("Ein neues Unterereignis wird aus genau einem Tages-/Zeitsegment erzeugt.")
-    start=min(captures); end=max(captures)
+    if segments:
+        if len(segments) != 1:
+            raise EventReassignmentError("Ein neues Unterereignis übernimmt genau ein Tages-/Zeitsegment. Weitere Segmente danach separat zuordnen.")
+        start=segments[0]["start_datetime"]; end=segments[0]["end_datetime"]
+        if not all(start <= capture <= end for capture in captures):
+            raise EventReassignmentError("Die ausgewählten Familien passen nicht vollständig in das Tages-/Zeitsegment.")
+    else:
+        start=min(captures); end=max(captures)
     overlaps=connection.execute(
         "SELECT name,start_datetime,end_datetime FROM events WHERE parent_event_id=? AND start_datetime<=? AND end_datetime>=? ORDER BY start_datetime",
         (target["id"],end,start),
@@ -489,8 +520,10 @@ def _create_child_in_existing_event(connection, job_id: str, target, family_ids:
 def assign_event_reassignments(
     database_path: Path, job_id: str, event_id: str, family_ids: Iterable[Any],
     *, target_mode: str, target_event_id: str | None = None, new_event_name: str | None = None,
+    segments: Iterable[Any] | None = None,
 ) -> dict[str, Any]:
     selected = _normalize_ids(family_ids)
+    exact_segments = _normalize_reassignment_segments(segments)
     now = _now()
 
     with database_connection(database_path) as connection:
@@ -502,11 +535,24 @@ def assign_event_reassignments(
             raise EventReassignmentError("Diese Neu-Zuordnung ist für noch nicht archivierte Ereignisse vorgesehen.")
         placeholders = ",".join("?" for _ in selected)
         pending = connection.execute(
-            f"SELECT family_id FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id IN ({placeholders})",
+            f"SELECT family_id,released_start_datetime,released_end_datetime FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id IN ({placeholders})",
             (job_id, event_id, *selected),
         ).fetchall()
         if {int(r["family_id"]) for r in pending} != set(selected):
             raise EventReassignmentError("Mindestens eine Familie ist nicht mehr zur Neu-Zuordnung offen.")
+        expected_ranges={
+            (str(r["released_start_datetime"])[:19],str(r["released_end_datetime"])[:19])
+            for r in pending if r["released_start_datetime"] and r["released_end_datetime"]
+        }
+        provided_ranges={(seg["start_datetime"],seg["end_datetime"]) for seg in exact_segments}
+        if expected_ranges and provided_ranges != expected_ranges:
+            raise EventReassignmentError("Die ausgewählten Tages-/Zeitsegmente sind nicht mehr aktuell. Bitte die Neu-Zuordnung neu öffnen.")
+        if exact_segments:
+            capture_rows=_selected_capture_rows(connection,job_id,selected)
+            for row in capture_rows:
+                cap=str(row["selected_capture_time"] or "")[:19]
+                if not any(seg["start_datetime"] <= cap <= seg["end_datetime"] for seg in exact_segments):
+                    raise EventReassignmentError("Mindestens eine Familie liegt außerhalb der ausgewählten Tages-/Zeitsegmente.")
 
     # Validate reassignment against the mutation target state. The source
     # event may still exist in SQLite for rollback while being deleted or
@@ -514,13 +560,16 @@ def assign_event_reassignments(
     ignored_for_target = {str(event_id)}
 
     if target_mode == "new_event":
+        if len(exact_segments) > 1:
+            raise EventReassignmentError("Ein neues normales Ereignis übernimmt pro Schritt genau ein Tages-/Zeitsegment. Ordne weitere Segmente anschließend demselben Ereignis oder weiteren Zielen zu.")
         target_info = _create_new_event(
             database_path, job_id, selected, str(new_event_name or ""),
             ignore_event_ids=ignored_for_target,
+            segment=exact_segments[0] if exact_segments else None,
         )
     elif target_mode == "new_no_event":
         target_info = _create_new_no_event(
-            database_path, job_id, selected, ignore_event_ids=ignored_for_target,
+            database_path, job_id, selected, ignore_event_ids=ignored_for_target, segments=exact_segments,
         )
     elif target_mode == "existing_no_event":
         if not target_event_id:
@@ -539,7 +588,7 @@ def assign_event_reassignments(
                 raise EventReassignmentError("Die ausgewählten Familien passen nicht zum Monat dieser „Ohne Ereignis“-Sammlung.")
 
             if str(target["job_id"]) != job_id:
-                target_info = _create_cross_job_no_event_extension(connection, job_id, target, selected, now)
+                target_info = _create_cross_job_no_event_extension(connection, job_id, target, selected, now, exact_segments)
                 connection.commit()
             elif str(target["status"]) == "archived":
                 # Archiv bleibt strikt read-only. Der vorhandene Follow-up-Mechanismus
@@ -555,8 +604,14 @@ def assign_event_reassignments(
                         "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
                         (target["id"], int(row["id"]), now),
                     )
-                for day, values in by_day.items():
-                    a, b = min(values), max(values)
+                segment_values = exact_segments or [
+                    {"day_key":day,"start_datetime":min(values),"end_datetime":max(values),
+                     "start_time":min(values)[11:16],"end_time":max(values)[11:16]}
+                    for day,values in by_day.items()
+                ]
+                for selected_segment in segment_values:
+                    day=selected_segment["day_key"]
+                    a=selected_segment["start_datetime"]; b=selected_segment["end_datetime"]
                     existing = connection.execute(
                         """SELECT * FROM event_time_segments WHERE event_id=? AND day_key=?
                            ORDER BY start_datetime""", (target["id"], day)
@@ -622,7 +677,7 @@ def assign_event_reassignments(
             target=_root_event(connection,target_event_id)
             if target is None:
                 raise EventReassignmentError("Das Oberereignis ist nicht mehr verfügbar.")
-            target_info=_create_child_in_existing_event(connection,job_id,target,selected,str(new_event_name or ""),now)
+            target_info=_create_child_in_existing_event(connection,job_id,target,selected,str(new_event_name or ""),now,exact_segments)
             connection.commit()
     else:
         raise EventReassignmentError("Unbekannte Zielart für die Neu-Zuordnung.")
