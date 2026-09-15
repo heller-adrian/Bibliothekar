@@ -70,17 +70,41 @@ Archivtests T080–T088 werden ausschließlich gegen die beschreibbare QA-Testbi
 `/mnt/storage/ki-workspace/hermes/bibliothekar-qa/archive-test-library` ausgeführt. Die reale
 Kamerabibliothek `/mnt/storage/fotos/Kamerabibliothek` bleibt read-only und ist niemals Testziel.
 
+### Verbindlicher Dateisystem-Nachweis für T080–T088
+
+API-, UI- und SQLite-Zustände reichen für diese Tests **nicht** als PASS aus. Nach jedem relevanten
+Archiv-, Reassignment- oder manuellen IST→SOLL-Schritt muss `nas-agent` den tatsächlichen Bestand
+unter `archive-test-library` gegen den zu diesem Schritt erwarteten SOLL-Zustand prüfen.
+
+Der Vergleich umfasst mindestens:
+
+- exakte relative Datei- und Ordnerpfade
+- erwartete und tatsächliche Dateianzahl
+- Dateigröße und, für die verwendeten Testkopien, SHA-256
+- vollständigen Zusammenhalt jeder Dateifamilie in genau dem vorgesehenen Zielordner
+- korrekte Ober-/Unterereignis- und `Alle`-Ordnerstruktur
+- keine fehlenden Dateien
+- keine verbliebenen Dateien oder veralteten Restordner
+- keine ungewollten Duplikate desselben Dateiinhalts an mehreren Archivpfaden
+- keine Symlinks als Ersatz für erwartete Archivdateien
+
+Vor dem Schritt werden IST und konkreter IST→SOLL-Plan gesichert; nach dem Schritt wird ein
+SOLL-Manifest erzeugt und mit `qa/archive_e2e/verify_filesystem_state.py` gegen den realen
+QA-Archivbestand geprüft. Der maschinenlesbare Nachweis gehört in den Laufordner und wird in
+`results.json` unter `filesystem_checks` referenziert. Ein T080–T088-Test darf nur dann `PASS`
+erhalten, wenn alle für ihn relevanten Dateisystemprüfungen `PASS` sind.
+
 | ID | Test |
 |---|---|
-| T080 | applied Ereignis in QA-Testbibliothek archivieren |
-| T081 | Archivprüfung gegen realen QA-Dateibestand |
-| T082 | archived Ereignis umbenennen und IST→SOLL prüfen |
-| T083 | archived Zeitraum ändern; herausfallende Segmente erkennen |
-| T084 | archived einfaches Ereignis zu Oberereignis mit Unterereignissen umbauen |
-| T085 | herausfallende Dateien einem neuen oder bestehenden Unterereignis zuordnen |
-| T086 | manuellen Änderungsauftrag mit konkreten Pfaden erzeugen |
-| T087 | manuelle Verschiebung in QA-Testbibliothek anschließend vollständig prüfen |
-| T088 | reale Kamerabibliothek niemals verändern; Schreibzugriff muss ausgeschlossen bleiben |
+| T080 | applied Ereignis in QA-Testbibliothek archivieren; realen Zielbestand vollständig gegen SOLL prüfen |
+| T081 | Archivprüfung gegen realen QA-Dateibestand einschließlich Pfade, Zählung, Familien und Duplikate |
+| T082 | archived Ereignis umbenennen, IST→SOLL prüfen und realen Dateisystemzustand nach Umsetzung vergleichen |
+| T083 | archived Zeitraum ändern; herausfallende Segmente erkennen und verbleibenden/herausfallenden Dateibestand prüfen |
+| T084 | archived einfaches Ereignis zu Oberereignis mit Unterereignissen umbauen und Unterereignisordner real prüfen |
+| T085 | herausfallende Dateien einem neuen oder bestehenden Unterereignis zuordnen und Familienzusammenhalt am Ziel prüfen |
+| T086 | manuellen Änderungsauftrag mit konkreten Pfaden erzeugen und jeden geplanten alten/neuen Pfad gegen IST/SOLL belegen |
+| T087 | manuelle Verschiebung in QA-Testbibliothek anschließend vollständig prüfen; keine Restdateien, Restordner oder Duplikate |
+| T088 | reale Kamerabibliothek niemals verändern; Schreibzugriff muss ausgeschlossen bleiben und QA-Archiv-Endzustand dokumentiert sein |
 
 ## Sicherheits- und Wiederanlauf
 
