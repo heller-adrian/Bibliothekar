@@ -203,15 +203,15 @@ if grep -Fq "$PRODUCTION_DATABASE" "$INSPECT_FILE"; then
   fail "Sicherheitsverletzung: Produktiv-DB taucht in Containerkonfiguration auf"
 fi
 
-MOUNTS="$(docker inspect "$CONTAINER_NAME" --format '{{range .Mounts}}{{println .Source " -> " .Destination " (" .RW ")"}}{{end}}')"
+MOUNTS="$(docker inspect "$CONTAINER_NAME" --format '{{range .Mounts}}{{printf "%s\t%s\t%t\n" .Source .Destination .RW}}{{end}}')"
 ENVS="$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{println .}}{{end}}')"
 printf '%s\n' "$MOUNTS" > "$RUN_ROOT/mounts.txt"
 printf '%s\n' "$ENVS" > "$RUN_ROOT/environment.txt"
 
 printf '%s\n' "$ENVS" | grep -Fx "KAMERA_DATABASE_DIR=$APP_DATABASE" >/dev/null || fail "QA-Datenbankvariable fehlt/ist falsch"
 printf '%s\n' "$ENVS" | grep -Fx "KAMERA_ARCHIVE_ROOT=$ARCHIVE_ROOT" >/dev/null || fail "QA-Archivvariable fehlt/ist falsch"
-printf '%s\n' "$MOUNTS" | grep -F "$ARCHIVE_ROOT -> $ARCHIVE_ROOT (true)" >/dev/null || fail "QA-Archiv ist nicht schreibbar gemountet"
-printf '%s\n' "$MOUNTS" | grep -F "$APP_IMPORT -> $APP_IMPORT (false)" >/dev/null || fail "QA-Testkopien sind nicht read-only gemountet"
+printf '%s\n' "$MOUNTS" | grep -Fx "${ARCHIVE_ROOT}"$'\t'"${ARCHIVE_ROOT}"$'\ttrue' >/dev/null || fail "QA-Archiv ist nicht schreibbar gemountet"
+printf '%s\n' "$MOUNTS" | grep -Fx "${APP_IMPORT}"$'\t'"${APP_IMPORT}"$'\tfalse' >/dev/null || fail "QA-Testkopien sind nicht read-only gemountet"
 
 if ! wait_for_health; then
   docker logs "$CONTAINER_NAME" > "$RUN_ROOT/app.log" 2>&1 || true
