@@ -38,6 +38,7 @@ Mindestens:
 - `commands.log`
 - `app.log`
 - `environment.txt`
+- bei T080–T088 zusätzlich `filesystem/` mit IST→SOLL-Plänen, erwarteten Manifesten und realen Evidence-Dateien
 
 ## Realdateien
 
@@ -77,6 +78,23 @@ Vor T080–T088 muss `nas-agent` die isolierte QA-Instanz gemäß `qa/archive_e2
 
 Nur ein `PASS` des Isolations-Harness erlaubt den Start von T080–T088. Bei `BLOCKED` oder `FAIL` werden diese Tests nicht improvisiert gegen Produktionspfade ausgeführt; unabhängige Tests laufen weiter.
 
+### Verbindliche reale Dateisystemprüfung
+
+Für T080–T088 reichen API/UI/SQLite-Nachweise nicht aus. Nach jedem relevanten Archiv-, Reassignment- oder manuellen IST→SOLL-Schritt wird der **tatsächliche** Inhalt von `archive-test-library` gegen ein explizites SOLL-Manifest geprüft.
+
+`qa/archive_e2e/verify_filesystem_state.py` prüft dabei mindestens:
+
+- exakte Pfade und Ordnerstruktur
+- Datei- und Ordneranzahl
+- Größe und SHA-256 der Testkopien
+- vollständigen Zusammenhalt jeder Dateifamilie
+- korrekte Unterereignisordner
+- fehlende und verbliebene Dateien/Ordner
+- ungewollte Inhaltsduplikate
+- Symlinks
+
+Jeder relevante Vergleich wird als `filesystem_checks` in `results.json` dokumentiert. `qa/validate_results.py` akzeptiert für T080–T088 kein `PASS`, wenn diese Nachweise fehlen oder ein Dateisystemvergleich nicht PASS ist. Für T082–T087 muss zusätzlich der konkrete IST→SOLL-Plan als Datei im Laufordner referenziert sein.
+
 Vor jedem Archiv-Testlauf muss der Agent dokumentieren:
 
 - verwendeter QA-Archivpfad
@@ -99,7 +117,7 @@ Jeder Fehler enthält:
 - tatsächliches Ergebnis
 - relevante API-Antworten
 - DB-Zustand
-- Dateisystemzustand
+- Dateisystemzustand einschließlich konkretem SOLL-Manifest und Evidence-Datei, sofern ein Archivschritt erreicht wurde
 - Logs
 - Reproduzierbarkeit
 - dadurch blockierte Tests
