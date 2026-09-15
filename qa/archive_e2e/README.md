@@ -62,21 +62,109 @@ Der Harness erzeugt insbesondere:
 
 ## T080–T088 wirklich als E2E ausführen
 
-Ein bestandener Start-Harness ist **noch kein PASS für T080–T088**. Danach führt `nas-agent` die Testfälle aus `TEST_MATRIX.md` tatsächlich über die isolierte Bibliothekar-Instanz aus und prüft jeweils API/UI-Zustand, QA-SQLite-DB und reales Dateisystem unter `archive-test-library`.
+Ein bestandener Start-Harness ist **noch kein PASS für T080–T088**. Danach führt `nas-agent` die Testfälle aus `TEST_MATRIX.md` tatsächlich über die isolierte Bibliothekar-Instanz aus.
 
-Dabei gilt:
+Die verbindliche Reihenfolge und Bedeutung der Archivtests ist:
 
-- T080: verwendete Realdateien sind nachweislich Kopien aus der freigegebenen Sicherung; Originalquelle bleibt unberührt.
-- T081: vollständiger Archivlauf schreibt tatsächlich in `archive-test-library`, nicht nur in DB/UI.
-- T082: ein dort archiviertes Ereignis wird aus demselben QA-Archiv erneut geöffnet/geprüft.
-- T083: archived einfaches Ereignis wird nachträglich zu Oberereignis + Unterereignis umgebaut; IST→SOLL wird real angewendet.
-- T084: herausfallendes archived Segment wird einem bestehenden normalen archived Ereignis zugeordnet.
-- T085: herausfallendes archived Segment wird einem bestehenden archived Unterereignis zugeordnet.
-- T086: herausfallendes archived Segment wird als neues Unterereignis eines bestehenden archived Oberereignisses angelegt.
-- T087: archived `Ohne Ereignis` bleibt segmentbasiert; Erweiterung/Änderung erzeugt keine falsche kontinuierliche Zeitspanne.
-- T088: nach dem Lauf ist weiterhin nachgewiesen, dass die Produktivbibliothek nie in der QA-Instanz gemountet war und kein QA-Kommando einen Produktionspfad als Schreibziel verwendet hat. Ein optionaler read-only Metadatenvergleich der Produktivbibliothek darf ergänzend verwendet werden; Inhalts-Hashes der realen 600-GB-Bibliothek sind dafür nicht erforderlich.
+- T080: applied Ereignis mit echten QA-Testkopien in `archive-test-library` archivieren und den realen Zielbestand vollständig prüfen.
+- T081: Archivprüfung gegen den realen QA-Dateibestand; API/DB und Dateisystem müssen denselben Zustand beschreiben.
+- T082: archived Ereignis umbenennen, konkreten IST→SOLL-Plan erzeugen, Änderung umsetzen und realen SOLL-Bestand prüfen.
+- T083: archived Zeitraum verändern, freigewordene Segmente exakt erkennen und verbleibenden/herausfallenden Bestand im Dateisystem belegen.
+- T084: archived einfaches Ereignis nachträglich in Oberereignis + Unterereignisse umbauen und die reale Unterereignisordnerstruktur prüfen.
+- T085: herausfallende Segmente einem bestehenden oder neuen Unterereignis zuordnen und die vollständigen Dateifamilien am korrekten Ziel prüfen.
+- T086: manuellen Änderungsauftrag mit konkreten alten/neuen Pfaden erzeugen; jeder relevante Pfad muss im Dateisystemnachweis nachvollziehbar sein.
+- T087: manuelle IST→SOLL-Verschiebung im QA-Archiv ausführen und danach vollständig prüfen: keine Restdateien, keine veralteten Restordner, keine Duplikate.
+- T088: nachweisen, dass die Produktivbibliothek niemals gemountet oder beschrieben wurde; zusätzlich den Endzustand des QA-Archivs dokumentieren.
 
 Nach einem FAIL werden fachlich unabhängige Tests weiter ausgeführt. Nur echte Folgeabhängigkeiten dürfen BLOCKED werden; sie müssen einzeln begründet werden.
+
+## Verbindlicher Dateisystem-Abgleich nach jedem relevanten Archivschritt
+
+API-Antworten, UI-Zustand und SQLite-Einträge sind **notwendig, aber nicht hinreichend**. Nach jedem Schritt, der Dateien oder Archivstruktur erzeugt, verschiebt, umbenennt, neu zuordnet oder strukturell verändert, ist zusätzlich ein realer Dateisystem-Abgleich erforderlich.
+
+Für jeden solchen Schritt legt `nas-agent` unter dem Laufordner beispielsweise an:
+
+```text
+filesystem/
+  T082-step01-plan.json
+  T082-step01-expected.json
+  T082-step01-evidence.json
+  T084-step02-plan.json
+  T084-step02-expected.json
+  T084-step02-evidence.json
+```
+
+Der Ablauf ist:
+
+1. tatsächlichen IST-Zustand und den von der App erzeugten IST→SOLL-Plan sichern
+2. daraus einen expliziten erwarteten Dateisystem-SOLL-Zustand erstellen
+3. Archivschritt bzw. manuelle Verschiebung ausführen
+4. den tatsächlichen Zustand von `archive-test-library` mit dem SOLL-Manifest vergleichen
+5. Evidence-Datei im Laufordner sichern und in `results.json` referenzieren
+
+Der Vergleich wird mit folgendem Helfer ausgeführt:
+
+```bash
+python3 qa/archive_e2e/verify_filesystem_state.py \
+  /mnt/storage/ki-workspace/hermes/bibliothekar-qa/runs/<RUN>/filesystem/T082-step01-expected.json \
+  --archive-root /mnt/storage/ki-workspace/hermes/bibliothekar-qa/archive-test-library \
+  --evidence /mnt/storage/ki-workspace/hermes/bibliothekar-qa/runs/<RUN>/filesystem/T082-step01-evidence.json
+```
+
+Das SOLL-Manifest enthält mindestens:
+
+```json
+{
+  "archive_root": "/mnt/storage/ki-workspace/hermes/bibliothekar-qa/archive-test-library",
+  "directories": [
+    "2026/07.15 - Beispiel",
+    "2026/07.15 - Beispiel/08-00 - 12-00 - Vormittag",
+    "2026/07.15 - Beispiel/08-00 - 12-00 - Vormittag/Alle"
+  ],
+  "files": [
+    {
+      "path": "2026/07.15 - Beispiel/08-00 - 12-00 - Vormittag/Alle/20260715_091500_Kamera.RAF",
+      "family_id": "42",
+      "size_bytes": 123456,
+      "sha256": "..."
+    }
+  ]
+}
+```
+
+`verify_filesystem_state.py` prüft den gesamten nicht-metadatenbezogenen QA-Archivbestand exakt gegen dieses Manifest. Geprüft werden:
+
+- exakte relative Datei- und Ordnerpfade
+- erwartete/tatsächliche Anzahl von Dateien und Ordnern
+- Größe und SHA-256 jeder erwarteten Testdatei, sofern im Manifest angegeben
+- dass alle Dateien einer Familie in genau demselben vorgesehenen Zielordner liegen
+- fehlende Dateien
+- unerwartete/verbliebene Dateien
+- unerwartete/verbliebene Ordner
+- gleiche Dateiinhalte an mehreren Pfaden als ungewollte Duplikate
+- Symlinks
+
+`event.json`, `.DS_Store` und AppleDouble-Dateien `._*` werden separat als bekannte Metadaten protokolliert und nicht als Kamera-Mediendateien gezählt. Andere unbekannte Dateien bleiben prüfpflichtig.
+
+Ein Archivtest T080–T088 darf nur `PASS` erhalten, wenn **alle für ihn relevanten `filesystem_checks` PASS** sind. Ein optisch plausibler Ordner oder ein passender DB-Zustand ersetzt diesen Nachweis nicht.
+
+Beispiel für `results.json`:
+
+```json
+{
+  "id": "T082",
+  "status": "PASS",
+  "filesystem_checks": [
+    {
+      "step": "rename-apply",
+      "status": "PASS",
+      "plan": "filesystem/T082-step01-plan.json",
+      "expected": "filesystem/T082-step01-expected.json",
+      "evidence": "filesystem/T082-step01-evidence.json"
+    }
+  ]
+}
+```
 
 ## Ende des isolierten Prozesses
 
@@ -100,4 +188,4 @@ python qa/validate_results.py \
   --archive-isolation /mnt/storage/ki-workspace/hermes/bibliothekar-qa/runs/<ARCHIVE_RUN>/isolation.json
 ```
 
-Der Validator schlägt fehl, sobald eine Test-ID fehlt, eine unbekannte ID vorkommt oder T080–T088 als tatsächlich ausgeführt gemeldet werden, ohne dass ein bestandenes Isolations-Gate für Produktrevision `627c5515…` vorliegt.
+Der Validator schlägt fehl, sobald eine Test-ID fehlt, eine unbekannte ID vorkommt, T080–T088 als tatsächlich ausgeführt gemeldet werden ohne bestandenes Isolations-Gate oder ein als PASS gemeldeter Archivtest keinen vollständigen bestandenen Dateisystemnachweis besitzt.
