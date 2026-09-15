@@ -29,6 +29,33 @@ jobs:
         run: python -m compileall -q app qa
       - name: Validate archive QA shell harness
         run: bash -n qa/archive_e2e/*.sh
+      - name: Exercise isolated archive QA harness
+        run: |
+          CI_SOURCE=/mnt/storage/backup/kamera-sd-karten/CI_DUMMY
+          sudo mkdir -p "$CI_SOURCE"
+          sudo chown -R "$(id -u):$(id -g)" /mnt/storage/backup/kamera-sd-karten
+          printf 'Bibliothekar archive QA harness smoke test\n' > "$CI_SOURCE/real-copy-placeholder.bin"
+
+          export QA_ROOT="$RUNNER_TEMP/bibliothekar-archive-qa"
+          export QA_RUN_ID="ci_archive_harness"
+          export QA_PORT=31044
+          trap 'QA_ROOT="$QA_ROOT" bash qa/archive_e2e/stop_isolated_archive_qa.sh >/dev/null 2>&1 || true' EXIT
+
+          bash qa/archive_e2e/start_isolated_archive_qa.sh "$CI_SOURCE"
+
+          test -f "$QA_ROOT/runs/$QA_RUN_ID/database/kamera.sqlite3"
+          python - "$QA_ROOT/runs/$QA_RUN_ID/isolation.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          data = json.loads(Path(sys.argv[1]).read_text())
+          assert data['status'] == 'PASS'
+          assert data['product_revision'] == '627c5515e533e167e45354ccaa71f988f104ae08'
+          assert data['production_archive_mounted'] is False
+          assert data['production_database_mounted'] is False
+          assert data['database'].startswith(data['workspace'].rsplit('/workspace', 1)[0])
+          PY
       - name: Collect complete backend regression suite
         run: pytest --collect-only -q -o addopts='' tests/backend
       - name: Run complete backend regression suite without fail-fast
