@@ -21,10 +21,10 @@ def _sha(data: bytes) -> str:
 
 
 def test_0210_version_and_schema(tmp_path: Path):
-    assert main.APP_VERSION == "0.21.1"
+    assert main.APP_VERSION == "0.21.2"
     db = tmp_path / "kamera.sqlite3"
     status = initialize_database(db)
-    assert max(status["applied_versions"]) == 22
+    assert max(status["applied_versions"]) == 24
     assert "imported_source_files" in status["tables"]
 
 
@@ -134,7 +134,6 @@ def test_source_helper_rejects_stale_mount_for_current_device(monkeypatch):
 
     def fake_run(*args: str, check: bool = True):
         calls.append(tuple(args))
-        joined = " ".join(args)
         if "--submounts" in args:
             return subprocess.CompletedProcess(args, 0, json.dumps({"filesystems": []}), "")
         if "findmnt" in args and "--target" in args:
