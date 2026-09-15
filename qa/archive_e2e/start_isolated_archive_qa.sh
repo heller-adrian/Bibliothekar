@@ -60,13 +60,9 @@ approved_source() {
 wait_for_health() {
   local i
   for i in $(seq 1 30); do
-    if docker exec "$CONTAINER_NAME" python - <<'PY' >/dev/null 2>&1
-import urllib.request
-with urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2) as response:
-    if response.status != 200:
-        raise SystemExit(1)
-PY
-    then
+    if docker exec "$CONTAINER_NAME" python -c \
+      "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2); raise SystemExit(0 if r.status == 200 else 1)" \
+      >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -183,15 +179,16 @@ docker run -d \
   -e "KAMERA_POOL_PROBE=$APP_POOL_PROBE" \
   -e "KAMERA_SOURCE_HELPER_URL=http://127.0.0.1:9" \
   -e "BIBLIOTHEKAR_QA_MODE=archive-e2e" \
+  -e "PYTHONDONTWRITEBYTECODE=1" \
   -v "$ARCHIVE_ROOT:$ARCHIVE_ROOT:rw" \
   -v "$APP_DATABASE:$APP_DATABASE:rw" \
   -v "$APP_WORKSPACE:$APP_WORKSPACE:rw" \
   -v "$APP_LOGS:$APP_LOGS:rw" \
   -v "$APP_CONFIG:$APP_CONFIG:ro" \
-  -v "$APP_IMPORT:$APP_IMPORT:rw" \
-  -v "$APP_REMOVABLE:$APP_REMOVABLE:rw" \
-  -v "$APP_NAS:$APP_NAS:rw" \
-  -v "$APP_POOL_PROBE:$APP_POOL_PROBE:rw" \
+  -v "$APP_IMPORT:$APP_IMPORT:ro" \
+  -v "$APP_REMOVABLE:$APP_REMOVABLE:ro" \
+  -v "$APP_NAS:$APP_NAS:ro" \
+  -v "$APP_POOL_PROBE:$APP_POOL_PROBE:ro" \
   "$IMAGE" >/dev/null
 
 INSPECT_FILE="$RUN_ROOT/container-inspect.json"
@@ -214,6 +211,7 @@ printf '%s\n' "$ENVS" > "$RUN_ROOT/environment.txt"
 printf '%s\n' "$ENVS" | grep -Fx "KAMERA_DATABASE_DIR=$APP_DATABASE" >/dev/null || fail "QA-Datenbankvariable fehlt/ist falsch"
 printf '%s\n' "$ENVS" | grep -Fx "KAMERA_ARCHIVE_ROOT=$ARCHIVE_ROOT" >/dev/null || fail "QA-Archivvariable fehlt/ist falsch"
 printf '%s\n' "$MOUNTS" | grep -F "$ARCHIVE_ROOT -> $ARCHIVE_ROOT (true)" >/dev/null || fail "QA-Archiv ist nicht schreibbar gemountet"
+printf '%s\n' "$MOUNTS" | grep -F "$APP_IMPORT -> $APP_IMPORT (false)" >/dev/null || fail "QA-Testkopien sind nicht read-only gemountet"
 
 if ! wait_for_health; then
   docker logs "$CONTAINER_NAME" > "$RUN_ROOT/app.log" 2>&1 || true
