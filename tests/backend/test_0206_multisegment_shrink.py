@@ -19,15 +19,15 @@ def _family(fid, capture):
 
 
 def test_version_0206():
-    assert APP_VERSION == "0.21.1"
+    assert APP_VERSION == "0.21.2"
 
 
 def test_multisegment_shrink_derives_union_without_requiring_old_membership():
     families = [
-        _family(1, "2026-07-20T11:30:00"),  # remains in Mittag after shrink
-        _family(2, "2026-07-20T14:30:00"),  # drops out after shrink to 14:00
-        _family(3, "2026-07-20T16:00:00"),  # remains in second segment
-        _family(4, "2026-07-20T20:00:00"),  # remains in second segment
+        _family(1, "2026-07-20T11:30:00"),
+        _family(2, "2026-07-20T14:30:00"),
+        _family(3, "2026-07-20T16:00:00"),
+        _family(4, "2026-07-20T20:00:00"),
     ]
     payload = {
         "event_kind": "event",
@@ -43,8 +43,6 @@ def test_multisegment_shrink_derives_union_without_requiring_old_membership():
     normalized = _event_edit_payload_within_new_range(payload, families)
     assert normalized["selected_family_ids"] == [1, 3, 4]
 
-    # Structural preview is intentionally built from one representative child
-    # without forcing the union membership through that single interval.
     first = normalized["child_segments"][0]
     preview_payload = dict(normalized)
     preview_payload.pop("selected_family_ids", None)
