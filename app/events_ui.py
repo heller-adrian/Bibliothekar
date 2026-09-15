@@ -2224,7 +2224,7 @@ EVENTS_HTML = r"""<!doctype html>
           <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
           <label class="edit-field"><span>Ende</span><input id="edit-end-date" type="date" value="${escapeHtml(isoDate(event.end_datetime))}" ${structural ? "" : "disabled"}></label>
           <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-          ${childEvents.length ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Zeitsegmente / Unterereignisse</span>${structural ? `<button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button>` : ""}</div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px">${normalSegmentHtml}</div><p class="muted">Zeitsegmente können geändert, ergänzt oder vollständig entfernt werden. Die Dateizugehörigkeit wird danach ausschließlich aus Datum und Uhrzeit neu berechnet.</p></div>` : `<label class="edit-field"><span>Unterereignis / Uhrzeit</span><select id="edit-time-enabled" ${structural ? "" : "disabled"}><option value="0" selected>Ganzer Zeitraum</option><option value="1">Zeitbereich verwenden</option></select></label><label class="edit-field"><span>Bezeichnung Zeitbereich</span><input id="edit-child-name" value="${escapeHtml(event.name || "")}" disabled></label><label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="00:00" disabled></label><label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="23:59" disabled></label>`}`}
+          ${childEvents.length ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Zeitsegmente / Unterereignisse</span>${structural ? `<button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button>` : ""}</div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px">${normalSegmentHtml}</div><p class="muted">Zeitsegmente können geändert, ergänzt oder vollständig entfernt werden. Die Dateizugehörigkeit wird danach ausschließlich aus Datum und Uhrzeit neu berechnet.</p></div>` : `<label class="edit-field"><span>Unterereignis / Uhrzeit</span><select id="edit-time-enabled" ${structural ? "" : "disabled"}><option value="0" selected>Ganzer Zeitraum</option><option value="1">Ein Zeitbereich</option></select></label><label class="edit-field"><span>Bezeichnung Zeitbereich</span><input id="edit-child-name" value="${escapeHtml(event.name || "")}" disabled></label><label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="00:00" disabled></label><label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="23:59" disabled></label>${structural ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Mehrere Unterereignisse</span><button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button></div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px"></div><p class="muted">Sobald hier Zeitsegmente angelegt sind, bilden sie gemeinsam die neue Ereignisstruktur. Das funktioniert auch bei einem bisher einfachen archivierten Ereignis in einem einzigen Änderungsauftrag.</p></div>` : ""}`}`}
           <label class="edit-field full"><span>Notizen</span><textarea id="edit-notes" maxlength="4000">${escapeHtml(event.notes || "")}</textarea></label>
         </div>
         <div class="edit-actions">
@@ -3009,9 +3009,13 @@ EVENTS_HTML = r"""<!doctype html>
         let archiveReassignData = null;
         if (archiveReassignRes.ok) archiveReassignData = await archiveReassignRes.json();
         if (archiveReassignData && Number(archiveReassignData.family_count || 0) > 0) {
-          const targetOptions = (archiveReassignData.targets || []).map(t =>
-            `<option value="existing:${escapeHtml(t.id)}">${escapeHtml(String(t.folder_name || t.name || "Ohne Ereignis"))} · ARCHIVIERT</option>`
-          ).join("");
+          const targetOptions = (archiveReassignData.targets||[]).map(t => {
+            if (t.event_kind === "no_event") return `<option value="existing-no-event:${escapeHtml(t.id)}">Bestehend · ${escapeHtml(t.folder_name||t.name||t.id)}</option>`;
+            const parent=`<option value="existing-event:${escapeHtml(t.id)}">Bestehendes Ereignis · ${escapeHtml(t.name||t.folder_name||t.id)}</option>`;
+            const child=(t.children||[]).map(c=>`<option value="existing-child:${escapeHtml(t.id)}:${escapeHtml(c.id)}">Bestehendes Unterereignis · ${escapeHtml(t.name)} / ${escapeHtml(c.name)}</option>`).join("");
+            const newChild=`<option value="new-child:${escapeHtml(t.id)}">Neues Unterereignis in · ${escapeHtml(t.name)}</option>`;
+            return parent+child+newChild;
+          }).join("");
           html += `<section class="preview-note" style="margin-top:14px">
             <strong>Neu-Zuordnung vor Archivprüfung</strong><br>
             ${Number(archiveReassignData.family_count)} herausfallende ${Number(archiveReassignData.family_count)===1?"Familie benötigt":"Familien benötigen"} noch ein Ziel.
@@ -3020,7 +3024,8 @@ EVENTS_HTML = r"""<!doctype html>
             `<label class="card" style="padding:10px;display:flex;gap:10px;align-items:center"><input type="checkbox" data-archive-family value="${Number(f.family_id)}" checked><span><strong>${escapeHtml(f.original_stem||f.family_key||f.family_id)}</strong><br><span class="muted">${escapeHtml(String(f.selected_capture_time||"").slice(0,19))} · ${Number(f.file_count||0)} Dateien</span></span></label>`
           ).join("")}</div>`;
           html += `<label class="edit-field" style="margin-top:10px"><span>Ziel</span><select id="archive-reassign-target"><option value="new">Neues Ereignis erstellen</option><option value="new-no-event">Neues „Ohne Ereignis“ erstellen</option>${targetOptions}</select></label>`;
-          html += `<label id="archive-reassign-name-row" class="edit-field"><span>Name des neuen Ereignisses</span><input id="archive-reassign-name" type="text" placeholder="Ereignisname"></label>`;
+          html += `<label id="archive-reassign-name-row" class="edit-field"><span>Name des neuen Ereignisses / Unterereignisses</span><input id="archive-reassign-name" type="text" placeholder="Name"></label>`;
+          html += `<div id="archive-reassign-time-row" class="edit-grid" hidden><label class="edit-field"><span>Startzeit</span><input id="archive-reassign-start" type="time"></label><label class="edit-field"><span>Endzeit</span><input id="archive-reassign-end" type="time"></label></div>`;
           html += `<button type="button" class="plan-button" id="archive-reassign-apply">Auswahl zuordnen</button><div id="archive-reassign-message" class="muted" style="margin-top:8px"></div>`;
         }
 
@@ -3054,7 +3059,13 @@ EVENTS_HTML = r"""<!doctype html>
         const archiveTarget = changeRequestBody.querySelector("#archive-reassign-target");
         const archiveNameRow = changeRequestBody.querySelector("#archive-reassign-name-row");
         if (archiveTarget && archiveNameRow) {
-          const syncArchiveName = () => { archiveNameRow.hidden = archiveTarget.value !== "new"; };
+          const archiveTimeRow=changeRequestBody.querySelector("#archive-reassign-time-row");
+          const syncArchiveName = () => {
+            const isNew=archiveTarget.value === "new";
+            const isChild=archiveTarget.value.startsWith("new-child:");
+            archiveNameRow.hidden = !(isNew || isChild);
+            if (archiveTimeRow) archiveTimeRow.hidden = !isChild;
+          };
           archiveTarget.addEventListener("change", syncArchiveName); syncArchiveName();
         }
         const archiveAssignButton = changeRequestBody.querySelector("#archive-reassign-apply");
@@ -3063,7 +3074,14 @@ EVENTS_HTML = r"""<!doctype html>
           const familyIds = [...changeRequestBody.querySelectorAll("[data-archive-family]:checked")].map(x => Number(x.value));
           if (!familyIds.length) { if (message) message.textContent = "Wähle mindestens eine Familie aus."; return; }
           const value = archiveTarget.value;
-          const body = { family_ids: familyIds, target_mode: value === "new" ? "new_event" : (value === "new-no-event" ? "new_no_event" : "existing_no_event"), target_event_id: value.startsWith("existing:") ? value.slice(9) : null, new_event_name: value === "new" ? changeRequestBody.querySelector("#archive-reassign-name").value : null };
+          let targetMode="new_event", targetEventId=null, targetChildEventId=null;
+          if (value === "new-no-event") targetMode="new_no_event";
+          else if (value.startsWith("existing-no-event:")) { targetMode="existing_no_event"; targetEventId=value.slice(18); }
+          else if (value.startsWith("existing-event:")) { targetMode="existing_event"; targetEventId=value.slice(15); }
+          else if (value.startsWith("existing-child:")) { const bits=value.split(":"); targetMode="existing_event"; targetEventId=bits[1]; targetChildEventId=bits[2]; }
+          else if (value.startsWith("new-child:")) { targetMode="new_child"; targetEventId=value.slice(10); }
+          const isNamed = value === "new" || targetMode === "new_child";
+          const body = { family_ids: familyIds, target_mode: targetMode, target_event_id: targetEventId, target_child_event_id: targetChildEventId, new_event_name: isNamed ? changeRequestBody.querySelector("#archive-reassign-name").value : null, new_child_start: targetMode === "new_child" ? changeRequestBody.querySelector("#archive-reassign-start").value : null, new_child_end: targetMode === "new_child" ? changeRequestBody.querySelector("#archive-reassign-end").value : null };
           archiveAssignButton.disabled = true; if (message) message.textContent = "Ziel und leere Arbeitsstruktur werden vorbereitet …";
           try {
             const assigned = await requestJson(`/api/change-requests/${encodeURIComponent(crId)}/reassignments`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});

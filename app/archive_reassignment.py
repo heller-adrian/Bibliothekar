@@ -26,10 +26,18 @@ def list_archive_reassignments(database_path:Path,cr_id:str)->dict[str,Any]:
         targets=[]
         if months:
             ph=','.join('?' for _ in months)
-            for r in c.execute(f"""SELECT id,name,folder_name,status,start_datetime,event_kind FROM events
-                                    WHERE parent_event_id IS NULL AND event_kind='no_event' AND status='archived'
-                                      AND substr(start_datetime,1,7) IN ({ph}) ORDER BY start_datetime""",months).fetchall():
-                targets.append(dict(r))
+            for r in c.execute(f"""SELECT id,name,folder_name,status,start_datetime,end_datetime,event_kind,preserve_day_folders
+                                    FROM events
+                                    WHERE parent_event_id IS NULL AND status='archived'
+                                      AND (event_kind!='no_event' OR substr(start_datetime,1,7) IN ({ph}))
+                                    ORDER BY start_datetime,id""",months).fetchall():
+                item=dict(r); item['children']=[]
+                if str(r['event_kind'])=='event':
+                    item['children']=[dict(x) for x in c.execute(
+                        "SELECT id,name,folder_name,start_datetime,end_datetime FROM events WHERE parent_event_id=? AND status='archived' ORDER BY start_datetime,id",
+                        (r['id'],),
+                    ).fetchall()]
+                targets.append(item)
     return {'change_request_id':cr_id,'job_id':str(cr['job_id']),'families':[dict(r) for r in rows],'family_count':len(rows),'targets':targets}
 
 def _target_for_new_event(c,job_id:str,fids:list[int],name:str)->dict[str,Any]:
@@ -56,7 +64,7 @@ def _target_for_new_no_event(c,job_id:str,fids:list[int])->dict[str,Any]:
     month=next(iter(months)); folder=f"{month[5:7]} - Ohne Ereignis"
     return {'kind':'new_no_event','event_id':None,'name':'Ohne Ereignis','folder':folder,'start':min(captures),'end':max(captures),'uses':0,'child_name':None,'child_folder':None,'preserve':0}
 
-def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[int],*,target_mode:str,new_event_name:str|None=None,target_event_id:str|None=None,workspace_path:Path|None=None)->dict[str,Any]:
+def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[int],*,target_mode:str,new_event_name:str|None=None,target_event_id:str|None=None,target_child_event_id:str|None=None,new_child_start:str|None=None,new_child_end:str|None=None,workspace_path:Path|None=None)->dict[str,Any]:
     fids=sorted({int(x) for x in family_ids})
     if not fids: raise ArchiveReassignmentError('Keine Familien ausgewählt.')
     now=_now()
@@ -70,12 +78,40 @@ def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[in
         elif target_mode=='new_no_event': target=_target_for_new_no_event(c,str(cr['job_id']),fids)
         elif target_mode=='existing_no_event':
             t=c.execute("SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",(target_event_id,)).fetchone()
-            if t is None or str(t['status'])!='archived' or str(t['event_kind'])!='no_event': raise ArchiveReassignmentError('Als bestehendes Archivziel ist nur eine archivierte „Ohne Ereignis“-Sammlung zulässig.')
+            if t is None or str(t['status'])!='archived' or str(t['event_kind'])!='no_event': raise ArchiveReassignmentError('Die archivierte „Ohne Ereignis“-Sammlung ist nicht verfügbar.')
             target={'kind':'existing_no_event','event_id':str(t['id']),'name':'Ohne Ereignis','folder':str(t['folder_name']),'start':str(t['start_datetime']),'end':str(t['end_datetime']),'uses':0,'child_name':None,'child_folder':None,'preserve':int(bool(t['preserve_day_folders']))}
+        elif target_mode=='existing_event':
+            t=c.execute("SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",(target_event_id,)).fetchone()
+            if t is None or str(t['status'])!='archived' or str(t['event_kind'])!='event': raise ArchiveReassignmentError('Das archivierte Zielereignis ist nicht verfügbar.')
+            child=None
+            if target_child_event_id:
+                child=c.execute("SELECT * FROM events WHERE id=? AND parent_event_id=? AND status='archived'",(target_child_event_id,t['id'])).fetchone()
+                if child is None: raise ArchiveReassignmentError('Das archivierte Unterereignis ist nicht verfügbar.')
+            target={'kind':'existing_event','event_id':str(t['id']),'child_event_id':str(child['id']) if child else None,
+                    'name':str(t['name']),'folder':str(t['folder_name']),
+                    'start':str(child['start_datetime'] if child else t['start_datetime']),'end':str(child['end_datetime'] if child else t['end_datetime']),
+                    'uses':1 if child else 0,'child_name':str(child['name']) if child else None,
+                    'child_folder':str(child['folder_name']) if child else None,'preserve':int(bool(t['preserve_day_folders']))}
+        elif target_mode=='new_child':
+            t=c.execute("SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",(target_event_id,)).fetchone()
+            if t is None or str(t['status'])!='archived' or str(t['event_kind'])!='event': raise ArchiveReassignmentError('Das archivierte Oberereignis ist nicht verfügbar.')
+            clean=str(new_event_name or '').strip(); st=str(new_child_start or '').strip(); et=str(new_child_end or '').strip()
+            if not clean: raise ArchiveReassignmentError('Name des neuen Unterereignisses fehlt.')
+            if len(st)!=5 or len(et)!=5 or st>=et: raise ArchiveReassignmentError('Start- und Endzeit des neuen Unterereignisses sind ungültig.')
+            phf=','.join('?' for _ in fids); caps=c.execute(f"SELECT selected_capture_time FROM file_families WHERE id IN ({phf})",fids).fetchall()
+            days={str(x['selected_capture_time'] or '')[:10] for x in caps}
+            if len(days)!=1: raise ArchiveReassignmentError('Ein neues Unterereignis wird aus genau einem Tag angelegt.')
+            day=next(iter(days)); start=f'{day}T{st}:00'; end=f'{day}T{et}:59'
+            if not all(start <= str(x['selected_capture_time'] or '')[:19] <= end for x in caps): raise ArchiveReassignmentError('Nicht alle ausgewählten Familien liegen im eingegebenen Zeitbereich.')
+            overlap=c.execute("SELECT 1 FROM events WHERE parent_event_id=? AND start_datetime<=? AND end_datetime>=? LIMIT 1",(t['id'],end,start)).fetchone()
+            if overlap: raise ArchiveReassignmentError('Der neue Zeitbereich überschneidet sich mit einem vorhandenen Unterereignis.')
+            child_folder=f"{st.replace(':','-')} - {et.replace(':','-')} - {clean}"
+            target={'kind':'new_child','event_id':str(t['id']),'child_event_id':None,'name':str(t['name']),'folder':str(t['folder_name']),
+                    'start':start,'end':end,'uses':1,'child_name':clean,'child_folder':child_folder,'preserve':int(bool(t['preserve_day_folders']))}
         else: raise ArchiveReassignmentError('Unbekanntes Ziel.')
         overlaps = continuous_event_overlaps(
             c, str(cr['job_id']), str(target['start'])[:19], str(target['end'])[:19],
-            exclude_event_id=str(cr['event_id']),
+            exclude_event_id=str(target.get('event_id') or cr['event_id']) if target['kind'] in {'existing_event','new_child'} else str(cr['event_id']),
         )
         if overlaps:
             names = sorted({str(r['name']) for r in overlaps})
@@ -84,8 +120,9 @@ def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[in
             )
         rows=c.execute(f"SELECT id,selected_capture_time FROM file_families WHERE id IN ({ph})",fids).fetchall(); captures={int(r['id']):str(r['selected_capture_time'] or '')[:19] for r in rows}
         for fid in fids:
+            stored_kind = target['kind'] + (':' + str(target.get('child_event_id')) if target['kind']=='existing_event' and target.get('child_event_id') else '')
             c.execute("""INSERT OR REPLACE INTO event_change_reassignments(change_request_id,family_id,target_kind,target_event_id,target_name,target_folder_name,target_start_datetime,target_end_datetime,target_uses_time_range,target_child_name,target_child_folder,target_preserve_day_folders,created_at)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",(cr_id,fid,target['kind'],target['event_id'],target['name'],target['folder'],target['start'],target['end'],target['uses'],target['child_name'],target['child_folder'],target['preserve'],now))
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",(cr_id,fid,stored_kind,target['event_id'],target['name'],target['folder'],target['start'],target['end'],target['uses'],target['child_name'],target['child_folder'],target['preserve'],now))
             reviews=c.execute("SELECT id,old_path FROM event_change_file_reviews WHERE change_request_id=? AND family_id=?",(cr_id,fid)).fetchall()
             for rv in reviews:
                 filename=Path(str(rv['old_path'])).name; parts=[str(target['start'])[:4],target['folder']]
@@ -115,6 +152,19 @@ def apply_archive_reassignment_targets(connection,cr:dict[str,Any],now:str)->lis
     created=[]
     for key,fids in groups.items():
         kind,target_id,name,folder,start,end,uses,child_name,child_folder,preserve=key
+        if kind.startswith('existing_event'):
+            eid=target_id
+            child_id = kind.split(':',1)[1] if ':' in kind else None
+            assign_id=child_id or eid
+            connection.executemany("INSERT OR IGNORE INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'manual',?)",[(assign_id,f,now) for f in fids])
+            continue
+        if kind=='new_child':
+            eid=target_id
+            cid='EVENT_'+uuid.uuid4().hex.upper()
+            connection.execute("""INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,timeline_model)
+                VALUES (?,?,?,'child',?,?,?,1,?,'archived',?,?,'event',?,1,?,?, 'continuous')""",(cid,cr['job_id'],eid,child_name,start,end,child_folder,now,now,preserve,now,now))
+            connection.executemany("INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'manual',?)",[(cid,f,now) for f in fids])
+            continue
         if kind=='existing_no_event':
             eid=target_id
             connection.executemany("INSERT OR IGNORE INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'manual',?)",[(eid,f,now) for f in fids])
