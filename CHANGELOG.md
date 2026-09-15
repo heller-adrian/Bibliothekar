@@ -2,7 +2,19 @@
 
 ## [Unreleased]
 
-### Geplant / offen
+### 0.21.2 – Patch in Arbeit
+
+- normale Zeitsegmente können ergänzt und vollständig entfernt werden
+- Neu-Zuordnung arbeitet auf Tages-/Zeitsegmentebene statt Familien-Drilldown
+- bestehende Ereignisse und neue Unterereignisse sind Neu-Zuordnungsziele
+- gespeicherte „Ohne Ereignis“-Segmente bleiben kanonische Zeitdefinition
+- pending/Nachsortierung wird deutlich als noch nicht angewendet markiert
+- freie Restzeiten werden sekundengenau berechnet
+- archivierte Ereignisse können mehrere Unterereignisse im manuellen IST→SOLL-Auftrag abbilden
+- SD-Wiederverwendung ignoriert Verwaltungsdateien und zeigt 0 neu / 0 verändert als normalen Zustand
+- Archiv-E2E-Tests verwenden eine getrennte beschreibbare QA-Testbibliothek
+
+### Weiter geplant / offen
 
 - Zeitsegmente beim Bearbeiten vollständig löschen können
 - Reassignment-Dialog ohne Familien-/Datei-Drilldown

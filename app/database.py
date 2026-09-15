@@ -3283,13 +3283,13 @@ def update_event_definition(
         assignment_rows: list[tuple[str, int, str, str]] = []
         if multi_segments:
             current_by_id = {str(row["id"]): row for row in children}
-            requested_ids_set = {str(seg.get("id") or "") for seg in multi_segments}
-            if not requested_ids_set or "" in requested_ids_set or requested_ids_set != set(current_by_id):
+            supplied_ids = [str(seg.get("id") or "") for seg in multi_segments if str(seg.get("id") or "")]
+            if len(supplied_ids) != len(set(supplied_ids)) or any(sid not in current_by_id for sid in supplied_ids):
                 connection.rollback()
                 raise ValueError("Die Zeitsegmente haben sich zwischenzeitlich geändert. Bitte den Editor neu öffnen.")
             normalized_segments = []
             for seg in multi_segments:
-                sid = str(seg["id"])
+                sid = str(seg.get("id") or "") or ("EVENT_" + uuid.uuid4().hex.upper())
                 name = str(seg.get("name") or "").strip()
                 st = str(seg.get("start_time") or "")
                 et = str(seg.get("end_time") or "")
@@ -3304,12 +3304,27 @@ def update_event_definition(
                 if a[5] >= b[4]:
                     connection.rollback()
                     raise ValueError("Zeitsegmente eines Ereignisses dürfen sich nicht überschneiden.")
+            requested_segment_ids={seg[0] for seg in normalized_segments}
+            for old_child in children:
+                if str(old_child["id"]) not in requested_segment_ids:
+                    connection.execute("DELETE FROM events WHERE id=? AND parent_event_id=?", (old_child["id"], event_id))
             for sid,name,st,et,seg_start,seg_end,folder in normalized_segments:
-                connection.execute(
-                    """UPDATE events SET name=?,start_datetime=?,end_datetime=?,folder_name=?,uses_time_range=1,
-                       preserve_day_folders=?,revision=revision+1,updated_at=?,edited_at=? WHERE id=? AND parent_event_id=?""",
-                    (name,seg_start,seg_end,folder,int(bool(preview["preserve_day_folders"])),now,now,sid,event_id),
-                )
+                if sid in current_by_id:
+                    connection.execute(
+                        """UPDATE events SET name=?,start_datetime=?,end_datetime=?,folder_name=?,uses_time_range=1,
+                           preserve_day_folders=?,revision=revision+1,updated_at=?,edited_at=? WHERE id=? AND parent_event_id=?""",
+                        (name,seg_start,seg_end,folder,int(bool(preview["preserve_day_folders"])),now,now,sid,event_id),
+                    )
+                else:
+                    connection.execute(
+                        """INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                           uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,
+                           revision,applied_at,archived_at,notes,edited_at,timeline_model)
+                           VALUES (?,?,?,'child',?,?,?,1,?,?,?,?,'event',?,1,?,NULL,'',?,'continuous')""",
+                        (sid,job_id,event_id,name,seg_start,seg_end,folder,
+                         'applied' if is_applied else 'planned',now,now,int(bool(preview["preserve_day_folders"])),
+                         now if is_applied else None,now),
+                    )
             for row in rows:
                 fid=int(row["id"]); capture=str(row["selected_capture_time"] or "")[:19]
                 matches=[seg for seg in normalized_segments if seg[4] <= capture <= seg[5]]

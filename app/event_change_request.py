@@ -92,6 +92,20 @@ def _compute_event_plan(
 
     parent_folder = str(preview.get("parent_folder") or "").strip()
     child_folder = str(preview.get("child_folder") or "").strip()
+    child_segments = list(preview.get("child_segments") or [])
+    normalized_child_segments=[]
+    for segment in child_segments:
+        name=str(segment.get("name") or "").strip()
+        start=str(segment.get("start_time") or "")
+        end=str(segment.get("end_time") or "")
+        if not name or len(start)!=5 or len(end)!=5 or start>=end:
+            raise EventChangeRequestError("Mindestens ein Unterereignis ist unvollständig oder ungültig.")
+        normalized_child_segments.append({"id":segment.get("id"),"name":name,"start_time":start,"end_time":end,
+            "folder":f"{start.replace(':','-')} - {end.replace(':','-')} - {name}"})
+    normalized_child_segments.sort(key=lambda s:(s["start_time"],s["end_time"],s["name"]))
+    for left,right in zip(normalized_child_segments,normalized_child_segments[1:]):
+        if left["end_time"] >= right["start_time"]:
+            raise EventChangeRequestError("Unterereignisse dürfen sich zeitlich nicht überschneiden.")
     preserve_day_folders = bool(preview.get("preserve_day_folders"))
     start_date = str(preview.get("start_date") or str(event["start_datetime"] or "")[:10])
     year = start_date[:4]
@@ -129,7 +143,13 @@ def _compute_event_plan(
         new_path = ""
         if family_id in requested_set:
             parts = [year, parent_folder]
-            if child_folder:
+            capture=str(row["selected_capture_time"] or "")[:19]
+            if normalized_child_segments:
+                matching=[s for s in normalized_child_segments if f"{start_date}T{s['start_time']}:00" <= capture <= f"{str(preview.get('end_date') or start_date)}T{s['end_time']}:59"]
+                if len(matching) != 1:
+                    raise EventChangeRequestError(f"Familie {family_id} passt in kein eindeutiges Unterereignis.")
+                parts.append(matching[0]["folder"])
+            elif child_folder:
                 parts.append(child_folder)
             day_key = str(row["selected_capture_time"] or "")[:10]
             if preserve_day_folders:
@@ -162,7 +182,11 @@ def _compute_event_plan(
         f"{year} — Archiv-Aenderungsplan (manuell)",
         f"└── {parent_folder}",
     ]
-    if child_folder:
+    if normalized_child_segments:
+        for index,segment in enumerate(normalized_child_segments):
+            connector="└──" if index == len(normalized_child_segments)-1 else "├──"
+            lines.append(f"    {connector} {segment['folder']}")
+    elif child_folder:
         lines.append(f"    └── {child_folder}")
     lines.extend(["", f"Dateien im Auftrag: {len(file_plans)}"])
     if removed_family_ids:
@@ -252,10 +276,10 @@ def propose_event_change(
                 start_time, end_time, event_kind, child_event_name,
                 selected_day_keys, selected_family_ids,
                 selected_file_count, selected_family_count,
-                no_event_segments,
+                no_event_segments, child_segments_json,
                 status, version, proposed_at,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cr_id,
@@ -278,6 +302,7 @@ def propose_event_change(
                 preview.get("selected_file_count", 0),
                 preview.get("selected_family_count", 0),
                 json.dumps(preview.get("no_event_segments", []), ensure_ascii=False),
+                json.dumps(normalized_child_segments, ensure_ascii=False),
                 "aenderbar_vorschlagen",
                 version,
                 now,

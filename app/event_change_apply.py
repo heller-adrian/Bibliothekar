@@ -265,6 +265,10 @@ def finish_event_change(
         parent_start = f"{start_date}T00:00:00"
         parent_end = f"{end_date}T23:59:59"
     uses_time_range = bool(cr["uses_time_range"]) if event_kind != "no_event" else False
+    try:
+        child_segments = json.loads(cr.get("child_segments_json") or "[]") if event_kind == "event" else []
+    except Exception as exc:
+        raise EventChangeApplyError("Die gespeicherten Unterereignisse sind ungültig.") from exc
     start_time = str(cr["start_time"] or "00:00")
     end_time = str(cr["end_time"] or "23:59")
     child_start = f"{start_date}T{start_time}:00"
@@ -337,6 +341,23 @@ def finish_event_change(
                 now=now,
                 source="cascade",
             )
+        elif child_segments:
+            connection.execute("DELETE FROM event_assignments WHERE event_id IN (SELECT id FROM events WHERE parent_event_id=?)",(cr["event_id"],))
+            connection.execute("DELETE FROM events WHERE parent_event_id=?",(cr["event_id"],))
+            created_children=[]
+            for segment in child_segments:
+                import uuid
+                child_id="EVENT_"+uuid.uuid4().hex.upper()
+                seg_start=f"{start_date}T{segment['start_time']}:00"; seg_end=f"{end_date}T{segment['end_time']}:59"
+                folder=str(segment.get("folder") or f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}")
+                connection.execute(
+                    """INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,notes,edited_at,timeline_model)
+                       VALUES (?,?,?,'child',?,?,?,1,?,'archived',?,?,'event',?,1,?,?,'',?,'continuous')""",
+                    (child_id,cr["job_id"],cr["event_id"],segment["name"],seg_start,seg_end,folder,now,now,
+                     int(bool(cr["preserve_day_folders"])),event["applied_at"],event["archived_at"],now),
+                )
+                created_children.append((child_id,seg_start,seg_end))
+            assignment_event_id=None
         elif uses_time_range:
             child_name = str(cr.get("child_event_name") or "Unterereignis")
             if child is None:
@@ -376,13 +397,27 @@ def finish_event_change(
             "(SELECT id FROM events WHERE parent_event_id = ?)",
             (cr["event_id"], cr["event_id"]),
         )
-        connection.executemany(
-            """
-            INSERT INTO event_assignments(event_id, family_id, file_id, assignment_source, created_at)
-            VALUES (?, ?, NULL, 'manual', ?)
-            """,
-            [(assignment_event_id, family_id, now) for family_id in selected_ids],
-        )
+        if child_segments:
+            family_rows=connection.execute(
+                "SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN (" + ",".join("?" for _ in selected_ids) + ")",
+                (cr["job_id"],*selected_ids),
+            ).fetchall()
+            assignments=[]
+            for family in family_rows:
+                capture=str(family["selected_capture_time"] or "")[:19]
+                matches=[child_id for child_id,a,b in created_children if a <= capture <= b]
+                if len(matches) != 1:
+                    connection.rollback(); raise EventChangeApplyError("Eine archivierte Familie passt in kein eindeutiges Unterereignis.")
+                assignments.append((matches[0],int(family["id"]),now))
+            connection.executemany(
+                "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
+                assignments,
+            )
+        else:
+            connection.executemany(
+                "INSERT INTO event_assignments(event_id, family_id, file_id, assignment_source, created_at) VALUES (?, ?, NULL, 'date_time_range', ?)",
+                [(assignment_event_id, family_id, now) for family_id in selected_ids],
+            )
         # 0.19.0: nach erfolgreicher manueller Prüfung den tatsächlich
         # bestätigten stabilen Archivanker je Familie speichern. Alle/Sortiert/
         # Export sind bewusst nicht Teil des Ankers.

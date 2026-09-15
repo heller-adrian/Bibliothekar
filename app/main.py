@@ -137,7 +137,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.21.1"
+APP_VERSION = "0.21.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1105,6 +1105,7 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
     already_imported_fast = 0
     new_fast = 0
     changed_fast = 0
+    ignored_fast = 0
     history_paths = {str(row["relative_path"]) for row in history_rows}
     for item in path.rglob("*"):
         if item.is_symlink() or not item.is_file():
@@ -1117,14 +1118,16 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
         file_count += 1
         total_size += size
         relative_item = item.relative_to(path).as_posix()
+        if item.suffix.lower() not in MEDIA_SOURCE_EXTENSIONS:
+            ignored_fast += 1
+            continue
+        media_count += 1
         if (relative_item, int(size), int(stat.st_mtime_ns)) in fast_history:
             already_imported_fast += 1
         elif relative_item in history_paths:
             changed_fast += 1
         else:
             new_fast += 1
-        if item.suffix.lower() in MEDIA_SOURCE_EXTENSIONS:
-            media_count += 1
     signature = quick_source_signature(path)
     duplicate = find_folder_import_by_identity(
         DATABASE_FILE,
@@ -1134,6 +1137,11 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
     import_status = "available"
     if duplicate is not None:
         import_status = "already_imported" if duplicate.get("state") == "completed" else "import_running"
+    elif source_device_id and history_rows and new_fast == 0 and changed_fast == 0:
+        # Reused SD card with no new/changed camera media is a normal idle state,
+        # not an import error. Non-media camera management files do not keep the
+        # source artificially "new".
+        import_status = "no_changes"
     return {
         "root_key": root_key,
         "relative_path": relative,
@@ -1146,6 +1154,7 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
         "already_imported_file_count": already_imported_fast,
         "new_file_count": new_fast,
         "changed_file_count": changed_fast,
+        "ignored_file_count": ignored_fast,
         "import_status": import_status,
         "existing_job_id": duplicate.get("id") if duplicate else None,
         "existing_job_created_at": duplicate.get("created_at") if duplicate else None,
@@ -6291,12 +6300,15 @@ def index() -> str:
         return;
       }
       const changed = Number(source.changed_file_count || 0);
+      const ignored = Number(source.ignored_file_count || 0);
       sdSourceDetail.textContent = `${source.file_count} Dateien insgesamt · `
         + `${source.media_file_count} Medien · `
         + `${formatBytes(source.total_size_bytes)} · `
         + `${Number(source.already_imported_file_count || 0)} bereits gesichert · `
         + `${Number(source.new_file_count || 0)} neu`
-        + (changed ? ` · ${changed} verändert/zu prüfen` : "");
+        + (changed ? ` · ${changed} verändert/zu prüfen` : "")
+        + (ignored ? ` · ${ignored} Verwaltungsdateien ignoriert` : "")
+        + (source.import_status === "no_changes" ? " · Keine neuen Dateien" : "");
     }
 
     async function loadFolderBrowser(rootKey=currentFolderRoot, relativePath=currentFolderPath) {
@@ -6393,14 +6405,17 @@ def index() -> str:
       }
       const blocked = source.import_status !== "available";
       importButton.disabled = blocked;
-      importButton.textContent = source.import_status === "already_imported"
-        ? "Bereits importiert"
-        : source.import_status === "import_running"
-          ? "Import läuft"
-          : "Quelle importieren";
+      importButton.textContent = source.import_status === "no_changes"
+        ? "Keine neuen Dateien"
+        : source.import_status === "already_imported"
+          ? "Bereits importiert"
+          : source.import_status === "import_running"
+            ? "Import läuft"
+            : "Quelle importieren";
       const incremental = source.source_device_id
         ? ` · ${source.already_imported_file_count || 0} bereits gesichert · ${source.new_file_count || 0} neu`
           + ((source.changed_file_count || 0) ? ` · ${source.changed_file_count} verändert/zu prüfen` : "")
+          + ((source.ignored_file_count || 0) ? ` · ${source.ignored_file_count} Verwaltungsdateien ignoriert` : "")
         : "";
       sourceDetail.textContent = `${source.file_count} Dateien insgesamt · `
         + `${source.media_file_count} Medien · `
