@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "product_version": "0.21.2",
+  "product_commit": "627c5515e533e167e45354ccaa71f988f104ae08",
+  "qa_commit": "9cfd760663b512dcf2ef57aed71bb3169edb6932",
+  "phase": "A",
+  "test_id": "T008",
+  "plan": null,
+  "execution": {
+    "task_id": "t_eab627de",
+    "run_id": 20,
+    "profile": "nas-agent",
+    "reported_judgment": "PASS"
+  },
+  "review": {
+    "task_id": "t_4b1921b0",
+    "run_id": 26,
+    "profile": "qa-thinker",
+    "judgment": "RETEST_REQUIRED",
+    "reason": "Der Executor dokumentierte ausdrücklich, dass kein echter App-Neustart erfolgt war; die zwingende Testhandlung fehlte."
+  },
+  "evidence": [
+    {"kind": "precondition", "summary": "QA-DB, Protokollarchiv und vier Importjobs waren vorhanden und abfragbar."},
+    {"kind": "missing_action", "summary": "Der Executor schrieb ausdrücklich: kein echter App-Neustart erfolgt."},
+    {"kind": "methodology", "summary": "Ohne echten Neustart kann Persistenz nach Neustart nicht als PASS bewertet werden."}
+  ],
+  "recorded_at": "2026-09-16T21:50:00+02:00"
+}
