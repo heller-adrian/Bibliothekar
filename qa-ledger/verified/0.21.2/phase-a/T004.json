@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "product_version": "0.21.2",
+  "product_commit": "627c5515e533e167e45354ccaa71f988f104ae08",
+  "qa_commit": "9cfd760663b512dcf2ef57aed71bb3169edb6932",
+  "phase": "A",
+  "test_id": "T004",
+  "plan": null,
+  "execution": {
+    "task_id": "t_eab627de",
+    "run_id": 20,
+    "profile": "nas-agent",
+    "reported_judgment": "PASS"
+  },
+  "review": {
+    "task_id": "t_4b1921b0",
+    "run_id": 26,
+    "profile": "qa-thinker",
+    "judgment": "RETEST_REQUIRED",
+    "reason": "Der Versuch verwendete einen neuen Quellpfad DEEPTEST_SD_04 statt derselben logischen Quelle; die 100 Baseline-Dateien wurden erneut als neu behandelt."
+  },
+  "evidence": [
+    {"kind": "source_identity", "summary": "T002 verwendete DEEPTEST_SD_02; T004 verwendete stattdessen den neuen Pfad DEEPTEST_SD_04."},
+    {"kind": "database_delta", "summary": "DB files stieg von 100 auf 203 statt nur um die drei Ergänzungen."},
+    {"kind": "methodology", "summary": "103 Dateien wurden unter der neuen Quelle importiert; damit wurde 'dieselbe SD mit neuen Medien' nicht bewiesen."}
+  ],
+  "recorded_at": "2026-09-16T21:50:00+02:00"
+}
