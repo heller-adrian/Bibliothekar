@@ -25,19 +25,6 @@ Erfasst werden nur strukturierte Prüfdaten:
 
 Produktionspfade werden abgewiesen. Die Datenbank wird im SQLite-Read-only-Modus geöffnet.
 
-Beispiel:
-
-```bash
-python3 qa/evidence_snapshot.py \
-  --database "$RUN_ROOT/database/kamera.sqlite3" \
-  --fixture-root "$RUN_ROOT/removable-sources/QA_SD_T004" \
-  --test-id T004 \
-  --phase A \
-  --executor-task-id t_... \
-  --executor-run-id 32 \
-  --output "$RUN_ROOT/evidence/T004/baseline.json"
-```
-
 ## 2. Evidence Delta
 
 `qa/evidence_delta.py` vergleicht zwei Snapshots deterministisch.
@@ -50,21 +37,54 @@ Es erzeugt:
 - Gleichheit der Schema-Versionen
 - hinzugefügte, entfernte und inhaltlich geänderte Fixture-Dateien
 
-```bash
-python3 qa/evidence_delta.py \
-  --before "$RUN_ROOT/evidence/T004/baseline.json" \
-  --after "$RUN_ROOT/evidence/T004/post.json" \
-  --output "$RUN_ROOT/evidence/T004/delta.json"
-```
-
 Damit muss der Executor keine eigenen SQL-Hilfsskripte schreiben und keine Zähler manuell auswerten.
 
-## 3. Thinker-Gate
+## 3. Diagnostische Checks
+
+Für funktionale Tests reicht ein DB-/Fixture-Delta allein oft nicht aus. Deshalb darf die sanitizierte Export-Evidence zusätzlich eine Liste `checks` enthalten.
+
+Jeder Check beschreibt genau eine überprüfte Vertragspflicht und enthält nur:
+
+```json
+{
+  "id": "EDIT-APPLY",
+  "method": "UI",
+  "action": "Ereignis bearbeiten und Anwenden auslösen",
+  "expected": "Änderung wird gespeichert und bleibt nach Reload sichtbar",
+  "actual": "HTTP 500; Änderung bleibt unverändert",
+  "result": "FAIL",
+  "status_code": 500,
+  "error": "kurzer sanitizierter Fehlertext"
+}
+```
+
+Pflichtfelder:
+
+- `id`: kurze stabile Check-ID
+- `method`: tatsächlicher Prüfweg, z. B. `UI`, `API`, `filesystem`, `database`
+- `action`: konkret ausgeführte Aktion
+- `expected`: vertraglich erwartetes Ergebnis
+- `actual`: tatsächlich beobachtetes Ergebnis
+- `result`: exakt `PASS`, `FAIL` oder `BLOCKED`
+
+Optional:
+
+- `status_code`: HTTP-Status 100–599
+- `error`: kurzer sanitizierter Fehlertext
+
+Der Export-Builder begrenzt die Liste auf 100 Checks und die Textfelder auf kompakte Längen. Unbekannte Felder werden nicht exportiert. Absolute NAS-/Home-Pfade und Secret-Muster bleiben verboten.
+
+Wichtig: `checks` ersetzen nicht die deterministischen Snapshots/Deltas. Sie ergänzen sie um die konkrete Nutzer-/API-Beobachtung. Der Executor darf Checks nur aus tatsächlich ausgeführten Aktionen und beobachteten Ergebnissen erzeugen; keine Schätzung, keine Rekonstruktion aus Erinnerung.
+
+Für Workflow-/UI-/API-Tests soll jede zwingende Vertragspflicht durch mindestens einen passenden Check belegt sein. Rein zustandsbasierte Infrastrukturtests dürfen ohne `checks` auskommen, wenn DB-/Fixture-Evidence den gesamten Vertrag vollständig abdeckt.
+
+## 4. Thinker-Gate
 
 Nach EXECUTE erhält `qa-thinker` nur:
 
 - Testvertrag
-- deterministisches Evidence-JSON
+- deterministische Evidence
+- die sanitizierten diagnostischen `checks`
 - gezielt notwendige API-/Jobbelege
 
 Der Thinker entscheidet ausschließlich:
@@ -74,57 +94,57 @@ Der Thinker entscheidet ausschließlich:
 - `ACCEPT_BLOCKED`
 - `RETEST_REQUIRED`
 
-Der abgeschlossene Review wird anschließend in ein kleines lokales, sanitiziertes Review-JSON überführt. Dieses JSON muss mindestens enthalten:
+Dabei prüft er ausdrücklich, ob `method` und `action` dem Testvertrag entsprechen. Ein technisch erfolgreicher Ersatzweg ist kein Beleg für den geforderten Nutzerweg.
 
-```json
-{
-  "task_id": "t_review",
-  "run_id": "33",
-  "profile": "qa-thinker",
-  "mode": "REVIEW",
-  "completed": true,
-  "verdict": "RETEST_REQUIRED",
-  "reason": "...",
-  "test_id": "T004",
-  "executor_task_id": "t_exec",
-  "executor_run_id": "32"
-}
-```
+Typische Einordnung:
 
-## 4. Verified Export Builder
+- Produkt verhält sich auf dem vorgeschriebenen Weg falsch -> `ACCEPT_FAIL`
+- notwendige technische Voraussetzung fehlt -> `ACCEPT_BLOCKED`
+- falscher Prüfweg, ausgelassene Pflichtaktion oder unzureichende Evidence -> `RETEST_REQUIRED`
+- alle Pflichtbedingungen auf dem vorgeschriebenen Weg belegt -> `ACCEPT_PASS`
+
+## 5. Verified Export Builder
 
 `qa/build_verified_export.py` akzeptiert nur einen abgeschlossenen, passenden `qa-thinker`-Review. Test-ID und Executor-Task/Run müssen exakt mit der Evidence übereinstimmen.
 
-Der Builder übernimmt nur eine Whitelist strukturierter Daten. Absolute NAS-/Home-Pfade und typische Secret-Muster führen zu `BLOCKED`.
+Der Builder übernimmt nur eine Whitelist strukturierter Daten:
 
-```bash
-python3 qa/build_verified_export.py \
-  --evidence "$RUN_ROOT/evidence/T004/delta.json" \
-  --review "$RUN_ROOT/evidence/T004/review.json" \
-  --product-commit 627c5515e533e167e45354ccaa71f988f104ae08 \
-  --qa-commit <QA_COMMIT> \
-  --output "$EXPORT_STAGING/verified/0.21.2/phase-a/T004.json"
-```
+- DB-/Job-/Integritätsdelta
+- Fixture-Delta
+- validierte diagnostische `checks`
+- Thinker-Urteil und Begründung
 
-## 5. GitHub Exporter – Sicherheitsgrenze
+Absolute NAS-/Home-Pfade und typische Secret-Muster führen zu `BLOCKED`.
+
+Das verifizierte Schema bleibt rückwärtskompatibel `bibliothekar.qa.verified-result.v1`; `evidence.checks` ist eine optionale Erweiterung. Alte Infrastruktur-Smokes ohne Checks bleiben gültig.
+
+## 6. GitHub Exporter – Sicherheitsgrenze
 
 Der GitHub-Schreibzugriff gehört **nicht** zu `nas-agent` und nicht zu `qa-thinker`.
 
-Empfohlene Zielarchitektur:
+Aktuelle Zielarchitektur:
 
-1. Eigener lokaler Benutzer/Prozess `qa-exporter` auf GX10.
-2. Dieser Benutzer hat **keinen** SSH-/Docker-/NAS-Zugriff und keinen Zugriff auf Hermes-Profile.
-3. Er darf ausschließlich ein sanitiziertes `EXPORT_STAGING` lesen.
-4. Er besitzt einen eigenen GitHub Deploy Key mit Schreibrecht ausschließlich auf ein separates privates QA-Ledger-Repository.
-5. Das Ledger-Repository enthält keinen Produktcode und keine NAS-Dateien.
-6. Der Exporter kopiert nur bereits durch `build_verified_export.py` erzeugte JSON-Dateien in `verified/...` und pusht diese.
+1. Der lokale QA-Exporter auf GX10 liest ausschließlich abgeschlossene `qa-thinker`-Review-Metadaten mit `export_contract_version=1`.
+2. Er baut daraus einen sanitisierten Verified-Result-Datensatz.
+3. Ein eigener GitHub Deploy Key besitzt Schreibrecht ausschließlich auf das separate private QA-Ledger-Repository.
+4. Das Ledger enthält keinen Produktcode und keine NAS-Dateien.
+5. ChatGPT liest das private Ledger über den GitHub-Connector.
 
 Damit bleibt die Sicherheitsrichtung strikt:
 
-`Hermes/NAS -> sanitizierte Evidence -> separater Exporter -> privates GitHub QA-Ledger -> ChatGPT liest GitHub`
+`Hermes/NAS -> sanitizierte Evidence -> lokaler Exporter -> privates GitHub QA-Ledger -> ChatGPT liest GitHub`
 
 Es entsteht kein Rückkanal von GitHub/ChatGPT zum NAS.
 
-## 6. Zustand bis zur Einrichtung des separaten Ledger-Repositories
+## 7. Zweck für die weitere Fehleranalyse
 
-Die Evidence-Werkzeuge können sofort lokal verwendet werden. Der eigentliche GitHub-Push bleibt deaktiviert, bis das separate private Ledger-Repository und sein eigener eingeschränkter Schreibschlüssel eingerichtet sind.
+Ein Ledger-Eintrag soll künftig nicht nur zeigen, **dass** ein Test fehlgeschlagen ist, sondern maschinenlesbar auch:
+
+- auf welchem Weg geprüft wurde,
+- welche konkrete Aktion ausgeführt wurde,
+- was erwartet war,
+- was tatsächlich geschah,
+- ob die einzelne Pflichtbedingung PASS/FAIL/BLOCKED war,
+- und optional HTTP-Status bzw. kurzen sanitizierten Fehlertext.
+
+Damit kann ein externer Reviewer einen echten Produktfehler von einem methodisch ungültigen Test unterscheiden, ohne Rohlogs oder private NAS-Daten zu benötigen.
