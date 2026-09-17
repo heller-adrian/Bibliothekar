@@ -10,12 +10,17 @@ from pathlib import Path
 from typing import Any
 
 ALLOWED_VERDICTS = {"ACCEPT_PASS", "ACCEPT_FAIL", "ACCEPT_BLOCKED", "RETEST_REQUIRED"}
+ALLOWED_CHECK_RESULTS = {"PASS", "FAIL", "BLOCKED"}
 FORBIDDEN_TEXT_PATTERNS = (
     re.compile(r"/mnt/"),
     re.compile(r"/home/"),
     re.compile(r"BEGIN [A-Z ]*PRIVATE KEY"),
     re.compile(r"(?i)(token|password|passwd|secret)\s*[:=]"),
 )
+MAX_CHECKS = 100
+MAX_CHECK_ID_CHARS = 80
+MAX_CHECK_METHOD_CHARS = 80
+MAX_CHECK_TEXT_CHARS = 1000
 
 
 def utc_now() -> str:
@@ -42,6 +47,67 @@ def reject_forbidden_text(value: Any, where: str = "root") -> None:
             reject_forbidden_text(child, f"{where}[{idx}]")
 
 
+def clean_text(value: Any, *, field: str, max_chars: int, required: bool = False) -> str | None:
+    if value is None:
+        if required:
+            raise SystemExit(f"BLOCKED: check missing {field}")
+        return None
+    if not isinstance(value, str):
+        raise SystemExit(f"BLOCKED: check {field} must be a string")
+    text = value.strip()
+    if required and not text:
+        raise SystemExit(f"BLOCKED: check {field} is empty")
+    if len(text) > max_chars:
+        raise SystemExit(f"BLOCKED: check {field} exceeds {max_chars} chars")
+    return text or None
+
+
+def clean_checks(evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = evidence.get("checks") or []
+    if not isinstance(raw, list):
+        raise SystemExit("BLOCKED: evidence.checks must be a list")
+    if len(raw) > MAX_CHECKS:
+        raise SystemExit(f"BLOCKED: evidence.checks exceeds {MAX_CHECKS} entries")
+
+    out: list[dict[str, Any]] = []
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise SystemExit(f"BLOCKED: evidence.checks[{idx}] must be an object")
+
+        check_id = clean_text(item.get("id"), field="id", max_chars=MAX_CHECK_ID_CHARS, required=True)
+        method = clean_text(item.get("method"), field="method", max_chars=MAX_CHECK_METHOD_CHARS, required=True)
+        action = clean_text(item.get("action"), field="action", max_chars=MAX_CHECK_TEXT_CHARS, required=True)
+        expected = clean_text(item.get("expected"), field="expected", max_chars=MAX_CHECK_TEXT_CHARS, required=True)
+        actual = clean_text(item.get("actual"), field="actual", max_chars=MAX_CHECK_TEXT_CHARS, required=True)
+        result = clean_text(item.get("result"), field="result", max_chars=20, required=True)
+        if result not in ALLOWED_CHECK_RESULTS:
+            raise SystemExit(f"BLOCKED: evidence.checks[{idx}].result invalid: {result}")
+
+        status_code = item.get("status_code")
+        if status_code is not None:
+            if isinstance(status_code, bool) or not isinstance(status_code, int):
+                raise SystemExit(f"BLOCKED: evidence.checks[{idx}].status_code must be an integer or null")
+            if status_code < 100 or status_code > 599:
+                raise SystemExit(f"BLOCKED: evidence.checks[{idx}].status_code outside HTTP range")
+
+        error = clean_text(item.get("error"), field="error", max_chars=MAX_CHECK_TEXT_CHARS)
+
+        cleaned: dict[str, Any] = {
+            "id": check_id,
+            "method": method,
+            "action": action,
+            "expected": expected,
+            "actual": actual,
+            "result": result,
+        }
+        if status_code is not None:
+            cleaned["status_code"] = status_code
+        if error is not None:
+            cleaned["error"] = error
+        out.append(cleaned)
+    return out
+
+
 def clean_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     db = evidence.get("database") or {}
     fixture = evidence.get("fixture") or {}
@@ -59,6 +125,7 @@ def clean_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
             "removed": fixture.get("removed") or [],
             "changed": fixture.get("changed") or [],
         },
+        "checks": clean_checks(evidence),
     }
 
 
