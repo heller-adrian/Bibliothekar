@@ -110,6 +110,18 @@ def test_verified_export_requires_completed_matching_thinker_review(tmp_path: Pa
             "schema_versions_equal": True,
         },
         "fixture": {"added": [], "removed": [], "changed": []},
+        "checks": [
+            {
+                "id": "IMPORT-HTTP",
+                "method": "API",
+                "action": "Folder import starten",
+                "expected": "HTTP 202 und neuer Importjob",
+                "actual": "HTTP 202 und neuer Importjob",
+                "result": "PASS",
+                "status_code": 202,
+                "debug_only": "must not be exported",
+            }
+        ],
     }))
 
     review = tmp_path / "review.json"
@@ -138,6 +150,15 @@ def test_verified_export_requires_completed_matching_thinker_review(tmp_path: Pa
     data = json.loads(out.read_text())
     assert data["review"]["verdict"] == "ACCEPT_PASS"
     assert data["evidence"]["database"]["table_count_delta"]["files"] == 3
+    assert data["evidence"]["checks"] == [{
+        "id": "IMPORT-HTTP",
+        "method": "API",
+        "action": "Folder import starten",
+        "expected": "HTTP 202 und neuer Importjob",
+        "actual": "HTTP 202 und neuer Importjob",
+        "result": "PASS",
+        "status_code": 202,
+    }]
 
     bad_review = json.loads(review.read_text())
     bad_review["completed"] = False
@@ -163,6 +184,14 @@ def test_verified_export_rejects_nas_paths_or_secret_like_text(tmp_path: Path) -
         "executor": {"task_id": "t_exec", "run_id": "32"},
         "database": {},
         "fixture": {"added": [], "removed": [], "changed": []},
+        "checks": [{
+            "id": "BAD-PATH",
+            "method": "filesystem",
+            "action": "Prüfen",
+            "expected": "kein Pfad",
+            "actual": "siehe /mnt/storage/private/path",
+            "result": "FAIL",
+        }],
     }))
     review = tmp_path / "review.json"
     review.write_text(json.dumps({
@@ -172,7 +201,7 @@ def test_verified_export_rejects_nas_paths_or_secret_like_text(tmp_path: Path) -
         "mode": "REVIEW",
         "completed": True,
         "verdict": "RETEST_REQUIRED",
-        "reason": "See /mnt/storage/private/path",
+        "reason": "Evidence method invalid.",
         "test_id": "T004",
         "executor_task_id": "t_exec",
         "executor_run_id": "32",
@@ -188,3 +217,47 @@ def test_verified_export_rejects_nas_paths_or_secret_like_text(tmp_path: Path) -
     )
     assert proc.returncode != 0
     assert "forbidden" in (proc.stderr + proc.stdout).lower()
+
+
+def test_verified_export_rejects_invalid_check_shape(tmp_path: Path) -> None:
+    evidence = tmp_path / "delta.json"
+    evidence.write_text(json.dumps({
+        "schema": "bibliothekar.qa.evidence.delta.v1",
+        "test_id": "T004",
+        "phase": "A",
+        "executor": {"task_id": "t_exec", "run_id": "32"},
+        "database": {},
+        "fixture": {"added": [], "removed": [], "changed": []},
+        "checks": [{
+            "id": "BROKEN",
+            "method": "API",
+            "action": "Request senden",
+            "expected": "HTTP 200",
+            "actual": "HTTP 500",
+            "result": "MAYBE",
+        }],
+    }))
+    review = tmp_path / "review.json"
+    review.write_text(json.dumps({
+        "task_id": "t_review",
+        "run_id": "33",
+        "profile": "qa-thinker",
+        "mode": "REVIEW",
+        "completed": True,
+        "verdict": "ACCEPT_FAIL",
+        "reason": "Unexpected response.",
+        "test_id": "T004",
+        "executor_task_id": "t_exec",
+        "executor_run_id": "32",
+    }))
+    out = tmp_path / "verified.json"
+    proc = run(
+        str(EXPORT),
+        "--evidence", str(evidence),
+        "--review", str(review),
+        "--product-commit", "p",
+        "--qa-commit", "q",
+        "--output", str(out),
+    )
+    assert proc.returncode != 0
+    assert "result invalid" in (proc.stderr + proc.stdout)
