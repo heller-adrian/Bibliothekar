@@ -45,3 +45,16 @@ def test_0212_version_and_sd_idle_copy():
     html = index().body.decode() if hasattr(index(), "body") else str(index())
     assert "Keine neuen Dateien" in html
     assert "Verwaltungsdateien ignoriert" in html
+
+
+def test_0212_archived_reassignment_endpoint_reads_optional_targets_from_payload():
+    source = Path("app/main.py").read_text()
+    start = source.index("def api_change_request_reassignments_assign")
+    end = source.index("@app.post(\"/api/change-requests/{cr_id}/confirm\")", start)
+    endpoint = source[start:end]
+
+    assert 'target_event_id=payload.get("target_event_id")' in endpoint
+    assert 'target_child_event_id=payload.get("target_child_event_id")' in endpoint
+    assert 'new_child_start=payload.get("new_child_start")' in endpoint
+    assert 'new_child_end=payload.get("new_child_end")' in endpoint
+    assert "body.get(" not in endpoint
