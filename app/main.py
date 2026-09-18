@@ -6896,10 +6896,10 @@ def api_change_request_reassignments_assign(cr_id: str, payload: dict[str, Any])
             DATABASE_FILE, cr_id, list(payload.get("family_ids") or []),
             target_mode=str(payload.get("target_mode") or ""),
             new_event_name=payload.get("new_event_name"),
-            target_event_id=body.get("target_event_id"),
-            target_child_event_id=body.get("target_child_event_id"),
-            new_child_start=body.get("new_child_start"),
-            new_child_end=body.get("new_child_end"),
+            target_event_id=payload.get("target_event_id"),
+            target_child_event_id=payload.get("target_child_event_id"),
+            new_child_start=payload.get("new_child_start"),
+            new_child_end=payload.get("new_child_end"),
             workspace_path=WORKSPACE_PATH,
         )
     except ArchiveReassignmentError as error:
