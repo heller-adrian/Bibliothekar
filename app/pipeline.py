@@ -287,15 +287,25 @@ def recover_cross_device_protocol_failures(
 
     return recovered
 
-def source_manifest(source: Path) -> list[dict[str, Any]]:
+def source_manifest(
+    source: Path,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> list[dict[str, Any]]:
     if not source.is_dir():
         raise PipelineError(
             f"Simulationsquelle fehlt: {source}"
         )
 
     entries: list[dict[str, Any]] = []
+    paths = sorted(source.rglob("*"))
+    total_files = sum(
+        1
+        for candidate in paths
+        if candidate.is_file() and not candidate.is_symlink()
+    )
+    processed_files = 0
 
-    for path in sorted(source.rglob("*")):
+    for path in paths:
         if path.is_symlink():
             raise PipelineError(
                 f"Symbolischer Link nicht erlaubt: {path}"
@@ -330,6 +340,10 @@ def source_manifest(source: Path) -> list[dict[str, Any]]:
             "sha256": sha256_file(path),
         })
 
+        processed_files += 1
+        if progress_callback is not None:
+            progress_callback(processed_files, total_files)
+
     if not entries:
         raise PipelineError(
             "Die Simulationsquelle enthält keine Dateien."
@@ -342,6 +356,7 @@ def copy_and_verify(
     source: Path,
     destination: Path,
     entries: list[dict[str, Any]],
+    progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> None:
     if destination.exists():
         raise PipelineError(
@@ -350,7 +365,9 @@ def copy_and_verify(
 
     destination.mkdir(parents=True)
 
-    for entry in entries:
+    total_entries = len(entries)
+
+    for index, entry in enumerate(entries, start=1):
         relative = Path(entry["relative_path"])
         source_path = source / relative
         destination_path = destination / relative
@@ -379,6 +396,9 @@ def copy_and_verify(
             ),
         )
 
+        if progress_callback is not None:
+            progress_callback("copy", index, total_entries)
+
     actual_files = sorted(
         path.relative_to(destination).as_posix()
         for path in destination.rglob("*")
@@ -396,7 +416,7 @@ def copy_and_verify(
             "nicht mit der Quelle überein."
         )
 
-    for entry in entries:
+    for index, entry in enumerate(entries, start=1):
         copied = destination / entry["relative_path"]
 
         if copied.stat().st_size != entry["size_bytes"]:
@@ -409,6 +429,9 @@ def copy_and_verify(
                 f"SHA-256-Abweichung: "
                 f"{entry['relative_path']}"
             )
+
+        if progress_callback is not None:
+            progress_callback("verify", index, total_entries)
 
 
 def build_organization_plan(
