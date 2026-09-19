@@ -2,13 +2,14 @@ from app import main
 from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
-def test_0221_mobile_navigation_returns_to_top_header():
+def test_0221_mobile_navigation_keeps_three_main_registers_on_top():
     html = main.index()
     assert 'id="bk-mobile-nav-toggle"' not in html
     assert 'class="bk-tab-mobile-label">Import</span>' in html
     assert 'class="bk-tab-mobile-label">Arbeitsbereich</span>' in html
     assert 'class="bk-tab-mobile-label">Archiv</span>' in html
-    assert 'class="bk-tab-mobile-label">KI</span>' in html
+    assert 'class="bk-tab-mobile-label">KI</span>' not in html
+    assert 'href="/assistant"' in html
     assert 'data-bk-area="import"' in html
 
 
@@ -26,10 +27,9 @@ def test_0221_mobile_sources_remain_three_cards():
     assert '.bk-source-option small { display: none; }' in BIBLIOTHEKAR_CSS
 
 
-def test_0221_assistant_is_a_header_register_not_floating_button():
+def test_0221_assistant_is_small_header_action_not_large_register():
     html = main.index()
-    assert 'id="bk-ai-tab"' in html
-    assert 'data-area="assistant"' in html
-    assert 'id="bk-ai-panel"' in html
-    assert 'id="bk-ai-close"' in html
-    assert 'id="bk-ai-launcher"' not in html
+    assert 'bk-assistant-button' in html
+    assert 'href="/assistant"' in html
+    assert 'id="bk-ai-tab"' not in html
+    assert 'id="bk-ai-panel"' not in html
