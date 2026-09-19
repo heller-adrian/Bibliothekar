@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.22.2 – Registergeometrie und Feinschliff
+
+- neuer eigener Entwicklungsbranch `patch/0.22.2` auf Basis von 0.22.1
+- aktive Register verwenden browserartige Viertelkreis-Schultern, die direkt in die Seitenfläche auslaufen statt angesetzter Halbkreis-Flächen
+- linke und rechte Schulter werden als eigene Dekorationselemente gerendert; die innere Rundung bleibt bei überlappenden Registern verborgen
+- inaktive Register behalten eine einheitliche Grundfarbe
+- Tiefenwirkung entsteht nur noch seitlich an den Registerkanten; unterhalb der Register wird kein Schlagschatten mehr gezeichnet
+- die stärkere trapezförmige Registersilhouette und die bestehende responsive Breitenlogik bleiben erhalten
+
 ### 0.22.1 – Desktop-Designpass 2
 
 - Registerkarten wirken als saubere, überlappende Trennblätter mit durchgehendem Farbakzent
