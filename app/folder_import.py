@@ -486,7 +486,23 @@ def run_folder_import_job(
     progress("copying", "starting", 0, 0, "Ordnerimport wird vorbereitet.")
 
     try:
-        all_entries = source_manifest(source)
+        progress(
+            "copying",
+            "source_manifest",
+            0,
+            1,
+            "Quelle wird inventarisiert und per SHA-256 erfasst.",
+        )
+        all_entries = source_manifest(
+            source,
+            progress_callback=lambda current, total: progress(
+                "copying",
+                "source_manifest",
+                current,
+                max(total, 1),
+                "Quelldateien werden inventarisiert und per SHA-256 erfasst.",
+            ),
+        )
         source_signature = quick_source_signature(source)
         source_fingerprint = manifest_fingerprint(all_entries)
         if identity_callback is not None:
@@ -554,7 +570,30 @@ def run_folder_import_job(
             len(entries),
             "Quelle wird vollständig in die temporäre Sicherung kopiert.",
         )
-        copy_and_verify(source, temporary_original, entries)
+        def report_copy_progress(phase: str, current: int, total: int) -> None:
+            if phase == "copy":
+                progress(
+                    "copying",
+                    "copying",
+                    current,
+                    max(total, 1),
+                    "Dateien werden in die temporäre Sicherung kopiert.",
+                )
+            else:
+                progress(
+                    "verifying",
+                    "backup_verification",
+                    current,
+                    max(total, 1),
+                    "Temporäre Sicherung wird Datei für Datei per SHA-256 geprüft.",
+                )
+
+        copy_and_verify(
+            source,
+            temporary_original,
+            entries,
+            progress_callback=report_copy_progress,
+        )
 
         progress(
             "verifying",
