@@ -5684,30 +5684,18 @@ def index() -> str:
       <div class="bk-source-mode-note">Quelle auswählen und anschließend sicher einlesen.</div>
 
       <div id="bk-source-picker" class="bk-source-picker" aria-label="Importquelle wählen">
-        <button id="bk-source-trigger" class="bk-source-trigger" type="button" aria-haspopup="true" aria-expanded="false">
-          <span id="bk-source-current-icon" class="bk-source-current-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M7 3h8l3 3v15H7z"/><path d="M10 3v5h5V3M10 13h5M10 16h5"/></svg>
-          </span>
-          <span class="bk-source-current-copy">
-            <strong id="bk-source-current-label">SD-Karte</strong>
-            <small>Quelle wechseln</small>
-          </span>
-          <span class="bk-source-chevron" aria-hidden="true">⌄</span>
+        <button type="button" class="bk-source-option active" data-source-mode="sd">
+          <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><path d="M7 3h8l3 3v15H7z"/><path d="M10 3v5h5V3M10 13h5M10 16h5"/></svg></span>
+          <span><strong>SD-Karte</strong><small>Karte im Kartenleser</small></span>
         </button>
-        <div id="bk-source-menu" class="bk-source-menu" hidden>
-          <button type="button" class="bk-source-option active" data-source-mode="sd">
-            <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><path d="M7 3h8l3 3v15H7z"/><path d="M10 3v5h5V3M10 13h5M10 16h5"/></svg></span>
-            <span><strong>SD-Karte</strong><small>Karte im Kartenleser</small></span>
-          </button>
-          <button type="button" class="bk-source-option" data-source-mode="drive">
-            <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 14h12M7 10h.01M10 10h.01"/></svg></span>
-            <span><strong>Laufwerk</strong><small>USB-Festplatte oder Stick</small></span>
-          </button>
-          <button type="button" class="bk-source-option" data-source-mode="folder">
-            <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/></svg></span>
-            <span><strong>Ordner / Sicherung</strong><small>NAS-Ordner oder vorhandene Sicherung</small></span>
-          </button>
-        </div>
+        <button type="button" class="bk-source-option" data-source-mode="drive">
+          <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 14h12M7 10h.01M10 10h.01"/></svg></span>
+          <span><strong>Laufwerk</strong><small>USB-Festplatte oder Stick</small></span>
+        </button>
+        <button type="button" class="bk-source-option" data-source-mode="folder">
+          <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/></svg></span>
+          <span><strong>Ordner / Sicherung</strong><small>NAS-Ordner oder vorhandene Sicherung</small></span>
+        </button>
       </div>
 
       <div class="source-device-card" id="sd-card-status">
@@ -5786,7 +5774,7 @@ def index() -> str:
       </details>
     </section>
 
-    <div class="toolbar">
+    <div class="toolbar bk-metadata-toolbar">
       <button
         class="secondary"
         id="refresh-button"
