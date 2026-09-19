@@ -1219,12 +1219,39 @@ BIBLIOTHEKAR_JS = r"""
     button.addEventListener("click", () => button.closest("dialog")?.close());
   });
 
+  const mobileNavToggle = document.getElementById("bk-mobile-nav-toggle");
+  const mobileNavStored = localStorage.getItem("bibliothekar-mobile-nav-collapsed") === "1";
+  if (mobileNavStored) document.body.classList.add("bk-mobile-nav-collapsed");
+
+  const syncMobileNavToggle = () => {
+    if (!mobileNavToggle) return;
+    const collapsed = document.body.classList.contains("bk-mobile-nav-collapsed");
+    mobileNavToggle.textContent = collapsed ? "‹" : "›";
+    mobileNavToggle.setAttribute(
+      "aria-label",
+      collapsed ? "Seitennavigation einblenden" : "Seitennavigation ausblenden"
+    );
+  };
+  syncMobileNavToggle();
+
+  mobileNavToggle?.addEventListener("click", () => {
+    document.body.classList.toggle("bk-mobile-nav-collapsed");
+    const collapsed = document.body.classList.contains("bk-mobile-nav-collapsed");
+    localStorage.setItem("bibliothekar-mobile-nav-collapsed", collapsed ? "1" : "0");
+    syncMobileNavToggle();
+  });
+
   const aiButton = document.getElementById("bk-ai-launcher");
   const aiPanel = document.getElementById("bk-ai-panel");
-  aiButton?.addEventListener("click", () => {
-    const open = aiPanel?.hasAttribute("hidden");
-    if (open) aiPanel?.removeAttribute("hidden"); else aiPanel?.setAttribute("hidden", "");
-  });
+  const aiClose = document.getElementById("bk-ai-close");
+
+  const setAiOpen = (open) => {
+    if (!aiPanel || !aiButton) return;
+    if (open) aiPanel.removeAttribute("hidden"); else aiPanel.setAttribute("hidden", "");
+    aiButton.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  aiButton?.addEventListener("click", () => setAiOpen(aiPanel?.hasAttribute("hidden")));
+  aiClose?.addEventListener("click", () => setAiOpen(false));
 
 
   // Quellenwahl 0.22.1: eine aktive Quelle, Auswahl über kompaktes Popover.
@@ -1349,9 +1376,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         (active, subarea),
         heading_map.get((active, None), ("Bibliothekar", "")),
     )
-    def tab(area: str, href: str, label: str) -> str:
+    def tab(area: str, href: str, label: str, mobile_label: str) -> str:
         klass = "bk-tab active" if area == active else "bk-tab"
-        return f'<a class="{klass}" data-area="{area}" href="{href}">{escape(label)}</a>'
+        return (
+            f'<a class="{klass}" data-area="{area}" href="{href}">'
+            f'<span class="bk-tab-label">{escape(label)}</span>'
+            f'<span class="bk-tab-mobile-label">{escape(mobile_label)}</span>'
+            f'</a>'
+        )
 
     subnav = ""
     if active == "workspace":
@@ -1377,9 +1409,9 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   </a>
 
   <nav class="bk-tabs" aria-label="Hauptbereiche">
-    {tab('import', '/', 'Import & Prüfung')}
-    {tab('workspace', '/workspace', 'Arbeitsbereich')}
-    {tab('archive', '/transfer', 'Archiv')}
+    {tab('import', '/', 'Import & Prüfung', 'Import')}
+    {tab('workspace', '/workspace', 'Arbeitsbereich', 'Arbeitsbereich')}
+    {tab('archive', '/transfer', 'Archiv', 'Archiv')}
   </nav>
 
   <div class="bk-shell-actions">
@@ -1409,6 +1441,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     </div>
   </div>
 </header>
+<button id="bk-mobile-nav-toggle" class="bk-mobile-nav-toggle" type="button" aria-label="Seitennavigation ein- oder ausblenden">‹</button>
 {subnav}
 {heading}
 
@@ -1461,11 +1494,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   </div>
 </dialog>
 
-<button id="bk-ai-launcher" class="bk-ai-launcher" type="button" aria-label="Bibliothekar Assistent">
+<button id="bk-ai-launcher" class="bk-ai-launcher" type="button" aria-label="Bibliothekar Assistent" aria-expanded="false">
   ✦ <span>Bibliothekar Assistent</span>
 </button>
 <aside id="bk-ai-panel" class="bk-ai-panel" hidden>
-  <strong>Bibliothekar Assistent</strong>
+  <div class="bk-ai-panel-head">
+    <strong>Bibliothekar Assistent</strong>
+    <button id="bk-ai-close" class="bk-ai-close" type="button" aria-label="Assistent schließen">×</button>
+  </div>
   <p>Der Platz für die spätere KI-Unterstützung ist bereits vorgesehen. In diesem Designstand führt der Assistent noch keine Aktionen aus.</p>
 </aside>
 """
@@ -1478,13 +1514,23 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_CSS}</style>\n</head>",
         1,
     )
+    area = active_area if active_area in {"import", "workspace", "archive"} else "import"
     if "<body>" in result:
-        result = result.replace("<body>", '<body class="bibliothekar-redesign">', 1)
+        result = result.replace(
+            "<body>",
+            f'<body class="bibliothekar-redesign" data-bk-area="{area}">',
+            1,
+        )
     elif "<body " in result:
-        result = result.replace("<body ", '<body class="bibliothekar-redesign" ', 1)
+        result = result.replace(
+            "<body ",
+            f'<body class="bibliothekar-redesign" data-bk-area="{area}" ',
+            1,
+        )
     result = result.replace(
-        '<body class="bibliothekar-redesign">',
-        '<body class="bibliothekar-redesign">\n' + _shell_markup(active_area, subarea),
+        f'<body class="bibliothekar-redesign" data-bk-area="{area}">',
+        f'<body class="bibliothekar-redesign" data-bk-area="{area}">\n'
+        + _shell_markup(area, subarea),
         1,
     )
     result = result.replace(
