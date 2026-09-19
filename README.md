@@ -1,8 +1,8 @@
-# Kamera-Automatisierung
+# Bibliothekar
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.21.1**
+Aktueller Entwicklungsstand: **0.22.0**
 
 ## Ziel
 
