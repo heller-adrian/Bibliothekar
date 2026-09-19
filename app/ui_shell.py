@@ -329,6 +329,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   inset: 0;
   z-index: -1;
   background: #d5d8d7;
+  border-radius: 12px 12px 0 0;
   box-shadow: inset 0 4px 0 var(--bk-tab-accent);
   clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 100%, 0 100%);
 }
@@ -782,6 +783,18 @@ html[data-bk-theme="dark"] body.bibliothekar-redesign .bk-action-eject {
 body.bibliothekar-redesign .bk-action-tile:disabled {
   opacity: .48 !important;
 }
+body.bibliothekar-redesign .import-panel,
+body.bibliothekar-redesign .source-device-card,
+body.bibliothekar-redesign .sd-actions,
+body.bibliothekar-redesign .source-detail,
+body.bibliothekar-redesign .other-source-content {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-wrap: anywhere;
+}
+body.bibliothekar-redesign .sd-actions {
+  width: 100% !important;
+}
 body.bibliothekar-redesign .other-source-panel {
   margin-top: 10px !important;
 }
@@ -1012,6 +1025,7 @@ body.bibliothekar-redesign .job details {
     overflow: visible;
   }
   .bk-tab::before {
+    border-radius: 10px 0 0 10px;
     clip-path: polygon(9px 0, 100% 0, 100% 100%, 9px 100%, 0 calc(100% - 9px), 0 9px);
     box-shadow: inset 4px 0 0 var(--bk-tab-accent);
   }
