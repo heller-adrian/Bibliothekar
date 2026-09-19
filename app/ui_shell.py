@@ -280,6 +280,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /* Gemeinsamer App-Rahmen */
 .bk-shell {
+  --bk-page-bridge-height: clamp(9px, .8vw, 13px);
   position: sticky;
   top: 0;
   z-index: 3000;
@@ -288,10 +289,30 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   align-items: end;
   gap: 14px;
   min-height: 78px;
+  margin-bottom: var(--bk-page-bridge-height);
   padding: 14px clamp(18px, 2vw, 30px) 0;
   background: #15222c;
   border-bottom: 0;
   color: #f8f4e9;
+  overflow: visible;
+  isolation: isolate;
+}
+.bk-shell::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  right: 0;
+  bottom: calc(-1 * var(--bk-page-bridge-height));
+  height: calc(var(--bk-page-bridge-height) + 1px);
+  background: var(--bk-page-bg, var(--bk-paper));
+  pointer-events: none;
+}
+.bk-brand,
+.bk-tabs,
+.bk-shell-actions {
+  position: relative;
+  z-index: 2;
 }
 
 .bk-brand {
@@ -325,7 +346,6 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 .bk-tabs {
   --bk-tab-overlap: clamp(24px, 3vw, 64px);
-  --bk-shoulder-size: clamp(8px, .65vw, 12px);
   --bk-tab-seam-bleed: clamp(2px, .28vw, 4px);
   --bk-edge-gradient-width: clamp(18px, 1.8vw, 32px);
   display: flex;
@@ -341,8 +361,6 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-accent: #87939a;
   --bk-tab-bg: #5f686d;
   --bk-tab-edge-gradient: linear-gradient(to right, transparent, transparent);
-  --bk-shoulder-skew-left: -12deg;
-  --bk-shoulder-skew-right: 12deg;
   position: relative;
   flex: 1 1 0;
   min-width: 0;
@@ -368,7 +386,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tab[data-area="workspace"] { --bk-tab-accent: var(--bk-blue); }
 .bk-tab[data-area="archive"] { --bk-tab-accent: var(--bk-yellow); }
 
-/* Eigentliche Trapezfläche. Kein Schatten nach unten. */
+/* Eigentliche Reiterfläche. Inaktive Reiter bleiben eigenständige Karten. */
 .bk-tab::before {
   content: "";
   position: absolute;
@@ -395,65 +413,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 
 /*
- * Browser-Tab-Schultern:
- * Nur ein sehr kleiner Viertelkreis glättet den Übergang von der
- * Trapezseite in die Seitenfläche. Er wird mit derselben sichtbaren
- * Steigung wie die Trapezkante geschert und liegt dadurch bündig an.
- * Kein Halbkreis, kein "Ohr", kein Schatten nach unten.
+ * Aktiver Reiter + Seitenfläche:
+ * Keine angeklebten Schultern mehr. Der aktive Reiter läuft direkt in den
+ * seitenfarbigen Header-Puffer hinein und bildet mit der Seite eine Fläche.
  */
-.bk-tab-shoulder {
-  --bk-shoulder-color: var(--bk-tab-bg);
-  position: absolute;
-  bottom: -1px;
-  width: var(--bk-shoulder-size);
-  height: var(--bk-shoulder-size);
-  display: none;
-  z-index: 1;
-  pointer-events: none;
-}
-.bk-tab-shoulder-left {
-  left: calc(var(--bk-tab-seam-bleed) - var(--bk-shoulder-size));
-  transform: skewX(var(--bk-shoulder-skew-left));
-  transform-origin: right bottom;
-  background:
-    radial-gradient(
-      circle at left top,
-      transparent 0,
-      transparent calc(var(--bk-shoulder-size) - 1px),
-      var(--bk-shoulder-color) var(--bk-shoulder-size)
-    );
-}
-.bk-tab-shoulder-right {
-  right: calc(var(--bk-tab-seam-bleed) - var(--bk-shoulder-size));
-  transform: skewX(var(--bk-shoulder-skew-right));
-  transform-origin: left bottom;
-  background:
-    radial-gradient(
-      circle at right top,
-      transparent 0,
-      transparent calc(var(--bk-shoulder-size) - 1px),
-      var(--bk-shoulder-color) var(--bk-shoulder-size)
-    );
-}
-
-/* Aktive Seite: beide Schultern gehen direkt in den Seitenhintergrund über. */
-.bk-tab.active .bk-tab-shoulder {
-  display: block;
-  --bk-shoulder-color: var(--bk-page-bg, var(--bk-paper));
-}
-/* Gruppenabschluss: nur die nach außen sichtbare Schulter bleibt stehen. */
-.bk-tab:first-child:not(.active) .bk-tab-shoulder-left {
-  display: block;
-}
-.bk-tab:last-child:not(.active) .bk-tab-shoulder-right {
-  display: block;
-}
-.bk-tab:first-child.active .bk-tab-shoulder-left {
-  left: calc(var(--bk-tab-seam-bleed) + 1px - var(--bk-shoulder-size));
-}
-.bk-tab:last-child.active .bk-tab-shoulder-right {
-  right: calc(var(--bk-tab-seam-bleed) + 1px - var(--bk-shoulder-size));
-}
 
 .bk-tab-label,
 .bk-tab-mobile-label {
@@ -554,6 +517,7 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 }
 .bk-tab.active::before {
   --bk-tab-edge-gradient: linear-gradient(to right, transparent, transparent);
+  bottom: calc(-1 * var(--bk-page-bridge-height));
   background:
     var(--bk-tab-edge-gradient),
     linear-gradient(
@@ -1163,6 +1127,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   }
 
   .bk-shell {
+    --bk-page-bridge-height: 10px;
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -1197,7 +1162,6 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
 
   .bk-tabs {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
-    --bk-shoulder-size: clamp(7px, 2.2vw, 9px);
     --bk-tab-seam-bleed: clamp(3px, 1vw, 5px);
     --bk-edge-gradient-width: clamp(14px, 5vw, 24px);
     grid-column: 1 / -1;
@@ -1231,9 +1195,9 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     transform: perspective(88px) rotateX(5deg);
     border-radius: 12px 12px 0 0;
   }
-  .bk-tab {
-    --bk-shoulder-skew-left: -7deg;
-    --bk-shoulder-skew-right: 7deg;
+  .bk-tab.active::before,
+  .bk-tab.is-active::before {
+    bottom: calc(-1 * var(--bk-page-bridge-height));
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
@@ -1363,7 +1327,15 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
 @media (max-width: 430px) {
   .bk-brand span:last-child { font-size: 1.02rem; }
   .bk-task-button { min-width: 70px; }
-  .bk-tab { font-size: .68rem; padding-inline: 7px; }
+  .bk-tabs {
+    --bk-tab-overlap: 4px;
+    --bk-tab-seam-bleed: 2px;
+    --bk-edge-gradient-width: 16px;
+  }
+  .bk-tab {
+    font-size: .68rem;
+    padding-inline: 5px;
+  }
   body.bibliothekar-redesign .selection-actions {
     grid-template-columns: 1fr 1fr;
   }
@@ -1544,8 +1516,6 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         klass = "bk-tab active" if area == active else "bk-tab"
         return (
             f'<a class="{klass}" data-area="{area}" href="{href}">'
-            f'<span class="bk-tab-shoulder bk-tab-shoulder-left" aria-hidden="true"></span>'
-            f'<span class="bk-tab-shoulder bk-tab-shoulder-right" aria-hidden="true"></span>'
             f'<span class="bk-tab-label">{escape(label)}</span>'
             f'<span class="bk-tab-mobile-label">{escape(mobile_label)}</span>'
             f'</a>'
