@@ -12,11 +12,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from PIL import Image
+
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from app.workspace_ui import WORKSPACE_HTML
 from app.events_ui import EVENTS_HTML
 from app.transfer_ui import TRANSFER_HTML
+from app.ui_shell import apply_shell
 
 from app.database import (
     claim_next_job,
@@ -137,7 +140,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.21.2"
+APP_VERSION = "0.22.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1440,7 +1443,11 @@ def api_ssd_release(
 )
 def workspace_interface() -> HTMLResponse:
     return HTMLResponse(
-        content=WORKSPACE_HTML,
+        content=apply_shell(
+            WORKSPACE_HTML,
+            active_area="workspace",
+            subarea="captures",
+        ),
         status_code=200,
     )
 
@@ -1452,7 +1459,11 @@ def workspace_interface() -> HTMLResponse:
 )
 def events_interface() -> HTMLResponse:
     return HTMLResponse(
-        content=EVENTS_HTML,
+        content=apply_shell(
+            EVENTS_HTML,
+            active_area="workspace",
+            subarea="events",
+        ),
         status_code=200,
     )
 
@@ -1464,7 +1475,10 @@ def events_interface() -> HTMLResponse:
 )
 def transfer_interface() -> HTMLResponse:
     return HTMLResponse(
-        content=TRANSFER_HTML,
+        content=apply_shell(
+            TRANSFER_HTML,
+            active_area="archive",
+        ),
         status_code=200,
     )
 
@@ -5041,7 +5055,7 @@ def api_run_simulated_job() -> JSONResponse:
     include_in_schema=False,
 )
 def index() -> str:
-    return """
+    return apply_shell("""
 <!doctype html>
 <html lang="de">
 <head>
@@ -6651,7 +6665,7 @@ def index() -> str:
   </script>
 </body>
 </html>
-"""
+""", active_area="import")
 
 
 @app.get(
