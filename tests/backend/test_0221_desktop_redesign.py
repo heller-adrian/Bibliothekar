@@ -45,9 +45,9 @@ def test_0221_only_three_main_registers_and_assistant_is_header_action():
     assert '.bk-tabs-active-workspace' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-archive' in BIBLIOTHEKAR_CSS
     assert '.bk-tab::before {' in BIBLIOTHEKAR_CSS
-    assert 'transform: perspective(170px) rotateX(2.4deg);' in BIBLIOTHEKAR_CSS
+    assert 'transform: perspective(115px) rotateX(6deg);' in BIBLIOTHEKAR_CSS
     assert '.bk-tab.active::after {' in BIBLIOTHEKAR_CSS
-    assert 'border-radius: 18px 18px 0 0;' in BIBLIOTHEKAR_CSS
+    assert 'border-radius: 34px 34px 0 0;' in BIBLIOTHEKAR_CSS
     assert 'linear-gradient(' in BIBLIOTHEKAR_CSS
 
 
@@ -90,12 +90,16 @@ def test_0221_menu_entries_and_legacy_toolbars_are_visually_normalized():
     assert 'body[data-bk-area="import"] .bk-metadata-toolbar .notice' in BIBLIOTHEKAR_CSS
 
 
-def test_0221_registers_are_fluid_depth_staggered_and_do_not_bleed_below_header():
+def test_0221_registers_use_same_inactive_color_light_shadow_and_clean_stacking():
     assert 'flex: 1 1 0;' in BIBLIOTHEKAR_CSS
     assert 'margin-bottom: 0;' in BIBLIOTHEKAR_CSS
-    assert '#70797e' in BIBLIOTHEKAR_CSS
-    assert '#c3c6c5' in BIBLIOTHEKAR_CSS
-    assert 'bottom: -1px;' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-shadow: 0 2px 7px' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-bg: #5f686d;' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-bg: #d3d6d5;' in BIBLIOTHEKAR_CSS
+    assert '#70797e' not in BIBLIOTHEKAR_CSS
+    assert '#c3c6c5' not in BIBLIOTHEKAR_CSS
+    assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
+    assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_legacy_white_strips_are_removed_at_markup_source():
@@ -112,3 +116,28 @@ def test_0221_legacy_white_strips_are_removed_at_markup_source():
 def test_0221_about_menu_icon_has_valid_svg_wrapper():
     html = main.index()
     assert '<span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"' in html
+
+
+def test_0221_active_register_has_outward_convex_shoulders():
+    assert 'left: -34px;' in BIBLIOTHEKAR_CSS
+    assert 'right: -34px;' in BIBLIOTHEKAR_CSS
+    assert 'height: 34px;' in BIBLIOTHEKAR_CSS
+    assert 'border-radius: 34px 34px 0 0;' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab:first-child::after,' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab:last-child::after,' in BIBLIOTHEKAR_CSS
+
+
+def test_0221_minimal_pages_have_no_browser_body_gutter_and_header_buttons_match():
+    assert 'margin: 0 !important;' in BIBLIOTHEKAR_CSS
+    assert 'padding: 0 !important;' in BIBLIOTHEKAR_CSS
+    assert 'max-width: 44px;' in BIBLIOTHEKAR_CSS
+    assert 'max-height: 44px;' in BIBLIOTHEKAR_CSS
+    assert 'flex: 0 0 44px;' in BIBLIOTHEKAR_CSS
+
+
+def test_0221_page_heading_and_main_share_same_horizontal_inset():
+    assert 'padding-left: 18px !important;' in BIBLIOTHEKAR_CSS
+    assert 'padding-right: 18px !important;' in BIBLIOTHEKAR_CSS
+    assert '.bk-page-heading {' in BIBLIOTHEKAR_CSS
+    assert 'padding-left: 18px;' in BIBLIOTHEKAR_CSS
+    assert 'padding-right: 18px;' in BIBLIOTHEKAR_CSS
