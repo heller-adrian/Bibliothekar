@@ -3,7 +3,7 @@ from app.events_ui import EVENTS_HTML
 
 
 def test_0207_version():
-    assert APP_VERSION == "0.22.1"
+    assert APP_VERSION == "0.22.2"
 
 
 def test_reassignment_warning_is_spaced_from_event_details():
