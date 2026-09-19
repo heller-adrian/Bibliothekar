@@ -141,7 +141,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.22.0"
+APP_VERSION = "0.22.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -5641,53 +5641,38 @@ def index() -> str:
       <button class="top-button" type="button" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Nach oben">↑</button>
     </div>
 
-    <div class="grid">
-      <article class="card">
-        <div class="status-label">
-          Anwendung
+    <div class="grid bk-status-grid">
+      <article class="card bk-status-card">
+        <div class="bk-status-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="12" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg>
         </div>
-        <div
-          class="status-value"
-          id="application-status"
-        >
-          Wird geprüft …
+        <div>
+          <div class="status-label">Anwendung</div>
+          <div class="status-value" id="application-status">Wird geprüft …</div>
+          <div class="status-detail" id="application-detail"></div>
         </div>
-        <div
-          class="status-detail"
-          id="application-detail"
-        ></div>
       </article>
 
-      <article class="card">
-        <div class="status-label">
-          Datenbank
+      <article class="card bk-status-card">
+        <div class="bk-status-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="7.5" ry="3"/><path d="M4.5 5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V5M4.5 11v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/></svg>
         </div>
-        <div
-          class="status-value"
-          id="database-status"
-        >
-          Wird geprüft …
+        <div>
+          <div class="status-label">Datenbank</div>
+          <div class="status-value" id="database-status">Wird geprüft …</div>
+          <div class="status-detail" id="database-detail"></div>
         </div>
-        <div
-          class="status-detail"
-          id="database-detail"
-        ></div>
       </article>
 
-      <article class="card">
-        <div class="status-label">
-          Arbeitsbereich
+      <article class="card bk-status-card">
+        <div class="bk-status-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 7.5h16v10.5H4z"/><path d="M7 7.5V5h10v2.5M7 14h.01M11 14h.01"/></svg>
         </div>
-        <div
-          class="status-value"
-          id="workspace-status"
-        >
-          Wird geprüft …
+        <div>
+          <div class="status-label">Arbeitsbereich</div>
+          <div class="status-value" id="workspace-status">Wird geprüft …</div>
+          <div class="status-detail" id="workspace-detail"></div>
         </div>
-        <div
-          class="status-detail"
-          id="workspace-detail"
-        ></div>
       </article>
     </div>
 
@@ -5699,18 +5684,30 @@ def index() -> str:
       <div class="bk-source-mode-note">Quelle auswählen und anschließend sicher einlesen.</div>
 
       <div id="bk-source-picker" class="bk-source-picker" aria-label="Importquelle wählen">
-        <button type="button" class="bk-source-choice active" data-source-mode="sd">
-          <span class="bk-source-icon">▣</span>
-          <strong>SD-Karte</strong>
+        <button id="bk-source-trigger" class="bk-source-trigger" type="button" aria-haspopup="true" aria-expanded="false">
+          <span id="bk-source-current-icon" class="bk-source-current-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M7 3h8l3 3v15H7z"/><path d="M10 3v5h5V3M10 13h5M10 16h5"/></svg>
+          </span>
+          <span class="bk-source-current-copy">
+            <strong id="bk-source-current-label">SD-Karte</strong>
+            <small>Quelle wechseln</small>
+          </span>
+          <span class="bk-source-chevron" aria-hidden="true">⌄</span>
         </button>
-        <button type="button" class="bk-source-choice" data-source-mode="drive">
-          <span class="bk-source-icon">▰</span>
-          <strong>Laufwerk</strong>
-        </button>
-        <button type="button" class="bk-source-choice" data-source-mode="folder">
-          <span class="bk-source-icon">▱</span>
-          <strong>Ordner / Sicherung</strong>
-        </button>
+        <div id="bk-source-menu" class="bk-source-menu" hidden>
+          <button type="button" class="bk-source-option active" data-source-mode="sd">
+            <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><path d="M7 3h8l3 3v15H7z"/><path d="M10 3v5h5V3M10 13h5M10 16h5"/></svg></span>
+            <span><strong>SD-Karte</strong><small>Karte im Kartenleser</small></span>
+          </button>
+          <button type="button" class="bk-source-option" data-source-mode="drive">
+            <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 14h12M7 10h.01M10 10h.01"/></svg></span>
+            <span><strong>Laufwerk</strong><small>USB-Festplatte oder Stick</small></span>
+          </button>
+          <button type="button" class="bk-source-option" data-source-mode="folder">
+            <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/></svg></span>
+            <span><strong>Ordner / Sicherung</strong><small>NAS-Ordner oder vorhandene Sicherung</small></span>
+          </button>
+        </div>
       </div>
 
       <div class="source-device-card" id="sd-card-status">
@@ -5719,9 +5716,18 @@ def index() -> str:
 
       <div class="import-controls sd-actions">
         <div class="source-device-card mount-state" id="sd-mount-state" aria-live="polite">SD-Karte noch nicht eingebunden</div>
-        <button class="primary" id="sd-mount-button" type="button" disabled>SD-Karte einbinden</button>
-        <button class="primary" id="sd-import-button" type="button" disabled>SD-Karte sichern</button>
-        <button class="secondary" id="sd-unmount-button" type="button" disabled>SD-Karte auswerfen</button>
+        <button class="bk-action-tile bk-action-mount" id="sd-mount-button" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 14v5h14v-5"/></svg>
+          <span>SD-Karte einbinden</span>
+        </button>
+        <button class="bk-action-tile bk-action-save" id="sd-import-button" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v6h8V3M8 15h8"/></svg>
+          <span>SD-Karte sichern</span>
+        </button>
+        <button class="bk-action-tile bk-action-eject" id="sd-unmount-button" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14l6-8 6 8z"/><path d="M6 18h12"/></svg>
+          <span>SD-Karte auswerfen</span>
+        </button>
       </div>
 
       <div class="source-detail" id="sd-source-detail"></div>
