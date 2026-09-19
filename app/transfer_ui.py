@@ -175,7 +175,8 @@ TRANSFER_HTML = r'''<!doctype html>
   async function getJson(url){const response=await fetch(url,{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
   async function postJson(url){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
 
-  function formatDate(value){
+  function eventStatusLabel(status){const labels={draft:'Entwurf',planned:'geplant',applied:'angewendet',archived:'archiviert'};return labels[String(status||'')]||String(status||'');}
+    function formatDate(value){
     const date=new Date(value||'');
     if(Number.isNaN(date.getTime()))return 'Zeitpunkt unbekannt';
     return new Intl.DateTimeFormat('de-DE',{dateStyle:'medium',timeStyle:'short'}).format(date);
@@ -196,7 +197,7 @@ TRANSFER_HTML = r'''<!doctype html>
       const verification=item.released?'SSD freigegeben':(item.verified?'Vollständig geprüft':(item.verification_status||'Noch nicht geprüft'));
       const releaseDisabled=!item.ssd_release_ready;
       const releaseLabel=item.released?'SSD freigegeben':'SSD freigeben';
-      card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge ${(item.verified||item.released)?'success':'warning'}">${escapeHtml(verification)}</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(item.status)}</span></div><div class="actions"><button class="primary verify" ${summary.archive_readable?'':'disabled'}>Archiv prüfen</button><button class="release" ${releaseDisabled?'disabled':''}>${releaseLabel}</button></div><div class="result" hidden></div>`;
+      card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge ${(item.verified||item.released)?'success':'warning'}">${escapeHtml(verification)}</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div><div class="actions"><button class="primary verify" ${summary.archive_readable?'':'disabled'}>Archiv prüfen</button><button class="release" ${releaseDisabled?'disabled':''}>${releaseLabel}</button></div><div class="result" hidden></div>`;
       const result=card.querySelector('.result');
       const verifyButton=card.querySelector('.verify');
       const releaseButton=card.querySelector('.release');
@@ -212,7 +213,7 @@ TRANSFER_HTML = r'''<!doctype html>
     if(!history.length) historyList.innerHTML='<div class="empty">Noch keine freigegebenen Ereignisse im Verlauf.</div>';
     for(const item of history){
       const card=document.createElement('article');card.className='card';
-      card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">SSD freigegeben</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(item.status)}</span></div>`;
+      card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">SSD freigegeben</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div>`;
       historyList.appendChild(card);
     }
   }
