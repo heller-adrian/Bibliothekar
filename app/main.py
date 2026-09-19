@@ -1568,6 +1568,57 @@ def transfer_interface() -> HTMLResponse:
     )
 
 
+def _shell_placeholder_html(message: str = "") -> str:
+    body = (
+        f'<section class="card" style="margin-top:12px"><p style="margin:0">{message}</p></section>'
+        if message
+        else ""
+    )
+    return f"""<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bibliothekar</title>
+</head>
+<body>
+  <main>{body}</main>
+</body>
+</html>"""
+
+
+@app.get(
+    "/assistant",
+    response_class=HTMLResponse,
+    tags=["Oberfläche"],
+)
+def assistant_interface() -> HTMLResponse:
+    return HTMLResponse(
+        content=apply_shell(
+            _shell_placeholder_html(
+                "Der KI-Assistent ist in diesem Designstand noch nicht verbunden."
+            ),
+            active_area="assistant",
+        ),
+        status_code=200,
+    )
+
+
+@app.get(
+    "/metadata-correction",
+    response_class=HTMLResponse,
+    tags=["Oberfläche"],
+)
+def metadata_correction_interface() -> HTMLResponse:
+    return HTMLResponse(
+        content=apply_shell(
+            _shell_placeholder_html(),
+            active_area="metadata",
+        ),
+        status_code=200,
+    )
+
+
 @app.get(
     "/files",
     response_class=HTMLResponse,
