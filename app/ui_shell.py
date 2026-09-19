@@ -279,7 +279,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   top: 0;
   z-index: 3000;
   display: grid;
-  grid-template-columns: minmax(190px, 235px) minmax(600px, 1fr) auto;
+  grid-template-columns: minmax(190px, 235px) minmax(0, 1fr) auto;
   align-items: end;
   gap: 14px;
   min-height: 78px;
@@ -321,20 +321,22 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs {
   display: flex;
   align-items: flex-end;
-  justify-content: center;
+  justify-content: stretch;
+  width: 100%;
   min-width: 0;
   overflow: visible;
   isolation: isolate;
-  margin-bottom: -2px;
+  margin-bottom: 0;
 }
 .bk-tab {
   --bk-tab-accent: #87939a;
-  --bk-tab-bg: #555d61;
+  --bk-tab-bg: #5f686d;
   position: relative;
-  flex: 0 0 auto;
-  height: 54px;
-  margin-left: -24px;
-  padding: 0 34px;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 56px;
+  margin-left: -20px;
+  padding: 0 30px;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -350,32 +352,31 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   isolation: isolate;
 }
 .bk-tab:first-child { margin-left: 0; }
-.bk-tab[data-area="import"] {
-  --bk-tab-accent: var(--bk-red);
-  width: 240px;
-}
-.bk-tab[data-area="workspace"] {
-  --bk-tab-accent: var(--bk-blue);
-  width: 225px;
-}
-.bk-tab[data-area="archive"] {
-  --bk-tab-accent: var(--bk-yellow);
-  width: 195px;
-}
+.bk-tab[data-area="import"] { --bk-tab-accent: var(--bk-red); }
+.bk-tab[data-area="workspace"] { --bk-tab-accent: var(--bk-blue); }
+.bk-tab[data-area="archive"] { --bk-tab-accent: var(--bk-yellow); }
+
 .bk-tab::before {
   content: "";
   position: absolute;
   inset: 0;
-  bottom: -2px;
   z-index: -1;
-  background: var(--bk-tab-bg);
-  border-radius: 15px 15px 0 0;
-  box-shadow: inset 0 5px 0 var(--bk-tab-accent);
-  transform: perspective(120px) rotateX(3deg);
+  background:
+    linear-gradient(
+      to bottom,
+      var(--bk-tab-accent) 0,
+      var(--bk-tab-accent) 5px,
+      var(--bk-tab-bg) 5px,
+      var(--bk-tab-bg) 100%
+    );
+  border-radius: 16px 16px 0 0;
+  transform: perspective(170px) rotateX(2.4deg);
   transform-origin: center bottom;
+  backface-visibility: hidden;
   pointer-events: none;
 }
-.bk-tab::after { content: none !important; }
+.bk-tab::after { content: none; }
+
 .bk-tab-label,
 .bk-tab-mobile-label {
   position: relative;
@@ -384,11 +385,12 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   width: 100%;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: clip;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .bk-tab-mobile-label { display: none; }
 
+/* Stapelreihenfolge: aktive Karte vorn, die übrigen laufen dahinter weiter. */
 .bk-tabs-active-import .bk-tab[data-area="import"] { z-index: 30; }
 .bk-tabs-active-import .bk-tab[data-area="workspace"] { z-index: 20; }
 .bk-tabs-active-import .bk-tab[data-area="archive"] { z-index: 10; }
@@ -401,25 +403,75 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs-active-archive .bk-tab[data-area="workspace"] { z-index: 20; }
 .bk-tabs-active-archive .bk-tab[data-area="archive"] { z-index: 30; }
 
+/* Tiefenabstufung: weiter hinten = im Dark Mode heller, im Light Mode dunkler. */
+html[data-bk-theme="dark"] .bk-tabs-active-import .bk-tab[data-area="workspace"],
+html[data-bk-theme="dark"] .bk-tabs-active-archive .bk-tab[data-area="workspace"] {
+  --bk-tab-bg: #5f686d;
+}
+html[data-bk-theme="dark"] .bk-tabs-active-import .bk-tab[data-area="archive"],
+html[data-bk-theme="dark"] .bk-tabs-active-archive .bk-tab[data-area="import"] {
+  --bk-tab-bg: #70797e;
+}
+html[data-bk-theme="dark"] .bk-tabs-active-workspace .bk-tab[data-area="import"] {
+  --bk-tab-bg: #687176;
+}
+html[data-bk-theme="dark"] .bk-tabs-active-workspace .bk-tab[data-area="archive"] {
+  --bk-tab-bg: #737c81;
+}
+
+html[data-bk-theme="light"] .bk-tabs-active-import .bk-tab[data-area="workspace"],
+html[data-bk-theme="light"] .bk-tabs-active-archive .bk-tab[data-area="workspace"] {
+  --bk-tab-bg: #d6d8d7;
+  color: #1b2731 !important;
+}
+html[data-bk-theme="light"] .bk-tabs-active-import .bk-tab[data-area="archive"],
+html[data-bk-theme="light"] .bk-tabs-active-archive .bk-tab[data-area="import"] {
+  --bk-tab-bg: #c3c6c5;
+  color: #1b2731 !important;
+}
+html[data-bk-theme="light"] .bk-tabs-active-workspace .bk-tab[data-area="import"] {
+  --bk-tab-bg: #cbd0cf;
+  color: #1b2731 !important;
+}
+html[data-bk-theme="light"] .bk-tabs-active-workspace .bk-tab[data-area="archive"] {
+  --bk-tab-bg: #c0c4c3;
+  color: #1b2731 !important;
+}
+
 .bk-tab.active {
   --bk-tab-bg: var(--bk-page-bg, var(--bk-paper));
-  height: 62px;
+  height: 64px;
   padding-top: 5px;
   color: var(--bk-ink) !important;
   z-index: 40 !important;
 }
 .bk-tab.active::before {
+  background:
+    linear-gradient(
+      to bottom,
+      var(--bk-tab-accent) 0,
+      var(--bk-tab-accent) 5px,
+      var(--bk-page-bg, var(--bk-paper)) 5px,
+      var(--bk-page-bg, var(--bk-paper)) 100%
+    );
+}
+/* Auswärts laufende, abgerundete Schulter in die Seite hinein. */
+.bk-tab.active::after {
+  content: "";
+  position: absolute;
+  left: -19px;
+  right: -19px;
+  bottom: -1px;
+  height: 17px;
+  z-index: -2;
   background: var(--bk-page-bg, var(--bk-paper));
-  border-radius: 15px 15px 0 0;
+  border-radius: 18px 18px 0 0;
+  pointer-events: none;
 }
 
-.bk-tab:hover:not(.active) { --bk-tab-bg: #626b70; }
-html[data-bk-theme="light"] .bk-tab:not(.active) {
-  --bk-tab-bg: #d4d7d6;
-  color: #1b2731 !important;
+.bk-tab:hover:not(.active) {
+  filter: brightness(1.035);
 }
-html[data-bk-theme="light"] .bk-tab:hover:not(.active) { --bk-tab-bg: #e1e2df; }
-
 .bk-shell-actions {
   position: relative;
   z-index: 80;
@@ -504,6 +556,7 @@ html[data-bk-theme="light"] .bk-tab:hover:not(.active) { --bk-tab-bg: #e1e2df; }
 .bk-menu button,
 .bk-menu a {
   width: 100%;
+  box-sizing: border-box;
   height: 44px;
   min-height: 44px;
   flex: 0 0 44px;
@@ -907,29 +960,35 @@ body.bibliothekar-redesign .job details {
   margin-top: 5px !important;
 }
 
-body[data-bk-area="workspace"] .command-header,
-body[data-bk-area="workspace"] .command-header .toolbar,
-body[data-bk-area="workspace"] .command-header .toolbar label {
-  background: transparent !important;
-  background-color: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-body[data-bk-area="workspace"] .command-header {
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-body[data-bk-area="workspace"] .command-header .toolbar {
-  padding: 0 !important;
-}
+body[data-bk-area="workspace"] .bk-workspace-command,
+body[data-bk-area="workspace"] .bk-workspace-job-picker,
+body[data-bk-area="workspace"] .bk-workspace-job-picker label,
 body[data-bk-area="import"] .bk-metadata-toolbar,
 body[data-bk-area="import"] .bk-metadata-toolbar .notice {
   background: transparent !important;
   background-color: transparent !important;
   border: 0 !important;
+  outline: 0 !important;
   box-shadow: none !important;
 }
+body[data-bk-area="workspace"] .bk-workspace-command {
+  margin: 0 0 18px !important;
+  padding: 0 !important;
+}
+body[data-bk-area="workspace"] .bk-workspace-job-picker {
+  display: block;
+  margin: 0 0 16px !important;
+  padding: 0 !important;
+}
+body[data-bk-area="workspace"] .bk-workspace-job-picker label {
+  display: grid;
+  gap: 6px;
+}
 body[data-bk-area="import"] .bk-metadata-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
   padding: 0 !important;
   margin: 22px 0 24px !important;
 }
@@ -946,26 +1005,35 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
 
 @media (min-width: 821px) and (max-width: 1120px) {
   .bk-shell {
-    grid-template-columns: 180px minmax(500px, 1fr) auto;
+    grid-template-columns: 170px minmax(0, 1fr) auto;
     gap: 10px;
     padding-inline: 16px;
   }
   .bk-brand { font-size: 1.08rem; }
-  .bk-tab[data-area="import"] { width: 210px; }
-  .bk-tab[data-area="workspace"] { width: 195px; }
-  .bk-tab[data-area="archive"] { width: 170px; }
-  .bk-tab { padding-inline: 26px; margin-left: -22px; font-size: .9rem; }
+  .bk-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 22px;
+    margin-left: -18px;
+    font-size: .9rem;
+  }
   .bk-task-label { display: none; }
 }
 
 @media (min-width: 1500px) {
   .bk-shell {
-    grid-template-columns: 260px minmax(660px, 1fr) auto;
-    padding-inline: 28px;
+    grid-template-columns: 250px minmax(0, 1fr) auto;
+    padding-inline: 26px;
   }
-  .bk-tab[data-area="import"] { width: 260px; }
-  .bk-tab[data-area="workspace"] { width: 240px; }
-  .bk-tab[data-area="archive"] { width: 205px; }
+  .bk-tabs {
+    width: 100%;
+    max-width: none;
+  }
+  .bk-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 38px;
+  }
 }
 
 @media (max-width: 820px) {
@@ -999,14 +1067,14 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     grid-row: 2;
     width: 100%;
     margin-top: 7px;
-    margin-bottom: -2px;
+    margin-bottom: 0;
     display: flex;
   }
   .bk-tab {
     min-width: 0;
     max-width: none;
     height: 44px;
-    margin-left: -12px;
+    margin-left: -10px;
     padding: 0 9px;
     font-size: .76rem;
   }
@@ -1023,11 +1091,16 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   }
   .bk-tab::before {
     inset: 0;
-    bottom: -2px;
-    transform: perspective(90px) rotateX(3deg);
+    transform: perspective(100px) rotateX(2.4deg);
     border-radius: 12px 12px 0 0;
   }
-  .bk-tab::after { content: none !important; }
+  .bk-tab.active::after {
+    left: -10px;
+    right: -10px;
+    bottom: -1px;
+    height: 12px;
+    border-radius: 12px 12px 0 0;
+  }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
     display: inline-block;
@@ -1399,7 +1472,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       </a>
       <div class="bk-menu-separator"></div>
       <button type="button" data-bk-open-about>
-        <span class="bk-menu-icon" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7h.01"/></svg></span>
+        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7h.01"/></svg></span>
         <span>Über Bibliothekar</span>
       </button>
     </div>
