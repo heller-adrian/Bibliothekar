@@ -11,7 +11,13 @@
 - Quellenwahl zeigt nur die aktive Quelle und öffnet SD-Karte, Laufwerk oder Ordner/Sicherung als Popover
 - SD-Aktionen sind kompakter, rechteckiger und mit eigenen Icons versehen
 - „SD-Karte sichern“ ist als grüne Primäraktion ausgezeichnet; Auswerfen bleibt neutral
-- Desktop-Komponenten orientieren sich stärker an der Bauhaus-Blaupause; Mobile bleibt bewusst ein eigener späterer Designschritt
+- Desktop-Komponenten orientieren sich stärker an der Bauhaus-Blaupause
+- Mobile Hochformatansicht verwendet eine einklappbare Registerleiste am rechten Rand statt der breiten Desktop-Reiter
+- Mobile Menü- und Aufgaben-Panels liegen als eigene Overlays über der Navigation und kollidieren nicht mehr mit den Registern
+- der Assistent erscheint mobil als eigener Registermodus und öffnet eine vollflächige Assistentenansicht
+- Import, Arbeitsbereich und Archiv erhalten sehr leichte bereichsspezifische Rot-/Blau-/Gelb-Hintergrundtöne
+- „Ereignis erstellen“ ist grün statt rot; Rot bleibt Warn-/Löschaktionen vorbehalten
+- mobile Importaktionen, Arbeitsbereich-Aktionsleiste und Archivstatistik werden kompakter gestapelt
 
 ### 0.22.0 – Redesign / Produktschale
 
