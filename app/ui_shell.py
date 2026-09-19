@@ -456,6 +456,113 @@ body.bibliothekar-redesign > .global-task-panel {
 .bk-help:hover::after,
 .bk-help:focus-visible::after { opacity: 1; }
 
+
+/* Importseite */
+body.bibliothekar-redesign .import-panel {
+  padding: 20px !important;
+}
+.bk-import-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 5px;
+}
+.bk-import-head h2 { margin: 0; }
+.bk-source-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 8px;
+  max-width: 500px;
+  margin: 16px 0 18px;
+}
+.bk-source-choice {
+  min-height: 78px !important;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  padding: 10px !important;
+  border-radius: 13px !important;
+  opacity: .58;
+  transform: scale(.96);
+  transition: opacity .15s ease, transform .15s ease, border-color .15s ease;
+}
+.bk-source-choice:hover { opacity: .86; transform: scale(.985); }
+.bk-source-choice.active {
+  opacity: 1;
+  transform: scale(1);
+  border-color: var(--bk-red) !important;
+  background: var(--bk-surface) !important;
+}
+.bk-source-icon {
+  font-size: 1.55rem;
+  line-height: 1;
+}
+.bk-source-choice strong {
+  font-size: .82rem;
+  white-space: nowrap;
+}
+body.bibliothekar-redesign .sd-actions {
+  grid-template-columns: minmax(230px,1.5fr) repeat(3,minmax(125px,.75fr)) !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+body.bibliothekar-redesign .sd-actions > * {
+  min-height: 54px !important;
+}
+body.bibliothekar-redesign .other-source-panel {
+  margin-top: 12px !important;
+}
+body.bibliothekar-redesign .other-source-panel > summary {
+  color: var(--bk-muted) !important;
+}
+.bk-source-mode-note {
+  margin: -7px 0 10px;
+  color: var(--bk-muted);
+  font-size: .9rem;
+}
+
+body.bibliothekar-redesign .jobs {
+  gap: 9px !important;
+}
+body.bibliothekar-redesign .job {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: 68px minmax(0,1fr);
+  column-gap: 14px;
+  padding: 12px 14px !important;
+}
+body.bibliothekar-redesign .job > *:not(.bk-job-thumb) {
+  grid-column: 2;
+}
+.bk-job-thumb {
+  grid-column: 1;
+  grid-row: 1 / span 6;
+  width: 68px;
+  height: 68px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bk-surface-2);
+  border: 1px solid var(--bk-line);
+  display: grid;
+  place-items: center;
+  color: var(--bk-muted);
+  font-size: 1.35rem;
+}
+.bk-job-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+body.bibliothekar-redesign .job-description {
+  display: none;
+}
+body.bibliothekar-redesign .job .message {
+  margin-top: 6px !important;
+}
+body.bibliothekar-redesign .job details {
+  margin-top: 5px !important;
+}
+
 @media (max-width: 820px) {
   .bk-shell {
     grid-template-columns: 1fr auto;
@@ -475,6 +582,12 @@ body.bibliothekar-redesign > .global-task-panel {
   .bk-task-label { display: none; }
 }
 
+
+@media (max-width: 760px) {
+  .bk-source-picker { grid-template-columns: repeat(3, minmax(95px,1fr)); max-width: 100%; }
+  body.bibliothekar-redesign .sd-actions { grid-template-columns: 1fr 1fr !important; }
+  body.bibliothekar-redesign .sd-actions .mount-state { grid-column: 1 / -1; }
+}
 @media (max-width: 560px) {
   .bk-brand { font-size: 1.08rem; }
   .bk-mark { transform: scale(.9); transform-origin: left center; }
@@ -560,6 +673,32 @@ BIBLIOTHEKAR_JS = r"""
     const open = aiPanel?.hasAttribute("hidden");
     if (open) aiPanel?.removeAttribute("hidden"); else aiPanel?.setAttribute("hidden", "");
   });
+
+
+  // Quellenwahl der Importseite: gleiche vorhandene Funktionen, kompakter dargestellt.
+  const sourcePicker = document.getElementById("bk-source-picker");
+  if (sourcePicker) {
+    const otherPanel = document.querySelector(".other-source-panel");
+    const setSourceMode = (mode) => {
+      sourcePicker.querySelectorAll("[data-source-mode]").forEach(button => {
+        button.classList.toggle("active", button.dataset.sourceMode === mode);
+      });
+      if (mode === "sd") {
+        if (otherPanel) otherPanel.open = false;
+        document.getElementById("sd-card-status")?.scrollIntoView({behavior:"smooth", block:"nearest"});
+      } else if (mode === "drive") {
+        if (otherPanel) otherPanel.open = true;
+        setTimeout(() => document.getElementById("device-select")?.scrollIntoView({behavior:"smooth", block:"center"}), 20);
+      } else if (mode === "folder") {
+        if (otherPanel) otherPanel.open = true;
+        setTimeout(() => document.getElementById("folder-root-select")?.scrollIntoView({behavior:"smooth", block:"center"}), 20);
+      }
+    };
+    sourcePicker.querySelectorAll("[data-source-mode]").forEach(button => {
+      button.addEventListener("click", () => setSourceMode(button.dataset.sourceMode));
+    });
+    setSourceMode("sd");
+  }
 
   async function refreshTasks() {
     const countNode = document.getElementById("bk-task-count");
