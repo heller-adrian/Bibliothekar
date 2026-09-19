@@ -12,12 +12,16 @@
 - SD-Aktionen sind kompakter, rechteckiger und mit eigenen Icons versehen
 - „SD-Karte sichern“ ist als grüne Primäraktion ausgezeichnet; Auswerfen bleibt neutral
 - Desktop-Komponenten orientieren sich stärker an der Bauhaus-Blaupause
-- Mobile Hochformatansicht verwendet eine einklappbare Registerleiste am rechten Rand statt der breiten Desktop-Reiter
-- Mobile Menü- und Aufgaben-Panels liegen als eigene Overlays über der Navigation und kollidieren nicht mehr mit den Registern
-- der Assistent erscheint mobil als eigener Registermodus und öffnet eine vollflächige Assistentenansicht
-- Import, Arbeitsbereich und Archiv erhalten sehr leichte bereichsspezifische Rot-/Blau-/Gelb-Hintergrundtöne
-- „Ereignis erstellen“ ist grün statt rot; Rot bleibt Warn-/Löschaktionen vorbehalten
-- mobile Importaktionen, Arbeitsbereich-Aktionsleiste und Archivstatistik werden kompakter gestapelt
+- Desktop und Mobile verwenden dasselbe horizontale Registerprinzip im Header; die frühere mobile Seitenleiste wurde wieder entfernt
+- Hauptregister sind abgerundete, gestaffelte Ordnerlaschen: der aktive Bereich liegt sichtbar vor den übrigen Registern und geht ohne dunkle Trennkante in die Seite über
+- der Bibliothekar-Assistent ist ein eigener Header-Reiter statt eines Floating-Buttons unten rechts
+- Mobile Menü- und Aufgaben-Panels liegen als eigene Overlays über der Registerzeile
+- Import, Arbeitsbereich und Archiv behalten sehr leichte bereichsspezifische Rot-/Blau-/Gelb-Hintergrundtöne
+- Import & Prüfung wiederholt Rot gezielt als linken Akzent an „Quelle sichern“
+- Arbeitsbereich verwendet Blau für „Ereignis erstellen“ und „Metadaten eindeutig“
+- offene Archivprüfungen erhalten einen gelben Kartenakzent
+- SD-Karte, Laufwerk und Ordner/Sicherung sind wieder als drei gleichwertige, füllende Quellkarten nebeneinander sichtbar
+- alte rechteckige Fremdflächen bei „Sicherung auswählen“ und „Metadaten prüfen“ werden neutralisiert; Diagnose und Importverlauf erhalten mehr Abstand
 
 ### 0.22.0 – Redesign / Produktschale
 
