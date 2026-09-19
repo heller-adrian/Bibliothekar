@@ -92,15 +92,18 @@ def test_0221_menu_entries_and_legacy_toolbars_are_visually_normalized():
     assert 'body[data-bk-area="import"] .bk-metadata-toolbar .notice' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_registers_use_same_inactive_color_and_side_only_depth():
+def test_0222_registers_use_same_inactive_color_and_shadow_only_under_overlapping_tabs():
     assert 'flex: 1 1 0;' in BIBLIOTHEKAR_CSS
     assert 'margin-bottom: 0;' in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-side-shadow:' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-bg: #5f686d;' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-bg: #d3d6d5;' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-side-shadow' not in BIBLIOTHEKAR_CSS
+    assert '--bk-stack-shadow:' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-import .bk-tab[data-area="workspace"]::after' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-workspace .bk-tab[data-area="import"]::after' in BIBLIOTHEKAR_CSS
+    assert 'background: linear-gradient(to right, var(--bk-stack-shadow), transparent);' in BIBLIOTHEKAR_CSS
+    assert 'background: linear-gradient(to left, var(--bk-stack-shadow), transparent);' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
-    assert 'linear-gradient(to right, var(--bk-tab-side-shadow), transparent 5px)' in BIBLIOTHEKAR_CSS
-    assert 'linear-gradient(to left, var(--bk-tab-side-shadow), transparent 5px)' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
 
@@ -149,9 +152,14 @@ def test_0221_page_heading_and_main_share_same_horizontal_inset():
     assert 'padding-right: 18px;' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_register_shoulder_and_side_shadow_stay_subtle():
+def test_0222_register_shoulder_tracks_trapezoid_slope_and_shadow_stays_side_only():
     assert '--bk-shoulder-size: 12px;' in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-side-shadow: rgb(0 0 0 / .09);' in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-side-shadow: rgb(18 32 51 / .05);' in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-side-shadow: rgb(0 0 0 / .035);' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-skew-left: -12deg;' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-skew-right: 12deg;' in BIBLIOTHEKAR_CSS
+    assert 'transform: skewX(var(--bk-shoulder-skew-left));' in BIBLIOTHEKAR_CSS
+    assert 'transform: skewX(var(--bk-shoulder-skew-right));' in BIBLIOTHEKAR_CSS
+    assert '--bk-stack-shadow: rgb(0 0 0 / .18);' in BIBLIOTHEKAR_CSS
+    assert '--bk-stack-shadow: rgb(18 32 51 / .12);' in BIBLIOTHEKAR_CSS
+    assert 'top: 5px;' in BIBLIOTHEKAR_CSS
+    assert 'bottom: 0;' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
