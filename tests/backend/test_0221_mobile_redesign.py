@@ -33,3 +33,8 @@ def test_0221_assistant_is_small_header_action_not_large_register():
     assert 'href="/assistant"' in html
     assert 'id="bk-ai-tab"' not in html
     assert 'id="bk-ai-panel"' not in html
+
+
+def test_0221_mobile_tabs_use_single_trapezoid_plane_without_double_wings():
+    assert 'transform: perspective(90px) rotateX(3deg);' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab::after { content: none !important; }' in BIBLIOTHEKAR_CSS
