@@ -4,7 +4,7 @@ from app.events_ui import EVENTS_HTML
 
 
 def test_0203_version():
-    assert APP_VERSION == "0.22.0"
+    assert APP_VERSION == "0.22.1"
 
 
 def test_no_event_range_generator_locks_existing_month():
