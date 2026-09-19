@@ -5735,49 +5735,53 @@ def index() -> str:
       <details class="other-source-panel">
         <summary>Andere Quelle verwenden</summary>
         <div class="other-source-content">
-          <h3>Externes Laufwerk vollständig sichern</h3>
-          <p class="section-description">
-            Eine erkannte USB-Festplatte oder ein USB-Stick wird wie eine
-            SD-Karte vollständig und nur lesend verarbeitet.
-          </p>
-          <div class="import-controls">
-            <select id="device-select" aria-label="Externes Laufwerk">
-              <option value="">Laufwerke werden geladen …</option>
-            </select>
-            <button class="secondary" id="device-mount-button" type="button" disabled>
-              Laufwerk einbinden
-            </button>
-          </div>
-
-          <h3>Sicherungsordner auswählen</h3>
-          <p class="section-description">
-            Wähle einen einzelnen Ordner auf dem NAS oder auf einem bereits
-            eingebundenen Wechselmedium. Nur dieser Ordner wird importiert.
-          </p>
-          <div class="folder-browser">
-            <select id="folder-root-select" aria-label="Quellenbereich">
-              <option value="nas">NAS-Speicher</option>
-              <option value="removable">Eingebundene Wechselmedien</option>
-              <option value="saved">Bisherige Sicherungsquellen</option>
-            </select>
-            <div class="folder-path" id="folder-path">/</div>
-            <div class="folder-list" id="folder-list"></div>
+          <section class="bk-source-pane" data-source-pane="drive" hidden>
+            <h3>Externes Laufwerk vollständig sichern</h3>
+            <p class="section-description">
+              Eine erkannte USB-Festplatte oder ein USB-Stick wird wie eine
+              SD-Karte vollständig und nur lesend verarbeitet.
+            </p>
             <div class="import-controls">
-              <button class="secondary" id="folder-up-button" type="button">Eine Ebene höher</button>
-              <button class="primary" id="folder-import-button" type="button">Diesen Ordner importieren</button>
+              <select id="device-select" aria-label="Externes Laufwerk">
+                <option value="">Laufwerke werden geladen …</option>
+              </select>
+              <button class="secondary" id="device-mount-button" type="button" disabled>
+                Laufwerk einbinden
+              </button>
             </div>
-          </div>
+          </section>
 
-          <h3>Bereits erkannte Sicherungsquellen</h3>
-          <div class="import-controls">
-            <select id="source-select" aria-label="Importquelle">
-              <option value="">Quellen werden geladen …</option>
-            </select>
-            <button class="primary" id="import-button" type="button">
-              Quelle importieren
-            </button>
-          </div>
-          <div class="source-detail" id="source-detail"></div>
+          <section class="bk-source-pane" data-source-pane="folder" hidden>
+            <h3>Sicherungsordner auswählen</h3>
+            <p class="section-description">
+              Wähle einen einzelnen Ordner auf dem NAS oder auf einem bereits
+              eingebundenen Wechselmedium. Nur dieser Ordner wird importiert.
+            </p>
+            <div class="folder-browser">
+              <select id="folder-root-select" aria-label="Quellenbereich">
+                <option value="nas">NAS-Speicher</option>
+                <option value="removable">Eingebundene Wechselmedien</option>
+                <option value="saved">Bisherige Sicherungsquellen</option>
+              </select>
+              <div class="folder-path" id="folder-path">/</div>
+              <div class="folder-list" id="folder-list"></div>
+              <div class="import-controls">
+                <button class="secondary" id="folder-up-button" type="button">Eine Ebene höher</button>
+                <button class="primary" id="folder-import-button" type="button">Diesen Ordner importieren</button>
+              </div>
+            </div>
+
+            <h3>Bereits erkannte Sicherungsquellen</h3>
+            <div class="import-controls">
+              <select id="source-select" aria-label="Importquelle">
+                <option value="">Quellen werden geladen …</option>
+              </select>
+              <button class="primary" id="import-button" type="button">
+                Quelle importieren
+              </button>
+            </div>
+            <div class="source-detail" id="source-detail"></div>
+          </section>
         </div>
       </details>
     </section>
