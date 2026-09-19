@@ -324,6 +324,25 @@ body.bibliothekar-redesign > .global-task-panel {
 .bk-menu button:hover { background: var(--bk-surface-2) !important; }
 .bk-menu-separator { height: 1px; background: var(--bk-line); margin: 6px; }
 
+
+.bk-page-heading {
+  width: min(1120px, calc(100% - 36px));
+  margin: 24px auto 4px;
+}
+.bk-page-heading h1 {
+  margin: 0;
+  color: var(--bk-ink);
+  font-size: clamp(2rem, 4.5vw, 2.85rem);
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+.bk-page-heading p {
+  margin: 9px 0 0;
+  color: var(--bk-muted);
+  max-width: 760px;
+  line-height: 1.45;
+}
+
 .bk-workspace-subnav {
   width: min(1120px, calc(100% - 36px));
   margin: 18px auto -2px;
@@ -739,6 +758,28 @@ BIBLIOTHEKAR_JS = r"""
 
 def _shell_markup(active_area: str, subarea: str | None) -> str:
     active = active_area if active_area in {"import", "workspace", "archive"} else "import"
+    heading_map = {
+        ("import", None): (
+            "Import & Prüfung",
+            "Quellen einlesen, sicher prüfen und für den Arbeitsbereich vorbereiten.",
+        ),
+        ("workspace", "captures"): (
+            "Aufnahmen",
+            "Freie Aufnahmen ordnen und Ereignisse aus dem Arbeitsbestand bilden.",
+        ),
+        ("workspace", "events"): (
+            "Ereignisse",
+            "Geplante, angewendete und archivierte Ereignisse verwalten.",
+        ),
+        ("archive", None): (
+            "Archiv",
+            "Archivierung prüfen, abschließen und spätere Änderungen nachvollziehen.",
+        ),
+    }
+    heading_title, heading_subtitle = heading_map.get(
+        (active, subarea),
+        heading_map.get((active, None), ("Bibliothekar", "")),
+    )
     def tab(area: str, href: str, label: str) -> str:
         klass = "bk-tab active" if area == active else "bk-tab"
         return f'<a class="{klass}" data-area="{area}" href="{href}">{escape(label)}</a>'
@@ -750,6 +791,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Aufnahmen</a>
   <a href="/events" class="{'active' if subarea == 'events' else ''}">Ereignisse</a>
 </div>
+"""
+
+    heading = f"""
+<section class="bk-page-heading">
+  <h1>{escape(heading_title)}</h1>
+  <p>{escape(heading_subtitle)}</p>
+</section>
 """
 
     return f"""
@@ -784,6 +832,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   </div>
 </header>
 {subnav}
+{heading}
 
 <dialog id="bk-settings-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
