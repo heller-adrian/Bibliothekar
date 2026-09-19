@@ -99,8 +99,8 @@ def test_0222_registers_use_same_inactive_color_and_side_only_depth():
     assert '--bk-tab-bg: #5f686d;' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-bg: #d3d6d5;' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
-    assert 'linear-gradient(to right, var(--bk-tab-side-shadow), transparent 8px)' in BIBLIOTHEKAR_CSS
-    assert 'linear-gradient(to left, var(--bk-tab-side-shadow), transparent 8px)' in BIBLIOTHEKAR_CSS
+    assert 'linear-gradient(to right, var(--bk-tab-side-shadow), transparent 5px)' in BIBLIOTHEKAR_CSS
+    assert 'linear-gradient(to left, var(--bk-tab-side-shadow), transparent 5px)' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
 
@@ -125,7 +125,7 @@ def test_0222_register_shoulders_are_quarter_circle_transitions_not_ears():
     html = main.index()
     assert 'bk-tab-shoulder bk-tab-shoulder-left' in html
     assert 'bk-tab-shoulder bk-tab-shoulder-right' in html
-    assert '--bk-shoulder-size: 30px;' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-size: 12px;' in BIBLIOTHEKAR_CSS
     assert 'circle at left top' in BIBLIOTHEKAR_CSS
     assert 'circle at right top' in BIBLIOTHEKAR_CSS
     assert 'transparent calc(var(--bk-shoulder-size) - 1px)' in BIBLIOTHEKAR_CSS
@@ -147,3 +147,11 @@ def test_0221_page_heading_and_main_share_same_horizontal_inset():
     assert '.bk-page-heading {' in BIBLIOTHEKAR_CSS
     assert 'padding-left: 18px;' in BIBLIOTHEKAR_CSS
     assert 'padding-right: 18px;' in BIBLIOTHEKAR_CSS
+
+
+def test_0222_register_shoulder_and_side_shadow_stay_subtle():
+    assert '--bk-shoulder-size: 12px;' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-side-shadow: rgb(0 0 0 / .09);' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-side-shadow: rgb(18 32 51 / .05);' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-side-shadow: rgb(0 0 0 / .035);' in BIBLIOTHEKAR_CSS
+    assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
