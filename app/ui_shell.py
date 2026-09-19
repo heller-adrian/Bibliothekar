@@ -754,6 +754,12 @@ body.bibliothekar-redesign #sd-card-status {
   color: var(--bk-muted);
   font-size: .9rem;
 }
+.bk-source-pane {
+  padding: 4px 0 2px;
+}
+.bk-source-pane > h3:first-child {
+  margin-top: 0;
+}
 
 body.bibliothekar-redesign .jobs {
   gap: 9px !important;
@@ -936,6 +942,10 @@ BIBLIOTHEKAR_JS = r"""
       if (currentIcon) currentIcon.innerHTML = icons[mode] || icons.sd;
       sourceMenu?.setAttribute("hidden", "");
       trigger?.setAttribute("aria-expanded", "false");
+
+      document.querySelectorAll("[data-source-pane]").forEach(pane => {
+        pane.hidden = pane.dataset.sourcePane !== mode;
+      });
 
       if (mode === "sd") {
         if (otherPanel) otherPanel.open = false;
