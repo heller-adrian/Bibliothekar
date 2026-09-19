@@ -793,7 +793,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
 <body>
   <main>
-    <section class="command-header">
+    <section class="bk-workspace-command">
       <header class="page-intro">
         <h1>Sortieren</h1>
 
@@ -809,7 +809,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         <button type="button" onclick="location.href='/transfer'">Archiv</button>
       </nav>
 
-      <div class="toolbar">
+      <div class="bk-workspace-job-picker">
         <label>
           <span class="muted">
             Sicherung auswählen
