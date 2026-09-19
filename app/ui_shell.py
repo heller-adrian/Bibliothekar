@@ -726,7 +726,28 @@ body.bibliothekar-redesign .other-source-panel {
   margin-top: 10px !important;
 }
 body.bibliothekar-redesign .other-source-panel > summary {
-  color: var(--bk-muted) !important;
+  display: none !important;
+}
+body.bibliothekar-redesign #sd-card-status {
+  margin: 0 0 12px !important;
+  padding: 11px 14px !important;
+  border-radius: 10px !important;
+}
+.bk-menu-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 18px;
+}
+.bk-menu-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .bk-source-mode-note {
   margin: -5px 0 5px;
@@ -1050,10 +1071,19 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     <div id="bk-task-panel" class="bk-task-panel" hidden></div>
 
     <div id="bk-menu" class="bk-menu" hidden>
-      <button type="button" data-bk-open-settings>⚙ <span>Einstellungen</span></button>
-      <button type="button" data-bk-open-library>▤ <span>Bibliothek wechseln</span></button>
+      <button type="button" data-bk-open-settings>
+        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a8 8 0 0 0-1.7-1L14.5 3h-5L9.2 6a8 8 0 0 0-1.7 1L5 6 3 9.4 5.1 11a7 7 0 0 0 0 2L3 14.6 5 18l2.5-1a8 8 0 0 0 1.7 1l.3 3h5l.3-3a8 8 0 0 0 1.7-1l2.5 1 2-3.4-2.1-1.6a7 7 0 0 0 .1-1z"/></svg></span>
+        <span>Einstellungen</span>
+      </button>
+      <button type="button" data-bk-open-library>
+        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+        <span>Bibliothek wechseln</span>
+      </button>
       <div class="bk-menu-separator"></div>
-      <button type="button" data-bk-open-about>ⓘ <span>Über Bibliothekar</span></button>
+      <button type="button" data-bk-open-about>
+        <span class="bk-menu-icon" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7h.01"/></svg></span>
+        <span>Über Bibliothekar</span>
+      </button>
     </div>
   </div>
 </header>
