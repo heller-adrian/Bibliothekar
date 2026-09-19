@@ -101,8 +101,8 @@ def test_0222_registers_use_same_inactive_color_and_shadow_only_under_overlappin
     assert '--bk-stack-shadow:' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-import .bk-tab[data-area="workspace"]::after' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-workspace .bk-tab[data-area="import"]::after' in BIBLIOTHEKAR_CSS
-    assert 'background: linear-gradient(to right, var(--bk-stack-shadow), transparent);' in BIBLIOTHEKAR_CSS
-    assert 'background: linear-gradient(to left, var(--bk-stack-shadow), transparent);' in BIBLIOTHEKAR_CSS
+    assert 'background: linear-gradient(to right, var(--bk-stack-shadow), transparent 88%);' in BIBLIOTHEKAR_CSS
+    assert 'background: linear-gradient(to left, var(--bk-stack-shadow), transparent 88%);' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
