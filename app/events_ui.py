@@ -1229,6 +1229,17 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
 
+    function eventStatusLabel(status) {
+      const labels = {
+        draft: "Entwurf",
+        planned: "geplant",
+        applied: "angewendet",
+        archived: "archiviert"
+      };
+      return labels[String(status || "")] || String(status || "");
+    }
+
+
     function isDeletable(event) {
       return ["draft","planned","applied","archived"].includes(event.status)
         && !Number(event.pending_delete||0)
@@ -1262,7 +1273,7 @@ EVENTS_HTML = r"""<!doctype html>
         const mutation = isMutationAnchor && Number(event.pending_reassignment_count||0) === 0 ? `
           <div class="reassignment-resume"><span><strong>⚠ Änderung noch nicht angewendet</strong><br><span class="muted">Die Neu-Zuordnung ist vollständig. Die neue Struktur ist gespeichert, aber die verifizierte Nachsortierung auf der SSD steht noch aus.</span></span><button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button></div>` : "";
         card.innerHTML = `
-          <div class="event-card-header"><div><strong class="event-name">${escapeHtml(event.name)}</strong><div class="event-folder">${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(event.status)}</span></div>
+          <div class="event-card-header"><div><strong class="event-name">${escapeHtml(event.name)}</strong><div class="event-folder">${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
           ${mutation}
           ${reassign}
           <details class="event-details"><summary>Öffnen</summary><div class="event-actions">
