@@ -103,6 +103,8 @@ html[data-bk-theme] body.bibliothekar-redesign::before {
 }
 
 body.bibliothekar-redesign {
+  margin: 0 !important;
+  padding: 0 !important;
   background: var(--bk-page-bg, var(--bk-paper)) !important;
   color: var(--bk-ink) !important;
   min-height: 100vh;
@@ -122,9 +124,12 @@ body.bibliothekar-redesign::before {
 
 body.bibliothekar-redesign main {
   width: min(1440px, calc(100% - 48px)) !important;
+  box-sizing: border-box;
   margin-left: auto !important;
   margin-right: auto !important;
   padding-top: 22px !important;
+  padding-left: 18px !important;
+  padding-right: 18px !important;
 }
 
 body.bibliothekar-redesign .page-intro,
@@ -331,12 +336,13 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tab {
   --bk-tab-accent: #87939a;
   --bk-tab-bg: #5f686d;
+  --bk-tab-shadow: 0 2px 7px rgb(0 0 0 / .14);
   position: relative;
   flex: 1 1 0;
   min-width: 0;
-  height: 56px;
-  margin-left: -20px;
-  padding: 0 30px;
+  height: 57px;
+  margin-left: -34px;
+  padding: 0 48px;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -369,13 +375,37 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
       var(--bk-tab-bg) 5px,
       var(--bk-tab-bg) 100%
     );
-  border-radius: 16px 16px 0 0;
-  transform: perspective(170px) rotateX(2.4deg);
+  border-radius: 17px 17px 0 0;
+  transform: perspective(115px) rotateX(6deg);
   transform-origin: center bottom;
   backface-visibility: hidden;
+  box-shadow: var(--bk-tab-shadow);
   pointer-events: none;
 }
-.bk-tab::after { content: none; }
+
+/*
+ * Untere Schulter: der Radius beginnt an der Laschenkante und läuft
+ * nach unten nach außen. So entsteht die vom Nutzer markierte konvexe
+ * Ausrundung statt einer eingezogenen Kerbe.
+ */
+.bk-tab::after {
+  content: none;
+  position: absolute;
+  left: -34px;
+  right: -34px;
+  bottom: -1px;
+  height: 34px;
+  z-index: -2;
+  background: var(--bk-tab-bg);
+  border-radius: 34px 34px 0 0;
+  box-shadow: 0 3px 7px rgb(0 0 0 / .06);
+  pointer-events: none;
+}
+.bk-tab:first-child::after,
+.bk-tab:last-child::after,
+.bk-tab.active::after {
+  content: "";
+}
 
 .bk-tab-label,
 .bk-tab-mobile-label {
@@ -390,7 +420,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 .bk-tab-mobile-label { display: none; }
 
-/* Stapelreihenfolge: aktive Karte vorn, die übrigen laufen dahinter weiter. */
+/* Stapelreihenfolge: aktive Karte vorn; die anderen verschwinden sauber dahinter. */
 .bk-tabs-active-import .bk-tab[data-area="import"] { z-index: 30; }
 .bk-tabs-active-import .bk-tab[data-area="workspace"] { z-index: 20; }
 .bk-tabs-active-import .bk-tab[data-area="archive"] { z-index: 10; }
@@ -403,44 +433,37 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs-active-archive .bk-tab[data-area="workspace"] { z-index: 20; }
 .bk-tabs-active-archive .bk-tab[data-area="archive"] { z-index: 30; }
 
-/* Tiefenabstufung: weiter hinten = im Dark Mode heller, im Light Mode dunkler. */
-html[data-bk-theme="dark"] .bk-tabs-active-import .bk-tab[data-area="workspace"],
-html[data-bk-theme="dark"] .bk-tabs-active-archive .bk-tab[data-area="workspace"] {
-  --bk-tab-bg: #5f686d;
+/* Innenliegende obere Rundungen werden vollständig unter der vorderen Karte versteckt. */
+.bk-tabs-active-import .bk-tab[data-area="workspace"]::before,
+.bk-tabs-active-import .bk-tab[data-area="archive"]::before {
+  border-top-left-radius: 0;
 }
-html[data-bk-theme="dark"] .bk-tabs-active-import .bk-tab[data-area="archive"],
-html[data-bk-theme="dark"] .bk-tabs-active-archive .bk-tab[data-area="import"] {
-  --bk-tab-bg: #70797e;
+.bk-tabs-active-workspace .bk-tab[data-area="import"]::before {
+  border-top-right-radius: 0;
 }
-html[data-bk-theme="dark"] .bk-tabs-active-workspace .bk-tab[data-area="import"] {
-  --bk-tab-bg: #687176;
+.bk-tabs-active-workspace .bk-tab[data-area="archive"]::before {
+  border-top-left-radius: 0;
 }
-html[data-bk-theme="dark"] .bk-tabs-active-workspace .bk-tab[data-area="archive"] {
-  --bk-tab-bg: #737c81;
+.bk-tabs-active-archive .bk-tab[data-area="import"]::before,
+.bk-tabs-active-archive .bk-tab[data-area="workspace"]::before {
+  border-top-right-radius: 0;
 }
 
-html[data-bk-theme="light"] .bk-tabs-active-import .bk-tab[data-area="workspace"],
-html[data-bk-theme="light"] .bk-tabs-active-archive .bk-tab[data-area="workspace"] {
-  --bk-tab-bg: #d6d8d7;
-  color: #1b2731 !important;
+/* Inaktive Reiter haben wieder dieselbe Grundfarbe; nur der leichte Schatten zeigt Tiefe. */
+html[data-bk-theme="dark"] .bk-tab:not(.active) {
+  --bk-tab-bg: #5f686d;
+  --bk-tab-shadow: 0 2px 7px rgb(0 0 0 / .22);
+  color: #fff !important;
 }
-html[data-bk-theme="light"] .bk-tabs-active-import .bk-tab[data-area="archive"],
-html[data-bk-theme="light"] .bk-tabs-active-archive .bk-tab[data-area="import"] {
-  --bk-tab-bg: #c3c6c5;
-  color: #1b2731 !important;
-}
-html[data-bk-theme="light"] .bk-tabs-active-workspace .bk-tab[data-area="import"] {
-  --bk-tab-bg: #cbd0cf;
-  color: #1b2731 !important;
-}
-html[data-bk-theme="light"] .bk-tabs-active-workspace .bk-tab[data-area="archive"] {
-  --bk-tab-bg: #c0c4c3;
+html[data-bk-theme="light"] .bk-tab:not(.active) {
+  --bk-tab-bg: #d3d6d5;
+  --bk-tab-shadow: 0 2px 7px rgb(18 32 51 / .12);
   color: #1b2731 !important;
 }
 
 .bk-tab.active {
   --bk-tab-bg: var(--bk-page-bg, var(--bk-paper));
-  height: 64px;
+  height: 66px;
   padding-top: 5px;
   color: var(--bk-ink) !important;
   z-index: 40 !important;
@@ -454,23 +477,15 @@ html[data-bk-theme="light"] .bk-tabs-active-workspace .bk-tab[data-area="archive
       var(--bk-page-bg, var(--bk-paper)) 5px,
       var(--bk-page-bg, var(--bk-paper)) 100%
     );
+  box-shadow: 0 2px 7px rgb(0 0 0 / .10);
 }
-/* Auswärts laufende, abgerundete Schulter in die Seite hinein. */
 .bk-tab.active::after {
-  content: "";
-  position: absolute;
-  left: -19px;
-  right: -19px;
-  bottom: -1px;
-  height: 17px;
-  z-index: -2;
   background: var(--bk-page-bg, var(--bk-paper));
-  border-radius: 18px 18px 0 0;
-  pointer-events: none;
+  box-shadow: none;
 }
 
 .bk-tab:hover:not(.active) {
-  filter: brightness(1.035);
+  filter: brightness(1.025);
 }
 .bk-shell-actions {
   position: relative;
@@ -508,10 +523,17 @@ html[data-bk-theme="light"] .bk-tabs-active-workspace .bk-tab[data-area="archive
 }
 .bk-assistant-button,
 .bk-menu-button {
-  width: 42px;
-  min-width: 42px;
-  padding: 8px 0;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  flex: 0 0 44px;
+  box-sizing: border-box;
+  padding: 0 !important;
   border-radius: 12px !important;
+  align-self: center;
 }
 .bk-assistant-button {
   display: grid;
@@ -586,7 +608,10 @@ html[data-bk-theme="light"] .bk-tabs-active-workspace .bk-tab[data-area="archive
 
 .bk-page-heading {
   width: min(1440px, calc(100% - 48px));
+  box-sizing: border-box;
   margin: 24px auto 4px;
+  padding-left: 18px;
+  padding-right: 18px;
 }
 .bk-page-heading h1 {
   margin: 0;
@@ -604,7 +629,10 @@ html[data-bk-theme="light"] .bk-tabs-active-workspace .bk-tab[data-area="archive
 
 .bk-workspace-subnav {
   width: min(1440px, calc(100% - 48px));
+  box-sizing: border-box;
   margin: 18px auto -2px;
+  padding-left: 18px;
+  padding-right: 18px;
   display: flex;
   gap: 6px;
   border-bottom: 1px solid var(--bk-line);
@@ -1013,8 +1041,8 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-tab {
     flex: 1 1 0;
     min-width: 0;
-    padding-inline: 22px;
-    margin-left: -18px;
+    padding-inline: 34px;
+    margin-left: -26px;
     font-size: .9rem;
   }
   .bk-task-label { display: none; }
@@ -1032,11 +1060,21 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-tab {
     flex: 1 1 0;
     min-width: 0;
-    padding-inline: 38px;
+    padding-inline: 50px;
   }
 }
 
 @media (max-width: 820px) {
+  body.bibliothekar-redesign main {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+  .bk-page-heading,
+  .bk-workspace-subnav {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
   .bk-shell {
     min-height: 0;
     display: grid;
@@ -1060,7 +1098,15 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-task-label { display: none; }
   .bk-task-button { padding: 8px 9px; }
   .bk-assistant-button,
-  .bk-menu-button { width: 42px; min-width: 42px; }
+  .bk-menu-button {
+    width: 42px;
+    min-width: 42px;
+    max-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    max-height: 42px;
+    flex-basis: 42px;
+  }
 
   .bk-tabs {
     grid-column: 1 / -1;
@@ -1074,8 +1120,8 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     min-width: 0;
     max-width: none;
     height: 44px;
-    margin-left: -10px;
-    padding: 0 9px;
+    margin-left: -15px;
+    padding: 0 16px;
     font-size: .76rem;
   }
   .bk-tab[data-area="import"],
@@ -1091,15 +1137,15 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   }
   .bk-tab::before {
     inset: 0;
-    transform: perspective(100px) rotateX(2.4deg);
+    transform: perspective(88px) rotateX(5deg);
     border-radius: 12px 12px 0 0;
   }
-  .bk-tab.active::after {
-    left: -10px;
-    right: -10px;
+  .bk-tab::after {
+    left: -18px;
+    right: -18px;
     bottom: -1px;
-    height: 12px;
-    border-radius: 12px 12px 0 0;
+    height: 18px;
+    border-radius: 18px 18px 0 0;
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
