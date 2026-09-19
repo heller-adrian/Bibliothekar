@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### 0.22.1 – Desktop-Designpass 2
+
+- Registerkarten wirken als saubere, überlappende Trennblätter mit durchgehendem Farbakzent
+- Light Mode übernimmt nun auch die historisch dunklen Arbeitsbereich-/Ereignisflächen
+- Header-Menü ist als einheitliches Panel ohne überlappende Einzelrahmen aufgebaut
+- Statuskarten in Import & Prüfung besitzen einheitliche Linien-Icons
+- Quellenwahl zeigt nur die aktive Quelle und öffnet SD-Karte, Laufwerk oder Ordner/Sicherung als Popover
+- SD-Aktionen sind kompakter, rechteckiger und mit eigenen Icons versehen
+- „SD-Karte sichern“ ist als grüne Primäraktion ausgezeichnet; Auswerfen bleibt neutral
+- Desktop-Komponenten orientieren sich stärker an der Bauhaus-Blaupause; Mobile bleibt bewusst ein eigener späterer Designschritt
+
 ### 0.22.0 – Redesign / Produktschale
 
 - gemeinsamer Bibliothekar-App-Rahmen für Import, Arbeitsbereich und Archiv
