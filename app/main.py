@@ -5692,12 +5692,26 @@ def index() -> str:
     </div>
 
     <section class="card import-panel">
-      <h2>SD-Karte sichern</h2>
-      <p class="section-description">
-        Die Karte im Kartenleser wird automatisch erkannt, ausschließlich
-        lesend eingebunden und vollständig kopiert. Danach folgen SHA-256-
-        Prüfung, Metadatenanalyse und die Sortierung in Tagesgruppen.
-      </p>
+      <div class="bk-import-head">
+        <h2>Quelle sichern</h2>
+        <button class="bk-help" type="button" aria-label="Hilfe zur Quellenwahl" data-help="Wähle SD-Karte, externes Laufwerk oder einen Ordner. Die vorhandenen Importwege bleiben unverändert erhalten.">?</button>
+      </div>
+      <div class="bk-source-mode-note">Quelle auswählen und anschließend sicher einlesen.</div>
+
+      <div id="bk-source-picker" class="bk-source-picker" aria-label="Importquelle wählen">
+        <button type="button" class="bk-source-choice active" data-source-mode="sd">
+          <span class="bk-source-icon">▣</span>
+          <strong>SD-Karte</strong>
+        </button>
+        <button type="button" class="bk-source-choice" data-source-mode="drive">
+          <span class="bk-source-icon">▰</span>
+          <strong>Laufwerk</strong>
+        </button>
+        <button type="button" class="bk-source-choice" data-source-mode="folder">
+          <span class="bk-source-icon">▱</span>
+          <strong>Ordner / Sicherung</strong>
+        </button>
+      </div>
 
       <div class="source-device-card" id="sd-card-status">
         SD-Karte wird gesucht …
@@ -5801,11 +5815,10 @@ def index() -> str:
     </details>
 
     <section>
-      <h2>Import- und Prüfverlauf</h2>
-      <p class="section-description">
-        Jeder Eintrag steht für einen vollständigen Hintergrundvorgang.
-        Technische Kennungen bleiben in den ausklappbaren Details.
-      </p>
+      <div class="bk-import-head">
+        <h2>Import- und Prüfverlauf</h2>
+        <button class="bk-help" type="button" aria-label="Hilfe zum Verlauf" data-help="Jeder Eintrag zeigt einen Importvorgang. Fortschritt und Status aktualisieren sich automatisch; technische Details bleiben ausklappbar.">?</button>
+      </div>
 
       <div
         class="jobs"
@@ -6110,8 +6123,14 @@ def index() -> str:
         `
         : "";
 
+      const jobId = String(job.job_id || job.id || "");
+      const thumbnail = job.operation === "folder_import"
+        ? `<div class="bk-job-thumb"><img src="/api/jobs/${encodeURIComponent(jobId)}/thumbnail" alt="" loading="lazy" onerror="this.remove();this.parentElement.textContent='▣'"></div>`
+        : `<div class="bk-job-thumb" aria-hidden="true">▣</div>`;
+
       return `
         <article class="job">
+          ${thumbnail}
           <div class="job-header">
             <div class="job-title">
               <div class="job-name">
