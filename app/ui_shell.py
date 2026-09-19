@@ -336,7 +336,8 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tab {
   --bk-tab-accent: #87939a;
   --bk-tab-bg: #5f686d;
-  --bk-shoulder-skew: 12deg;
+  --bk-shoulder-skew-left: -12deg;
+  --bk-shoulder-skew-right: 12deg;
   position: relative;
   flex: 1 1 0;
   min-width: 0;
@@ -404,7 +405,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 .bk-tab-shoulder-left {
   left: calc(-1 * var(--bk-shoulder-size));
-  transform: skewX(calc(-1 * var(--bk-shoulder-skew)));
+  transform: skewX(var(--bk-shoulder-skew-left));
   transform-origin: right bottom;
   background:
     radial-gradient(
@@ -416,7 +417,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 .bk-tab-shoulder-right {
   right: calc(-1 * var(--bk-shoulder-size));
-  transform: skewX(var(--bk-shoulder-skew));
+  transform: skewX(var(--bk-shoulder-skew-right));
   transform-origin: left bottom;
   background:
     radial-gradient(
@@ -478,7 +479,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   top: 5px;
   bottom: 0;
   width: 10px;
-  z-index: 3;
+  z-index: 1;
   opacity: 0;
   pointer-events: none;
 }
@@ -1203,7 +1204,8 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     border-radius: 12px 12px 0 0;
   }
   .bk-tab {
-    --bk-shoulder-skew: 7deg;
+    --bk-shoulder-skew-left: -7deg;
+    --bk-shoulder-skew-right: 7deg;
   }
   .bk-tab-shoulder {
     --bk-shoulder-size: 8px;
