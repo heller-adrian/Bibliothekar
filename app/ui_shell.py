@@ -336,7 +336,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tab {
   --bk-tab-accent: #87939a;
   --bk-tab-bg: #5f686d;
-  --bk-tab-shadow: 0 2px 7px rgb(0 0 0 / .14);
+  --bk-tab-side-shadow: rgb(0 0 0 / .12);
   position: relative;
   flex: 1 1 0;
   min-width: 0;
@@ -362,12 +362,17 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tab[data-area="workspace"] { --bk-tab-accent: var(--bk-blue); }
 .bk-tab[data-area="archive"] { --bk-tab-accent: var(--bk-yellow); }
 
+/* Eigentliche Trapezfläche. Kein Schatten nach unten. */
 .bk-tab::before {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   background:
+    linear-gradient(to right, var(--bk-tab-side-shadow), transparent 8px)
+      left 5px / 8px calc(100% - 5px) no-repeat,
+    linear-gradient(to left, var(--bk-tab-side-shadow), transparent 8px)
+      right 5px / 8px calc(100% - 5px) no-repeat,
     linear-gradient(
       to bottom,
       var(--bk-tab-accent) 0,
@@ -376,32 +381,63 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
       var(--bk-tab-bg) 100%
     );
   border-radius: 17px 17px 0 0;
-  transform: perspective(115px) rotateX(6deg);
+  transform: perspective(108px) rotateX(7deg);
   transform-origin: center bottom;
   backface-visibility: hidden;
-  box-shadow: var(--bk-tab-shadow);
+  box-shadow: none;
   pointer-events: none;
 }
 
 /*
- * Untere Register-Schulter:
- * Kein zusätzliches helles "Ohr" mehr außerhalb der Karte.
- * Stattdessen wird die Kartenfläche selbst unten rund ausgeschnitten.
- * Dadurch dreht sich der Bogen sichtbar in die Gegenrichtung und die
- * Registerkarte läuft direkt in die darunterliegende Seitenfläche aus.
+ * Browser-Tab-Schultern:
+ * Das Quadrat selbst bleibt transparent. Gefüllt wird nur der Bereich
+ * AUSSERHALB des Viertelkreises. Dadurch verläuft die sichtbare Kante
+ * von der Trapezseite nach außen/unten und endet tangential in der Seite.
+ * Kein angehängter Halbkreis, kein "Ohr".
  */
-.bk-tab::after {
-  content: none;
+.bk-tab-shoulder {
+  --bk-shoulder-size: 30px;
+  --bk-shoulder-color: var(--bk-tab-bg);
+  position: absolute;
+  bottom: 0;
+  width: var(--bk-shoulder-size);
+  height: var(--bk-shoulder-size);
+  display: none;
+  z-index: 1;
+  pointer-events: none;
 }
-.bk-tab:first-child::before {
-  border-bottom-left-radius: 34px;
+.bk-tab-shoulder-left {
+  left: calc(-1 * var(--bk-shoulder-size));
+  background:
+    radial-gradient(
+      circle at left top,
+      transparent 0,
+      transparent calc(var(--bk-shoulder-size) - 1px),
+      var(--bk-shoulder-color) var(--bk-shoulder-size)
+    );
 }
-.bk-tab:last-child::before {
-  border-bottom-right-radius: 34px;
+.bk-tab-shoulder-right {
+  right: calc(-1 * var(--bk-shoulder-size));
+  background:
+    radial-gradient(
+      circle at right top,
+      transparent 0,
+      transparent calc(var(--bk-shoulder-size) - 1px),
+      var(--bk-shoulder-color) var(--bk-shoulder-size)
+    );
 }
-.bk-tab.active::before {
-  border-bottom-left-radius: 34px;
-  border-bottom-right-radius: 34px;
+
+/* Aktive Seite: beide Schultern gehen direkt in den Seitenhintergrund über. */
+.bk-tab.active .bk-tab-shoulder {
+  display: block;
+  --bk-shoulder-color: var(--bk-page-bg, var(--bk-paper));
+}
+/* Gruppenabschluss: nur die nach außen sichtbare Schulter bleibt stehen. */
+.bk-tab:first-child:not(.active) .bk-tab-shoulder-left {
+  display: block;
+}
+.bk-tab:last-child:not(.active) .bk-tab-shoulder-right {
+  display: block;
 }
 
 .bk-tab-label,
@@ -417,7 +453,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 .bk-tab-mobile-label { display: none; }
 
-/* Stapelreihenfolge: aktive Karte vorn; die anderen verschwinden sauber dahinter. */
+/* Stapelreihenfolge: aktive Karte vorn; innere Abschlüsse verschwinden dahinter. */
 .bk-tabs-active-import .bk-tab[data-area="import"] { z-index: 30; }
 .bk-tabs-active-import .bk-tab[data-area="workspace"] { z-index: 20; }
 .bk-tabs-active-import .bk-tab[data-area="archive"] { z-index: 10; }
@@ -430,7 +466,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs-active-archive .bk-tab[data-area="workspace"] { z-index: 20; }
 .bk-tabs-active-archive .bk-tab[data-area="archive"] { z-index: 30; }
 
-/* Innenliegende obere Rundungen werden vollständig unter der vorderen Karte versteckt. */
+/* Innenliegende obere Rundungen werden unter der vorderen Karte verborgen. */
 .bk-tabs-active-import .bk-tab[data-area="workspace"]::before,
 .bk-tabs-active-import .bk-tab[data-area="archive"]::before {
   border-top-left-radius: 0;
@@ -446,20 +482,21 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   border-top-right-radius: 0;
 }
 
-/* Inaktive Reiter haben wieder dieselbe Grundfarbe; nur der leichte Schatten zeigt Tiefe. */
+/* Alle inaktiven Register behalten dieselbe Grundfarbe. */
 html[data-bk-theme="dark"] .bk-tab:not(.active) {
   --bk-tab-bg: #5f686d;
-  --bk-tab-shadow: 0 2px 7px rgb(0 0 0 / .22);
+  --bk-tab-side-shadow: rgb(0 0 0 / .16);
   color: #fff !important;
 }
 html[data-bk-theme="light"] .bk-tab:not(.active) {
   --bk-tab-bg: #d3d6d5;
-  --bk-tab-shadow: 0 2px 7px rgb(18 32 51 / .12);
+  --bk-tab-side-shadow: rgb(18 32 51 / .08);
   color: #1b2731 !important;
 }
 
 .bk-tab.active {
   --bk-tab-bg: var(--bk-page-bg, var(--bk-paper));
+  --bk-tab-side-shadow: rgb(0 0 0 / .07);
   height: 66px;
   padding-top: 5px;
   color: var(--bk-ink) !important;
@@ -467,6 +504,10 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 }
 .bk-tab.active::before {
   background:
+    linear-gradient(to right, var(--bk-tab-side-shadow), transparent 8px)
+      left 5px / 8px calc(100% - 5px) no-repeat,
+    linear-gradient(to left, var(--bk-tab-side-shadow), transparent 8px)
+      right 5px / 8px calc(100% - 5px) no-repeat,
     linear-gradient(
       to bottom,
       var(--bk-tab-accent) 0,
@@ -474,7 +515,6 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
       var(--bk-page-bg, var(--bk-paper)) 5px,
       var(--bk-page-bg, var(--bk-paper)) 100%
     );
-  box-shadow: 0 2px 7px rgb(0 0 0 / .10);
 }
 .bk-tab:hover:not(.active) {
   filter: brightness(1.025);
@@ -1132,15 +1172,8 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     transform: perspective(88px) rotateX(5deg);
     border-radius: 12px 12px 0 0;
   }
-  .bk-tab:first-child::before {
-    border-bottom-left-radius: 18px;
-  }
-  .bk-tab:last-child::before {
-    border-bottom-right-radius: 18px;
-  }
-  .bk-tab.active::before {
-    border-bottom-left-radius: 18px;
-    border-bottom-right-radius: 18px;
+  .bk-tab-shoulder {
+    --bk-shoulder-size: 18px;
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
@@ -1451,6 +1484,8 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         klass = "bk-tab active" if area == active else "bk-tab"
         return (
             f'<a class="{klass}" data-area="{area}" href="{href}">'
+            f'<span class="bk-tab-shoulder bk-tab-shoulder-left" aria-hidden="true"></span>'
+            f'<span class="bk-tab-shoulder bk-tab-shoulder-right" aria-hidden="true"></span>'
             f'<span class="bk-tab-label">{escape(label)}</span>'
             f'<span class="bk-tab-mobile-label">{escape(mobile_label)}</span>'
             f'</a>'
