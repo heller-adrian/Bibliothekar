@@ -35,8 +35,10 @@ def test_0221_assistant_is_small_header_action_not_large_register():
     assert 'id="bk-ai-panel"' not in html
 
 
-def test_0222_mobile_tabs_keep_trapezoid_and_smaller_browser_shoulders():
+def test_0222_mobile_tabs_keep_trapezoid_with_matching_shoulder_slope():
     assert 'transform: perspective(88px) rotateX(5deg);' in BIBLIOTHEKAR_CSS
     assert '--bk-shoulder-size: 8px;' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-skew-left: -7deg;' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-skew-right: 7deg;' in BIBLIOTHEKAR_CSS
     assert 'bk-tab-shoulder-left' in main.index()
     assert 'bk-tab-shoulder-right' in main.index()
