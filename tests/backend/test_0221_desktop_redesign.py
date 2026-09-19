@@ -118,13 +118,14 @@ def test_0221_about_menu_icon_has_valid_svg_wrapper():
     assert '<span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"' in html
 
 
-def test_0221_active_register_has_outward_convex_shoulders():
-    assert 'left: -34px;' in BIBLIOTHEKAR_CSS
-    assert 'right: -34px;' in BIBLIOTHEKAR_CSS
-    assert 'height: 34px;' in BIBLIOTHEKAR_CSS
-    assert 'border-radius: 34px 34px 0 0;' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab:first-child::after,' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab:last-child::after,' in BIBLIOTHEKAR_CSS
+def test_0221_register_shoulders_curve_into_page_instead_of_adding_outer_ears():
+    assert '.bk-tab::after {' in BIBLIOTHEKAR_CSS
+    assert 'content: none;' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab:first-child::before {' in BIBLIOTHEKAR_CSS
+    assert 'border-bottom-left-radius: 34px;' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab:last-child::before {' in BIBLIOTHEKAR_CSS
+    assert 'border-bottom-right-radius: 34px;' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab.active::before {' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_minimal_pages_have_no_browser_body_gutter_and_header_buttons_match():
