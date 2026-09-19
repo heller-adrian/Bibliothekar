@@ -2261,7 +2261,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         badge.className =
           reviewCount > 0
             ? "badge warning"
-            : "badge success";
+            : "badge success metadata-ok";
 
         badge.textContent =
           reviewCount > 0
