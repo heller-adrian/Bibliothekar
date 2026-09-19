@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 0.22.0 – Redesign / Produktschale
+
+- gemeinsamer Bibliothekar-App-Rahmen für Import, Arbeitsbereich und Archiv
+- drei überlappende Hauptreiter im Bauhaus-inspirierten Design
+- Arbeitsbereich bündelt Aufnahmen und Ereignisse als Unterbereiche
+- Aufgaben wandern aus dem Floating-Button in den Header
+- Menü mit Einstellungen, Bibliothek wechseln und Über Bibliothekar
+- Hell-, Dunkel- und Systemdarstellung
+- vorbereiteter, noch inaktiver Bibliothekar-Assistent unten rechts
+- Importquellen als kompakte Auswahl für SD-Karte, Laufwerk und Ordner/Sicherung
+- Import- und Prüfverlauf mit komprimiertem Vorschaubild aus dem frühesten JPEG
+- dateiweise Fortschrittsmeldungen beim Inventarisieren, Kopieren und Verifizieren
+- deutsche Statusbegriffe bleiben fachlich nah an geplant / angewendet / archiviert
+- bestehende Importwege und Kernfunktionen bleiben erhalten
+
 ### 0.21.2 – Patch in Arbeit
 
 - normale Zeitsegmente können ergänzt und vollständig entfernt werden
