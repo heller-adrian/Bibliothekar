@@ -336,7 +336,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tab {
   --bk-tab-accent: #87939a;
   --bk-tab-bg: #5f686d;
-  --bk-tab-side-shadow: rgb(0 0 0 / .12);
+  --bk-tab-side-shadow: rgb(0 0 0 / .035);
   position: relative;
   flex: 1 1 0;
   min-width: 0;
@@ -369,10 +369,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   inset: 0;
   z-index: 0;
   background:
-    linear-gradient(to right, var(--bk-tab-side-shadow), transparent 8px)
-      left 5px / 8px calc(100% - 5px) no-repeat,
-    linear-gradient(to left, var(--bk-tab-side-shadow), transparent 8px)
-      right 5px / 8px calc(100% - 5px) no-repeat,
+    linear-gradient(to right, var(--bk-tab-side-shadow), transparent 5px)
+      left 5px / 5px calc(100% - 5px) no-repeat,
+    linear-gradient(to left, var(--bk-tab-side-shadow), transparent 5px)
+      right 5px / 5px calc(100% - 5px) no-repeat,
     linear-gradient(
       to bottom,
       var(--bk-tab-accent) 0,
@@ -390,13 +390,12 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /*
  * Browser-Tab-Schultern:
- * Das Quadrat selbst bleibt transparent. Gefüllt wird nur der Bereich
- * AUSSERHALB des Viertelkreises. Dadurch verläuft die sichtbare Kante
- * von der Trapezseite nach außen/unten und endet tangential in der Seite.
- * Kein angehängter Halbkreis, kein "Ohr".
+ * Nur ein sehr kleiner Viertelkreis glättet den Übergang von der
+ * Trapezseite in die Seitenfläche. Die Schulter soll nicht als eigenes
+ * Formelement auffallen: kein Halbkreis, kein "Ohr", kein Schatten nach unten.
  */
 .bk-tab-shoulder {
-  --bk-shoulder-size: 30px;
+  --bk-shoulder-size: 12px;
   --bk-shoulder-color: var(--bk-tab-bg);
   position: absolute;
   bottom: 0;
@@ -485,12 +484,12 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 /* Alle inaktiven Register behalten dieselbe Grundfarbe. */
 html[data-bk-theme="dark"] .bk-tab:not(.active) {
   --bk-tab-bg: #5f686d;
-  --bk-tab-side-shadow: rgb(0 0 0 / .16);
+  --bk-tab-side-shadow: rgb(0 0 0 / .09);
   color: #fff !important;
 }
 html[data-bk-theme="light"] .bk-tab:not(.active) {
   --bk-tab-bg: #d3d6d5;
-  --bk-tab-side-shadow: rgb(18 32 51 / .08);
+  --bk-tab-side-shadow: rgb(18 32 51 / .05);
   color: #1b2731 !important;
 }
 
@@ -504,10 +503,10 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 }
 .bk-tab.active::before {
   background:
-    linear-gradient(to right, var(--bk-tab-side-shadow), transparent 8px)
-      left 5px / 8px calc(100% - 5px) no-repeat,
-    linear-gradient(to left, var(--bk-tab-side-shadow), transparent 8px)
-      right 5px / 8px calc(100% - 5px) no-repeat,
+    linear-gradient(to right, var(--bk-tab-side-shadow), transparent 5px)
+      left 5px / 5px calc(100% - 5px) no-repeat,
+    linear-gradient(to left, var(--bk-tab-side-shadow), transparent 5px)
+      right 5px / 5px calc(100% - 5px) no-repeat,
     linear-gradient(
       to bottom,
       var(--bk-tab-accent) 0,
@@ -1173,7 +1172,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     border-radius: 12px 12px 0 0;
   }
   .bk-tab-shoulder {
-    --bk-shoulder-size: 18px;
+    --bk-shoulder-size: 8px;
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
