@@ -5825,7 +5825,7 @@ def index() -> str:
       </details>
     </section>
 
-    <div class="toolbar bk-metadata-toolbar">
+    <div class="bk-metadata-toolbar">
       <button
         class="secondary"
         id="refresh-button"
