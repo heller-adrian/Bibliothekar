@@ -5,6 +5,7 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Any
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -12,7 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -214,6 +215,61 @@ SOURCE_HELPER_URL = os.environ.get(
 
 WORKER_STOP = Event()
 WORKER_THREAD: Thread | None = None
+
+
+def _thumbnail_path(job_id: str) -> Path:
+    digest = hashlib.sha256(job_id.encode("utf-8")).hexdigest()[:24]
+    return LOG_PATH / "thumbnails" / f"{digest}.jpg"
+
+
+def ensure_job_thumbnail(job_id: str) -> Path | None:
+    target = _thumbnail_path(job_id)
+    if target.is_file():
+        return target
+
+    candidates = [
+        row
+        for row in list_job_files(DATABASE_FILE, job_id)
+        if str(row.get("media_type") or "") == "jpeg"
+        and row.get("current_relative_path")
+    ]
+    candidates.sort(
+        key=lambda row: (
+            str(row.get("selected_capture_time") or "9999-12-31T23:59:59"),
+            str(row.get("current_relative_path") or ""),
+        )
+    )
+
+    work_root = WORKSPACE_PATH / WORK_DIRECTORY_NAME
+    for row in candidates:
+        relative = Path(str(row["current_relative_path"]))
+        source = (work_root / relative).resolve()
+        try:
+            source.relative_to(work_root.resolve())
+        except ValueError:
+            continue
+        if not source.is_file():
+            continue
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with Image.open(source) as image:
+                image = ImageOps.exif_transpose(image)
+                image.thumbnail((320, 220))
+                if image.mode not in {"RGB", "L"}:
+                    image = image.convert("RGB")
+                image.save(
+                    target,
+                    format="JPEG",
+                    quality=72,
+                    optimize=True,
+                    progressive=True,
+                )
+            return target
+        except Exception:
+            target.unlink(missing_ok=True)
+
+    return None
 
 
 app = FastAPI(
@@ -514,6 +570,16 @@ def process_claimed_job(
                 + " Mediendateien wurden verifiziert."
             ),
         )
+
+        if operation == "folder_import":
+            try:
+                ensure_job_thumbnail(job_id)
+            except Exception as thumbnail_error:
+                print(
+                    "Vorschaubild konnte nicht erstellt werden:",
+                    thumbnail_error,
+                    flush=True,
+                )
 
     except Exception as error:
         try:
@@ -1337,6 +1403,25 @@ def api_jobs() -> dict[str, Any]:
         "count": len(jobs),
         "jobs": jobs,
     }
+
+
+@app.get(
+    "/api/jobs/{job_id}/thumbnail",
+    tags=["Aufträge"],
+)
+def api_job_thumbnail(job_id: str):
+    job = get_job(DATABASE_FILE, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Auftrag wurde nicht gefunden.")
+    path = ensure_job_thumbnail(job_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Kein JPEG-Vorschaubild verfügbar.")
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        filename=f"{job_id}-thumbnail.jpg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get(
