@@ -2,8 +2,8 @@ from app import main
 from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
-def test_0221_version():
-    assert main.APP_VERSION == "0.22.1"
+def test_0222_version():
+    assert main.APP_VERSION == "0.22.2"
 
 
 def test_0221_import_uses_three_source_cards_and_keeps_all_paths():
@@ -45,10 +45,12 @@ def test_0221_only_three_main_registers_and_assistant_is_header_action():
     assert '.bk-tabs-active-workspace' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-archive' in BIBLIOTHEKAR_CSS
     assert '.bk-tab::before {' in BIBLIOTHEKAR_CSS
-    assert 'transform: perspective(115px) rotateX(6deg);' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab.active::after {' in BIBLIOTHEKAR_CSS
-    assert 'border-radius: 34px 34px 0 0;' in BIBLIOTHEKAR_CSS
-    assert 'linear-gradient(' in BIBLIOTHEKAR_CSS
+    assert 'transform: perspective(108px) rotateX(7deg);' in BIBLIOTHEKAR_CSS
+    assert 'bk-tab-shoulder-left' in html
+    assert 'bk-tab-shoulder-right' in html
+    assert 'radial-gradient(' in BIBLIOTHEKAR_CSS
+    assert 'circle at left top' in BIBLIOTHEKAR_CSS
+    assert 'circle at right top' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_page_accents_match_import_workspace_and_archive():
@@ -90,14 +92,15 @@ def test_0221_menu_entries_and_legacy_toolbars_are_visually_normalized():
     assert 'body[data-bk-area="import"] .bk-metadata-toolbar .notice' in BIBLIOTHEKAR_CSS
 
 
-def test_0221_registers_use_same_inactive_color_light_shadow_and_clean_stacking():
+def test_0222_registers_use_same_inactive_color_and_side_only_depth():
     assert 'flex: 1 1 0;' in BIBLIOTHEKAR_CSS
     assert 'margin-bottom: 0;' in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-shadow: 0 2px 7px' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-side-shadow:' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-bg: #5f686d;' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-bg: #d3d6d5;' in BIBLIOTHEKAR_CSS
-    assert '#70797e' not in BIBLIOTHEKAR_CSS
-    assert '#c3c6c5' not in BIBLIOTHEKAR_CSS
+    assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
+    assert 'linear-gradient(to right, var(--bk-tab-side-shadow), transparent 8px)' in BIBLIOTHEKAR_CSS
+    assert 'linear-gradient(to left, var(--bk-tab-side-shadow), transparent 8px)' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
 
@@ -118,14 +121,16 @@ def test_0221_about_menu_icon_has_valid_svg_wrapper():
     assert '<span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"' in html
 
 
-def test_0221_register_shoulders_curve_into_page_instead_of_adding_outer_ears():
-    assert '.bk-tab::after {' in BIBLIOTHEKAR_CSS
-    assert 'content: none;' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab:first-child::before {' in BIBLIOTHEKAR_CSS
-    assert 'border-bottom-left-radius: 34px;' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab:last-child::before {' in BIBLIOTHEKAR_CSS
-    assert 'border-bottom-right-radius: 34px;' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab.active::before {' in BIBLIOTHEKAR_CSS
+def test_0222_register_shoulders_are_quarter_circle_transitions_not_ears():
+    html = main.index()
+    assert 'bk-tab-shoulder bk-tab-shoulder-left' in html
+    assert 'bk-tab-shoulder bk-tab-shoulder-right' in html
+    assert '--bk-shoulder-size: 30px;' in BIBLIOTHEKAR_CSS
+    assert 'circle at left top' in BIBLIOTHEKAR_CSS
+    assert 'circle at right top' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-shoulder-size) - 1px)' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab.active .bk-tab-shoulder {' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-color: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_minimal_pages_have_no_browser_body_gutter_and_header_buttons_match():
