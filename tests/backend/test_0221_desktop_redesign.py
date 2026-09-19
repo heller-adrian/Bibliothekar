@@ -92,17 +92,20 @@ def test_0221_menu_entries_and_legacy_toolbars_are_visually_normalized():
     assert 'body[data-bk-area="import"] .bk-metadata-toolbar .notice' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_registers_use_same_inactive_color_and_shadow_only_under_overlapping_tabs():
+def test_0222_registers_use_same_inactive_color_and_in_face_depth_gradient():
     assert 'flex: 1 1 0;' in BIBLIOTHEKAR_CSS
     assert 'margin-bottom: 0;' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-bg: #5f686d;' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-bg: #d3d6d5;' in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-side-shadow' not in BIBLIOTHEKAR_CSS
-    assert '--bk-stack-shadow:' in BIBLIOTHEKAR_CSS
-    assert '.bk-tabs-active-import .bk-tab[data-area="workspace"]::after' in BIBLIOTHEKAR_CSS
-    assert '.bk-tabs-active-workspace .bk-tab[data-area="import"]::after' in BIBLIOTHEKAR_CSS
-    assert 'background: linear-gradient(to right, var(--bk-stack-shadow), transparent 88%);' in BIBLIOTHEKAR_CSS
-    assert 'background: linear-gradient(to left, var(--bk-stack-shadow), transparent 88%);' in BIBLIOTHEKAR_CSS
+    assert '--bk-stack-shadow' not in BIBLIOTHEKAR_CSS
+    assert '--bk-stack-blend:' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-edge-gradient:' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab::after {' in BIBLIOTHEKAR_CSS
+    assert 'content: none;' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-import .bk-tab[data-area="workspace"],' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-workspace .bk-tab[data-area="import"],' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
+    assert 'transparent var(--bk-edge-gradient-width)' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
@@ -152,20 +155,19 @@ def test_0221_page_heading_and_main_share_same_horizontal_inset():
     assert 'padding-right: 18px;' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_register_geometry_is_responsive_and_shadow_tracks_slope():
+def test_0222_register_geometry_is_responsive_and_gradient_follows_tab_face():
     assert '--bk-tab-overlap: clamp(24px, 3vw, 64px);' in BIBLIOTHEKAR_CSS
     assert '--bk-shoulder-size: clamp(8px, .65vw, 12px);' in BIBLIOTHEKAR_CSS
-    assert '--bk-shadow-width: clamp(8px, .7vw, 12px);' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-seam-bleed: clamp(2px, .28vw, 4px);' in BIBLIOTHEKAR_CSS
+    assert '--bk-edge-gradient-width: clamp(18px, 1.8vw, 32px);' in BIBLIOTHEKAR_CSS
     assert 'margin-left: calc(0px - var(--bk-tab-overlap));' in BIBLIOTHEKAR_CSS
+    assert 'left: calc(0px - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
+    assert 'right: calc(0px - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
     assert '--bk-shoulder-skew-left: -12deg;' in BIBLIOTHEKAR_CSS
     assert '--bk-shoulder-skew-right: 12deg;' in BIBLIOTHEKAR_CSS
     assert 'transform: skewX(var(--bk-shoulder-skew-left));' in BIBLIOTHEKAR_CSS
     assert 'transform: skewX(var(--bk-shoulder-skew-right));' in BIBLIOTHEKAR_CSS
-    assert 'left: calc(var(--bk-tab-overlap) - var(--bk-shadow-edge-inset));' in BIBLIOTHEKAR_CSS
-    assert 'right: calc(var(--bk-tab-overlap) - var(--bk-shadow-edge-inset));' in BIBLIOTHEKAR_CSS
-    assert 'bottom: calc(var(--bk-shoulder-size) - 1px);' in BIBLIOTHEKAR_CSS
-    assert 'border-bottom-left-radius: var(--bk-shoulder-size);' in BIBLIOTHEKAR_CSS
-    assert 'border-bottom-right-radius: var(--bk-shoulder-size);' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-tab-edge-gradient),' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
 
 
@@ -177,9 +179,18 @@ def test_0222_no_fixed_desktop_overlap_or_shadow_offsets_remain():
     assert '--bk-tab-overlap: clamp(44px, 3vw, 72px);' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_active_outer_shoulders_close_seam_without_bottom_shadow():
+def test_0222_active_outer_shoulders_close_seam_and_use_no_shadow_overlay():
     assert '.bk-tab:first-child.active .bk-tab-shoulder-left {' in BIBLIOTHEKAR_CSS
     assert '.bk-tab:last-child.active .bk-tab-shoulder-right {' in BIBLIOTHEKAR_CSS
     assert 'bottom: -1px;' in BIBLIOTHEKAR_CSS
-    assert 'background: linear-gradient(to right, var(--bk-stack-shadow), transparent 88%);' in BIBLIOTHEKAR_CSS
-    assert 'background: linear-gradient(to left, var(--bk-stack-shadow), transparent 88%);' in BIBLIOTHEKAR_CSS
+    assert 'calc(var(--bk-tab-seam-bleed) + 1px - var(--bk-shoulder-size))' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab::after {' in BIBLIOTHEKAR_CSS
+    assert 'content: none;' in BIBLIOTHEKAR_CSS
+    assert '--bk-stack-shadow' not in BIBLIOTHEKAR_CSS
+
+
+def test_0222_tab_face_bleed_closes_hairline_gaps_responsively():
+    assert '--bk-tab-seam-bleed: clamp(2px, .28vw, 4px);' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-seam-bleed: clamp(3px, .24vw, 5px);' in BIBLIOTHEKAR_CSS
+    assert 'left: calc(var(--bk-tab-seam-bleed) - var(--bk-shoulder-size));' in BIBLIOTHEKAR_CSS
+    assert 'right: calc(var(--bk-tab-seam-bleed) - var(--bk-shoulder-size));' in BIBLIOTHEKAR_CSS
