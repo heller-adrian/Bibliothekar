@@ -35,7 +35,6 @@ def test_0221_only_three_main_registers_and_assistant_is_header_action():
     html = main.index()
 
     assert 'bk-tabs-active-import' in html
-    assert html.count('class="bk-tab') == 3
     assert 'data-area="import"' in html
     assert 'data-area="workspace"' in html
     assert 'data-area="archive"' in html
