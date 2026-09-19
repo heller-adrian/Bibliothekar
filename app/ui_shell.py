@@ -384,27 +384,24 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 
 /*
- * Untere Schulter: der Radius beginnt an der Laschenkante und läuft
- * nach unten nach außen. So entsteht die vom Nutzer markierte konvexe
- * Ausrundung statt einer eingezogenen Kerbe.
+ * Untere Register-Schulter:
+ * Kein zusätzliches helles "Ohr" mehr außerhalb der Karte.
+ * Stattdessen wird die Kartenfläche selbst unten rund ausgeschnitten.
+ * Dadurch dreht sich der Bogen sichtbar in die Gegenrichtung und die
+ * Registerkarte läuft direkt in die darunterliegende Seitenfläche aus.
  */
 .bk-tab::after {
   content: none;
-  position: absolute;
-  left: -34px;
-  right: -34px;
-  bottom: -1px;
-  height: 34px;
-  z-index: -2;
-  background: var(--bk-tab-bg);
-  border-radius: 34px 34px 0 0;
-  box-shadow: 0 3px 7px rgb(0 0 0 / .06);
-  pointer-events: none;
 }
-.bk-tab:first-child::after,
-.bk-tab:last-child::after,
-.bk-tab.active::after {
-  content: "";
+.bk-tab:first-child::before {
+  border-bottom-left-radius: 34px;
+}
+.bk-tab:last-child::before {
+  border-bottom-right-radius: 34px;
+}
+.bk-tab.active::before {
+  border-bottom-left-radius: 34px;
+  border-bottom-right-radius: 34px;
 }
 
 .bk-tab-label,
@@ -479,11 +476,6 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
     );
   box-shadow: 0 2px 7px rgb(0 0 0 / .10);
 }
-.bk-tab.active::after {
-  background: var(--bk-page-bg, var(--bk-paper));
-  box-shadow: none;
-}
-
 .bk-tab:hover:not(.active) {
   filter: brightness(1.025);
 }
@@ -1140,12 +1132,15 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     transform: perspective(88px) rotateX(5deg);
     border-radius: 12px 12px 0 0;
   }
-  .bk-tab::after {
-    left: -18px;
-    right: -18px;
-    bottom: -1px;
-    height: 18px;
-    border-radius: 18px 18px 0 0;
+  .bk-tab:first-child::before {
+    border-bottom-left-radius: 18px;
+  }
+  .bk-tab:last-child::before {
+    border-bottom-right-radius: 18px;
+  }
+  .bk-tab.active::before {
+    border-bottom-left-radius: 18px;
+    border-bottom-right-radius: 18px;
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
