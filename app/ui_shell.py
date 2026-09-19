@@ -82,9 +82,16 @@ body[data-bk-area="archive"] {
   --bk-area-accent: var(--bk-yellow);
   --bk-page-bg: #f8f4e8;
 }
+body[data-bk-area="assistant"],
+body[data-bk-area="metadata"] {
+  --bk-area-accent: #7c8790;
+  --bk-page-bg: #f1f2ef;
+}
 html[data-bk-theme="dark"] body[data-bk-area="import"] { --bk-page-bg: #120f11; }
 html[data-bk-theme="dark"] body[data-bk-area="workspace"] { --bk-page-bg: #0c1217; }
 html[data-bk-theme="dark"] body[data-bk-area="archive"] { --bk-page-bg: #14120c; }
+html[data-bk-theme="dark"] body[data-bk-area="assistant"],
+html[data-bk-theme="dark"] body[data-bk-area="metadata"] { --bk-page-bg: #0f1418; }
 
 html[data-bk-theme] body.bibliothekar-redesign,
 html[data-bk-theme] body.bibliothekar-redesign main {
@@ -193,8 +200,9 @@ body[data-bk-area="workspace"] #new-event-button {
   border-color: var(--bk-blue) !important;
   color: #fff !important;
 }
-body[data-bk-area="workspace"] .metadata-ok {
+body[data-bk-area="workspace"] span.badge.success.metadata-ok {
   color: var(--bk-blue) !important;
+  -webkit-text-fill-color: var(--bk-blue) !important;
   border-color: var(--bk-blue) !important;
 }
 body[data-bk-area="archive"] .archive-check-card {
@@ -303,6 +311,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs {
   display: flex;
   align-items: flex-end;
+  justify-content: center;
   min-width: 0;
   overflow: visible;
   isolation: isolate;
@@ -310,16 +319,16 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 .bk-tab {
   --bk-tab-accent: #87939a;
+  --bk-tab-bg: #555d61;
   position: relative;
-  flex: 1 1 0;
-  min-width: 132px;
-  max-width: 224px;
+  flex: 0 0 auto;
   height: 52px;
-  margin-left: -18px;
-  padding: 0 24px;
+  margin-left: -22px;
+  padding: 0 22px;
   border: 0 !important;
-  background: transparent !important;
-  color: #17232d !important;
+  border-radius: 14px 14px 0 0 !important;
+  background: var(--bk-tab-bg) !important;
+  color: #fff !important;
   text-align: center;
   text-decoration: none;
   font: inherit;
@@ -328,65 +337,93 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   display: grid;
   place-items: center;
   cursor: pointer;
+  box-shadow: inset 0 4px 0 var(--bk-tab-accent);
+  isolation: isolate;
 }
 .bk-tab:first-child { margin-left: 0; }
-.bk-tab::before {
+.bk-tab[data-area="import"] {
+  --bk-tab-accent: var(--bk-red);
+  width: 184px;
+}
+.bk-tab[data-area="workspace"] {
+  --bk-tab-accent: var(--bk-blue);
+  width: 170px;
+}
+.bk-tab[data-area="archive"] {
+  --bk-tab-accent: var(--bk-yellow);
+  width: 132px;
+}
+.bk-tab::before,
+.bk-tab::after {
   content: "";
   position: absolute;
-  inset: 0 8px 0 8px;
-  z-index: -1;
-  background: #d5d8d7;
-  border-radius: 14px 14px 6px 6px;
+  bottom: 0;
+  width: 30px;
+  height: 48px;
+  background: var(--bk-tab-bg);
   box-shadow: inset 0 4px 0 var(--bk-tab-accent);
-  transform: skewX(-7deg);
-  transform-origin: center bottom;
+  pointer-events: none;
+  z-index: -1;
 }
-.bk-tab[data-area="import"] { --bk-tab-accent: var(--bk-red); }
-.bk-tab[data-area="workspace"] { --bk-tab-accent: var(--bk-blue); }
-.bk-tab[data-area="archive"] { --bk-tab-accent: var(--bk-yellow); }
-.bk-tab[data-area="assistant"] { --bk-tab-accent: #7c8790; }
-.bk-tab-label { display: inline-block; }
+.bk-tab::before {
+  left: -14px;
+  transform: skewX(-11deg);
+  transform-origin: left bottom;
+  border-radius: 14px 0 0 0;
+}
+.bk-tab::after {
+  right: -14px;
+  transform: skewX(11deg);
+  transform-origin: right bottom;
+  border-radius: 0 14px 0 0;
+}
+.bk-tab-label,
+.bk-tab-mobile-label {
+  position: relative;
+  z-index: 2;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
 .bk-tab-mobile-label { display: none; }
 
-.bk-tabs-active-import .bk-tab[data-area="import"] { z-index: 40; }
-.bk-tabs-active-import .bk-tab[data-area="workspace"] { z-index: 30; }
-.bk-tabs-active-import .bk-tab[data-area="archive"] { z-index: 20; }
-.bk-tabs-active-import .bk-tab[data-area="assistant"] { z-index: 10; }
+.bk-tabs-active-import .bk-tab[data-area="import"] { z-index: 30; }
+.bk-tabs-active-import .bk-tab[data-area="workspace"] { z-index: 20; }
+.bk-tabs-active-import .bk-tab[data-area="archive"] { z-index: 10; }
 
 .bk-tabs-active-workspace .bk-tab[data-area="import"] { z-index: 20; }
-.bk-tabs-active-workspace .bk-tab[data-area="workspace"] { z-index: 40; }
-.bk-tabs-active-workspace .bk-tab[data-area="archive"] { z-index: 30; }
-.bk-tabs-active-workspace .bk-tab[data-area="assistant"] { z-index: 10; }
+.bk-tabs-active-workspace .bk-tab[data-area="workspace"] { z-index: 30; }
+.bk-tabs-active-workspace .bk-tab[data-area="archive"] { z-index: 20; }
 
 .bk-tabs-active-archive .bk-tab[data-area="import"] { z-index: 10; }
 .bk-tabs-active-archive .bk-tab[data-area="workspace"] { z-index: 20; }
-.bk-tabs-active-archive .bk-tab[data-area="archive"] { z-index: 40; }
-.bk-tabs-active-archive .bk-tab[data-area="assistant"] { z-index: 30; }
+.bk-tabs-active-archive .bk-tab[data-area="archive"] { z-index: 30; }
 
-.bk-tab.active,
-.bk-tab.is-active {
+.bk-tab.active {
+  --bk-tab-bg: var(--bk-page-bg, var(--bk-paper));
   height: 59px;
   padding-top: 4px;
   color: var(--bk-ink) !important;
-  z-index: 50 !important;
+  z-index: 40 !important;
+  border-radius: 14px 14px 0 0 !important;
 }
-.bk-tab.active::before {
-  bottom: -3px;
+.bk-tab.active::before,
+.bk-tab.active::after {
+  height: 55px;
   background: var(--bk-page-bg, var(--bk-paper));
-  border-radius: 14px 14px 4px 4px;
-  box-shadow: inset 0 5px 0 var(--bk-tab-accent);
 }
-.bk-tab.is-active::before {
-  bottom: -3px;
-  background: var(--bk-surface);
-  border-radius: 14px 14px 4px 4px;
-  box-shadow: inset 0 5px 0 var(--bk-tab-accent);
-}
-.bk-tab:hover:not(.active):not(.is-active)::before { background: #e2e2dd; }
+.bk-tab.active::before { border-radius: 14px 0 0 8px; }
+.bk-tab.active::after { border-radius: 0 14px 8px 0; }
 
-html[data-bk-theme="dark"] .bk-tab { color: #eef1ef !important; }
-html[data-bk-theme="dark"] .bk-tab:not(.active):not(.is-active)::before { background: #4a5155; }
-html[data-bk-theme="dark"] .bk-tab:hover:not(.active):not(.is-active)::before { background: #565f64; }
+.bk-tab:hover:not(.active) { --bk-tab-bg: #626b70; }
+
+html[data-bk-theme="light"] .bk-tab:not(.active) {
+  --bk-tab-bg: #d4d7d6;
+  color: #1b2731 !important;
+}
+html[data-bk-theme="light"] .bk-tab:hover:not(.active) { --bk-tab-bg: #e1e2df; }
 
 .bk-shell-actions {
   position: relative;
@@ -422,11 +459,33 @@ html[data-bk-theme="dark"] .bk-tab:hover:not(.active):not(.is-active)::before { 
   background: var(--bk-yellow); color: #202020; padding: 0 6px;
   font-size: .72rem; font-weight: 850;
 }
+.bk-assistant-button,
 .bk-menu-button {
   width: 42px;
+  min-width: 42px;
   padding: 8px 0;
-  font-size: 1.18rem;
+  border-radius: 12px !important;
 }
+.bk-assistant-button {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  text-decoration: none;
+}
+.bk-assistant-button svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bk-assistant-button.active {
+  border-color: #8ea0ab;
+  background: #2a3943;
+}
+.bk-menu-button { font-size: 1.18rem; }
 .bk-menu,
 .bk-task-panel {
   position: absolute;
@@ -447,7 +506,8 @@ html[data-bk-theme="dark"] .bk-tab:hover:not(.active):not(.is-active)::before { 
   display: grid;
   gap: 2px;
 }
-.bk-menu button {
+.bk-menu button,
+.bk-menu a {
   width: 100%;
   min-height: 42px;
   display: flex;
@@ -459,9 +519,11 @@ html[data-bk-theme="dark"] .bk-tab:hover:not(.active):not(.is-active)::before { 
   background: transparent !important;
   color: var(--bk-ink) !important;
   text-align: left;
+  text-decoration: none;
   padding: 9px 10px !important;
 }
-.bk-menu button:hover { background: var(--bk-surface-2) !important; }
+.bk-menu button:hover,
+.bk-menu a:hover { background: var(--bk-surface-2) !important; }
 .bk-menu-separator {
   height: 1px;
   background: var(--bk-line);
@@ -546,44 +608,6 @@ html[data-bk-theme="dark"] .bk-tab:hover:not(.active):not(.is-active)::before { 
 }
 .bk-language-note {
   margin-top: 9px; color: var(--bk-muted); font-size: .9rem;
-}
-
-.bk-ai-panel {
-  position: fixed;
-  z-index: 2900;
-  top: 78px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(1120px, 100%);
-  height: calc(100dvh - 78px);
-  overflow: auto;
-  border: 0;
-  border-radius: 0;
-  background: var(--bk-paper);
-  color: var(--bk-ink);
-  padding: 28px max(18px, calc((100vw - 1120px) / 2));
-  box-shadow: none;
-}
-html[data-bk-theme="dark"] .bk-ai-panel { background: #0f1418; }
-.bk-ai-panel[hidden] { display: none !important; }
-.bk-ai-panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.bk-ai-panel-head strong {
-  display: block;
-  margin: 0;
-  font-size: 1.65rem;
-}
-.bk-ai-close {
-  width: 38px;
-  min-width: 38px;
-  min-height: 38px;
-  padding: 0 !important;
-  border-radius: 50% !important;
 }
 
 .bk-help {
@@ -933,19 +957,37 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     min-width: 0;
     max-width: none;
     height: 44px;
-    margin-left: -10px;
-    padding: 0 10px;
-    font-size: .78rem;
+    margin-left: -12px;
+    padding: 0 9px;
+    font-size: .76rem;
+  }
+  .bk-tab[data-area="import"],
+  .bk-tab[data-area="workspace"],
+  .bk-tab[data-area="archive"] {
+    width: auto;
+    flex: 1 1 0;
   }
   .bk-tab:first-child { margin-left: 0; }
   .bk-tab.active,
   .bk-tab.is-active {
     height: 49px;
   }
+  .bk-tab::before,
+  .bk-tab::after {
+    width: 20px;
+    height: 40px;
+  }
   .bk-tab::before {
-    inset-inline: 5px;
-    border-radius: 11px 11px 5px 5px;
-    transform: skewX(-5deg);
+    left: -9px;
+    transform: skewX(-9deg);
+  }
+  .bk-tab::after {
+    right: -9px;
+    transform: skewX(9deg);
+  }
+  .bk-tab.active::before,
+  .bk-tab.active::after {
+    height: 45px;
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
@@ -1069,13 +1111,6 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-status-grid { grid-template-columns: 1fr !important; }
   .bk-status-card { min-height: 82px; }
 
-  .bk-ai-panel {
-    top: 128px;
-    width: 100%;
-    height: calc(100dvh - 128px);
-    padding: 18px 16px;
-  }
-
   body.bibliothekar-redesign section { scroll-margin-top: 132px; }
 }
 
@@ -1158,28 +1193,6 @@ BIBLIOTHEKAR_JS = r"""
     button.addEventListener("click", () => button.closest("dialog")?.close());
   });
 
-  const aiButton = document.getElementById("bk-ai-tab");
-  const aiPanel = document.getElementById("bk-ai-panel");
-  const aiClose = document.getElementById("bk-ai-close");
-
-  const setAiOpen = (open) => {
-    if (!aiPanel || !aiButton) return;
-    if (open) {
-      aiPanel.removeAttribute("hidden");
-      aiButton.classList.add("is-active");
-    } else {
-      aiPanel.setAttribute("hidden", "");
-      aiButton.classList.remove("is-active");
-    }
-    aiButton.setAttribute("aria-expanded", open ? "true" : "false");
-  };
-  aiButton?.addEventListener("click", () => setAiOpen(aiPanel?.hasAttribute("hidden")));
-  aiClose?.addEventListener("click", () => setAiOpen(false));
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && !aiPanel?.hasAttribute("hidden")) setAiOpen(false);
-  });
-
-
   // Quellenwahl 0.22.1: drei gleichwertige Quellkarten im Importbereich.
   const sourcePicker = document.getElementById("bk-source-picker");
   if (sourcePicker) {
@@ -1250,7 +1263,7 @@ BIBLIOTHEKAR_JS = r"""
 
 
 def _shell_markup(active_area: str, subarea: str | None) -> str:
-    active = active_area if active_area in {"import", "workspace", "archive"} else "import"
+    active = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
     heading_map = {
         ("import", None): (
             "Import & Prüfung",
@@ -1267,6 +1280,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         ("archive", None): (
             "Archiv",
             "Archivierung prüfen, abschließen und spätere Änderungen nachvollziehen.",
+        ),
+        ("assistant", None): (
+            "Bibliothekar Assistent",
+            "Bibliothekar fragen, Vorschläge erhalten und später Aktionen nachvollziehbar auslösen.",
+        ),
+        ("metadata", None): (
+            "Metadatenkorrektion",
+            "Metadaten aus externen Quellen prüfen und später gezielt ergänzen oder korrigieren.",
         ),
     }
     heading_title, heading_subtitle = heading_map.get(
@@ -1309,10 +1330,6 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     {tab('import', '/', 'Import & Prüfung', 'Import')}
     {tab('workspace', '/workspace', 'Arbeitsbereich', 'Arbeitsbereich')}
     {tab('archive', '/transfer', 'Archiv', 'Archiv')}
-    <button id="bk-ai-tab" class="bk-tab bk-ai-tab" data-area="assistant" type="button" aria-expanded="false">
-      <span class="bk-tab-label">Assistent</span>
-      <span class="bk-tab-mobile-label">KI</span>
-    </button>
   </nav>
 
   <div class="bk-shell-actions">
@@ -1321,6 +1338,9 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <span class="bk-task-label">Aufgaben</span>
       <span id="bk-task-count" class="bk-task-count">0</span>
     </button>
+    <a class="bk-shell-button bk-assistant-button{' active' if active == 'assistant' else ''}" href="/assistant" aria-label="Bibliothekar Assistent" title="Bibliothekar Assistent">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
+    </a>
     <button id="bk-menu-button" class="bk-shell-button bk-menu-button" type="button" aria-label="Menü">☰</button>
 
     <div id="bk-task-panel" class="bk-task-panel" hidden></div>
@@ -1334,6 +1354,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
         <span>Bibliothek wechseln</span>
       </button>
+      <a href="/metadata-correction">
+        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5M16.5 13.5l2 2M18.5 13.5l-2 2"/></svg></span>
+        <span>Metadatenkorrektion</span>
+      </a>
       <div class="bk-menu-separator"></div>
       <button type="button" data-bk-open-about>
         <span class="bk-menu-icon" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7h.01"/></svg></span>
@@ -1394,18 +1418,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   </div>
 </dialog>
 
-<aside id="bk-ai-panel" class="bk-ai-panel" hidden>
-  <div class="bk-ai-panel-head">
-    <div>
-      <strong>Bibliothekar Assistent</strong>
-      <div style="color:var(--bk-muted);margin-top:4px">Später kannst du hier Bibliothekar direkt ansprechen und Aktionen vorschlagen lassen.</div>
-    </div>
-    <button id="bk-ai-close" class="bk-ai-close" type="button" aria-label="Assistent schließen">×</button>
-  </div>
-  <div class="card" style="margin-top:18px">
-    <p style="margin:0;color:var(--bk-muted)">Der KI-Assistent ist in diesem Designstand noch nicht verbunden.</p>
-  </div>
-</aside>
+
 """
 
 
@@ -1416,7 +1429,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_CSS}</style>\n</head>",
         1,
     )
-    area = active_area if active_area in {"import", "workspace", "archive"} else "import"
+    area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
     if "<body>" in result:
         result = result.replace(
             "<body>",
