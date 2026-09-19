@@ -371,13 +371,13 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   z-index: 50 !important;
 }
 .bk-tab.active::before {
-  inset-bottom: -3px;
+  bottom: -3px;
   background: var(--bk-page-bg, var(--bk-paper));
   border-radius: 14px 14px 4px 4px;
   box-shadow: inset 0 5px 0 var(--bk-tab-accent);
 }
 .bk-tab.is-active::before {
-  inset-bottom: -3px;
+  bottom: -3px;
   background: var(--bk-surface);
   border-radius: 14px 14px 4px 4px;
   box-shadow: inset 0 5px 0 var(--bk-tab-accent);
@@ -959,7 +959,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-task-panel {
     position: fixed;
     z-index: 9000;
-    top: 82px;
+    top: 126px;
     right: 12px;
     left: 12px;
     width: auto;
