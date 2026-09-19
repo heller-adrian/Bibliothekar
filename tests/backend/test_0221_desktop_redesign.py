@@ -46,11 +46,10 @@ def test_0221_only_three_main_registers_and_assistant_is_header_action():
     assert '.bk-tabs-active-archive' in BIBLIOTHEKAR_CSS
     assert '.bk-tab::before {' in BIBLIOTHEKAR_CSS
     assert 'transform: perspective(108px) rotateX(7deg);' in BIBLIOTHEKAR_CSS
-    assert 'bk-tab-shoulder-left' in html
-    assert 'bk-tab-shoulder-right' in html
-    assert 'radial-gradient(' in BIBLIOTHEKAR_CSS
-    assert 'circle at left top' in BIBLIOTHEKAR_CSS
-    assert 'circle at right top' in BIBLIOTHEKAR_CSS
+    assert 'bk-tab-shoulder' not in html
+    assert '--bk-page-bridge-height:' in BIBLIOTHEKAR_CSS
+    assert '.bk-shell::after {' in BIBLIOTHEKAR_CSS
+    assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_page_accents_match_import_workspace_and_archive():
@@ -127,16 +126,15 @@ def test_0221_about_menu_icon_has_valid_svg_wrapper():
     assert '<span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"' in html
 
 
-def test_0222_register_shoulders_are_quarter_circle_transitions_not_ears():
+def test_0222_active_register_and_page_are_one_joined_surface():
     html = main.index()
-    assert 'bk-tab-shoulder bk-tab-shoulder-left' in html
-    assert 'bk-tab-shoulder bk-tab-shoulder-right' in html
-    assert '--bk-shoulder-size: clamp(8px, .65vw, 12px);' in BIBLIOTHEKAR_CSS
-    assert 'circle at left top' in BIBLIOTHEKAR_CSS
-    assert 'circle at right top' in BIBLIOTHEKAR_CSS
-    assert 'transparent calc(var(--bk-shoulder-size) - 1px)' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab.active .bk-tab-shoulder {' in BIBLIOTHEKAR_CSS
-    assert '--bk-shoulder-color: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
+    assert 'bk-tab-shoulder' not in html
+    assert 'bk-tab-shoulder' not in BIBLIOTHEKAR_CSS
+    assert '--bk-page-bridge-height: clamp(9px, .8vw, 13px);' in BIBLIOTHEKAR_CSS
+    assert '.bk-shell::after {' in BIBLIOTHEKAR_CSS
+    assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab.active::before {' in BIBLIOTHEKAR_CSS
+    assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_minimal_pages_have_no_browser_body_gutter_and_header_buttons_match():
@@ -157,16 +155,14 @@ def test_0221_page_heading_and_main_share_same_horizontal_inset():
 
 def test_0222_register_geometry_is_responsive_and_gradient_follows_tab_face():
     assert '--bk-tab-overlap: clamp(24px, 3vw, 64px);' in BIBLIOTHEKAR_CSS
-    assert '--bk-shoulder-size: clamp(8px, .65vw, 12px);' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-seam-bleed: clamp(2px, .28vw, 4px);' in BIBLIOTHEKAR_CSS
     assert '--bk-edge-gradient-width: clamp(18px, 1.8vw, 32px);' in BIBLIOTHEKAR_CSS
     assert 'margin-left: calc(0px - var(--bk-tab-overlap));' in BIBLIOTHEKAR_CSS
     assert 'left: calc(0px - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
     assert 'right: calc(0px - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
-    assert '--bk-shoulder-skew-left: -12deg;' in BIBLIOTHEKAR_CSS
-    assert '--bk-shoulder-skew-right: 12deg;' in BIBLIOTHEKAR_CSS
-    assert 'transform: skewX(var(--bk-shoulder-skew-left));' in BIBLIOTHEKAR_CSS
-    assert 'transform: skewX(var(--bk-shoulder-skew-right));' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-size' not in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-skew-left' not in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-skew-right' not in BIBLIOTHEKAR_CSS
     assert 'var(--bk-tab-edge-gradient),' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
 
@@ -179,18 +175,24 @@ def test_0222_no_fixed_desktop_overlap_or_shadow_offsets_remain():
     assert '--bk-tab-overlap: clamp(44px, 3vw, 72px);' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_active_outer_shoulders_close_seam_and_use_no_shadow_overlay():
-    assert '.bk-tab:first-child.active .bk-tab-shoulder-left {' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab:last-child.active .bk-tab-shoulder-right {' in BIBLIOTHEKAR_CSS
-    assert 'bottom: -1px;' in BIBLIOTHEKAR_CSS
-    assert 'calc(var(--bk-tab-seam-bleed) + 1px - var(--bk-shoulder-size))' in BIBLIOTHEKAR_CSS
+def test_0222_active_page_bridge_replaces_outer_shoulders_and_shadow_overlay():
+    assert '.bk-shell::after {' in BIBLIOTHEKAR_CSS
+    assert 'height: calc(var(--bk-page-bridge-height) + 1px);' in BIBLIOTHEKAR_CSS
+    assert 'margin-bottom: var(--bk-page-bridge-height);' in BIBLIOTHEKAR_CSS
     assert '.bk-tab::after {' in BIBLIOTHEKAR_CSS
     assert 'content: none;' in BIBLIOTHEKAR_CSS
     assert '--bk-stack-shadow' not in BIBLIOTHEKAR_CSS
+    assert 'bk-tab-shoulder' not in BIBLIOTHEKAR_CSS
 
 
 def test_0222_tab_face_bleed_closes_hairline_gaps_responsively():
     assert '--bk-tab-seam-bleed: clamp(2px, .28vw, 4px);' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-seam-bleed: clamp(3px, .24vw, 5px);' in BIBLIOTHEKAR_CSS
-    assert 'left: calc(var(--bk-tab-seam-bleed) - var(--bk-shoulder-size));' in BIBLIOTHEKAR_CSS
-    assert 'right: calc(var(--bk-tab-seam-bleed) - var(--bk-shoulder-size));' in BIBLIOTHEKAR_CSS
+    assert 'left: calc(0px - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
+    assert 'right: calc(0px - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
+
+
+def test_0222_header_has_page_coloured_scroll_buffer():
+    assert '--bk-page-bridge-height: clamp(9px, .8vw, 13px);' in BIBLIOTHEKAR_CSS
+    assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
+    assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
