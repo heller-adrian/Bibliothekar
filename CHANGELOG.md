@@ -14,14 +14,15 @@
 - Desktop-Komponenten orientieren sich stärker an der Bauhaus-Blaupause
 - Desktop und Mobile verwenden dasselbe horizontale Registerprinzip im Header; die frühere mobile Seitenleiste wurde wieder entfernt
 - Hauptregister sind abgerundete, gestaffelte Ordnerlaschen: der aktive Bereich liegt sichtbar vor den übrigen Registern und geht ohne dunkle Trennkante in die Seite über
-- der Bibliothekar-Assistent ist ein eigener Header-Reiter statt eines Floating-Buttons unten rechts
+- der Bibliothekar-Assistent ist ein kleines eigenes Header-Feld neben dem Menü und öffnet eine echte eigene Seite
 - Mobile Menü- und Aufgaben-Panels liegen als eigene Overlays über der Registerzeile
 - Import, Arbeitsbereich und Archiv behalten sehr leichte bereichsspezifische Rot-/Blau-/Gelb-Hintergrundtöne
 - Import & Prüfung wiederholt Rot gezielt als linken Akzent an „Quelle sichern“
-- Arbeitsbereich verwendet Blau für „Ereignis erstellen“ und „Metadaten eindeutig“
+- Arbeitsbereich verwendet Blau für „Ereignis erstellen“ sowie Rahmen und Schrift von „Metadaten eindeutig“
 - offene Archivprüfungen erhalten einen gelben Kartenakzent
 - SD-Karte, Laufwerk und Ordner/Sicherung sind wieder als drei gleichwertige, füllende Quellkarten nebeneinander sichtbar
 - alte rechteckige Fremdflächen bei „Sicherung auswählen“ und „Metadaten prüfen“ werden neutralisiert; Diagnose und Importverlauf erhalten mehr Abstand
+- das Hauptmenü enthält die neue Seite „Metadatenkorrektion“ als vorbereiteten Einstieg für spätere WhatsApp-/Signal-Metadatenpflege
 
 ### 0.22.0 – Redesign / Produktschale
 
