@@ -37,6 +37,6 @@ def test_0221_assistant_is_small_header_action_not_large_register():
 
 def test_0222_mobile_tabs_keep_trapezoid_and_smaller_browser_shoulders():
     assert 'transform: perspective(88px) rotateX(5deg);' in BIBLIOTHEKAR_CSS
-    assert '--bk-shoulder-size: 18px;' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-size: 8px;' in BIBLIOTHEKAR_CSS
     assert 'bk-tab-shoulder-left' in main.index()
     assert 'bk-tab-shoulder-right' in main.index()
