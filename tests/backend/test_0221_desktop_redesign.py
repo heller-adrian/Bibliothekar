@@ -128,7 +128,7 @@ def test_0222_register_shoulders_are_quarter_circle_transitions_not_ears():
     html = main.index()
     assert 'bk-tab-shoulder bk-tab-shoulder-left' in html
     assert 'bk-tab-shoulder bk-tab-shoulder-right' in html
-    assert '--bk-shoulder-size: 12px;' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-size: clamp(8px, .65vw, 12px);' in BIBLIOTHEKAR_CSS
     assert 'circle at left top' in BIBLIOTHEKAR_CSS
     assert 'circle at right top' in BIBLIOTHEKAR_CSS
     assert 'transparent calc(var(--bk-shoulder-size) - 1px)' in BIBLIOTHEKAR_CSS
@@ -152,14 +152,34 @@ def test_0221_page_heading_and_main_share_same_horizontal_inset():
     assert 'padding-right: 18px;' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_register_shoulder_tracks_trapezoid_slope_and_shadow_stays_side_only():
-    assert '--bk-shoulder-size: 12px;' in BIBLIOTHEKAR_CSS
+def test_0222_register_geometry_is_responsive_and_shadow_tracks_slope():
+    assert '--bk-tab-overlap: clamp(24px, 3vw, 64px);' in BIBLIOTHEKAR_CSS
+    assert '--bk-shoulder-size: clamp(8px, .65vw, 12px);' in BIBLIOTHEKAR_CSS
+    assert '--bk-shadow-width: clamp(8px, .7vw, 12px);' in BIBLIOTHEKAR_CSS
+    assert 'margin-left: calc(0px - var(--bk-tab-overlap));' in BIBLIOTHEKAR_CSS
     assert '--bk-shoulder-skew-left: -12deg;' in BIBLIOTHEKAR_CSS
     assert '--bk-shoulder-skew-right: 12deg;' in BIBLIOTHEKAR_CSS
     assert 'transform: skewX(var(--bk-shoulder-skew-left));' in BIBLIOTHEKAR_CSS
     assert 'transform: skewX(var(--bk-shoulder-skew-right));' in BIBLIOTHEKAR_CSS
-    assert '--bk-stack-shadow: rgb(0 0 0 / .18);' in BIBLIOTHEKAR_CSS
-    assert '--bk-stack-shadow: rgb(18 32 51 / .12);' in BIBLIOTHEKAR_CSS
-    assert 'top: 5px;' in BIBLIOTHEKAR_CSS
-    assert 'bottom: 0;' in BIBLIOTHEKAR_CSS
+    assert 'left: calc(var(--bk-tab-overlap) - var(--bk-shadow-edge-inset));' in BIBLIOTHEKAR_CSS
+    assert 'right: calc(var(--bk-tab-overlap) - var(--bk-shadow-edge-inset));' in BIBLIOTHEKAR_CSS
+    assert 'bottom: calc(var(--bk-shoulder-size) - 1px);' in BIBLIOTHEKAR_CSS
+    assert 'border-bottom-left-radius: var(--bk-shoulder-size);' in BIBLIOTHEKAR_CSS
+    assert 'border-bottom-right-radius: var(--bk-shoulder-size);' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
+
+
+def test_0222_no_fixed_desktop_overlap_or_shadow_offsets_remain():
+    assert 'margin-left: -34px;' not in BIBLIOTHEKAR_CSS
+    assert 'margin-left: -26px;' not in BIBLIOTHEKAR_CSS
+    assert 'left: 27px;' not in BIBLIOTHEKAR_CSS
+    assert 'right: 27px;' not in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-overlap: clamp(44px, 3vw, 72px);' in BIBLIOTHEKAR_CSS
+
+
+def test_0222_active_outer_shoulders_close_seam_without_bottom_shadow():
+    assert '.bk-tab:first-child.active .bk-tab-shoulder-left {' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab:last-child.active .bk-tab-shoulder-right {' in BIBLIOTHEKAR_CSS
+    assert 'bottom: -1px;' in BIBLIOTHEKAR_CSS
+    assert 'background: linear-gradient(to right, var(--bk-stack-shadow), transparent 88%);' in BIBLIOTHEKAR_CSS
+    assert 'background: linear-gradient(to left, var(--bk-stack-shadow), transparent 88%);' in BIBLIOTHEKAR_CSS
