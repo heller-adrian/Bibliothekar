@@ -193,7 +193,7 @@ TRANSFER_HTML = r'''<!doctype html>
     const history=(summary.candidates||[]).filter(item=>item.released);
     if(!open.length) archiveList.innerHTML='<div class="empty">Keine offenen Ereignisse zur Archivprüfung.</div>';
     for(const item of open){
-      const card=document.createElement('article');card.className='card';
+      const card=document.createElement('article');card.className='card archive-check-card';
       const verification=item.released?'SSD freigegeben':(item.verified?'Vollständig geprüft':(item.verification_status||'Noch nicht geprüft'));
       const releaseDisabled=!item.ssd_release_ready;
       const releaseLabel=item.released?'SSD freigegeben':'SSD freigeben';
