@@ -35,7 +35,8 @@ def test_0221_assistant_is_small_header_action_not_large_register():
     assert 'id="bk-ai-panel"' not in html
 
 
-def test_0221_mobile_tabs_use_single_trapezoid_plane_with_active_shoulder():
-    assert 'transform: perspective(100px) rotateX(2.4deg);' in BIBLIOTHEKAR_CSS
+def test_0221_mobile_tabs_keep_stronger_trapezoid_and_outward_shoulder():
+    assert 'transform: perspective(88px) rotateX(5deg);' in BIBLIOTHEKAR_CSS
     assert '.bk-tab.active::after {' in BIBLIOTHEKAR_CSS
-    assert 'border-radius: 12px 12px 0 0;' in BIBLIOTHEKAR_CSS
+    assert 'height: 18px;' in BIBLIOTHEKAR_CSS
+    assert 'border-radius: 18px 18px 0 0;' in BIBLIOTHEKAR_CSS
