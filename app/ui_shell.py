@@ -324,6 +324,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-mark .b { right: 0; bottom: 2px; background: var(--bk-blue); }
 
 .bk-tabs {
+  --bk-tab-overlap: clamp(24px, 3vw, 64px);
+  --bk-shoulder-size: clamp(8px, .65vw, 12px);
+  --bk-shadow-width: clamp(8px, .7vw, 12px);
+  --bk-shadow-edge-inset: clamp(5px, .5vw, 8px);
   display: flex;
   align-items: flex-end;
   justify-content: stretch;
@@ -342,7 +346,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   flex: 1 1 0;
   min-width: 0;
   height: 57px;
-  margin-left: -34px;
+  margin-left: calc(0px - var(--bk-tab-overlap));
   padding: 0 48px;
   border: 0 !important;
   border-radius: 0 !important;
@@ -393,10 +397,9 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
  * Kein Halbkreis, kein "Ohr", kein Schatten nach unten.
  */
 .bk-tab-shoulder {
-  --bk-shoulder-size: 12px;
   --bk-shoulder-color: var(--bk-tab-bg);
   position: absolute;
-  bottom: 0;
+  bottom: -1px;
   width: var(--bk-shoulder-size);
   height: var(--bk-shoulder-size);
   display: none;
@@ -404,7 +407,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   pointer-events: none;
 }
 .bk-tab-shoulder-left {
-  left: calc(-1 * var(--bk-shoulder-size));
+  left: calc(1px - var(--bk-shoulder-size));
   transform: skewX(var(--bk-shoulder-skew-left));
   transform-origin: right bottom;
   background:
@@ -416,7 +419,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
     );
 }
 .bk-tab-shoulder-right {
-  right: calc(-1 * var(--bk-shoulder-size));
+  right: calc(1px - var(--bk-shoulder-size));
   transform: skewX(var(--bk-shoulder-skew-right));
   transform-origin: left bottom;
   background:
@@ -439,6 +442,12 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 .bk-tab:last-child:not(.active) .bk-tab-shoulder-right {
   display: block;
+}
+.bk-tab:first-child.active .bk-tab-shoulder-left {
+  left: calc(2px - var(--bk-shoulder-size));
+}
+.bk-tab:last-child.active .bk-tab-shoulder-right {
+  right: calc(2px - var(--bk-shoulder-size));
 }
 
 .bk-tab-label,
@@ -469,33 +478,41 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /*
  * Schichtungsschatten:
- * Der Schatten wird NICHT auf die obere Karte gemalt, sondern auf die
- * jeweils darunterliegende Karte direkt neben der überdeckten Kante.
- * Nur horizontaler Verlauf; kein Schatten nach unten.
+ * Der Schatten liegt auf der jeweils darunterliegenden Karte und folgt
+ * derselben Schräge wie die überdeckende Registerkante. Überlappung,
+ * Schattenposition und Schultergröße skalieren mit der Fensterbreite.
+ * Der Schatten endet vor der unteren Seitenkante: kein Schatten nach unten.
  */
 .bk-tab::after {
   content: "";
   position: absolute;
   top: 5px;
-  bottom: 0;
-  width: 10px;
+  bottom: calc(var(--bk-shoulder-size) - 1px);
+  width: var(--bk-shadow-width);
   z-index: 1;
   opacity: 0;
   pointer-events: none;
+  box-shadow: none;
 }
 .bk-tabs-active-import .bk-tab[data-area="workspace"]::after,
 .bk-tabs-active-import .bk-tab[data-area="archive"]::after,
 .bk-tabs-active-workspace .bk-tab[data-area="archive"]::after {
-  left: 27px;
+  left: calc(var(--bk-tab-overlap) - var(--bk-shadow-edge-inset));
   opacity: 1;
-  background: linear-gradient(to right, var(--bk-stack-shadow), transparent);
+  transform: skewX(var(--bk-shoulder-skew-right));
+  transform-origin: left bottom;
+  border-bottom-left-radius: var(--bk-shoulder-size);
+  background: linear-gradient(to right, var(--bk-stack-shadow), transparent 88%);
 }
 .bk-tabs-active-workspace .bk-tab[data-area="import"]::after,
 .bk-tabs-active-archive .bk-tab[data-area="workspace"]::after,
 .bk-tabs-active-archive .bk-tab[data-area="import"]::after {
-  right: 27px;
+  right: calc(var(--bk-tab-overlap) - var(--bk-shadow-edge-inset));
   opacity: 1;
-  background: linear-gradient(to left, var(--bk-stack-shadow), transparent);
+  transform: skewX(var(--bk-shoulder-skew-left));
+  transform-origin: right bottom;
+  border-bottom-right-radius: var(--bk-shoulder-size);
+  background: linear-gradient(to left, var(--bk-stack-shadow), transparent 88%);
 }
 
 /* Innenliegende obere Rundungen werden unter der vorderen Karte verborgen. */
@@ -1101,11 +1118,14 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     padding-inline: 16px;
   }
   .bk-brand { font-size: 1.08rem; }
+  .bk-tabs {
+    --bk-tab-overlap: clamp(24px, 3vw, 34px);
+    --bk-shadow-edge-inset: clamp(5px, .55vw, 7px);
+  }
   .bk-tab {
     flex: 1 1 0;
     min-width: 0;
     padding-inline: 34px;
-    margin-left: -26px;
     font-size: .9rem;
   }
   .bk-task-label { display: none; }
@@ -1117,6 +1137,8 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     padding-inline: 26px;
   }
   .bk-tabs {
+    --bk-tab-overlap: clamp(44px, 3vw, 72px);
+    --bk-shadow-edge-inset: clamp(6px, .45vw, 9px);
     width: 100%;
     max-width: none;
   }
@@ -1172,6 +1194,10 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   }
 
   .bk-tabs {
+    --bk-tab-overlap: clamp(12px, 4vw, 18px);
+    --bk-shoulder-size: clamp(7px, 2.2vw, 9px);
+    --bk-shadow-width: clamp(6px, 2vw, 9px);
+    --bk-shadow-edge-inset: clamp(3px, 1.2vw, 5px);
     grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
@@ -1183,7 +1209,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     min-width: 0;
     max-width: none;
     height: 44px;
-    margin-left: -15px;
+    margin-left: calc(0px - var(--bk-tab-overlap));
     padding: 0 16px;
     font-size: .76rem;
   }
@@ -1206,19 +1232,6 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-tab {
     --bk-shoulder-skew-left: -7deg;
     --bk-shoulder-skew-right: 7deg;
-  }
-  .bk-tab-shoulder {
-    --bk-shoulder-size: 8px;
-  }
-  .bk-tabs-active-import .bk-tab[data-area="workspace"]::after,
-  .bk-tabs-active-import .bk-tab[data-area="archive"]::after,
-  .bk-tabs-active-workspace .bk-tab[data-area="archive"]::after {
-    left: 11px;
-  }
-  .bk-tabs-active-workspace .bk-tab[data-area="import"]::after,
-  .bk-tabs-active-archive .bk-tab[data-area="workspace"]::after,
-  .bk-tabs-active-archive .bk-tab[data-area="import"]::after {
-    right: 11px;
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
