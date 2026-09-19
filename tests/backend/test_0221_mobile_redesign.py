@@ -2,34 +2,34 @@ from app import main
 from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
-def test_0221_mobile_rail_navigation_is_present():
+def test_0221_mobile_navigation_returns_to_top_header():
     html = main.index()
-    assert 'id="bk-mobile-nav-toggle"' in html
+    assert 'id="bk-mobile-nav-toggle"' not in html
     assert 'class="bk-tab-mobile-label">Import</span>' in html
     assert 'class="bk-tab-mobile-label">Arbeitsbereich</span>' in html
     assert 'class="bk-tab-mobile-label">Archiv</span>' in html
+    assert 'class="bk-tab-mobile-label">KI</span>' in html
     assert 'data-bk-area="import"' in html
 
 
-def test_0221_mobile_css_uses_side_rail_and_full_overlay_menu():
-    assert '@media (max-width: 700px) and (orientation: portrait)' in BIBLIOTHEKAR_CSS
-    assert 'position: fixed;' in BIBLIOTHEKAR_CSS
-    assert 'writing-mode: vertical-rl;' in BIBLIOTHEKAR_CSS
-    assert 'body.bk-mobile-nav-collapsed .bk-tabs' in BIBLIOTHEKAR_CSS
-    assert 'z-index: 5700;' in BIBLIOTHEKAR_CSS
+def test_0221_mobile_css_uses_compact_horizontal_registers():
+    assert '@media (max-width: 820px)' in BIBLIOTHEKAR_CSS
+    assert 'grid-column: 1 / -1;' in BIBLIOTHEKAR_CSS
+    assert 'writing-mode: vertical-rl;' not in BIBLIOTHEKAR_CSS
+    assert 'bk-mobile-nav-collapsed' not in BIBLIOTHEKAR_CSS
+    assert 'z-index: 9000;' in BIBLIOTHEKAR_CSS
 
 
-def test_0221_area_tints_and_green_create_button():
-    assert 'body[data-bk-area="import"]' in BIBLIOTHEKAR_CSS
-    assert 'body[data-bk-area="workspace"]' in BIBLIOTHEKAR_CSS
-    assert 'body[data-bk-area="archive"]' in BIBLIOTHEKAR_CSS
-    assert '#new-event-button' in BIBLIOTHEKAR_CSS
-    assert 'background: var(--bk-green) !important;' in BIBLIOTHEKAR_CSS
+def test_0221_mobile_sources_remain_three_cards():
+    assert '.bk-source-picker {' in BIBLIOTHEKAR_CSS
+    assert 'grid-template-columns: repeat(3, minmax(0, 1fr));' in BIBLIOTHEKAR_CSS
+    assert '.bk-source-option small { display: none; }' in BIBLIOTHEKAR_CSS
 
 
-def test_0221_mobile_assistant_uses_dedicated_mode():
+def test_0221_assistant_is_a_header_register_not_floating_button():
     html = main.index()
-    assert 'id="bk-ai-launcher"' in html
+    assert 'id="bk-ai-tab"' in html
+    assert 'data-area="assistant"' in html
     assert 'id="bk-ai-panel"' in html
     assert 'id="bk-ai-close"' in html
-    assert 'aria-expanded="false"' in html
+    assert 'id="bk-ai-launcher"' not in html
