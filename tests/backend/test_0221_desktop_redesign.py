@@ -44,9 +44,10 @@ def test_0221_only_three_main_registers_and_assistant_is_header_action():
 
     assert '.bk-tabs-active-workspace' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-archive' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab::before,' in BIBLIOTHEKAR_CSS
-    assert 'transform: skewX(-11deg);' in BIBLIOTHEKAR_CSS
-    assert 'border-radius: 14px 14px 0 0 !important;' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab::before {' in BIBLIOTHEKAR_CSS
+    assert 'transform: perspective(120px) rotateX(3deg);' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab::after { content: none !important; }' in BIBLIOTHEKAR_CSS
+    assert 'border-radius: 15px 15px 0 0;' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_page_accents_match_import_workspace_and_archive():
@@ -71,3 +72,18 @@ def test_0221_assistant_and_metadata_correction_are_real_pages():
     assert 'data-bk-area="metadata"' in metadata
     assert 'Metadatenkorrektion' in metadata
     assert 'href="/metadata-correction"' in metadata
+
+
+def test_0221_shell_has_shared_typography_wider_canvas_and_left_brand_space():
+    assert 'font-family: Inter, ui-sans-serif, system-ui' in BIBLIOTHEKAR_CSS
+    assert 'width: min(1440px, calc(100% - 48px)) !important;' in BIBLIOTHEKAR_CSS
+    assert 'grid-template-columns: minmax(190px, 235px) minmax(600px, 1fr) auto;' in BIBLIOTHEKAR_CSS
+    assert '@media (min-width: 1500px)' in BIBLIOTHEKAR_CSS
+
+
+def test_0221_menu_entries_and_legacy_toolbars_are_visually_normalized():
+    assert '.bk-menu button,' in BIBLIOTHEKAR_CSS
+    assert 'height: 44px;' in BIBLIOTHEKAR_CSS
+    assert 'background: var(--bk-surface-2) !important;' in BIBLIOTHEKAR_CSS
+    assert 'body[data-bk-area="workspace"] .command-header .toolbar label' in BIBLIOTHEKAR_CSS
+    assert 'body[data-bk-area="import"] .bk-metadata-toolbar .notice' in BIBLIOTHEKAR_CSS
