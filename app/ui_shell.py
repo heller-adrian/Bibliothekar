@@ -347,7 +347,9 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs {
   --bk-tab-overlap: clamp(24px, 3vw, 64px);
   --bk-tab-seam-bleed: clamp(2px, .28vw, 4px);
-  --bk-edge-gradient-width: clamp(18px, 1.8vw, 32px);
+  --bk-edge-gradient-width: clamp(22px, 2vw, 38px);
+  --bk-edge-gradient-angle-right: 100deg;
+  --bk-edge-gradient-angle-left: 260deg;
   display: flex;
   align-items: flex-end;
   justify-content: stretch;
@@ -447,8 +449,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 /*
  * Staffelungsverlauf:
  * Kein separater Schatten mehr. Der darunterliegende Reiter bekommt den
- * Verlauf direkt IN seine transformierte Trapezfläche. Dadurch folgt der
- * Verlauf automatisch Schräge, Rundung und responsiver Größe.
+ * Verlauf direkt IN der transformierten Trapezfläche. Der Verlauf wird
+ * zusätzlich um die gleiche optische Richtung wie die Trapezkante geneigt
+ * und an die reale Überdeckung verschoben. So bleibt er auf Desktop wie
+ * Mobil sichtbar und liest sich nicht als gerader Schattenstreifen.
  */
 .bk-tab::after {
   content: none;
@@ -458,9 +462,11 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs-active-workspace .bk-tab[data-area="archive"] {
   --bk-tab-edge-gradient:
     linear-gradient(
-      to right,
-      var(--bk-stack-blend) 0,
-      transparent var(--bk-edge-gradient-width),
+      var(--bk-edge-gradient-angle-right),
+      transparent 0,
+      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
+      var(--bk-stack-blend) var(--bk-tab-overlap),
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
       transparent 100%
     );
 }
@@ -469,9 +475,11 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs-active-archive .bk-tab[data-area="import"] {
   --bk-tab-edge-gradient:
     linear-gradient(
-      to left,
-      var(--bk-stack-blend) 0,
-      transparent var(--bk-edge-gradient-width),
+      var(--bk-edge-gradient-angle-left),
+      transparent 0,
+      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
+      var(--bk-stack-blend) var(--bk-tab-overlap),
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
       transparent 100%
     );
 }
@@ -494,10 +502,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /* Alle inaktiven Register behalten dieselbe Grundfarbe. */
 html[data-bk-theme="dark"] .bk-tabs {
-  --bk-stack-blend: rgb(0 0 0 / .14);
+  --bk-stack-blend: rgb(0 0 0 / .18);
 }
 html[data-bk-theme="light"] .bk-tabs {
-  --bk-stack-blend: rgb(18 32 51 / .09);
+  --bk-stack-blend: rgb(18 32 51 / .12);
 }
 html[data-bk-theme="dark"] .bk-tab:not(.active) {
   --bk-tab-bg: #5f686d;
@@ -1163,7 +1171,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-tabs {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
     --bk-tab-seam-bleed: clamp(3px, 1vw, 5px);
-    --bk-edge-gradient-width: clamp(14px, 5vw, 24px);
+    --bk-edge-gradient-width: clamp(18px, 5vw, 28px);
     grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
@@ -1328,9 +1336,9 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-brand span:last-child { font-size: 1.02rem; }
   .bk-task-button { min-width: 70px; }
   .bk-tabs {
-    --bk-tab-overlap: 4px;
-    --bk-tab-seam-bleed: 2px;
-    --bk-edge-gradient-width: 16px;
+    --bk-tab-overlap: clamp(12px, 4vw, 18px);
+    --bk-tab-seam-bleed: clamp(3px, 1vw, 5px);
+    --bk-edge-gradient-width: clamp(18px, 6vw, 28px);
   }
   .bk-tab {
     font-size: .68rem;
