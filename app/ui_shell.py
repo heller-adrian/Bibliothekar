@@ -348,6 +348,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-overlap: clamp(24px, 3vw, 64px);
   --bk-tab-seam-bleed: clamp(2px, .28vw, 4px);
   --bk-edge-gradient-width: clamp(18px, 1.8vw, 32px);
+  --bk-active-junction-radius: clamp(5px, .45vw, 8px);
   display: flex;
   align-items: flex-end;
   justify-content: stretch;
@@ -382,6 +383,9 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   isolation: isolate;
 }
 .bk-tab:first-child { margin-left: 0; }
+.bk-tab:not(.active):not(.is-active) {
+  overflow: hidden;
+}
 .bk-tab[data-area="import"] { --bk-tab-accent: var(--bk-red); }
 .bk-tab[data-area="workspace"] { --bk-tab-accent: var(--bk-blue); }
 .bk-tab[data-area="archive"] { --bk-tab-accent: var(--bk-yellow); }
@@ -414,8 +418,9 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /*
  * Aktiver Reiter + Seitenfläche:
- * Keine angeklebten Schultern mehr. Der aktive Reiter läuft direkt in den
- * seitenfarbigen Header-Puffer hinein und bildet mit der Seite eine Fläche.
+ * Keine angeklebten Schultern. Der aktive Reiter endet exakt am Beginn der
+ * Seitenfläche. Seine eigenen unteren Radien bilden mit der unmittelbar
+ * anschließenden gleichfarbigen Seitenfläche eine einzige weiche Kontur.
  */
 
 .bk-tab-label,
@@ -447,8 +452,9 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 /*
  * Staffelungsverlauf:
  * Kein separater Schatten mehr. Der darunterliegende Reiter bekommt den
- * Verlauf direkt IN seine transformierte Trapezfläche. Dadurch folgt der
- * Verlauf automatisch Schräge, Rundung und responsiver Größe.
+ * Verlauf direkt IN seine transformierte Trapezfläche. Der Verlauf beginnt
+ * an der real sichtbaren Überdeckungskante (var(--bk-tab-overlap)) und bleibt
+ * dadurch auf Desktop wie Mobil sichtbar.
  */
 .bk-tab::after {
   content: none;
@@ -459,8 +465,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-edge-gradient:
     linear-gradient(
       to right,
-      var(--bk-stack-blend) 0,
-      transparent var(--bk-edge-gradient-width),
+      transparent 0,
+      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
+      var(--bk-stack-blend) var(--bk-tab-overlap),
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
       transparent 100%
     );
 }
@@ -470,8 +478,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-edge-gradient:
     linear-gradient(
       to left,
-      var(--bk-stack-blend) 0,
-      transparent var(--bk-edge-gradient-width),
+      transparent 0,
+      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
+      var(--bk-stack-blend) var(--bk-tab-overlap),
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
       transparent 100%
     );
 }
@@ -515,9 +525,14 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   color: var(--bk-ink) !important;
   z-index: 40 !important;
 }
-.bk-tab.active::before {
+.bk-tab.active::before,
+.bk-tab.is-active::before {
   --bk-tab-edge-gradient: linear-gradient(to right, transparent, transparent);
-  bottom: calc(-1 * var(--bk-page-bridge-height));
+  bottom: 0;
+  border-radius:
+    17px 17px
+    var(--bk-active-junction-radius)
+    var(--bk-active-junction-radius);
   background:
     var(--bk-tab-edge-gradient),
     linear-gradient(
@@ -1164,6 +1179,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
     --bk-tab-seam-bleed: clamp(3px, 1vw, 5px);
     --bk-edge-gradient-width: clamp(14px, 5vw, 24px);
+    --bk-active-junction-radius: 6px;
     grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
@@ -1197,7 +1213,9 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   }
   .bk-tab.active::before,
   .bk-tab.is-active::before {
-    bottom: calc(-1 * var(--bk-page-bridge-height));
+    bottom: 0;
+    border-bottom-left-radius: var(--bk-active-junction-radius);
+    border-bottom-right-radius: var(--bk-active-junction-radius);
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
@@ -1327,11 +1345,6 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
 @media (max-width: 430px) {
   .bk-brand span:last-child { font-size: 1.02rem; }
   .bk-task-button { min-width: 70px; }
-  .bk-tabs {
-    --bk-tab-overlap: 4px;
-    --bk-tab-seam-bleed: 2px;
-    --bk-edge-gradient-width: 16px;
-  }
   .bk-tab {
     font-size: .68rem;
     padding-inline: 5px;
