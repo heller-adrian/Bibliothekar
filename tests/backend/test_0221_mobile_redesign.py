@@ -41,8 +41,9 @@ def test_0222_mobile_tabs_keep_trapezoid_with_joined_page_surface():
     assert '--bk-tab-overlap: clamp(12px, 4vw, 18px);' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-seam-bleed: clamp(3px, 1vw, 5px);' in BIBLIOTHEKAR_CSS
     assert '--bk-edge-gradient-width: clamp(18px, 5vw, 28px);' in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-page-mask: 4px;' in BIBLIOTHEKAR_CSS
-    assert '.bk-tabs::after {' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-page-mask: clamp(3px, .35vw, 5px);' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs::after {' not in BIBLIOTHEKAR_CSS
+    assert '.bk-shell::after {' in BIBLIOTHEKAR_CSS
     assert '--bk-page-bridge-height: 10px;' in BIBLIOTHEKAR_CSS
     assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
     assert 'margin-left: calc(0px - var(--bk-tab-overlap));' in BIBLIOTHEKAR_CSS

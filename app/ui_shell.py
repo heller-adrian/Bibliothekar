@@ -281,6 +281,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 /* Gemeinsamer App-Rahmen */
 .bk-shell {
   --bk-page-bridge-height: clamp(9px, .8vw, 13px);
+  --bk-tab-page-mask: clamp(3px, .35vw, 5px);
   position: sticky;
   top: 0;
   z-index: 3000;
@@ -300,11 +301,11 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-shell::after {
   content: "";
   position: absolute;
-  z-index: 0;
+  z-index: 25;
   left: 0;
   right: 0;
   bottom: calc(-1 * var(--bk-page-bridge-height));
-  height: calc(var(--bk-page-bridge-height) + 1px);
+  height: calc(var(--bk-page-bridge-height) + var(--bk-tab-page-mask));
   background: var(--bk-page-bg, var(--bk-paper));
   pointer-events: none;
 }
@@ -312,7 +313,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 .bk-tabs,
 .bk-shell-actions {
   position: relative;
-  z-index: 2;
+}
+.bk-brand,
+.bk-shell-actions {
+  z-index: 50;
 }
 
 .bk-brand {
@@ -348,14 +352,14 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-overlap: clamp(24px, 3vw, 64px);
   --bk-tab-seam-bleed: clamp(2px, .28vw, 4px);
   --bk-edge-gradient-width: clamp(22px, 2vw, 38px);
-  --bk-tab-page-mask: clamp(3px, .35vw, 5px);
   display: flex;
   align-items: flex-end;
   justify-content: stretch;
   width: 100%;
   min-width: 0;
   overflow: visible;
-  isolation: isolate;
+  isolation: auto;
+  z-index: auto;
   margin-bottom: 0;
 }
 .bk-tab {
@@ -469,18 +473,6 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
  */
 .bk-tab::after {
   content: none;
-}
-
-.bk-tabs::after {
-  content: "";
-  position: absolute;
-  z-index: 25;
-  left: 0;
-  right: 0;
-  bottom: calc(-1 * var(--bk-page-bridge-height));
-  height: calc(var(--bk-page-bridge-height) + var(--bk-tab-page-mask));
-  background: var(--bk-page-bg, var(--bk-paper));
-  pointer-events: none;
 }
 
 .bk-tabs-active-import .bk-tab[data-area="archive"] {
@@ -1190,7 +1182,6 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
     --bk-tab-seam-bleed: clamp(3px, 1vw, 5px);
     --bk-edge-gradient-width: clamp(18px, 5vw, 28px);
-    --bk-tab-page-mask: 4px;
     grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
