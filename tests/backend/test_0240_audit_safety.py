@@ -46,7 +46,7 @@ def _seed_initial_sort(tmp_path: Path):
                    id,kind,trigger_type,state,stage,operation,source_volume_label,
                    working_path,created_at,updated_at
                ) VALUES (
-                   'j','folder_import','manual','completed','organized_verified',
+                   'j','sd_import','manual','completed','organized_verified',
                    'folder_import','TEST',?,?,?
                )""",
             (str(incoming), NOW, NOW),

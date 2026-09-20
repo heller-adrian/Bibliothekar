@@ -189,7 +189,6 @@ def prepare_reapply_sort_run(
                 }),
                 now,
                 now,
-                now,
             ),
         )
 
