@@ -3779,7 +3779,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 'kind': 'reassignment', 'job_id': row['job_id'],
                 'event_id': row['event_id'], 'title': 'Neu-Zuordnung',
                 'detail': f"{row['n']} Familie" + ('' if int(row['n']) == 1 else 'n') + f" · {row['event_name']}",
-                'count': 1, 'family_count': int(row['n']), 'href': f"/workspace?job={row['job_id']}&task=reassign:{row['event_id']}",
+                'count': 1, 'family_count': int(row['n']), 'href': f"/events?job={row['job_id']}&task=reassign:{row['event_id']}",
             })
         for row in connection.execute(
             """SELECT id,job_id,event_id,event_name,status FROM event_change_requests

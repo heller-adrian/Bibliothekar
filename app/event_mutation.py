@@ -217,6 +217,75 @@ def _insert_dict_rows(connection: Any, table: str, rows: list[dict[str, Any]]) -
         )
 
 
+
+def _update_dict_row(connection: Any, table: str, row: dict[str, Any], *, key: str = "id") -> None:
+    """Restore one existing row without deleting its identity/FK dependants."""
+    columns = [name for name in row.keys() if name != key]
+    if not columns:
+        return
+    assignments = ",".join(f'"{name}"=?' for name in columns)
+    connection.execute(
+        f'UPDATE "{table}" SET {assignments} WHERE "{key}"=?',
+        tuple(row[name] for name in columns) + (row[key],),
+    )
+
+
+def _root_id_map(events: list[dict[str, Any]]) -> dict[str, str]:
+    """Map every root/child event id in a captured state to its root id."""
+    result: dict[str, str] = {}
+    for event in events:
+        event_id = str(event.get("id") or "")
+        if not event_id:
+            continue
+        parent = str(event.get("parent_event_id") or "")
+        result[event_id] = parent or event_id
+    return result
+
+
+def _state_bundle(state: dict[str, Any], root_id: str) -> dict[str, Any]:
+    """Canonical mutable event-graph bundle for one root event."""
+    events = list(state.get("events") or [])
+    root_map = _root_id_map(events)
+    graph_ids = {event_id for event_id, root in root_map.items() if root == root_id}
+
+    def rows_for(key: str, predicate) -> list[dict[str, Any]]:
+        rows = [dict(row) for row in (state.get(key) or []) if predicate(row)]
+        return sorted(rows, key=lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True, default=str))
+
+    return {
+        "events": rows_for("events", lambda row: str(row.get("id") or "") in graph_ids),
+        "event_assignments": rows_for(
+            "event_assignments",
+            lambda row: str(row.get("event_id") or "") in graph_ids,
+        ),
+        "event_time_segments": rows_for(
+            "event_time_segments",
+            lambda row: str(row.get("event_id") or "") in graph_ids,
+        ),
+        "event_reapply_removed_families": rows_for(
+            "event_reapply_removed_families",
+            lambda row: str(row.get("event_id") or "") == root_id,
+        ),
+    }
+
+
+def _changed_root_ids(original: dict[str, Any], current: dict[str, Any]) -> set[str]:
+    original_roots = {
+        str(row.get("id"))
+        for row in (original.get("events") or [])
+        if not row.get("parent_event_id")
+    }
+    current_roots = {
+        str(row.get("id"))
+        for row in (current.get("events") or [])
+        if not row.get("parent_event_id")
+    }
+    result: set[str] = set()
+    for root_id in original_roots | current_roots:
+        if _state_bundle(original, root_id) != _state_bundle(current, root_id):
+            result.add(root_id)
+    return result
+
 def cancel_mutation(connection: Any, mutation_id: str, job_id: str, *, workspace_path=None) -> dict[str, Any]:
     row = connection.execute(
         "SELECT * FROM event_mutations WHERE id=? AND job_id=?", (mutation_id, job_id)
@@ -242,20 +311,110 @@ def cancel_mutation(connection: Any, mutation_id: str, job_id: str, *, workspace
         from app.applied_neutralization import restore_neutralized_files
         restored_file_count = restore_neutralized_files(connection, workspace_path, row)
 
-    event_ids = [str(r["id"]) for r in connection.execute(
-        "SELECT id FROM events WHERE job_id=?", (job_id,)
-    ).fetchall()]
-    if event_ids:
-        ph = ",".join("?" for _ in event_ids)
-        connection.execute(f"DELETE FROM event_assignments WHERE event_id IN ({ph})", tuple(event_ids))
-        connection.execute(f"DELETE FROM event_time_segments WHERE event_id IN ({ph})", tuple(event_ids))
-    connection.execute("DELETE FROM event_reapply_removed_families WHERE job_id=?", (job_id,))
-    connection.execute("DELETE FROM events WHERE job_id=?", (job_id,))
+    # 0.24.1 / A04:
+    # Never delete/recreate the complete job graph. Existing root-event rows are
+    # referenced by durable sort/archive evidence with ON DELETE CASCADE. A
+    # wholesale restore therefore destroyed independent history. Instead compare
+    # the live mutable graph with the captured original state and restore only
+    # roots that this mutation actually changed. Existing root identities are
+    # updated in place, so unrelated FK dependants survive untouched.
+    current_state = capture_job_event_state(connection, job_id)
+    changed_roots = _changed_root_ids(state, current_state)
 
-    _insert_dict_rows(connection, "events", list(state.get("events") or []))
-    _insert_dict_rows(connection, "event_assignments", list(state.get("event_assignments") or []))
-    _insert_dict_rows(connection, "event_time_segments", list(state.get("event_time_segments") or []))
-    _insert_dict_rows(connection, "event_reapply_removed_families", list(state.get("event_reapply_removed_families") or []))
+    original_events = [dict(item) for item in (state.get("events") or [])]
+    original_root_ids = {
+        str(item["id"]) for item in original_events if not item.get("parent_event_id")
+    }
+    original_by_id = {str(item["id"]): item for item in original_events}
+
+    if changed_roots:
+        placeholders = ",".join("?" for _ in changed_roots)
+
+        # Remove mutation-created queue rows first, including references to a
+        # newly created target root that will disappear below.
+        connection.execute(
+            f"""DELETE FROM event_reapply_removed_families
+                WHERE job_id=?
+                  AND (event_id IN ({placeholders}) OR target_event_id IN ({placeholders}))""",
+            (job_id, *sorted(changed_roots), *sorted(changed_roots)),
+        )
+
+        for root_id in sorted(changed_roots):
+            current_graph_rows = connection.execute(
+                """SELECT id FROM events
+                   WHERE job_id=? AND (id=? OR parent_event_id=?)""",
+                (job_id, root_id, root_id),
+            ).fetchall()
+            current_graph_ids = [str(item["id"]) for item in current_graph_rows]
+            if current_graph_ids:
+                ph = ",".join("?" for _ in current_graph_ids)
+                connection.execute(
+                    f"DELETE FROM event_assignments WHERE event_id IN ({ph})",
+                    tuple(current_graph_ids),
+                )
+                connection.execute(
+                    f"DELETE FROM event_time_segments WHERE event_id IN ({ph})",
+                    tuple(current_graph_ids),
+                )
+
+            if root_id not in original_root_ids:
+                # A root created while this mutation was open belongs to the
+                # mutation (e.g. a new reassignment target) and can be removed.
+                connection.execute(
+                    "DELETE FROM events WHERE job_id=? AND id=? AND parent_event_id IS NULL",
+                    (job_id, root_id),
+                )
+                continue
+
+            # Children are mutable structure and may legitimately be replaced.
+            # Root rows are deliberately never deleted here.
+            connection.execute(
+                "DELETE FROM events WHERE job_id=? AND parent_event_id=?",
+                (job_id, root_id),
+            )
+            original_root = original_by_id[root_id]
+            exists = connection.execute(
+                "SELECT 1 FROM events WHERE id=? AND job_id=?",
+                (root_id, job_id),
+            ).fetchone()
+            if exists is None:
+                # This is only a fallback for a root that disappeared during an
+                # unfinished mutation. Normal applied edits retain the root.
+                _insert_dict_rows(connection, "events", [original_root])
+            else:
+                _update_dict_row(connection, "events", original_root)
+
+            original_children = [
+                item for item in original_events
+                if str(item.get("parent_event_id") or "") == root_id
+            ]
+            _insert_dict_rows(connection, "events", original_children)
+
+            original_graph_ids = {root_id} | {str(item["id"]) for item in original_children}
+            _insert_dict_rows(
+                connection,
+                "event_assignments",
+                [
+                    dict(item) for item in (state.get("event_assignments") or [])
+                    if str(item.get("event_id") or "") in original_graph_ids
+                ],
+            )
+            _insert_dict_rows(
+                connection,
+                "event_time_segments",
+                [
+                    dict(item) for item in (state.get("event_time_segments") or [])
+                    if str(item.get("event_id") or "") in original_graph_ids
+                ],
+            )
+            _insert_dict_rows(
+                connection,
+                "event_reapply_removed_families",
+                [
+                    dict(item) for item in (state.get("event_reapply_removed_families") or [])
+                    if str(item.get("event_id") or "") == root_id
+                ],
+            )
 
     now = _now()
     connection.execute(
@@ -265,6 +424,24 @@ def cancel_mutation(connection: Any, mutation_id: str, job_id: str, *, workspace
     connection.execute(
         """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
            VALUES (?,'event_mutation_cancelled','event_mutation',?,?,?)""",
-        (job_id, mutation_id, json.dumps({"anchor_event_id": row["anchor_event_id"]}, sort_keys=True), now),
+        (
+            job_id,
+            mutation_id,
+            json.dumps(
+                {
+                    "anchor_event_id": row["anchor_event_id"],
+                    "restored_root_event_ids": sorted(changed_roots),
+                },
+                sort_keys=True,
+            ),
+            now,
+        ),
     )
-    return {"status": "cancelled", "mutation_id": mutation_id, "job_id": job_id, "restored_file_count": restored_file_count}
+    return {
+        "status": "cancelled",
+        "mutation_id": mutation_id,
+        "job_id": job_id,
+        "restored_file_count": restored_file_count,
+        "restored_root_event_ids": sorted(changed_roots),
+    }
+

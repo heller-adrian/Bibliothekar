@@ -141,7 +141,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.24.0"
+APP_VERSION = "0.24.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4220,6 +4220,51 @@ def _event_edit_payload_within_new_range(
     return normalized
 
 
+
+def _no_event_normal_conflicts(
+    connection: Any,
+    job_id: str,
+    event_id: str,
+    segments: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Return named-event occupancies that a no-event edit would cover.
+
+    „Ohne Ereignis“ fills free time; it must never trim or steal time from a
+    normal event. Keep this separate from the normal cascade path, which is
+    allowed to coordinate edits between named events.
+    """
+    from app.event_timeline import continuous_event_overlaps
+
+    found: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for segment in segments:
+        for row in continuous_event_overlaps(
+            connection,
+            job_id,
+            str(segment["start_datetime"]),
+            str(segment["end_datetime"]),
+            exclude_event_id=event_id,
+        ):
+            key = (
+                str(row.get("id") or ""),
+                str(row.get("effective_child_id") or ""),
+                str(row.get("effective_start") or "")[:19],
+                str(row.get("effective_end") or "")[:19],
+            )
+            found[key] = {
+                "event_id": str(row.get("id") or ""),
+                "child_event_id": (
+                    str(row.get("effective_child_id"))
+                    if row.get("effective_child_id")
+                    else None
+                ),
+                "name": str(row.get("name") or ""),
+                "status": str(row.get("status") or ""),
+                "start_datetime": str(row.get("effective_start") or "")[:19],
+                "end_datetime": str(row.get("effective_end") or "")[:19],
+            }
+    return list(found.values())
+
+
 def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, Any]) -> bool:
     """True when an applied event only changes visible name/notes."""
     event = context["event"]
@@ -4244,7 +4289,11 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
             {"day_key": seg["day_key"], "start_time": seg["start_time"], "end_time": seg["end_time"]}
             for seg in requested_segments
         ]
-        return requested_simple == current_segments
+        return (
+            requested_simple == current_segments
+            and str(payload.get("event_kind") or "no_event") == "no_event"
+            and bool(payload.get("preserve_day_folders")) == bool(event.get("preserve_day_folders"))
+        )
 
     children = list(context.get("child_events") or [])
     requested_children = list(payload.get("child_segments") or [])
@@ -4267,7 +4316,10 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
         )
 
     child = context.get("child_event")
-    uses_time = bool(event.get("uses_time_range"))
+    # Older rows may have a parent uses_time_range=0 while the real effective
+    # structure is represented by one child. Structure comparison must follow
+    # the child graph, not only the legacy parent flag.
+    uses_time = bool(children) or bool(event.get("uses_time_range"))
     current_start_time = str(child.get("start_datetime") or "")[11:16] if uses_time and child else "00:00"
     current_end_time = str(child.get("end_datetime") or "")[11:16] if uses_time and child else "23:59"
     current_child_name = str(child.get("name") or "") if child else ""
@@ -4299,7 +4351,31 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
         if context["structural_editable"] and not _applied_edit_is_metadata_only(context, payload):
             event_kind = str(payload.get("event_kind") or context["event"].get("event_kind") or "event")
             cascade_preview = {"has_conflicts": False, "can_apply_automatically": True, "items": []}
-            if event_kind == "event":
+            if event_kind == "no_event":
+                from app.event_timeline import normalize_no_event_segments
+                requested_no_event_segments = normalize_no_event_segments(
+                    payload.get("no_event_segments") or []
+                )
+                with database_connection(DATABASE_FILE) as connection:
+                    occupied = _no_event_normal_conflicts(
+                        connection,
+                        job_id,
+                        event_id,
+                        requested_no_event_segments,
+                    )
+                if occupied:
+                    names = sorted({str(item.get("name") or "Ereignis") for item in occupied})
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "detail": (
+                                "„Ohne Ereignis“ darf keine bereits von einem normalen Ereignis "
+                                "belegte Zeit überdecken. Konflikt: " + ", ".join(names)
+                            ),
+                            "occupied_by_events": occupied,
+                        },
+                    )
+            elif event_kind == "event":
                 start_date = str(payload.get("start_date") or "")
                 end_date = str(payload.get("end_date") or "")
                 child_segments = list(payload.get("child_segments") or [])

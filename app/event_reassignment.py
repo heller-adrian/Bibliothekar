@@ -70,6 +70,28 @@ def _assignment_event_id(connection, target, capture_time: str) -> str:
     return str(target["id"])
 
 
+def _effective_target_intervals(connection, target) -> list[tuple[str, str, str]]:
+    """Return the actual occupied intervals of one normal target event."""
+    children = connection.execute(
+        "SELECT id,start_datetime,end_datetime FROM events WHERE parent_event_id=? ORDER BY start_datetime,id",
+        (target["id"],),
+    ).fetchall()
+    if children:
+        return [
+            (
+                str(child["start_datetime"] or "")[:19],
+                str(child["end_datetime"] or "")[:19],
+                str(child["id"]),
+            )
+            for child in children
+        ]
+    return [(
+        str(target["start_datetime"] or "")[:19],
+        str(target["end_datetime"] or "")[:19],
+        str(target["id"]),
+    )]
+
+
 
 
 def reconcile_stale_event_reassignments(connection, job_id: str | None = None, event_id: str | None = None) -> int:
@@ -535,7 +557,10 @@ def assign_event_reassignments(
             raise EventReassignmentError("Diese Neu-Zuordnung ist für noch nicht archivierte Ereignisse vorgesehen.")
         placeholders = ",".join("?" for _ in selected)
         pending = connection.execute(
-            f"SELECT family_id,released_start_datetime,released_end_datetime FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id IN ({placeholders})",
+            f"""SELECT family_id,released_start_datetime,released_end_datetime
+                FROM event_reapply_removed_families
+                WHERE job_id=? AND event_id=? AND target_event_id IS NULL
+                  AND family_id IN ({placeholders})""",
             (job_id, event_id, *selected),
         ).fetchall()
         if {int(r["family_id"]) for r in pending} != set(selected):
@@ -548,6 +573,32 @@ def assign_event_reassignments(
         if expected_ranges and provided_ranges != expected_ranges:
             raise EventReassignmentError("Die ausgewählten Tages-/Zeitsegmente sind nicht mehr aktuell. Bitte die Neu-Zuordnung neu öffnen.")
         if exact_segments:
+            # Every persisted released range is an atomic reassignment unit.
+            # Validate against ALL still-open families of the chosen segments,
+            # not merely against the subset sent by the caller.
+            all_open = connection.execute(
+                """SELECT family_id,released_start_datetime,released_end_datetime
+                   FROM event_reapply_removed_families
+                   WHERE job_id=? AND event_id=? AND target_event_id IS NULL""",
+                (job_id, event_id),
+            ).fetchall()
+            chosen_ranges = {
+                (segment["start_datetime"], segment["end_datetime"])
+                for segment in exact_segments
+            }
+            complete_family_ids = {
+                int(item["family_id"])
+                for item in all_open
+                if (
+                    str(item["released_start_datetime"] or "")[:19],
+                    str(item["released_end_datetime"] or "")[:19],
+                ) in chosen_ranges
+            }
+            if complete_family_ids != set(selected):
+                raise EventReassignmentError(
+                    "Tages-/Zeitsegmente können nur vollständig neu zugeordnet werden. "
+                    "Bitte das komplette Segment auswählen."
+                )
             capture_rows=_selected_capture_rows(connection,job_id,selected)
             for row in capture_rows:
                 cap=str(row["selected_capture_time"] or "")[:19]
@@ -651,9 +702,25 @@ def assign_event_reassignments(
             if target is None or str(target["job_id"]) != job_id or str(target["event_kind"]) != "event" or str(target["status"]) not in {"planned","applied"}:
                 raise EventReassignmentError("Das Zielereignis ist nicht mehr verfügbar.")
             capture_rows=_selected_capture_rows(connection,job_id,selected)
+            target_intervals = _effective_target_intervals(connection, target)
+            if exact_segments:
+                for segment in exact_segments:
+                    if not any(
+                        start <= segment["start_datetime"]
+                        and segment["end_datetime"] <= end
+                        for start, end, _ in target_intervals
+                    ):
+                        raise EventReassignmentError(
+                            "Mindestens ein vollständiges Tages-/Zeitsegment passt nicht "
+                            "in den Zeitraum des Zielereignisses."
+                        )
             assignments=[]
             for row in capture_rows:
                 cap=str(row["selected_capture_time"] or "")[:19]
+                if not any(start <= cap <= end for start,end,_ in target_intervals):
+                    raise EventReassignmentError(
+                        "Mindestens eine Familie liegt außerhalb des Zeitraums des Zielereignisses."
+                    )
                 assignment_id=_assignment_event_id(connection,target,cap)
                 if assignment_id == str(target["id"]):
                     children=connection.execute("SELECT COUNT(*) FROM events WHERE parent_event_id=?",(target["id"],)).fetchone()[0]

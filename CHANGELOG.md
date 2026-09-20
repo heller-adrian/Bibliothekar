@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.24.1 – applied-/Neu-Zuordnungsblock aus Astra-Audit
+
+- Mutationsabbruch stellt nur tatsächlich veränderte Ereignisgraphen wieder her und löscht bestehende Root-Ereignisse nicht mehr; unabhängige Sortier- und Archivnachweise bleiben erhalten
+- applied-Strukturvergleich erkennt ein vorhandenes Einzel-Unterereignis auch bei altem Parent-Flag sowie Änderungen der Tagesordner bei „Ohne Ereignis“ als strukturell
+- „Ohne Ereignis“ darf beim Bearbeiten keine von normalen Ereignissen belegten Zeitsegmente überdecken
+- Neu-Zuordnung erzwingt vollständige persistierte Tages-/Zeitsegmente und zeitlich passende bestehende normale Zielereignisse
+- globale Neu-Zuordnungsaufgaben öffnen den kanonischen Ereignisdialog mit exakten Segmenten und vollständigen Zielarten
+- applied-Nachsortierung wird nicht mehr automatisch ausgeführt: der konkrete Reconcile-Plan wird angezeigt und muss ausdrücklich bestätigt werden
+- gezielte Regressionstests für A04, A07, A08, A09, A10 und A11 ergänzt
+
 ### 0.24.0 – erster Audit-Sicherheitsblock
 
 - Reconcile prüft unmittelbar vor der Ausführung erneut, ob der aktuelle Plan weiterhin blockerfrei ist

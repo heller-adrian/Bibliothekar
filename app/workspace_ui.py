@@ -2718,92 +2718,12 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     }
 
-    async function runAutomaticTaskReapply(eventId, jobId) {
-      const plan = await getJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reconcile-plan?verify_sha256=true`);
-      if (!plan.summary?.ready) throw new Error(`${Number(plan.summary?.blocker_count||1)} Blocker verhindern die automatische Nachsortierung.`);
-      let response = await postJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reconcile-sort`, {
-        plan_token: plan.plan_token,
-        confirmation_phrase: plan.apply_confirmation_phrase,
-      });
-      let run = response.run;
-      while (["queued","verifying","moving","finalizing"].includes(run.status)) {
-        await new Promise(resolve => setTimeout(resolve, 350));
-        run = await getJson(`/api/jobs/${encodeURIComponent(jobId)}/sort-runs/${encodeURIComponent(run.id)}`);
-      }
-      if (run.status !== "applied") throw new Error(run.error_message || "Die automatische Nachsortierung wurde nicht abgeschlossen.");
-      return run;
-    }
-
     async function openTaskReassignment(eventId) {
       const jobId = jobSelect.value;
       if (!jobId) throw new Error("Keine Sicherung ausgewählt.");
-      const data = await getJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reassignments`);
-      taskReassignContext = {eventId, jobId, data};
-      taskReassignSubtitle.textContent = `${Number(data.family_count||0)} ${Number(data.family_count||0)===1?"Familie":"Familien"} · ${data.source_event?.name||""}`;
-      if (!data.family_count) {
-        taskReassignBody.innerHTML = `<div class="saved-message">Diese Neu-Zuordnung ist bereits erledigt.</div>`;
-        if (!taskReassignDialog.open) taskReassignDialog.showModal();
-        return;
-      }
-      const targetOptions = (data.targets||[]).map(t=>`<option value="noevent:${escapeHtml(t.event_id)}">${escapeHtml((t.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(t.status))}${t.same_job?"":" · andere Sicherung"}</option>`).join("");
-      const byDay=new Map();
-      for (const f of (data.families||[])) {
-        const day=String(f.selected_capture_time||"").slice(0,10)||"Ohne Datum";
-        if (!byDay.has(day)) byDay.set(day,[]);
-        byDay.get(day).push(f);
-      }
-      const dayGroups=[...byDay.entries()].map(([day,items])=>{
-        const files=items.reduce((n,f)=>n+Number(f.file_count||0),0);
-        const explicitRange=(data.reassignment_time_ranges||{})[day] || null;
-        const timeText=explicitRange ? ` · ${explicitRange.start_time}–${explicitRange.end_time}` : "";
-        const ids=items.map(f=>Number(f.family_id)).filter(Number.isFinite).join(",");
-        return `<label class="card" style="padding:7px 10px;display:flex;align-items:center;gap:8px;min-height:30px">
-          <strong style="flex:0 0 auto">${escapeHtml(formatGermanIsoDate(day))}</strong>
-          <span class="muted" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${items.length} Familien · ${files} Dateien${escapeHtml(timeText)}</span>
-          <input type="checkbox" data-task-day data-family-ids="${escapeHtml(ids)}" checked style="width:16px;height:16px;margin-left:auto;flex:0 0 auto">
-        </label>`;
-      }).join("");
-      const newNoEventOption = data.new_no_event_supported ? '<option value="new-no-event">Neues „Ohne Ereignis“ erstellen</option>' : '';
-      taskReassignBody.innerHTML = `
-        <div class="preview-note"><strong>Offene Aufgabe</strong><br>Diese Familien sind durch eine Ereignisänderung frei geworden. Besteht für ihren Monat bereits „Ohne Ereignis“, wird genau diese Monats-Sammlung als Ziel angeboten.</div>
-        <div style="display:grid;gap:8px">${dayGroups}</div>
-        <label><span>Ziel</span><select id="task-reassign-target"><option value="new">Neues Ereignis erstellen</option>${newNoEventOption}${targetOptions}</select></label>
-        <label id="task-reassign-name-row"><span>Name des neuen Ereignisses</span><input id="task-reassign-name" type="text" placeholder="Ereignisname"></label>
-        <div id="task-reassign-message" class="muted"></div>
-        <div class="dialog-actions"><button id="task-reassign-apply" class="primary" type="button">Auswahl zuordnen</button></div>`;
-      const target = document.getElementById("task-reassign-target");
-      const nameRow = document.getElementById("task-reassign-name-row");
-      const sync = ()=>{ nameRow.hidden = target.value !== "new"; };
-      target.addEventListener("change",sync); sync();
-      document.getElementById("task-reassign-apply").addEventListener("click", async ()=>{
-        const button=document.getElementById("task-reassign-apply");
-        const message=document.getElementById("task-reassign-message");
-        const familyIds=[...new Set([...taskReassignBody.querySelectorAll("[data-task-day]:checked")].flatMap(x=>String(x.dataset.familyIds||"").split(",").map(Number).filter(Number.isFinite)))];
-        if (!familyIds.length) { message.textContent="Wähle mindestens eine Familie aus."; return; }
-        const value=target.value;
-        const isNew=value==="new";
-        const isNewNoEvent=value==="new-no-event";
-        button.disabled=true; message.textContent="Zuordnung wird gespeichert …";
-        try {
-          const assigned = await postJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reassignments`, {
-            family_ids:familyIds,
-            target_mode:isNew?"new_event":(isNewNoEvent?"new_no_event":"existing_no_event"),
-            target_event_id:(isNew||isNewNoEvent)?null:value.slice("noevent:".length),
-            new_event_name:isNew?document.getElementById("task-reassign-name").value:null,
-          });
-          if (Number(assigned.pending_family_count||0) === 0 && assigned.source_resort_required) {
-            message.textContent="Neu-Zuordnung vollständig. SSD wird automatisch nachsortiert …";
-            await runAutomaticTaskReapply(eventId, jobId);
-            if (assigned?.target?.status === "applied" && assigned?.target?.event_id && assigned.target.event_id !== eventId) {
-              await runAutomaticTaskReapply(assigned.target.event_id, jobId);
-            }
-            taskReassignDialog.close();
-          }
-          await loadWorkspace(); await refreshGlobalTasks();
-          if (Number(assigned.pending_family_count||0) > 0) await openTaskReassignment(eventId);
-        } catch(error) { message.textContent=error.message; button.disabled=false; }
-      });
-      if (!taskReassignDialog.open) taskReassignDialog.showModal();
+      // 0.24.1: one canonical reassignment dialog lives on the Ereignisse page.
+      // It sends exact persisted segments and exposes the complete target model.
+      location.href = `/events?job=${encodeURIComponent(jobId)}&task=reassign:${encodeURIComponent(eventId)}`;
     }
 
     taskReassignClose?.addEventListener("click",()=>taskReassignDialog.close());

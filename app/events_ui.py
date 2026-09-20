@@ -2541,9 +2541,10 @@ EVENTS_HTML = r"""<!doctype html>
       if (result.reassignment_required && (result.removed_family_ids || []).length) {
         await openReassignmentWorkflow(context.event.id, context._job_id, Boolean(result.resort_required));
       } else {
-        // 0.16.8: Eine bestaetigte Kaskade ist eine gemeinsame Operation.
-        // Alle betroffenen applied-Ereignisse werden automatisch nachsortiert;
-        // der Nutzer bekommt nur dann eine Aufgabe, wenn ein Lauf fehlschlaegt.
+        // Eine bestätigte Kaskade bleibt eine gemeinsame Operation. Bei
+        // applied-Bestand wird der gemeinsame Reconcile-Plan jedoch nur
+        // angezeigt; die Dateioperation benötigt anschließend die ausdrückliche
+        // Bestätigung des Nutzers.
         const cascadeNeedsReconcile = (result.cascade?.preview?.items || []).some(
           item => String(item.status || "") === "applied"
         );
@@ -2551,7 +2552,12 @@ EVENTS_HTML = r"""<!doctype html>
         if (needsReconcile) {
           // 0.16.10: genau EIN Lauf für die gesamte verbundene Änderungsgruppe.
           // Der Abgleich ermittelt selbst alle betroffenen applied-Ereignisse.
-          await runAutomaticReapply(context.event.id, context._job_id);
+          await loadReapplyPlan(context.event.id, context._job_id);
+          setStatus(
+            "Änderung gespeichert. Bitte den angezeigten Nachsortierplan prüfen und ausdrücklich bestätigen.",
+            false,
+            true
+          );
         } else {
           const plannedCascade = String(result.mutation_id || "") && !Boolean(result.resort_required);
           setStatus(
@@ -2583,7 +2589,12 @@ EVENTS_HTML = r"""<!doctype html>
         if (ctx.resortRequired) {
           // Ein gemeinsamer 0.16.10-Abgleich umfasst Quellereignis und alle
           // verbundenen applied-Ziele (auch „Ohne Ereignis“).
-          await runAutomaticReapply(ctx.eventId, ctx.jobId);
+          await loadReapplyPlan(ctx.eventId, ctx.jobId);
+          setStatus(
+            "Neu-Zuordnung vollständig. Bitte den Nachsortierplan prüfen und ausdrücklich bestätigen.",
+            false,
+            true
+          );
         } else {
           setStatus("Ereignis gespeichert und alle herausfallenden Familien neu zugeordnet.", false, true);
         }
@@ -2649,39 +2660,6 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
     reassignmentClose.addEventListener("click", () => reassignmentDialog.close());
-
-    async function runAutomaticReapply(eventId, jobId) {
-      sortPlanTitle.textContent = "Nachsortierung wird automatisch ausgeführt";
-      sortPlanSubtitle.textContent = "Die neue Struktur wird geprüft und anschließend direkt auf der SSD umgesetzt.";
-      sortPlanBody.textContent = "Dateien, Ziele und Konflikte werden geprüft …";
-      if (!sortPlanDialog.open) sortPlanDialog.showModal();
-
-      const plan = await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reconcile-plan?verify_sha256=true`);
-      if (!plan.summary?.ready) {
-        plan._job_id = jobId;
-        plan._reapply = true;
-        plan._reconcile = true;
-      plan._reconcile = true;
-        renderSortPlan(plan);
-        throw new Error(`${plan.summary?.blocker_count || 1} Blocker verhindern die automatische Nachsortierung.`);
-      }
-
-      const response = await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reconcile-sort`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          plan_token: plan.plan_token,
-          confirmation_phrase: plan.apply_confirmation_phrase,
-        }),
-      });
-      renderSortRunProgress(response.run);
-      const run = await pollSortRun(jobId, response.run.id);
-      if (run.status !== "applied") {
-        throw new Error(run.error_message || "Die automatische Nachsortierung wurde nicht abgeschlossen.");
-      }
-      setStatus("Änderung gespeichert, SSD automatisch nachsortiert und geprüft.", false, true);
-      return run;
-    }
 
     async function loadReapplyPlan(eventId, jobId) {
       const event = currentEvents.find(item => item.id === eventId && (!jobId || item._job_id === jobId));
@@ -2758,7 +2736,7 @@ EVENTS_HTML = r"""<!doctype html>
       const statusText = event.status === "planned" || event.status === "draft"
         ? "Die Planung wird sofort entfernt; Dateien und Ordner bleiben unverändert."
         : event.status === "applied"
-          ? "Die Familien müssen anschließend neu zugeordnet werden. Danach sortiert die App die SSD automatisch und löscht das leere Ereignis."
+          ? "Die Familien müssen anschließend neu zugeordnet werden. Danach prüfst und bestätigst du den Nachsortierplan; erst dann wird das leere Ereignis entfernt."
           : "Für den archivierten Bestand wird ein manueller IST→SOLL-Löschauftrag erstellt. Die Kamerabibliothek bleibt read-only.";
       const confirmed = window.confirm(`Ereignis „${event.name}“ löschen?\n\n${statusText}`);
 
@@ -2841,7 +2819,11 @@ EVENTS_HTML = r"""<!doctype html>
 
         const workspaceReassignButton = event.target.closest("[data-reassign-workspace]");
         if (workspaceReassignButton) {
-          location.href = `/workspace?job=${encodeURIComponent(workspaceReassignButton.dataset.jobId||"")}&task=reassign:${encodeURIComponent(workspaceReassignButton.dataset.reassignWorkspace)}`;
+          openReassignmentWorkflow(
+            workspaceReassignButton.dataset.reassignWorkspace,
+            workspaceReassignButton.dataset.jobId,
+            true
+          ).catch(error => setStatus(error.message, true));
           return;
         }
 
@@ -3264,6 +3246,20 @@ EVENTS_HTML = r"""<!doctype html>
         const crId = task.slice("change:".length);
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
         await showChangeRequestDetail(crId);
+      } else if (task.startsWith("reassign:")) {
+        const eventId = task.slice("reassign:".length);
+        if (jobId) {
+          const data = await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events`);
+          const target = (data.events||[]).find(item=>item.id===eventId);
+          if (target && !currentEvents.some(item=>item.id===eventId)) {
+            currentEvents.push({...target,_job_id:jobId});
+          }
+          await openReassignmentWorkflow(
+            eventId,
+            jobId,
+            Boolean(target?.resort_required)
+          );
+        }
       } else if (task.startsWith("resort:")) {
         const eventId = task.slice("resort:".length);
         if (jobId) {
