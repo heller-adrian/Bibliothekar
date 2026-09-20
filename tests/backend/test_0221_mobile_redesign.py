@@ -56,6 +56,8 @@ def test_0223_narrow_portrait_keeps_the_shared_overlap_geometry():
     assert '--bk-edge-gradient-width: clamp(18px, 6vw, 28px);' in BIBLIOTHEKAR_CSS
 
 
-def test_0223_mobile_uses_same_angled_depth_cues_as_desktop():
-    assert '--bk-edge-gradient-angle-right: 100deg;' in BIBLIOTHEKAR_CSS
-    assert '--bk-edge-gradient-angle-left: 260deg;' in BIBLIOTHEKAR_CSS
+def test_0223_mobile_uses_same_edge_bound_depth_fade_as_desktop():
+    assert '--bk-edge-gradient-angle-right' not in BIBLIOTHEKAR_CSS
+    assert '--bk-edge-gradient-angle-left' not in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-import .bk-tab[data-area="archive"] {' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-archive .bk-tab[data-area="import"] {' in BIBLIOTHEKAR_CSS
