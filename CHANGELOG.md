@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 0.22.3 – Registerbasis stabilisiert
+
+- neuer Entwicklungsbranch `patch/0.22.3` auf dem letzten optisch stabilen Registerstand vor den Schulter-/Ohren-Experimenten
+- keine zusätzlichen Schulter-, Ohr- oder Anschlussflächen an aktiven Registern
+- Tiefenverlauf liegt wieder direkt in der transformierten Trapezfläche und ist passend zur Registerschräge geneigt
+- Verlauf ist an die reale Überdeckungskante gekoppelt, damit er auf Desktop und Mobil sichtbar bleibt
+- schmale Hochformatansichten verwenden keine separate 4-px-Überlappung mehr; die responsive gemeinsame Registergeometrie bleibt erhalten
+
 ### 0.22.2 – Registergeometrie und Feinschliff
 
 - neuer eigener Entwicklungsbranch `patch/0.22.2` auf Basis von 0.22.1
