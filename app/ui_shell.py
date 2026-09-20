@@ -348,7 +348,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-overlap: clamp(24px, 3vw, 64px);
   --bk-tab-seam-bleed: clamp(2px, .28vw, 4px);
   --bk-edge-gradient-width: clamp(18px, 1.8vw, 32px);
-  --bk-active-junction-radius: clamp(5px, .45vw, 8px);
+  --bk-active-shoulder: clamp(7px, .65vw, 11px);
   display: flex;
   align-items: flex-end;
   justify-content: stretch;
@@ -383,9 +383,6 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   isolation: isolate;
 }
 .bk-tab:first-child { margin-left: 0; }
-.bk-tab:not(.active):not(.is-active) {
-  overflow: hidden;
-}
 .bk-tab[data-area="import"] { --bk-tab-accent: var(--bk-red); }
 .bk-tab[data-area="workspace"] { --bk-tab-accent: var(--bk-blue); }
 .bk-tab[data-area="archive"] { --bk-tab-accent: var(--bk-yellow); }
@@ -398,7 +395,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   bottom: 0;
   left: calc(0px - var(--bk-tab-seam-bleed));
   right: calc(0px - var(--bk-tab-seam-bleed));
-  z-index: 0;
+  z-index: 1;
   background:
     var(--bk-tab-edge-gradient),
     linear-gradient(
@@ -418,9 +415,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /*
  * Aktiver Reiter + Seitenfläche:
- * Keine angeklebten Schultern. Der aktive Reiter endet exakt am Beginn der
- * Seitenfläche. Seine eigenen unteren Radien bilden mit der unmittelbar
- * anschließenden gleichfarbigen Seitenfläche eine einzige weiche Kontur.
+ * Der Reiter selbst bleibt unten gerade und läuft in den Seitenpuffer.
+ * Die kleine Rundung wird AUSSERHALB des Reiters aus Seitenfarbe aufgebaut:
+ * Die Seitenfläche steigt neben der schrägen Reiterkante weich nach oben,
+ * statt eine Ecke aus der Reiterfläche herauszuschneiden.
  */
 
 .bk-tab-label,
@@ -452,12 +450,24 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 /*
  * Staffelungsverlauf:
  * Kein separater Schatten mehr. Der darunterliegende Reiter bekommt den
- * Verlauf direkt IN seine transformierte Trapezfläche. Der Verlauf beginnt
- * an der real sichtbaren Überdeckungskante (var(--bk-tab-overlap)) und bleibt
- * dadurch auf Desktop wie Mobil sichtbar.
+ * Verlauf direkt IN seine transformierte Trapezfläche. Dadurch folgt der
+ * Verlauf automatisch Schräge, Rundung und responsiver Größe.
  */
 .bk-tab::after {
   content: none;
+}
+.bk-tab.active::after,
+.bk-tab.is-active::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: calc(0px - var(--bk-active-shoulder) - var(--bk-tab-seam-bleed));
+  right: calc(0px - var(--bk-active-shoulder) - var(--bk-tab-seam-bleed));
+  bottom: calc(-1 * var(--bk-page-bridge-height));
+  height: calc(var(--bk-page-bridge-height) + var(--bk-active-shoulder));
+  background: var(--bk-page-bg, var(--bk-paper));
+  border-radius: var(--bk-active-shoulder) var(--bk-active-shoulder) 0 0;
+  pointer-events: none;
 }
 .bk-tabs-active-import .bk-tab[data-area="workspace"],
 .bk-tabs-active-import .bk-tab[data-area="archive"],
@@ -465,10 +475,8 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-edge-gradient:
     linear-gradient(
       to right,
-      transparent 0,
-      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
-      var(--bk-stack-blend) var(--bk-tab-overlap),
-      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+      var(--bk-stack-blend) 0,
+      transparent var(--bk-edge-gradient-width),
       transparent 100%
     );
 }
@@ -478,10 +486,8 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-edge-gradient:
     linear-gradient(
       to left,
-      transparent 0,
-      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
-      var(--bk-stack-blend) var(--bk-tab-overlap),
-      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+      var(--bk-stack-blend) 0,
+      transparent var(--bk-edge-gradient-width),
       transparent 100%
     );
 }
@@ -528,11 +534,8 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 .bk-tab.active::before,
 .bk-tab.is-active::before {
   --bk-tab-edge-gradient: linear-gradient(to right, transparent, transparent);
-  bottom: 0;
-  border-radius:
-    17px 17px
-    var(--bk-active-junction-radius)
-    var(--bk-active-junction-radius);
+  bottom: calc(-1 * var(--bk-page-bridge-height));
+  border-radius: 17px 17px 0 0;
   background:
     var(--bk-tab-edge-gradient),
     linear-gradient(
@@ -1179,8 +1182,8 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
     --bk-tab-seam-bleed: clamp(3px, 1vw, 5px);
     --bk-edge-gradient-width: clamp(14px, 5vw, 24px);
-    --bk-active-junction-radius: 6px;
-    grid-column: 1 / -1;
+    --bk-active-shoulder: 8px;
+      grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
     margin-top: 7px;
@@ -1213,9 +1216,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   }
   .bk-tab.active::before,
   .bk-tab.is-active::before {
-    bottom: 0;
-    border-bottom-left-radius: var(--bk-active-junction-radius);
-    border-bottom-right-radius: var(--bk-active-junction-radius);
+    bottom: calc(-1 * var(--bk-page-bridge-height));
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
