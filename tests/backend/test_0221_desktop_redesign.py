@@ -3,7 +3,7 @@ from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
 def test_0222_version():
-    assert main.APP_VERSION == "0.22.2"
+    assert main.APP_VERSION == "0.22.3"
 
 
 def test_0221_import_uses_three_source_cards_and_keeps_all_paths():
@@ -103,8 +103,11 @@ def test_0222_registers_use_same_inactive_color_and_in_face_depth_gradient():
     assert 'content: none;' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-import .bk-tab[data-area="workspace"],' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-workspace .bk-tab[data-area="import"],' in BIBLIOTHEKAR_CSS
-    assert 'var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
-    assert 'transparent var(--bk-edge-gradient-width)' in BIBLIOTHEKAR_CSS
+    assert '--bk-edge-gradient-angle-right: 100deg;' in BIBLIOTHEKAR_CSS
+    assert '--bk-edge-gradient-angle-left: 260deg;' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed))' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
@@ -196,3 +199,19 @@ def test_0222_header_has_page_coloured_scroll_buffer():
     assert '--bk-page-bridge-height: clamp(9px, .8vw, 13px);' in BIBLIOTHEKAR_CSS
     assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
     assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
+
+
+def test_0223_has_no_outer_tab_ears_or_corner_helper_elements():
+    html = main.index()
+    assert 'bk-tab-junction' not in html
+    assert 'bk-tab-shoulder' not in html
+    assert '--bk-active-shoulder' not in BIBLIOTHEKAR_CSS
+    assert '--bk-junction-radius' not in BIBLIOTHEKAR_CSS
+
+
+def test_0223_depth_gradient_is_angled_inside_the_transformed_tab_face():
+    assert '--bk-edge-gradient-angle-right: 100deg;' in BIBLIOTHEKAR_CSS
+    assert '--bk-edge-gradient-angle-left: 260deg;' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-edge-gradient-angle-right)' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-edge-gradient-angle-left)' in BIBLIOTHEKAR_CSS
+    assert 'transform: perspective(108px) rotateX(7deg);' in BIBLIOTHEKAR_CSS
