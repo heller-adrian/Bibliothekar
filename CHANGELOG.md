@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.23.1 – kleiner UI-/UX-Patch nach M1 A/B
+
+- positive Hauptaktionen im Arbeitsbereich sind blau: Ereignis speichern/anwenden, Sortierung prüfen und Änderungen speichern
+- Karte mit geplanten Ereignissen ist horizontal bündig mit dem restlichen Arbeitsbereich
+- sichtbare Statuswerte im Arbeitsbereich werden deutsch angezeigt, insbesondere `Geplant` statt `planned`
+- geplante Ereignisse lassen sich unter `Auswahl anpassen` im hellen Theme wieder eindeutig per Checkbox an- und abwählen
+- der Ereignis-Editor kennt explizit `Mehrere Zeitbereiche`; beim ersten hinzugefügten Zeitsegment wechselt er automatisch aus `Ganzer Zeitraum`
+- Rückwechsel auf `Ganzer Zeitraum` oder `Ein Zeitbereich` entfernt zusätzliche Segmentzeilen konsistent
+
 ### 0.23.0 – Funktionsbasis nach M1-Codeaudit
 
 - neuer Funktionsbranch `patch/0.23.0` auf Basis des optisch stabilen 0.22.3-Stands

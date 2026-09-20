@@ -830,14 +830,14 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     </section>
 
-    <section id="post-save-action" class="card" hidden style="margin:0 20px 18px; border-color:#6ea8ff;">
+    <section id="post-save-action" class="card" hidden style="margin:0 0 18px; border-color:#6ea8ff;">
       <strong id="post-save-title">Geplante Änderungen</strong>
       <p id="post-save-detail" class="muted" style="margin:8px 0 12px;">Alle geplanten Ereignisse sind standardmäßig ausgewählt.</p>
       <details style="margin:0 0 14px;">
         <summary>Auswahl anpassen</summary>
         <div id="planned-event-selection" style="display:grid;gap:8px;margin-top:10px;"></div>
       </details>
-      <button id="apply-saved-event-button" class="primary" type="button">Alle geplanten Ereignisse anwenden</button>
+      <button id="apply-saved-event-button" class="primary bk-positive-action" type="button">Alle geplanten Ereignisse anwenden</button>
       <span id="apply-saved-event-status" class="muted" style="margin-left:12px;"></span>
     </section>
 
@@ -1193,7 +1193,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         <button
           id="save-event-button"
-          class="primary"
+          class="primary bk-positive-action"
           type="button"
         >
           Ereignis speichern
@@ -1405,6 +1405,17 @@ WORKSPACE_HTML = r"""<!doctype html>
     let workspace = null;
     let selectedDays = new Set();
     let dialogMode = "event";
+
+
+    function workspaceStatusLabel(status) {
+      const labels = {
+        draft: "Entwurf",
+        planned: "Geplant",
+        applied: "Angewendet",
+        archived: "Archiviert"
+      };
+      return labels[String(status || "")] || String(status || "");
+    }
 
 
     function escapeHtml(value) {
@@ -1834,7 +1845,7 @@ WORKSPACE_HTML = r"""<!doctype html>
             </div>
 
             <span class="badge success">
-              ${escapeHtml(event.status)}
+              ${escapeHtml(workspaceStatusLabel(event.status))}
             </span>
           </div>
 
@@ -2075,7 +2086,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
               <span class="badge success">
                 ${escapeHtml(
-                  group.status
+                  workspaceStatusLabel(group.status)
                 )}
               </span>
             </div>
@@ -2651,7 +2662,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           return;
         }
         existingNoEventTargetRow.hidden=false;
-        existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(target.status)}</option>`;
+        existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;
         existingNoEventTarget.disabled=true;
         activateNoEventTarget(target);
         return;
@@ -2662,7 +2673,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       existingNoEventTargetRow.hidden = noEventTargetCache.length===0;
       existingNoEventTarget.disabled=false;
       existingNoEventTarget.innerHTML='<option value="">Neue Monats-Sammlung / noch kein Ziel</option>' + noEventTargetCache.map(target=>
-        `<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||""))} · Ohne Ereignis · ${escapeHtml(target.status)}</option>`
+        `<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||""))} · Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`
       ).join("");
       activateNoEventTarget(null);
     }
@@ -2734,7 +2745,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         if (!taskReassignDialog.open) taskReassignDialog.showModal();
         return;
       }
-      const targetOptions = (data.targets||[]).map(t=>`<option value="noevent:${escapeHtml(t.event_id)}">${escapeHtml((t.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(t.status)}${t.same_job?"":" · andere Sicherung"}</option>`).join("");
+      const targetOptions = (data.targets||[]).map(t=>`<option value="noevent:${escapeHtml(t.event_id)}">${escapeHtml((t.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(t.status))}${t.same_job?"":" · andere Sicherung"}</option>`).join("");
       const byDay=new Map();
       for (const f of (data.families||[])) {
         const day=String(f.selected_capture_time||"").slice(0,10)||"Ohne Datum";
@@ -2887,7 +2898,7 @@ WORKSPACE_HTML = r"""<!doctype html>
             noEventTargetCache=targetData.targets||[];
           } catch (_) {}
         }
-        existingNoEventTarget.innerHTML=noEventTargetCache.map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(String(e.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(e.status)}${e.same_job?"":" · andere Sicherung"}</option>`).join("");
+        existingNoEventTarget.innerHTML=noEventTargetCache.map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(String(e.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(e.status))}${e.same_job?"":" · andere Sicherung"}</option>`).join("");
         if (!noEventTargetCache.length) {
           existingNoEventTarget.innerHTML='<option value="">Keine passende Monats-Sammlung vorhanden</option>';
         }

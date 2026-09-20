@@ -1278,7 +1278,7 @@ EVENTS_HTML = r"""<!doctype html>
           ${reassign}
           <details class="event-details"><summary>Öffnen</summary><div class="event-actions">
             <button type="button" data-edit-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" ${event.mutation_id ? 'disabled title="Offene Änderung zuerst abschließen oder verwerfen"' : ''}>Bearbeiten</button>
-            <button type="button" class="plan-button" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">${event.status === "applied" ? "Nachsortierung prüfen" : "Sortierung prüfen"}</button>
+            <button type="button" class="plan-button bk-positive-action" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">${event.status === "applied" ? "Nachsortierung prüfen" : "Sortierung prüfen"}</button>
             ${isDeletable(event)
               ? `<button type="button" class="danger-button" data-delete-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Ereignis löschen</button>`
               : event.mutation_id
@@ -2235,28 +2235,16 @@ EVENTS_HTML = r"""<!doctype html>
           <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
           <label class="edit-field"><span>Ende</span><input id="edit-end-date" type="date" value="${escapeHtml(isoDate(event.end_datetime))}" ${structural ? "" : "disabled"}></label>
           <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-          ${childEvents.length ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Zeitsegmente / Unterereignisse</span>${structural ? `<button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button>` : ""}</div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px">${normalSegmentHtml}</div><p class="muted">Zeitsegmente können geändert, ergänzt oder vollständig entfernt werden. Die Dateizugehörigkeit wird danach ausschließlich aus Datum und Uhrzeit neu berechnet.</p></div>` : `<label class="edit-field"><span>Unterereignis / Uhrzeit</span><select id="edit-time-enabled" ${structural ? "" : "disabled"}><option value="0" selected>Ganzer Zeitraum</option><option value="1">Ein Zeitbereich</option></select></label><label class="edit-field"><span>Bezeichnung Zeitbereich</span><input id="edit-child-name" value="${escapeHtml(event.name || "")}" disabled></label><label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="00:00" disabled></label><label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="23:59" disabled></label>${structural ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Mehrere Unterereignisse</span><button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button></div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px"></div><p class="muted">Sobald hier Zeitsegmente angelegt sind, bilden sie gemeinsam die neue Ereignisstruktur. Das funktioniert auch bei einem bisher einfachen archivierten Ereignis in einem einzigen Änderungsauftrag.</p></div>` : ""}`}`}
+          ${childEvents.length ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Zeitsegmente / Unterereignisse</span>${structural ? `<button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button>` : ""}</div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px">${normalSegmentHtml}</div><p class="muted">Zeitsegmente können geändert, ergänzt oder vollständig entfernt werden. Die Dateizugehörigkeit wird danach ausschließlich aus Datum und Uhrzeit neu berechnet.</p></div>` : `<label class="edit-field"><span>Unterereignis / Uhrzeit</span><select id="edit-time-enabled" ${structural ? "" : "disabled"}><option value="0" selected>Ganzer Zeitraum</option><option value="1">Ein Zeitbereich</option><option value="2">Mehrere Zeitbereiche</option></select></label><label class="edit-field"><span>Bezeichnung Zeitbereich</span><input id="edit-child-name" value="${escapeHtml(event.name || "")}" disabled></label><label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="00:00" disabled></label><label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="23:59" disabled></label>${structural ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Mehrere Unterereignisse</span><button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button></div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px"></div><p class="muted">Sobald hier Zeitsegmente angelegt sind, bilden sie gemeinsam die neue Ereignisstruktur. Das funktioniert auch bei einem bisher einfachen archivierten Ereignis in einem einzigen Änderungsauftrag.</p></div>` : ""}`}`}
           <label class="edit-field full"><span>Notizen</span><textarea id="edit-notes" maxlength="4000">${escapeHtml(event.notes || "")}</textarea></label>
         </div>
         <div class="edit-actions">
           <button type="button" id="edit-cancel">Abbrechen</button>
-          <button type="submit" class="plan-button">Änderungen speichern</button>
+          <button type="submit" class="plan-button bk-positive-action">Änderungen speichern</button>
         </div>`;
 
       if (!noEvent) {
         const normalContainer = document.getElementById("normal-event-segments");
-        const bindNormalRemove = () => normalContainer?.querySelectorAll("[data-remove-child-segment]").forEach(button => {
-          button.onclick = () => button.closest("[data-child-segment]")?.remove();
-        });
-        bindNormalRemove();
-        document.getElementById("add-normal-segment")?.addEventListener("click", () => {
-          if (!normalContainer) return;
-          const row=document.createElement("details");
-          row.className="card"; row.dataset.childSegment="1"; row.open=true;
-          row.style.cssText="padding:8px 10px;margin:6px 0";
-          row.innerHTML=`<summary style="cursor:pointer"><strong>Neues Zeitsegment</strong></summary><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:8px"><label class="edit-field"><span>Bezeichnung</span><input data-child-name value="${escapeHtml(event.name||"")}"></label><label class="edit-field"><span>Startzeit</span><input data-child-start type="time" value="00:00"></label><label class="edit-field"><span>Endzeit</span><input data-child-end type="time" value="23:59"></label><button type="button" data-remove-child-segment class="danger-button">Zeitsegment entfernen</button></div>`;
-          normalContainer.appendChild(row); bindNormalRemove();
-        });
         const timeEnabled = document.getElementById("edit-time-enabled");
         const updateTimeFields = () => {
           if (!timeEnabled) return;
@@ -2265,7 +2253,49 @@ EVENTS_HTML = r"""<!doctype html>
             const field=document.getElementById(id); if (field) field.disabled = !enabled;
           }
         };
-        timeEnabled?.addEventListener("change", updateTimeFields);
+        const syncMultiSegmentModeAfterRemove = () => {
+          if (!timeEnabled || !normalContainer) return;
+          if (!normalContainer.querySelector("[data-child-segment]") && timeEnabled.value === "2") {
+            timeEnabled.value = "0";
+            updateTimeFields();
+          }
+        };
+        const bindNormalRemove = () => normalContainer?.querySelectorAll("[data-remove-child-segment]").forEach(button => {
+          button.onclick = () => {
+            button.closest("[data-child-segment]")?.remove();
+            syncMultiSegmentModeAfterRemove();
+          };
+        });
+        const appendNormalSegment = () => {
+          if (!normalContainer) return;
+          const row=document.createElement("details");
+          row.className="card"; row.dataset.childSegment="1"; row.open=true;
+          row.style.cssText="padding:8px 10px;margin:6px 0";
+          row.innerHTML=`<summary style="cursor:pointer"><strong>Neues Zeitsegment</strong></summary><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:8px"><label class="edit-field"><span>Bezeichnung</span><input data-child-name value="${escapeHtml(event.name||"")}"></label><label class="edit-field"><span>Startzeit</span><input data-child-start type="time" value="00:00"></label><label class="edit-field"><span>Endzeit</span><input data-child-end type="time" value="23:59"></label><button type="button" data-remove-child-segment class="danger-button">Zeitsegment entfernen</button></div>`;
+          normalContainer.appendChild(row);
+          bindNormalRemove();
+        };
+        bindNormalRemove();
+        document.getElementById("add-normal-segment")?.addEventListener("click", () => {
+          if (timeEnabled) {
+            timeEnabled.value = "2";
+            updateTimeFields();
+          }
+          appendNormalSegment();
+        });
+        timeEnabled?.addEventListener("change", () => {
+          if (!normalContainer) {
+            updateTimeFields();
+            return;
+          }
+          if (timeEnabled.value === "2") {
+            if (!normalContainer.querySelector("[data-child-segment]")) appendNormalSegment();
+          } else {
+            normalContainer.innerHTML = "";
+          }
+          updateTimeFields();
+        });
+        updateTimeFields();
       } else if (structural) {
         const container = document.getElementById("no-event-segments");
         const renderRangeSummary = () => {

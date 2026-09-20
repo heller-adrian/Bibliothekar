@@ -77,7 +77,7 @@ def _assert_neutralized(db, workspace, removed_id):
 
 
 def test_version_0204():
-    assert APP_VERSION == '0.23.0'
+    assert APP_VERSION == '0.23.1'
 
 
 def test_applied_normal_event_removed_family_moves_to_neutral_workspace(tmp_path):

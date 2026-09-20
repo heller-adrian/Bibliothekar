@@ -21,7 +21,7 @@ def seed(db: Path):
 
 
 def test_version_0202():
-    assert APP_VERSION == '0.23.0'
+    assert APP_VERSION == '0.23.1'
 
 
 def test_stale_pending_reassignment_disappears_when_family_is_assigned_again(tmp_path):

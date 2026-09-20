@@ -215,6 +215,11 @@ body[data-bk-area="workspace"] #new-event-button {
   border-color: var(--bk-blue) !important;
   color: #fff !important;
 }
+body[data-bk-area="workspace"] .bk-positive-action {
+  background: var(--bk-blue) !important;
+  border-color: var(--bk-blue) !important;
+  color: #fff !important;
+}
 body[data-bk-area="workspace"] span.badge.success.metadata-ok {
   color: var(--bk-blue) !important;
   -webkit-text-fill-color: var(--bk-blue) !important;
@@ -276,6 +281,13 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .day-card.selected {
 html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   background: #fff !important;
   border-color: var(--bk-line) !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked {
+  background: var(--bk-blue) !important;
+  border-color: var(--bk-blue) !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::after {
+  color: #fff !important;
 }
 
 /* Gemeinsamer App-Rahmen */
