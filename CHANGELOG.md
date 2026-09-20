@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.24.0 – erster Audit-Sicherheitsblock
+
+- Reconcile prüft unmittelbar vor der Ausführung erneut, ob der aktuelle Plan weiterhin blockerfrei ist
+- ein nachträglicher Zielkonflikt kann nicht mehr trotz unverändertem Plan-Token als erfolgreicher Reconcile enden
+- Fehler beim nachgelagerten Schreiben von `event.json` lösen nach erfolgreichem DB-Commit keinen Dateisystem-Rollback mehr aus; der konsistente Sortierzustand bleibt bestehen und die Dokumentstörung wird protokolliert
+- Neutralisierung protokolliert eine bereits erfolgte Dateibewegung vor der Ziel-SHA-Prüfung, sodass auch ein unmittelbar folgender Prüffehler sicher zurückgerollt wird
+- der bisher falsch-grüne Reapply-Erfolgstest verwendet jetzt reale Migrationen, eine reale Datei und verbindliche Assertions
+- `Ereignis anwenden` im Arbeitsbereich besitzt einen expliziten blauen UI-Override
+- gezielte Regressionstests für die Auditbefunde A01, A02, A03 und C01 ergänzt
+
 ### 0.23.1 – kleiner UI-/UX-Patch nach M1 A/B
 
 - positive Hauptaktionen im Arbeitsbereich sind blau: Ereignis speichern/anwenden, Sortierung prüfen und Änderungen speichern

@@ -3,7 +3,7 @@ from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
 def test_0222_version():
-    assert main.APP_VERSION == "0.23.1"
+    assert main.APP_VERSION == "0.24.0"
 
 
 def test_0221_import_uses_three_source_cards_and_keeps_all_paths():

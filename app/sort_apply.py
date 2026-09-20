@@ -967,17 +967,57 @@ def _finalize_database(
             ),
         )
 
-    # Die portable event.json ist die primäre Beschreibung des
-    # angewendeten Ereignisses; sie wird erst nach dem vollständigen,
-    # prüfsummenbestätigten Lauf aus dem lebhaften Index neu geschrieben.
-    from app.event_document import sync_event_document_after_change
+    # SQLite und Dateisystem sind an dieser Stelle bereits konsistent
+    # abgeschlossen. Ein nachgelagerter Fehler beim portablen event.json darf
+    # deshalb niemals den äußeren Dateisystem-Rollback auslösen; sonst würden
+    # die Dateien zurückbewegt, während der DB-Commit bestehen bleibt.
+    try:
+        from app.event_document import sync_event_document_after_change
 
-    sync_event_document_after_change(
-        database_path,
-        Path(plan["workspace_root"]),
-        job_id,
-        event_id,
-    )
+        sync_event_document_after_change(
+            database_path,
+            Path(plan["workspace_root"]),
+            job_id,
+            event_id,
+        )
+    except Exception as error:
+        warning = "event.json konnte nach erfolgreicher Sortierung nicht aktualisiert werden: " + str(error)
+        # Auch die Warnungsprotokollierung ist best effort: Nach dem bereits
+        # erfolgreichen Commit darf kein sekundärer Fehler einen Rollback der
+        # physischen Dateien mehr auslösen.
+        try:
+            with database_connection(database_path) as connection:
+                row = connection.execute(
+                    "SELECT details_json FROM sort_runs WHERE id = ?",
+                    (run_id,),
+                ).fetchone()
+                details_after = _load_json(row["details_json"] if row is not None else None)
+                details_after["event_document_sync_error"] = warning
+                connection.execute(
+                    """UPDATE sort_runs
+                       SET phase = ?, error_message = ?, details_json = ?, updated_at = ?
+                       WHERE id = ? AND status = 'applied'""",
+                    (
+                        "Sortierung angewendet; event.json muss neu erzeugt werden",
+                        warning,
+                        _json_details(details_after),
+                        _now(),
+                        run_id,
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO audit_log(
+                           job_id, action, entity_type, entity_id, details_json, created_at
+                       ) VALUES (?,'event_document_sync_failed','event',?,?,?)""",
+                    (
+                        job_id,
+                        event_id,
+                        _json_details({"sort_run_id": run_id, "error": str(error)}),
+                        _now(),
+                    ),
+                )
+        except Exception:
+            pass
 
 
 def execute_sort_run(

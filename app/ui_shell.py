@@ -220,6 +220,11 @@ body[data-bk-area="workspace"] .bk-positive-action {
   border-color: var(--bk-blue) !important;
   color: #fff !important;
 }
+body[data-bk-area="workspace"] #apply-saved-event-button {
+  background: var(--bk-blue) !important;
+  border-color: var(--bk-blue) !important;
+  color: #fff !important;
+}
 body[data-bk-area="workspace"] span.badge.success.metadata-ok {
   color: var(--bk-blue) !important;
   -webkit-text-fill-color: var(--bk-blue) !important;

@@ -143,9 +143,11 @@ def neutralize_removed_applied_families(
     try:
         for item in prepared:
             _move_same_filesystem(item["source"], item["destination"])
+            # Ab jetzt muss der Schritt rollback-fähig sein, auch wenn die
+            # unmittelbar folgende Zielprüfung fehlschlägt.
+            moved.append(item)
             if _sha256(item["destination"]) != item["sha256"]:
                 raise AppliedNeutralizationError("SHA-256 stimmt nach Neutralisierung nicht: " + str(item["destination"]))
-            moved.append(item)
         with database_connection(database_path) as c:
             c.execute("BEGIN IMMEDIATE")
             for item in prepared:
