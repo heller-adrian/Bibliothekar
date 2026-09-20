@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### 0.23.0 – Funktionsbasis nach M1-Codeaudit
+
+- neuer Funktionsbranch `patch/0.23.0` auf Basis des optisch stabilen 0.22.3-Stands
+- Mehrsegment-Ereignisse belegen nur ihre tatsächlichen Unterereignisintervalle; Lücken bleiben frei
+- bestätigte Cascades werden bei mehreren Unterereignissen segmentweise statt über den gesamten Elternzeitraum angewendet
+- bestehende Unterereignisse werden bei archivierten Strukturwechseln vollständig bereinigt
+- archivierte Neu-Zuordnung verhindert eine zweite `Ohne Ereignis`-Monatssammlung
+- pro archiviertem Ereignis ist höchstens ein offener IST→SOLL-Änderungsauftrag zulässig
+- Zeitbereiche mit identischem Beginn und Ende am selben Tag werden konsistent abgewiesen
+- `Alle/Sortiert/Export` bleibt als eigener noch zu klärender M1-Funktionsblock unverändert
+
 ### 0.22.3 – Registerbasis stabilisiert
 
 - neuer Entwicklungsbranch `patch/0.22.3` auf dem letzten optisch stabilen Registerstand vor den Schulter-/Ohren-Experimenten
