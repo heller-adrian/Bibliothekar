@@ -107,9 +107,10 @@ def test_0222_registers_use_same_inactive_color_and_in_face_depth_gradient():
     assert '.bk-tabs-active-archive .bk-tab[data-area="workspace"],' not in BIBLIOTHEKAR_CSS
     assert 'to right,' in BIBLIOTHEKAR_CSS
     assert 'to left,' in BIBLIOTHEKAR_CSS
-    assert 'transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed))' in BIBLIOTHEKAR_CSS
-    assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
     assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' not in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed))' not in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
@@ -211,11 +212,13 @@ def test_0223_has_no_outer_tab_ears_or_corner_helper_elements():
     assert '--bk-junction-radius' not in BIBLIOTHEKAR_CSS
 
 
-def test_0223_depth_gradient_follows_the_transformed_tab_edge_without_custom_angles():
+def test_0223_depth_gradient_starts_hidden_under_the_foreground_tab():
     assert '--bk-edge-gradient-angle-right' not in BIBLIOTHEKAR_CSS
     assert '--bk-edge-gradient-angle-left' not in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-import .bk-tab[data-area="archive"] {' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-archive .bk-tab[data-area="import"] {' in BIBLIOTHEKAR_CSS
-    assert 'linear-gradient(\n      to right,' in BIBLIOTHEKAR_CSS
-    assert 'linear-gradient(\n      to left,' in BIBLIOTHEKAR_CSS
+    assert 'linear-gradient(\n      to right,\n      var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
+    assert 'linear-gradient(\n      to left,\n      var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' not in BIBLIOTHEKAR_CSS
     assert 'transform: perspective(108px) rotateX(7deg);' in BIBLIOTHEKAR_CSS

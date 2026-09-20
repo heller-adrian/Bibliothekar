@@ -446,17 +446,18 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /*
  * Staffelungsverlauf:
- * Der Verlauf trennt ausschließlich die beiden gleichfarbigen, inaktiven
- * Register voneinander. Er liegt IM hinteren Register und startet an der
- * realen Überdeckungskante. Die Trapez-Transformation der Reiter übernimmt
- * die Schräge selbst; deshalb hier bewusst keine frei gewählten Winkel.
+ * Der Verlauf beginnt wieder an der VERDECKTEN Außenkante des jeweils
+ * hinteren Reiters. Sein kräftiger Anfang liegt damit unter der davor
+ * liegenden Karte; sichtbar wird nur der weiche Auslauf hinter der Naht.
  *
- * Import aktiv: Arbeitsbereich liegt vor Archiv -> Verlauf an Archivs linker
- * Kante, nach rechts in Archiv auslaufend.
- * Archiv aktiv: Arbeitsbereich liegt vor Import -> Verlauf an Imports rechter
- * Kante, nach links in Import auslaufend.
- * Arbeitsbereich aktiv: Die inaktiven Register berühren einander nicht,
- * deshalb ist dort kein zusätzlicher Verlauf nötig.
+ * Das ist absichtlich anders als die vorige 0.22.3-Variante: Dort wurde der
+ * stärkste Punkt auf --bk-tab-overlap verschoben. Dadurch wurde an der
+ * sichtbaren Naht die Perspektivschräge des hinteren Reiters sichtbar und
+ * wirkte spiegelverkehrt zur überdeckenden Karte.
+ *
+ * Die Gesamtlänge ist jetzt Überlappung + sichtbarer Auslauf. So bleibt die
+ * auf Mobilgeräten bereits stimmige Logik erhalten und der Auslauf erscheint
+ * auch bei den größeren Desktop-Überlappungen.
  */
 .bk-tab::after {
   content: none;
@@ -465,9 +466,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-edge-gradient:
     linear-gradient(
       to right,
-      transparent 0,
-      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
-      var(--bk-stack-blend) var(--bk-tab-overlap),
+      var(--bk-stack-blend) 0,
       transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
       transparent 100%
     );
@@ -476,9 +475,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-edge-gradient:
     linear-gradient(
       to left,
-      transparent 0,
-      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
-      var(--bk-stack-blend) var(--bk-tab-overlap),
+      var(--bk-stack-blend) 0,
       transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
       transparent 100%
     );
