@@ -103,8 +103,9 @@ def test_0222_registers_use_same_inactive_color_and_in_face_depth_gradient():
     assert 'content: none;' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-import .bk-tab[data-area="workspace"],' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-workspace .bk-tab[data-area="import"],' in BIBLIOTHEKAR_CSS
-    assert 'var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
-    assert 'transparent var(--bk-edge-gradient-width)' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed))' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
@@ -131,10 +132,13 @@ def test_0222_active_register_and_page_are_one_joined_surface():
     assert 'bk-tab-shoulder' not in html
     assert 'bk-tab-shoulder' not in BIBLIOTHEKAR_CSS
     assert '--bk-page-bridge-height: clamp(9px, .8vw, 13px);' in BIBLIOTHEKAR_CSS
+    assert '--bk-active-junction-radius: clamp(5px, .45vw, 8px);' in BIBLIOTHEKAR_CSS
     assert '.bk-shell::after {' in BIBLIOTHEKAR_CSS
     assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab.active::before {' in BIBLIOTHEKAR_CSS
-    assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab.active::before,' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab.is-active::before {' in BIBLIOTHEKAR_CSS
+    assert 'bottom: 0;' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-active-junction-radius)' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_minimal_pages_have_no_browser_body_gutter_and_header_buttons_match():
@@ -196,3 +200,13 @@ def test_0222_header_has_page_coloured_scroll_buffer():
     assert '--bk-page-bridge-height: clamp(9px, .8vw, 13px);' in BIBLIOTHEKAR_CSS
     assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
     assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
+
+
+def test_0222_inactive_tabs_are_clipped_before_page_surface():
+    assert '.bk-tab:not(.active):not(.is-active) {' in BIBLIOTHEKAR_CSS
+    assert 'overflow: hidden;' in BIBLIOTHEKAR_CSS
+
+
+def test_0222_depth_gradient_is_anchored_to_actual_overlap():
+    assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' in BIBLIOTHEKAR_CSS
+    assert 'calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
