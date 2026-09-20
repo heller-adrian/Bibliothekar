@@ -495,10 +495,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 
 
-/* 0.22.4: Auch auf neutralen Sonderseiten (Assistent/Metadaten) bleiben
- * die Staffelungsverläufe zwischen allen drei inaktiven Reitern sichtbar. */
-.bk-tabs:not(.bk-tabs-active-import):not(.bk-tabs-active-workspace):not(.bk-tabs-active-archive)
-  .bk-tab[data-area="workspace"] {
+/* 0.22.4: Auch auf den neutralen Sonderseiten Assistent und
+ * Metadatenkorrektion bleiben beide Staffelungsfugen sichtbar. */
+.bk-tabs-active-assistant .bk-tab[data-area="workspace"],
+.bk-tabs-active-metadata .bk-tab[data-area="workspace"] {
   --bk-tab-edge-gradient:
     linear-gradient(
       to right,
@@ -507,8 +507,8 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
       transparent 100%
     );
 }
-.bk-tabs:not(.bk-tabs-active-import):not(.bk-tabs-active-workspace):not(.bk-tabs-active-archive)
-  .bk-tab[data-area="archive"] {
+.bk-tabs-active-assistant .bk-tab[data-area="archive"],
+.bk-tabs-active-metadata .bk-tab[data-area="archive"] {
   --bk-tab-edge-gradient:
     linear-gradient(
       to right,
@@ -519,7 +519,9 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 }
 
 /* Bei schmalen/hochformatigen Layouts muss im Archiv auch die Naht
- * Import -> Arbeitsbereich weich überblendet bleiben. */
+ * Import -> Arbeitsbereich weich überblendet bleiben. Zusätzlich wird die
+ * Arbeitsbereich-Fläche links um genau einen weiteren responsiven Bleed
+ * verlängert, damit die perspektivisch verjüngte Oberkante keine Lücke lässt. */
 @media (max-width: 820px) {
   .bk-tabs-active-archive .bk-tab[data-area="workspace"] {
     --bk-tab-edge-gradient:
@@ -529,6 +531,9 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
         transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
         transparent 100%
       );
+  }
+  .bk-tabs-active-archive .bk-tab[data-area="workspace"]::before {
+    left: calc(0px - var(--bk-tab-seam-bleed) - var(--bk-tab-seam-bleed));
   }
 }
 
@@ -1688,7 +1693,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.22.1</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.22.4</span></p>
   </div>
 </dialog>
 
