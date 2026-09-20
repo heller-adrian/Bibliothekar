@@ -278,7 +278,9 @@ def build_event_preview(
             f"{end_date}T{end_time}:59"
         )
 
-        if end_second <= start_second:
+        if end_second < start_second or (
+            start_date == end_date and end_time <= start_time
+        ):
             raise EventPreviewError(
                 "Das Ende muss nach dem Beginn liegen."
             )
