@@ -494,6 +494,44 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
     );
 }
 
+
+/* 0.22.4: Auch auf neutralen Sonderseiten (Assistent/Metadaten) bleiben
+ * die Staffelungsverläufe zwischen allen drei inaktiven Reitern sichtbar. */
+.bk-tabs:not(.bk-tabs-active-import):not(.bk-tabs-active-workspace):not(.bk-tabs-active-archive)
+  .bk-tab[data-area="workspace"] {
+  --bk-tab-edge-gradient:
+    linear-gradient(
+      to right,
+      var(--bk-stack-blend) 0,
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+      transparent 100%
+    );
+}
+.bk-tabs:not(.bk-tabs-active-import):not(.bk-tabs-active-workspace):not(.bk-tabs-active-archive)
+  .bk-tab[data-area="archive"] {
+  --bk-tab-edge-gradient:
+    linear-gradient(
+      to right,
+      var(--bk-stack-blend) 0,
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+      transparent 100%
+    );
+}
+
+/* Bei schmalen/hochformatigen Layouts muss im Archiv auch die Naht
+ * Import -> Arbeitsbereich weich überblendet bleiben. */
+@media (max-width: 820px) {
+  .bk-tabs-active-archive .bk-tab[data-area="workspace"] {
+    --bk-tab-edge-gradient:
+      linear-gradient(
+        to right,
+        var(--bk-stack-blend) 0,
+        transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+        transparent 100%
+      );
+  }
+}
+
 /* Innenliegende obere Rundungen werden unter der vorderen Karte verborgen. */
 .bk-tabs-active-import .bk-tab[data-area="workspace"]::before,
 .bk-tabs-active-import .bk-tab[data-area="archive"]::before {
