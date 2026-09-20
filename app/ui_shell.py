@@ -348,8 +348,6 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-overlap: clamp(24px, 3vw, 64px);
   --bk-tab-seam-bleed: clamp(2px, .28vw, 4px);
   --bk-edge-gradient-width: clamp(22px, 2vw, 38px);
-  --bk-edge-gradient-angle-right: 100deg;
-  --bk-edge-gradient-angle-left: 260deg;
   display: flex;
   align-items: flex-end;
   justify-content: stretch;
@@ -448,21 +446,25 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /*
  * Staffelungsverlauf:
- * Kein separater Schatten mehr. Der darunterliegende Reiter bekommt den
- * Verlauf direkt IN der transformierten Trapezfläche. Der Verlauf wird
- * zusätzlich um die gleiche optische Richtung wie die Trapezkante geneigt
- * und an die reale Überdeckung verschoben. So bleibt er auf Desktop wie
- * Mobil sichtbar und liest sich nicht als gerader Schattenstreifen.
+ * Der Verlauf trennt ausschließlich die beiden gleichfarbigen, inaktiven
+ * Register voneinander. Er liegt IM hinteren Register und startet an der
+ * realen Überdeckungskante. Die Trapez-Transformation der Reiter übernimmt
+ * die Schräge selbst; deshalb hier bewusst keine frei gewählten Winkel.
+ *
+ * Import aktiv: Arbeitsbereich liegt vor Archiv -> Verlauf an Archivs linker
+ * Kante, nach rechts in Archiv auslaufend.
+ * Archiv aktiv: Arbeitsbereich liegt vor Import -> Verlauf an Imports rechter
+ * Kante, nach links in Import auslaufend.
+ * Arbeitsbereich aktiv: Die inaktiven Register berühren einander nicht,
+ * deshalb ist dort kein zusätzlicher Verlauf nötig.
  */
 .bk-tab::after {
   content: none;
 }
-.bk-tabs-active-import .bk-tab[data-area="workspace"],
-.bk-tabs-active-import .bk-tab[data-area="archive"],
-.bk-tabs-active-workspace .bk-tab[data-area="archive"] {
+.bk-tabs-active-import .bk-tab[data-area="archive"] {
   --bk-tab-edge-gradient:
     linear-gradient(
-      var(--bk-edge-gradient-angle-right),
+      to right,
       transparent 0,
       transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
       var(--bk-stack-blend) var(--bk-tab-overlap),
@@ -470,12 +472,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
       transparent 100%
     );
 }
-.bk-tabs-active-workspace .bk-tab[data-area="import"],
-.bk-tabs-active-archive .bk-tab[data-area="workspace"],
 .bk-tabs-active-archive .bk-tab[data-area="import"] {
   --bk-tab-edge-gradient:
     linear-gradient(
-      var(--bk-edge-gradient-angle-left),
+      to left,
       transparent 0,
       transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
       var(--bk-stack-blend) var(--bk-tab-overlap),
@@ -502,10 +502,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /* Alle inaktiven Register behalten dieselbe Grundfarbe. */
 html[data-bk-theme="dark"] .bk-tabs {
-  --bk-stack-blend: rgb(0 0 0 / .18);
+  --bk-stack-blend: rgb(0 0 0 / .14);
 }
 html[data-bk-theme="light"] .bk-tabs {
-  --bk-stack-blend: rgb(18 32 51 / .12);
+  --bk-stack-blend: rgb(18 32 51 / .09);
 }
 html[data-bk-theme="dark"] .bk-tab:not(.active) {
   --bk-tab-bg: #5f686d;
