@@ -278,9 +278,9 @@ def build_event_preview(
             f"{end_date}T{end_time}:59"
         )
 
-        if end_second < start_second:
+        if end_second <= start_second:
             raise EventPreviewError(
-                "Das Ende liegt vor dem Beginn."
+                "Das Ende muss nach dem Beginn liegen."
             )
 
         candidate_families = [
