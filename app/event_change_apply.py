@@ -325,14 +325,15 @@ def finish_event_change(
             ),
         )
 
-        child = connection.execute(
-            "SELECT * FROM events WHERE parent_event_id = ? ORDER BY start_datetime LIMIT 1",
+        children = connection.execute(
+            "SELECT * FROM events WHERE parent_event_id = ? ORDER BY start_datetime, id",
             (cr["event_id"],),
-        ).fetchone()
+        ).fetchall()
+        child = children[0] if children else None
         if event_kind == "no_event":
             assignment_event_id = str(cr["event_id"])
-            if child is not None:
-                connection.execute("DELETE FROM events WHERE id = ?", (child["id"],))
+            if children:
+                connection.execute("DELETE FROM events WHERE parent_event_id = ?", (cr["event_id"],))
             replace_event_segments(
                 connection,
                 event_id=str(cr["event_id"]),
@@ -386,11 +387,13 @@ def finish_event_change(
                     (child_name, child_start, child_end, cr["child_folder"] or "",
                      int(bool(cr["preserve_day_folders"])), now, now, child_id),
                 )
+                for extra in children[1:]:
+                    connection.execute("DELETE FROM events WHERE id = ?", (extra["id"],))
             assignment_event_id = child_id
         else:
             assignment_event_id = str(cr["event_id"])
-            if child is not None:
-                connection.execute("DELETE FROM events WHERE id = ?", (child["id"],))
+            if children:
+                connection.execute("DELETE FROM events WHERE parent_event_id = ?", (cr["event_id"],))
 
         connection.execute(
             "DELETE FROM event_assignments WHERE event_id = ? OR event_id IN "
