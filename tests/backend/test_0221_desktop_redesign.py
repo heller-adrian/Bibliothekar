@@ -159,7 +159,7 @@ def test_0221_page_heading_and_main_share_same_horizontal_inset():
 def test_0222_register_geometry_is_responsive_and_gradient_follows_tab_face():
     assert '--bk-tab-overlap: clamp(24px, 3vw, 64px);' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-seam-bleed: clamp(2px, .28vw, 4px);' in BIBLIOTHEKAR_CSS
-    assert '--bk-edge-gradient-width: clamp(18px, 1.8vw, 32px);' in BIBLIOTHEKAR_CSS
+    assert '--bk-edge-gradient-width: clamp(22px, 2vw, 38px);' in BIBLIOTHEKAR_CSS
     assert 'margin-left: calc(0px - var(--bk-tab-overlap));' in BIBLIOTHEKAR_CSS
     assert 'left: calc(0px - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
     assert 'right: calc(0px - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
