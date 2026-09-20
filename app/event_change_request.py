@@ -262,8 +262,16 @@ def propose_event_change(
             "ORDER BY version DESC LIMIT 1",
             (event_id,),
         ).fetchone()
+        if existing is not None:
+            raise EventChangeRequestError(
+                "Für dieses Ereignis ist bereits ein offener Änderungsauftrag vorhanden."
+            )
 
-        version = (int(existing["version"]) if existing else 0) + 1
+        version_row = connection.execute(
+            "SELECT COALESCE(MAX(version), 0) AS version FROM event_change_requests WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()
+        version = int(version_row["version"] or 0) + 1
 
         cr_id = f"cr-{uuid.uuid4().hex[:12]}"
 
