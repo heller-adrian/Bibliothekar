@@ -204,18 +204,20 @@ def test_0222_header_has_page_coloured_scroll_buffer():
     assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
 
 
-def test_0223_outer_page_junction_is_css_only_and_subtle():
+def test_0223_page_surface_masks_inactive_tab_bottoms_without_helper_ears():
     html = main.index()
     assert 'bk-tab-junction' not in html
     assert 'bk-tab-shoulder' not in html
     assert '--bk-active-shoulder' not in BIBLIOTHEKAR_CSS
     assert '--bk-junction-radius' not in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-junction-width: clamp(10px, .75vw, 14px);' in BIBLIOTHEKAR_CSS
-    assert '--bk-tab-junction-rise: clamp(7px, .5vw, 9px);' in BIBLIOTHEKAR_CSS
-    assert '.bk-tabs-active-import .bk-tab[data-area="import"]::after {' in BIBLIOTHEKAR_CSS
-    assert '.bk-tabs-active-archive .bk-tab[data-area="archive"]::after {' in BIBLIOTHEKAR_CSS
-    assert 'clip-path: polygon(' in BIBLIOTHEKAR_CSS
-    assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-junction-width' not in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-junction-rise' not in BIBLIOTHEKAR_CSS
+    assert '--bk-tab-page-mask: clamp(3px, .35vw, 5px);' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs::after {' in BIBLIOTHEKAR_CSS
+    assert 'z-index: 25;' in BIBLIOTHEKAR_CSS
+    assert 'height: calc(var(--bk-page-bridge-height) + var(--bk-tab-page-mask));' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab::after {\n  content: none;' in BIBLIOTHEKAR_CSS
+    assert 'clip-path: polygon(' not in BIBLIOTHEKAR_CSS
 
 
 def test_0223_depth_gradient_starts_hidden_under_the_foreground_tab():
