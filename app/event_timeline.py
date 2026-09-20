@@ -43,8 +43,8 @@ def normalize_no_event_segments(values: Any) -> list[dict[str, str]]:
         end = _time(item.get('end_time') or '23:59')
         start_dt = f'{day}T{start}:00'
         end_dt = f'{day}T{end}:59'
-        if end_dt < start_dt:
-            raise EventTimelineError(f'Am {day} liegt das Ende vor dem Beginn.')
+        if end_dt <= start_dt:
+            raise EventTimelineError(f'Am {day} muss das Ende nach dem Beginn liegen.')
         key = (day, start, end)
         if key in seen:
             continue
@@ -145,23 +145,41 @@ def no_event_segment_overlaps(
 def continuous_event_overlaps(
     connection, job_id: str, start_datetime: str, end_datetime: str, *, exclude_event_id: str | None = None
 ) -> list[dict[str, Any]]:
-    """Return normal root events whose effective interval overlaps.
+    """Return the actually occupied normal-event intervals that overlap.
 
-    For a parent with a child time range, the child interval is authoritative.
+    A root event without children occupies its parent interval.  If child
+    events exist, every child is an independent occupied interval; gaps
+    between children stay free and must never be collapsed into MIN..MAX.
     """
     sql = """SELECT e.*,
-                    COALESCE((SELECT MIN(c.start_datetime) FROM events c WHERE c.parent_event_id=e.id), e.start_datetime) AS effective_start,
-                    COALESCE((SELECT MAX(c.end_datetime) FROM events c WHERE c.parent_event_id=e.id), e.end_datetime) AS effective_end
+                    c.id AS effective_child_id,
+                    COALESCE(c.start_datetime, e.start_datetime) AS effective_start,
+                    COALESCE(c.end_datetime, e.end_datetime) AS effective_end,
+                    (SELECT COUNT(*) FROM events cc WHERE cc.parent_event_id=e.id) AS child_count
              FROM events e
+             LEFT JOIN events c ON c.parent_event_id=e.id
              WHERE e.job_id=? AND e.event_level='parent' AND e.event_kind='event'
                AND e.status IN ('draft','planned','applied','archived')
-               AND COALESCE((SELECT MIN(c.start_datetime) FROM events c WHERE c.parent_event_id=e.id), e.start_datetime) <= ?
-               AND COALESCE((SELECT MAX(c.end_datetime) FROM events c WHERE c.parent_event_id=e.id), e.end_datetime) >= ?"""
-    params: list[Any] = [job_id, end_datetime, start_datetime]
+               AND (
+                    (
+                      (SELECT COUNT(*) FROM events cc WHERE cc.parent_event_id=e.id)=0
+                      AND e.start_datetime <= ? AND e.end_datetime >= ?
+                    )
+                    OR
+                    (
+                      (SELECT COUNT(*) FROM events cc WHERE cc.parent_event_id=e.id)>0
+                      AND c.start_datetime <= ? AND c.end_datetime >= ?
+                    )
+               )"""
+    params: list[Any] = [
+        job_id,
+        end_datetime, start_datetime,
+        end_datetime, start_datetime,
+    ]
     if exclude_event_id:
         sql += ' AND e.id != ?'
         params.append(exclude_event_id)
-    sql += ' ORDER BY effective_start, e.id'
+    sql += ' ORDER BY effective_start, e.id, effective_child_id'
     return [dict(r) for r in connection.execute(sql, params).fetchall()]
 
 
@@ -242,6 +260,7 @@ def cascade_preview_for_interval(
             can_apply=False
         items.append({
             'kind':'event','event_id':str(row['id']),'name':str(row['name']),
+            'child_event_id':str(row['effective_child_id']) if row.get('effective_child_id') else None,
             'status':str(row['status']),'current_start':a,'current_end':b,
             'action':action,'proposed_start':proposed_start,'proposed_end':proposed_end,
             'automatic': action in {'trim_end','trim_start'} and str(row['status']) != 'archived',
@@ -340,6 +359,69 @@ def _set_continuous_event_interval(connection, event_id: str, new_start: str, ne
     return sorted(old_ids-set(keep))
 
 
+def _set_child_event_interval(
+    connection,
+    event_id: str,
+    child_event_id: str,
+    new_start: str,
+    new_end: str,
+    now: str,
+) -> list[int]:
+    """Trim one child interval without collapsing sibling time segments."""
+    event = connection.execute('SELECT * FROM events WHERE id=?', (event_id,)).fetchone()
+    child = connection.execute(
+        'SELECT * FROM events WHERE id=? AND parent_event_id=?',
+        (child_event_id, event_id),
+    ).fetchone()
+    if event is None or child is None:
+        return []
+
+    old_rows = connection.execute(
+        'SELECT DISTINCT family_id FROM event_assignments WHERE event_id=? AND family_id IS NOT NULL',
+        (child_event_id,),
+    ).fetchall()
+    old_ids = {int(row['family_id']) for row in old_rows}
+
+    child_name = str(child['name'] or event['name'])
+    folder = (
+        f'{new_start[11:16].replace(":", "-")} - '
+        f'{new_end[11:16].replace(":", "-")} - {child_name}'
+    )
+    connection.execute(
+        """UPDATE events
+           SET start_datetime=?, end_datetime=?, folder_name=?,
+               updated_at=?, revision=revision+1
+           WHERE id=? AND parent_event_id=?""",
+        (new_start, new_end, folder, now, child_event_id, event_id),
+    )
+
+    candidates = family_ids_for_continuous_range(
+        connection, str(event['job_id']), new_start, new_end
+    )
+    keep: list[int] = []
+    for fid in candidates:
+        conflict = connection.execute(
+            """SELECT 1
+               FROM event_assignments ea JOIN events e ON e.id=ea.event_id
+               WHERE ea.family_id=?
+                 AND COALESCE(e.parent_event_id,e.id) != ?
+                 AND e.status IN ('draft','planned','applied','archived')
+               LIMIT 1""",
+            (fid, event_id),
+        ).fetchone()
+        if conflict is None:
+            keep.append(int(fid))
+
+    connection.execute('DELETE FROM event_assignments WHERE event_id=?', (child_event_id,))
+    if keep:
+        connection.executemany(
+            "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) "
+            "VALUES (?,?,NULL,'date_time_range',?)",
+            [(child_event_id, fid, now) for fid in keep],
+        )
+    return sorted(old_ids - set(keep))
+
+
 def apply_cascade_for_interval(
     connection,
     job_id: str,
@@ -363,8 +445,21 @@ def apply_cascade_for_interval(
     for item in preview['items']:
         if item['kind']=='no_event' or str(item.get('status')) == 'archived':
             continue
-        removed = _set_continuous_event_interval(connection,item['event_id'],item['proposed_start'],item['proposed_end'],now)
-        removed_by_event[item['event_id']] = removed
+        if item.get('child_event_id'):
+            removed = _set_child_event_interval(
+                connection,
+                item['event_id'],
+                item['child_event_id'],
+                item['proposed_start'],
+                item['proposed_end'],
+                now,
+            )
+        else:
+            removed = _set_continuous_event_interval(
+                connection,item['event_id'],item['proposed_start'],item['proposed_end'],now
+            )
+        prior = set(removed_by_event.get(item['event_id']) or [])
+        removed_by_event[item['event_id']] = sorted(prior | set(removed))
         if item['status']=='applied':
             connection.execute('UPDATE events SET resort_required=1 WHERE id=?',(item['event_id'],))
         affected.append(item['event_id'])
