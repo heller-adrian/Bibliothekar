@@ -3261,10 +3261,29 @@ def update_event_definition(
 
         if cascade_confirmed and str(preview.get("event_kind") or "event") == "event":
             from app.event_timeline import apply_cascade_for_interval
-            cascade_result = apply_cascade_for_interval(
-                connection, job_id, event_id, assignment_start, assignment_end, now=now,
-                allow_archived_manual=allow_archived_manual,
+            cascade_ranges = (
+                new_definition_ranges
+                if multi_segments
+                else [(assignment_start, assignment_end)]
             )
+            cascade_result = {
+                "affected_event_ids": [],
+                "removed_by_event": {},
+                "archived_manual_items": [],
+            }
+            for cascade_start, cascade_end in cascade_ranges:
+                part = apply_cascade_for_interval(
+                    connection, job_id, event_id, cascade_start, cascade_end, now=now,
+                    allow_archived_manual=allow_archived_manual,
+                )
+                cascade_result["affected_event_ids"].extend(part.get("affected_event_ids") or [])
+                cascade_result["archived_manual_items"].extend(part.get("archived_manual_items") or [])
+                for affected_event_id, removed_family_ids in (part.get("removed_by_event") or {}).items():
+                    prior = set(cascade_result["removed_by_event"].get(affected_event_id) or [])
+                    cascade_result["removed_by_event"][affected_event_id] = sorted(
+                        prior | {int(fid) for fid in removed_family_ids}
+                    )
+            cascade_result["affected_event_ids"] = sorted(set(cascade_result["affected_event_ids"]))
             # Applied source events touched by the cascade need durable move
             # targets for their later verified reapply runs.
             for affected_event_id, removed_family_ids in (cascade_result.get("removed_by_event") or {}).items():
