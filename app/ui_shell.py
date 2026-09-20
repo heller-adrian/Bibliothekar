@@ -348,7 +348,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-overlap: clamp(24px, 3vw, 64px);
   --bk-tab-seam-bleed: clamp(2px, .28vw, 4px);
   --bk-edge-gradient-width: clamp(18px, 1.8vw, 32px);
-  --bk-active-shoulder: clamp(7px, .65vw, 11px);
+  --bk-junction-radius: clamp(6px, .52vw, 9px);
   display: flex;
   align-items: flex-end;
   justify-content: stretch;
@@ -416,9 +416,9 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 /*
  * Aktiver Reiter + Seitenfläche:
  * Der Reiter selbst bleibt unten gerade und läuft in den Seitenpuffer.
- * Die kleine Rundung wird AUSSERHALB des Reiters aus Seitenfarbe aufgebaut:
- * Die Seitenfläche steigt neben der schrägen Reiterkante weich nach oben,
- * statt eine Ecke aus der Reiterfläche herauszuschneiden.
+ * Die Rundung wird nicht mehr mit einer breiten Hilfsfläche erzeugt.
+ * Zwei kleine explizite Anschlussstücke verbinden die schräge Reiterkante
+ * direkt mit der horizontalen Seitenoberkante.
  */
 
 .bk-tab-label,
@@ -433,6 +433,36 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   white-space: nowrap;
 }
 .bk-tab-mobile-label { display: none; }
+
+/*
+ * Exakte Verbindung Reiter -> Seite:
+ * Keine breite Hilfsfläche mehr. Zwei kleine seitenfarbige Viertelbögen
+ * sitzen ausschließlich an den unteren Außenkanten des aktiven Reiters.
+ * Dadurch wächst die Seitenfläche dort subtil NACH AUSSEN in die Reiterkante
+ * hinein, ohne die bekannten "Ohren".
+ */
+.bk-tab-junction {
+  display: none;
+  position: absolute;
+  z-index: 0;
+  bottom: calc(-1 * var(--bk-page-bridge-height));
+  width: var(--bk-junction-radius);
+  height: calc(var(--bk-page-bridge-height) + var(--bk-junction-radius));
+  background: var(--bk-page-bg, var(--bk-paper));
+  pointer-events: none;
+}
+.bk-tab.active .bk-tab-junction,
+.bk-tab.is-active .bk-tab-junction {
+  display: block;
+}
+.bk-tab-junction-left {
+  left: calc(0px - var(--bk-junction-radius));
+  border-top-left-radius: var(--bk-junction-radius);
+}
+.bk-tab-junction-right {
+  right: calc(0px - var(--bk-junction-radius));
+  border-top-right-radius: var(--bk-junction-radius);
+}
 
 /* Stapelreihenfolge: aktive Karte vorn; innere Abschlüsse verschwinden dahinter. */
 .bk-tabs-active-import .bk-tab[data-area="import"] { z-index: 30; }
@@ -453,30 +483,17 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
  * Verlauf direkt IN seine transformierte Trapezfläche. Dadurch folgt der
  * Verlauf automatisch Schräge, Rundung und responsiver Größe.
  */
-.bk-tab::after {
-  content: none;
-}
-.bk-tab.active::after,
-.bk-tab.is-active::after {
-  content: "";
-  position: absolute;
-  z-index: 0;
-  left: calc(0px - var(--bk-active-shoulder) - var(--bk-tab-seam-bleed));
-  right: calc(0px - var(--bk-active-shoulder) - var(--bk-tab-seam-bleed));
-  bottom: calc(-1 * var(--bk-page-bridge-height));
-  height: calc(var(--bk-page-bridge-height) + var(--bk-active-shoulder));
-  background: var(--bk-page-bg, var(--bk-paper));
-  border-radius: var(--bk-active-shoulder) var(--bk-active-shoulder) 0 0;
-  pointer-events: none;
-}
+.bk-tab::after { content: none; }
 .bk-tabs-active-import .bk-tab[data-area="workspace"],
 .bk-tabs-active-import .bk-tab[data-area="archive"],
 .bk-tabs-active-workspace .bk-tab[data-area="archive"] {
   --bk-tab-edge-gradient:
     linear-gradient(
       to right,
-      var(--bk-stack-blend) 0,
-      transparent var(--bk-edge-gradient-width),
+      transparent 0,
+      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
+      var(--bk-stack-blend) var(--bk-tab-overlap),
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
       transparent 100%
     );
 }
@@ -486,8 +503,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-edge-gradient:
     linear-gradient(
       to left,
-      var(--bk-stack-blend) 0,
-      transparent var(--bk-edge-gradient-width),
+      transparent 0,
+      transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed)),
+      var(--bk-stack-blend) var(--bk-tab-overlap),
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
       transparent 100%
     );
 }
@@ -510,10 +529,10 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
 
 /* Alle inaktiven Register behalten dieselbe Grundfarbe. */
 html[data-bk-theme="dark"] .bk-tabs {
-  --bk-stack-blend: rgb(0 0 0 / .14);
+  --bk-stack-blend: rgb(0 0 0 / .20);
 }
 html[data-bk-theme="light"] .bk-tabs {
-  --bk-stack-blend: rgb(18 32 51 / .09);
+  --bk-stack-blend: rgb(18 32 51 / .14);
 }
 html[data-bk-theme="dark"] .bk-tab:not(.active) {
   --bk-tab-bg: #5f686d;
@@ -1182,7 +1201,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
     --bk-tab-seam-bleed: clamp(3px, 1vw, 5px);
     --bk-edge-gradient-width: clamp(14px, 5vw, 24px);
-    --bk-active-shoulder: 8px;
+    --bk-junction-radius: 7px;
       grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
@@ -1530,8 +1549,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         klass = "bk-tab active" if area == active else "bk-tab"
         return (
             f'<a class="{klass}" data-area="{area}" href="{href}">'
+            f'<span class="bk-tab-junction bk-tab-junction-left" aria-hidden="true"></span>'
             f'<span class="bk-tab-label">{escape(label)}</span>'
             f'<span class="bk-tab-mobile-label">{escape(mobile_label)}</span>'
+            f'<span class="bk-tab-junction bk-tab-junction-right" aria-hidden="true"></span>'
             f'</a>'
         )
 
