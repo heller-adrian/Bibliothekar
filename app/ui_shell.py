@@ -348,6 +348,8 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   --bk-tab-overlap: clamp(24px, 3vw, 64px);
   --bk-tab-seam-bleed: clamp(2px, .28vw, 4px);
   --bk-edge-gradient-width: clamp(22px, 2vw, 38px);
+  --bk-tab-junction-width: clamp(10px, .75vw, 14px);
+  --bk-tab-junction-rise: clamp(7px, .5vw, 9px);
   display: flex;
   align-items: flex-end;
   justify-content: stretch;
@@ -394,7 +396,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
   bottom: 0;
   left: calc(0px - var(--bk-tab-seam-bleed));
   right: calc(0px - var(--bk-tab-seam-bleed));
-  z-index: 0;
+  z-index: 1;
   background:
     var(--bk-tab-edge-gradient),
     linear-gradient(
@@ -459,8 +461,52 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
  * auf Mobilgeräten bereits stimmige Logik erhalten und der Auslauf erscheint
  * auch bei den größeren Desktop-Überlappungen.
  */
+/*
+ * Äußerer Übergang der aktiven Randregister:
+ * Keine separaten "Ohren" und keine feste Rundung am Trapez. Stattdessen
+ * verlängert eine sehr kleine, CSS-only Kurve die Seitenfarbe bis in den
+ * bereits vorhandenen Seiten-Puffer. Die Kurve liegt HINTER der eigentlichen
+ * Reiterfläche; dadurch bleibt die schräge Trapezkante erhalten und nur ihr
+ * unteres Ende läuft weich in die Seitenfläche aus.
+ */
 .bk-tab::after {
   content: none;
+  position: absolute;
+  z-index: 0;
+  bottom: calc(-1 * var(--bk-page-bridge-height));
+  width: var(--bk-tab-junction-width);
+  height: calc(var(--bk-tab-junction-rise) + var(--bk-page-bridge-height));
+  background: var(--bk-page-bg, var(--bk-paper));
+  pointer-events: none;
+}
+.bk-tabs-active-import .bk-tab[data-area="import"]::after {
+  content: "";
+  left: calc(-1 * (var(--bk-tab-junction-width) + var(--bk-tab-seam-bleed)));
+  clip-path: polygon(
+    100% 0,
+    100% 100%,
+    0 100%,
+    14% 95%,
+    31% 83%,
+    50% 66%,
+    68% 45%,
+    84% 22%
+  );
+}
+.bk-tabs-active-archive .bk-tab[data-area="archive"]::after {
+  content: "";
+  right: calc(-1 * (var(--bk-tab-junction-width) + var(--bk-tab-seam-bleed)));
+  clip-path: polygon(
+    100% 0,
+    100% 100%,
+    0 100%,
+    14% 95%,
+    31% 83%,
+    50% 66%,
+    68% 45%,
+    84% 22%
+  );
+  transform: scaleX(-1);
 }
 .bk-tabs-active-import .bk-tab[data-area="archive"] {
   --bk-tab-edge-gradient:
@@ -1169,6 +1215,8 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
     --bk-tab-seam-bleed: clamp(3px, 1vw, 5px);
     --bk-edge-gradient-width: clamp(18px, 5vw, 28px);
+    --bk-tab-junction-width: 10px;
+    --bk-tab-junction-rise: 7px;
     grid-column: 1 / -1;
     grid-row: 2;
     width: 100%;
