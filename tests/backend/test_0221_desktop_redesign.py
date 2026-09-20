@@ -103,8 +103,9 @@ def test_0222_registers_use_same_inactive_color_and_in_face_depth_gradient():
     assert 'content: none;' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-import .bk-tab[data-area="workspace"],' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-workspace .bk-tab[data-area="import"],' in BIBLIOTHEKAR_CSS
-    assert 'var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
-    assert 'transparent var(--bk-edge-gradient-width)' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed))' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
     assert 'box-shadow: none;' in BIBLIOTHEKAR_CSS
     assert 'border-top-left-radius: 0;' in BIBLIOTHEKAR_CSS
     assert 'border-top-right-radius: 0;' in BIBLIOTHEKAR_CSS
@@ -131,15 +132,17 @@ def test_0222_active_register_and_page_are_one_joined_surface():
     assert 'bk-tab-shoulder' not in html
     assert 'bk-tab-shoulder' not in BIBLIOTHEKAR_CSS
     assert '--bk-page-bridge-height: clamp(9px, .8vw, 13px);' in BIBLIOTHEKAR_CSS
-    assert '--bk-active-shoulder: clamp(7px, .65vw, 11px);' in BIBLIOTHEKAR_CSS
+    assert '--bk-junction-radius: clamp(6px, .52vw, 9px);' in BIBLIOTHEKAR_CSS
     assert '.bk-shell::after {' in BIBLIOTHEKAR_CSS
     assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
     assert '.bk-tab.active::before,' in BIBLIOTHEKAR_CSS
     assert '.bk-tab.is-active::before {' in BIBLIOTHEKAR_CSS
     assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
-    assert '.bk-tab.active::after,' in BIBLIOTHEKAR_CSS
-    assert 'height: calc(var(--bk-page-bridge-height) + var(--bk-active-shoulder));' in BIBLIOTHEKAR_CSS
-    assert 'border-radius: var(--bk-active-shoulder) var(--bk-active-shoulder) 0 0;' in BIBLIOTHEKAR_CSS
+    assert 'bk-tab-junction-left' in html
+    assert 'bk-tab-junction-right' in html
+    assert '.bk-tab-junction {' in BIBLIOTHEKAR_CSS
+    assert 'border-top-left-radius: var(--bk-junction-radius);' in BIBLIOTHEKAR_CSS
+    assert 'border-top-right-radius: var(--bk-junction-radius);' in BIBLIOTHEKAR_CSS
 
 
 def test_0221_minimal_pages_have_no_browser_body_gutter_and_header_buttons_match():
@@ -203,13 +206,18 @@ def test_0222_header_has_page_coloured_scroll_buffer():
     assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_active_tab_uses_outward_page_coloured_shoulders():
-    assert '.bk-tab.active::after,' in BIBLIOTHEKAR_CSS
-    assert 'left: calc(0px - var(--bk-active-shoulder) - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
-    assert 'right: calc(0px - var(--bk-active-shoulder) - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
+def test_0222_active_tab_uses_explicit_convex_corner_junctions():
+    html = main.index()
+    assert 'class="bk-tab-junction bk-tab-junction-left"' in html
+    assert 'class="bk-tab-junction bk-tab-junction-right"' in html
+    assert '.bk-tab-junction-left {' in BIBLIOTHEKAR_CSS
+    assert '.bk-tab-junction-right {' in BIBLIOTHEKAR_CSS
+    assert 'border-top-left-radius: var(--bk-junction-radius);' in BIBLIOTHEKAR_CSS
+    assert 'border-top-right-radius: var(--bk-junction-radius);' in BIBLIOTHEKAR_CSS
     assert 'background: var(--bk-page-bg, var(--bk-paper));' in BIBLIOTHEKAR_CSS
 
 
-def test_0222_depth_gradient_uses_last_known_good_in_face_blend():
-    assert 'var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
-    assert 'transparent var(--bk-edge-gradient-width)' in BIBLIOTHEKAR_CSS
+def test_0222_depth_gradient_is_visible_at_actual_overlap_edge():
+    assert 'transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed))' in BIBLIOTHEKAR_CSS
+    assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' in BIBLIOTHEKAR_CSS
+    assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
