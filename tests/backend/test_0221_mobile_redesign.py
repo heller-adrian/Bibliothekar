@@ -41,11 +41,12 @@ def test_0222_mobile_tabs_keep_trapezoid_with_joined_page_surface():
     assert '--bk-tab-overlap: clamp(12px, 4vw, 18px);' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-seam-bleed: clamp(3px, 1vw, 5px);' in BIBLIOTHEKAR_CSS
     assert '--bk-edge-gradient-width: clamp(14px, 5vw, 24px);' in BIBLIOTHEKAR_CSS
-    assert '--bk-active-shoulder: 8px;' in BIBLIOTHEKAR_CSS
+    assert '--bk-junction-radius: 7px;' in BIBLIOTHEKAR_CSS
     assert '--bk-page-bridge-height: 10px;' in BIBLIOTHEKAR_CSS
     assert 'margin-left: calc(0px - var(--bk-tab-overlap));' in BIBLIOTHEKAR_CSS
     assert 'bottom: calc(-1 * var(--bk-page-bridge-height));' in BIBLIOTHEKAR_CSS
-    assert 'border-radius: var(--bk-active-shoulder) var(--bk-active-shoulder) 0 0;' in BIBLIOTHEKAR_CSS
+    assert 'border-top-left-radius: var(--bk-junction-radius);' in BIBLIOTHEKAR_CSS
+    assert 'border-top-right-radius: var(--bk-junction-radius);' in BIBLIOTHEKAR_CSS
     assert '--bk-shoulder-size' not in BIBLIOTHEKAR_CSS
     assert 'bk-tab-shoulder' not in html
 
@@ -54,4 +55,4 @@ def test_0222_narrow_portrait_keeps_shared_mobile_overlap_geometry():
     assert '@media (max-width: 430px)' in BIBLIOTHEKAR_CSS
     assert '--bk-tab-overlap: 4px;' not in BIBLIOTHEKAR_CSS
     assert '--bk-tab-overlap: clamp(12px, 4vw, 18px);' in BIBLIOTHEKAR_CSS
-    assert '--bk-active-shoulder: 8px;' in BIBLIOTHEKAR_CSS
+    assert '--bk-junction-radius: 7px;' in BIBLIOTHEKAR_CSS
