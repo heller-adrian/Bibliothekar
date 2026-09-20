@@ -494,6 +494,49 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check {
     );
 }
 
+
+/* Sonderseiten ohne aktiven Hauptreiter: Assistent und Metadatenkorrektion
+ * behalten an beiden Fugen denselben dezenten Staffelungsverlauf. */
+.bk-tabs-active-assistant .bk-tab[data-area="workspace"],
+.bk-tabs-active-metadata .bk-tab[data-area="workspace"] {
+  --bk-tab-edge-gradient:
+    linear-gradient(
+      to right,
+      var(--bk-stack-blend) 0,
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+      transparent 100%
+    );
+}
+.bk-tabs-active-assistant .bk-tab[data-area="archive"],
+.bk-tabs-active-metadata .bk-tab[data-area="archive"] {
+  --bk-tab-edge-gradient:
+    linear-gradient(
+      to right,
+      var(--bk-stack-blend) 0,
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+      transparent 100%
+    );
+}
+
+/* Archiv im schmalen Hochformat:
+ * Die perspektivisch verjüngte Oberkante des Arbeitsbereich-Reiters wird
+ * links um einen zusätzlichen responsiven Bleed verlängert. So bleibt die
+ * Fuge Import -> Arbeitsbereich auch auf Handy/engen Fenstern geschlossen. */
+@media (max-width: 820px) {
+  .bk-tabs-active-archive .bk-tab[data-area="workspace"] {
+    --bk-tab-edge-gradient:
+      linear-gradient(
+        to right,
+        var(--bk-stack-blend) 0,
+        transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+        transparent 100%
+      );
+  }
+  .bk-tabs-active-archive .bk-tab[data-area="workspace"]::before {
+    left: calc(0px - var(--bk-tab-seam-bleed) - var(--bk-tab-seam-bleed));
+  }
+}
+
 /* Innenliegende obere Rundungen werden unter der vorderen Karte verborgen. */
 .bk-tabs-active-import .bk-tab[data-area="workspace"]::before,
 .bk-tabs-active-import .bk-tab[data-area="archive"]::before {

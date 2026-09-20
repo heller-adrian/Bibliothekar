@@ -183,7 +183,7 @@ def test_0222_no_fixed_desktop_overlap_or_shadow_offsets_remain():
 
 def test_0222_active_page_bridge_replaces_outer_shoulders_and_shadow_overlay():
     assert '.bk-shell::after {' in BIBLIOTHEKAR_CSS
-    assert 'height: calc(var(--bk-page-bridge-height) + 1px);' in BIBLIOTHEKAR_CSS
+    assert 'height: calc(var(--bk-page-bridge-height) + var(--bk-tab-page-mask));' in BIBLIOTHEKAR_CSS
     assert 'margin-bottom: var(--bk-page-bridge-height);' in BIBLIOTHEKAR_CSS
     assert '.bk-tab::after {' in BIBLIOTHEKAR_CSS
     assert 'content: none;' in BIBLIOTHEKAR_CSS
@@ -232,3 +232,10 @@ def test_0223_depth_gradient_starts_hidden_under_the_foreground_tab():
     assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
     assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' not in BIBLIOTHEKAR_CSS
     assert 'transform: perspective(108px) rotateX(7deg);' in BIBLIOTHEKAR_CSS
+
+
+def test_0223_neutral_pages_keep_both_tab_depth_gradients():
+    assert '.bk-tabs-active-assistant .bk-tab[data-area="workspace"],' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-metadata .bk-tab[data-area="workspace"] {' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-assistant .bk-tab[data-area="archive"],' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-metadata .bk-tab[data-area="archive"] {' in BIBLIOTHEKAR_CSS

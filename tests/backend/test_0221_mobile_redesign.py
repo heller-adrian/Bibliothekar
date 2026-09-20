@@ -67,3 +67,8 @@ def test_0223_mobile_uses_same_hidden_origin_depth_fade_as_desktop():
     assert 'var(--bk-stack-blend) 0,' in BIBLIOTHEKAR_CSS
     assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
     assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' not in BIBLIOTHEKAR_CSS
+
+
+def test_0223_archive_portrait_closes_import_workspace_top_seam():
+    assert '.bk-tabs-active-archive .bk-tab[data-area="workspace"]::before {' in BIBLIOTHEKAR_CSS
+    assert 'left: calc(0px - var(--bk-tab-seam-bleed) - var(--bk-tab-seam-bleed));' in BIBLIOTHEKAR_CSS
