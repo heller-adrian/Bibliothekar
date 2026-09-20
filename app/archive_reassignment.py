@@ -71,7 +71,22 @@ def _target_for_new_no_event(c,job_id:str,fids:list[int],range_start:str,range_e
     if len(rows)!=len(fids) or any(not r['selected_capture_time'] for r in rows): raise ArchiveReassignmentError('Aufnahmedaten der Familien sind unvollständig.')
     months={range_start[:7],range_end[:7]}
     if len(months)!=1: raise ArchiveReassignmentError('Eine neue „Ohne Ereignis“-Sammlung muss in einem Monat liegen.')
-    month=next(iter(months)); folder=f"{month[5:7]} - Ohne Ereignis"
+    month=next(iter(months))
+    existing=c.execute(
+        """SELECT id FROM events
+           WHERE parent_event_id IS NULL
+             AND event_kind='no_event'
+             AND status IN ('planned','applied','archived')
+             AND substr(start_datetime,1,7)=?
+           LIMIT 1""",
+        (month,),
+    ).fetchone()
+    if existing is not None:
+        raise ArchiveReassignmentError(
+            'Für diesen Monat existiert bereits eine „Ohne Ereignis“-Sammlung. '
+            'Bitte diese bestehende Sammlung als Ziel wählen.'
+        )
+    folder=f"{month[5:7]} - Ohne Ereignis"
     return {'kind':'new_no_event','event_id':None,'name':'Ohne Ereignis','folder':folder,'start':range_start,'end':range_end,'uses':0,'child_name':None,'child_folder':None,'preserve':0}
 
 def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[int],*,target_mode:str,new_event_name:str|None=None,target_event_id:str|None=None,target_child_event_id:str|None=None,new_child_start:str|None=None,new_child_end:str|None=None,workspace_path:Path|None=None)->dict[str,Any]:
