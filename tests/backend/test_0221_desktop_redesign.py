@@ -101,10 +101,12 @@ def test_0222_registers_use_same_inactive_color_and_in_face_depth_gradient():
     assert '--bk-tab-edge-gradient:' in BIBLIOTHEKAR_CSS
     assert '.bk-tab::after {' in BIBLIOTHEKAR_CSS
     assert 'content: none;' in BIBLIOTHEKAR_CSS
-    assert '.bk-tabs-active-import .bk-tab[data-area="workspace"],' in BIBLIOTHEKAR_CSS
-    assert '.bk-tabs-active-workspace .bk-tab[data-area="import"],' in BIBLIOTHEKAR_CSS
-    assert '--bk-edge-gradient-angle-right: 100deg;' in BIBLIOTHEKAR_CSS
-    assert '--bk-edge-gradient-angle-left: 260deg;' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-import .bk-tab[data-area="archive"] {' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-archive .bk-tab[data-area="import"] {' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-import .bk-tab[data-area="workspace"],' not in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-archive .bk-tab[data-area="workspace"],' not in BIBLIOTHEKAR_CSS
+    assert 'to right,' in BIBLIOTHEKAR_CSS
+    assert 'to left,' in BIBLIOTHEKAR_CSS
     assert 'transparent calc(var(--bk-tab-overlap) - var(--bk-tab-seam-bleed))' in BIBLIOTHEKAR_CSS
     assert 'var(--bk-stack-blend) var(--bk-tab-overlap)' in BIBLIOTHEKAR_CSS
     assert 'transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width))' in BIBLIOTHEKAR_CSS
@@ -209,9 +211,11 @@ def test_0223_has_no_outer_tab_ears_or_corner_helper_elements():
     assert '--bk-junction-radius' not in BIBLIOTHEKAR_CSS
 
 
-def test_0223_depth_gradient_is_angled_inside_the_transformed_tab_face():
-    assert '--bk-edge-gradient-angle-right: 100deg;' in BIBLIOTHEKAR_CSS
-    assert '--bk-edge-gradient-angle-left: 260deg;' in BIBLIOTHEKAR_CSS
-    assert 'var(--bk-edge-gradient-angle-right)' in BIBLIOTHEKAR_CSS
-    assert 'var(--bk-edge-gradient-angle-left)' in BIBLIOTHEKAR_CSS
+def test_0223_depth_gradient_follows_the_transformed_tab_edge_without_custom_angles():
+    assert '--bk-edge-gradient-angle-right' not in BIBLIOTHEKAR_CSS
+    assert '--bk-edge-gradient-angle-left' not in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-import .bk-tab[data-area="archive"] {' in BIBLIOTHEKAR_CSS
+    assert '.bk-tabs-active-archive .bk-tab[data-area="import"] {' in BIBLIOTHEKAR_CSS
+    assert 'linear-gradient(\n      to right,' in BIBLIOTHEKAR_CSS
+    assert 'linear-gradient(\n      to left,' in BIBLIOTHEKAR_CSS
     assert 'transform: perspective(108px) rotateX(7deg);' in BIBLIOTHEKAR_CSS
