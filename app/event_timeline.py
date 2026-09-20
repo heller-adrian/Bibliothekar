@@ -43,7 +43,7 @@ def normalize_no_event_segments(values: Any) -> list[dict[str, str]]:
         end = _time(item.get('end_time') or '23:59')
         start_dt = f'{day}T{start}:00'
         end_dt = f'{day}T{end}:59'
-        if end_dt <= start_dt:
+        if end <= start:
             raise EventTimelineError(f'Am {day} muss das Ende nach dem Beginn liegen.')
         key = (day, start, end)
         if key in seen:
