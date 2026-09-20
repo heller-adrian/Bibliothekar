@@ -132,8 +132,9 @@ def test_global_task_button_stays_visible_and_planned_and_free_tasks_exist(tmp_p
 
 
 def test_reassignment_ui_has_new_no_event_and_event_spacing():
-    assert 'value="new-no-event"' in WORKSPACE_HTML
-    assert 'Neues „Ohne Ereignis“ erstellen' in WORKSPACE_HTML
-    assert '/no-event/targets?months=' in WORKSPACE_HTML
+    assert 'value="__new_no_event__"' in EVENTS_HTML
+    assert 'Neues „Ohne Ereignis“ erstellen' in EVENTS_HTML
+    assert 'task.startsWith("reassign:")' in EVENTS_HTML
+    assert '/events?job=' in WORKSPACE_HTML
     assert 'class="event-browser-toolbar"' in EVENTS_HTML
     assert '.event-browser-search' in EVENTS_HTML

@@ -15,8 +15,9 @@ def test_no_event_range_generator_locks_existing_month():
 
 
 def test_reassignment_is_compact_by_day_without_family_drilldown():
-    assert 'data-task-day data-family-ids=' in WORKSPACE_HTML
-    assert 'querySelectorAll("[data-task-day]:checked")' in WORKSPACE_HTML
+    assert 'data-reassign-day data-family-ids=' in EVENTS_HTML
+    assert "querySelectorAll('[data-reassign-day]:checked')" in EVENTS_HTML
+    assert 'segments:selectedSegments' in EVENTS_HTML
     assert 'data-task-family value=' not in WORKSPACE_HTML
 
 

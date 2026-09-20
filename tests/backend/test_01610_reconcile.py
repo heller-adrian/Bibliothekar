@@ -67,8 +67,10 @@ def test_connected_applied_events_are_one_reconciliation_and_execute_atomically(
 
 def test_applied_ui_uses_workspace_reconciliation_not_single_event_reapply():
     assert '/reconcile-plan' in EVENTS_HTML
-    assert '/reconcile-sort' in EVENTS_HTML
+    assert '"reconcile-sort"' in EVENTS_HTML
     assert 'plan._reconcile' in EVENTS_HTML
+    assert 'id="sort-apply-confirmation"' in EVENTS_HTML
+    assert 'id="sort-apply-button"' in EVENTS_HTML
 
 def test_archived_removed_family_can_become_new_archived_event_with_empty_prep_structure(tmp_path):
     from app.event_change_request import propose_event_change, get_event_change_files

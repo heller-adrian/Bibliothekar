@@ -59,13 +59,13 @@ def test_existing_month_blocks_second_no_event_target(tmp_path):
 
 
 def test_all_reassignment_windows_use_day_groups_and_locked_month_ui():
-    assert 'data-task-day' in WORKSPACE_HTML
+    # 0.24.1: only the canonical Ereignisse dialog owns reassignment UI.
     assert 'data-reassign-day' in EVENTS_HTML
-    assert 'new_no_event_supported' in WORKSPACE_HTML
     assert 'new_no_event_supported' in EVENTS_HTML
-    assert 'Monat/Jahr' in WORKSPACE_HTML
+    assert 'segments:selectedSegments' in EVENTS_HTML
+    assert 'task.startsWith("reassign:")' in EVENTS_HTML
+    assert '/events?job=' in WORKSPACE_HTML
     assert 'Monat/Jahr' in EVENTS_HTML
-    assert 'family_count' in WORKSPACE_HTML
 
 
 def test_existing_no_event_preview_contains_real_folder_structure():
