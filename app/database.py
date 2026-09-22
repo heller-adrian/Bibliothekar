@@ -3516,30 +3516,13 @@ def update_event_definition(
         connection.commit()
         row = connection.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
 
+    # 0.25.1 / F01:
+    # Applied edits change only the index/plan. Removed families keep their
+    # current workspace files until targets are assigned and the user explicitly
+    # confirms the workspace reconciliation. The legacy neutralization module is
+    # retained for restoring mutations that were already neutralized by older
+    # versions.
     neutralized_files: list[dict[str, Any]] = []
-    if is_applied and removed_ids and workspace_path is not None:
-        try:
-            from app.applied_neutralization import neutralize_removed_applied_families
-            neutralized_files = neutralize_removed_applied_families(
-                database_path,
-                workspace_path,
-                job_id=job_id,
-                event_id=event_id,
-                family_ids=removed_ids,
-                mutation_id=mutation_id,
-            )
-        except Exception as exc:
-            # Die Dateifunktion rollt Teilbewegungen selbst zurück. Da die
-            # Ereignisänderung zu diesem Zeitpunkt bereits committed ist,
-            # stellen wir im Fehlerfall auch den gespeicherten DB-Ursprung
-            # wieder her. So entsteht kein DB/SSD-Drift.
-            if mutation_id is not None:
-                from app.event_mutation import cancel_mutation
-                with database_connection(database_path) as rollback_connection:
-                    rollback_connection.execute("BEGIN IMMEDIATE")
-                    cancel_mutation(rollback_connection, mutation_id, job_id)
-                    rollback_connection.commit()
-            raise ValueError("Herausfallende Dateien konnten nicht sicher neutralisiert werden: " + str(exc)) from exc
 
     result: dict[str, Any] = {
         "event": dict(row),

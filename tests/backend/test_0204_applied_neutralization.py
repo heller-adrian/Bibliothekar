@@ -64,54 +64,83 @@ def _edit(db, workspace, ids, folder, *, no_event=False):
     return update_event_definition(db,'j','src',preview,event_name='Ohne Ereignis' if no_event else 'Quelle',notes='',expected_revision=1,workspace_path=workspace,app_version=APP_VERSION)
 
 
-def _assert_neutralized(db, workspace, removed_id):
-    root=workspace/'Arbeitsbereich'
-    expected=[]
+def _current_paths(db, family_id):
     with database_connection(db) as c:
-        rows=c.execute("SELECT current_relative_path FROM files WHERE family_id=? ORDER BY id",(removed_id,)).fetchall()
-        rels=[str(r['current_relative_path']) for r in rows]
-    assert len(rels)==2
-    assert all(r.startswith('Nicht zugeordnet/2026/09/') for r in rels)
-    assert all((root/r).is_file() for r in rels)
-    return rels
+        return [
+            str(r["current_relative_path"])
+            for r in c.execute(
+                "SELECT current_relative_path FROM files WHERE family_id=? ORDER BY id",
+                (family_id,),
+            ).fetchall()
+        ]
+
+
+def _assert_removed_family_stays_in_place(db, workspace, family_id, expected_paths):
+    root = workspace / "Arbeitsbereich"
+    assert _current_paths(db, family_id) == expected_paths
+    assert all((root / rel).is_file() for rel in expected_paths)
+    assert not (root / "Nicht zugeordnet").exists()
+    with database_connection(db) as c:
+        queued = c.execute(
+            """SELECT released_start_datetime,released_end_datetime,target_event_id
+               FROM event_reapply_removed_families
+               WHERE event_id='src' AND job_id='j' AND family_id=?""",
+            (family_id,),
+        ).fetchone()
+        event = c.execute("SELECT resort_required FROM events WHERE id='src'").fetchone()
+    assert queued is not None
+    assert queued["released_start_datetime"]
+    assert queued["released_end_datetime"]
+    assert queued["target_event_id"] is None
+    assert int(event["resort_required"]) == 1
 
 
 def test_version_0204():
-    assert APP_VERSION == '0.25.0'
+    assert APP_VERSION == '0.25.1'
 
 
-def test_applied_normal_event_removed_family_moves_to_neutral_workspace(tmp_path):
+def test_applied_normal_event_removed_family_stays_at_old_path_until_reconcile(tmp_path):
     db,workspace,ids,folder=_seed(tmp_path,no_event=False)
+    before=_current_paths(db,ids[1])
     result=_edit(db,workspace,ids,folder,no_event=False)
     assert result['removed_family_ids']==[ids[1]]
-    assert result['neutralized_file_count']==2
-    _assert_neutralized(db,workspace,ids[1])
-    assert not any((workspace/'Arbeitsbereich'/f'2026/{folder}/Alle').glob('20260908_*'))
+    assert result['neutralized_file_count']==0
+    assert result['neutralized_files']==[]
+    _assert_removed_family_stays_in_place(db,workspace,ids[1],before)
 
 
-def test_applied_no_event_removed_family_moves_to_same_neutral_rule(tmp_path):
+def test_applied_no_event_removed_family_uses_same_no_move_rule(tmp_path):
     db,workspace,ids,folder=_seed(tmp_path,no_event=True)
+    before=_current_paths(db,ids[1])
     result=_edit(db,workspace,ids,folder,no_event=True)
     assert result['removed_family_ids']==[ids[1]]
-    assert result['neutralized_file_count']==2
-    _assert_neutralized(db,workspace,ids[1])
+    assert result['neutralized_file_count']==0
+    assert result['neutralized_files']==[]
+    _assert_removed_family_stays_in_place(db,workspace,ids[1],before)
 
 
-def test_cancel_applied_edit_restores_neutralized_files_and_paths(tmp_path):
+def test_cancel_applied_edit_restores_db_without_moving_files(tmp_path):
     db,workspace,ids,folder=_seed(tmp_path,no_event=False)
+    before=_current_paths(db,ids[1])
     result=_edit(db,workspace,ids,folder,no_event=False)
-    neutral=_assert_neutralized(db,workspace,ids[1])
+    _assert_removed_family_stays_in_place(db,workspace,ids[1],before)
     with database_connection(db) as c:
         c.execute('BEGIN IMMEDIATE')
         cancelled=cancel_mutation(c,result['mutation_id'],'j',workspace_path=workspace)
         c.commit()
-    assert cancelled['restored_file_count']==2
-    assert all(not (workspace/'Arbeitsbereich'/r).exists() for r in neutral)
+    assert cancelled['restored_file_count']==0
+    assert _current_paths(db,ids[1])==before
+    assert all((workspace/'Arbeitsbereich'/rel).is_file() for rel in before)
     with database_connection(db) as c:
-        rels=[str(r['current_relative_path']) for r in c.execute("SELECT current_relative_path FROM files WHERE family_id=? ORDER BY id",(ids[1],)).fetchall()]
-        assignment=c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id='src' AND family_id=?",(ids[1],)).fetchone()[0]
-    assert all(r.startswith(f'2026/{folder}/Alle/') for r in rels)
+        assignment=c.execute(
+            "SELECT COUNT(*) FROM event_assignments WHERE event_id='src' AND family_id=?",
+            (ids[1],),
+        ).fetchone()[0]
+        pending=c.execute(
+            "SELECT COUNT(*) FROM event_reapply_removed_families WHERE event_id='src'"
+        ).fetchone()[0]
+        event=c.execute("SELECT resort_required FROM events WHERE id='src'").fetchone()
     assert assignment==1
-    assert not (workspace/'Arbeitsbereich'/'Nicht zugeordnet'/'2026'/'09').exists()
-    assert not (workspace/'Arbeitsbereich'/'Nicht zugeordnet'/'2026').exists()
-
+    assert pending==0
+    assert int(event['resort_required'])==0
+    assert not (workspace/'Arbeitsbereich'/'Nicht zugeordnet').exists()

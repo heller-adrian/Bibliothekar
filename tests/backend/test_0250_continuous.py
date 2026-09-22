@@ -173,12 +173,27 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path):
     event=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,event['id'])
     write_event_document(workspace,build_event_document_from_db(db,workspace,'j',event['id']))
+    root=workspace/'Arbeitsbereich'
+    with database_connection(db) as c:
+        before_paths={int(r['id']):str(r['current_relative_path']) for r in c.execute("SELECT id,current_relative_path FROM files WHERE job_id='j' ORDER BY id")}
+    before_bytes={fid:(root/rel).read_bytes() for fid,rel in before_paths.items()}
     preview=build_event_preview(payload(),get_event_edit_context(db,'j',event['id'])['families'])
-    update_event_definition(db,'j',event['id'],preview,event_name='Urlaub',notes='',expected_revision=1)
+    edited=update_event_definition(db,'j',event['id'],preview,event_name='Urlaub',notes='',expected_revision=1,workspace_path=workspace)
+    assert edited['neutralized_file_count']==0
+    assert edited['neutralized_files']==[]
+    with database_connection(db) as c:
+        after_edit_paths={int(r['id']):str(r['current_relative_path']) for r in c.execute("SELECT id,current_relative_path FROM files WHERE job_id='j' ORDER BY id")}
+    assert after_edit_paths==before_paths
+    assert all((root/rel).read_bytes()==before_bytes[fid] for fid,rel in before_paths.items())
+    assert not (root/'Nicht zugeordnet').exists()
     blocked=build_workspace_reconcile_plan(db,'j',event['id'],workspace)
     assert not blocked['summary']['ready']
     cards=list_job_planning_overview(db,'j')['available_day_groups']
     target=create(db,{'event_kind':'no_event','no_event_segments':cards})['parent_event']
+    with database_connection(db) as c:
+        before_reconcile_paths={int(r['id']):str(r['current_relative_path']) for r in c.execute("SELECT id,current_relative_path FROM files WHERE job_id='j' ORDER BY id")}
+    assert before_reconcile_paths==before_paths
+    assert all((root/rel).read_bytes()==before_bytes[fid] for fid,rel in before_paths.items())
     plan=build_workspace_reconcile_plan(db,'j',event['id'],workspace)
     assert plan['summary']['ready'],plan['blockers']
     with pytest.raises(SortApplyError,match='Bestätigung'):

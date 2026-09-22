@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 0.25.1 – Applied-Dateien erst beim bestätigten Reconcile verschieben
+
+- Behebt F01: Das Verkleinern eines angewendeten Ereignisses verschiebt herausfallende Dateien nicht mehr vorzeitig nach „Nicht zugeordnet“.
+- Applied-Bearbeitungen speichern Definition, Freigaben und Neu-Zuordnungsaufgabe; physische Dateibewegungen erfolgen erst im ausdrücklich bestätigten Workspace-Reconcile.
+- Regressionen prüfen den unveränderten Dateipfad für normale Ereignisse und „Ohne Ereignis“ sowie den vollständigen Reconcile-Ablauf mit gesetztem Workspace-Pfad.
+- Die ältere Neutralisierungs-/Restore-Unterstützung bleibt für bereits begonnene Legacy-Mutationen erhalten.
+
 ### 0.25.0 – kontinuierliches Ereignismodell
 
 - Normale Ereignisse belegen exakt einen durchgehenden Start-/Endbereich; Uhrzeiten erzwingen kein Unterereignis. Optionale organisatorische Unterereignisse ändern die Belegung nicht.
