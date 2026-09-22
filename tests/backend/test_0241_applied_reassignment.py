@@ -290,8 +290,8 @@ def test_0241_reassignment_tasks_use_canonical_exact_segment_ui(tmp_path: Path):
     assert "&task=reassign:" in task["href"]
 
     assert 'task.startsWith("reassign:")' in EVENTS_HTML
-    assert "data-reassign-day" in EVENTS_HTML
-    assert "segments:selectedSegments" in EVENTS_HTML
+    assert "In Aufnahmen öffnen" in EVENTS_HTML
+    assert 'id="reassignment-target"' not in EVENTS_HTML
     assert "runAutomaticReapply" not in EVENTS_HTML
 
     assert 'task.startsWith("reassign:")' in WORKSPACE_HTML
@@ -305,3 +305,4 @@ def test_0241_applied_reconcile_requires_visible_confirmation():
     assert 'id="sort-apply-confirmation"' in EVENTS_HTML
     assert 'id="sort-apply-button"' in EVENTS_HTML
     assert "Die ausdrückliche Bestätigung fehlt." in EVENTS_HTML
+

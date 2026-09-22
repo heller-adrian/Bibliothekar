@@ -793,6 +793,14 @@ EVENTS_HTML = r"""<!doctype html>
     .global-task-item { display:block; padding:10px; margin-top:8px; border-radius:10px; border:1px solid #333a42; background:#20252b; color:inherit; text-decoration:none; }
     .global-task-item strong { display:block; margin-bottom:3px; }
 
+
+    summary { cursor:pointer; user-select:none; }
+    summary[style*="display:flex"]::before { content:"▸"; flex:0 0 auto; }
+    details[open] > summary[style*="display:flex"]::before { content:"▾"; }
+    .event-details > summary { display:list-item !important; list-style:disclosure-closed !important; }
+    .event-details[open] > summary { list-style:disclosure-open !important; }
+    button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button, #calculate-preview-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
+    button.danger-button, .danger-button { background:#b42318 !important; border-color:#b42318 !important; color:white !important; }
   </style>
 </head>
 
@@ -1266,14 +1274,14 @@ EVENTS_HTML = r"""<!doctype html>
           <div class="reassignment-resume">
             <span><strong>⚠ ${Number(event.pending_reassignment_count)} ${Number(event.pending_reassignment_count)===1?"Familie":"Familien"} noch neu zuzuordnen</strong><br><span class="muted">Die Änderung bleibt bis zur Neu-Zuordnung im sicheren Schwebezustand. Ursprungs- und Zielzustand sind weiterhin nachvollziehbar.</span></span>
             <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-              <button type="button" class="plan-button" data-reassign-workspace="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">In Sortieren öffnen</button>
+              <button type="button" class="plan-button" data-reassign-workspace="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">In Aufnahmen öffnen</button>
               ${isMutationAnchor ? `<button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button>` : ""}
             </div>
           </div>` : "";
         const mutation = isMutationAnchor && Number(event.pending_reassignment_count||0) === 0 ? `
           <div class="reassignment-resume"><span><strong>⚠ Änderung noch nicht angewendet</strong><br><span class="muted">Die Neu-Zuordnung ist vollständig. Die neue Struktur ist gespeichert, aber die verifizierte Nachsortierung auf der SSD steht noch aus.</span></span><button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button></div>` : "";
         card.innerHTML = `
-          <div class="event-card-header"><div><strong class="event-name">${escapeHtml(event.name)}</strong><div class="event-folder">${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
+          <div class="event-card-header"><div><strong class="event-name">${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder">${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
           ${mutation}
           ${reassign}
           <details class="event-details"><summary>Öffnen</summary><div class="event-actions">
@@ -2161,6 +2169,7 @@ EVENTS_HTML = r"""<!doctype html>
     function renderEventEditor(context) {
       currentEditContext = context;
       const event = context.event;
+      if (context.legacy_disjoint) throw new Error(context.legacy_warning);
       const child = context.child_event;
       const childEvents = context.child_events || (child ? [child] : []);
       const structural = Boolean(context.structural_editable);
@@ -2201,8 +2210,8 @@ EVENTS_HTML = r"""<!doctype html>
           <summary style="cursor:pointer"><strong>Zeitsegment ${index+1}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)} · ${escapeHtml(segment.name||"")}</span></summary>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:8px">
             <label class="edit-field"><span>Bezeichnung</span><input data-child-name value="${escapeHtml(segment.name||"")}" ${structural ? "" : "disabled"}></label>
-            <label class="edit-field"><span>Startzeit</span><input data-child-start type="time" value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
-            <label class="edit-field"><span>Endzeit</span><input data-child-end type="time" value="${escapeHtml(end)}" ${structural ? "" : "disabled"}></label>
+            <label class="edit-field"><span>Startzeit</span><input data-child-start type="datetime-local" value="${escapeHtml(String(segment.start_datetime).slice(0,16))}" ${structural ? "" : "disabled"}></label>
+            <label class="edit-field"><span>Endzeit</span><input data-child-end type="datetime-local" value="${escapeHtml(String(segment.end_datetime).slice(0,16))}" ${structural ? "" : "disabled"}></label>
             ${structural ? `<button type="button" data-remove-child-segment class="danger-button">Zeitsegment entfernen</button>` : ""}
           </div>
         </details>`;
@@ -2211,7 +2220,7 @@ EVENTS_HTML = r"""<!doctype html>
       eventEditBody.innerHTML = `
         ${archivedChange ? `<div class="edit-warning">ARCHIVIERTES Ereignis: Die Kamerabibliothek bleibt strikt read-only. Nach dem Speichern erhältst du einen manuellen Änderungsauftrag mit IST- und SOLL-Zustand.</div><br>` : ""}
         <div class="edit-grid">
-          <label class="edit-field full"><span>Ereignisname</span><input id="edit-name" maxlength="160" value="${escapeHtml(event.name)}" ${noEvent ? "disabled" : ""}></label>
+          <label class="edit-field full"><span>Ereignisname</span><input id="edit-name" maxlength="160" value="${escapeHtml(event.display_title || event.name)}" ${noEvent ? "disabled" : ""}></label>
           ${noEvent ? `
             <div class="edit-field full">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
@@ -2235,7 +2244,11 @@ EVENTS_HTML = r"""<!doctype html>
           <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
           <label class="edit-field"><span>Ende</span><input id="edit-end-date" type="date" value="${escapeHtml(isoDate(event.end_datetime))}" ${structural ? "" : "disabled"}></label>
           <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-          ${childEvents.length ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Zeitsegmente / Unterereignisse</span>${structural ? `<button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button>` : ""}</div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px">${normalSegmentHtml}</div><p class="muted">Zeitsegmente können geändert, ergänzt oder vollständig entfernt werden. Die Dateizugehörigkeit wird danach ausschließlich aus Datum und Uhrzeit neu berechnet.</p></div>` : `<label class="edit-field"><span>Unterereignis / Uhrzeit</span><select id="edit-time-enabled" ${structural ? "" : "disabled"}><option value="0" selected>Ganzer Zeitraum</option><option value="1">Ein Zeitbereich</option><option value="2">Mehrere Zeitbereiche</option></select></label><label class="edit-field"><span>Bezeichnung Zeitbereich</span><input id="edit-child-name" value="${escapeHtml(event.name || "")}" disabled></label><label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="00:00" disabled></label><label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="23:59" disabled></label>${structural ? `<div class="edit-field full"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Mehrere Unterereignisse</span><button id="add-normal-segment" type="button">＋ Zeitsegment hinzufügen</button></div><div id="normal-event-segments" style="display:grid;gap:6px;margin-top:6px"></div><p class="muted">Sobald hier Zeitsegmente angelegt sind, bilden sie gemeinsam die neue Ereignisstruktur. Das funktioniert auch bei einem bisher einfachen archivierten Ereignis in einem einzigen Änderungsauftrag.</p></div>` : ""}`}`}
+          <input id="edit-time-enabled" type="hidden" value="1">
+          <label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="${escapeHtml(isoTime(event.start_datetime,'00:00'))}"></label>
+          <label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="${escapeHtml(isoTime(event.end_datetime,'23:59'))}"></label>
+          <div class="edit-field full"><span>Optionale Unterereignisse</span><div id="normal-event-segments">${normalSegmentHtml}</div><button id="add-normal-segment" type="button">Unterereignis hinzufügen</button></div>`}
+
           <label class="edit-field full"><span>Notizen</span><textarea id="edit-notes" maxlength="4000">${escapeHtml(event.notes || "")}</textarea></label>
         </div>
         <div class="edit-actions">
@@ -2244,58 +2257,14 @@ EVENTS_HTML = r"""<!doctype html>
         </div>`;
 
       if (!noEvent) {
-        const normalContainer = document.getElementById("normal-event-segments");
-        const timeEnabled = document.getElementById("edit-time-enabled");
-        const updateTimeFields = () => {
-          if (!timeEnabled) return;
-          const enabled = structural && timeEnabled.value === "1";
-          for (const id of ["edit-child-name","edit-start-time","edit-end-time"]) {
-            const field=document.getElementById(id); if (field) field.disabled = !enabled;
-          }
+        const normalContainer=document.getElementById('normal-event-segments');
+        const bind=()=>normalContainer.querySelectorAll('[data-remove-child-segment]').forEach(button=>button.onclick=()=>button.closest('[data-child-segment]').remove());
+        bind();
+        document.getElementById('add-normal-segment').onclick=()=>{
+          const row=document.createElement('details');row.open=true;row.dataset.childSegment='1';
+          row.innerHTML=`<summary>Unterereignis</summary><label>Name<input data-child-name></label><label>Beginn<input data-child-start type="datetime-local" value="${event.start_datetime.slice(0,16)}"></label><label>Ende<input data-child-end type="datetime-local" value="${event.end_datetime.slice(0,16)}"></label><button type="button" class="danger-button" data-remove-child-segment>Unterereignis entfernen</button>`;
+          normalContainer.appendChild(row);bind();
         };
-        const syncMultiSegmentModeAfterRemove = () => {
-          if (!timeEnabled || !normalContainer) return;
-          if (!normalContainer.querySelector("[data-child-segment]") && timeEnabled.value === "2") {
-            timeEnabled.value = "0";
-            updateTimeFields();
-          }
-        };
-        const bindNormalRemove = () => normalContainer?.querySelectorAll("[data-remove-child-segment]").forEach(button => {
-          button.onclick = () => {
-            button.closest("[data-child-segment]")?.remove();
-            syncMultiSegmentModeAfterRemove();
-          };
-        });
-        const appendNormalSegment = () => {
-          if (!normalContainer) return;
-          const row=document.createElement("details");
-          row.className="card"; row.dataset.childSegment="1"; row.open=true;
-          row.style.cssText="padding:8px 10px;margin:6px 0";
-          row.innerHTML=`<summary style="cursor:pointer"><strong>Neues Zeitsegment</strong></summary><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:8px"><label class="edit-field"><span>Bezeichnung</span><input data-child-name value="${escapeHtml(event.name||"")}"></label><label class="edit-field"><span>Startzeit</span><input data-child-start type="time" value="00:00"></label><label class="edit-field"><span>Endzeit</span><input data-child-end type="time" value="23:59"></label><button type="button" data-remove-child-segment class="danger-button">Zeitsegment entfernen</button></div>`;
-          normalContainer.appendChild(row);
-          bindNormalRemove();
-        };
-        bindNormalRemove();
-        document.getElementById("add-normal-segment")?.addEventListener("click", () => {
-          if (timeEnabled) {
-            timeEnabled.value = "2";
-            updateTimeFields();
-          }
-          appendNormalSegment();
-        });
-        timeEnabled?.addEventListener("change", () => {
-          if (!normalContainer) {
-            updateTimeFields();
-            return;
-          }
-          if (timeEnabled.value === "2") {
-            if (!normalContainer.querySelector("[data-child-segment]")) appendNormalSegment();
-          } else {
-            normalContainer.innerHTML = "";
-          }
-          updateTimeFields();
-        });
-        updateTimeFields();
       } else if (structural) {
         const container = document.getElementById("no-event-segments");
         const renderRangeSummary = () => {
@@ -2309,7 +2278,7 @@ EVENTS_HTML = r"""<!doctype html>
             const aDay=Number(a.slice(8,10));
             const bDay=Number(b.slice(8,10));
             return `<details class="card" data-existing-range data-range-start="${escapeHtml(a)}" data-range-end="${escapeHtml(b)}" style="padding:7px 9px">
-              <summary style="cursor:pointer"><strong>Zeitblock ${i+1}</strong> <span class="muted">· ${escapeHtml(germanDay(a))}${a===b?"":` bis ${escapeHtml(germanDay(b))}`}</span></summary>
+              <summary style="cursor:pointer"><strong>Zeitblock ${i+1}</strong> <span class="muted">· ${escapeHtml(germanDay(a))}${a===b?"":` bis ${escapeHtml(germanDay(b))}`} · ${values.filter(v=>v>=a && v<=b).length} Zeitsegmente</span></summary>
               <div style="display:grid;grid-template-columns:minmax(118px,.85fr) minmax(86px,.55fr) minmax(118px,.85fr) minmax(86px,.55fr);gap:8px;align-items:end;margin-top:8px">
                 <label class="edit-field"><span>Monat/Jahr</span><input value="${escapeHtml(monthLabel)}" disabled></label>
                 <label class="edit-field"><span>Von Tag</span><input data-edit-range-start-day type="number" min="1" max="${maxDay}" value="${aDay}"></label>
@@ -2451,37 +2420,16 @@ EVENTS_HTML = r"""<!doctype html>
           payload.start_date = payload.no_event_segments[0].day_key;
           payload.end_date = payload.no_event_segments[payload.no_event_segments.length - 1].day_key;
         } else {
-          const segmentRows=[...eventEditBody.querySelectorAll("[data-child-segment]")];
-          if (segmentRows.length) {
-            Object.assign(payload, {
-              event_kind: "event",
-              start_date: document.getElementById("edit-start-date").value,
-              end_date: document.getElementById("edit-end-date").value,
-              preserve_day_folders: document.getElementById("edit-preserve").value === "1",
-              uses_time_range: true,
-              child_segments: segmentRows.map(row=>({
-                id: row.dataset.childId || null,
-                name: row.querySelector("[data-child-name]").value,
-                start_time: row.querySelector("[data-child-start]").value,
-                end_time: row.querySelector("[data-child-end]").value,
-              })),
-            });
-          } else {
-            const timeEnabled=document.getElementById("edit-time-enabled");
-            const usesTime = timeEnabled ? timeEnabled.value === "1" : false;
-            Object.assign(payload, {
-              event_kind: "event",
-              start_date: document.getElementById("edit-start-date").value,
-              end_date: document.getElementById("edit-end-date").value,
-              preserve_day_folders: document.getElementById("edit-preserve").value === "1",
-              uses_time_range: usesTime,
-              child_event_name: document.getElementById("edit-child-name")?.value || document.getElementById("edit-name").value,
-              start_time: document.getElementById("edit-start-time")?.value || "00:00",
-              end_time: document.getElementById("edit-end-time")?.value || "23:59",
-            });
-          }
+          Object.assign(payload, {
+            event_kind:'event',start_date:document.getElementById('edit-start-date').value,
+            end_date:document.getElementById('edit-end-date').value,
+            start_time:document.getElementById('edit-start-time').value,end_time:document.getElementById('edit-end-time').value,
+            uses_time_range:true,preserve_day_folders:document.getElementById('edit-preserve').value==='1',
+            subevents:[...eventEditBody.querySelectorAll('[data-child-segment]')].map(row=>({id:row.dataset.childId||null,name:row.querySelector('[data-child-name]').value,start_datetime:row.querySelector('[data-child-start]').value,end_datetime:row.querySelector('[data-child-end]').value}))
+          });
         }
       }
+
       if (context.archived_change_request) {
         setStatus("Manueller Änderungsauftrag wird berechnet …");
         const result = await requestJson(`/api/change-requests/${encodeURIComponent(context.event.id)}/propose?job_id=${encodeURIComponent(context._job_id)}`, {
@@ -2501,35 +2449,9 @@ EVENTS_HTML = r"""<!doctype html>
           method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload),
         });
       } catch (error) {
-        const cascade = error.data?.cascade_preview;
-        if (!cascade?.has_conflicts) throw error;
-        const lines = (cascade.items || []).map(item => {
-          const action = item.action === "trim_start" ? "Beginn verschieben"
-            : item.action === "trim_end" ? "Ende verkürzen"
-            : item.action === "trim_or_split_segment" ? "„Ohne Ereignis“-Segment anpassen"
-            : "manuelle Klärung nötig";
-          return `• ${item.name} (${item.status}): ${action}`;
-        });
-        const hardNonArchive = (cascade.items || []).some(item => String(item.status || "") !== "archived" && !item.automatic);
-        if (hardNonArchive) {
-          throw new Error(error.message + "\n\n" + lines.join("\n"));
-        }
-        const hasArchived = (cascade.items || []).some(item => String(item.status || "") === "archived");
-        const accepted = window.confirm(
-          (hasArchived
-            ? "ACHTUNG: Diese Änderung betrifft mindestens ein ARCHIVIERTES Ereignis. Die Kamerabibliothek bleibt read-only; für den Archivanteil wird ein manueller IST→SOLL-Auftrag erzeugt.\n\n"
-            : "Die Änderung betrifft weitere Zeitbereiche. Die App schlägt folgende gemeinsame Anpassung vor:\n\n")
-          + lines.join("\n")
-          + "\n\nDiese gemeinsame Änderung wirklich vorbereiten?"
-        );
-        if (!accepted) throw new Error("Änderung wurde nicht ausgeführt.");
-        payload.cascade_confirmed = true;
-        result = await requestJson(`/api/jobs/${encodeURIComponent(context._job_id)}/events/${encodeURIComponent(context.event.id)}`, {
-          method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload),
-        });
+        throw error;
       }
-      eventEditDialog.close();
-      await loadEvents();
+
       if (result.archive_manual?.change_request_ids?.length) {
         const crId = result.archive_manual.change_request_ids[0];
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
@@ -2611,53 +2533,11 @@ EVENTS_HTML = r"""<!doctype html>
         return existing+child;
       }).join("");
       const exactSegments=data.reassignment_segments || [];
-      const dayGroups=exactSegments.map(segment=>{
-        const ids=(segment.family_ids||[]).map(Number).join(",");
-        const day=segment.day_key || String(segment.start_datetime||"").slice(0,10);
-        const fallback=segment.fallback ? " · Legacy-Zeitraum aus Aufnahmen" : "";
-        return `<label class="card" style="display:flex;align-items:center;gap:10px;padding:10px 12px"><input type="checkbox" data-reassign-day data-family-ids="${escapeHtml(ids)}" data-day="${escapeHtml(day)}" data-start="${escapeHtml(segment.start_datetime||"")}" data-end="${escapeHtml(segment.end_datetime||"")}" checked style="width:18px;height:18px;flex:0 0 auto"><span style="min-width:0"><strong>${escapeHtml(germanDay(day))} · ${escapeHtml(segment.start_time||"")}–${escapeHtml(segment.end_time||"")}</strong><br><span class="muted">${Number(segment.family_count||0)} Familien · ${Number(segment.file_count||0)} Dateien · nur gemeinsam zuordenbar${escapeHtml(fallback)}</span></span></label>`;
-      }).join("");
-      const newNoEventOption = data.new_no_event_supported ? '<option value="__new_no_event__">Neues „Ohne Ereignis“ erstellen</option>' : '';
-      reassignmentBody.innerHTML = `
-        <div class="edit-warning">Wähle ganze Tages-/Zeitsegmente, die gemeinsam dasselbe Ziel bekommen. Einzelne Familien oder Dateien können hier bewusst nicht herausgepickt werden.</div>
-        <div class="reassignment-list">${dayGroups}</div>
-        <div class="reassignment-controls">
-          <label class="edit-field"><span>Ziel</span><select id="reassignment-target"><option value="__new__">Neues Ereignis erstellen</option>${newNoEventOption}${options}</select></label>
-          <button id="reassignment-apply" type="button" class="plan-button">Auswahl zuordnen</button>
-        </div>
-        <label id="reassignment-new-wrap" class="edit-field reassignment-new-name"><span>Name des neuen Ereignisses</span><input id="reassignment-new-name" type="text" placeholder="Ereignisname"></label>
-        <p id="reassignment-message" class="muted"></p>`;
-      // 0.21.2: day/time rows are atomic. No family-level controls exist.
-      const target = document.getElementById("reassignment-target");
-      const newWrap = document.getElementById("reassignment-new-wrap");
-      const updateNew = () => { newWrap.hidden = !(target.value === "__new__" || target.selectedOptions[0]?.dataset.kind === "new_child"); };
-      target.addEventListener("change", updateNew); updateNew();
-      document.getElementById("reassignment-apply").addEventListener("click", async () => {
-        const selectedDays=[...reassignmentBody.querySelectorAll('[data-reassign-day]:checked')];
-        const selectedIds=[...new Set(selectedDays.flatMap(i=>String(i.dataset.familyIds||"").split(",").filter(Boolean).map(Number)))];
-        const selectedSegments=selectedDays.map(i=>({start_datetime:i.dataset.start,end_datetime:i.dataset.end,day_key:i.dataset.day}));
-        if (!selectedIds.length) { document.getElementById("reassignment-message").textContent = "Bitte mindestens ein Tages-/Zeitsegment auswählen."; return; }
-        const opt = target.selectedOptions[0];
-        const isNew = target.value === "__new__";
-        const isNewNoEvent = target.value === "__new_no_event__";
-        const isNewChild = opt.dataset.kind === "new_child";
-        const targetMode = isNew ? "new_event" : (isNewNoEvent ? "new_no_event" : (isNewChild ? "new_child" : (opt.dataset.kind === "no_event" ? "existing_no_event" : "existing_event")));
-        document.getElementById("reassignment-apply").disabled = true;
-        try {
-          const assigned = await requestJson(`/api/jobs/${encodeURIComponent(ctx.jobId)}/events/${encodeURIComponent(ctx.eventId)}/reassignments`, {
-            method:"POST", headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({family_ids:selectedIds, segments:selectedSegments, target_mode:targetMode, target_event_id:(isNew||isNewNoEvent) ? null : (isNewChild ? opt.dataset.parentId : target.value), new_event_name:(isNew||isNewChild) ? document.getElementById("reassignment-new-name").value : null})
-          });
-          if (assigned?.target?.status === "applied" && assigned?.target?.event_id) {
-            if (!ctx.autoTargetIds.includes(assigned.target.event_id)) ctx.autoTargetIds.push(assigned.target.event_id);
-          }
-          await renderReassignmentWorkflow();
-        } catch (error) {
-          document.getElementById("reassignment-message").textContent = error.message;
-          document.getElementById("reassignment-apply").disabled = false;
-        }
-      });
+      reassignmentBody.innerHTML = `<p>Ausgangsereignis: ${escapeHtml(data.event?.name || ctx.eventId)}</p>` + exactSegments.map(segment=>
+        `<div class="card"><strong>${escapeHtml(segment.day_key)} · ${escapeHtml(segment.start_time)}–${escapeHtml(segment.end_time)}</strong><p>${Number(segment.family_count||0)} Familien · ${Number(segment.file_count||0)} Dateien</p></div>`).join("") +
+        `<a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(ctx.jobId)}&task=free">In Aufnahmen öffnen</a>`;
     }
+
 
     reassignmentClose.addEventListener("click", () => reassignmentDialog.close());
 
@@ -3032,24 +2912,7 @@ EVENTS_HTML = r"""<!doctype html>
         let archiveReassignData = null;
         if (archiveReassignRes.ok) archiveReassignData = await archiveReassignRes.json();
         if (archiveReassignData && Number(archiveReassignData.family_count || 0) > 0) {
-          const targetOptions = (archiveReassignData.targets||[]).map(t => {
-            if (t.event_kind === "no_event") return `<option value="existing-no-event:${escapeHtml(t.id)}">Bestehend · ${escapeHtml(t.folder_name||t.name||t.id)}</option>`;
-            const parent=`<option value="existing-event:${escapeHtml(t.id)}">Bestehendes Ereignis · ${escapeHtml(t.name||t.folder_name||t.id)}</option>`;
-            const child=(t.children||[]).map(c=>`<option value="existing-child:${escapeHtml(t.id)}:${escapeHtml(c.id)}">Bestehendes Unterereignis · ${escapeHtml(t.name)} / ${escapeHtml(c.name)}</option>`).join("");
-            const newChild=`<option value="new-child:${escapeHtml(t.id)}">Neues Unterereignis in · ${escapeHtml(t.name)}</option>`;
-            return parent+child+newChild;
-          }).join("");
-          html += `<section class="preview-note" style="margin-top:14px">
-            <strong>Neu-Zuordnung vor Archivprüfung</strong><br>
-            ${Number(archiveReassignData.family_count)} herausfallende ${Number(archiveReassignData.family_count)===1?"Familie benötigt":"Familien benötigen"} noch ein Ziel.
-          </section>`;
-          html += `<div data-archive-reassign-segments style="display:grid;gap:8px;margin-top:10px">${(archiveReassignData.reassignment_segments||[]).map(s =>
-            `<label class="card" style="padding:10px;display:flex;gap:10px;align-items:center"><input type="checkbox" data-archive-segment data-family-ids="${escapeHtml(JSON.stringify(s.family_ids||[]))}" checked><span><strong>${escapeHtml(String(s.day_key||""))} · ${escapeHtml(String(s.start_time||""))}–${escapeHtml(String(s.end_time||""))}</strong><br><span class="muted">${Number(s.family_count||0)} Familien · ${Number(s.file_count||0)} Dateien</span></span></label>`
-          ).join("")}</div>`;
-          html += `<label class="edit-field" style="margin-top:10px"><span>Ziel</span><select id="archive-reassign-target"><option value="new">Neues Ereignis erstellen</option><option value="new-no-event">Neues „Ohne Ereignis“ erstellen</option>${targetOptions}</select></label>`;
-          html += `<label id="archive-reassign-name-row" class="edit-field"><span>Name des neuen Ereignisses / Unterereignisses</span><input id="archive-reassign-name" type="text" placeholder="Name"></label>`;
-          html += `<div id="archive-reassign-time-row" class="edit-grid" hidden><label class="edit-field"><span>Startzeit</span><input id="archive-reassign-start" type="time"></label><label class="edit-field"><span>Endzeit</span><input id="archive-reassign-end" type="time"></label></div>`;
-          html += `<button type="button" class="plan-button" id="archive-reassign-apply">Auswahl zuordnen</button><div id="archive-reassign-message" class="muted" style="margin-top:8px"></div>`;
+          html += `<section class="preview-note"><strong>Neu zuzuordnen</strong>${(archiveReassignData.reassignment_segments||[]).map(s=>`<p>${escapeHtml(s.day_key)} · ${escapeHtml(s.start_time)}–${escapeHtml(s.end_time)} · ${Number(s.family_count)} Familien · ${Number(s.file_count)} Dateien</p>`).join('')}<a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(archiveReassignData.job_id)}&task=free">In Aufnahmen öffnen</a></section>`;
         }
 
         // Workflow-Aktionen (propose -> preview -> confirm / cancel / archive)
@@ -3059,7 +2922,7 @@ EVENTS_HTML = r"""<!doctype html>
         if (status === "aenderbar_vorschlagen") {
           html +=
             `<button type="button" class="plan-button" data-cr-confirm="${escapeHtml(crId)}">Änderungen bestätigen</button>` +
-            ` <button type="button" class="danger-button" data-cr-cancel="${escapeHtml(crId)}">Abbrechen</button>`;
+            ` <button type="button" class="danger-button" data-cr-cancel="${escapeHtml(crId)}">Änderung verwerfen</button>`;
         } else if (status === "aenderbar_bestaetigt") {
           const initiallyVerified = reviewRows.length > 0 && reviewRows.every(row => String(row.verification_status || "") === "verified");
           html +=
@@ -3072,48 +2935,12 @@ EVENTS_HTML = r"""<!doctype html>
               `<div id="change-verify-errors" style="display:${initiallyVerified ? "none" : "block"};margin-top:10px"></div>` +
             `</div>` +
             ` <button type="button" class="plan-button" data-cr-archive="${escapeHtml(crId)}" ${initiallyVerified ? "" : "disabled"}>Nach erfolgreicher Prüfung abschließen</button>` +
-            ` <button type="button" class="danger-button" data-cr-cancel="${escapeHtml(crId)}">Abbrechen</button>`;
+            ` <button type="button" class="danger-button" data-cr-cancel="${escapeHtml(crId)}">Änderung verwerfen</button>`;
         } else {
           html += `<p class="muted">Dieser Aenderungsantrag ist abgeschlossen (${escapeHtml(status)}).</p>`;
         }
 
         changeRequestBody.innerHTML = html;
-
-        const archiveTarget = changeRequestBody.querySelector("#archive-reassign-target");
-        const archiveNameRow = changeRequestBody.querySelector("#archive-reassign-name-row");
-        if (archiveTarget && archiveNameRow) {
-          const archiveTimeRow=changeRequestBody.querySelector("#archive-reassign-time-row");
-          const syncArchiveName = () => {
-            const isNew=archiveTarget.value === "new";
-            const isChild=archiveTarget.value.startsWith("new-child:");
-            archiveNameRow.hidden = !(isNew || isChild);
-            if (archiveTimeRow) archiveTimeRow.hidden = !isChild;
-          };
-          archiveTarget.addEventListener("change", syncArchiveName); syncArchiveName();
-        }
-        const archiveAssignButton = changeRequestBody.querySelector("#archive-reassign-apply");
-        if (archiveAssignButton) archiveAssignButton.addEventListener("click", async () => {
-          const message = changeRequestBody.querySelector("#archive-reassign-message");
-          const selectedSegments = [...changeRequestBody.querySelectorAll("[data-archive-segment]:checked")];
-          const familyIds = [...new Set(selectedSegments.flatMap(x => { try { return JSON.parse(x.dataset.familyIds || "[]").map(Number); } catch (_) { return []; } }))];
-          if (!familyIds.length) { if (message) message.textContent = "Wähle mindestens ein Tages-/Zeitsegment aus."; return; }
-          const value = archiveTarget.value;
-          let targetMode="new_event", targetEventId=null, targetChildEventId=null;
-          if (value === "new-no-event") targetMode="new_no_event";
-          else if (value.startsWith("existing-no-event:")) { targetMode="existing_no_event"; targetEventId=value.slice(18); }
-          else if (value.startsWith("existing-event:")) { targetMode="existing_event"; targetEventId=value.slice(15); }
-          else if (value.startsWith("existing-child:")) { const bits=value.split(":"); targetMode="existing_event"; targetEventId=bits[1]; targetChildEventId=bits[2]; }
-          else if (value.startsWith("new-child:")) { targetMode="new_child"; targetEventId=value.slice(10); }
-          const isNamed = value === "new" || targetMode === "new_child";
-          const body = { family_ids: familyIds, target_mode: targetMode, target_event_id: targetEventId, target_child_event_id: targetChildEventId, new_event_name: isNamed ? changeRequestBody.querySelector("#archive-reassign-name").value : null, new_child_start: targetMode === "new_child" ? changeRequestBody.querySelector("#archive-reassign-start").value : null, new_child_end: targetMode === "new_child" ? changeRequestBody.querySelector("#archive-reassign-end").value : null };
-          archiveAssignButton.disabled = true; if (message) message.textContent = "Ziel und leere Arbeitsstruktur werden vorbereitet …";
-          try {
-            const assigned = await requestJson(`/api/change-requests/${encodeURIComponent(crId)}/reassignments`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-            if (message) message.textContent = assigned.prepared_structure ? `Vorbereitet: ${assigned.prepared_structure}` : "Zuordnung gespeichert.";
-            await showChangeRequestDetail(crId);
-            refreshGlobalTasks();
-          } catch (error) { if (message) message.textContent = error.message; archiveAssignButton.disabled = false; }
-        });
 
         // Workflow-Button-Handler
         const confirmBtn = changeRequestBody.querySelector("[data-cr-confirm]");
@@ -3275,3 +3102,4 @@ EVENTS_HTML = r"""<!doctype html>
 </body>
 </html>
 """
+

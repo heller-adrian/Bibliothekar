@@ -171,6 +171,14 @@ def build_event_preview(
     payload: dict[str, Any],
     available_families: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    if payload.get("child_segments"):
+        raise EventPreviewError("Normale Ereignisse benötigen einen durchgehenden Beginn und ein Ende. Getrennte Belegungssegmente sind nicht zulässig.")
+    selected_intervals = payload.get("selected_intervals") or []
+    if selected_intervals and payload.get("event_kind", "event") == "event":
+        from app.released_ranges import merge_intervals
+        ranges = merge_intervals((v['start_datetime'], v['end_datetime']) for v in selected_intervals)
+        if len(ranges) != 1 and not payload.get("existing_parent_event_id"):
+            raise EventPreviewError("Die Auswahl ist nicht durchgehend. Bitte getrennte Ereignisse oder „Ohne Ereignis“ verwenden.")
     event_kind = str(
         payload.get(
             "event_kind",
@@ -256,10 +264,8 @@ def build_event_preview(
     child_folder = None
 
     if uses_time_range:
-        child_name = _clean_name(
-            payload.get("child_event_name"),
-            "Unterereignisname",
-        )
+        if str(payload.get("child_event_name") or "").strip():
+            child_name = _clean_name(payload["child_event_name"], "Unterereignisname")
 
         start_time = _validate_time(
             payload.get("start_time"),
@@ -279,7 +285,7 @@ def build_event_preview(
         )
 
         if end_second < start_second or (
-            start_date == end_date and end_time <= start_time
+            start_date == end_date and end_time < start_time
         ):
             raise EventPreviewError(
                 "Das Ende muss nach dem Beginn liegen."
@@ -301,8 +307,14 @@ def build_event_preview(
             + end_time.replace(":", "-")
             + " - "
             + child_name
-        )
+        ) if child_name else None
 
+    from app.subevents import normalize_subevents
+    try:
+        subevents = normalize_subevents(payload.get('subevents') or [],
+            f"{start_date}T{start_time or '00:00'}:00",f"{end_date}T{end_time or '23:59'}:59")
+    except ValueError as error:
+        raise EventPreviewError(str(error)) from error
     requested_family_ids = {
         int(value)
         for value in (payload.get("selected_family_ids") or [])
@@ -424,6 +436,9 @@ def build_event_preview(
             )
         )
 
+    from app.structure_view import render_structure
+    lines = render_structure(start_date[:4],parent_folder,selected_day_keys,
+        subevents or ([{'folder_name':child_folder}] if child_folder else []),preserve_day_folders)
     lines.extend([
         "",
         "Zeitraum:",
@@ -467,7 +482,10 @@ def build_event_preview(
         "selected_family_count": (
             selected_family_count
         ),
+        "subevents": subevents,
+        "selected_intervals": selected_intervals,
         "existing_parent_event_id": str(payload.get("existing_parent_event_id") or "").strip() or None,
         "structure_lines": lines,
         "structure_text": "\n".join(lines),
     }
+

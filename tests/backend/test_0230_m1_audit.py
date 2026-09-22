@@ -134,22 +134,22 @@ def test_0230_cascade_trims_only_overlapping_child_segment(tmp_path: Path):
             (afternoon_family, NOW),
         )
 
-        result = apply_cascade_for_interval(
-            c,
-            "j",
-            "new-event",
-            "2026-07-15T09:30:00",
-            "2026-07-15T11:00:59",
-            now=NOW,
-        )
-        assert result["affected_event_ids"] == ["root"]
+        with pytest.raises(ValueError,match='belegter Zeit'):
+            result = apply_cascade_for_interval(
+                c,
+                "j",
+                "new-event",
+                "2026-07-15T09:30:00",
+                "2026-07-15T11:00:59",
+                now=NOW,
+            )
 
         children = c.execute(
             "SELECT id,start_datetime,end_datetime FROM events "
             "WHERE parent_event_id='root' ORDER BY start_datetime"
         ).fetchall()
         assert [(r["id"], r["start_datetime"], r["end_datetime"]) for r in children] == [
-            ("morning", "2026-07-15T08:00:00", "2026-07-15T09:29:59"),
+            ("morning", "2026-07-15T08:00:00", "2026-07-15T10:00:59"),
             ("afternoon", "2026-07-15T14:00:00", "2026-07-15T16:00:59"),
         ]
         assert c.execute(
@@ -227,7 +227,7 @@ def test_0230_only_one_open_archived_change_request(tmp_path: Path, monkeypatch)
         )
 
 
-def test_0230_zero_length_same_day_ranges_are_rejected():
+def test_0230_one_inclusive_minute_is_preserved():
     families = [{
         "family_id": 1,
         "family_key": "F",
@@ -252,23 +252,22 @@ def test_0230_zero_length_same_day_ranges_are_rejected():
         "selected_family_ids": [1],
         "selected_day_keys": ["2026-07-15"],
     }
-    with pytest.raises(EventPreviewError, match="muss nach dem Beginn"):
-        build_event_preview(payload, families)
+    preview=build_event_preview(payload,families)
+    assert preview['selected_family_ids']==[1]
+    segments=normalize_no_event_segments([{'day_key':'2026-07-15','start_time':'12:00','end_time':'12:00'}])
+    assert segments[0]['start_datetime']=='2026-07-15T12:00:00'
+    assert segments[0]['end_datetime']=='2026-07-15T12:00:59'
+    payload['end_time']='11:59'
+    with pytest.raises(EventPreviewError):
+        build_event_preview(payload,families)
 
-    with pytest.raises(Exception, match="muss das Ende nach dem Beginn"):
-        normalize_no_event_segments([
-            {"day_key": "2026-07-15", "start_time": "12:00", "end_time": "12:00"}
-        ])
 
-
-def test_0230_segmentwise_cascade_and_archived_child_cleanup_are_wired():
-    database_source = Path("app/database.py").read_text()
-    archive_apply_source = Path("app/event_change_apply.py").read_text()
-
-    assert "cascade_ranges = (" in database_source
-    assert "new_definition_ranges" in database_source
-    assert "for cascade_start, cascade_end in cascade_ranges:" in database_source
-
-    assert "children = connection.execute(" in archive_apply_source
-    assert "for extra in children[1:]:" in archive_apply_source
-    assert 'DELETE FROM events WHERE parent_event_id = ?' in archive_apply_source
+def test_0230_segmentwise_cascade_and_archived_child_cleanup_are_wired(tmp_path):
+    # Replaces the obsolete source assertion: every cascade call must fail atomically.
+    db=tmp_path/'db';initialize_database(db)
+    with database_connection(db) as c:
+        _seed_job(c);_insert_event(c,'other',status='archived')
+        before=[tuple(r) for r in c.execute('SELECT * FROM events')]
+        with pytest.raises(ValueError,match='belegter Zeit'):
+            apply_cascade_for_interval(c,'j','edited','2026-07-15T09:00:00','2026-07-15T10:00:59',now=NOW,allow_archived_manual=True)
+        assert [tuple(r) for r in c.execute('SELECT * FROM events')]==before

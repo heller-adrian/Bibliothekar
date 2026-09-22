@@ -1856,6 +1856,20 @@ def list_job_day_groups(
     return result
 
 
+def event_display(connection, row):
+    result=dict(row)
+    if result.get('event_kind')=='no_event':
+        segments=connection.execute('SELECT start_datetime,end_datetime FROM event_time_segments WHERE event_id=? ORDER BY start_datetime,id',(result['id'],)).fetchall()
+        if segments:
+            result['start_datetime']=segments[0]['start_datetime']
+            result['end_datetime']=segments[-1]['end_datetime']
+        a=str(result['start_datetime'])[:10];b=str(result['end_datetime'])[:10]
+        def de(day): return '.'.join(reversed(day.split('-')))
+        result['display_title']=de(a)+(('–'+de(b)) if a!=b else '')+' · Ohne Ereignis'
+        result['time_segment_count']=len(segments)
+    return result
+
+
 def list_job_events(
     database_path: Path,
     job_id: str,
@@ -1970,10 +1984,8 @@ def list_job_events(
             ),
         ).fetchall()
 
-    return [
-        dict(row)
-        for row in rows
-    ]
+    with database_connection(database_path) as connection:
+        return [event_display(connection,row) for row in rows]
 
 
 
@@ -2034,8 +2046,10 @@ def search_events(
             ''',
             [*params, safe_limit, safe_offset],
         ).fetchall()
+    with database_connection(database_path) as connection:
+        display_events=[event_display(connection,r) for r in rows]
     return {
-        "events": [dict(r) for r in rows],
+        "events": display_events,
         "total_count": int(total or 0),
         "matching_count": int(matching or 0),
         "limit": safe_limit,
@@ -2133,8 +2147,37 @@ def create_planned_event(
     existing_parent_event_id = str(preview.get("existing_parent_event_id") or "").strip()
     if existing_parent_event_id:
         ignored_event_ids.add(existing_parent_event_id)
-        if event_kind != "event" or not uses_time_range:
-            raise ValueError("Ein bestehendes Oberereignis kann nur mit einem Zeit-Unterereignis erweitert werden.")
+        if event_kind != "event":
+            raise ValueError("Das Ziel muss ein normales Ereignis sein.")
+
+        context = get_event_edit_context(database_path, job_id, existing_parent_event_id)
+        existing = context['event']
+        if existing['status'] == 'applied':
+            from app.released_ranges import merge_intervals
+            from app.event_timeline import assert_editable_normal
+            from app.event_structure import build_event_preview
+            with database_connection(database_path) as connection:
+                current = assert_editable_normal(connection, existing_parent_event_id)
+            selected = preview.get('selected_intervals') or [{
+                'start_datetime': start_date + 'T' + str(preview.get('start_time') or '00:00') + ':00',
+                'end_datetime': end_date + 'T' + str(preview.get('end_time') or '23:59') + ':59'}]
+            union = merge_intervals([current] + [(x['start_datetime'], x['end_datetime']) for x in selected])
+            if len(union) != 1:
+                raise ValueError('Die freie Auswahl grenzt nicht unmittelbar an das bestehende Ereignis an.')
+            start, end = union[0]
+            expanded = build_event_preview({
+                'event_kind': 'event', 'event_name': existing['name'],
+                'start_date': start[:10], 'end_date': end[:10],
+                'start_time': start[11:16], 'end_time': end[11:16], 'uses_time_range': True,
+                'preserve_day_folders': bool(existing['preserve_day_folders']),
+                'subevents': context['child_events'],
+            }, [f for f in context['families'] if not f['assigned_elsewhere']])
+            changed = update_event_definition(database_path, job_id, existing_parent_event_id, expanded,
+                event_name=existing['name'], notes=existing['notes'] or '', expected_revision=existing['revision'])
+            return {'parent_event': changed['event'], 'child_event': None,
+                'assignment_event_id': existing_parent_event_id, 'assignment_source': 'date_range',
+                'assigned_family_count': len(expanded['selected_family_ids']),
+                'assigned_family_ids': expanded['selected_family_ids'], 'resort_required': True}
 
     requested_family_ids = sorted({
         int(value)
@@ -2193,6 +2236,9 @@ def create_planned_event(
         assignment_end = parent_end
         assignment_source = "date_range"
 
+    if event_kind == "event":
+        parent_start, parent_end = assignment_start, assignment_end
+
     parent_event_id = existing_parent_event_id or (
         "EVENT_"
         + uuid.uuid4().hex.upper()
@@ -2201,7 +2247,7 @@ def create_planned_event(
     child_event_id = (
         "EVENT_"
         + uuid.uuid4().hex.upper()
-        if uses_time_range
+        if preview.get("child_folder") and not existing_parent_event_id
         else None
     )
 
@@ -2271,10 +2317,15 @@ def create_planned_event(
                 raise ValueError("Das ausgewählte Oberereignis wurde nicht gefunden.")
             if str(existing_parent_row["event_kind"]) != "event" or str(existing_parent_row["status"]) != "planned":
                 connection.rollback()
-                raise ValueError("Nur ein geplantes normales Oberereignis kann direkt um ein Unterereignis ergänzt werden.")
-            if not (str(existing_parent_row["start_datetime"])[:10] <= start_date <= end_date <= str(existing_parent_row["end_datetime"])[:10]):
-                connection.rollback()
-                raise ValueError("Der neue Zeitbereich liegt außerhalb des ausgewählten Oberereignisses.")
+                raise ValueError("Dieses normale Ereignis kann nicht direkt erweitert werden.")
+            from app.event_timeline import assert_editable_normal
+            from app.released_ranges import merge_intervals
+            existing_range = assert_editable_normal(connection, existing_parent_event_id)
+            selected = preview.get('selected_intervals') or [{'start_datetime': assignment_start, 'end_datetime': assignment_end}]
+            union = merge_intervals([existing_range] + [(x['start_datetime'], x['end_datetime']) for x in selected])
+            if len(union) != 1:
+                raise ValueError('Die freie Auswahl grenzt nicht unmittelbar an das bestehende Ereignis an.')
+            parent_start, parent_end = union[0]
 
         family_rows = connection.execute(
             f"""
@@ -2532,6 +2583,10 @@ def create_planned_event(
                 ),
             )
 
+        if event_kind == "event":
+            connection.execute("UPDATE events SET start_datetime=?,end_datetime=?,time_model_version=2,updated_at=?,revision=revision+? WHERE id=?",
+                (parent_start,parent_end,now,int(bool(existing_parent_event_id)),parent_event_id))
+
         if event_kind == "no_event":
             from app.event_timeline import replace_event_segments
             connection.execute(
@@ -2631,6 +2686,14 @@ def create_planned_event(
                 in requested_family_ids
             ],
         )
+
+        if preview.get('subevents') and not existing_parent_event_id:
+            from app.subevents import normalize_subevents,store_subevents,assignment_target
+            organizational=normalize_subevents(preview['subevents'],parent_start,parent_end)
+            children=store_subevents(connection,parent_event_id,organizational,now)
+            for row in family_rows:
+                connection.execute('UPDATE event_assignments SET event_id=? WHERE family_id=? AND event_id=?',
+                    (assignment_target(parent_event_id,children,str(row['selected_capture_time'])[:19]),row['id'],assignment_event_id))
 
         connection.execute(
             """
@@ -2976,13 +3039,22 @@ def get_event_edit_context(
             (event_id, event_id, job_id),
         ).fetchall()
 
+    from app.released_ranges import merge_intervals
+    legacy = int(event['time_model_version']) < 2 and bool(children) and event['event_kind'] == 'event'
+    legacy_ranges = merge_intervals((str(c['start_datetime']),str(c['end_datetime'])) for c in children) if legacy else []
+    legacy_blocked = len(legacy_ranges) > 1
+    event_dict = dict(event)
+    if legacy and not legacy_blocked:
+        event_dict['start_datetime'], event_dict['end_datetime'] = legacy_ranges[0]
     status = str(event["status"])
     archived_change_request = status == "archived" or event["archived_at"] is not None
     structural_editable = (
         status in {"draft", "planned", "applied"} and event["archived_at"] is None
     ) or archived_change_request
     return {
-        "event": dict(event),
+        "event": event_dict,
+        "legacy_disjoint": legacy_blocked,
+        "legacy_warning": "Älteres Ereignis mit getrennten Zeitbereichen: manuelle Aufteilung erforderlich." if legacy_blocked else None,
         "child_event": dict(child) if child is not None else None,
         "child_events": [dict(row) for row in children],
         "assigned_family_ids": sorted(assigned_ids),
@@ -3030,6 +3102,10 @@ def update_event_definition(
     import uuid
     from datetime import datetime, timezone
 
+    if cascade_confirmed or allow_archived_manual:
+        raise ValueError('Automatische gemeinsame Anpassungen sind nicht mehr zulässig. Bitte das andere Ereignis zuerst bearbeiten.')
+    if preview and preview.get('child_segments'):
+        raise ValueError('Getrennte Zeitbereiche sind für normale Ereignisse nicht zulässig.')
     clean_name = str(event_name or "").strip()
     if not clean_name:
         raise ValueError("Ereignisname fehlt.")
@@ -3187,15 +3263,9 @@ def update_event_definition(
             ).fetchall()
             old_definition_ranges = [(str(r["start_datetime"])[:19], str(r["end_datetime"])[:19]) for r in old_definition_rows]
         else:
-            old_definition_rows = connection.execute(
-                "SELECT start_datetime,end_datetime FROM events WHERE parent_event_id=? ORDER BY start_datetime,id",
-                (event_id,),
-            ).fetchall()
-            old_definition_ranges = (
-                [(str(r["start_datetime"])[:19], str(r["end_datetime"])[:19]) for r in old_definition_rows]
-                if old_definition_rows else
-                [(str(event["start_datetime"])[:19], str(event["end_datetime"])[:19])]
-            )
+            from app.event_timeline import normal_event_ranges, assert_editable_normal
+            assert_editable_normal(connection, event_id)
+            old_definition_ranges = normal_event_ranges(connection, event_id)
 
         placeholders = ",".join("?" for _ in requested_ids)
         rows = connection.execute(
@@ -3244,6 +3314,8 @@ def update_event_definition(
             uses_time_range = bool(preview["uses_time_range"]) or bool(multi_segments)
             assignment_start = f"{start_date}T{preview['start_time']}:00" if uses_time_range and not multi_segments else parent_start
             assignment_end = f"{end_date}T{preview['end_time']}:59" if uses_time_range and not multi_segments else parent_end
+        if event_kind == "event":
+            parent_start, parent_end = assignment_start, assignment_end
         if event_kind == "no_event":
             new_definition_ranges = [(seg["start_datetime"], seg["end_datetime"]) for seg in no_event_segments]
         elif multi_segments:
@@ -3254,6 +3326,11 @@ def update_event_definition(
             ]
         else:
             new_definition_ranges = [(assignment_start, assignment_end)]
+        from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
+        for a, b in new_definition_ranges:
+            conflicts = continuous_event_overlaps(connection,job_id,a,b,exclude_event_id=event_id) + no_event_segment_overlaps(connection,job_id,a,b,exclude_event_id=event_id)
+            if conflicts:
+                raise ValueError('Die Änderung überschneidet sich mit belegter Zeit. Bitte zuerst das andere Ereignis bearbeiten.')
         from app.released_ranges import subtract_intervals, split_intervals_by_day
         released_definition_ranges = split_intervals_by_day(
             subtract_intervals(old_definition_ranges, new_definition_ranges)
@@ -3362,89 +3439,16 @@ def update_event_definition(
             connection.execute("UPDATE events SET timeline_model='segments' WHERE id=?", (event_id,))
             replace_event_segments(connection, event_id=event_id, job_id=job_id, segments=no_event_segments, now=now, source="user")
         else:
-            connection.execute("UPDATE events SET timeline_model='continuous' WHERE id=?", (event_id,))
+            connection.execute("UPDATE events SET timeline_model='continuous',time_model_version=2 WHERE id=?", (event_id,))
 
-        children = connection.execute("SELECT * FROM events WHERE parent_event_id = ? ORDER BY start_datetime, id", (event_id,)).fetchall()
-        assignment_rows: list[tuple[str, int, str, str]] = []
-        if multi_segments:
-            current_by_id = {str(row["id"]): row for row in children}
-            supplied_ids = [str(seg.get("id") or "") for seg in multi_segments if str(seg.get("id") or "")]
-            if len(supplied_ids) != len(set(supplied_ids)) or any(sid not in current_by_id for sid in supplied_ids):
-                connection.rollback()
-                raise ValueError("Die Zeitsegmente haben sich zwischenzeitlich geändert. Bitte den Editor neu öffnen.")
-            normalized_segments = []
-            for seg in multi_segments:
-                sid = str(seg.get("id") or "") or ("EVENT_" + uuid.uuid4().hex.upper())
-                name = str(seg.get("name") or "").strip()
-                st = str(seg.get("start_time") or "")
-                et = str(seg.get("end_time") or "")
-                if not name or len(st) != 5 or len(et) != 5 or st >= et:
-                    connection.rollback()
-                    raise ValueError("Mindestens ein Zeitsegment ist unvollständig oder ungültig.")
-                seg_start=f"{start_date}T{st}:00"; seg_end=f"{end_date}T{et}:59"
-                folder=f"{st.replace(':','-')} - {et.replace(':','-')} - {name}"
-                normalized_segments.append((sid,name,st,et,seg_start,seg_end,folder))
-            normalized_segments.sort(key=lambda x:(x[2],x[3],x[0]))
-            for a,b in zip(normalized_segments, normalized_segments[1:]):
-                if a[5] >= b[4]:
-                    connection.rollback()
-                    raise ValueError("Zeitsegmente eines Ereignisses dürfen sich nicht überschneiden.")
-            requested_segment_ids={seg[0] for seg in normalized_segments}
-            for old_child in children:
-                if str(old_child["id"]) not in requested_segment_ids:
-                    connection.execute("DELETE FROM events WHERE id=? AND parent_event_id=?", (old_child["id"], event_id))
-            for sid,name,st,et,seg_start,seg_end,folder in normalized_segments:
-                if sid in current_by_id:
-                    connection.execute(
-                        """UPDATE events SET name=?,start_datetime=?,end_datetime=?,folder_name=?,uses_time_range=1,
-                           preserve_day_folders=?,revision=revision+1,updated_at=?,edited_at=? WHERE id=? AND parent_event_id=?""",
-                        (name,seg_start,seg_end,folder,int(bool(preview["preserve_day_folders"])),now,now,sid,event_id),
-                    )
-                else:
-                    connection.execute(
-                        """INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
-                           uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,
-                           revision,applied_at,archived_at,notes,edited_at,timeline_model)
-                           VALUES (?,?,?,'child',?,?,?,1,?,?,?,?,'event',?,1,?,NULL,'',?,'continuous')""",
-                        (sid,job_id,event_id,name,seg_start,seg_end,folder,
-                         'applied' if is_applied else 'planned',now,now,int(bool(preview["preserve_day_folders"])),
-                         now if is_applied else None,now),
-                    )
-            for row in rows:
-                fid=int(row["id"]); capture=str(row["selected_capture_time"] or "")[:19]
-                matches=[seg for seg in normalized_segments if seg[4] <= capture <= seg[5]]
-                if len(matches) != 1:
-                    connection.rollback()
-                    raise ValueError("Eine Familie lässt sich keinem eindeutigen Zeitsegment zuordnen.")
-                assignment_rows.append((matches[0][0], fid, "date_time_range", now))
-            assignment_event_id = None
-        elif uses_time_range:
-            child = children[0] if children else None
-            if child is None:
-                child_id = "EVENT_" + uuid.uuid4().hex.upper()
-                connection.execute(
-                    """INSERT INTO events(id, job_id, parent_event_id, event_level, name, start_datetime, end_datetime,
-                       uses_time_range, folder_name, status, created_at, updated_at, event_kind, preserve_day_folders,
-                       revision, applied_at, archived_at, notes, edited_at)
-                       VALUES (?, ?, ?, 'child', ?, ?, ?, 1, ?, ?, ?, ?, 'event', ?, 1, ?, NULL, '', ?)""",
-                    (child_id, job_id, event_id, str(preview["child_event_name"]), assignment_start, assignment_end, str(preview["child_folder"]),
-                     "applied" if is_applied else "planned", now, now, int(bool(preview["preserve_day_folders"])), now if is_applied else None, now),
-                )
-            else:
-                child_id = str(child["id"])
-                connection.execute(
-                    """UPDATE events SET name = ?, start_datetime = ?, end_datetime = ?, folder_name = ?,
-                       preserve_day_folders = ?, revision = revision + 1, updated_at = ?, edited_at = ? WHERE id = ?""",
-                    (str(preview["child_event_name"]), assignment_start, assignment_end, str(preview["child_folder"]), int(bool(preview["preserve_day_folders"])), now, now, child_id),
-                )
-                for extra in children[1:]:
-                    connection.execute("DELETE FROM events WHERE id=?", (extra["id"],))
-            assignment_event_id = child_id
-        else:
-            assignment_event_id = event_id
-            for child in children:
-                connection.execute("DELETE FROM events WHERE id = ?", (child["id"],))
-
+        from app.subevents import normalize_subevents, store_subevents, assignment_target
+        organizational = list(preview.get('subevents') or [])
+        if preview.get('child_folder') and not organizational:
+            organizational=[{'name':preview['child_event_name'],'start_datetime':assignment_start,'end_datetime':assignment_end}]
+        organizational=normalize_subevents(organizational,parent_start,parent_end)
+        children=store_subevents(connection,event_id,organizational,now)
+        assignment_rows=[(assignment_target(event_id,children,str(row['selected_capture_time'])[:19]),int(row['id']),'date_time_range',now) for row in rows]
+        assignment_event_id = event_id
         # 0.16.3: Herausfallende Familien werden für planned UND applied
         # zunächst in derselben sicheren Neu-Zuordnungs-Warteschlange geführt.
         # planned benötigt später nur eine DB-Zuordnung; applied behält die
@@ -3481,7 +3485,7 @@ def update_event_definition(
             "DELETE FROM event_assignments WHERE event_id = ? OR event_id IN (SELECT id FROM events WHERE parent_event_id = ?)",
             (event_id, event_id),
         )
-        if multi_segments:
+        if assignment_rows:
             connection.executemany(
                 """INSERT INTO event_assignments(event_id, family_id, file_id, assignment_source, created_at)
                    VALUES (?, ?, NULL, ?, ?)""",
@@ -3670,6 +3674,7 @@ def assign_free_families_to_existing_no_event(
                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (effective_event_id,job_id,seg["day_key"],a[11:16],b[11:16],a,b,'user',now,now),
             )
+        connection.execute("UPDATE events SET start_datetime=(SELECT MIN(start_datetime) FROM event_time_segments WHERE event_id=?),end_datetime=(SELECT MAX(end_datetime) FROM event_time_segments WHERE event_id=?) WHERE id=?",(effective_event_id,effective_event_id,effective_event_id))
         connection.execute(
             "UPDATE events SET timeline_model='segments',revision=revision+1,updated_at=?,resort_required=CASE WHEN status='applied' THEN 1 ELSE resort_required END WHERE id=?",
             (now,effective_event_id),
@@ -3930,3 +3935,4 @@ def store_imported_source_files(
                     now,
                 ),
             )
+

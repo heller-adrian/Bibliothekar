@@ -43,7 +43,7 @@ def normalize_no_event_segments(values: Any) -> list[dict[str, str]]:
         end = _time(item.get('end_time') or '23:59')
         start_dt = f'{day}T{start}:00'
         end_dt = f'{day}T{end}:59'
-        if end <= start:
+        if end < start:
             raise EventTimelineError(f'Am {day} muss das Ende nach dem Beginn liegen.')
         key = (day, start, end)
         if key in seen:
@@ -145,52 +145,43 @@ def no_event_segment_overlaps(
 def continuous_event_overlaps(
     connection, job_id: str, start_datetime: str, end_datetime: str, *, exclude_event_id: str | None = None
 ) -> list[dict[str, Any]]:
-    """Return the actually occupied normal-event intervals that overlap.
+    """Parent occupancy for v2; preserve historical child occupancy verbatim."""
+    rows = connection.execute("SELECT * FROM events WHERE job_id=? AND event_level='parent' AND event_kind='event' AND pending_delete=0 AND status IN ('draft','planned','applied','archived')", (job_id,)).fetchall()
+    result = []
+    for row in rows:
+        event = dict(row)
+        if event['id'] == exclude_event_id:
+            continue
+        children = connection.execute('SELECT * FROM events WHERE parent_event_id=? ORDER BY start_datetime', (event['id'],)).fetchall()
+        intervals = children if event.get('time_model_version', 1) < 2 and children else [row]
+        for interval in intervals:
+            a, b = str(interval['start_datetime'])[:19], str(interval['end_datetime'])[:19]
+            if a <= end_datetime and b >= start_datetime:
+                result.append({**event, 'effective_start': a, 'effective_end': b,
+                    'effective_child_id': interval['id'] if interval['id'] != event['id'] else None,
+                    'child_count': len(children)})
+    return sorted(result, key=lambda x: (x['effective_start'], x['id']))
 
-    A root event without children occupies its parent interval.  If child
-    events exist, every child is an independent occupied interval; gaps
-    between children stay free and must never be collapsed into MIN..MAX.
-    """
-    sql = """SELECT e.*,
-                    c.id AS effective_child_id,
-                    COALESCE(c.start_datetime, e.start_datetime) AS effective_start,
-                    COALESCE(c.end_datetime, e.end_datetime) AS effective_end,
-                    (SELECT COUNT(*) FROM events cc WHERE cc.parent_event_id=e.id) AS child_count
-             FROM events e
-             LEFT JOIN events c ON c.parent_event_id=e.id
-             WHERE e.job_id=? AND e.event_level='parent' AND e.event_kind='event'
-               AND e.status IN ('draft','planned','applied','archived')
-               AND (
-                    (
-                      (SELECT COUNT(*) FROM events cc WHERE cc.parent_event_id=e.id)=0
-                      AND e.start_datetime <= ? AND e.end_datetime >= ?
-                    )
-                    OR
-                    (
-                      (SELECT COUNT(*) FROM events cc WHERE cc.parent_event_id=e.id)>0
-                      AND c.start_datetime <= ? AND c.end_datetime >= ?
-                    )
-               )"""
-    params: list[Any] = [
-        job_id,
-        end_datetime, start_datetime,
-        end_datetime, start_datetime,
-    ]
-    if exclude_event_id:
-        sql += ' AND e.id != ?'
-        params.append(exclude_event_id)
-    sql += ' ORDER BY effective_start, e.id, effective_child_id'
-    return [dict(r) for r in connection.execute(sql, params).fetchall()]
+
+def normal_event_ranges(connection, event_id):
+    row = connection.execute('SELECT * FROM events WHERE id=?', (event_id,)).fetchone()
+    if row is None:
+        return []
+    children = connection.execute('SELECT start_datetime,end_datetime FROM events WHERE parent_event_id=? ORDER BY start_datetime', (event_id,)).fetchall()
+    values = children if dict(row).get('time_model_version', 1) < 2 and children else [row]
+    return [(str(r['start_datetime'])[:19], str(r['end_datetime'])[:19]) for r in values]
+
+
+def assert_editable_normal(connection, event_id):
+    from app.released_ranges import merge_intervals
+    ranges = merge_intervals(normal_event_ranges(connection, event_id))
+    if len(ranges) > 1:
+        raise EventTimelineError('Dieses ältere Ereignis enthält getrennte Zeitbereiche. Bitte zuerst manuell in eigenständige Ereignisse aufteilen; eine automatische Erweiterung ist gesperrt.')
+    return ranges[0] if ranges else None
 
 
 def effective_event_interval(connection, event_id: str) -> tuple[str, str] | None:
-    row=connection.execute(
-        """SELECT e.start_datetime,e.end_datetime,
-                  COALESCE((SELECT MIN(c.start_datetime) FROM events c WHERE c.parent_event_id=e.id),e.start_datetime) AS effective_start,
-                  COALESCE((SELECT MAX(c.end_datetime) FROM events c WHERE c.parent_event_id=e.id),e.end_datetime) AS effective_end
-           FROM events e WHERE e.id=?""",(event_id,)
-    ).fetchone()
-    return (str(row['effective_start'])[:19],str(row['effective_end'])[:19]) if row else None
+    return assert_editable_normal(connection, event_id)
 
 
 def trim_no_event_segments_for_range(
@@ -277,7 +268,10 @@ def cascade_preview_for_interval(
             'current_end':str(row['end_datetime']),'action':'trim_or_split_segment',
             'automatic': str(row['status']) != 'archived',
         })
-    return {'has_conflicts':bool(items),'can_apply_automatically':can_apply,'items':items}
+    
+    for item in items:
+        item['automatic'] = False
+    return {'has_conflicts':bool(items),'can_apply_automatically':False,'items':items}
 
 
 def _set_continuous_event_interval(connection, event_id: str, new_start: str, new_end: str, now: str) -> list[int]:
@@ -432,56 +426,7 @@ def apply_cascade_for_interval(
     now: str,
     allow_archived_manual: bool = False,
 ) -> dict[str, Any]:
-    preview=cascade_preview_for_interval(connection,job_id,event_id,start_datetime,end_datetime)
-    archived_items=[item for item in preview['items'] if str(item.get('status')) == 'archived']
-    hard_items=[item for item in preview['items'] if str(item.get('status')) != 'archived' and not bool(item.get('automatic'))]
-    if hard_items or (archived_items and not allow_archived_manual):
-        raise EventTimelineError(
-            'Die Zeitänderung betrifft ein archiviertes Ereignis oder würde ein anderes Ereignis vollständig teilen/überdecken. '
-            'Dieser Fall muss über einen gemeinsamen manuellen Änderungsauftrag bearbeitet werden.'
-        )
-    affected=[]
-    removed_by_event: dict[str,list[int]] = {}
-    for item in preview['items']:
-        if item['kind']=='no_event' or str(item.get('status')) == 'archived':
-            continue
-        if item.get('child_event_id'):
-            removed = _set_child_event_interval(
-                connection,
-                item['event_id'],
-                item['child_event_id'],
-                item['proposed_start'],
-                item['proposed_end'],
-                now,
-            )
-        else:
-            removed = _set_continuous_event_interval(
-                connection,item['event_id'],item['proposed_start'],item['proposed_end'],now
-            )
-        prior = set(removed_by_event.get(item['event_id']) or [])
-        removed_by_event[item['event_id']] = sorted(prior | set(removed))
-        if item['status']=='applied':
-            connection.execute('UPDATE events SET resort_required=1 WHERE id=?',(item['event_id'],))
-        affected.append(item['event_id'])
-    archived_no_event_ids={str(item['event_id']) for item in archived_items if item.get('kind')=='no_event'}
-    no_events=trim_no_event_segments_for_range(
-        connection,job_id,start_datetime,end_datetime,now=now,exclude_event_ids=archived_no_event_ids
-    )
-    for eid in no_events:
-        ev=connection.execute('SELECT status FROM events WHERE id=?',(eid,)).fetchone()
-        if ev and str(ev['status'])=='applied':
-            connection.execute('UPDATE events SET resort_required=1,updated_at=? WHERE id=?',(now,eid))
-        # Remove assignments now covered by the edited normal event.
-        rows=connection.execute(
-            """SELECT ea.id,ea.family_id,ff.selected_capture_time FROM event_assignments ea
-               JOIN file_families ff ON ff.id=ea.family_id
-               WHERE ea.event_id=? AND ea.family_id IS NOT NULL""",(eid,)
-        ).fetchall()
-        removed=[int(r['family_id']) for r in rows if start_datetime <= str(r['selected_capture_time'] or '')[:19] <= end_datetime]
-        connection.executemany('DELETE FROM event_assignments WHERE id=?',[(int(r['id']),) for r in rows if int(r['family_id']) in set(removed)])
-        removed_by_event[eid]=removed
-        affected.append(eid)
-    return {
-        'preview':preview,'affected_event_ids':sorted(set(affected)),
-        'removed_by_event':removed_by_event,'archived_manual_items':archived_items,
-    }
+    preview = cascade_preview_for_interval(connection, job_id, event_id, start_datetime, end_datetime)
+    if preview['has_conflicts']:
+        raise EventTimelineError('Die Änderung überschneidet sich mit belegter Zeit. Bitte zuerst das andere Ereignis bearbeiten und die Zeit freigeben.')
+    return {'preview': preview, 'affected_event_ids': [], 'removed_by_event': {}, 'archived_manual_items': []}

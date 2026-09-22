@@ -86,7 +86,10 @@ def test_new_time_event_can_reuse_existing_planned_parent(tmp_path):
     }
     result=create_planned_event(db,'j',preview)
     assert result['parent_event']['id']=='parent'
-    assert result['child_event']['parent_event_id']=='parent'
+    assert result['child_event'] is None
+    assert result['parent_event']['start_datetime']=='2026-07-19T17:00:00'
+    assert result['parent_event']['end_datetime']=='2026-07-19T22:00:59'
     with database_connection(db) as c:
-        assert c.execute("SELECT COUNT(*) FROM events WHERE parent_event_id='parent'").fetchone()[0]==2
-        assert c.execute("SELECT event_id FROM event_assignments WHERE family_id=?",(fid,)).fetchone()[0]==result['child_event']['id']
+        assert c.execute("SELECT COUNT(*) FROM events WHERE parent_event_id='parent'").fetchone()[0]==1
+        assert c.execute("SELECT event_id FROM event_assignments WHERE family_id=?",(fid,)).fetchone()[0]=='parent'
+

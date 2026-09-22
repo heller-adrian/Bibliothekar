@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.25.0 – kontinuierliches Ereignismodell
+
+- Normale Ereignisse belegen exakt einen durchgehenden Start-/Endbereich; Uhrzeiten erzwingen kein Unterereignis. Optionale organisatorische Unterereignisse ändern die Belegung nicht.
+- Freie Karten stellen exakte Intervalle dar, übernehmen ihre Grenzen in die Dialoge und zeigen Aufnahmezeiten pro Familie. Angrenzende Bereiche erweitern bestehende geplante oder angewendete Ereignisse.
+- „Ohne Ereignis“ erhält alle getrennten Tages-/Zeitsegmente, korrekte Bereichstitel und segmentbasierte Zusammenfassungen.
+- Konflikte lösen keine Cascade aus. Neu-Zuordnungsaufgaben informieren und führen zu Aufnahmen; angewendete Änderungen benötigen weiterhin einen ausdrücklich bestätigten Nachsortierplan.
+- Archivänderungen bleiben im IST→SOLL-Workflow. Version 2 von event.json enthält alle Unterereignisse, Segmente und exakten Grenzen. Verifizierte Nachsortierung entfernt ausschließlich bekannte, obsolete leere Strukturen.
+- Disjunkte Legacy-Ereignisse bleiben unverändert lesbar und werden für unsichere Konvertierungen gesperrt. Positive Aktionen sind blau; destruktive Aktionen rot.
+
 ### 0.24.1 – applied-/Neu-Zuordnungsblock aus Astra-Audit
 
 - Mutationsabbruch stellt nur tatsächlich veränderte Ereignisgraphen wieder her und löscht bestehende Root-Ereignisse nicht mehr; unabhängige Sortier- und Archivnachweise bleiben erhalten
@@ -137,3 +146,4 @@
 - bereits gesicherte Dateien werden erkannt
 - neue Dateien können separat als eigener Sicherungslauf importiert werden
 - Schema-Version 22
+

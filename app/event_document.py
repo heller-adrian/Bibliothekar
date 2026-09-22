@@ -25,7 +25,7 @@ from app.database import database_connection
 
 from app.workspace_layout import WORK_DIRECTORY_NAME
 
-EVENT_DOCUMENT_VERSION = 1
+EVENT_DOCUMENT_VERSION = 2
 EVENT_DOCUMENT_FILENAME = "event.json"
 
 
@@ -118,11 +118,11 @@ def build_event_document_from_db(
         if str(event["status"]) != "applied" or event["archived_at"]:
             return None
 
-        child = connection.execute(
-            "SELECT * FROM events WHERE parent_event_id = ? ORDER BY start_datetime LIMIT 1",
-            (event_id,),
-        ).fetchone()
-        child_dict = dict(child) if child is not None else None
+        children = [dict(r) for r in connection.execute("SELECT * FROM events WHERE parent_event_id=? ORDER BY start_datetime,id", (event_id,))]
+        child_dict = children[0] if children else None
+        segments = [dict(r) for r in connection.execute("SELECT * FROM event_time_segments WHERE event_id=? ORDER BY start_datetime,id", (event_id,))]
+        from app.event_timeline import normal_event_ranges
+        occupancy = normal_event_ranges(connection,event_id) if event['event_kind']=='event' else [(x['start_datetime'],x['end_datetime']) for x in segments]
 
         families = _families_of_event(connection, job_id, event_id)
 
@@ -173,8 +173,8 @@ def build_event_document_from_db(
         str(_iso_date(event["start_datetime"]))[:4],
         f"└── {event['folder_name']}",
     ]
-    if child_dict is not None:
-        structure_lines.append(f"    └── {child_dict['folder_name']}")
+    for child in children:
+        structure_lines.append(f"    └── {child['folder_name']}")
     day_keys = sorted({
         str(row["selected_capture_time"] or "")[:10]
         for row in families
@@ -184,6 +184,8 @@ def build_event_document_from_db(
         structure_lines.extend(f"        └── {day}" for day in day_keys)
     structure_lines.extend(["            ├── Alle", "            ├── Sortiert", "            └── Export"])
 
+    from app.structure_view import render_structure
+    structure_lines = render_structure(str(event['start_datetime'])[:4],event['folder_name'],day_keys,children,preserve_day_folders)
     return {
         "document_version": EVENT_DOCUMENT_VERSION,
         "source": "kamera-automatisierung",
@@ -194,9 +196,13 @@ def build_event_document_from_db(
             "event_kind": str(event["event_kind"] or "event"),
             "start_date": _iso_date(event["start_datetime"]),
             "end_date": _iso_date(event["end_datetime"]),
-            "start_time": _iso_time(child_dict["start_datetime"]) if child_dict else "",
-            "end_time": _iso_time(child_dict["end_datetime"]) if child_dict else "",
-            "uses_time_range": bool(child_dict),
+            "start_datetime": str(event['start_datetime']),
+            "end_datetime": str(event['end_datetime']),
+            "start_time": _iso_time(event['start_datetime']),
+            "end_time": _iso_time(event['end_datetime']),
+            "uses_time_range": _iso_time(event['start_datetime']) != '00:00' or _iso_time(event['end_datetime']) != '23:59',
+            "time_model_version": int(event['time_model_version']),
+            "occupied_intervals": [{'start_datetime':a,'end_datetime':b} for a,b in occupancy],
             "preserve_day_folders": preserve_day_folders,
             "folder_name": str(event["folder_name"]),
             "status": str(event["status"]),
@@ -205,6 +211,8 @@ def build_event_document_from_db(
             "revision": int(event["revision"] or 1),
             "notes": str(event["notes"] or ""),
         },
+        "child_events": children,
+        "no_event_segments": segments,
         "child_event": (
             {
                 "id": str(child_dict["id"]),
@@ -339,9 +347,14 @@ def event_document_matches_db(
 
     for key in ("id", "name", "event_kind", "start_date", "end_date",
                  "uses_time_range", "preserve_day_folders", "folder_name",
-                 "revision", "status"):
+                 "revision", "status", "start_datetime", "end_datetime",
+                 "time_model_version", "occupied_intervals"):
         if str(doc_event.get(key)) != str(fresh_event.get(key)):
             drift.append(str(key))
+
+    for key in ("document_version", "child_events", "no_event_segments", "structure", "files"):
+        if document.get(key) != fresh.get(key):
+            drift.append(key)
 
     doc_families = {int(f.get("family_id")) for f in document.get("families") or []}
     fresh_families = {int(f["family_id"]) for f in fresh["families"]}
@@ -364,3 +377,4 @@ def sync_event_document_after_change(
     document = build_event_document_from_db(database_path, workspace_root, job_id, event_id)
     if document:
         write_event_document(workspace_root, document)
+

@@ -788,6 +788,14 @@ WORKSPACE_HTML = r"""<!doctype html>
     .global-task-item { display:block; padding:10px; margin-top:8px; border-radius:10px; border:1px solid #333a42; background:#20252b; color:inherit; text-decoration:none; }
     .global-task-item strong { display:block; margin-bottom:3px; }
 
+
+    summary { cursor:pointer; user-select:none; }
+    summary[style*="display:flex"]::before { content:"▸"; flex:0 0 auto; }
+    details[open] > summary[style*="display:flex"]::before { content:"▾"; }
+    .event-details > summary { display:list-item !important; list-style:disclosure-closed !important; }
+    .event-details[open] > summary { list-style:disclosure-open !important; }
+    button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button, #calculate-preview-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
+    button.danger-button, .danger-button { background:#b42318 !important; border-color:#b42318 !important; color:white !important; }
   </style>
 </head>
 
@@ -885,7 +893,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           type="button"
           disabled
         >
-          ＋ Ereignis erstellen
+          Ereignis
         </button>
 
 
@@ -1112,7 +1120,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           hidden
         >
           <label class="full-width">
-            <span>Unterereignisname</span>
+            <span>Unterereignis (optional)</span>
 
             <input
               id="child-event-name"
@@ -1725,7 +1733,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       plannedEventSelection.innerHTML = planned.map(event => `
         <label class="planned-choice">
           <input class="planned-check" type="checkbox" data-planned-event="${escapeHtml(event.id)}" checked>
-          <span>${escapeHtml(event.name)} · ${Number(event.assigned_family_count || 0)} Familien</span>
+          <span>${escapeHtml(event.display_title || event.name)} · ${Number(event.assigned_family_count || 0)} Familien</span>
         </label>`).join("");
       const families = planned.reduce((sum,event)=>sum+Number(event.assigned_family_count||0),0);
       const files = planned.reduce((sum,event)=>sum+Number(event.assigned_file_count||0),0);
@@ -1811,6 +1819,11 @@ WORKSPACE_HTML = r"""<!doctype html>
           document.createElement("article");
 
         card.className = "event-card";
+        card.addEventListener("click",async(e)=>{
+          if(e.target.closest('button,input,a,summary')) return;
+          const data=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/events/${encodeURIComponent(event.id)}/structure`);
+          structurePreview.textContent=data.structure_text; previewBody.hidden=false;
+        });
 
         const kindLabel =
           event.event_kind === "no_event"
@@ -1834,7 +1847,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           <div class="event-card-header">
             <div>
               <div class="event-name">
-                ${escapeHtml(event.name)}
+                ${escapeHtml(event.display_title || event.name)}
               </div>
 
               <div class="event-folder">
@@ -2003,7 +2016,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         new Set(
           availableDayGroups().map(
             group =>
-              group.day_key
+              group.card_key || group.day_key
               || "__without_date__"
           )
         );
@@ -2035,6 +2048,12 @@ WORKSPACE_HTML = r"""<!doctype html>
 
           card.className =
             "timeline-event-card";
+          card.style.cursor="pointer";
+          card.addEventListener("click",async()=>{
+            const data=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/events/${encodeURIComponent(group.event_id)}/structure`);
+            structurePreview.textContent=data.structure_text;
+            previewBody.hidden=false;
+          });
 
           const range =
             formatTimelineDateRange(
@@ -2130,7 +2149,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
 
         const key =
-          group.day_key
+          group.card_key || group.day_key
           || "__without_date__";
 
         const card =
@@ -2196,7 +2215,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         name.className =
           "day-name";
         name.textContent =
-          formatDay(group.day_key);
+          formatDay(group.day_key) + (group.start_time && (group.start_time !== "00:00" || group.end_time !== "23:59") ? ` · ${group.start_time}–${group.end_time}` : "");
 
         const metadata =
           document.createElement(
@@ -2233,6 +2252,16 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         main.appendChild(name);
         main.appendChild(metadata);
+        if (group.reassignment_pending) {
+          const marker=document.createElement("span");
+          marker.textContent="●"; marker.title="Offene Neu-Zuordnung";
+          marker.style.cssText="color:#d99a20;margin-left:auto";
+          main.appendChild(marker);
+        }
+        const details=document.createElement("details");
+        details.innerHTML='<summary>Aufnahmezeiten</summary>' + (group.families||[]).map(f=>`<div>${escapeHtml(f.family_key)} | ${escapeHtml(String(f.selected_capture_time||"").slice(0,10))} | ${escapeHtml(String(f.selected_capture_time||"").slice(11,19))}</div>`).join("");
+        details.addEventListener("click",e=>e.stopPropagation());
+        main.appendChild(details);
 
         if (
           group.partially_assigned
@@ -2294,7 +2323,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         group =>
           group.has_date
           && selectedDays.has(
-            group.day_key
+            group.card_key || group.day_key
           )
       );
     }
@@ -2304,7 +2333,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       return availableDayGroups().filter(
         group => {
           const key =
-            group.day_key
+            group.card_key || group.day_key
             || "__without_date__";
 
           return selectedDays.has(key);
@@ -2512,7 +2541,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       };
       noEventRangeSummary.innerHTML = ranges.map(([a,b],index)=>`
         <details class="card" style="padding:7px 9px">
-          <summary style="cursor:pointer"><strong>Zeitblock ${index+1}</strong> <span class="muted">· ${escapeHtml(formatGermanIsoDate(a))}${a===b?"":` bis ${escapeHtml(formatGermanIsoDate(b))}`}</span></summary>
+          <summary style="cursor:pointer"><strong>Zeitblock ${index+1}</strong> <span class="muted">· ${escapeHtml(formatGermanIsoDate(a))}${a===b?"":` bis ${escapeHtml(formatGermanIsoDate(b))}`} · ${selectedNoEventSegments().filter(s=>s.day_key>=a && s.day_key<=b).length} Zeitsegmente</span></summary>
           <div class="form-grid" style="margin-top:8px">
             ${rangeField(a,'data-range-block-start','Von')}
             ${rangeField(b,'data-range-block-end','Bis')}
@@ -2691,31 +2720,13 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function applyAutomaticFreeTimeSuggestion(dated) {
-      if (dated.length !== 1 || !workspace) return;
-      const day = dated[0].day_key;
-      const segments = (workspace.time_segments || []).filter(s => s.day_key === day && s.event_kind === "no_event");
-      if (!segments.length) return;
-      // Only auto-fill an unambiguous free edge interval. More complicated
-      // gaps remain editable by the user and are checked server-side.
-      const ordered = [...segments].sort((a,b)=>String(a.start_time).localeCompare(String(b.start_time)));
-      const first = ordered[0], last = ordered[ordered.length-1];
-      if (String(first.start_time) <= "00:01" && String(last.end_time) < "23:59") {
-        const [h,m] = String(last.end_time).split(":").map(Number);
-        const dt = new Date(2000,0,1,h,m+1);
-        eventStartTime.value = `${String(dt.getHours()).padStart(2,"0")}:${String(dt.getMinutes()).padStart(2,"0")}`;
-        eventEndTime.value = "23:59";
-        useTimeRange.checked = true;
-        timeFields.hidden = false;
-        childEventName.required = true;
-      } else if (String(first.start_time) > "00:00" && String(last.end_time) >= "23:58") {
-        const [h,m] = String(first.start_time).split(":").map(Number);
-        const dt = new Date(2000,0,1,h,m-1);
-        eventStartTime.value = "00:00";
-        eventEndTime.value = `${String(dt.getHours()).padStart(2,"0")}:${String(dt.getMinutes()).padStart(2,"0")}`;
-        useTimeRange.checked = true;
-        timeFields.hidden = false;
-        childEventName.required = true;
-      }
+      if (!dated.length) return;
+      const ordered=[...dated].sort((a,b)=>String(a.start_datetime).localeCompare(String(b.start_datetime)));
+      eventStartTime.value=ordered[0].start_time || "00:00";
+      eventEndTime.value=ordered[ordered.length-1].end_time || "23:59";
+      useTimeRange.checked=true;
+      timeFields.hidden=false;
+      childEventName.required=false;
     }
 
     async function openTaskReassignment(eventId) {
@@ -2729,15 +2740,9 @@ WORKSPACE_HTML = r"""<!doctype html>
     taskReassignClose?.addEventListener("click",()=>taskReassignDialog.close());
 
     function plannedParentCandidates(dated) {
-      if (!workspace || dated.length !== 1) return [];
-      const day = dated[0].day_key;
-      return (workspace.events || []).filter(event =>
-        event.event_level === "parent"
-        && event.event_kind === "event"
-        && event.status === "planned"
-        && String(event.start_datetime || "").slice(0,10) <= day
-        && String(event.end_datetime || "").slice(0,10) >= day
-      );
+      if (!workspace || !dated.length) return [];
+      return (workspace.events || []).filter(event => event.event_level === "parent" && event.event_kind === "event" && (dated[0].archive_change_request_id ? event.status === "archived" : ["planned","applied"].includes(event.status)) && dated.some(d =>
+        Math.abs(Date.parse(d.start_datetime)-Date.parse(event.end_datetime)-1000)<1 || Math.abs(Date.parse(event.start_datetime)-Date.parse(d.end_datetime)-1000)<1));
     }
 
     function nextMinute(value) {
@@ -2758,15 +2763,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventName.disabled=true;
       useTimeRange.checked=true;
       timeFields.hidden=false;
-      childEventName.required=true;
-      const children=(workspace?.events||[]).filter(event=>event.parent_event_id===parent.id);
-      if (children.length) {
-        const latest=[...children].sort((a,b)=>String(a.end_datetime||"").localeCompare(String(b.end_datetime||""))).pop();
-        eventStartTime.value=nextMinute(String(latest?.end_datetime||"").slice(11,16));
-      }
-      eventEndTime.value="23:59";
-      childEventName.value="";
-      childEventName.focus();
+      childEventName.required=false;
+      applyAutomaticFreeTimeSuggestion(selectedDatedGroups());
+      childEventName.required=false;
     }
 
     async function openEventDialog(mode) {
@@ -2789,7 +2788,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       if (!existingParentRow.hidden) {
         existingParentEvent.innerHTML = `<option value="">Neues Oberereignis anlegen</option>` + parentCandidates.map(parent => `<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");
-        existingParentEvent.value = parentCandidates[0].id;
+        existingParentEvent.value = "";
       } else {
         existingParentEvent.innerHTML = "";
       }
@@ -2833,7 +2832,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         if (noEventRangeDetails) noEventRangeDetails.open=false;
         if (noEventRangeGenerator) noEventRangeGenerator.hidden=true;
         renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));
-        if (dated.length) syncNoEventSegmentsFromRange();
+
         await autoAttachExistingNoEventCollection();
       } else {
         applyAutomaticFreeTimeSuggestion(dated);
@@ -2858,6 +2857,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         end_date: eventEndDate.value,
         uses_time_range: useTimeRange.checked,
         child_event_name: childEventName.value.trim(),
+        selected_intervals: selectedDatedGroups().map(g=>({start_datetime:g.start_datetime,end_datetime:g.end_datetime})),
         start_time: eventStartTime.value,
         end_time: eventEndTime.value,
         preserve_day_folders: preserveDayFolders.checked,
@@ -2967,6 +2967,24 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       try {
         let result;
+        const selected=selectedDatedGroups();
+        const archiveIds=[...new Set(selected.map(g=>g.archive_change_request_id).filter(Boolean))];
+        if (archiveIds.length) {
+          if (archiveIds.length!==1 || selected.some(g=>g.archive_change_request_id!==archiveIds[0])) throw new Error("Bitte die freien Bereiche eines Archivauftrags getrennt auswählen.");
+          const payload=collectEventPayload();
+          const targetId=activeNoEventTarget?.id || existingNoEventTarget.value;
+          const noEvent=payload.event_kind==='no_event';
+          const normalTarget=existingParentEvent?.value;
+          await postJson(`/api/change-requests/${encodeURIComponent(archiveIds[0])}/reassignments`,{
+            family_ids:selected.flatMap(g=>g.family_ids),
+            target_mode:noEvent ? (targetId?'existing_no_event':'new_no_event') : (normalTarget?'existing_event':'new_event'),
+            target_event_id:noEvent ? targetId : normalTarget,
+            new_event_name:payload.event_name
+          });
+          selectedDays.clear(); await loadWorkspace(); eventDialog.close();
+          setStatus("Neu zugeordnet. Den manuellen Archiv-Änderungsplan unter Ereignisse prüfen und bestätigen.");
+          return;
+        }
         if (dialogMode === "existing_no_event" || activeNoEventTarget) {
           const payload=collectEventPayload();
           const targetId=activeNoEventTarget?.id || existingNoEventTarget.value;
@@ -3041,7 +3059,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         ) {
           if (group.has_date) {
             selectedDays.add(
-              group.day_key
+              group.card_key || group.day_key
             );
           }
         }
@@ -3078,8 +3096,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         timeFields.hidden =
           !useTimeRange.checked;
 
-        childEventName.required =
-          useTimeRange.checked;
+        childEventName.required = false;
 
         if (
           useTimeRange.checked
@@ -3299,3 +3316,4 @@ WORKSPACE_HTML = r"""<!doctype html>
 </body>
 </html>
 """
+

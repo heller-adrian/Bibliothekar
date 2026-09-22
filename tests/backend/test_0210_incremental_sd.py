@@ -21,10 +21,10 @@ def _sha(data: bytes) -> str:
 
 
 def test_0210_version_and_schema(tmp_path: Path):
-    assert main.APP_VERSION == "0.24.1"
+    assert main.APP_VERSION == "0.25.0"
     db = tmp_path / "kamera.sqlite3"
     status = initialize_database(db)
-    assert max(status["applied_versions"]) == 24
+    assert max(status["applied_versions"]) == 25
     assert "imported_source_files" in status["tables"]
 
 
@@ -156,3 +156,4 @@ def test_source_helper_rejects_stale_mount_for_current_device(monkeypatch):
     assert devices[0]["device_path"] == "/dev/sde1"
     assert devices[0]["mounted"] is False
     assert any("umount" in call for call in calls)
+

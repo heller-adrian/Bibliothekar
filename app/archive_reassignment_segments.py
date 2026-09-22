@@ -47,7 +47,7 @@ def proposed_ranges(change_request: Mapping[str, Any]) -> list[tuple[str, str]]:
             return sorted(result)
 
     children = _json_list(change_request.get("child_segments_json"))
-    if children:
+    if children and int(change_request.get('time_model_version',1)) < 2:
         result = []
         for segment in children:
             start = str(segment.get("start_time") or "")[:5]
@@ -82,6 +82,8 @@ def _source_range(connection, change_request: Mapping[str, Any], family_id: int,
         if row is not None:
             return str(row["start_datetime"]), str(row["end_datetime"])
 
+    if str(root['event_kind']) == 'event' and int(dict(root).get('time_model_version',1)) >= 2:
+        return str(root['start_datetime']), str(root['end_datetime'])
     row = connection.execute(
         """SELECT e.start_datetime,e.end_datetime
            FROM event_assignments ea
@@ -177,3 +179,4 @@ def selected_bounds(segments: Iterable[Mapping[str, Any]]) -> tuple[str, str]:
         min(str(item["start_datetime"]) for item in items),
         max(str(item["end_datetime"]) for item in items),
     )
+

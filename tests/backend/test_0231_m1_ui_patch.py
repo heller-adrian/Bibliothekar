@@ -3,7 +3,7 @@ from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
 def test_0231_version():
-    assert main.APP_VERSION == "0.24.1"
+    assert main.APP_VERSION == "0.25.0"
 
 
 def test_0231_workspace_main_actions_are_blue_and_card_is_aligned():
@@ -43,10 +43,9 @@ def test_0231_event_actions_use_blue_positive_action_class():
 
 
 def test_0231_multiple_time_ranges_have_explicit_editor_mode():
-    html = main.events_interface().body.decode("utf-8")
+    html=main.events_interface().body.decode('utf-8')
+    assert 'Mehrere Zeitbereiche</option>' not in html
+    assert 'id="edit-start-time"' in html and 'id="edit-end-time"' in html
+    assert 'isoTime(event.start_datetime' in html
+    assert 'isoTime(event.end_datetime' in html
 
-    assert '<option value="2">Mehrere Zeitbereiche</option>' in html
-    assert 'timeEnabled.value = "2";' in html
-    assert 'if (timeEnabled.value === "2") {' in html
-    assert 'normalContainer.innerHTML = "";' in html
-    assert 'syncMultiSegmentModeAfterRemove' in html

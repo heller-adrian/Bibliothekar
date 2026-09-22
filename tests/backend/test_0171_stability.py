@@ -113,33 +113,25 @@ def test_real_planned_cascade_is_durable_consistent_and_cancellable(tmp_path):
         'preserve_day_folders':False,
         'selected_family_ids':fids[:6],
     }
-    result=update_event_definition(
-        db,'j','a',preview,event_name='Test 19A',notes='',expected_revision=1,
-        cascade_confirmed=True,
-    )
-    assert result['mutation_id']
-    assert result['resort_required'] is False
-    assert result['cascade']['affected_event_ids']==['b']
+    import pytest
     with database_connection(db) as c:
-        mutation=c.execute("SELECT * FROM event_mutations WHERE id=?",(result['mutation_id'],)).fetchone()
-        assert mutation['status']=='pending_apply'
-        assert set(json.loads(mutation['affected_event_ids_json']))=={'a','b'}
-        b=c.execute("SELECT start_datetime,end_datetime,folder_name FROM events WHERE id='bc'").fetchone()
-        assert tuple(b)==('2026-07-19T19:46:00','2026-07-19T22:31:59','19-46 - 22-31 - Abend')
-        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id='ac'").fetchone()[0]==6
-        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id='bc'").fetchone()[0]==2
-    with pytest.raises(ValueError, match='noch nicht abgeschlossene Ereignisänderung'):
-        delete_planned_event(db,'j','a')
+        before=[tuple(r) for r in c.execute('SELECT * FROM events ORDER BY id')]
+        assignments=[tuple(r) for r in c.execute('SELECT * FROM event_assignments ORDER BY id')]
+    with pytest.raises(ValueError,match='nicht mehr zulässig'):
+        result=update_event_definition(
+            db,'j','a',preview,event_name='Test 19A',notes='',expected_revision=1,
+            cascade_confirmed=True,
+        )
+
     with database_connection(db) as c:
-        cancel_mutation(c,result['mutation_id'],'j')
-        c.commit()
-        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id='ac'").fetchone()[0]==4
-        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id='bc'").fetchone()[0]==4
-        b=c.execute("SELECT start_datetime,end_datetime,folder_name FROM events WHERE id='bc'").fetchone()
-        assert tuple(b)==('2026-07-19T19:31:00','2026-07-19T22:31:59','19-31 - 22-31 - Abend')
+        assert [tuple(r) for r in c.execute('SELECT * FROM events ORDER BY id')]==before
+        assert [tuple(r) for r in c.execute('SELECT * FROM event_assignments ORDER BY id')]==assignments
+        assert c.execute('SELECT COUNT(*) FROM event_mutations').fetchone()[0]==0
+
 
 def test_ui_does_not_auto_reconcile_planned_only_cascade_and_task_is_specific():
     assert 'item => String(item.status || "") === "applied"' in EVENTS_HTML
     assert 'Gemeinsame Planänderung gespeichert' in EVENTS_HTML
     assert 'Dieses geplante Ereignis anwenden' in WORKSPACE_HTML
     assert 'andere geplante Ereignisse bleiben unangetastet' in WORKSPACE_HTML
+

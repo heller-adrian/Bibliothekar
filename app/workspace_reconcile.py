@@ -188,7 +188,7 @@ def _connected_applied_events(connection: Any, job_id: str, anchor_event_id: str
     rows = connection.execute(
         """SELECT id,name,status,start_datetime,end_datetime,resort_required,archived_at
            FROM events WHERE job_id=? AND parent_event_id IS NULL
-             AND status IN ('applied','archived')""", (job_id,)
+             AND status IN ('planned','applied','archived')""", (job_id,)
     ).fetchall()
     by_id={str(r['id']):r for r in rows}
     anchor=by_id.get(anchor_event_id)
@@ -222,7 +222,7 @@ def _connected_applied_events(connection: Any, job_id: str, anchor_event_id: str
             if nxt not in seen:
                 seen.add(nxt); todo.append(nxt)
 
-    applied=sorted(eid for eid in seen if eid in by_id and str(by_id[eid]['status'])=='applied' and int(by_id[eid]['resort_required'] or 0)==1)
+    applied=sorted(eid for eid in seen if eid in by_id and (str(by_id[eid]['status'])=='planned' or (str(by_id[eid]['status'])=='applied' and int(by_id[eid]['resort_required'] or 0)==1)))
     archived=[]
     # Archived targets touched by a reassignment are explicitly surfaced.
     for eid in sorted(seen):
@@ -243,6 +243,8 @@ def _connected_applied_events(connection: Any, job_id: str, anchor_event_id: str
 
 def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_event_id: str, workspace_path: Path, *, verify_sha256: bool=False) -> dict[str,Any]:
     with database_connection(database_path) as c:
+        from app.event_reassignment import reconcile_stale_event_reassignments
+        reconcile_stale_event_reassignments(c,job_id)
         event_ids, archived_impacts = _connected_applied_events(c,job_id,anchor_event_id)
         unresolved=c.execute(
             """SELECT r.event_id,r.family_id,ff.family_key FROM event_reapply_removed_families r
@@ -269,7 +271,9 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     warnings=[]
     for eid in event_ids:
         try:
-            p=build_event_sort_plan(database_path,job_id,eid,workspace_path,verify_sha256=verify_sha256,allow_reapply=True)
+            with database_connection(database_path) as c:
+                event_status=c.execute('SELECT status FROM events WHERE id=?',(eid,)).fetchone()['status']
+            p=build_event_sort_plan(database_path,job_id,eid,workspace_path,verify_sha256=verify_sha256,allow_reapply=event_status=='applied')
         except SortPlanError as exc:
             blockers.append({"code":"event_plan_failed","event_id":eid,"message":str(exc)})
             continue
@@ -416,19 +420,25 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                     )
                     c.execute("DELETE FROM events WHERE id=? AND job_id=?", (eid,job_id))
                 else:
-                    c.execute("UPDATE events SET resort_required=0,updated_at=? WHERE id=?",(now,eid))
+                    c.execute("UPDATE events SET resort_required=0,status='applied',applied_at=COALESCE(applied_at,?),updated_at=? WHERE id=?",(now,now,eid))
             c.execute("UPDATE sort_runs SET status='applied',phase='Gemeinsamer Arbeitsbereich-Abgleich abgeschlossen',completed_at=?,updated_at=? WHERE id=?",(now,now,run_id))
             c.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_applied','sort_run',?,?,?)",(job_id,run_id,_json_details({'event_ids':plan['event_ids'],'file_count':len(plan['files'])}),now))
             from app.event_mutation import mark_job_mutation_completed
             mark_job_mutation_completed(c, job_id)
             c.commit()
-        # Best-effort cleanup of empty old directories, never above shared root.
-        for src,_,_,_ in moved:
-            cur=src.parent
-            while cur!=root and str(cur).startswith(str(root)):
-                try: cur.rmdir(); _fsync_directory(cur.parent)
-                except OSError: break
-                cur=cur.parent
+        # Post-commit metadata/cleanup cannot roll back an already committed move.
+        try:
+            from app.event_document import build_event_document_from_db, write_event_document
+            from app.obsolete_structure import cleanup_obsolete_structure
+            for eid in plan['event_ids']:
+                document=build_event_document_from_db(database_path,workspace_path,job_id,eid)
+                if document:
+                    write_event_document(workspace_path,document)
+            cleanup_obsolete_structure(root,[src for src,_,_,_ in moved],
+                [f['destination_absolute_path'] for f in plan['files']],set(plan['event_ids']))
+        except Exception as metadata_error:
+            with database_connection(database_path) as c:
+                c.execute("UPDATE sort_runs SET phase=?,error_message=? WHERE id=?",('Abgleich abgeschlossen; Strukturmetadaten prüfen',str(metadata_error),run_id))
     except Exception as exc:
         # Roll back physical moves in reverse order. Database paths are only finalized after all moves succeed.
         for src,dst,_,_ in reversed(moved):
@@ -437,3 +447,4 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         with database_connection(database_path) as c:
             c.execute("UPDATE sort_runs SET status='failed',phase='Arbeitsbereich-Abgleich fehlgeschlagen',error_message=?,updated_at=?,completed_at=? WHERE id=?",(str(exc),_now(),_now(),run_id))
         raise
+

@@ -141,7 +141,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.24.1"
+APP_VERSION = "0.25.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4149,6 +4149,25 @@ def api_create_event(
         **result,
     }
 
+@app.get("/api/jobs/{job_id}/events/{event_id}/structure")
+def api_event_structure(job_id: str, event_id: str):
+    context = get_event_edit_context(DATABASE_FILE,job_id,event_id)
+    event = context['event']
+    from app.structure_view import render_structure
+    with database_connection(DATABASE_FILE) as c:
+        cr = c.execute("SELECT * FROM event_change_requests WHERE event_id=? AND status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt') ORDER BY version DESC LIMIT 1",(event_id,)).fetchone()
+    days = sorted({str(f['selected_capture_time'])[:10] for f in context['families'] if f['assigned_here'] and f['selected_capture_time']})
+    if cr:
+        import json
+        children=json.loads(cr['child_segments_json'] or '[]')
+        if cr['child_folder']:
+            children=[{'folder_name':cr['child_folder']}]
+        lines=render_structure(str(cr['start_date'])[:4],cr['parent_folder'],json.loads(cr['selected_day_keys'] or '[]'),children,bool(cr['preserve_day_folders']))
+    else:
+        lines=render_structure(str(event['start_datetime'])[:4],event['folder_name'],days,context['child_events'],bool(event['preserve_day_folders']))
+    return {'structure_text':'\n'.join(lines),'planned_change':bool(cr or event.get('resort_required'))}
+
+
 @app.get(
     "/api/jobs/{job_id}/events/{event_id}/edit",
     tags=["Ereignisse"],
@@ -4346,7 +4365,9 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
     try:
         context = get_event_edit_context(DATABASE_FILE, job_id, event_id)
         preview = None
-        cascade_confirmed = bool(payload.get("cascade_confirmed"))
+        if payload.get("cascade_confirmed") or payload.get("child_segments"):
+            raise ValueError("Getrennte Belegungssegmente und automatische gemeinsame Anpassungen werden nicht mehr unterstützt.")
+        cascade_confirmed = False
 
         if context["structural_editable"] and not _applied_edit_is_metadata_only(context, payload):
             event_kind = str(payload.get("event_kind") or context["event"].get("event_kind") or "event")
@@ -4402,8 +4423,8 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                     return JSONResponse(
                         status_code=409,
                         content={
-                            "detail": "Die Änderung berührt andere Zeitbereiche. Die App kann die Auswirkungen gemeinsam bearbeiten, wenn du den Vorschlag bestätigst.",
-                            "cascade_preview": cascade_preview,
+                            "detail": "Die Änderung überschneidet sich mit belegter Zeit. Bitte zuerst das andere Ereignis bearbeiten und die Zeit freigeben.",
+                            "conflicts": cascade_preview["items"],
                         },
                     )
                 if cascade_preview["has_conflicts"] and cascade_confirmed and not cascade_preview["can_apply_automatically"]:
@@ -7195,3 +7216,4 @@ def api_archive_change(cr_id: str) -> JSONResponse:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+

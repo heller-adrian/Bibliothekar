@@ -112,6 +112,10 @@ def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[in
         except ArchiveSegmentError as exc:
             raise ArchiveReassignmentError(str(exc)) from exc
 
+        from app.released_ranges import merge_intervals
+        selected_ranges=merge_intervals((s['start_datetime'],s['end_datetime']) for s in selected_segments)
+        if target_mode=='new_event' and len(selected_ranges)!=1:
+            raise ArchiveReassignmentError('Ein normales Ereignis benötigt einen durchgehenden Zeitraum.')
         if target_mode=='new_event': target=_target_for_new_event(c,str(cr['job_id']),fids,str(new_event_name or ''),released_start,released_end)
         elif target_mode=='new_no_event': target=_target_for_new_no_event(c,str(cr['job_id']),fids,released_start,released_end)
         elif target_mode=='existing_no_event':
@@ -151,21 +155,21 @@ def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[in
         else: raise ArchiveReassignmentError('Unbekanntes Ziel.')
 
         captures={int(r['family_id']):str(r['selected_capture_time'] or '')[:19] for r in pending_rows if int(r['family_id']) in set(fids)}
-        if target['kind']=='existing_event' and not all(str(target['start'])[:19] <= cap <= str(target['end'])[:19] for cap in captures.values()):
-            raise ArchiveReassignmentError('Mindestens ein ausgewähltes Zeitsegment liegt außerhalb des bestehenden Zielereignisses.')
-
-        # Existing archived targets already own their timeline interval. Adding
-        # families or a child inside that parent must not be rejected because
-        # the still-unmodified source event overlaps until the change request
-        # is finished. Only newly created root targets extend the timeline.
-        if target['kind'] in {'new_event','new_no_event'}:
-            overlaps = continuous_event_overlaps(
-                c, str(cr['job_id']), str(target['start'])[:19], str(target['end'])[:19],
-                exclude_event_id=str(cr['event_id']),
-            )
-            if overlaps:
-                names = sorted({str(r['name']) for r in overlaps})
-                raise ArchiveReassignmentError('Dieses Ziel würde sich mit einem anderen Ereignis überschneiden: ' + ', '.join(names))
+        from app.released_ranges import merge_intervals
+        if target['kind']=='existing_event':
+            union=merge_intervals([(target['start'],target['end'])]+selected_ranges)
+            if len(union)!=1:
+                raise ArchiveReassignmentError('Der freie Bereich grenzt nicht unmittelbar an das Zielereignis an.')
+            target['start'],target['end']=union[0]
+        from app.event_timeline import no_event_segment_overlaps
+        check_ranges=selected_ranges if target['kind'] in {'new_no_event','existing_no_event'} else [(target['start'],target['end'])]
+        for a,b in check_ranges:
+            conflicts=continuous_event_overlaps(c,str(cr['job_id']),a,b,exclude_event_id=str(cr['event_id']))
+            conflicts=[x for x in conflicts if x['id']!=target.get('event_id')]
+            segments=no_event_segment_overlaps(c,str(cr['job_id']),a,b,exclude_event_id=str(cr['event_id']))
+            segments=[x for x in segments if x['event_id']!=target.get('event_id')]
+            if conflicts or segments:
+                raise ArchiveReassignmentError('Dieses Ziel überschneidet sich mit einem anderen Ereignis.')
 
         ph=','.join('?' for _ in fids)
         for fid in fids:
@@ -210,6 +214,7 @@ def apply_archive_reassignment_targets(connection,cr:dict[str,Any],now:str)->lis
         kind,target_id,name,folder,start,end,uses,child_name,child_folder,preserve=key
         if kind.startswith('existing_event'):
             eid=target_id
+            connection.execute("UPDATE events SET start_datetime=?,end_datetime=?,time_model_version=2,updated_at=?,revision=revision+1 WHERE id=?",(start,end,now,eid))
             child_id = kind.split(':',1)[1] if ':' in kind else None
             assign_id=child_id or eid
             connection.executemany("INSERT OR IGNORE INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'manual',?)",[(assign_id,f,now) for f in fids])
@@ -234,8 +239,8 @@ def apply_archive_reassignment_targets(connection,cr:dict[str,Any],now:str)->lis
             if bounds and bounds['a'] and bounds['b']: connection.execute("UPDATE events SET start_datetime=?,end_datetime=?,updated_at=? WHERE id=?",(bounds['a'],bounds['b'],now,eid))
             continue
         eid='EVENT_'+uuid.uuid4().hex.upper(); event_kind='no_event' if kind=='new_no_event' else 'event'
-        parent_start = f"{start[:10]}T00:00:00" if uses else start
-        parent_end = f"{end[:10]}T23:59:59" if uses else end
+        parent_start = start
+        parent_end = end
         connection.execute("""INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,timeline_model)
                              VALUES (?,?,NULL,'parent',?,?,?,0,?,'archived',?,?,?, ?,1,?,?,?)""",(eid,cr['job_id'],name,parent_start,parent_end,folder,now,now,event_kind,preserve,now,now,'segments' if event_kind=='no_event' else 'continuous'))
         assign_id=eid
@@ -251,3 +256,4 @@ def apply_archive_reassignment_targets(connection,cr:dict[str,Any],now:str)->lis
                 connection.execute("UPDATE events SET start_datetime=?,end_datetime=?,updated_at=? WHERE id=?",(min(s['start_datetime'] for s in exact_segments),max(s['end_datetime'] for s in exact_segments),now,eid))
         created.append(eid)
     return created
+

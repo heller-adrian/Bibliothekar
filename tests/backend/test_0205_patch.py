@@ -9,7 +9,7 @@ NOW='2026-09-10T20:00:00+00:00'
 
 
 def test_version_0205():
-    assert APP_VERSION == '0.24.1'
+    assert APP_VERSION == '0.25.0'
 
 
 def test_editor_context_returns_all_child_time_segments(tmp_path: Path):
@@ -28,9 +28,10 @@ def test_editor_context_returns_all_child_time_segments(tmp_path: Path):
 
 
 def test_events_ui_has_multi_segment_editor_and_merged_reassignment_actions():
-    assert 'Zeitsegmente / Unterereignisse' in EVENTS_HTML
-    assert 'data-child-segment' in EVENTS_HTML
-    assert 'child_segments' in EVENTS_HTML
-    assert 'Die Änderung bleibt bis zur Neu-Zuordnung im sicheren Schwebezustand' in EVENTS_HTML
-    assert 'In Sortieren öffnen' in EVENTS_HTML
-    assert 'Änderung verwerfen' in EVENTS_HTML
+    # 0.25 removes the target selector: assignment happens through workspace cards.
+    assert 'In Aufnahmen öffnen' in EVENTS_HTML
+    assert 'id="reassignment-target"' not in EVENTS_HTML
+    assert 'id="reassignment-apply"' not in EVENTS_HTML
+    assert 'segment.start_time' in EVENTS_HTML and 'segment.end_time' in EVENTS_HTML
+    assert 'segment.family_count' in EVENTS_HTML and 'segment.file_count' in EVENTS_HTML
+

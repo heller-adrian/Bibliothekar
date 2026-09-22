@@ -92,7 +92,10 @@ def test_pending_reassignment_is_visible_after_reload(tmp_path):
 
 
 def test_reassignment_ui_hides_new_name_for_existing_target_and_has_resume_action():
-    assert '.reassignment-new-name[hidden] { display:none !important; }' in EVENTS_HTML
-    assert 'data-reassign-workspace=' in EVENTS_HTML
-    assert 'In Sortieren öffnen' in EVENTS_HTML
-    assert 'const raw = await response.text();' in EVENTS_HTML
+    # 0.25 removes the target selector: assignment happens through workspace cards.
+    assert 'In Aufnahmen öffnen' in EVENTS_HTML
+    assert 'id="reassignment-target"' not in EVENTS_HTML
+    assert 'id="reassignment-apply"' not in EVENTS_HTML
+    assert 'segment.start_time' in EVENTS_HTML and 'segment.end_time' in EVENTS_HTML
+    assert 'segment.family_count' in EVENTS_HTML and 'segment.file_count' in EVENTS_HTML
+

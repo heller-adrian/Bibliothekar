@@ -33,8 +33,9 @@ def test_env(tmp_path):
                 start_datetime TEXT, end_datetime TEXT, uses_time_range INTEGER, folder_name TEXT,
                 status TEXT, created_at TEXT, updated_at TEXT, event_kind TEXT, preserve_day_folders INTEGER,
                 revision INTEGER, applied_at TEXT, archived_at TEXT, notes TEXT, edited_at TEXT,
-                linkage_kind TEXT
+                time_model_version INTEGER DEFAULT 1, linkage_kind TEXT
             );
+            CREATE TABLE event_time_segments (id INTEGER, event_id TEXT,start_datetime TEXT,end_datetime TEXT);
             CREATE TABLE file_families (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, family_key TEXT,
                 selected_capture_time TEXT, capture_time_confidence REAL
@@ -112,23 +113,10 @@ def test_event_document_matches_db(test_env):
         """, (job_id, 1, "Alle/2023-01-01/IMG_0001.RAF", "IMG_0001.RAF",
               42000000, "abc123", "abc123", "required"))
 
-    doc = {
-        "event": {
-            "id": event_id,
-            "name": "Test Event",
-            "event_kind": "event",
-            "start_date": "2023-01-01",
-            "end_date": "2023-01-02",
-            "uses_time_range": False,
-            "preserve_day_folders": False,
-            "folder_name": "test_folder",
-            "status": "applied",
-            "applied_at": "2023-01-01T00:00:00",
-            "revision": 1
-        },
-        "families": [{"family_id": 1, "family_key": "fam_1", "selected_capture_time": "2023-01-01T10:00:00", "file_count": 0, "total_size_bytes": 0}],
-        "files": []
-    }
+    # A legacy partial document must be refreshed rather than accepted as complete.
+    assert not event_document_matches_db(db, ws, job_id, event_id, {"event": {"id": event_id}})["ok"]
+    doc = build_event_document_from_db(db, ws, job_id, event_id)
+    assert doc['document_version'] == 2
 
     result = event_document_matches_db(db, ws, job_id, event_id, doc)
     assert result["ok"] is True
@@ -177,3 +165,4 @@ def test_sync_event_document_after_change(test_env):
     doc = read_event_document(expected_path)
     assert doc["event"]["id"] == event_id
     assert doc["event"]["name"] == "Sync Event"
+

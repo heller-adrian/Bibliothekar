@@ -21,7 +21,7 @@ def seed(db: Path):
 
 
 def test_version_0202():
-    assert APP_VERSION == '0.24.1'
+    assert APP_VERSION == '0.25.0'
 
 
 def test_stale_pending_reassignment_disappears_when_family_is_assigned_again(tmp_path):
@@ -59,16 +59,16 @@ def test_existing_month_blocks_second_no_event_target(tmp_path):
 
 
 def test_all_reassignment_windows_use_day_groups_and_locked_month_ui():
-    # 0.24.1: only the canonical Ereignisse dialog owns reassignment UI.
-    assert 'data-reassign-day' in EVENTS_HTML
-    assert 'new_no_event_supported' in EVENTS_HTML
-    assert 'segments:selectedSegments' in EVENTS_HTML
-    assert 'task.startsWith("reassign:")' in EVENTS_HTML
-    assert '/events?job=' in WORKSPACE_HTML
-    assert 'Monat/Jahr' in EVENTS_HTML
+    # 0.25 removes the target selector: assignment happens through workspace cards.
+    assert 'In Aufnahmen öffnen' in EVENTS_HTML
+    assert 'id="reassignment-target"' not in EVENTS_HTML
+    assert 'id="reassignment-apply"' not in EVENTS_HTML
+    assert 'segment.start_time' in EVENTS_HTML and 'segment.end_time' in EVENTS_HTML
+    assert 'segment.family_count' in EVENTS_HTML and 'segment.file_count' in EVENTS_HTML
 
 
 def test_existing_no_event_preview_contains_real_folder_structure():
     assert '├── Alle' in WORKSPACE_HTML
     assert '├── Sortiert' in WORKSPACE_HTML
     assert '└── Export' in WORKSPACE_HTML
+

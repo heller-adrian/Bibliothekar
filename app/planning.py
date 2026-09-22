@@ -193,12 +193,14 @@ def list_job_available_families(
         if row.get("family_id") is not None
     }
 
-    return [
-        family
-        for family in family_stats
-        if int(family["family_id"])
-        not in assigned_family_ids
-    ]
+    result=[f for f in family_stats if int(f['family_id']) not in assigned_family_ids]
+    known={f['family_id'] for f in result}
+    for card in archive_free_cards(database_path,job_id):
+        for family in card['families']:
+            if family['family_id'] not in known:
+                result.append(family);known.add(family['family_id'])
+    return result
+
 
 
 def _group_available_families(
@@ -268,6 +270,44 @@ def _group_available_families(
         )
     )
 
+    return result
+
+
+def archive_free_cards(database_path, job_id):
+    from app.archive_reassignment import list_archive_reassignments
+    families={f['family_id']:f for f in _load_family_stats(database_path,job_id)}
+    with database_connection(database_path) as c:
+        requests=[str(r['id']) for r in c.execute("SELECT id FROM event_change_requests WHERE job_id=? AND status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt')",(job_id,))]
+    result=[]
+    for cr_id in requests:
+        task=list_archive_reassignments(database_path,cr_id)
+        for segment in task['reassignment_segments']:
+            fs=[families[f] for f in segment['family_ids'] if f in families]
+            if not fs: continue
+            group=_group_available_families(fs,{segment['day_key']:len(fs)})[0]
+            result.append({**group,**segment,'families':fs,'card_key':cr_id+'/'+segment['start_datetime']+'/'+segment['end_datetime'],
+                'reassignment_pending':True,'archive_change_request_id':cr_id})
+    return result
+
+
+def interval_cards(database_path, job_id, available_families, total_by_day):
+    from app.free_time import free_ranges_for_day
+    from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
+    result = []
+    with database_connection(database_path) as c:
+        pending = {int(r['family_id']) for r in c.execute("SELECT family_id FROM event_reapply_removed_families WHERE job_id=? AND target_event_id IS NULL", (job_id,))}
+        for day in sorted(d for d in total_by_day if d):
+            a,b = day+'T00:00:00', day+'T23:59:59'
+            occupied = [(r['effective_start'],r['effective_end']) for r in continuous_event_overlaps(c,job_id,a,b)]
+            occupied += [(r['start_datetime'],r['end_datetime']) for r in no_event_segment_overlaps(c,job_id,a,b)]
+            for segment in free_ranges_for_day(day, occupied):
+                families = [f for f in available_families if segment['start_datetime'] <= str(f.get('selected_capture_time') or '')[:19] <= segment['end_datetime']]
+                if not families:
+                    continue
+                group = _group_available_families(families,total_by_day)[0]
+                result.append({**group, **segment, 'card_key': segment['start_datetime']+'/'+segment['end_datetime'],
+                    'families': families, 'reassignment_pending': any(f['family_id'] in pending for f in families)})
+    result.extend(_group_available_families([f for f in available_families if not f.get('day_key')],total_by_day))
     return result
 
 
@@ -423,16 +463,21 @@ def list_job_planning_overview(
         not in assigned_family_ids
     ]
 
-    available_day_groups = _group_available_families(
-        available_families,
-        total_by_day,
-    )
+    available_day_groups = interval_cards(database_path, job_id, available_families, total_by_day)
 
+    available_day_groups.extend(archive_free_cards(database_path,job_id))
+    available_day_groups.sort(key=lambda x:(str(x.get('start_datetime') or ''),str(x.get('card_key') or '')))
     event_groups = list(
         event_groups_by_id.values()
     )
 
     for event in event_groups:
+        if event['event_kind']=='no_event':
+            from app.event_timeline import list_event_segments
+            segments=list_event_segments(database_path,event['event_id'])
+            if segments:
+                event['start_datetime']=segments[0]['start_datetime']
+                event['end_datetime']=segments[-1]['end_datetime']
         event["day_keys"].sort()
         event["family_ids"].sort()
         event["child_events"].sort(
@@ -482,3 +527,4 @@ def list_job_planning_overview(
             available_families
         ),
     }
+

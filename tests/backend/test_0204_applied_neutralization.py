@@ -77,7 +77,7 @@ def _assert_neutralized(db, workspace, removed_id):
 
 
 def test_version_0204():
-    assert APP_VERSION == '0.24.1'
+    assert APP_VERSION == '0.25.0'
 
 
 def test_applied_normal_event_removed_family_moves_to_neutral_workspace(tmp_path):
@@ -114,3 +114,4 @@ def test_cancel_applied_edit_restores_neutralized_files_and_paths(tmp_path):
     assert assignment==1
     assert not (workspace/'Arbeitsbereich'/'Nicht zugeordnet'/'2026'/'09').exists()
     assert not (workspace/'Arbeitsbereich'/'Nicht zugeordnet'/'2026').exists()
+

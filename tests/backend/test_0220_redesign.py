@@ -5,7 +5,7 @@ from app.pipeline import copy_and_verify, source_manifest
 
 
 def test_0220_version_and_app_shell():
-    assert main.APP_VERSION == "0.24.1"
+    assert main.APP_VERSION == "0.25.0"
 
     html = main.index()
     assert "Bibliothekar" in html
@@ -73,3 +73,4 @@ def test_0220_manifest_and_copy_report_live_progress(tmp_path: Path):
     assert ("copy", 2, 2) in copy_progress
     assert ("verify", 1, 2) in copy_progress
     assert ("verify", 2, 2) in copy_progress
+

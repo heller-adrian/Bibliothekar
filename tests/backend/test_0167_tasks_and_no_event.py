@@ -132,9 +132,10 @@ def test_global_task_button_stays_visible_and_planned_and_free_tasks_exist(tmp_p
 
 
 def test_reassignment_ui_has_new_no_event_and_event_spacing():
-    assert 'value="__new_no_event__"' in EVENTS_HTML
-    assert 'Neues „Ohne Ereignis“ erstellen' in EVENTS_HTML
-    assert 'task.startsWith("reassign:")' in EVENTS_HTML
-    assert '/events?job=' in WORKSPACE_HTML
-    assert 'class="event-browser-toolbar"' in EVENTS_HTML
-    assert '.event-browser-search' in EVENTS_HTML
+    # 0.25 removes the target selector: assignment happens through workspace cards.
+    assert 'In Aufnahmen öffnen' in EVENTS_HTML
+    assert 'id="reassignment-target"' not in EVENTS_HTML
+    assert 'id="reassignment-apply"' not in EVENTS_HTML
+    assert 'segment.start_time' in EVENTS_HTML and 'segment.end_time' in EVENTS_HTML
+    assert 'segment.family_count' in EVENTS_HTML and 'segment.file_count' in EVENTS_HTML
+

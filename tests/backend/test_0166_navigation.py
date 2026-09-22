@@ -15,8 +15,11 @@ def test_workspace_has_task_reassignment_and_existing_no_event_action():
     assert '/no-event/assign-existing' in WORKSPACE_HTML
 
 
-def test_events_script_no_broken_literal_newlines():
-    assert r'error.message + "\n\n" + lines.join("\n")' in EVENTS_HTML
+def test_events_script_no_broken_literal_newlines(tmp_path):
+    import re, subprocess
+    script=tmp_path/'events.js'
+    script.write_text('\n'.join(re.findall(r'<script[^>]*>(.*?)</script>',EVENTS_HTML,re.S)))
+    subprocess.run(['node','--check',str(script)],check=True,capture_output=True)
 
 
 def test_search_events_and_expand_existing_no_event(tmp_path):
@@ -45,3 +48,4 @@ def test_search_events_and_expand_existing_no_event(tmp_path):
     assert found['events'][0]['id']==eid
     with database_connection(db) as c:
         assert c.execute("SELECT COUNT(*) FROM event_time_segments WHERE event_id=?",(eid,)).fetchone()[0]==2
+

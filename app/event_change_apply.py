@@ -273,6 +273,8 @@ def finish_event_change(
     end_time = str(cr["end_time"] or "23:59")
     child_start = f"{start_date}T{start_time}:00"
     child_end = f"{end_date}T{end_time}:59"
+    if event_kind == 'event' and uses_time_range:
+        parent_start, parent_end = child_start, child_end
     now = _now()
 
     with database_connection(database_path) as connection:
@@ -325,6 +327,7 @@ def finish_event_change(
             ),
         )
 
+        connection.execute("UPDATE events SET time_model_version=2 WHERE id=?", (cr['event_id'],))
         children = connection.execute(
             "SELECT * FROM events WHERE parent_event_id = ? ORDER BY start_datetime, id",
             (cr["event_id"],),
@@ -349,8 +352,8 @@ def finish_event_change(
             for segment in child_segments:
                 import uuid
                 child_id="EVENT_"+uuid.uuid4().hex.upper()
-                seg_start=f"{start_date}T{segment['start_time']}:00"; seg_end=f"{end_date}T{segment['end_time']}:59"
-                folder=str(segment.get("folder") or f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}")
+                seg_start=segment.get('start_datetime') or f"{start_date}T{segment['start_time']}:00"; seg_end=segment.get('end_datetime') or f"{end_date}T{segment['end_time']}:59"
+                folder=str(segment.get("folder_name") or segment.get("folder") or f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}")
                 connection.execute(
                     """INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,notes,edited_at,timeline_model)
                        VALUES (?,?,?,'child',?,?,?,1,?,'archived',?,?,'event',?,1,?,?,'',?,'continuous')""",
@@ -359,7 +362,7 @@ def finish_event_change(
                 )
                 created_children.append((child_id,seg_start,seg_end))
             assignment_event_id=None
-        elif uses_time_range:
+        elif uses_time_range and cr.get('child_folder'):
             child_name = str(cr.get("child_event_name") or "Unterereignis")
             if child is None:
                 import uuid
@@ -409,9 +412,9 @@ def finish_event_change(
             for family in family_rows:
                 capture=str(family["selected_capture_time"] or "")[:19]
                 matches=[child_id for child_id,a,b in created_children if a <= capture <= b]
-                if len(matches) != 1:
+                if len(matches)>1 or (not matches and int(cr.get('time_model_version',1))<2):
                     connection.rollback(); raise EventChangeApplyError("Eine archivierte Familie passt in kein eindeutiges Unterereignis.")
-                assignments.append((matches[0],int(family["id"]),now))
+                assignments.append((matches[0] if matches else cr['event_id'],int(family["id"]),now))
             connection.executemany(
                 "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
                 assignments,
@@ -489,3 +492,4 @@ def finish_event_change(
         "verified_file_count": verification["verified_file_count"],
         "created_reassignment_event_ids": created_reassignment_events,
     }
+

@@ -106,6 +106,11 @@ def _compute_event_plan(
     for left,right in zip(normalized_child_segments,normalized_child_segments[1:]):
         if left["end_time"] >= right["start_time"]:
             raise EventChangeRequestError("Unterereignisse dürfen sich zeitlich nicht überschneiden.")
+    if preview.get('subevents'):
+        from app.subevents import normalize_subevents
+        normalized_child_segments=normalize_subevents(preview['subevents'],
+            f"{preview['start_date']}T{preview.get('start_time') or '00:00'}:00",f"{preview['end_date']}T{preview.get('end_time') or '23:59'}:59")
+        normalized_child_segments=[{**s,'folder':s['folder_name']} for s in normalized_child_segments]
     preserve_day_folders = bool(preview.get("preserve_day_folders"))
     start_date = str(preview.get("start_date") or str(event["start_datetime"] or "")[:10])
     year = start_date[:4]
@@ -145,10 +150,10 @@ def _compute_event_plan(
             parts = [year, parent_folder]
             capture=str(row["selected_capture_time"] or "")[:19]
             if normalized_child_segments:
-                matching=[s for s in normalized_child_segments if f"{start_date}T{s['start_time']}:00" <= capture <= f"{str(preview.get('end_date') or start_date)}T{s['end_time']}:59"]
-                if len(matching) != 1:
+                matching=[s for s in normalized_child_segments if str(s.get('start_datetime') or f"{start_date}T{s['start_time']}:00") <= capture <= str(s.get('end_datetime') or f"{str(preview.get('end_date') or start_date)}T{s['end_time']}:59")]
+                if len(matching)>1 or (not matching and not preview.get('subevents')):
                     raise EventChangeRequestError(f"Familie {family_id} passt in kein eindeutiges Unterereignis.")
-                parts.append(matching[0]["folder"])
+                if matching: parts.append(matching[0]["folder"])
             elif child_folder:
                 parts.append(child_folder)
             day_key = str(row["selected_capture_time"] or "")[:10]
@@ -255,6 +260,16 @@ def propose_event_change(
 
     # ChangeRequest erstellen
     with database_connection(database_path) as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        from app.event_timeline import assert_editable_normal, continuous_event_overlaps, no_event_segment_overlaps
+        from app.archive_reassignment_segments import proposed_ranges
+        if preview.get('child_segments'):
+            raise EventChangeRequestError('Getrennte Belegungssegmente sind für normale Ereignisse nicht zulässig.')
+        if preview.get('event_kind','event') == 'event':
+            assert_editable_normal(connection,event_id)
+        for a,b in proposed_ranges(preview):
+            if continuous_event_overlaps(connection,job_id,a,b,exclude_event_id=event_id) or no_event_segment_overlaps(connection,job_id,a,b,exclude_event_id=event_id):
+                raise EventChangeRequestError('Die Änderung überschneidet sich mit belegter Zeit. Bitte zuerst das andere Ereignis bearbeiten.')
         # Pruefe, ob bereits ein aktiver Auftrag existiert
         existing = connection.execute(
             "SELECT id, version FROM event_change_requests "
@@ -310,7 +325,7 @@ def propose_event_change(
                 preview.get("selected_file_count", 0),
                 preview.get("selected_family_count", 0),
                 json.dumps(preview.get("no_event_segments", []), ensure_ascii=False),
-                json.dumps(preview.get("child_segments", []), ensure_ascii=False),
+                json.dumps(preview.get("subevents") or preview.get("child_segments", []), ensure_ascii=False),
                 "aenderbar_vorschlagen",
                 version,
                 now,
@@ -319,6 +334,7 @@ def propose_event_change(
             ),
         )
 
+        connection.execute('UPDATE event_change_requests SET time_model_version=2 WHERE id=?',(cr_id,))
         # Datei-Bestaetigungen (loeschen/bewegen/behalten) fuer jede Familie
         for family_plan in plan["families_with_plans"]:
             fid = family_plan["family_id"]
@@ -506,3 +522,4 @@ def propose_archived_event_deletion(
         "reassignment_required":False,
         "message":"Manueller Löschauftrag erstellt. Die Kamerabibliothek bleibt read-only; verschiebe die Dateien gemäß IST→SOLL und schließe den Auftrag danach ab.",
     }
+

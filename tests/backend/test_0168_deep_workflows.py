@@ -199,21 +199,26 @@ def test_applied_cascade_marks_all_affected_events_for_reapply(tmp_path):
             c.execute("INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?, ?, NULL, 'date_time_range', ?)", (eid+"c",fid,NOW))
         c.commit()
 
-    result = update_event_definition(
-        db,"j","a",{
-            "selected_family_ids":ids,
-            "start_date":"2026-07-19","end_date":"2026-07-19",
-            "uses_time_range":True,"start_time":"18:00","end_time":"18:30",
-            "child_event_name":"A","parent_folder":"07-19 - A","child_folder":"18-00 - 18-30 - A",
-            "event_kind":"event","preserve_day_folders":False,
-        }, event_name="A", notes="", expected_revision=1, cascade_confirmed=True,
-    )
-    assert "b" in result["cascade"]["affected_event_ids"]
+    import pytest
     with database_connection(db) as c:
-        assert c.execute("SELECT resort_required FROM events WHERE id='a'").fetchone()[0] == 1
-        assert c.execute("SELECT resort_required FROM events WHERE id='b'").fetchone()[0] == 1
-        row = c.execute("SELECT target_event_id FROM event_reapply_removed_families WHERE event_id='b' AND family_id=?", (ids[1],)).fetchone()
-        assert row is not None and row["target_event_id"] == "a"
+        before=[tuple(r) for r in c.execute('SELECT * FROM events ORDER BY id')]
+        assignments=[tuple(r) for r in c.execute('SELECT * FROM event_assignments ORDER BY id')]
+    with pytest.raises(ValueError,match='nicht mehr zulässig'):
+        result = update_event_definition(
+            db,"j","a",{
+                "selected_family_ids":ids,
+                "start_date":"2026-07-19","end_date":"2026-07-19",
+                "uses_time_range":True,"start_time":"18:00","end_time":"18:30",
+                "child_event_name":"A","parent_folder":"07-19 - A","child_folder":"18-00 - 18-30 - A",
+                "event_kind":"event","preserve_day_folders":False,
+            }, event_name="A", notes="", expected_revision=1, cascade_confirmed=True,
+        )
+
+    with database_connection(db) as c:
+        assert [tuple(r) for r in c.execute('SELECT * FROM events ORDER BY id')]==before
+        assert [tuple(r) for r in c.execute('SELECT * FROM event_assignments ORDER BY id')]==assignments
+        assert c.execute('SELECT COUNT(*) FROM event_mutations').fetchone()[0]==0
+
 
 
 def test_events_ui_applied_reapply_uses_reconciliation_endpoint():
@@ -221,3 +226,4 @@ def test_events_ui_applied_reapply_uses_reconciliation_endpoint():
     assert 'plan._reconcile' in EVENTS_HTML
     assert '? "reconcile-sort"' in EVENTS_HTML
     assert ': (plan._reapply ? "reapply-sort" : "apply-sort")' in EVENTS_HTML
+

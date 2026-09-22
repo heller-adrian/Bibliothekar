@@ -76,7 +76,7 @@ def _effective_target_intervals(connection, target) -> list[tuple[str, str, str]
         "SELECT id,start_datetime,end_datetime FROM events WHERE parent_event_id=? ORDER BY start_datetime,id",
         (target["id"],),
     ).fetchall()
-    if children:
+    if children and int(dict(target).get('time_model_version',1)) < 2:
         return [
             (
                 str(child["start_datetime"] or "")[:19],
@@ -122,11 +122,13 @@ def reconcile_stale_event_reassignments(connection, job_id: str | None = None, e
               AND e.status IN ('draft','planned','applied','archived')
           )
     """, params).fetchall()
-    if rows:
-        connection.executemany(
-            "DELETE FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id=? AND target_event_id IS NULL",
-            [(str(r['job_id']),str(r['event_id']),int(r['family_id'])) for r in rows],
-        )
+    for r in rows:
+        source = connection.execute('SELECT status FROM events WHERE id=?',(r['event_id'],)).fetchone()
+        target = connection.execute("SELECT COALESCE(e.parent_event_id,e.id) AS id, e.status,e.event_kind,e.name,e.folder_name,e.preserve_day_folders,e.linkage_kind FROM event_assignments a JOIN events e ON e.id=a.event_id WHERE a.family_id=? AND e.status IN ('draft','planned','applied','archived') LIMIT 1",(r['family_id'],)).fetchone()
+        if source and source['status']=='applied' and target and target['id'] != r['event_id']:
+            connection.execute("UPDATE event_reapply_removed_families SET target_event_id=?,target_status=?,target_kind=?,target_name=?,target_folder_name=?,target_preserve_day_folders=?,target_linkage_kind=? WHERE job_id=? AND event_id=? AND family_id=?",(target['id'],target['status'],target['event_kind'],target['name'],target['folder_name'],target['preserve_day_folders'],target['linkage_kind'],r['job_id'],r['event_id'],r['family_id']))
+        else:
+            connection.execute("DELETE FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id=? AND target_event_id IS NULL",(r['job_id'],r['event_id'],r['family_id']))
     return len(rows)
 
 
@@ -345,10 +347,10 @@ def _create_new_event(
     preview = build_event_preview({
         "event_kind": "event", "event_name": clean_name,
         "start_date": start_date, "end_date": end_date,
-        "uses_time_range": same_day,
-        "child_event_name": clean_name if same_day else "",
-        "start_time": (segment["start_time"] if segment else min(captures)[11:16]) if same_day else "00:00",
-        "end_time": (segment["end_time"] if segment else max(captures)[11:16]) if same_day else "23:59",
+        "uses_time_range": True,
+        "child_event_name": "",
+        "start_time": (segment["start_datetime"][11:16] if segment else min(captures)[11:16]),
+        "end_time": (segment["end_datetime"][11:16] if segment else max(captures)[11:16]),
         "preserve_day_folders": start_date != end_date,
         "selected_day_keys": sorted({a["day_key"] for a in available}),
         "selected_family_ids": family_ids,
@@ -786,3 +788,4 @@ def assign_event_reassignments(
         "pending_family_count": state["family_count"],
         "source_resort_required": source_status == "applied",
     }
+

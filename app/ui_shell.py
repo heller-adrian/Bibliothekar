@@ -200,9 +200,15 @@ body.bibliothekar-redesign button.primary,
 body.bibliothekar-redesign .primary,
 body.bibliothekar-redesign .plan-button,
 body.bibliothekar-redesign .sort-apply-button {
-  background: var(--bk-red) !important;
-  border-color: var(--bk-red) !important;
+  background: var(--bk-blue) !important;
+  border-color: var(--bk-blue) !important;
   color: #fff !important;
+}
+
+body.bibliothekar-redesign .danger-button {
+  background:var(--bk-danger) !important;
+  border-color:var(--bk-danger) !important;
+  color:#fff !important;
 }
 
 body.bibliothekar-redesign .warning-button {
@@ -1750,3 +1756,4 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         1,
     )
     return result
+

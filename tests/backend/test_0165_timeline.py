@@ -72,4 +72,6 @@ def test_cascade_preview_detects_edge_overlap(tmp_path):
     with database_connection(db) as c:
         p=cascade_preview_for_interval(c,'j','a','2026-07-15T08:00:00','2026-07-15T14:00:59')
     assert p['items'] and p['items'][0]['action']=='trim_start'
-    assert p['can_apply_automatically'] is True
+    assert p['can_apply_automatically'] is False
+    assert all(item['automatic'] is False for item in p['items'])
+

@@ -25,6 +25,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Complete QA before publishing
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pip install -r requirements.txt pytest httpx
+          python -m compileall -q app qa
+          bash -n qa/archive_e2e/*.sh
+          pytest -q -o addopts='' tests/backend
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -46,9 +59,13 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push image
+        id: publish
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Record published digest
+        run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"

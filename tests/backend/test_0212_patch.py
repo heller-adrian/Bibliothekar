@@ -1,4 +1,5 @@
 from pathlib import Path
+from app.events_ui import EVENTS_HTML
 
 from app.database import database_connection, initialize_database
 from app.free_time import free_ranges_for_day
@@ -29,19 +30,18 @@ def test_0212_schema_stores_archived_child_segments(tmp_path: Path):
 
 
 def test_0212_event_ui_has_atomic_reassignment_and_segment_delete():
-    from app.events_ui import EVENTS_HTML
-
-    assert 'name="reassignment_family"' not in EVENTS_HTML
-    assert "data-reassign-day" in EVENTS_HTML
-    assert "data-remove-child-segment" in EVENTS_HTML
-    assert "add-normal-segment" in EVENTS_HTML
-    assert "Änderung noch nicht angewendet" in EVENTS_HTML
+    # 0.25 removes the target selector: assignment happens through workspace cards.
+    assert 'In Aufnahmen öffnen' in EVENTS_HTML
+    assert 'id="reassignment-target"' not in EVENTS_HTML
+    assert 'id="reassignment-apply"' not in EVENTS_HTML
+    assert 'segment.start_time' in EVENTS_HTML and 'segment.end_time' in EVENTS_HTML
+    assert 'segment.family_count' in EVENTS_HTML and 'segment.file_count' in EVENTS_HTML
 
 
 def test_0212_version_and_sd_idle_copy():
     from app.main import APP_VERSION, index
 
-    assert APP_VERSION == "0.24.1"
+    assert APP_VERSION == "0.25.0"
     html = index().body.decode() if hasattr(index(), "body") else str(index())
     assert "Keine neuen Dateien" in html
     assert "Verwaltungsdateien ignoriert" in html
@@ -58,3 +58,4 @@ def test_0212_archived_reassignment_endpoint_reads_optional_targets_from_payload
     assert 'new_child_start=payload.get("new_child_start")' in endpoint
     assert 'new_child_end=payload.get("new_child_end")' in endpoint
     assert "body.get(" not in endpoint
+

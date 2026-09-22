@@ -19,7 +19,7 @@ def _family(fid, capture):
 
 
 def test_version_0206():
-    assert APP_VERSION == "0.24.1"
+    assert APP_VERSION == "0.25.0"
 
 
 def test_multisegment_shrink_derives_union_without_requiring_old_membership():
@@ -53,11 +53,14 @@ def test_multisegment_shrink_derives_union_without_requiring_old_membership():
         "start_time": first["start_time"],
         "end_time": first["end_time"],
     })
-    preview = build_event_preview(preview_payload, families)
-    assert preview["selected_family_ids"] == [1]
+    import pytest
+    from app.event_structure import EventPreviewError
+    with pytest.raises(EventPreviewError,match='durchgehenden'):
+        build_event_preview(preview_payload, families)
 
 
 def test_endpoint_multisegment_preview_does_not_pass_union_into_first_child_validator():
     source = inspect.getsource(main_module.api_update_event)
     assert 'preview_payload.pop("selected_family_ids", None)' in source
     assert 'preview["child_segments"] = child_segments' in source
+
