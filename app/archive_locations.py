@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 from typing import Iterable
+import os
+import stat
 
 from app.database import database_connection
 
@@ -11,6 +13,46 @@ SORT_BRANCHES = {"Alle", "Sortiert", "Export"}
 
 class ArchiveLocationError(ValueError):
     pass
+
+
+def archive_path_without_symlinks(archive_root: Path, relative_path: str) -> Path:
+    """Return one archive path only when no path component is a symlink.
+
+    The archive root itself is canonicalized once. Every component below that
+    root is then checked with lstat before any consumer opens/hashes the file.
+    Missing components are allowed here so callers can distinguish "missing"
+    from "unsafe"; existing symlinks are never followed.
+    """
+    raw = str(relative_path or "").replace("\\", "/").strip("/")
+    rel = PurePosixPath(raw)
+    if (
+        not raw
+        or rel.is_absolute()
+        or any(part in {"", ".", ".."} for part in rel.parts)
+    ):
+        raise ArchiveLocationError("Unsicherer relativer Archivpfad: " + raw)
+
+    root = archive_root.expanduser().resolve(strict=False)
+    candidate = root.joinpath(*rel.parts)
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ArchiveLocationError("Archivpfad verlässt die Kamerabibliothek.") from exc
+
+    current = root
+    for part in rel.parts:
+        current = current / part
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            raise ArchiveLocationError(
+                "Symlinks sind als Archivnachweis nicht zulässig: "
+                + current.relative_to(root).as_posix()
+            )
+
+    return candidate
 
 
 def stable_anchor_from_file_path(relative_path: str) -> str:
@@ -132,25 +174,26 @@ def resolve_archived_file_relative_path(
     # moved the file afterwards between Alle/Sortiert/Export, use the durable
     # structural anchor below as the bounded fallback.
     if exact_rel:
-        exact_path = root.joinpath(*PurePosixPath(exact_rel).parts).resolve(strict=False)
-        try:
-            exact_path.relative_to(root)
-        except ValueError as exc:
-            raise ArchiveLocationError("Geprüfter Archivpfad verlässt die Kamerabibliothek.") from exc
+        exact_path = archive_path_without_symlinks(root, exact_rel)
         if exact_path.is_file() and exact_path.name == filename:
             return exact_rel
 
-    anchor = root.joinpath(*PurePosixPath(anchor_rel).parts).resolve(strict=False)
-    try:
-        anchor.relative_to(root)
-    except ValueError as exc:
-        raise ArchiveLocationError("Archiv-Strukturanker verlässt die Kamerabibliothek.") from exc
+    anchor = archive_path_without_symlinks(root, anchor_rel)
     if not anchor.exists() or not anchor.is_dir():
         raise ArchiveLocationError(
             f"Der zuletzt verifizierte Archiv-Strukturanker existiert nicht mehr: {anchor_rel}"
         )
 
-    matches = [p for p in anchor.rglob(filename) if p.is_file() and p.name == filename]
+    matches = []
+    for candidate in anchor.rglob(filename):
+        if not candidate.is_file() or candidate.name != filename:
+            continue
+        relative = candidate.relative_to(root).as_posix()
+        try:
+            archive_path_without_symlinks(root, relative)
+        except ArchiveLocationError:
+            continue
+        matches.append(candidate)
     if len(matches) == 0:
         raise ArchiveLocationError(
             f"Datei wurde innerhalb des zuletzt verifizierten Strukturankers nicht gefunden: {anchor_rel}/{filename}"
