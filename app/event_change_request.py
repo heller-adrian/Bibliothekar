@@ -446,13 +446,13 @@ def propose_event_change(
 
     # Vorlage berechnen
     plan = _compute_event_plan(database_path, job_id, event_id, preview, archive_root=archive_root)
-    if "selected_family_ids" not in preview:
-        preview = dict(preview)
-        preview["selected_family_ids"] = sorted({
-            int(item["family_id"]) for item in plan["families_with_plans"]
-        })
-        preview["selected_family_count"] = len(preview["selected_family_ids"])
-        preview["selected_file_count"] = len(plan["families_with_plans"])
+    preview = dict(preview)
+    # Die aktuelle Archiv-Inventur ist für den neuen Zustand maßgeblich.
+    # Manuell seit der letzten Archivierung gelöschte Dateien/Familien werden
+    # nicht wieder als Sollbestand hineingezwungen.
+    preview["selected_family_ids"] = list(plan["selected_family_ids"])
+    preview["selected_family_count"] = len(preview["selected_family_ids"])
+    preview["selected_file_count"] = int(plan["diff_summary"]["file_count"])
 
     # ChangeRequest erstellen
     with database_connection(database_path) as connection:
@@ -560,6 +560,30 @@ def propose_event_change(
                 ),
             )
 
+        for asset in plan.get("assets_with_plans", []):
+            connection.execute(
+                """
+                INSERT INTO event_change_asset_reviews(
+                    change_request_id,asset_kind,source_file_id,family_id,
+                    old_path,new_path,action,expected_size_bytes,expected_sha256,
+                    created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    cr_id,
+                    str(asset.get("asset_kind") or "other"),
+                    asset.get("source_file_id"),
+                    asset.get("family_id"),
+                    str(asset.get("old_path") or ""),
+                    str(asset.get("new_path") or ""),
+                    str(asset.get("action") or "unresolved"),
+                    int(asset.get("expected_size_bytes") or 0),
+                    str(asset.get("expected_sha256") or ""),
+                    now,
+                    now,
+                ),
+            )
+
         connection.commit()
 
     # Rueckgabe mit Plan
@@ -618,13 +642,28 @@ def get_event_change_files(
     database_path: Path,
     cr_id: str,
 ) -> list[dict[str, Any]]:
-    """Datei-Bestaetigungen fuer einen Aenderungsauftrag."""
+    """Alle aktuellen Datei-Arbeitsanweisungen eines Änderungsauftrags."""
     with database_connection(database_path) as connection:
-        rows = connection.execute(
-            "SELECT * FROM event_change_file_reviews WHERE change_request_id = ? ORDER BY id",
-            (cr_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
+        camera_rows = [
+            {**dict(row), "review_kind": "camera"}
+            for row in connection.execute(
+                "SELECT * FROM event_change_file_reviews WHERE change_request_id=? ORDER BY id",
+                (cr_id,),
+            ).fetchall()
+        ]
+        asset_rows = [
+            {
+                **dict(row),
+                "review_kind": "asset",
+                "file_id": None,
+                "confirmed": 0,
+            }
+            for row in connection.execute(
+                "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? ORDER BY id",
+                (cr_id,),
+            ).fetchall()
+        ]
+    return camera_rows + asset_rows
 
 
 def propose_archived_event_deletion(
