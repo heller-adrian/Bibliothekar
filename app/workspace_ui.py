@@ -386,10 +386,43 @@ WORKSPACE_HTML = r"""<!doctype html>
         Menlo,
         monospace;
       font-size: 0.9rem;
-      line-height: 1.65;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
+      line-height: 1.5;
     }
+    .preview-root-title { margin-bottom:8px; font-weight:750; }
+    .preview-days { display:grid; gap:7px; }
+    .preview-day {
+      min-width:0;
+      border:1px solid var(--border);
+      border-radius:10px;
+      background:var(--surface);
+      overflow:hidden;
+    }
+    .preview-day > summary {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:8px 10px;
+      cursor:pointer;
+      list-style-position:inside;
+      white-space:nowrap;
+    }
+    .preview-day-title { min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:700; }
+    .preview-day-count { flex:0 0 auto; color:var(--muted); font-size:.76rem; }
+    .preview-family-list { display:grid; gap:4px; padding:7px 10px 9px; border-top:1px solid var(--border); }
+    .preview-family-row {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:8px;
+      align-items:baseline;
+      min-width:0;
+      white-space:nowrap;
+      font-size:clamp(.64rem, 1.05vw, .78rem);
+      line-height:1.35;
+    }
+    .preview-family-stem { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    .preview-family-time { white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .preview-selection-note { margin-top:9px; color:var(--muted); font-size:.78rem; line-height:1.4; }
 
     .timeline-event-card {
       min-width: 0;
@@ -2370,20 +2403,24 @@ WORKSPACE_HTML = r"""<!doctype html>
         selectedDatedGroups();
 
       let preview =
-        "Arbeitsbestand\n";
+        '<div class="preview-root-title">Arbeitsbestand</div><div class="preview-days">';
 
       for (const group of groups) {
-        preview +=
-          `├── ${
-            formatDay(group.day_key)
-          } · ${
-            group.file_count
-          } Dateien\n`;
-        for (const family of group.families || []) {
+        const dayLabel = group.has_date ? formatDay(group.day_key) : "Ohne Datum";
+        const familyRows = (group.families || []).map(family => {
           const capture = String(family.selected_capture_time || "");
-          preview += `│   ${family.original_stem || family.family_key || "Dateifamilie"} · ${capture.slice(0,10)} ${capture.slice(11,19)}\n`;
-        }
+          const stem = family.original_stem || family.family_key || "Dateifamilie";
+          const captureText = capture
+            ? `${capture.slice(0,10)} ${capture.slice(11,19)}`
+            : "Zeit unbekannt";
+          return `<div class="preview-family-row"><span class="preview-family-stem" title="${escapeHtml(stem)}">${escapeHtml(stem)}</span><span class="preview-family-time">${escapeHtml(captureText)}</span></div>`;
+        }).join("");
+
+        preview +=
+          `<details class="preview-day"><summary><span class="preview-day-title">${escapeHtml(dayLabel)}</span><span class="preview-day-count">${Number(group.file_count || 0)} Dateien</span></summary><div class="preview-family-list">${familyRows || '<span class="muted">Keine Familien in dieser Auswahl.</span>'}</div></details>`;
       }
+
+      preview += "</div>";
 
       if (
         groups.some(
@@ -2391,19 +2428,15 @@ WORKSPACE_HTML = r"""<!doctype html>
         )
       ) {
         preview +=
-          "\nHinweis: Dateien ohne Datum "
-          + "müssen zuerst geprüft werden.";
+          '<div class="preview-selection-note">Hinweis: Dateien ohne Datum müssen zuerst geprüft werden.</div>';
       }
 
       if (dated.length) {
         preview +=
-          "\n\nAuswahlzeitraum:\n"
-          + dated[0].day_key
-          + " bis "
-          + dated[dated.length - 1].day_key;
+          `<div class="preview-selection-note"><strong>Auswahlzeitraum:</strong> ${escapeHtml(dated[0].day_key)} bis ${escapeHtml(dated[dated.length - 1].day_key)}</div>`;
       }
 
-      structurePreview.textContent =
+      structurePreview.innerHTML =
         preview;
 
     }

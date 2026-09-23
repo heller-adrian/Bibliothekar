@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 0.26.1 – UI-Feinschliff für Neu-Zuordnung, Unterereignisse und Vorschau
+
+- Neu-Zuordnungsdialog gibt der Aktion „In Aufnahmen öffnen“ mehr Abstand zur Segmentkarte.
+- „Öffnen“ auf Ereigniskarten verwendet in geschlossenem und geöffnetem Zustand dieselbe Einrückung und einen stabilen eigenen Marker.
+- Unterereignisse im Editor haben konsistente Abstände; ihr Aufklapptitel zeigt live den eingegebenen Namen und der Entfernen-Button ist vom Zeitraumfeld getrennt.
+- Die Zielstruktur-Vorschau zeigt Tagesgruppen kompakt und standardmäßig eingeklappt. Familien erscheinen erst nach dem Öffnen eines Tages; Stem und Aufnahmezeit bleiben pro Familie in einer einzeiligen, responsiven Zeile.
+
 ### 0.26.0 – Kanonischer freier Bestand und vollständige Ereignis-Nachsortierung
 
 - Freie Aufnahmen erhalten aus der bibliotheksweiten Belegung aller aktiven Ereignisse, auch über mehrere Import-Jobs und „Ohne Ereignis“-Segmente hinweg, kanonische Tages-/Zeitordner. Bestätigte Sortierungen normalisieren betroffene freie Dateien und entfernen nur bekannte leere Altordner; fremde Inhalte bleiben erhalten. Kollisionen und Dateifehler rollen sicher zurück.

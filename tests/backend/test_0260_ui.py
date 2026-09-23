@@ -15,5 +15,6 @@ def test_event_card_navigates_directly_and_editor_closes_on_save():
     assert 'href="/workspace?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=free"' in EVENTS_HTML
     assert 'data-reassign-workspace=' not in EVENTS_HTML
     assert 'a.plan-button { display:inline-flex;' in EVENTS_HTML
-    assert 'list-style:disclosure-closed inside' in EVENTS_HTML
+    assert 'list-style:none !important' in EVENTS_HTML
+    assert '.event-details[open] > summary::before' in EVENTS_HTML
     assert 'eventEditDialog.close();\n\n      if (result.archive_manual?' in EVENTS_HTML

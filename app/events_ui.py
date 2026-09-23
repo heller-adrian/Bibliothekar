@@ -777,7 +777,14 @@ EVENTS_HTML = r"""<!doctype html>
        <details>-Summary trennen. Auf schmalen Ansichten lag dessen native
        Marker-/Textzeile direkt auf dem gelben Rahmen. */
     .reassignment-resume + .event-details { margin-top:10px; }
-    .reassignment-resume + .event-details > summary { display:inline-block; padding-top:2px; }
+    .reassignment-resume + .event-details > summary { padding-top:6px; }
+    .reassignment-dialog-action { display:flex; margin-top:14px; }
+    #normal-event-segments { display:grid; gap:10px; }
+    .child-segment-card { padding:12px 14px !important; margin:0 !important; }
+    .child-segment-card > summary { padding:2px 0 8px; }
+    .child-segment-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; padding-top:4px; }
+    .child-segment-fields > label { display:grid; gap:6px; }
+    .child-segment-remove { grid-column:1/-1; justify-self:start; margin-top:4px; }
     .event-browser-toolbar { display:flex; gap:28px; align-items:end; justify-content:space-between; flex-wrap:wrap; margin:8px 0 20px; }
     .event-browser-heading { min-width:250px; }
     .event-browser-search { min-width:min(100%,380px); flex:0 1 420px; }
@@ -798,8 +805,16 @@ EVENTS_HTML = r"""<!doctype html>
     summary { cursor:pointer; user-select:none; }
     summary[style*="display:flex"]::before { content:"▸"; flex:0 0 auto; }
     details[open] > summary[style*="display:flex"]::before { content:"▾"; }
-    .event-details > summary { display:list-item !important; list-style:disclosure-closed inside !important; padding-left:4px; }
-    .event-details[open] > summary { list-style:disclosure-open !important; }
+    .event-details > summary {
+      display:flex !important;
+      align-items:center;
+      gap:6px;
+      list-style:none !important;
+      padding:4px 0 4px 16px;
+    }
+    .event-details > summary::-webkit-details-marker { display:none; }
+    .event-details > summary::before { content:"▸"; flex:0 0 10px; width:10px; }
+    .event-details[open] > summary::before { content:"▾"; }
     button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button, #calculate-preview-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
     button.danger-button, .danger-button { background:#b42318 !important; border-color:#b42318 !important; color:white !important; }
   </style>
@@ -2207,13 +2222,14 @@ EVENTS_HTML = r"""<!doctype html>
       const normalSegmentHtml = childEvents.map((segment, index) => {
         const start=isoTime(segment.start_datetime,"00:00");
         const end=isoTime(segment.end_datetime,"23:59");
-        return `<details class="card" data-child-segment data-child-id="${escapeHtml(segment.id)}" open style="padding:8px 10px;margin:6px 0">
-          <summary style="cursor:pointer"><strong>Zeitsegment ${index+1}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)} · ${escapeHtml(segment.name||"")}</span></summary>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:8px">
-            <label class="edit-field"><span>Bezeichnung</span><input data-child-name value="${escapeHtml(segment.name||"")}" ${structural ? "" : "disabled"}></label>
-            <label class="edit-field"><span>Startzeit</span><input data-child-start type="datetime-local" value="${escapeHtml(String(segment.start_datetime).slice(0,16))}" ${structural ? "" : "disabled"}></label>
-            <label class="edit-field"><span>Endzeit</span><input data-child-end type="datetime-local" value="${escapeHtml(String(segment.end_datetime).slice(0,16))}" ${structural ? "" : "disabled"}></label>
-            ${structural ? `<button type="button" data-remove-child-segment class="danger-button">Zeitsegment entfernen</button>` : ""}
+        const title=segment.name || "Unterereignis";
+        return `<details class="card child-segment-card" data-child-segment data-child-id="${escapeHtml(segment.id)}" open>
+          <summary><strong data-child-summary>${escapeHtml(title)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
+          <div class="child-segment-fields">
+            <label class="edit-field"><span>Name</span><input data-child-name value="${escapeHtml(segment.name||"")}" ${structural ? "" : "disabled"}></label>
+            <label class="edit-field"><span>Beginn</span><input data-child-start type="datetime-local" value="${escapeHtml(String(segment.start_datetime).slice(0,16))}" ${structural ? "" : "disabled"}></label>
+            <label class="edit-field"><span>Ende</span><input data-child-end type="datetime-local" value="${escapeHtml(String(segment.end_datetime).slice(0,16))}" ${structural ? "" : "disabled"}></label>
+            ${structural ? `<button type="button" data-remove-child-segment class="danger-button child-segment-remove">Unterereignis entfernen</button>` : ""}
           </div>
         </details>`;
       }).join("");
@@ -2259,12 +2275,28 @@ EVENTS_HTML = r"""<!doctype html>
 
       if (!noEvent) {
         const normalContainer=document.getElementById('normal-event-segments');
-        const bind=()=>normalContainer.querySelectorAll('[data-remove-child-segment]').forEach(button=>button.onclick=()=>button.closest('[data-child-segment]').remove());
+        const bind=()=>{
+          normalContainer.querySelectorAll('[data-child-segment]').forEach(row=>{
+            const remove=row.querySelector('[data-remove-child-segment]');
+            if (remove) remove.onclick=()=>row.remove();
+            const nameInput=row.querySelector('[data-child-name]');
+            const summary=row.querySelector('[data-child-summary]');
+            if (nameInput && summary) {
+              const syncSummary=()=>{ summary.textContent=String(nameInput.value||"").trim() || "Unterereignis"; };
+              nameInput.oninput=syncSummary;
+              syncSummary();
+            }
+          });
+        };
         bind();
         document.getElementById('add-normal-segment').onclick=()=>{
-          const row=document.createElement('details');row.open=true;row.dataset.childSegment='1';
-          row.innerHTML=`<summary>Unterereignis</summary><label>Name<input data-child-name></label><label>Beginn<input data-child-start type="datetime-local" value="${event.start_datetime.slice(0,16)}"></label><label>Ende<input data-child-end type="datetime-local" value="${event.end_datetime.slice(0,16)}"></label><button type="button" class="danger-button" data-remove-child-segment>Unterereignis entfernen</button>`;
-          normalContainer.appendChild(row);bind();
+          const row=document.createElement('details');
+          row.open=true;
+          row.dataset.childSegment='1';
+          row.className='card child-segment-card';
+          row.innerHTML=`<summary><strong data-child-summary>Unterereignis</strong></summary><div class="child-segment-fields"><label class="edit-field"><span>Name</span><input data-child-name></label><label class="edit-field"><span>Beginn</span><input data-child-start type="datetime-local" value="${event.start_datetime.slice(0,16)}"></label><label class="edit-field"><span>Ende</span><input data-child-end type="datetime-local" value="${event.end_datetime.slice(0,16)}"></label><button type="button" class="danger-button child-segment-remove" data-remove-child-segment>Unterereignis entfernen</button></div>`;
+          normalContainer.appendChild(row);
+          bind();
         };
       } else if (structural) {
         const container = document.getElementById("no-event-segments");
@@ -2537,7 +2569,7 @@ EVENTS_HTML = r"""<!doctype html>
       const exactSegments=data.reassignment_segments || [];
       reassignmentBody.innerHTML = `<p>Ausgangsereignis: ${escapeHtml(data.event?.name || ctx.eventId)}</p>` + exactSegments.map(segment=>
         `<div class="card"><strong>${escapeHtml(segment.day_key)} · ${escapeHtml(segment.start_time)}–${escapeHtml(segment.end_time)}</strong><p>${Number(segment.family_count||0)} Familien · ${Number(segment.file_count||0)} Dateien</p></div>`).join("") +
-        `<a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(ctx.jobId)}&task=free">In Aufnahmen öffnen</a>`;
+        `<div class="reassignment-dialog-action"><a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(ctx.jobId)}&task=free">In Aufnahmen öffnen</a></div>`;
     }
 
 
