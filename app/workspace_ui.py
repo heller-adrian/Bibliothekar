@@ -1738,7 +1738,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           <div class="suggestion-head">
             <div>
               <div class="suggestion-title">${Number(item.family_count || familyIds.length)} Familien passen zu ${escapeHtml(item.target_name)}</div>
-              <div class="muted">Eindeutige Übereinstimmung mit bereits zugeordneten Aufnahmen desselben Kalendertags.</div>
+              <div class="muted">Eindeutige Übereinstimmung mit dem bereits belegten Ereigniszeitraum aus einer anderen Sicherung.</div>
             </div>
             <span class="badge ${item.target_status === "archived" ? "warning" : "success"}">${escapeHtml(statusText)}</span>
           </div>
