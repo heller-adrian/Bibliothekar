@@ -271,7 +271,7 @@ def scan_event_inventory(
             for row in analyzed.get("files", [])
             if row.get("relative_path")
         }
-    except MetadataError:
+    except (MetadataError, OSError):
         # Hash-/Existenzprüfung bleibt möglich. Für neue Exporte ohne
         # auslesbare Aufnahmemetadaten entsteht später bewusst ein unklarer
         # Zuordnungsfall statt einer geratenen Zeit.
