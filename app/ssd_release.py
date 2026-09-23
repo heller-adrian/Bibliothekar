@@ -644,9 +644,8 @@ def release_event_ssd(
     if completed is not None:
         return completed
 
-    event, files = _event_and_files(database_path, job_id, event_id)
+    event, _files = _event_and_files(database_path, job_id, event_id)
 
-    from app.database import database_connection
     with database_connection(database_path) as connection:
         pending = connection.execute(
             """SELECT COUNT(*) AS n FROM event_reapply_removed_families
@@ -669,13 +668,10 @@ def release_event_ssd(
         raise SsdReleaseError(
             "SSD-Freigabe gesperrt: Für dieses Ereignis ist noch eine Nachsortierung offen."
         )
-
     if str(event.get("status")) == "archived":
         raise SsdReleaseError(
-            "Ereignis ist bereits archiviert, aber ein abgeschlossener "
-            "SSD-Freigabelauf fehlt."
+            "Ereignis ist bereits archiviert, aber ein abgeschlossener SSD-Freigabelauf fehlt."
         )
-
     if str(event.get("status")) != "applied":
         raise SsdReleaseError(
             "Nur ein angewendetes Ereignis kann von der SSD freigegeben werden."
@@ -685,14 +681,8 @@ def release_event_ssd(
     if not archive_root.exists() or not archive_root.is_dir():
         raise SsdReleaseError("Kamerabibliothek ist nicht lesbar eingebunden.")
 
-    open_release = _latest_open_release(database_path, job_id, event_id)
     work_root = shared_work_root(workspace_path).resolve(strict=False)
-    event_root, prepared = _validate_event_tree(
-        work_root,
-        event,
-        files,
-        allow_missing_sources=open_release is not None,
-    )
+    open_release = _latest_open_release(database_path, job_id, event_id)
 
     try:
         verification = verify_event_archive(
@@ -706,13 +696,83 @@ def release_event_ssd(
 
     if not verification.get("verified"):
         raise SsdReleaseError(
-            "Kamerabibliothek ist bei der erneuten Prüfung nicht vollständig identisch."
+            "Kamerabibliothek ist bei der erneuten Prüfung der Kameraoriginale nicht vollständig identisch."
         )
 
-    release_id = (
-        str(open_release["id"])
-        if open_release is not None
-        else _create_release_run(
+    prepared: list[dict[str, Any]] = []
+    asset_prepared: list[dict[str, Any]] = []
+
+    if open_release is None:
+        try:
+            workspace_inventory = scan_event_inventory(
+                database_path,
+                work_root,
+                job_id,
+                event_id,
+                root_kind="shared_workspace",
+                persist=True,
+                update_known_file_locations=True,
+            )
+            archive_inventory = scan_event_inventory(
+                database_path,
+                archive_root,
+                job_id,
+                event_id,
+                root_kind="camera_archive",
+                persist=True,
+                update_known_file_locations=False,
+            )
+        except EventInventoryError as exc:
+            raise SsdReleaseError(str(exc)) from exc
+
+        missing_known = list(
+            workspace_inventory.get("summary", {}).get("missing_known_file_ids") or []
+        )
+        if missing_known:
+            raise SsdReleaseError(
+                "Im SSD-Ereignis fehlen importierte Kameraoriginale. "
+                "Freigabe wurde gesperrt."
+            )
+
+        source_inventory = list(workspace_inventory["files"])
+        if not source_inventory:
+            raise SsdReleaseError("Der SSD-Ereignisordner enthält keine zu sichernden Dateien.")
+
+        try:
+            matches = match_inventory_by_content(
+                source_inventory,
+                list(archive_inventory["files"]),
+            )
+        except EventInventoryError as exc:
+            raise SsdReleaseError(
+                "Nicht der gesamte aktuelle SSD-Ereignisbestand wurde im Archiv gefunden: "
+                + str(exc)
+            ) from exc
+
+        archive_by_source = {
+            str(match["source"]["relative_path"]): match["target"]
+            for match in matches
+        }
+        event_root = Path(str(workspace_inventory["event_root"]))
+
+        for item in source_inventory:
+            relative = _safe_relative(item["relative_path"])
+            target = archive_by_source[str(item["relative_path"])]
+            row = {
+                "relative": relative,
+                "archive_relative": _safe_relative(target["relative_path"]),
+                "source": work_root.joinpath(*relative.parts),
+                "size_bytes": int(item["size_bytes"]),
+                "expected_sha256": str(item["sha256"]),
+                "asset_kind": str(item.get("asset_kind") or "other"),
+            }
+            if item.get("known_file_id") is not None:
+                row["file_id"] = int(item["known_file_id"])
+                prepared.append(row)
+            else:
+                asset_prepared.append(row)
+
+        release_id = _create_release_run(
             database_path,
             job_id,
             event_id,
@@ -720,54 +780,79 @@ def release_event_ssd(
             work_root,
             archive_root,
             prepared,
+            asset_prepared,
         )
-    )
+    else:
+        release_id = str(open_release["id"])
+        event_root = work_root.joinpath(*_event_prefix(event).parts)
+        with database_connection(database_path) as connection:
+            camera_rows = connection.execute(
+                """SELECT * FROM event_ssd_release_files
+                   WHERE release_id=? ORDER BY id""",
+                (release_id,),
+            ).fetchall()
+            asset_rows = connection.execute(
+                """SELECT * FROM event_ssd_release_assets
+                   WHERE release_id=? ORDER BY id""",
+                (release_id,),
+            ).fetchall()
+
+        for stored in camera_rows:
+            relative = _safe_relative(stored["source_relative_path"])
+            prepared.append({
+                "file_id": int(stored["file_id"]),
+                "relative": relative,
+                "archive_relative": _safe_relative(stored["archive_relative_path"]),
+                "source": work_root.joinpath(*relative.parts),
+                "size_bytes": int(stored["expected_size_bytes"]),
+                "expected_sha256": str(stored["expected_sha256"]),
+                "asset_kind": "camera_original",
+            })
+        for stored in asset_rows:
+            relative = _safe_relative(stored["source_relative_path"])
+            asset_prepared.append({
+                "relative": relative,
+                "archive_relative": _safe_relative(stored["archive_relative_path"]),
+                "source": work_root.joinpath(*relative.parts),
+                "size_bytes": int(stored["expected_size_bytes"]),
+                "expected_sha256": str(stored["expected_sha256"]),
+                "asset_kind": str(stored["asset_kind"]),
+            })
 
     try:
         with database_connection(database_path) as connection:
             connection.execute(
                 """
                 UPDATE event_ssd_releases
-                SET status = 'verifying',
-                    verification_id = ?,
-                    error_message = NULL,
-                    updated_at = ?
-                WHERE id = ?
+                SET status='verifying',verification_id=?,error_message=NULL,updated_at=?
+                WHERE id=?
                 """,
                 (str(verification["id"]), _now(), release_id),
             )
 
         for row in prepared:
             file_id = int(row["file_id"])
-            relative = row["relative"]
             source = row["source"]
+            archive_rel = row["archive_relative"]
             try:
                 archive = archive_path_without_symlinks(
                     archive_root,
-                    relative.as_posix(),
+                    archive_rel.as_posix(),
                 )
             except ArchiveLocationError as exc:
                 raise SsdReleaseError(str(exc)) from exc
+
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
-
             _archive_stat, archive_hash = _verify_regular_file(
-                archive,
-                expected_size,
-                expected_hash,
-                "Archivdatei",
+                archive, expected_size, expected_hash, "Archivdatei"
             )
 
             source_exists = source.exists() or source.is_symlink()
-            source_hash: str | None = None
-            source_stat: os.stat_result | None = None
-
+            source_hash = None
             if source_exists:
-                source_stat, source_hash = _verify_regular_file(
-                    source,
-                    expected_size,
-                    expected_hash,
-                    "SSD-Datei",
+                _source_stat, source_hash = _verify_regular_file(
+                    source, expected_size, expected_hash, "SSD-Datei"
                 )
             elif open_release is None:
                 raise SsdReleaseError("SSD-Datei fehlt: " + str(source))
@@ -776,14 +861,11 @@ def release_event_ssd(
                 connection.execute(
                     """
                     UPDATE event_ssd_release_files
-                    SET status = 'archive_verified',
-                        actual_source_size_bytes = ?,
-                        actual_source_sha256 = ?,
-                        actual_archive_size_bytes = ?,
-                        actual_archive_sha256 = ?,
-                        verified_at = ?,
-                        error_message = NULL
-                    WHERE release_id = ? AND file_id = ?
+                    SET status='archive_verified',
+                        actual_source_size_bytes=?,actual_source_sha256=?,
+                        actual_archive_size_bytes=?,actual_archive_sha256=?,
+                        verified_at=?,error_message=NULL
+                    WHERE release_id=? AND file_id=?
                     """,
                     (
                         expected_size if source_exists else None,
@@ -796,37 +878,85 @@ def release_event_ssd(
                     ),
                 )
 
+        for row in asset_prepared:
+            source = row["source"]
+            source_rel = row["relative"].as_posix()
+            archive_rel = row["archive_relative"]
+            try:
+                archive = archive_path_without_symlinks(
+                    archive_root,
+                    archive_rel.as_posix(),
+                )
+            except ArchiveLocationError as exc:
+                raise SsdReleaseError(str(exc)) from exc
+
+            expected_size = int(row["size_bytes"])
+            expected_hash = str(row["expected_sha256"])
+            _archive_stat, archive_hash = _verify_regular_file(
+                archive, expected_size, expected_hash, "Archivdatei"
+            )
+
+            source_exists = source.exists() or source.is_symlink()
+            source_hash = None
+            if source_exists:
+                _source_stat, source_hash = _verify_regular_file(
+                    source, expected_size, expected_hash, "SSD-Datei"
+                )
+            elif open_release is None:
+                raise SsdReleaseError("SSD-Datei fehlt: " + str(source))
+
+            with database_connection(database_path) as connection:
+                connection.execute(
+                    """
+                    UPDATE event_ssd_release_assets
+                    SET status='archive_verified',
+                        actual_source_size_bytes=?,actual_source_sha256=?,
+                        actual_archive_size_bytes=?,actual_archive_sha256=?,
+                        verified_at=?,error_message=NULL
+                    WHERE release_id=? AND source_relative_path=?
+                    """,
+                    (
+                        expected_size if source_exists else None,
+                        source_hash,
+                        expected_size,
+                        archive_hash,
+                        _now(),
+                        release_id,
+                        source_rel,
+                    ),
+                )
+
         with database_connection(database_path) as connection:
-            verified_source_count = connection.execute(
-                """
-                SELECT COUNT(*)
-                FROM event_ssd_release_files
-                WHERE release_id = ?
-                  AND actual_source_sha256 IS NOT NULL
-                """,
+            camera_source = int(connection.execute(
+                """SELECT COUNT(*) FROM event_ssd_release_files
+                   WHERE release_id=? AND actual_source_sha256 IS NOT NULL""",
                 (release_id,),
-            ).fetchone()[0]
-            verified_archive_count = connection.execute(
-                """
-                SELECT COUNT(*)
-                FROM event_ssd_release_files
-                WHERE release_id = ?
-                  AND status = 'archive_verified'
-                """,
+            ).fetchone()[0])
+            asset_source = int(connection.execute(
+                """SELECT COUNT(*) FROM event_ssd_release_assets
+                   WHERE release_id=? AND actual_source_sha256 IS NOT NULL""",
                 (release_id,),
-            ).fetchone()[0]
+            ).fetchone()[0])
+            camera_archive = int(connection.execute(
+                """SELECT COUNT(*) FROM event_ssd_release_files
+                   WHERE release_id=? AND status='archive_verified'""",
+                (release_id,),
+            ).fetchone()[0])
+            asset_archive = int(connection.execute(
+                """SELECT COUNT(*) FROM event_ssd_release_assets
+                   WHERE release_id=? AND status='archive_verified'""",
+                (release_id,),
+            ).fetchone()[0])
             connection.execute(
                 """
                 UPDATE event_ssd_releases
-                SET status = 'deleting',
-                    verified_source_count = ?,
-                    verified_archive_count = ?,
-                    updated_at = ?
-                WHERE id = ?
+                SET status='deleting',verified_source_count=?,
+                    verified_archive_count=?,updated_at=?
+                WHERE id=?
                 """,
                 (
-                    int(verified_source_count),
-                    int(verified_archive_count),
+                    camera_source + asset_source,
+                    camera_archive + asset_archive,
                     _now(),
                     release_id,
                 ),
@@ -835,12 +965,11 @@ def release_event_ssd(
         deleted_count = 0
         deleted_bytes = 0
 
-        for row in prepared:
-            file_id = int(row["file_id"])
+        def delete_source(row: dict[str, Any], *, asset: bool) -> None:
+            nonlocal deleted_count, deleted_bytes
             source = row["source"]
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
-
             if source.exists() or source.is_symlink():
                 source_stat, _source_hash = _verify_regular_file(
                     source,
@@ -861,10 +990,8 @@ def release_event_ssd(
                     int(source_stat.st_size),
                 ):
                     raise SsdReleaseError(
-                        "SSD-Datei änderte sich unmittelbar vor dem Löschen: "
-                        + str(source)
+                        "SSD-Datei änderte sich unmittelbar vor dem Löschen: " + str(source)
                     )
-
                 source.unlink()
                 _fsync_directory(source.parent)
                 status_value = "deleted"
@@ -874,34 +1001,40 @@ def release_event_ssd(
                 status_value = "already_released"
 
             with database_connection(database_path) as connection:
+                if asset:
+                    connection.execute(
+                        """UPDATE event_ssd_release_assets
+                           SET status=?,deleted_at=?,error_message=NULL
+                           WHERE release_id=? AND source_relative_path=?""",
+                        (
+                            status_value,
+                            _now(),
+                            release_id,
+                            row["relative"].as_posix(),
+                        ),
+                    )
+                else:
+                    connection.execute(
+                        """UPDATE event_ssd_release_files
+                           SET status=?,deleted_at=?,error_message=NULL
+                           WHERE release_id=? AND file_id=?""",
+                        (status_value, _now(), release_id, int(row["file_id"])),
+                    )
                 connection.execute(
-                    """
-                    UPDATE event_ssd_release_files
-                    SET status = ?,
-                        deleted_at = ?,
-                        error_message = NULL
-                    WHERE release_id = ? AND file_id = ?
-                    """,
-                    (status_value, _now(), release_id, file_id),
-                )
-                connection.execute(
-                    """
-                    UPDATE event_ssd_releases
-                    SET deleted_file_count = ?,
-                        deleted_size_bytes = ?,
-                        updated_at = ?
-                    WHERE id = ?
-                    """,
+                    """UPDATE event_ssd_releases
+                       SET deleted_file_count=?,deleted_size_bytes=?,updated_at=?
+                       WHERE id=?""",
                     (deleted_count, deleted_bytes, _now(), release_id),
                 )
 
+        for row in prepared:
+            delete_source(row, asset=False)
+        for row in asset_prepared:
+            delete_source(row, asset=True)
+
         with database_connection(database_path) as connection:
             connection.execute(
-                """
-                UPDATE event_ssd_releases
-                SET status = 'finalizing', updated_at = ?
-                WHERE id = ?
-                """,
+                "UPDATE event_ssd_releases SET status='finalizing',updated_at=? WHERE id=?",
                 (_now(), release_id),
             )
 
@@ -919,3 +1052,4 @@ def release_event_ssd(
         if isinstance(error, SsdReleaseError):
             raise
         raise SsdReleaseError(str(error)) from error
+
