@@ -352,20 +352,51 @@ def scan_event_inventory(
             continue
         rel = PurePosixPath(row["event_relative_path"])
         candidates = by_same_dir_stem.get((str(rel.parent), rel.stem), [])
-        if len(candidates) != 1:
+        if not candidates:
             candidates = by_stem.get(rel.stem, [])
-        if len(candidates) == 1:
-            source = candidates[0]
+
+        source = candidates[0] if len(candidates) == 1 else None
+        candidate_family_ids = {
+            int(item["family_id"])
+            for item in candidates
+            if item.get("family_id") is not None
+        }
+
+        # Ein Lightroom-XMP kann denselben Stem wie RAF und Kamera-JPEG haben.
+        # Dann ist kein einzelnes Ursprungs-file eindeutig, wohl aber die
+        # Kamerafamilie. Genau diese Beziehung reicht für gemeinsame
+        # Neu-Zuordnung und Aufnahmezeit-Vererbung.
+        family_source = None
+        if len(candidate_family_ids) == 1:
+            family_id = next(iter(candidate_family_ids))
+            family_members = [
+                item for item in candidates
+                if item.get("family_id") is not None
+                and int(item["family_id"]) == family_id
+            ]
+            if family_members:
+                family_source = family_members[0]
+                row["family_id"] = family_id
+
+        if source is not None:
             row["source_file_id"] = source["known_file_id"]
             if row["family_id"] is None:
                 row["family_id"] = source["family_id"]
-            if (
-                not row["selected_capture_time"]
-                or row["capture_time_confidence"] in {"missing", "low", "conflict"}
-            ):
-                row["selected_capture_time"] = source["selected_capture_time"]
-                row["selected_capture_source"] = "source_file_inheritance"
-                row["capture_time_confidence"] = "high" if source["selected_capture_time"] else "missing"
+            family_source = source
+
+        if family_source is not None and (
+            not row["selected_capture_time"]
+            or row["capture_time_confidence"] in {"missing", "low", "conflict"}
+        ):
+            row["selected_capture_time"] = family_source["selected_capture_time"]
+            row["selected_capture_source"] = (
+                "source_file_inheritance"
+                if source is not None
+                else "family_inheritance"
+            )
+            row["capture_time_confidence"] = (
+                "high" if family_source["selected_capture_time"] else "missing"
+            )
 
     scanned_at = _now()
     if persist:
