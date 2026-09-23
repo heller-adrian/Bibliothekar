@@ -102,23 +102,23 @@ def _compute_event_plan(
         requested_set = set(requested_ids)
         relevant_ids = sorted(current_family_ids | requested_set)
 
-        if not relevant_ids:
-            raise EventChangeRequestError("Der Aenderungsauftrag enthaelt keine Dateifamilien.")
-
-        placeholders = ",".join("?" for _ in relevant_ids)
-        rows = connection.execute(
-            f"""
-            SELECT f.id AS file_id, f.family_id, f.current_relative_path,
-                   f.original_relative_path, f.size_bytes,
-                   f.sha256_current, f.sha256_original,
-                   ff.family_key, ff.selected_capture_time
-            FROM files f
-            JOIN file_families ff ON ff.id = f.family_id AND ff.job_id = f.job_id
-            WHERE f.job_id = ? AND f.family_id IN ({placeholders})
-            ORDER BY ff.selected_capture_time, ff.id, f.current_relative_path, f.id
-            """,
-            (job_id, *relevant_ids),
-        ).fetchall()
+        if relevant_ids:
+            placeholders = ",".join("?" for _ in relevant_ids)
+            rows = connection.execute(
+                f"""
+                SELECT f.id AS file_id, f.family_id, f.current_relative_path,
+                       f.original_relative_path, f.size_bytes,
+                       f.sha256_current, f.sha256_original,
+                       ff.family_key, ff.selected_capture_time
+                FROM files f
+                JOIN file_families ff ON ff.id = f.family_id AND ff.job_id = f.job_id
+                WHERE f.job_id = ? AND f.family_id IN ({placeholders})
+                ORDER BY ff.selected_capture_time, ff.id, f.current_relative_path, f.id
+                """,
+                (job_id, *relevant_ids),
+            ).fetchall()
+        else:
+            rows = []
 
     parent_folder = str(preview.get("parent_folder") or "").strip()
     child_folder = str(preview.get("child_folder") or "").strip()
