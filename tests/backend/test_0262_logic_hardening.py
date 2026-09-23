@@ -57,7 +57,7 @@ def seed_event(
                uses_time_range,folder_name,status,created_at,updated_at,event_kind,
                preserve_day_folders,revision,applied_at,archived_at,resort_required,
                time_model_version,timeline_model
-           ) VALUES (?,?,NULL,'parent',?,?,?,0,?,?,?,?, 'event',?,1,?,?,?,?,2,'continuous')""",
+           ) VALUES (?,?,NULL,'parent',?,?,?,0,?,?,?,?, 'event',?,1,?,?,?,2,'continuous')""",
         (
             event_id,
             job_id,
