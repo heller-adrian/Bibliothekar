@@ -810,10 +810,16 @@ EVENTS_HTML = r"""<!doctype html>
       align-items:center;
       gap:6px;
       list-style:none !important;
-      padding:4px 0 4px 16px;
+      padding:4px 0;
     }
     .event-details > summary::-webkit-details-marker { display:none; }
-    .event-details > summary::before { content:"▸"; flex:0 0 10px; width:10px; }
+    .event-details > summary::before {
+      content:"▸";
+      flex:0 0 12px;
+      width:12px;
+      font-size:1.08rem;
+      line-height:1;
+    }
     .event-details[open] > summary::before { content:"▾"; }
     button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button, #calculate-preview-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
     button.danger-button, .danger-button { background:#b42318 !important; border-color:#b42318 !important; color:white !important; }
