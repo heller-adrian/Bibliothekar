@@ -100,4 +100,4 @@ def test_change_plan_uses_actual_archive_location_not_stale_db_path(tmp_path):
     row=plan['families_with_plans'][0]
     assert row['file_id']==file_id
     assert row['old_path']=='2026/07-23 - Test/09-00 - 15-00 - Test/Sortiert/a.JPG'
-    assert row['new_path']=='2026/07-23 - Test/09-00 - 10-00 - Test/Alle/a.JPG'
+    assert row['new_path']=='2026/07-23 - Test/09-00 - 10-00 - Test/Sortiert/a.JPG'
