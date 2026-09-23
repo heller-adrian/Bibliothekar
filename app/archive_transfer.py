@@ -9,7 +9,12 @@ import os
 import uuid
 
 from app.database import database_connection
-from app.archive_locations import record_family_anchor, record_verified_file_location
+from app.archive_locations import (
+    ArchiveLocationError,
+    archive_path_without_symlinks,
+    record_family_anchor,
+    record_verified_file_location,
+)
 
 
 class ArchiveVerificationError(RuntimeError):
@@ -241,6 +246,7 @@ def list_archive_candidates(
                 events.created_at AS event_created_at,
                 events.applied_at,
                 events.archived_at,
+                COALESCE(events.resort_required, 0) AS resort_required,
                 COALESCE(counts.file_count, 0) AS file_count,
                 COALESCE(counts.family_count, 0) AS family_count,
                 COALESCE(counts.total_size_bytes, 0) AS total_size_bytes,
@@ -302,12 +308,18 @@ def list_archive_candidates(
             and item.get("status") == "applied"
             and int(item.get("pending_reassignment_count") or 0) == 0
             and int(item.get("active_mutation_count") or 0) == 0
+            and int(item.get("resort_required") or 0) == 0
         )
-        item["ssd_release_block_reason"] = (
-            "Offene Neu-Zuordnung/Ereignisänderung zuerst abschließen."
-            if (int(item.get("pending_reassignment_count") or 0) > 0 or int(item.get("active_mutation_count") or 0) > 0)
-            else None
-        )
+        if int(item.get("resort_required") or 0):
+            item["ssd_release_block_reason"] = (
+                "Nachsortierung noch offen. Bitte die angewendete Änderung zuerst vollständig ausführen."
+            )
+        elif int(item.get("pending_reassignment_count") or 0) > 0 or int(item.get("active_mutation_count") or 0) > 0:
+            item["ssd_release_block_reason"] = (
+                "Offene Neu-Zuordnung/Ereignisänderung zuerst abschließen."
+            )
+        else:
+            item["ssd_release_block_reason"] = None
         item["ssd_release_available"] = True
         candidates.append(item)
 
@@ -350,6 +362,11 @@ def verify_event_archive(
     if str(event.get("status")) not in {"applied", "archived"}:
         raise ArchiveVerificationError(
             "Nur angewendete oder archivierte Ereignisse können geprüft werden."
+        )
+
+    if str(event.get("status")) == "applied" and int(event.get("resort_required") or 0):
+        raise ArchiveVerificationError(
+            "Archivprüfung gesperrt: Die Nachsortierung des Ereignisses ist noch nicht abgeschlossen."
         )
 
     if not files:
@@ -401,10 +418,13 @@ def verify_event_archive(
                 row.get("current_relative_path")
                 or row.get("original_relative_path")
             )
-            candidate = archive_root.joinpath(*relative.parts).resolve(strict=False)
-
-            if not _is_relative_to(candidate, archive_root):
-                raise ArchiveVerificationError("Archivpfad verlässt die Kamerabibliothek.")
+            try:
+                candidate = archive_path_without_symlinks(
+                    archive_root,
+                    relative.as_posix(),
+                )
+            except ArchiveLocationError as exc:
+                raise ArchiveVerificationError(str(exc)) from exc
 
             expected_size = int(row["size_bytes"])
             expected_sha256 = str(
