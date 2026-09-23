@@ -19,7 +19,7 @@ def _family(fid, capture):
 
 
 def test_version_0206():
-    assert APP_VERSION == "0.26.2"
+    assert APP_VERSION == "0.26.3"
 
 
 def test_multisegment_shrink_derives_union_without_requiring_old_membership():
