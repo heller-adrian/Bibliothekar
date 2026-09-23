@@ -21,6 +21,7 @@ from typing import Any
 
 from app.database import database_connection
 from app.archive_locations import resolve_archived_file_relative_path, ArchiveLocationError
+from app.event_inventory import EventInventoryError, scan_event_inventory
 
 
 class EventChangeRequestError(ValueError):
@@ -36,10 +37,25 @@ def _compute_event_plan(
 ) -> dict[str, Any]:
     """Berechne den manuellen Archiv-Aenderungsplan dateigenau.
 
-    Die Kamerabibliothek wird hier ausschliesslich beschrieben. ``old_path``
-    und ``new_path`` sind echte relative Pfade innerhalb der Kamerabibliothek;
-    es werden weder Platzhalter noch physische Dateioperationen erzeugt.
+    Vor jeder Bearbeitung eines archivierten Ereignisses wird der reale
+    Ereignisordner neu eingelesen. Alte DB-Pfade sind nur noch zuletzt
+    beobachtete Orte und niemals die aktuelle IST-Wahrheit.
     """
+    inventory = None
+    if archive_root is not None:
+        try:
+            inventory = scan_event_inventory(
+                database_path,
+                archive_root,
+                job_id,
+                event_id,
+                root_kind="camera_archive",
+                persist=True,
+                update_known_file_locations=True,
+            )
+        except EventInventoryError as exc:
+            raise EventChangeRequestError(str(exc)) from exc
+
     with database_connection(database_path) as connection:
         event = connection.execute(
             "SELECT * FROM events WHERE id = ? AND job_id = ?",
@@ -64,9 +80,23 @@ def _compute_event_plan(
             """,
             (job_id, event_id),
         ).fetchall()
-        current_family_ids = {int(r["family_id"]) for r in assigned_rows}
+        assigned_family_ids = {int(r["family_id"]) for r in assigned_rows}
+        if inventory is not None:
+            current_family_ids = {
+                int(item["family_id"])
+                for item in inventory["files"]
+                if item.get("known_file_id") is not None and item.get("family_id") is not None
+            }
+        else:
+            current_family_ids = assigned_family_ids
+
         if "selected_family_ids" in preview:
-            requested_ids = sorted({int(v) for v in preview.get("selected_family_ids", [])})
+            requested = {int(v) for v in preview.get("selected_family_ids", [])}
+            requested_ids = sorted(
+                requested & current_family_ids
+                if inventory is not None
+                else requested
+            )
         else:
             requested_ids = sorted(current_family_ids)
         requested_set = set(requested_ids)
