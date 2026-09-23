@@ -787,6 +787,13 @@ def assign_event_reassignments(
                             "Mindestens ein vollständiges Tages-/Zeitsegment passt nicht "
                             "in den Zeitraum des Zielereignisses."
                         )
+            for row in capture_rows:
+                cap=str(row["selected_capture_time"] or "")[:19]
+                if not any(start <= cap <= end for start,end,_ in target_intervals):
+                    raise EventReassignmentError(
+                        "Mindestens eine Familie liegt außerhalb des Zeitraums des Zielereignisses."
+                    )
+
             if str(target["job_id"]) != job_id:
                 # The target occupies time library-wide, while files remain owned
                 # by their import job. Keep those two truths compatible by creating
@@ -797,27 +804,38 @@ def assign_event_reassignments(
                 connection.commit()
             else:
                 assignments=[]
-                    for row in capture_rows:
+                for row in capture_rows:
                     cap=str(row["selected_capture_time"] or "")[:19]
-                    if not any(start <= cap <= end for start,end,_ in target_intervals):
-                        raise EventReassignmentError(
-                            "Mindestens eine Familie liegt außerhalb des Zeitraums des Zielereignisses."
-                        )
                     assignment_id=_assignment_event_id(connection,target,cap)
                     if assignment_id == str(target["id"]):
-                        children=connection.execute("SELECT COUNT(*) FROM events WHERE parent_event_id=?",(target["id"],)).fetchone()[0]
+                        children=connection.execute(
+                            "SELECT COUNT(*) FROM events WHERE parent_event_id=?",
+                            (target["id"],),
+                        ).fetchone()[0]
                         if int(children or 0):
-                            raise EventReassignmentError("Mindestens eine Familie passt in kein vorhandenes Unterereignis. Wähle dafür „Neues Unterereignis“.")
+                            raise EventReassignmentError(
+                                "Mindestens eine Familie passt in kein vorhandenes Unterereignis. "
+                                "Wähle dafür „Neues Unterereignis“."
+                            )
                     assignments.append((assignment_id,int(row["id"]),now))
                 connection.executemany(
                     "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
                     assignments,
                 )
                 if str(target["status"]) == "applied":
-                    connection.execute("UPDATE events SET resort_required=1,updated_at=? WHERE id=?",(now,target["id"]))
-                target_info={"event_id":str(target["id"]),"name":str(target["name"]),"status":str(target["status"]),
-                             "folder_name":str(target["folder_name"]),"preserve_day_folders":bool(target["preserve_day_folders"]),
-                             "linkage_kind":str(target["linkage_kind"] or ""),"linked_target_status":str(target["status"])}
+                    connection.execute(
+                        "UPDATE events SET resort_required=1,updated_at=? WHERE id=?",
+                        (now,target["id"]),
+                    )
+                target_info={
+                    "event_id":str(target["id"]),
+                    "name":str(target["name"]),
+                    "status":str(target["status"]),
+                    "folder_name":str(target["folder_name"]),
+                    "preserve_day_folders":bool(target["preserve_day_folders"]),
+                    "linkage_kind":str(target["linkage_kind"] or ""),
+                    "linked_target_status":str(target["status"]),
+                }
                 connection.commit()
     elif target_mode == "new_child":
         if not target_event_id:
