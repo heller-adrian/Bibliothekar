@@ -15,6 +15,7 @@ from typing import Any
 from app.database import database_connection
 from app.archive_reassignment import apply_archive_reassignment_targets
 from app.event_timeline import normalize_no_event_segments, replace_event_segments
+from app.event_inventory import EventInventoryError, scan_event_inventory
 from app.archive_locations import (
     ArchiveLocationError,
     archive_path_without_symlinks,
@@ -610,6 +611,26 @@ def finish_event_change(
         )
         connection.commit()
 
+    inventory_refresh_error = None
+    inventory_summary = None
+    try:
+        refreshed = scan_event_inventory(
+            database_path,
+            archive_root,
+            str(cr["job_id"]),
+            str(cr["event_id"]),
+            root_kind="camera_archive",
+            persist=True,
+            update_known_file_locations=True,
+        )
+        inventory_summary = refreshed.get("summary")
+    except EventInventoryError as exc:
+        # Die manuelle Änderung ist zu diesem Zeitpunkt bereits geprüft und
+        # atomar in SQLite abgeschlossen. Ein nachgelagerter Inventurfehler
+        # darf diesen konsistenten Abschluss nicht rückwirkend als fehlgeschlagen
+        # darstellen; der nächste Bearbeitungslauf scannt ohnehin erneut.
+        inventory_refresh_error = str(exc)
+
     return {
         "status": "archiviert",
         "change_request_id": cr_id,
@@ -617,4 +638,6 @@ def finish_event_change(
         "files_changed_by_app": 0,
         "verified_file_count": verification["verified_file_count"],
         "created_reassignment_event_ids": created_reassignment_events,
+        "inventory_summary": inventory_summary,
+        "inventory_refresh_error": inventory_refresh_error,
     }
