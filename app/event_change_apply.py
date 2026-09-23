@@ -318,7 +318,15 @@ def finish_event_change(
     selected_ids = sorted({int(v) for v in json.loads(cr["selected_family_ids"] or "[]")})
     delete_event = bool(cr.get("delete_event") or 0)
     if not selected_ids and not delete_event:
-        raise EventChangeApplyError("Mindestens eine Dateifamilie muss dem Ereignis zugeordnet bleiben.")
+        with database_connection(database_path) as connection:
+            asset_count = int(connection.execute(
+                "SELECT COUNT(*) FROM event_change_asset_reviews WHERE change_request_id=?",
+                (cr_id,),
+            ).fetchone()[0])
+        if asset_count == 0:
+            raise EventChangeApplyError(
+                "Das archivierte Ereignis enthält weder aktuelle Kamera- noch weitere Ereignisdateien."
+            )
 
     start_date = str(cr["start_date"])
     end_date = str(cr["end_date"])
