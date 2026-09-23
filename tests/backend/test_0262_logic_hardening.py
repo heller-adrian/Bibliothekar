@@ -20,7 +20,7 @@ from app.event_change_apply import (
     verify_event_change,
 )
 from app.event_change_request import get_event_change_files, propose_event_change
-from app.event_reassignment import _create_new_no_event
+from app.event_reassignment import _create_new_no_event, assign_event_reassignments
 from app.event_suggestions import accept_event_suggestion, list_event_suggestions
 from app.main import _applied_edit_is_metadata_only
 from app.sort_apply import recover_interrupted_sort_runs
@@ -511,3 +511,143 @@ def test_0262_legacy_new_no_event_keeps_explicit_day_folder_choice(tmp_path):
             (result["event_id"],),
         ).fetchone()
     assert tuple(row) == (1, "no_event")
+
+
+def queue_family_for_reassignment(connection, *, job_id: str, source_event_id: str, family_id: int) -> None:
+    connection.execute(
+        """INSERT INTO event_reapply_removed_families(
+               event_id,job_id,family_id,created_at
+           ) VALUES (?,?,?,?)""",
+        (source_event_id, job_id, family_id, NOW),
+    )
+
+
+def test_0262_reassignment_to_cross_job_normal_event_creates_local_followup(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        seed_job(connection, "old")
+        seed_job(connection, "new")
+        seed_event(
+            connection,
+            event_id="target",
+            job_id="old",
+            status="planned",
+            start="2026-07-23T10:00:00",
+            end="2026-07-23T12:00:59",
+            folder="07-23 - Target",
+            name="Target",
+            preserve=True,
+        )
+        seed_event(
+            connection,
+            event_id="source",
+            job_id="new",
+            status="planned",
+            start="2026-07-23T00:00:00",
+            end="2026-07-23T23:59:59",
+            folder="07-23 - Source",
+            name="Source",
+        )
+        family_id, _ = seed_family_file(
+            connection,
+            job_id="new",
+            family_key="LATE",
+            capture="2026-07-23T11:00:00",
+            current_path="2026/free/LATE.JPG",
+            content=b"x",
+        )
+        queue_family_for_reassignment(
+            connection,
+            job_id="new",
+            source_event_id="source",
+            family_id=family_id,
+        )
+
+    result = assign_event_reassignments(
+        db,
+        "new",
+        "source",
+        [family_id],
+        target_mode="existing_event",
+        target_event_id="target",
+    )
+    followup_id = result["target"]["event_id"]
+    assert followup_id != "target"
+    with database_connection(db) as connection:
+        event = connection.execute(
+            """SELECT job_id,linked_event_id,linkage_kind,status,preserve_day_folders
+               FROM events WHERE id=?""",
+            (followup_id,),
+        ).fetchone()
+        assignment = connection.execute(
+            "SELECT event_id FROM event_assignments WHERE family_id=?",
+            (family_id,),
+        ).fetchone()
+    assert tuple(event) == ("new", "target", "planned_extension", "planned", 1)
+    assert assignment["event_id"] == followup_id
+
+
+def test_0262_cross_job_no_event_extension_inherits_day_folder_choice(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        seed_job(connection, "old")
+        seed_job(connection, "new")
+        seed_event(
+            connection,
+            event_id="target",
+            job_id="old",
+            status="planned",
+            start="2026-07-01T00:00:00",
+            end="2026-07-31T23:59:59",
+            folder="07 - Ohne Ereignis",
+            name="Ohne Ereignis",
+            preserve=True,
+        )
+        connection.execute(
+            """UPDATE events
+               SET event_kind='no_event',timeline_model='segments'
+               WHERE id='target'"""
+        )
+        seed_event(
+            connection,
+            event_id="source",
+            job_id="new",
+            status="planned",
+            start="2026-07-23T00:00:00",
+            end="2026-07-23T23:59:59",
+            folder="07-23 - Source",
+            name="Source",
+        )
+        family_id, _ = seed_family_file(
+            connection,
+            job_id="new",
+            family_key="LATE",
+            capture="2026-07-23T11:00:00",
+            current_path="2026/free/LATE.JPG",
+            content=b"x",
+        )
+        queue_family_for_reassignment(
+            connection,
+            job_id="new",
+            source_event_id="source",
+            family_id=family_id,
+        )
+
+    result = assign_event_reassignments(
+        db,
+        "new",
+        "source",
+        [family_id],
+        target_mode="existing_no_event",
+        target_event_id="target",
+    )
+    followup_id = result["target"]["event_id"]
+    with database_connection(db) as connection:
+        event = connection.execute(
+            """SELECT event_kind,preserve_day_folders,linked_event_id,linkage_kind
+               FROM events WHERE id=?""",
+            (followup_id,),
+        ).fetchone()
+    assert tuple(event) == ("no_event", 1, "target", "planned_extension")
