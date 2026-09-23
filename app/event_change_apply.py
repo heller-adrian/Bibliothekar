@@ -15,7 +15,12 @@ from typing import Any
 from app.database import database_connection
 from app.archive_reassignment import apply_archive_reassignment_targets
 from app.event_timeline import normalize_no_event_segments, replace_event_segments
-from app.archive_locations import record_family_anchor, record_verified_file_location
+from app.archive_locations import (
+    ArchiveLocationError,
+    archive_path_without_symlinks,
+    record_family_anchor,
+    record_verified_file_location,
+)
 
 
 class EventChangeApplyError(ValueError):
@@ -39,16 +44,10 @@ def _sha256_file(path: Path) -> str:
 
 def _safe_archive_path(archive_root: Path, relative_value: Any) -> Path:
     raw = str(relative_value or "").strip().replace("\\", "/")
-    rel = PurePosixPath(raw)
-    if not raw or rel.is_absolute() or any(part in {"", ".", ".."} for part in rel.parts):
-        raise EventChangeApplyError("Unsicherer relativer Archivpfad: " + raw)
-    candidate = archive_root.joinpath(*rel.parts).resolve(strict=False)
-    root = archive_root.resolve(strict=False)
     try:
-        candidate.relative_to(root)
-    except ValueError as error:
-        raise EventChangeApplyError("Archivpfad verlässt die Kamerabibliothek.") from error
-    return candidate
+        return archive_path_without_symlinks(archive_root, raw)
+    except ArchiveLocationError as exc:
+        raise EventChangeApplyError(str(exc)) from exc
 
 
 def confirm_event_change(database_path: Path, cr_id: str) -> dict[str, Any]:
@@ -84,7 +83,19 @@ def confirm_event_change(database_path: Path, cr_id: str) -> dict[str, Any]:
     }
 
 
-def cancel_event_change(database_path: Path, cr_id: str) -> dict[str, Any]:
+def cancel_event_change(
+    database_path: Path,
+    cr_id: str,
+    archive_root: Path | None = None,
+) -> dict[str, Any]:
+    """Abort only while the original archive state is still provably intact.
+
+    A proposal can be cancelled freely because no manual action has been
+    confirmed yet. Once confirmed, every original file must still exist with
+    the expected size/SHA and no distinct target path may already exist.
+    """
+    from app.event_change_request import get_event_change_files
+
     now = _now()
     with database_connection(database_path) as connection:
         row = connection.execute(
@@ -92,10 +103,56 @@ def cancel_event_change(database_path: Path, cr_id: str) -> dict[str, Any]:
         ).fetchone()
         if row is None:
             raise EventChangeApplyError("Änderungsauftrag nicht gefunden.")
-        if row["status"] not in ("aenderbar_vorschlagen", "aenderbar_bestaetigt"):
+        status = str(row["status"])
+        if status not in ("aenderbar_vorschlagen", "aenderbar_bestaetigt"):
             raise EventChangeApplyError(
-                f"Status '{row['status']}' erlaubt keinen Abbruch."
+                f"Status '{status}' erlaubt keinen Abbruch."
             )
+
+    if status == "aenderbar_bestaetigt":
+        if archive_root is None:
+            raise EventChangeApplyError(
+                "Ein bestätigter Archivauftrag kann nur nach Prüfung des ursprünglichen Archivzustands verworfen werden."
+            )
+        root = archive_root.expanduser().resolve(strict=False)
+        reviews = get_event_change_files(database_path, cr_id)
+        if not reviews:
+            raise EventChangeApplyError("Der Änderungsauftrag enthält keine Dateien.")
+
+        for review in reviews:
+            old_rel = str(review.get("old_path") or "")
+            new_rel = str(review.get("new_path") or "")
+            expected_size = int(review.get("expected_size_bytes") or 0)
+            expected_sha = str(review.get("expected_sha256") or "").strip()
+            if not expected_sha:
+                raise EventChangeApplyError(
+                    "Abbruch gesperrt: Für mindestens eine Archivdatei fehlt die gespeicherte SHA-256-Summe."
+                )
+
+            old_path = _safe_archive_path(root, old_rel)
+            if not old_path.is_file():
+                raise EventChangeApplyError(
+                    "Abbruch gesperrt: Der ursprüngliche Archivzustand ist nicht mehr vollständig vorhanden."
+                )
+            if expected_size and int(old_path.stat().st_size) != expected_size:
+                raise EventChangeApplyError(
+                    "Abbruch gesperrt: Eine ursprüngliche Archivdatei hat eine abweichende Größe."
+                )
+            if _sha256_file(old_path) != expected_sha:
+                raise EventChangeApplyError(
+                    "Abbruch gesperrt: Eine ursprüngliche Archivdatei hat eine abweichende SHA-256-Summe."
+                )
+
+            action = str(review.get("action") or "")
+            if action in {"move", "merge"} and new_rel and new_rel != old_rel:
+                new_path = _safe_archive_path(root, new_rel)
+                if new_path.exists() or new_path.is_symlink():
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Am neuen Archivpfad wurden bereits manuelle Änderungen erkannt. "
+                        "Bitte zuerst den alten Archivzustand vollständig wiederherstellen."
+                    )
+
+    with database_connection(database_path) as connection:
         connection.execute(
             "UPDATE event_change_requests SET status = 'aenderbar_abgebrochen', "
             "cancelled_at = ?, updated_at = ? WHERE id = ?",
@@ -153,6 +210,9 @@ def verify_event_change(
                 status = "needs_reassignment"
                 message = "Familie fällt aus dem Ereignis heraus und muss zuerst einem Zielereignis zugeordnet werden."
                 open_reassignments += 1
+            elif not expected_sha:
+                status = "missing_sha256"
+                message = "Gespeicherte SHA-256-Summe fehlt; die Archivänderung kann nicht verifiziert werden."
             else:
                 target_rel = new_rel if action == "move" else (new_rel or old_rel)
                 target = _safe_archive_path(root, target_rel)
@@ -164,15 +224,13 @@ def verify_event_change(
                     if expected_size and actual_size != expected_size:
                         status = "size_mismatch"
                         message = "Dateigröße weicht ab."
-                    elif expected_sha:
+                    else:
                         actual_sha = _sha256_file(target)
                         if actual_sha != expected_sha:
                             status = "sha256_mismatch"
                             message = "SHA-256-Summe weicht ab."
                         else:
                             status = "verified"
-                    else:
-                        status = "verified"
 
                 if status == "verified" and action == "move" and old_rel != new_rel:
                     old_target = _safe_archive_path(root, old_rel)
@@ -474,14 +532,23 @@ def finish_event_change(
         # bestätigten stabilen Archivanker je Familie speichern. Alle/Sortiert/
         # Export sind bewusst nicht Teil des Ankers.
         verified_rows = connection.execute(
-            """SELECT family_id,new_path FROM event_change_file_reviews
+            """SELECT family_id,file_id,new_path FROM event_change_file_reviews
                WHERE change_request_id=? AND verification_status='verified' AND new_path<>''
                ORDER BY family_id,id""",
             (cr_id,),
         ).fetchall()
         paths_by_family: dict[int, list[str]] = {}
         for row in verified_rows:
-            paths_by_family.setdefault(int(row["family_id"]), []).append(str(row["new_path"]))
+            family_id = int(row["family_id"])
+            new_path = str(row["new_path"])
+            paths_by_family.setdefault(family_id, []).append(new_path)
+            if row["file_id"] is not None:
+                connection.execute(
+                    """UPDATE files
+                       SET current_relative_path=?, current_root_kind='camera_archive', updated_at=?
+                       WHERE id=?""",
+                    (new_path, now, int(row["file_id"])),
+                )
         for family_id, verified_paths in paths_by_family.items():
             owner = connection.execute(
                 """SELECT COALESCE(parent.id,assigned.id) AS root_event_id
