@@ -461,6 +461,7 @@ def _no_event_segments_for_rows(rows) -> list[dict[str, str]]:
 def _create_new_no_event(
     database_path: Path, job_id: str, family_ids: list[int],
     *, ignore_event_ids: set[str] | None = None, segments: list[dict[str,str]] | None = None,
+    preserve_day_folders: bool = False,
 ) -> dict[str, Any]:
     with database_connection(database_path) as connection:
         rows = _selected_capture_rows(connection, job_id, family_ids)
@@ -500,6 +501,7 @@ def _create_new_no_event(
         "event_kind": "no_event",
         "event_name": "Ohne Ereignis",
         "no_event_segments": (segments or _no_event_segments_for_rows(rows)),
+        "preserve_day_folders": bool(preserve_day_folders),
         "selected_family_ids": family_ids,
     }, available)
     created = create_planned_event(database_path, job_id, preview, ignore_event_ids=ignore_event_ids)
@@ -507,7 +509,7 @@ def _create_new_no_event(
     return {
         "event_id": str(event["id"]), "name": str(event["name"]),
         "status": "planned", "folder_name": str(event["folder_name"]),
-        "preserve_day_folders": False, "linkage_kind": "",
+        "preserve_day_folders": bool(event.get("preserve_day_folders")), "linkage_kind": "",
         "linked_target_status": "planned",
     }
 
@@ -531,9 +533,10 @@ def _create_cross_job_no_event_extension(connection, job_id: str, target, family
             id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,
             folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,
             applied_at,archived_at,linked_event_id,linkage_kind,timeline_model,resort_required
-        ) VALUES (?,?,NULL,'parent','Ohne Ereignis',?,?,0,?,'planned',?,?,'no_event',0,1,NULL,NULL,?,
+        ) VALUES (?,?,NULL,'parent','Ohne Ereignis',?,?,0,?,'planned',?,?,'no_event',?,1,NULL,NULL,?,
                   'planned_extension','segments',0)""",
-        (event_id,job_id,min(captures),max(captures),target["folder_name"],now,now,target["id"]),
+        (event_id,job_id,min(captures),max(captures),target["folder_name"],now,now,
+         int(bool(target["preserve_day_folders"])),target["id"]),
     )
     connection.executemany(
         "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
@@ -550,7 +553,8 @@ def _create_cross_job_no_event_extension(connection, job_id: str, target, family
         )
     return {
         "event_id": event_id, "name": "Ohne Ereignis", "status": "planned",
-        "folder_name": str(target["folder_name"]), "preserve_day_folders": False,
+        "folder_name": str(target["folder_name"]),
+        "preserve_day_folders": bool(target["preserve_day_folders"]),
         "linkage_kind": "planned_extension", "linked_target_status": str(target["status"]),
     }
 
@@ -686,7 +690,10 @@ def assign_event_reassignments(
         )
     elif target_mode == "new_no_event":
         target_info = _create_new_no_event(
-            database_path, job_id, selected, ignore_event_ids=ignored_for_target, segments=exact_segments,
+            database_path, job_id, selected,
+            ignore_event_ids=ignored_for_target,
+            segments=exact_segments,
+            preserve_day_folders=preserve_day_folders,
         )
     elif target_mode == "existing_no_event":
         if not target_event_id:
@@ -765,7 +772,7 @@ def assign_event_reassignments(
             raise EventReassignmentError("Das Zielereignis fehlt.")
         with database_connection(database_path) as connection:
             target=_root_event(connection,target_event_id)
-            if target is None or str(target["job_id"]) != job_id or str(target["event_kind"]) != "event" or str(target["status"]) not in {"planned","applied"}:
+            if target is None or str(target["event_kind"]) != "event" or str(target["status"]) not in {"planned","applied"}:
                 raise EventReassignmentError("Das Zielereignis ist nicht mehr verfügbar.")
             capture_rows=_selected_capture_rows(connection,job_id,selected)
             target_intervals = _effective_target_intervals(connection, target)
@@ -780,29 +787,38 @@ def assign_event_reassignments(
                             "Mindestens ein vollständiges Tages-/Zeitsegment passt nicht "
                             "in den Zeitraum des Zielereignisses."
                         )
-            assignments=[]
-            for row in capture_rows:
-                cap=str(row["selected_capture_time"] or "")[:19]
-                if not any(start <= cap <= end for start,end,_ in target_intervals):
-                    raise EventReassignmentError(
-                        "Mindestens eine Familie liegt außerhalb des Zeitraums des Zielereignisses."
-                    )
-                assignment_id=_assignment_event_id(connection,target,cap)
-                if assignment_id == str(target["id"]):
-                    children=connection.execute("SELECT COUNT(*) FROM events WHERE parent_event_id=?",(target["id"],)).fetchone()[0]
-                    if int(children or 0):
-                        raise EventReassignmentError("Mindestens eine Familie passt in kein vorhandenes Unterereignis. Wähle dafür „Neues Unterereignis“.")
-                assignments.append((assignment_id,int(row["id"]),now))
-            connection.executemany(
-                "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
-                assignments,
-            )
-            if str(target["status"]) == "applied":
-                connection.execute("UPDATE events SET resort_required=1,updated_at=? WHERE id=?",(now,target["id"]))
-            target_info={"event_id":str(target["id"]),"name":str(target["name"]),"status":str(target["status"]),
-                         "folder_name":str(target["folder_name"]),"preserve_day_folders":bool(target["preserve_day_folders"]),
-                         "linkage_kind":str(target["linkage_kind"] or ""),"linked_target_status":str(target["status"])}
-            connection.commit()
+            if str(target["job_id"]) != job_id:
+                # The target occupies time library-wide, while files remain owned
+                # by their import job. Keep those two truths compatible by creating
+                # a current-job technical follow-up linked to the canonical target.
+                target_info = _create_linked_followup(
+                    connection, job_id, target, selected, now,
+                )
+                connection.commit()
+            else:
+                assignments=[]
+                    for row in capture_rows:
+                    cap=str(row["selected_capture_time"] or "")[:19]
+                    if not any(start <= cap <= end for start,end,_ in target_intervals):
+                        raise EventReassignmentError(
+                            "Mindestens eine Familie liegt außerhalb des Zeitraums des Zielereignisses."
+                        )
+                    assignment_id=_assignment_event_id(connection,target,cap)
+                    if assignment_id == str(target["id"]):
+                        children=connection.execute("SELECT COUNT(*) FROM events WHERE parent_event_id=?",(target["id"],)).fetchone()[0]
+                        if int(children or 0):
+                            raise EventReassignmentError("Mindestens eine Familie passt in kein vorhandenes Unterereignis. Wähle dafür „Neues Unterereignis“.")
+                    assignments.append((assignment_id,int(row["id"]),now))
+                connection.executemany(
+                    "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
+                    assignments,
+                )
+                if str(target["status"]) == "applied":
+                    connection.execute("UPDATE events SET resort_required=1,updated_at=? WHERE id=?",(now,target["id"]))
+                target_info={"event_id":str(target["id"]),"name":str(target["name"]),"status":str(target["status"]),
+                             "folder_name":str(target["folder_name"]),"preserve_day_folders":bool(target["preserve_day_folders"]),
+                             "linkage_kind":str(target["linkage_kind"] or ""),"linked_target_status":str(target["status"])}
+                connection.commit()
     elif target_mode == "new_child":
         if not target_event_id:
             raise EventReassignmentError("Das Oberereignis fehlt.")
