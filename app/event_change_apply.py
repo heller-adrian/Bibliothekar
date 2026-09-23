@@ -205,10 +205,16 @@ def verify_event_change(
             message = None
 
             if action == "delete":
-                # 0.16.2: Herausfallende Familien werden niemals gelöscht.
-                # Ohne neues Ziel bleibt die Aufgabe bewusst offen.
+                # Herausfallende Kamerafamilien werden niemals gelöscht.
                 status = "needs_reassignment"
                 message = "Familie fällt aus dem Ereignis heraus und muss zuerst einem Zielereignis zugeordnet werden."
+                open_reassignments += 1
+            elif action == "unresolved":
+                status = "needs_assignment"
+                message = (
+                    "Diese aktuelle XMP-/Export-/Ereignisdatei lässt sich anhand "
+                    "der verfügbaren Aufnahmeinformationen noch keinem eindeutigen Ziel zuordnen."
+                )
                 open_reassignments += 1
             elif not expected_sha:
                 status = "missing_sha256"
@@ -241,9 +247,14 @@ def verify_event_change(
             if status == "verified":
                 ok_count += 1
 
+            table = (
+                "event_change_asset_reviews"
+                if str(review.get("review_kind") or "camera") == "asset"
+                else "event_change_file_reviews"
+            )
             connection.execute(
-                """
-                UPDATE event_change_file_reviews
+                f"""
+                UPDATE {table}
                 SET verification_status = ?, actual_size_bytes = ?, actual_sha256 = ?,
                     verified_at = ?, updated_at = ?
                 WHERE id = ?
@@ -253,7 +264,9 @@ def verify_event_change(
             results.append({
                 "id": review["id"],
                 "file_id": review.get("file_id"),
-                "family_id": review["family_id"],
+                "family_id": review.get("family_id"),
+                "asset_kind": review.get("asset_kind"),
+                "review_kind": review.get("review_kind", "camera"),
                 "action": action,
                 "old_path": old_rel,
                 "new_path": new_rel,
