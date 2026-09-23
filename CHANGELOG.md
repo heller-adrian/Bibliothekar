@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### 0.26.2 – Logikhärtung nach vollständigem Konsistenz-Audit
+
+- Archivnachweise akzeptieren keine Symlinks mehr: erwartete Archivpfade und ihre vorhandenen Komponenten werden mit `lstat` geprüft, bevor SHA-Prüfung oder SSD-Freigabe möglich sind.
+- Abgeschlossene manuelle Archivänderungen aktualisieren neben dem exakten Archivnachweis auch den allgemeinen aktuellen Dateipfad; Folgeprüfung, weitere Änderung und Löschplanung verwenden dadurch wieder dieselbe Pfadwahrheit.
+- Bestätigte manuelle Archivaufträge können nur verworfen werden, wenn der ursprüngliche Archivzustand vollständig per Größe und SHA-256 nachgewiesen ist und am neuen Ziel noch keine manuelle Änderung erkannt wird.
+- Fehlende Legacy-SHA-256-Werte reichen auch bei passender Dateigröße nicht mehr für eine erfolgreiche Archivänderungsprüfung.
+- Reine Name-/Notizänderungen angewendeter Ereignisse werden anhand einer kanonischen Struktur verglichen und lösen nicht mehr unnötig Mutation und Nachsortierung aus.
+- `resort_required` sperrt Archivprüfung und SSD-Freigabe bereits fachlich und wird in der Archivübersicht als Blocker ausgewiesen.
+- Spätere Import-Jobs können normale bibliotheksweit belegende Ereignisse als explizites Ziel erreichen. Die Dateien bleiben Eigentum ihres Import-Jobs und werden über einen lokalen verknüpften Nachtrag angebunden.
+- Der ältere direkte Reassignment-Pfad übernimmt bei `Ohne Ereignis` die Tagesordneroption wieder korrekt; Cross-Job-Fortführungen erben die Einstellung der kanonischen Monatssammlung.
+- Unterbrochene Sortier-/Reconcile-Läufe werden beim Start anhand des persistierten Journals konservativ auf den letzten DB-IST-Zustand zurückgerollt. Eindeutige Fälle werden wieder freigegeben; mehrdeutige Dateizustände bleiben bewusst gesperrt.
+- Neue 0.26.2-Regressionstests decken Symlink-Freigabe, Archivpfad-Fortschreibung, sicheren Auftragsabbruch, fehlende Hashes, UI-Metadatenvergleich, Cross-Job-Nachträge, Wiederanlauf sowie Archiv-/Nachsortierungssperren ab.
+
 ### 0.26.1 – UI-Feinschliff für Neu-Zuordnung, Unterereignisse und Vorschau
 
 - Neu-Zuordnungsdialog gibt der Aktion „In Aufnahmen öffnen“ mehr Abstand zur Segmentkarte.
