@@ -509,7 +509,7 @@ def _create_new_no_event(
     return {
         "event_id": str(event["id"]), "name": str(event["name"]),
         "status": "planned", "folder_name": str(event["folder_name"]),
-        "preserve_day_folders": bool(event.get("preserve_day_folders")), "linkage_kind": "",
+        "preserve_day_folders": bool(event["preserve_day_folders"]), "linkage_kind": "",
         "linked_target_status": "planned",
     }
 
