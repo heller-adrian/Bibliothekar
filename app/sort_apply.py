@@ -217,6 +217,145 @@ def mark_incomplete_sort_runs_interrupted(
     return int(cursor.rowcount or 0)
 
 
+def _verify_recovery_copy(path: Path, expected_size: int, expected_sha256: str) -> None:
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError as exc:
+        raise SortApplyError("Datei fehlt bei der Wiederherstellung: " + str(path)) from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise SortApplyError("Wiederherstellung verweigert nicht-reguläre Datei: " + str(path))
+    if int(info.st_size) != int(expected_size):
+        raise SortApplyError("Dateigröße weicht bei der Wiederherstellung ab: " + str(path))
+    if not expected_sha256:
+        raise SortApplyError("Gespeicherte SHA-256-Summe fehlt für: " + str(path))
+    if _sha256_file(path) != str(expected_sha256):
+        raise SortApplyError("SHA-256-Summe weicht bei der Wiederherstellung ab: " + str(path))
+
+
+def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
+    """Safely roll interrupted sort/reconcile runs back to their DB IST paths.
+
+    SQLite path finalization and the run status are committed atomically. Thus a
+    run that is still interrupted after startup has not committed its new file
+    paths. The journaled source path is therefore the only safe automatic
+    recovery target. Ambiguous filesystem states remain blocked for manual
+    inspection instead of being guessed.
+    """
+    with database_connection(database_path) as connection:
+        runs = [
+            dict(row) for row in connection.execute(
+                """SELECT * FROM sort_runs
+                   WHERE status='interrupted'
+                   ORDER BY created_at,id"""
+            ).fetchall()
+        ]
+
+    recovered = 0
+    blocked = 0
+
+    for run in runs:
+        run_id = str(run["id"])
+        source_root = Path(str(run["source_root"])).resolve(strict=False)
+        target_root = Path(str(run["target_root"])).resolve(strict=False)
+        with database_connection(database_path) as connection:
+            operations = [
+                dict(row) for row in connection.execute(
+                    """SELECT * FROM sort_operations
+                       WHERE sort_run_id=?
+                       ORDER BY sequence_number,id""",
+                    (run_id,),
+                ).fetchall()
+            ]
+
+        try:
+            for operation in reversed(operations):
+                source_rel = _safe_relative(operation["source_relative_path"])
+                destination_rel = _safe_relative(operation["destination_relative_path"])
+                source = source_root.joinpath(*source_rel.parts)
+                destination = target_root.joinpath(*destination_rel.parts)
+                expected_size = int(operation["expected_size_bytes"])
+                expected_sha = str(operation["expected_sha256"] or "").strip()
+
+                if source == destination or str(operation.get("status") or "") == "already_at_target":
+                    _verify_recovery_copy(source, expected_size, expected_sha)
+                    continue
+
+                source_exists = source.exists() or source.is_symlink()
+                destination_exists = destination.exists() or destination.is_symlink()
+
+                if source_exists and not destination_exists:
+                    _verify_recovery_copy(source, expected_size, expected_sha)
+                elif destination_exists and not source_exists:
+                    _verify_recovery_copy(destination, expected_size, expected_sha)
+                    _rollback_one(source, destination)
+                    _verify_recovery_copy(source, expected_size, expected_sha)
+                elif source_exists and destination_exists:
+                    source_info = os.lstat(source)
+                    destination_info = os.lstat(destination)
+                    if (
+                        not stat.S_ISREG(source_info.st_mode)
+                        or not stat.S_ISREG(destination_info.st_mode)
+                        or int(source_info.st_dev) != int(destination_info.st_dev)
+                        or int(source_info.st_ino) != int(destination_info.st_ino)
+                    ):
+                        raise SortApplyError(
+                            "Wiederherstellung ist mehrdeutig: Quelle und Ziel existieren als verschiedene Dateien: "
+                            + str(source) + " / " + str(destination)
+                        )
+                    _verify_recovery_copy(source, expected_size, expected_sha)
+                    _rollback_one(source, destination)
+                else:
+                    raise SortApplyError(
+                        "Wiederherstellung ist nicht möglich, weil Quelle und Ziel fehlen: "
+                        + str(source)
+                    )
+
+                with database_connection(database_path) as connection:
+                    connection.execute(
+                        """UPDATE sort_operations
+                           SET status='rolled_back',rolled_back_at=?,error_message=NULL
+                           WHERE sort_run_id=? AND id=?""",
+                        (_now(), run_id, int(operation["id"])),
+                    )
+
+            now = _now()
+            with database_connection(database_path) as connection:
+                connection.execute(
+                    """UPDATE sort_runs
+                       SET status='rolled_back',
+                           phase='Unterbrochener Lauf sicher zurückgesetzt – erneut starten möglich',
+                           error_message=NULL,completed_at=?,updated_at=?
+                       WHERE id=? AND status='interrupted'""",
+                    (now, now, run_id),
+                )
+                connection.execute(
+                    """INSERT INTO audit_log(
+                           job_id,action,entity_type,entity_id,details_json,created_at
+                       ) VALUES (?,'interrupted_sort_run_recovered','sort_run',?,?,?)""",
+                    (
+                        str(run["job_id"]),
+                        run_id,
+                        _json_details({"recovery":"rollback_to_journaled_source","run_kind":str(run.get("run_kind") or "initial")}),
+                        now,
+                    ),
+                )
+            recovered += 1
+
+        except Exception as exc:
+            blocked += 1
+            now = _now()
+            with database_connection(database_path) as connection:
+                connection.execute(
+                    """UPDATE sort_runs
+                       SET phase='Unterbrochen – automatische Wiederherstellung nicht eindeutig',
+                           error_message=?,updated_at=?
+                       WHERE id=? AND status='interrupted'""",
+                    (str(exc), now, run_id),
+                )
+
+    return {"recovered": recovered, "blocked": blocked}
+
+
 def prepare_sort_run(
     database_path: Path,
     job_id: str,
