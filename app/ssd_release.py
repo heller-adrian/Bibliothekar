@@ -502,36 +502,38 @@ def _finalize_release(
             raise SsdReleaseError("SSD-Freigabelauf wurde nicht gefunden.")
 
         operations = connection.execute(
-            """
-            SELECT *
-            FROM event_ssd_release_files
-            WHERE release_id = ?
-            ORDER BY id
-            """,
+            """SELECT * FROM event_ssd_release_files
+               WHERE release_id=? ORDER BY id""",
             (release_id,),
         ).fetchall()
+        asset_operations = connection.execute(
+            """SELECT * FROM event_ssd_release_assets
+               WHERE release_id=? ORDER BY id""",
+            (release_id,),
+        ).fetchall()
+        all_operations = list(operations) + list(asset_operations)
 
-        if not operations or any(
+        if not all_operations or any(
             str(row["status"]) not in {"deleted", "already_released"}
-            for row in operations
+            for row in all_operations
         ):
             raise SsdReleaseError(
                 "Nicht alle SSD-Dateien wurden sicher freigegeben."
             )
 
         file_ids = [int(row["file_id"]) for row in operations]
-        placeholders = ",".join("?" for _ in file_ids)
-
-        connection.execute(
-            f"""
-            UPDATE files
-            SET current_root_kind = 'camera_archive',
-                updated_at = ?
-            WHERE job_id = ?
-              AND id IN ({placeholders})
-            """,
-            (now, job_id, *file_ids),
-        )
+        if file_ids:
+            placeholders = ",".join("?" for _ in file_ids)
+            connection.execute(
+                f"""
+                UPDATE files
+                SET current_root_kind = 'camera_archive',
+                    updated_at = ?
+                WHERE job_id = ?
+                  AND id IN ({placeholders})
+                """,
+                (now, job_id, *file_ids),
+            )
 
         connection.execute(
             """
@@ -545,15 +547,22 @@ def _finalize_release(
             (now, now, job_id, event_id, event_id),
         )
 
+        connection.execute(
+            "DELETE FROM event_inventory_files WHERE event_id=? AND root_kind='shared_workspace'",
+            (event_id,),
+        )
+
         details = {
             "removed_directories": removed_directories,
-            "file_count": len(operations),
+            "file_count": len(all_operations),
+            "camera_file_count": len(operations),
+            "asset_file_count": len(asset_operations),
             "deleted_file_count": sum(
-                1 for row in operations if str(row["status"]) == "deleted"
+                1 for row in all_operations if str(row["status"]) == "deleted"
             ),
             "already_released_file_count": sum(
                 1
-                for row in operations
+                for row in all_operations
                 if str(row["status"]) == "already_released"
             ),
         }
@@ -609,11 +618,7 @@ def _finalize_release(
         )
 
         final = connection.execute(
-            """
-            SELECT *
-            FROM event_ssd_releases
-            WHERE id = ?
-            """,
+            "SELECT * FROM event_ssd_releases WHERE id=?",
             (release_id,),
         ).fetchone()
 
@@ -623,7 +628,7 @@ def _finalize_release(
     result["released"] = True
     result["message"] = (
         "Kamerabibliothek erneut vollständig geprüft und "
-        "SSD-Bestand sicher freigegeben."
+        "SSD-Bestand einschließlich XMP/Export sicher freigegeben."
     )
     return result
 
