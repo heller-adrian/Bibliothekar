@@ -221,10 +221,12 @@ def test_0262_symlink_archive_path_never_releases_ssd_source(tmp_path):
     with pytest.raises(ArchiveLocationError, match="Symlinks"):
         archive_path_without_symlinks(archive, rel)
 
-    with pytest.raises(ArchiveVerificationError, match="Symlinks"):
-        verify_event_archive(db, archive, "j", "e")
+    verification = verify_event_archive(db, archive, "j", "e")
+    assert verification["verified"] is False
+    assert verification["files"][0]["status"] == "unsafe_path"
+    assert "Symlinks" in verification["files"][0]["error_message"]
 
-    with pytest.raises(SsdReleaseError, match="Symlinks"):
+    with pytest.raises(SsdReleaseError, match="nicht vollständig identisch"):
         release_event_ssd(db, workspace, archive, "j", "e")
 
     assert source.read_bytes() == data
@@ -477,7 +479,7 @@ def test_0262_resort_required_blocks_archive_verification_and_ready_state(tmp_pa
         )
 
     summary = list_archive_candidates(db, archive)
-    candidate = next(item for item in summary["events"] if item["event_id"] == "e")
+    candidate = next(item for item in summary["candidates"] if item["event_id"] == "e")
     assert candidate["ssd_release_ready"] is False
     assert "Nachsortierung" in candidate["ssd_release_block_reason"]
 
