@@ -337,3 +337,47 @@ def test_0263_ssd_release_protects_camera_xmp_and_export_independent_of_subfolde
         ("export", "deleted"),
         ("xmp", "deleted"),
     }
+
+
+def test_0263_xmp_links_to_family_when_raf_and_jpeg_share_stem(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    archive = tmp_path / "archive"
+    jpg = b"camera-jpg"
+    raf = b"camera-raf"
+    with database_connection(db) as connection:
+        seed_job(connection)
+        seed_event(connection, status="archived")
+        family_id, jpg_id = seed_family(
+            connection,
+            content=jpg,
+            current_path="2026/07-23 - Trip/Sortiert/A.JPG",
+        )
+        raf_id = seed_file_for_family(
+            connection,
+            family_id=family_id,
+            content=raf,
+            current_path="2026/07-23 - Trip/Sortiert/A.RAF",
+            filename="A.RAF",
+        )
+
+    sorted_dir = archive / "2026" / "07-23 - Trip" / "Sortiert"
+    sorted_dir.mkdir(parents=True)
+    (sorted_dir / "A.JPG").write_bytes(jpg)
+    (sorted_dir / "A.RAF").write_bytes(raf)
+    (sorted_dir / "A.xmp").write_text("<xmp/>", encoding="utf-8")
+
+    inventory = scan_event_inventory(
+        db,
+        archive,
+        "j",
+        "e",
+        root_kind="camera_archive",
+        persist=True,
+        update_known_file_locations=True,
+    )
+    xmp = next(row for row in inventory["files"] if row["asset_kind"] == "xmp")
+    assert xmp["family_id"] == family_id
+    assert xmp["source_file_id"] is None
+    assert xmp["selected_capture_time"].startswith("2026-07-23T12:00:00")
+    assert {row["known_file_id"] for row in inventory["files"] if row["known_file_id"]} == {jpg_id, raf_id}
