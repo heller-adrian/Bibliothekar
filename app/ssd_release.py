@@ -12,6 +12,7 @@ import uuid
 from app.archive_transfer import ArchiveVerificationError, verify_event_archive
 from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.database import database_connection
+from app.event_inventory import EventInventoryError, match_inventory_by_content, scan_event_inventory
 from app.workspace_layout import shared_work_root
 
 
@@ -316,10 +317,12 @@ def _create_release_run(
     work_root: Path,
     archive_root: Path,
     files: list[dict[str, Any]],
+    assets: list[dict[str, Any]],
 ) -> str:
     release_id = "RELEASE_" + uuid.uuid4().hex.upper()
     now = _now()
-    total_size = sum(int(row["size_bytes"]) for row in files)
+    all_rows = list(files) + list(assets)
+    total_size = sum(int(row["size_bytes"]) for row in all_rows)
 
     with database_connection(database_path) as connection:
         connection.execute(
@@ -338,7 +341,7 @@ def _create_release_run(
                 verification_id,
                 str(work_root),
                 str(archive_root),
-                len(files),
+                len(all_rows),
                 total_size,
                 now,
                 now,
@@ -359,11 +362,31 @@ def _create_release_run(
                     release_id,
                     int(row["file_id"]),
                     row["relative"].as_posix(),
-                    row["relative"].as_posix(),
+                    row["archive_relative"].as_posix(),
                     int(row["size_bytes"]),
                     str(row["expected_sha256"]),
                 )
                 for row in files
+            ],
+        )
+
+        connection.executemany(
+            """
+            INSERT INTO event_ssd_release_assets (
+                release_id,asset_kind,source_relative_path,archive_relative_path,
+                expected_size_bytes,expected_sha256,status
+            ) VALUES (?,?,?,?,?,?,'planned')
+            """,
+            [
+                (
+                    release_id,
+                    str(row.get("asset_kind") or "other"),
+                    row["relative"].as_posix(),
+                    row["archive_relative"].as_posix(),
+                    int(row["size_bytes"]),
+                    str(row["expected_sha256"]),
+                )
+                for row in assets
             ],
         )
 
