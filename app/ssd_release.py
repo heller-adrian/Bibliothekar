@@ -522,17 +522,19 @@ def _finalize_release(
             )
 
         file_ids = [int(row["file_id"]) for row in operations]
-        if file_ids:
-            placeholders = ",".join("?" for _ in file_ids)
+        for operation in operations:
             connection.execute(
-                f"""
-                UPDATE files
-                SET current_root_kind = 'camera_archive',
-                    updated_at = ?
-                WHERE job_id = ?
-                  AND id IN ({placeholders})
-                """,
-                (now, job_id, *file_ids),
+                """UPDATE files
+                   SET current_relative_path=?,
+                       current_root_kind='camera_archive',
+                       updated_at=?
+                   WHERE job_id=? AND id=?""",
+                (
+                    str(operation["archive_relative_path"]),
+                    now,
+                    job_id,
+                    int(operation["file_id"]),
+                ),
             )
 
         connection.execute(
