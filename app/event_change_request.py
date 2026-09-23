@@ -152,93 +152,259 @@ def _compute_event_plan(
     removed_family_ids = current_family_ids - requested_set
     added_family_ids = requested_set - current_family_ids
     file_plans: list[dict[str, Any]] = []
+    asset_plans: list[dict[str, Any]] = []
+
+    inventory_by_file_id = {
+        int(item["known_file_id"]): item
+        for item in (inventory["files"] if inventory is not None else [])
+        if item.get("known_file_id") is not None
+    }
+
+    end_date = str(preview.get("end_date") or start_date)
+    uses_time_range = bool(preview.get("uses_time_range"))
+
+    def capture_belongs(capture: str) -> bool:
+        value = str(capture or "")[:19]
+        if len(value) < 19:
+            return False
+        if str(preview.get("event_kind") or "event") == "no_event":
+            from app.event_timeline import normalize_no_event_segments
+            try:
+                segments = normalize_no_event_segments(preview.get("no_event_segments") or [])
+            except Exception:
+                return False
+            return any(
+                str(segment["start_datetime"]) <= value <= str(segment["end_datetime"])
+                for segment in segments
+            )
+        lower = (
+            f"{start_date}T{str(preview.get('start_time') or '00:00')}:00"
+            if uses_time_range else f"{start_date}T00:00:00"
+        )
+        upper = (
+            f"{end_date}T{str(preview.get('end_time') or '23:59')}:59"
+            if uses_time_range else f"{end_date}T23:59:59"
+        )
+        return lower <= value <= upper
+
+    def target_for(
+        *,
+        filename: str,
+        capture: str | None,
+        branch: str,
+        old_event_relative_path: str,
+    ) -> str | None:
+        value = str(capture or "")[:19]
+        safe_branch = branch if branch in {"Alle", "Sortiert", "Export"} else ""
+        parts = [year, parent_folder]
+
+        if value and capture_belongs(value):
+            if normalized_child_segments:
+                matching = [
+                    segment for segment in normalized_child_segments
+                    if str(
+                        segment.get("start_datetime")
+                        or f"{start_date}T{segment['start_time']}:00"
+                    ) <= value <= str(
+                        segment.get("end_datetime")
+                        or f"{end_date}T{segment['end_time']}:59"
+                    )
+                ]
+                if len(matching) > 1:
+                    return None
+                if matching:
+                    parts.append(str(matching[0]["folder"]))
+            elif child_folder:
+                parts.append(child_folder)
+
+            if preserve_day_folders:
+                day_key = value[:10]
+                if len(day_key) != 10:
+                    return None
+                parts.append(day_key)
+
+            if safe_branch:
+                parts.append(safe_branch)
+            parts.append(filename)
+            return "/".join(parts)
+
+        # Ohne belastbare Aufnahmezeit darf nichts in neue Tages-/Unterereignis-
+        # Strukturen geraten. Bei einer reinen Ereignisordner-Umbenennung bleibt
+        # jedoch die interne relative Lage vollständig erhalten.
+        if not normalized_child_segments and not child_folder and not preserve_day_folders:
+            suffix = str(old_event_relative_path or "").replace("\\", "/").strip("/")
+            if suffix:
+                return "/".join([year, parent_folder, suffix])
+        return None
 
     for row in rows:
+        file_id = int(row["file_id"])
         family_id = int(row["family_id"])
-        stored_path = str(row["current_relative_path"] or row["original_relative_path"] or "").replace("\\", "/").lstrip("/")
+
+        observed = inventory_by_file_id.get(file_id)
+        if inventory is not None and observed is None:
+            # Die Datei wurde seit der letzten Archivierung manuell entfernt.
+            # Das ist ein legitimer neuer IST-Bestand und erzeugt keinen Auftrag.
+            continue
+
+        stored_path = str(
+            observed["relative_path"]
+            if observed is not None
+            else row["current_relative_path"] or row["original_relative_path"] or ""
+        ).replace("\\", "/").lstrip("/")
         filename = Path(stored_path).name
         if not filename:
             raise EventChangeRequestError(f"Dateiname fuer Datei {row['file_id']} fehlt.")
         old_path = stored_path
-        if archive_root is not None:
-            fallback_anchor = "/".join([str(event["start_datetime"] or "")[:4], str(event["folder_name"] or "").strip()]).strip("/")
-            try:
-                old_path = resolve_archived_file_relative_path(
-                    database_path,
-                    archive_root,
-                    event_id=str(event_id),
-                    family_id=family_id,
-                    filename=filename,
-                    fallback_anchor=fallback_anchor,
-                    file_id=int(row["file_id"]),
-                )
-            except ArchiveLocationError as exc:
-                raise EventChangeRequestError(str(exc)) from exc
+        old_event_relative = str(observed.get("event_relative_path") or "") if observed else ""
+        branch = str(observed.get("branch") or "") if observed else ""
+        if not branch:
+            for part in Path(old_path).parts:
+                if part in {"Alle", "Sortiert", "Export"}:
+                    branch = part
+                    break
+        if not branch:
+            branch = "Alle"
 
         new_path = ""
         if family_id in requested_set:
-            parts = [year, parent_folder]
-            capture=str(row["selected_capture_time"] or "")[:19]
-            if normalized_child_segments:
-                matching=[s for s in normalized_child_segments if str(s.get('start_datetime') or f"{start_date}T{s['start_time']}:00") <= capture <= str(s.get('end_datetime') or f"{str(preview.get('end_date') or start_date)}T{s['end_time']}:59")]
-                if len(matching)>1 or (not matching and not preview.get('subevents')):
-                    raise EventChangeRequestError(f"Familie {family_id} passt in kein eindeutiges Unterereignis.")
-                if matching: parts.append(matching[0]["folder"])
-            elif child_folder:
-                parts.append(child_folder)
-            day_key = str(row["selected_capture_time"] or "")[:10]
-            if preserve_day_folders:
-                if len(day_key) != 10:
-                    raise EventChangeRequestError(
-                        f"Fuer Datei {row['file_id']} fehlt das Aufnahmedatum fuer den Tagesordner."
-                    )
-                parts.append(day_key)
-            parts.extend(["Alle", filename])
-            new_path = "/".join(parts)
+            capture = str(row["selected_capture_time"] or "")[:19]
+            candidate = target_for(
+                filename=filename,
+                capture=capture,
+                branch=branch,
+                old_event_relative_path=old_event_relative,
+            )
+            if not candidate:
+                raise EventChangeRequestError(
+                    f"Datei {filename} lässt sich anhand ihrer Aufnahmezeit nicht eindeutig "
+                    "in die neue Ereignisstruktur einordnen."
+                )
+            new_path = candidate
             action = "keep" if old_path == new_path else "move"
         else:
-            # Eine herausfallende Familie darf niemals geloescht werden. Solange
-            # kein neues Ereignis gewaehlt wurde, bleibt sie als offene manuelle
-            # Neu-Zuordnung im Auftrag und kann nicht abgeschlossen werden.
+            # Herausfallende Kamerafamilien bleiben im etablierten
+            # Neu-Zuordnungsworkflow. Nichts wird automatisch gelöscht.
             action = "delete"
 
         file_plans.append({
-            "file_id": int(row["file_id"]),
+            "file_id": file_id,
             "family_id": family_id,
             "family_key": str(row["family_key"] or ""),
             "old_path": old_path,
             "new_path": new_path,
             "action": action,
-            "expected_size_bytes": int(row["size_bytes"] or 0),
-            "expected_sha256": str(row["sha256_current"] or row["sha256_original"] or ""),
+            "expected_size_bytes": int(
+                observed["size_bytes"] if observed is not None else row["size_bytes"] or 0
+            ),
+            "expected_sha256": str(
+                observed["sha256"]
+                if observed is not None
+                else row["sha256_current"] or row["sha256_original"] or ""
+            ),
         })
+
+    if inventory is not None:
+        for item in inventory["files"]:
+            if item.get("known_file_id") is not None:
+                continue
+
+            old_path = str(item["relative_path"])
+            family_id = (
+                int(item["family_id"])
+                if item.get("family_id") is not None
+                else None
+            )
+            asset_kind = str(item.get("asset_kind") or "other")
+            capture = str(item.get("selected_capture_time") or "")[:19] or None
+            branch = str(item.get("branch") or "")
+            if asset_kind == "export":
+                branch = "Export"
+
+            # Sidecars eines herausfallenden Kameraoriginals folgen dessen
+            # Neu-Zuordnung; bis das Ziel gewählt wurde bleibt auch der Sidecar
+            # bewusst offen.
+            if family_id is not None and family_id in removed_family_ids:
+                candidate = None
+            elif asset_kind == "other" and not capture:
+                candidate = target_for(
+                    filename=str(item["filename"]),
+                    capture=None,
+                    branch=branch,
+                    old_event_relative_path=str(item["event_relative_path"]),
+                )
+            else:
+                candidate = target_for(
+                    filename=str(item["filename"]),
+                    capture=capture,
+                    branch=branch,
+                    old_event_relative_path=str(item["event_relative_path"]),
+                )
+
+            if candidate:
+                action = "keep" if candidate == old_path else "move"
+                new_path = candidate
+            else:
+                action = "unresolved"
+                new_path = ""
+
+            asset_plans.append({
+                "asset_kind": asset_kind,
+                "source_file_id": item.get("source_file_id"),
+                "family_id": family_id,
+                "old_path": old_path,
+                "new_path": new_path,
+                "action": action,
+                "expected_size_bytes": int(item["size_bytes"]),
+                "expected_sha256": str(item["sha256"]),
+                "selected_capture_time": item.get("selected_capture_time"),
+                "capture_time_confidence": item.get("capture_time_confidence"),
+            })
 
     lines = [
         f"{year} — Archiv-Aenderungsplan (manuell)",
         f"└── {parent_folder}",
     ]
     if normalized_child_segments:
-        for index,segment in enumerate(normalized_child_segments):
-            connector="└──" if index == len(normalized_child_segments)-1 else "├──"
+        for index, segment in enumerate(normalized_child_segments):
+            connector = "└──" if index == len(normalized_child_segments)-1 else "├──"
             lines.append(f"    {connector} {segment['folder']}")
     elif child_folder:
         lines.append(f"    └── {child_folder}")
-    lines.extend(["", f"Dateien im Auftrag: {len(file_plans)}"])
+    lines.extend([
+        "",
+        f"Kameradateien im Auftrag: {len(file_plans)}",
+        f"XMP/Export/weitere aktuelle Dateien: {len(asset_plans)}",
+    ])
     if removed_family_ids:
         lines.append(
             f"Offen neu zuzuordnen: {len(removed_family_ids)} Familien (werden niemals geloescht)."
         )
+    unresolved_assets = sum(1 for item in asset_plans if item["action"] == "unresolved")
+    if unresolved_assets:
+        lines.append(
+            f"Nicht eindeutig zuordenbare aktuelle Dateien: {unresolved_assets}"
+        )
 
     return {
         "families_with_plans": file_plans,
+        "assets_with_plans": asset_plans,
+        "selected_family_ids": sorted(requested_set),
         "structure_lines": lines,
         "structure_text": "\n".join(lines),
+        "inventory_summary": inventory.get("summary") if inventory is not None else None,
         "diff_summary": {
             "removed_count": len(removed_family_ids),
             "added_count": len(added_family_ids),
             "kept_count": len(requested_set & current_family_ids),
-            "total_changes": sum(1 for item in file_plans if item["action"] != "keep"),
-            "file_count": len(file_plans),
+            "total_changes": (
+                sum(1 for item in file_plans if item["action"] != "keep")
+                + sum(1 for item in asset_plans if item["action"] != "keep")
+            ),
+            "file_count": len(file_plans) + len(asset_plans),
+            "camera_file_count": len(file_plans),
+            "asset_file_count": len(asset_plans),
+            "unresolved_asset_count": unresolved_assets,
         },
     }
 
