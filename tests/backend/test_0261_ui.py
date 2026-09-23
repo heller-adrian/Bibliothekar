@@ -7,7 +7,9 @@ def test_0261_reassignment_action_and_event_opening_spacing():
     assert 'class="reassignment-dialog-action"' in EVENTS_HTML
     assert '.event-details > summary::before { content:"▸"' in EVENTS_HTML
     assert '.event-details[open] > summary::before { content:"▾"' in EVENTS_HTML
-    assert 'padding:4px 0 4px 16px' in EVENTS_HTML
+    assert 'padding:4px 0;' in EVENTS_HTML
+    assert 'font-size:1.08rem' in EVENTS_HTML
+    assert 'flex:0 0 12px' in EVENTS_HTML
 
 
 def test_0261_child_event_editor_uses_named_accordion_and_spacing():
