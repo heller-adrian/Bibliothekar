@@ -31,6 +31,8 @@ def _iso(day: str, hm: str, *, end: bool = False) -> str:
 
 def proposed_ranges(change_request: Mapping[str, Any]) -> list[tuple[str, str]]:
     """Return exact SOLL coverage stored in an open archive change request."""
+    if change_request.get("delete_event"):
+        return []
     kind = str(change_request.get("event_kind") or "event")
     start_day = str(change_request.get("start_date") or "")[:10]
     end_day = str(change_request.get("end_date") or start_day)[:10]
@@ -179,4 +181,3 @@ def selected_bounds(segments: Iterable[Mapping[str, Any]]) -> tuple[str, str]:
         min(str(item["start_datetime"]) for item in items),
         max(str(item["end_datetime"]) for item in items),
     )
-

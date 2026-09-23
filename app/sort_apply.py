@@ -904,6 +904,9 @@ def _finalize_database(
             from app.event_mutation import maybe_complete_planned_cascade_after_initial_apply
             maybe_complete_planned_cascade_after_initial_apply(connection, job_id)
 
+        from app.event_reassignment import finalize_reconciled_deleted_sources
+        finalize_reconciled_deleted_sources(connection, event_id, now)
+
         details = {
             "event_name": str(plan["event"]["name"]),
             "structure_text": str(plan["structure_text"]),

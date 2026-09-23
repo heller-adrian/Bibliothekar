@@ -4,7 +4,7 @@ from app.events_ui import EVENTS_HTML
 
 
 def test_0203_version():
-    assert APP_VERSION == "0.25.1"
+    assert APP_VERSION == "0.26.0"
 
 
 def test_no_event_range_generator_locks_existing_month():
@@ -29,4 +29,3 @@ def test_existing_no_event_time_blocks_are_editable():
     assert "data-edit-range-end-day" in EVENTS_HTML
     assert "data-apply-existing-range" in EVENTS_HTML
     assert "Zeitblock übernehmen" in EVENTS_HTML
-

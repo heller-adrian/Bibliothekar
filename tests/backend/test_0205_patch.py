@@ -9,7 +9,7 @@ NOW='2026-09-10T20:00:00+00:00'
 
 
 def test_version_0205():
-    assert APP_VERSION == '0.25.1'
+    assert APP_VERSION == '0.26.0'
 
 
 def test_editor_context_returns_all_child_time_segments(tmp_path: Path):
@@ -34,4 +34,3 @@ def test_events_ui_has_multi_segment_editor_and_merged_reassignment_actions():
     assert 'id="reassignment-apply"' not in EVENTS_HTML
     assert 'segment.start_time' in EVENTS_HTML and 'segment.end_time' in EVENTS_HTML
     assert 'segment.family_count' in EVENTS_HTML and 'segment.file_count' in EVENTS_HTML
-

@@ -248,6 +248,9 @@ def _delete_applied_evening_with_wrong_target(tmp_path: Path):
         )
         c.commit()
     delete_planned_event(db, "j", "b")
+    # This isolated reassignment fixture has no source file operation.
+    with database_connection(db) as c:
+        c.execute("UPDATE events SET resort_required=0 WHERE id='b'")
     state = list_event_reassignments(db, "j", "b")
     return db, family_ids, state
 
@@ -305,4 +308,3 @@ def test_0241_applied_reconcile_requires_visible_confirmation():
     assert 'id="sort-apply-confirmation"' in EVENTS_HTML
     assert 'id="sort-apply-button"' in EVENTS_HTML
     assert "Die ausdrückliche Bestätigung fehlt." in EVENTS_HTML
-

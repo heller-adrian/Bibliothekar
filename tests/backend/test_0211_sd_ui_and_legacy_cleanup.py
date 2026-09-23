@@ -7,7 +7,7 @@ from app import main, source_helper
 
 
 def test_0211_version_keeps_schema_22():
-    assert main.APP_VERSION == "0.25.1"
+    assert main.APP_VERSION == "0.26.0"
 
 
 def test_source_helper_flattens_nested_findmnt_and_cleans_legacy_mount(monkeypatch):
@@ -47,4 +47,3 @@ def test_import_page_has_separate_sd_and_generic_source_details():
     assert 'id="source-detail"' in html
     assert "function updateSdSourceDetail()" in html
     assert 'source.root_key === "removable"' in html
-

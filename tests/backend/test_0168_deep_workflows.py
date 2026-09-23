@@ -1,8 +1,13 @@
 from pathlib import Path
 import hashlib
+import pytest
 
 from app.database import database_connection, initialize_database, delete_planned_event
-from app.event_change_apply import confirm_event_change, finish_event_change
+from app.archive_reassignment import assign_archive_reassignments, list_archive_reassignments
+from app.event_change_apply import (
+    EventChangeApplyError, confirm_event_change, finish_event_change,
+    verify_event_change,
+)
 from app.events_ui import EVENTS_HTML
 from app.workspace_ui import WORKSPACE_HTML
 
@@ -104,34 +109,59 @@ def test_archived_delete_is_manual_move_and_finishes_without_touching_archive(tm
     add_parent_event(db, "arch", "archived", fid, archived=True)
     old_rel = "2026/07-19 - arch/Alle/F1.JPG"
     payload, digest = add_file(db, fid, old_rel)
+    archive = tmp_path / "archive"
+    source = archive / old_rel
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
 
     result = delete_planned_event(db, "j", "arch")
     assert result["pending_delete"] is True
     assert result["archive_read_only"] is True
+    assert result["reassignment_required"] is True
     cr_id = result["change_request_id"]
     with database_connection(db) as c:
         cr = c.execute("SELECT delete_event,status FROM event_change_requests WHERE id=?", (cr_id,)).fetchone()
         assert tuple(cr) == (1, "aenderbar_vorschlagen")
         review = c.execute("SELECT old_path,new_path,action,expected_sha256 FROM event_change_file_reviews WHERE change_request_id=?", (cr_id,)).fetchone()
         assert review["old_path"] == old_rel
-        assert review["new_path"].startswith("Später zuordnen/2026/2026-07-19 - arch/")
-        assert review["action"] == "move"
+        assert review["new_path"] == ""
+        assert review["action"] == "delete"
         assert review["expected_sha256"] == digest
-        target_rel = review["new_path"]
-
-    archive = tmp_path / "archive"
-    target = archive / target_rel
-    target.parent.mkdir(parents=True)
-    target.write_bytes(payload)
-
+    state = list_archive_reassignments(db, cr_id)
+    assert state["family_count"] == 1
+    assert state["reassignment_segments"][0]["family_ids"] == [fid]
+    assert source.read_bytes() == payload
     confirm_event_change(db, cr_id)
+    assert verify_event_change(db, cr_id, archive)["open_reassignment_count"] == 1
+    with pytest.raises(EventChangeApplyError, match="Neu-Zuordnung"):
+        finish_event_change(db, cr_id, archive)
+    assign_archive_reassignments(
+        db, cr_id, [fid], target_mode="new_event", new_event_name="Ersatz",
+    )
+    with database_connection(db) as c:
+        review = c.execute(
+            "SELECT new_path,action FROM event_change_file_reviews WHERE change_request_id=?",
+            (cr_id,),
+        ).fetchone()
+        target_rel = review["new_path"]
+        assert review["action"] == "move"
+        assert "Später zuordnen" not in target_rel
+    target = archive / target_rel
+    assert source.read_bytes() == payload
+    assert not target.exists()
+    assert not verify_event_change(db, cr_id, archive)["complete"]
+    target.parent.mkdir(parents=True)
+    source.rename(target)
+    assert verify_event_change(db, cr_id, archive)["complete"]
     done = finish_event_change(db, cr_id, archive)
     assert done["event_deleted"] is True
     assert done["files_changed_by_app"] == 0
+    assert target.read_bytes() == payload
     with database_connection(db) as c:
         assert c.execute("SELECT COUNT(*) FROM events WHERE id='arch'").fetchone()[0] == 0
         assert c.execute("SELECT COUNT(*) FROM event_change_requests WHERE id=?", (cr_id,)).fetchone()[0] == 0
         assert c.execute("SELECT COUNT(*) FROM audit_log WHERE action='archived_event_deleted_after_manual_move'").fetchone()[0] == 1
+        assert c.execute("SELECT current_relative_path FROM files WHERE family_id=?",(fid,)).fetchone()[0] == target_rel
 
 
 def test_direct_event_creation_uses_date_time_without_day_selection(tmp_path):
@@ -226,4 +256,3 @@ def test_events_ui_applied_reapply_uses_reconciliation_endpoint():
     assert 'plan._reconcile' in EVENTS_HTML
     assert '? "reconcile-sort"' in EVENTS_HTML
     assert ': (plan._reapply ? "reapply-sort" : "apply-sort")' in EVENTS_HTML
-

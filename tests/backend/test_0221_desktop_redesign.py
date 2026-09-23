@@ -3,7 +3,7 @@ from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
 def test_0222_version():
-    assert main.APP_VERSION == "0.25.1"
+    assert main.APP_VERSION == "0.26.0"
 
 
 def test_0221_import_uses_three_source_cards_and_keeps_all_paths():
@@ -239,4 +239,3 @@ def test_0223_neutral_pages_keep_both_tab_depth_gradients():
     assert '.bk-tabs-active-metadata .bk-tab[data-area="workspace"] {' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-assistant .bk-tab[data-area="archive"],' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-metadata .bk-tab[data-area="archive"] {' in BIBLIOTHEKAR_CSS
-

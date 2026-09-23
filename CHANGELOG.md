@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.26.0 – Kanonischer freier Bestand und vollständige Ereignis-Nachsortierung
+
+- Freie Aufnahmen erhalten aus der bibliotheksweiten Belegung aller aktiven Ereignisse, auch über mehrere Import-Jobs und „Ohne Ereignis“-Segmente hinweg, kanonische Tages-/Zeitordner. Bestätigte Sortierungen normalisieren betroffene freie Dateien und entfernen nur bekannte leere Altordner; fremde Inhalte bleiben erhalten. Kollisionen und Dateifehler rollen sicher zurück.
+- Applied-Verkleinerung, -Erweiterung und vollständige Löschung speichern zunächst nur den SOLL-Zustand. Erst der ausdrücklich bestätigte SHA-geprüfte Reconcile bewegt Dateien. Herausfallende Familien bleiben bis zur fachlichen Neu-Zuordnung als Aufgabe erhalten; interne `pending_delete`-Quellen werden erst nach erfolgreicher Anwendung aller Ziele entfernt.
+- Neu-Zuordnungen funktionieren über freie Karten bis zur physischen Anwendung, auch für bestehende Cross-Job-„Ohne Ereignis“-Sammlungen. Neue Ereignisse übernehmen `preserve_day_folders` explizit mit AN oder AUS; die frühere automatische Mehrtages-Sonderregel entfällt.
+- `event.json` bleibt während offener Applied-Mutationen am IST-Ort und wechselt erst nach erfolgreichem Reconcile zum neuen Namen, Datum oder Jahr. Ein Mutationsabbruch hinterlässt keine neue SOLL-Struktur.
+- Archivänderungen bleiben rein lesende IST→SOLL-Aufträge bis zur manuellen Dateiaktion und Verifikation. Herausfallende Familien benötigen ein explizites Ziel; auch eine vollständige Archivlöschung legt nichts stillschweigend unter „Später zuordnen“ ab. Teilzeit, Segmente und Tagesordner werden berücksichtigt; Konflikte lösen keine Cascade aus.
+- Im Arbeitsbereich steht der gelbe Aufgabenpunkt direkt am Tages-/Zeittitel; Aufnahmezeiten mit Familie/Stem stehen in der rechten Vorschau. Ereigniskarten und Editor haben korrigierte Einrückung, Schaltflächen, Dialogschließung und direkte Navigation zu Aufnahmen.
+
 ### 0.25.1 – Applied-Dateien erst beim bestätigten Reconcile verschieben
 
 - Behebt F01: Das Verkleinern eines angewendeten Ereignisses verschiebt herausfallende Dateien nicht mehr vorzeitig nach „Nicht zugeordnet“.
@@ -153,4 +162,3 @@
 - bereits gesicherte Dateien werden erkannt
 - neue Dateien können separat als eigener Sicherungslauf importiert werden
 - Schema-Version 22
-

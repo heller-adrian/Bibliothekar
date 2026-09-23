@@ -3,7 +3,7 @@ from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
 def test_0231_version():
-    assert main.APP_VERSION == "0.25.1"
+    assert main.APP_VERSION == "0.26.0"
 
 
 def test_0231_workspace_main_actions_are_blue_and_card_is_aligned():
@@ -48,4 +48,3 @@ def test_0231_multiple_time_ranges_have_explicit_editor_mode():
     assert 'id="edit-start-time"' in html and 'id="edit-end-time"' in html
     assert 'isoTime(event.start_datetime' in html
     assert 'isoTime(event.end_datetime' in html
-

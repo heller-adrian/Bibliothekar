@@ -438,10 +438,8 @@ def propose_archived_event_deletion(
 ) -> dict[str, Any]:
     """Create a read-only manual deletion request for an archived event.
 
-    Files are never deleted. The user is instructed to move every file into a
-    neutral ``Später zuordnen/<Jahr>/<Tag - Ereignis>/`` holding area inside
-    the camera library. Only after read-only verification is the event row
-    removed and its families become free in the index.
+    Files are never deleted. Every family needs an explicit manual destination
+    before the read-only verification may complete.
     """
     now = datetime.now(timezone.utc).isoformat()
     with database_connection(database_path) as connection:
@@ -484,10 +482,6 @@ def propose_archived_event_deletion(
         ).fetchone()
         version = int(version_row["v"] or 0) + 1
         cr_id = f"cr-{uuid.uuid4().hex[:12]}"
-        year = str(event["start_datetime"] or "")[:4] or "Unbekannt"
-        day = str(event["start_datetime"] or "")[:10]
-        safe_name = "".join(c if c not in '/\\\0' else '-' for c in str(event["name"]))
-        holding_folder = f"Später zuordnen/{year}/{day} - {safe_name}"
         connection.execute(
             """INSERT INTO event_change_requests(
                    id,event_id,job_id,event_name,notes,parent_folder,child_folder,uses_time_range,
@@ -496,22 +490,20 @@ def propose_archived_event_deletion(
                    status,version,proposed_at,created_at,updated_at,delete_event)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
             (
-                cr_id,event_id,job_id,str(event["name"]),"Ereignis löschen; Dateien manuell nach Später zuordnen verschieben.",
-                holding_folder,None,0,0,str(event["start_datetime"] or "")[:10],str(event["end_datetime"] or "")[:10],
+                cr_id,event_id,job_id,str(event["name"]),"Ereignis löschen; für alle Familien ein fachliches Ziel wählen.",
+                str(event["folder_name"]),None,0,int(bool(event["preserve_day_folders"])),str(event["start_datetime"] or "")[:10],str(event["end_datetime"] or "")[:10],
                 None,None,str(event["event_kind"] or "event"),None,json.dumps([],ensure_ascii=False),
                 json.dumps(family_ids,ensure_ascii=False),len(files),len(family_ids),"aenderbar_vorschlagen",version,now,now,now,
             ),
         )
         for row in files:
             old_path = str(row["current_relative_path"] or row["original_relative_path"] or "").replace("\\","/").lstrip("/")
-            filename = Path(old_path).name
-            new_path = f"{holding_folder}/{filename}"
             connection.execute(
                 """INSERT INTO event_change_file_reviews(
                        change_request_id,family_id,file_id,old_path,new_path,action,
                        expected_size_bytes,expected_sha256,confirmed,created_at,updated_at)
-                   VALUES (?,?,?,?,?,'move',?,?,0,?,?)""",
-                (cr_id,int(row["family_id"]),int(row["file_id"]),old_path,new_path,
+                   VALUES (?,?,?,?,?,'delete',?,?,0,?,?)""",
+                (cr_id,int(row["family_id"]),int(row["file_id"]),old_path,"",
                  int(row["size_bytes"] or 0),str(row["sha256_current"] or row["sha256_original"] or ""),now,now),
             )
         connection.commit()
@@ -519,7 +511,6 @@ def propose_archived_event_deletion(
         "status":"change_request_created","pending_delete":True,"archive_read_only":True,
         "change_request_id":cr_id,"event_id":event_id,"event_name":str(event["name"]),
         "released_family_count":len(family_ids),"released_file_count":len(files),
-        "reassignment_required":False,
-        "message":"Manueller Löschauftrag erstellt. Die Kamerabibliothek bleibt read-only; verschiebe die Dateien gemäß IST→SOLL und schließe den Auftrag danach ab.",
+        "reassignment_required":True,
+        "message":"Manueller Löschauftrag erstellt. Alle Familien benötigen ein explizites Ziel; die Kamerabibliothek bleibt read-only.",
     }
-

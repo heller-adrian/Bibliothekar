@@ -132,6 +132,65 @@ def reconcile_stale_event_reassignments(connection, job_id: str | None = None, e
     return len(rows)
 
 
+def finalize_reconciled_deleted_sources(connection, target_event_id: str, now: str) -> list[str]:
+    """Remove soft-deleted sources only after every replacement is applied.
+
+    The source mutation and audit rows retain their textual event ID.  Queue
+    rows have a source FK and are consumed by the final source deletion.
+    """
+    sources = connection.execute(
+        """SELECT DISTINCT source.id,source.job_id
+           FROM event_reapply_removed_families queue
+           JOIN events source ON source.id=queue.event_id
+           WHERE queue.target_event_id=? AND source.pending_delete=1
+             AND source.resort_required=0""",
+        (target_event_id,),
+    ).fetchall()
+    completed: list[str] = []
+    for source in sources:
+        source_id = str(source["id"])
+        rows = connection.execute(
+            """SELECT queue.family_id,queue.target_event_id,
+                      target.status,target.resort_required,target.pending_delete
+               FROM event_reapply_removed_families queue
+               LEFT JOIN events target ON target.id=queue.target_event_id
+               WHERE queue.event_id=?""",
+            (source_id,),
+        ).fetchall()
+        if not rows or any(
+            row["target_event_id"] is None
+            or row["status"] != "applied"
+            or int(row["resort_required"] or 0)
+            or int(row["pending_delete"] or 0)
+            or not connection.execute(
+                """SELECT 1 FROM event_assignments assignment
+                   JOIN events assigned ON assigned.id=assignment.event_id
+                   WHERE assignment.family_id=?
+                     AND COALESCE(assigned.parent_event_id,assigned.id)=?
+                   LIMIT 1""",
+                (row["family_id"], row["target_event_id"]),
+            ).fetchone()
+            for row in rows
+        ):
+            continue
+        if connection.execute(
+            """SELECT 1 FROM event_assignments assignment
+               JOIN events assigned ON assigned.id=assignment.event_id
+               WHERE COALESCE(assigned.parent_event_id,assigned.id)=?
+               LIMIT 1""",
+            (source_id,),
+        ).fetchone():
+            continue
+        connection.execute(
+            """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
+               VALUES (?,'event_deleted_after_target_apply','event',?,'{}',?)""",
+            (source["job_id"], source_id, now),
+        )
+        connection.execute("DELETE FROM events WHERE id=?", (source_id,))
+        completed.append(source_id)
+    return completed
+
+
 def list_event_reassignments(database_path: Path, job_id: str, event_id: str) -> dict[str, Any]:
     with database_connection(database_path) as connection:
         if reconcile_stale_event_reassignments(connection, job_id, event_id):
@@ -310,6 +369,7 @@ def _create_linked_followup(connection, job_id: str, target, family_ids: list[in
 def _create_new_event(
     database_path: Path, job_id: str, family_ids: list[int], name: str,
     *, ignore_event_ids: set[str] | None = None, segment: dict[str,str] | None = None,
+    preserve_day_folders: bool = False,
 ) -> dict[str, Any]:
     clean_name = str(name or "").strip()
     if not clean_name:
@@ -343,7 +403,6 @@ def _create_new_event(
         "file_count": int(r["file_count"] or 0), "total_size_bytes": int(r["total_size_bytes"] or 0),
         "review_required_count": 0,
     } for r in rows]
-    same_day = start_date == end_date
     preview = build_event_preview({
         "event_kind": "event", "event_name": clean_name,
         "start_date": start_date, "end_date": end_date,
@@ -351,7 +410,7 @@ def _create_new_event(
         "child_event_name": "",
         "start_time": (segment["start_datetime"][11:16] if segment else min(captures)[11:16]),
         "end_time": (segment["end_datetime"][11:16] if segment else max(captures)[11:16]),
-        "preserve_day_folders": start_date != end_date,
+        "preserve_day_folders": preserve_day_folders,
         "selected_day_keys": sorted({a["day_key"] for a in available}),
         "selected_family_ids": family_ids,
     }, available)
@@ -544,7 +603,7 @@ def _create_child_in_existing_event(connection, job_id: str, target, family_ids:
 def assign_event_reassignments(
     database_path: Path, job_id: str, event_id: str, family_ids: Iterable[Any],
     *, target_mode: str, target_event_id: str | None = None, new_event_name: str | None = None,
-    segments: Iterable[Any] | None = None,
+    segments: Iterable[Any] | None = None, preserve_day_folders: bool = False,
 ) -> dict[str, Any]:
     selected = _normalize_ids(family_ids)
     exact_segments = _normalize_reassignment_segments(segments)
@@ -557,6 +616,10 @@ def assign_event_reassignments(
         source_status = str(source["status"])
         if source_status not in {"draft", "planned", "applied"}:
             raise EventReassignmentError("Diese Neu-Zuordnung ist für noch nicht archivierte Ereignisse vorgesehen.")
+        if source_status == "applied" and int(source["resort_required"] or 0):
+            raise EventReassignmentError(
+                "Bitte zuerst die bestätigte Nachsortierung des Quellereignisses abschließen."
+            )
         placeholders = ",".join("?" for _ in selected)
         pending = connection.execute(
             f"""SELECT family_id,released_start_datetime,released_end_datetime
@@ -619,6 +682,7 @@ def assign_event_reassignments(
             database_path, job_id, selected, str(new_event_name or ""),
             ignore_event_ids=ignored_for_target,
             segment=exact_segments[0] if exact_segments else None,
+            preserve_day_folders=preserve_day_folders,
         )
     elif target_mode == "new_no_event":
         target_info = _create_new_no_event(
@@ -788,4 +852,3 @@ def assign_event_reassignments(
         "pending_family_count": state["family_count"],
         "source_resort_required": source_status == "applied",
     }
-

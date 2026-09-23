@@ -794,7 +794,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     details[open] > summary[style*="display:flex"]::before { content:"▾"; }
     .event-details > summary { display:list-item !important; list-style:disclosure-closed !important; }
     .event-details[open] > summary { list-style:disclosure-open !important; }
-    button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button, #calculate-preview-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
+    button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
+    #calculate-preview-button { background:#374151 !important; border-color:#4b5563 !important; color:white !important; }
     button.danger-button, .danger-button { background:#b42318 !important; border-color:#b42318 !important; color:white !important; }
   </style>
 </head>
@@ -2216,6 +2217,12 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-name";
         name.textContent =
           formatDay(group.day_key) + (group.start_time && (group.start_time !== "00:00" || group.end_time !== "23:59") ? ` · ${group.start_time}–${group.end_time}` : "");
+        if (group.reassignment_pending) {
+          const marker=document.createElement("span");
+          marker.textContent="●"; marker.title="Offene Neu-Zuordnung";
+          marker.style.cssText="color:#d99a20;margin-left:6px";
+          name.appendChild(marker);
+        }
 
         const metadata =
           document.createElement(
@@ -2252,16 +2259,6 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         main.appendChild(name);
         main.appendChild(metadata);
-        if (group.reassignment_pending) {
-          const marker=document.createElement("span");
-          marker.textContent="●"; marker.title="Offene Neu-Zuordnung";
-          marker.style.cssText="color:#d99a20;margin-left:auto";
-          main.appendChild(marker);
-        }
-        const details=document.createElement("details");
-        details.innerHTML='<summary>Aufnahmezeiten</summary>' + (group.families||[]).map(f=>`<div>${escapeHtml(f.family_key)} | ${escapeHtml(String(f.selected_capture_time||"").slice(0,10))} | ${escapeHtml(String(f.selected_capture_time||"").slice(11,19))}</div>`).join("");
-        details.addEventListener("click",e=>e.stopPropagation());
-        main.appendChild(details);
 
         if (
           group.partially_assigned
@@ -2382,6 +2379,10 @@ WORKSPACE_HTML = r"""<!doctype html>
           } · ${
             group.file_count
           } Dateien\n`;
+        for (const family of group.families || []) {
+          const capture = String(family.selected_capture_time || "");
+          preview += `│   ${family.original_stem || family.family_key || "Dateifamilie"} · ${capture.slice(0,10)} ${capture.slice(11,19)}\n`;
+        }
       }
 
       if (
@@ -3316,4 +3317,3 @@ WORKSPACE_HTML = r"""<!doctype html>
 </body>
 </html>
 """
-

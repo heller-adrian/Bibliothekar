@@ -21,7 +21,7 @@ def seed(db: Path):
 
 
 def test_version_0202():
-    assert APP_VERSION == '0.25.1'
+    assert APP_VERSION == '0.26.0'
 
 
 def test_stale_pending_reassignment_disappears_when_family_is_assigned_again(tmp_path):
@@ -71,4 +71,3 @@ def test_existing_no_event_preview_contains_real_folder_structure():
     assert '├── Alle' in WORKSPACE_HTML
     assert '├── Sortiert' in WORKSPACE_HTML
     assert '└── Export' in WORKSPACE_HTML
-

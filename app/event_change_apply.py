@@ -290,6 +290,52 @@ def finish_event_change(
         created_reassignment_events = apply_archive_reassignment_targets(connection, cr, now)
 
         if delete_event:
+            verified_rows = connection.execute(
+                """SELECT family_id,file_id,new_path
+                   FROM event_change_file_reviews
+                   WHERE change_request_id=? AND verification_status='verified'
+                   ORDER BY family_id,id""",
+                (cr_id,),
+            ).fetchall()
+            paths_by_family: dict[int, list[str]] = {}
+            for review in verified_rows:
+                family_id = int(review["family_id"])
+                owner = connection.execute(
+                    """SELECT COALESCE(assigned.parent_event_id,assigned.id) AS root_id
+                       FROM event_assignments assignment
+                       JOIN events assigned ON assigned.id=assignment.event_id
+                       WHERE assignment.family_id=? AND assigned.status='archived'
+                         AND COALESCE(assigned.parent_event_id,assigned.id)<>?
+                       LIMIT 1""",
+                    (family_id, cr["event_id"]),
+                ).fetchone()
+                if owner is None or review["file_id"] is None or not review["new_path"]:
+                    raise EventChangeApplyError(
+                        "Für eine Archivdatei fehlt ein verifiziertes fachliches Ziel."
+                    )
+                target_id = str(owner["root_id"])
+                file_id = int(review["file_id"])
+                target_path = str(review["new_path"])
+                connection.execute(
+                    """UPDATE files SET current_relative_path=?,
+                           current_root_kind='camera_archive',updated_at=? WHERE id=?""",
+                    (target_path, now, file_id),
+                )
+                record_verified_file_location(
+                    connection, target_id, family_id, file_id, target_path, now,
+                )
+                paths_by_family.setdefault(family_id, []).append(target_path)
+            for family_id, paths in paths_by_family.items():
+                owner = connection.execute(
+                    """SELECT COALESCE(assigned.parent_event_id,assigned.id) AS root_id
+                       FROM event_assignments assignment
+                       JOIN events assigned ON assigned.id=assignment.event_id
+                       WHERE assignment.family_id=? AND assigned.status='archived'
+                         AND COALESCE(assigned.parent_event_id,assigned.id)<>?
+                       LIMIT 1""",
+                    (family_id, cr["event_id"]),
+                ).fetchone()
+                record_family_anchor(connection, str(owner["root_id"]), family_id, paths, now)
             # event_change_requests references the event with ON DELETE CASCADE.
             # Persist the durable audit entry first, then remove the event; the
             # completed request and its file-review rows disappear together.
@@ -492,4 +538,3 @@ def finish_event_change(
         "verified_file_count": verification["verified_file_count"],
         "created_reassignment_event_ids": created_reassignment_events,
     }
-

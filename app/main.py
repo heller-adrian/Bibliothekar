@@ -141,7 +141,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.25.1"
+APP_VERSION = "0.26.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -6965,6 +6965,7 @@ def api_assign_event_reassignments(job_id: str, event_id: str, body: dict) -> JS
             target_event_id=body.get("target_event_id"),
             new_event_name=body.get("new_event_name"),
             segments=body.get("segments") or [],
+            preserve_day_folders=bool(body.get("preserve_day_folders", False)),
         )
         return JSONResponse(content=result)
     except EventReassignmentError as exc:
@@ -7216,4 +7217,3 @@ def api_archive_change(cr_id: str) -> JSONResponse:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-

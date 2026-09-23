@@ -246,17 +246,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
         from app.event_reassignment import reconcile_stale_event_reassignments
         reconcile_stale_event_reassignments(c,job_id)
         event_ids, archived_impacts = _connected_applied_events(c,job_id,anchor_event_id)
-        unresolved=c.execute(
-            """SELECT r.event_id,r.family_id,ff.family_key FROM event_reapply_removed_families r
-               JOIN file_families ff ON ff.id=r.family_id
-               WHERE r.job_id=? AND r.event_id IN (%s) AND r.target_event_id IS NULL
-               ORDER BY r.event_id,r.family_id""" % ",".join("?" for _ in event_ids),
-            (job_id,*event_ids),
-        ).fetchall() if event_ids else []
-
     blockers=[]
-    if unresolved:
-        blockers.append({"code":"reassignment_required","message":f"{len(unresolved)} herausfallende Familien benötigen noch ein Ziel."})
 
     with database_connection(database_path) as c:
         owner_rows = c.execute(
@@ -412,8 +402,16 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 c.execute("UPDATE files SET current_relative_path=?,current_root_kind='shared_workspace',updated_at=? WHERE id=?",(str(f['destination_relative_path']),now,int(f['file_id'])))
             for eid in plan['event_ids']:
                 row = c.execute("SELECT pending_delete FROM events WHERE id=? AND job_id=?", (eid,job_id)).fetchone()
-                c.execute("DELETE FROM event_reapply_removed_families WHERE event_id=? AND job_id=?",(eid,job_id))
-                if row is not None and int(row['pending_delete'] or 0):
+                # Only resolved transitions are consumed by the physical run.
+                # Open rows remain as fachliche tasks after safe release into
+                # canonical free stock.
+                c.execute("DELETE FROM event_reapply_removed_families WHERE event_id=? AND job_id=? AND target_event_id IS NOT NULL",(eid,job_id))
+                open_reassignments = c.execute(
+                    "SELECT COUNT(*) FROM event_reapply_removed_families "
+                    "WHERE event_id=? AND job_id=? AND target_event_id IS NULL",
+                    (eid, job_id),
+                ).fetchone()[0]
+                if row is not None and int(row['pending_delete'] or 0) and not open_reassignments:
                     c.execute(
                         "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'event_deleted_after_reconcile','event',?,?,?)",
                         (job_id,eid,_json_details({'run_id':run_id}),now),
@@ -447,4 +445,3 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         with database_connection(database_path) as c:
             c.execute("UPDATE sort_runs SET status='failed',phase='Arbeitsbereich-Abgleich fehlgeschlagen',error_message=?,updated_at=?,completed_at=? WHERE id=?",(str(exc),_now(),_now(),run_id))
         raise
-

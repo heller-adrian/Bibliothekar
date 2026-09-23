@@ -132,9 +132,10 @@ def no_event_segment_overlaps(
 ) -> list[dict[str, Any]]:
     sql = """SELECT s.*, e.name, e.status, e.folder_name
              FROM event_time_segments s JOIN events e ON e.id=s.event_id
-             WHERE s.job_id=? AND e.event_kind='no_event'
+             WHERE e.event_kind='no_event' AND e.pending_delete=0
+               AND e.status IN ('draft','planned','applied','archived')
                AND s.start_datetime <= ? AND s.end_datetime >= ?"""
-    params: list[Any] = [job_id, end_datetime, start_datetime]
+    params: list[Any] = [end_datetime, start_datetime]
     if exclude_event_id:
         sql += ' AND s.event_id != ?'
         params.append(exclude_event_id)
@@ -146,7 +147,7 @@ def continuous_event_overlaps(
     connection, job_id: str, start_datetime: str, end_datetime: str, *, exclude_event_id: str | None = None
 ) -> list[dict[str, Any]]:
     """Parent occupancy for v2; preserve historical child occupancy verbatim."""
-    rows = connection.execute("SELECT * FROM events WHERE job_id=? AND event_level='parent' AND event_kind='event' AND pending_delete=0 AND status IN ('draft','planned','applied','archived')", (job_id,)).fetchall()
+    rows = connection.execute("SELECT * FROM events WHERE event_level='parent' AND event_kind='event' AND pending_delete=0 AND status IN ('draft','planned','applied','archived')").fetchall()
     result = []
     for row in rows:
         event = dict(row)

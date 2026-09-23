@@ -312,6 +312,7 @@ EVENTS_HTML = r"""<!doctype html>
       border-color: var(--accent);
       color: var(--accent);
     }
+    a.plan-button { display:inline-flex; align-items:center; padding:10px 14px; border:1px solid var(--accent); border-radius:10px; text-decoration:none; }
 
     .sort-plan-dialog {
       inline-size: min(980px, calc(100dvw - 28px));
@@ -797,7 +798,7 @@ EVENTS_HTML = r"""<!doctype html>
     summary { cursor:pointer; user-select:none; }
     summary[style*="display:flex"]::before { content:"▸"; flex:0 0 auto; }
     details[open] > summary[style*="display:flex"]::before { content:"▾"; }
-    .event-details > summary { display:list-item !important; list-style:disclosure-closed !important; }
+    .event-details > summary { display:list-item !important; list-style:disclosure-closed inside !important; padding-left:4px; }
     .event-details[open] > summary { list-style:disclosure-open !important; }
     button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button, #calculate-preview-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
     button.danger-button, .danger-button { background:#b42318 !important; border-color:#b42318 !important; color:white !important; }
@@ -1274,7 +1275,7 @@ EVENTS_HTML = r"""<!doctype html>
           <div class="reassignment-resume">
             <span><strong>⚠ ${Number(event.pending_reassignment_count)} ${Number(event.pending_reassignment_count)===1?"Familie":"Familien"} noch neu zuzuordnen</strong><br><span class="muted">Die Änderung bleibt bis zur Neu-Zuordnung im sicheren Schwebezustand. Ursprungs- und Zielzustand sind weiterhin nachvollziehbar.</span></span>
             <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-              <button type="button" class="plan-button" data-reassign-workspace="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">In Aufnahmen öffnen</button>
+              <a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=free">In Aufnahmen öffnen</a>
               ${isMutationAnchor ? `<button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button>` : ""}
             </div>
           </div>` : "";
@@ -2451,6 +2452,7 @@ EVENTS_HTML = r"""<!doctype html>
       } catch (error) {
         throw error;
       }
+      eventEditDialog.close();
 
       if (result.archive_manual?.change_request_ids?.length) {
         const crId = result.archive_manual.change_request_ids[0];
@@ -2694,16 +2696,6 @@ EVENTS_HTML = r"""<!doctype html>
               );
             }
           );
-          return;
-        }
-
-        const workspaceReassignButton = event.target.closest("[data-reassign-workspace]");
-        if (workspaceReassignButton) {
-          openReassignmentWorkflow(
-            workspaceReassignButton.dataset.reassignWorkspace,
-            workspaceReassignButton.dataset.jobId,
-            true
-          ).catch(error => setStatus(error.message, true));
           return;
         }
 
@@ -3102,4 +3094,3 @@ EVENTS_HTML = r"""<!doctype html>
 </body>
 </html>
 """
-

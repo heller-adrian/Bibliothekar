@@ -96,6 +96,64 @@ def _seed_initial_sort(tmp_path: Path):
     return db, workspace, incoming, work, file_id, payload
 
 
+def test_0260_first_partial_day_apply_moves_event_and_free_stock(tmp_path: Path):
+    db, workspace, incoming, work, free_file_id, free_payload = _seed_initial_sort(tmp_path)
+    event_payload = b"event-photo"
+    (incoming / "EVENT.JPG").write_bytes(event_payload)
+    event_digest = hashlib.sha256(event_payload).hexdigest()
+    with database_connection(db) as c:
+        c.execute("DELETE FROM event_assignments WHERE event_id='e'")
+        c.execute(
+            "UPDATE events SET start_datetime='2026-07-19T13:00:00',"
+            "end_datetime='2026-07-19T15:00:59',preserve_day_folders=1 WHERE id='e'"
+        )
+        family_id = int(c.execute(
+            """INSERT INTO file_families(job_id,family_key,original_stem,status,
+                   selected_capture_time,capture_time_confidence)
+               VALUES ('j','F2','EVENT','complete','2026-07-19T14:00:00','high')"""
+        ).lastrowid)
+        c.execute(
+            "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) "
+            "VALUES ('e',?,NULL,'date_range',?)", (family_id, NOW)
+        )
+        event_file_id = int(c.execute(
+            """INSERT INTO files(job_id,family_id,original_relative_path,
+                   current_relative_path,original_filename,extension,media_type,
+                   size_bytes,sha256_original,sha256_current,selected_capture_time,
+                   selected_capture_source,capture_time_confidence,review_status,
+                   metadata_write_status,created_at,updated_at,current_root_kind)
+               VALUES ('j',?,'EVENT.JPG','EVENT.JPG','EVENT.JPG','.JPG','jpeg',
+                   ?,?,?,'2026-07-19T14:00:00','DateTimeOriginal','high',
+                   'not_required','not_requested',?,?,'job_root')""",
+            (family_id, len(event_payload), event_digest, event_digest, NOW, NOW),
+        ).lastrowid)
+    plan = build_event_sort_plan(db, "j", "e", workspace)
+    assert plan["summary"]["ready"], plan["blockers"]
+    by_id = {int(item["file_id"]): item for item in plan["files"]}
+    assert by_id[free_file_id]["destination_relative_path"] == (
+        "2026/2026-07-19 · 00-00–12-59/IMG.JPG"
+    )
+    assert by_id[event_file_id]["destination_relative_path"].endswith(
+        "/2026-07-19/Alle/EVENT.JPG"
+    )
+    run = prepare_sort_run(
+        db, "j", "e", workspace,
+        expected_plan_token=plan["plan_token"],
+        confirmation_phrase=CONFIRMATION_PHRASE,
+    )
+    execute_sort_run(db, run["id"], workspace)
+    assert not (incoming / "IMG.JPG").exists()
+    assert not (incoming / "EVENT.JPG").exists()
+    assert (work / by_id[free_file_id]["destination_relative_path"]).read_bytes() == free_payload
+    assert (work / by_id[event_file_id]["destination_relative_path"]).read_bytes() == event_payload
+    with database_connection(db) as c:
+        assert c.execute("SELECT status FROM events WHERE id='e'").fetchone()[0] == "applied"
+        assert {row[0] for row in c.execute(
+            "SELECT current_root_kind FROM files WHERE id IN (?,?)",
+            (free_file_id, event_file_id),
+        )} == {"shared_workspace"}
+
+
 def test_0240_reconcile_refuses_new_target_blocker_after_prepare(tmp_path: Path):
     db = tmp_path / "reconcile.sqlite3"
     workspace = tmp_path / "workspace"

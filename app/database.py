@@ -3537,10 +3537,9 @@ def update_event_definition(
         "neutralized_file_count": len(neutralized_files),
     }
 
-    # event.json ist die führende portable Beschreibung: für angewendete
-    # Ereignisse wird sie jetzt aus dem neuen Index-Gesamtzustand neu
-    # geschrieben und kennzeichnet, dass die Nachsortierung ansteht.
-    if workspace_path is not None:
+    # A structural applied edit stores SOLL only in SQLite.  Its final portable
+    # document is written after the explicitly confirmed physical reconcile.
+    if workspace_path is not None and not is_applied:
         from app.event_document import (
             build_event_document_from_db,
             write_event_document,
@@ -3550,8 +3549,6 @@ def update_event_definition(
             database_path, workspace_path, job_id, event_id
         )
         if document is not None:
-            if is_applied:
-                document["resort_required"] = True
             result["event_document"] = str(
                 write_event_document(workspace_path, document, app_version=app_version)
             )
@@ -3918,4 +3915,3 @@ def store_imported_source_files(
                     now,
                 ),
             )
-

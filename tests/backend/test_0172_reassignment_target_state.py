@@ -24,6 +24,8 @@ def test_delete_reassignment_new_event_ignores_source_event_being_deleted(tmp_pa
     result = delete_planned_event(db, 'j', 'b')
     assert result['reassignment_required'] is True
     assert result['removed_family_ids'] == fids[4:]
+    with database_connection(db) as c:
+        c.execute("UPDATE events SET resort_required=0 WHERE id='b'")
 
     reassigned = assign_event_reassignments(
         db, 'j', 'b', fids[4:], target_mode='new_event', new_event_name='Ersatz Abend', segments=_segments(db)
@@ -42,6 +44,8 @@ def test_delete_reassignment_new_no_event_ignores_source_event_being_deleted(tmp
     db = tmp_path / 'db.sqlite3'
     fids = _make_applied(db)
     delete_planned_event(db, 'j', 'b')
+    with database_connection(db) as c:
+        c.execute("UPDATE events SET resort_required=0 WHERE id='b'")
 
     reassigned = assign_event_reassignments(
         db, 'j', 'b', fids[4:], target_mode='new_no_event', segments=_segments(db)

@@ -62,6 +62,9 @@ def test_applied_removed_family_keeps_target_for_reapply(tmp_path):
     db=tmp_path/'db.sqlite3'; ids=seed(db,source_status='applied')
     result=edit_drop_second(db,ids)
     assert result['resort_required'] is True
+    # This unit fixture has no physical files: represent a completed source reconcile.
+    with database_connection(db) as c:
+        c.execute("UPDATE events SET resort_required=0 WHERE id='src'")
     assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='existing_no_event',target_event_id='target',segments=_segments(db))
     assert assigned['pending_family_count'] == 0
     assert assigned['source_resort_required'] is True

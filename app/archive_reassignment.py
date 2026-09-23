@@ -234,7 +234,7 @@ def apply_archive_reassignment_targets(connection,cr:dict[str,Any],now:str)->lis
             for segment in _exact_segments_for(fids):
                 exists=connection.execute("SELECT 1 FROM event_time_segments WHERE event_id=? AND start_datetime=? AND end_datetime=? LIMIT 1",(eid,segment['start_datetime'],segment['end_datetime'])).fetchone()
                 if exists is None:
-                    connection.execute("INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",(eid,target_job,segment['day_key'],segment['start_time'],segment['end_time'],segment['start_datetime'],segment['end_datetime'],'archive_reassignment',now,now))
+                    connection.execute("INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",(eid,target_job,segment['day_key'],segment['start_time'],segment['end_time'],segment['start_datetime'],segment['end_datetime'],'reassignment',now,now))
             bounds=connection.execute("SELECT MIN(start_datetime) a,MAX(end_datetime) b FROM event_time_segments WHERE event_id=?",(eid,)).fetchone()
             if bounds and bounds['a'] and bounds['b']: connection.execute("UPDATE events SET start_datetime=?,end_datetime=?,updated_at=? WHERE id=?",(bounds['a'],bounds['b'],now,eid))
             continue
@@ -251,9 +251,8 @@ def apply_archive_reassignment_targets(connection,cr:dict[str,Any],now:str)->lis
         if event_kind=='no_event':
             exact_segments=_exact_segments_for(fids)
             for segment in exact_segments:
-                connection.execute("INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",(eid,cr['job_id'],segment['day_key'],segment['start_time'],segment['end_time'],segment['start_datetime'],segment['end_datetime'],'archive_reassignment',now,now))
+                connection.execute("INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",(eid,cr['job_id'],segment['day_key'],segment['start_time'],segment['end_time'],segment['start_datetime'],segment['end_datetime'],'reassignment',now,now))
             if exact_segments:
                 connection.execute("UPDATE events SET start_datetime=?,end_datetime=?,updated_at=? WHERE id=?",(min(s['start_datetime'] for s in exact_segments),max(s['end_datetime'] for s in exact_segments),now,eid))
         created.append(eid)
     return created
-

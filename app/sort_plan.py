@@ -673,6 +673,50 @@ def build_event_sort_plan(
                 ).fetchall()
             )
 
+        from app.free_stock_layout import (
+            affected_days_for_event,
+            canonical_free_directory,
+            free_file_rows,
+        )
+        affected_days = affected_days_for_event(connection, event_id)
+        known_file_ids = {int(row["id"]) for row in file_rows}
+        for free_row in free_file_rows(
+            connection,
+            affected_days,
+            job_id=job_id,
+            shared_library=allow_reapply,
+        ):
+            if int(free_row["id"]) not in known_file_ids:
+                file_rows.append(free_row)
+        normalized_file_rows: list[dict[str, Any]] = []
+        for raw_file_row in file_rows:
+            record = dict(raw_file_row)
+            record_family_id = (
+                int(record["family_id"])
+                if record.get("family_id") is not None
+                else None
+            )
+            removed_target = removed_targets.get(record_family_id)
+            if record.get("_free_stock") or (
+                removed_target is not None
+                and not removed_target.get("target_event_id")
+            ):
+                record["_free_stock"] = True
+                record["_free_directory"] = str(
+                    canonical_free_directory(
+                        connection,
+                        str(
+                            record.get("family_capture_time")
+                            or record.get("selected_capture_time")
+                            or ""
+                        ),
+                        physical=True,
+                        include_event_ids=(event_id,) if not allow_reapply else (),
+                    )
+                )
+            normalized_file_rows.append(record)
+        file_rows = normalized_file_rows
+
     job = dict(job_row)
 
     try:
@@ -852,8 +896,8 @@ def build_event_sort_plan(
             family_statuses[family_id] = family_status
 
         capture_time = (
-            file_record.get("selected_capture_time")
-            or file_record.get("family_capture_time")
+            file_record.get("family_capture_time")
+            or file_record.get("selected_capture_time")
         )
         day_key = str(capture_time or "")[:10]
 
@@ -881,13 +925,16 @@ def build_event_sort_plan(
         )
 
         reassignment = removed_targets.get(family_id) if family_id is not None else None
-        if reassignment:
-            if not reassignment.get("target_event_id"):
-                blockers.append({
-                    "code": "removed_family_needs_reassignment",
-                    "family_id": family_id,
-                    "message": "Eine herausfallende Familie muss vor der Nachsortierung neu zugeordnet werden.",
-                })
+        is_free_stock = bool(file_record.get("_free_stock")) or bool(
+            reassignment and not reassignment.get("target_event_id")
+        )
+        file_preserve_day_folders = preserve_day_folders
+        if is_free_stock:
+            free_directory = PurePosixPath(str(file_record["_free_directory"]))
+            destination_parts = list(free_directory.parts)
+            child_folder = None
+            file_preserve_day_folders = False
+        elif reassignment:
             target_folder = _safe_component(
                 reassignment.get("target_folder_name") or "Später zuzuordnen",
                 "Zielereignisordner",
@@ -903,7 +950,7 @@ def build_event_sort_plan(
                 destination_parts = ["Später zuzuordnen", year, f"{target_folder} - {job_token}"]
             else:
                 destination_parts = [year, target_folder]
-            preserve_day_folders = bool(reassignment.get("target_preserve_day_folders"))
+            file_preserve_day_folders = bool(reassignment.get("target_preserve_day_folders"))
             child_folder = None
         elif linkage_kind == "archived_manual" or collision_redirected:
             # "Später zuzuordnen" ist ein globaler technischer Bereich direkt
@@ -917,7 +964,7 @@ def build_event_sort_plan(
         if child_folder:
             destination_parts.append(child_folder)
 
-        if preserve_day_folders:
+        if file_preserve_day_folders:
             if len(day_key) != 10:
                 blockers.append({
                     "code": "missing_capture_day",
@@ -932,10 +979,10 @@ def build_event_sort_plan(
                 destination_parts.append(day_key)
                 branch_days[branch_key].add(day_key)
 
-        destination_parts.extend([
-            "Alle",
-            filename,
-        ])
+        if is_free_stock:
+            destination_parts.append(filename)
+        else:
+            destination_parts.extend(["Alle", filename])
 
         destination_relative = PurePosixPath(*destination_parts)
         source_base = target_root if current_root_kind == "shared_workspace" else source_root
@@ -1108,8 +1155,9 @@ def build_event_sort_plan(
 
         leaf = destination_relative.parent
         planned_directories.add(str(leaf))
-        planned_directories.add(str(leaf.parent / "Sortiert"))
-        planned_directories.add(str(leaf.parent / "Export"))
+        if not is_free_stock:
+            planned_directories.add(str(leaf.parent / "Sortiert"))
+            planned_directories.add(str(leaf.parent / "Export"))
 
         entry_status = "move"
 
