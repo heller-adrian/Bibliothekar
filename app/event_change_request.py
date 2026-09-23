@@ -450,9 +450,22 @@ def propose_event_change(
     # Die aktuelle Archiv-Inventur ist für den neuen Zustand maßgeblich.
     # Manuell seit der letzten Archivierung gelöschte Dateien/Familien werden
     # nicht wieder als Sollbestand hineingezwungen.
-    preview["selected_family_ids"] = list(plan["selected_family_ids"])
+    planned_selected = plan.get("selected_family_ids")
+    if planned_selected is None:
+        planned_selected = sorted({
+            int(item["family_id"])
+            for item in plan.get("families_with_plans", [])
+            if item.get("family_id") is not None
+        })
+    preview["selected_family_ids"] = list(planned_selected)
     preview["selected_family_count"] = len(preview["selected_family_ids"])
-    preview["selected_file_count"] = int(plan["diff_summary"]["file_count"])
+    preview["selected_file_count"] = int(
+        plan.get("diff_summary", {}).get(
+            "file_count",
+            len(plan.get("families_with_plans", []))
+            + len(plan.get("assets_with_plans", [])),
+        )
+    )
 
     # ChangeRequest erstellen
     with database_connection(database_path) as connection:
