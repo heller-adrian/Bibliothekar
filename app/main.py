@@ -84,6 +84,7 @@ from app.sort_apply import (
     get_sort_run,
     latest_event_sort_run,
     mark_incomplete_sort_runs_interrupted,
+    recover_interrupted_sort_runs,
     prepare_sort_run,
 )
 from app.event_reapply import prepare_reapply_sort_run
@@ -747,7 +748,21 @@ def startup_database() -> None:
         if interrupted_sort_runs:
             print(
                 f"{interrupted_sort_runs} unterbrochene Sortierläufe "
-                "wurden zur manuellen Prüfung markiert.",
+                "wurden erkannt.",
+                flush=True,
+            )
+
+        sort_recovery = recover_interrupted_sort_runs(DATABASE_FILE)
+        if sort_recovery["recovered"]:
+            print(
+                f"{sort_recovery['recovered']} unterbrochene Sortierläufe "
+                "wurden anhand des Journals sicher zurückgesetzt.",
+                flush=True,
+            )
+        if sort_recovery["blocked"]:
+            print(
+                f"{sort_recovery['blocked']} unterbrochene Sortierläufe "
+                "bleiben wegen eines uneindeutigen Dateizustands gesperrt.",
                 flush=True,
             )
 
