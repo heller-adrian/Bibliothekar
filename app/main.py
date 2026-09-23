@@ -4285,7 +4285,12 @@ def _no_event_normal_conflicts(
 
 
 def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, Any]) -> bool:
-    """True when an applied event only changes visible name/notes."""
+    """True when an applied event changes only visible metadata.
+
+    UI and backend use slightly different field names for organizational
+    subevents. Compare their canonical time/structure semantics instead of
+    comparing the raw payload shape.
+    """
     event = context["event"]
     if str(event.get("status") or "") != "applied" or not event.get("applied_at"):
         return False
@@ -4314,44 +4319,71 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
             and bool(payload.get("preserve_day_folders")) == bool(event.get("preserve_day_folders"))
         )
 
-    children = list(context.get("child_events") or [])
-    requested_children = list(payload.get("child_segments") or [])
-    if requested_children or len(children) > 1:
-        if len(requested_children) != len(children):
+    if str(payload.get("event_kind") or "event") != "event":
+        return False
+    if bool(payload.get("preserve_day_folders")) != bool(event.get("preserve_day_folders")):
+        return False
+
+    start_date = str(payload.get("start_date") or "")
+    end_date = str(payload.get("end_date") or "")
+    if not start_date or not end_date:
+        return False
+
+    requested_children = list(
+        payload.get("subevents")
+        or payload.get("child_segments")
+        or []
+    )
+    current_children = list(context.get("child_events") or [])
+    if len(requested_children) != len(current_children):
+        return False
+
+    current_by_id = {str(child.get("id") or ""): child for child in current_children}
+    for index, segment in enumerate(requested_children):
+        segment_id = str(segment.get("id") or "")
+        current = current_by_id.get(segment_id) if segment_id else (
+            current_children[index] if index < len(current_children) else None
+        )
+        if current is None:
             return False
-        current_by_id = {str(c.get("id")): c for c in children}
-        for seg in requested_children:
-            current = current_by_id.get(str(seg.get("id") or ""))
-            if current is None:
-                return False
-            if (str(seg.get("name") or "") != str(current.get("name") or "")
-                or str(seg.get("start_time") or "") != str(current.get("start_datetime") or "")[11:16]
-                or str(seg.get("end_time") or "") != str(current.get("end_datetime") or "")[11:16]):
-                return False
+        requested_start = str(
+            segment.get("start_datetime")
+            or f"{start_date}T{str(segment.get('start_time') or '00:00')}:00"
+        )[:19]
+        requested_end = str(
+            segment.get("end_datetime")
+            or f"{end_date}T{str(segment.get('end_time') or '23:59')}:59"
+        )[:19]
+        if (
+            str(segment.get("name") or "") != str(current.get("name") or "")
+            or requested_start != str(current.get("start_datetime") or "")[:19]
+            or requested_end != str(current.get("end_datetime") or "")[:19]
+        ):
+            return False
+
+    uses_time = bool(payload.get("uses_time_range"))
+    requested_start = (
+        f"{start_date}T{str(payload.get('start_time') or '00:00')}:00"
+        if uses_time
+        else f"{start_date}T00:00:00"
+    )
+    requested_end = (
+        f"{end_date}T{str(payload.get('end_time') or '23:59')}:59"
+        if uses_time
+        else f"{end_date}T23:59:59"
+    )
+
+    # Legacy V1 parents may keep full-day parent bounds while one child carries
+    # the effective time range. Their child graph was compared above.
+    if int(event.get("time_model_version") or 1) < 2 and current_children:
         return (
-            str(payload.get("start_date") or "") == str(event.get("start_datetime") or "")[:10]
-            and str(payload.get("end_date") or "") == str(event.get("end_datetime") or "")[:10]
-            and bool(payload.get("preserve_day_folders")) == bool(event.get("preserve_day_folders"))
+            start_date == str(event.get("start_datetime") or "")[:10]
+            and end_date == str(event.get("end_datetime") or "")[:10]
         )
 
-    child = context.get("child_event")
-    # Older rows may have a parent uses_time_range=0 while the real effective
-    # structure is represented by one child. Structure comparison must follow
-    # the child graph, not only the legacy parent flag.
-    uses_time = bool(children) or bool(event.get("uses_time_range"))
-    current_start_time = str(child.get("start_datetime") or "")[11:16] if uses_time and child else "00:00"
-    current_end_time = str(child.get("end_datetime") or "")[11:16] if uses_time and child else "23:59"
-    current_child_name = str(child.get("name") or "") if child else ""
-
     return (
-        str(payload.get("start_date") or "") == str(event.get("start_datetime") or "")[:10]
-        and str(payload.get("end_date") or "") == str(event.get("end_datetime") or "")[:10]
-        and str(payload.get("event_kind") or "event") == str(event.get("event_kind") or "event")
-        and bool(payload.get("preserve_day_folders")) == bool(event.get("preserve_day_folders"))
-        and bool(payload.get("uses_time_range")) == uses_time
-        and (not uses_time or str(payload.get("start_time") or "00:00") == current_start_time)
-        and (not uses_time or str(payload.get("end_time") or "23:59") == current_end_time)
-        and (not uses_time or str(payload.get("child_event_name") or "") == current_child_name)
+        requested_start == str(event.get("start_datetime") or "")[:19]
+        and requested_end == str(event.get("end_datetime") or "")[:19]
     )
 
 
@@ -7187,7 +7219,7 @@ def api_confirm_change(cr_id: str) -> JSONResponse:
 def api_cancel_change(cr_id: str) -> JSONResponse:
     """Aenderungsauftrag abbrechen."""
     try:
-        result = cancel_event_change(DATABASE_FILE, cr_id)
+        result = cancel_event_change(DATABASE_FILE, cr_id, ARCHIVE_ROOT)
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
