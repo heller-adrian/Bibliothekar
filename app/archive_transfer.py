@@ -9,6 +9,7 @@ import os
 import uuid
 
 from app.database import database_connection
+from app.event_inventory import EventInventoryError, scan_event_inventory
 from app.archive_locations import (
     ArchiveLocationError,
     archive_path_without_symlinks,
@@ -374,6 +375,25 @@ def verify_event_archive(
             "Dem Ereignis sind keine Dateien zugeordnet."
         )
 
+    try:
+        inventory = scan_event_inventory(
+            database_path,
+            archive_root,
+            job_id,
+            event_id,
+            root_kind="camera_archive",
+            persist=True,
+            update_known_file_locations=False,
+        )
+    except EventInventoryError as exc:
+        raise ArchiveVerificationError(str(exc)) from exc
+
+    observed_by_file_id = {
+        int(item["known_file_id"]): item
+        for item in inventory["files"]
+        if item.get("known_file_id") is not None
+    }
+
     verification_id = "ARCHIVE_" + uuid.uuid4().hex.upper()
     created_at = _now()
     total_size = sum(int(row["size_bytes"]) for row in files)
@@ -414,18 +434,6 @@ def verify_event_archive(
 
     for row in files:
         try:
-            relative = _safe_relative(
-                row.get("current_relative_path")
-                or row.get("original_relative_path")
-            )
-            try:
-                candidate = archive_path_without_symlinks(
-                    archive_root,
-                    relative.as_posix(),
-                )
-            except ArchiveLocationError as exc:
-                raise ArchiveVerificationError(str(exc)) from exc
-
             expected_size = int(row["size_bytes"])
             expected_sha256 = str(
                 row.get("sha256_current")
@@ -436,36 +444,49 @@ def verify_event_archive(
             if not expected_sha256:
                 raise ArchiveVerificationError("Gespeicherte SHA-256-Summe fehlt.")
 
-            if not candidate.is_file():
+            observed = observed_by_file_id.get(int(row["file_id"]))
+            if observed is None:
+                relative_text = str(
+                    row.get("current_relative_path")
+                    or row.get("original_relative_path")
+                    or ""
+                )
                 status = "missing"
                 actual_size = None
                 actual_sha256 = None
-                error_message = "Datei fehlt in der Kamerabibliothek."
+                error_message = (
+                    "Datei wurde im aktuellen Ereignisordner der Kamerabibliothek nicht gefunden."
+                )
                 missing_count += 1
             else:
-                actual_size = int(candidate.stat().st_size)
-
+                relative_text = str(observed["relative_path"])
+                candidate = archive_path_without_symlinks(
+                    archive_root,
+                    relative_text,
+                )
+                actual_size = int(observed["size_bytes"])
+                actual_sha256 = str(observed["sha256"])
                 if actual_size != expected_size:
                     status = "size_mismatch"
-                    actual_sha256 = None
                     error_message = "Dateigröße weicht ab."
                     mismatched_count += 1
+                elif actual_sha256 != expected_sha256:
+                    status = "sha256_mismatch"
+                    error_message = "SHA-256-Summe weicht ab."
+                    mismatched_count += 1
+                elif not candidate.is_file():
+                    status = "missing"
+                    error_message = "Datei fehlt in der Kamerabibliothek."
+                    missing_count += 1
                 else:
-                    actual_sha256 = _sha256_file(candidate)
-
-                    if actual_sha256 != expected_sha256:
-                        status = "sha256_mismatch"
-                        error_message = "SHA-256-Summe weicht ab."
-                        mismatched_count += 1
-                    else:
-                        status = "verified"
-                        error_message = None
-                        verified_count += 1
-                        verified_bytes += expected_size
+                    status = "verified"
+                    error_message = None
+                    verified_count += 1
+                    verified_bytes += expected_size
 
             result = {
                 "file_id": int(row["file_id"]),
-                "expected_relative_path": relative.as_posix(),
+                "expected_relative_path": relative_text,
                 "expected_size_bytes": expected_size,
                 "expected_sha256": expected_sha256,
                 "status": status,
@@ -605,6 +626,7 @@ def verify_event_archive(
         "files": results,
         "ssd_release_ready": final_status == "verified",
         "ssd_release_available": True,
+        "inventory_summary": inventory.get("summary"),
         "message": (
             "Kamerabibliothek vollständig identisch geprüft."
             if final_status == "verified"
