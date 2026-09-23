@@ -9,7 +9,7 @@ import os
 import stat
 import uuid
 
-from app.archive_transfer import verify_event_archive
+from app.archive_transfer import ArchiveVerificationError, verify_event_archive
 from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.database import database_connection
 from app.workspace_layout import shared_work_root
@@ -666,12 +666,15 @@ def release_event_ssd(
         allow_missing_sources=open_release is not None,
     )
 
-    verification = verify_event_archive(
-        database_path,
-        archive_root,
-        job_id,
-        event_id,
-    )
+    try:
+        verification = verify_event_archive(
+            database_path,
+            archive_root,
+            job_id,
+            event_id,
+        )
+    except ArchiveVerificationError as exc:
+        raise SsdReleaseError(str(exc)) from exc
 
     if not verification.get("verified"):
         raise SsdReleaseError(
