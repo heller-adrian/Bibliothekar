@@ -315,6 +315,21 @@ def scan_event_inventory(
             if known is not None and capture_time
             else str(metadata.get("capture_time_confidence") or "missing")
         )
+        asset_kind = _asset_kind(event_rel, media_type, known_file_id)
+
+        # Bei Exporten ist CreateDate/ModifyDate häufig der Zeitpunkt des
+        # Lightroom-Exports und ausdrücklich NICHT die Aufnahmezeit. Ohne echte
+        # DateTimeOriginal-Information oder spätere eindeutige Verknüpfung zum
+        # Kameraoriginal wird deshalb keine zeitliche Zuordnung geraten.
+        if (
+            known_file_id is None
+            and asset_kind == "export"
+            and capture_time
+            and "DateTimeOriginal" not in str(capture_source or "")
+        ):
+            capture_time = None
+            capture_source = None
+            confidence = "missing"
 
         scanned.append({
             "event_id": event_id,
@@ -325,7 +340,7 @@ def scan_event_inventory(
             "filename": path.name,
             "extension": path.suffix.lower(),
             "media_type": media_type,
-            "asset_kind": _asset_kind(event_rel, media_type, known_file_id),
+            "asset_kind": asset_kind,
             "known_file_id": known_file_id,
             "family_id": family_id,
             "source_file_id": None,
@@ -384,10 +399,12 @@ def scan_event_inventory(
                 row["family_id"] = source["family_id"]
             family_source = source
 
-        if family_source is not None and (
-            not row["selected_capture_time"]
+        should_inherit = (
+            row["asset_kind"] == "xmp"
+            or not row["selected_capture_time"]
             or row["capture_time_confidence"] in {"missing", "low", "conflict"}
-        ):
+        )
+        if family_source is not None and should_inherit:
             row["selected_capture_time"] = family_source["selected_capture_time"]
             row["selected_capture_source"] = (
                 "source_file_inheritance"
