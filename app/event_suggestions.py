@@ -30,11 +30,13 @@ def _action_label(status: str) -> str:
 
 
 def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, Any]]:
-    """Return grouped, exact-day cross-import event matches for unassigned families.
+    """Return grouped cross-import event matches for unassigned families.
 
-    A broad event time range alone is deliberately not enough. A candidate event must
-    already contain at least one assigned family from the same calendar day. This keeps
-    long-running events from swallowing unrelated later imports.
+    Normal event occupancy is library-wide. Therefore a later import whose capture
+    time lies inside an existing normal event must also get a reachable target,
+    otherwise it is counted as unassigned while no free interval can be displayed.
+    The suggestion remains explicit/user-confirmed and creates a current-job linked
+    follow-up rather than assigning foreign-job files directly to the target row.
     """
     with database_connection(database_path) as connection:
         family_rows = connection.execute(
@@ -70,36 +72,28 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
                 """
                 SELECT e.id, e.job_id, e.name, e.folder_name, e.status,
                        e.event_kind, e.start_datetime, e.end_datetime,
-                       e.created_at, e.preserve_day_folders,
-                       COUNT(DISTINCT matched_ff.id) AS same_day_family_count
+                       e.created_at, e.preserve_day_folders
                 FROM events AS e
-                JOIN event_assignments AS matched_ea
-                  ON matched_ea.event_id = e.id
-                JOIN file_families AS matched_ff
-                  ON matched_ff.id = matched_ea.family_id
                 WHERE e.parent_event_id IS NULL
                   AND e.job_id <> ?
                   AND e.event_kind = 'event'
                   AND e.status IN ('planned', 'applied', 'archived')
-                  AND substr(matched_ff.selected_capture_time, 1, 10) = ?
                   AND ? BETWEEN e.start_datetime AND e.end_datetime
-                GROUP BY e.id
                 ORDER BY
                     CASE e.status
                         WHEN 'planned' THEN 1
                         WHEN 'applied' THEN 2
                         ELSE 3
                     END,
-                    same_day_family_count DESC,
                     e.created_at DESC,
                     e.id DESC
                 """,
-                (job_id, capture_day, capture),
+                (job_id, capture),
             ).fetchall()
 
-            # Among exact-day matches, prefer the most active state. If more than one
-            # event remains at the best state, the match is still ambiguous and no
-            # automatic proposal is made.
+            # Global normal-event occupancy must have one reachable target. If an
+            # old/legacy database contains several best-rank overlaps, keep the case
+            # explicit by withholding an automatic suggestion.
             if not candidates:
                 continue
             best_rank = {"planned": 1, "applied": 2, "archived": 3}[str(candidates[0]["status"])]
@@ -121,7 +115,6 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
                     "target_status": target["status"],
                     "target_start_datetime": target["start_datetime"],
                     "target_end_datetime": target["end_datetime"],
-                    "same_day_family_count": int(target["same_day_family_count"] or 0),
                     "action_label": _action_label(str(target["status"])),
                     "families": [],
                     "family_ids": [],
@@ -209,21 +202,6 @@ def accept_event_suggestion(
         if len(families) != len(selected_ids):
             raise EventSuggestionError("Mindestens eine Dateifamilie wurde nicht gefunden.")
 
-        target_days = {
-            str(row[0])
-            for row in connection.execute(
-                """
-                SELECT DISTINCT substr(ff.selected_capture_time, 1, 10)
-                FROM event_assignments AS ea
-                JOIN file_families AS ff ON ff.id = ea.family_id
-                WHERE ea.event_id = ?
-                  AND ff.selected_capture_time IS NOT NULL
-                """,
-                (target_event_id,),
-            ).fetchall()
-            if row[0]
-        }
-
         total_files = 0
         for family in families:
             assigned = connection.execute(
@@ -240,8 +218,6 @@ def accept_event_suggestion(
             capture = str(family["selected_capture_time"] or "")
             if not capture or not (str(target["start_datetime"]) <= capture <= str(target["end_datetime"])):
                 raise EventSuggestionError("Mindestens ein Aufnahmezeitpunkt passt nicht mehr zum Ereignis.")
-            if _capture_day(capture) not in target_days:
-                raise EventSuggestionError("Das Zielereignis enthält keine Aufnahmen vom selben Kalendertag mehr.")
             total_files += int(family["file_count"] or 0)
 
         status = str(target["status"])
