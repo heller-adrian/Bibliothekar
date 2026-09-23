@@ -176,13 +176,47 @@ def assign_archive_reassignments(database_path:Path,cr_id:str,family_ids:list[in
             stored_kind = target['kind'] + (':' + str(target.get('child_event_id')) if target['kind']=='existing_event' and target.get('child_event_id') else '')
             c.execute("""INSERT OR REPLACE INTO event_change_reassignments(change_request_id,family_id,target_kind,target_event_id,target_name,target_folder_name,target_start_datetime,target_end_datetime,target_uses_time_range,target_child_name,target_child_folder,target_preserve_day_folders,created_at)
                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",(cr_id,fid,stored_kind,target['event_id'],target['name'],target['folder'],target['start'],target['end'],target['uses'],target['child_name'],target['child_folder'],target['preserve'],now))
-            reviews=c.execute("SELECT id,old_path FROM event_change_file_reviews WHERE change_request_id=? AND family_id=?",(cr_id,fid)).fetchall()
+            reviews=c.execute(
+                "SELECT id,old_path FROM event_change_file_reviews WHERE change_request_id=? AND family_id=?",
+                (cr_id,fid),
+            ).fetchall()
             for rv in reviews:
-                filename=Path(str(rv['old_path'])).name; parts=[str(target['start'])[:4],target['folder']]
+                filename=Path(str(rv['old_path'])).name
+                source_parts=[part for part in Path(str(rv['old_path'])).parts if part]
+                branch=next((part for part in source_parts if part in {'Alle','Sortiert','Export'}),'Alle')
+                parts=[str(target['start'])[:4],target['folder']]
                 if target['child_folder']: parts.append(target['child_folder'])
                 if target['preserve']: parts.append(captures[fid][:10])
-                parts+=['Alle',filename]; new='/'.join(parts)
-                c.execute("UPDATE event_change_file_reviews SET new_path=?,action='move',updated_at=? WHERE id=?",(new,now,int(rv['id'])))
+                parts += [branch,filename]
+                new='/'.join(parts)
+                c.execute(
+                    "UPDATE event_change_file_reviews SET new_path=?,action='move',updated_at=? WHERE id=?",
+                    (new,now,int(rv['id'])),
+                )
+
+            asset_reviews=c.execute(
+                """SELECT id,old_path,asset_kind
+                   FROM event_change_asset_reviews
+                   WHERE change_request_id=? AND family_id=?""",
+                (cr_id,fid),
+            ).fetchall()
+            for rv in asset_reviews:
+                filename=Path(str(rv['old_path'])).name
+                source_parts=[part for part in Path(str(rv['old_path'])).parts if part]
+                branch=next(
+                    (part for part in source_parts if part in {'Alle','Sortiert','Export'}),
+                    'Export' if str(rv['asset_kind'])=='export' else 'Alle',
+                )
+                parts=[str(target['start'])[:4],target['folder']]
+                if target['child_folder']: parts.append(target['child_folder'])
+                if target['preserve']: parts.append(captures[fid][:10])
+                parts += [branch,filename]
+                new='/'.join(parts)
+                c.execute(
+                    """UPDATE event_change_asset_reviews
+                       SET new_path=?,action='move',updated_at=? WHERE id=?""",
+                    (new,now,int(rv['id'])),
+                )
         c.commit()
     prepared=None
     if workspace_path is not None:
