@@ -24,7 +24,7 @@ def test_0210_version_and_schema(tmp_path: Path):
     assert main.APP_VERSION == "0.26.3"
     db = tmp_path / "kamera.sqlite3"
     status = initialize_database(db)
-    assert max(status["applied_versions"]) == 25
+    assert max(status["applied_versions"]) == 26
     assert "imported_source_files" in status["tables"]
 
 
