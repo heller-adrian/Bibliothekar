@@ -221,12 +221,10 @@ def test_0262_symlink_archive_path_never_releases_ssd_source(tmp_path):
     with pytest.raises(ArchiveLocationError, match="Symlinks"):
         archive_path_without_symlinks(archive, rel)
 
-    verification = verify_event_archive(db, archive, "j", "e")
-    assert verification["verified"] is False
-    assert verification["files"][0]["status"] == "unsafe_path"
-    assert "Symlinks" in verification["files"][0]["error_message"]
+    with pytest.raises(ArchiveVerificationError, match="Symlinks"):
+        verify_event_archive(db, archive, "j", "e")
 
-    with pytest.raises(SsdReleaseError, match="nicht vollständig identisch"):
+    with pytest.raises(SsdReleaseError, match="Symlinks"):
         release_event_ssd(db, workspace, archive, "j", "e")
 
     assert source.read_bytes() == data
