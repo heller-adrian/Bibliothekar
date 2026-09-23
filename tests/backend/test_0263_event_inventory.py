@@ -381,3 +381,43 @@ def test_0263_xmp_links_to_family_when_raf_and_jpeg_share_stem(tmp_path):
     assert xmp["source_file_id"] is None
     assert xmp["selected_capture_time"].startswith("2026-07-23T12:00:00")
     assert {row["known_file_id"] for row in inventory["files"] if row["known_file_id"]} == {jpg_id, raf_id}
+
+
+def test_0263_export_create_date_is_not_mistaken_for_capture_time(tmp_path, monkeypatch):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    archive = tmp_path / "archive"
+    with database_connection(db) as connection:
+        seed_job(connection)
+        seed_event(connection, status="archived")
+
+    export_dir = archive / "2026" / "07-23 - Trip" / "Export"
+    export_dir.mkdir(parents=True)
+    (export_dir / "final.jpg").write_bytes(b"export")
+
+    monkeypatch.setattr(
+        "app.event_inventory.analyze_tree",
+        lambda _root: {
+            "files": [{
+                "relative_path": "Export/final.jpg",
+                "media_type": "jpeg",
+                "selected_capture_time": "2026-09-23T20:00:00+02:00",
+                "selected_capture_source": "EXIF:ExifIFD:CreateDate",
+                "capture_time_confidence": "high",
+            }]
+        },
+    )
+
+    inventory = scan_event_inventory(
+        db,
+        archive,
+        "j",
+        "e",
+        root_kind="camera_archive",
+        persist=True,
+        update_known_file_locations=False,
+    )
+    export = next(row for row in inventory["files"] if row["asset_kind"] == "export")
+    assert export["selected_capture_time"] is None
+    assert export["selected_capture_source"] is None
+    assert export["capture_time_confidence"] == "missing"
