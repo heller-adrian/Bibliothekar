@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.26.3 – Ereignis-Inventur, XMP/Export und aktueller Archiv-IST
+
+- `Alle`, `Sortiert` und `Export` sind keine dauerhaft vorgeschriebenen Dateipositionen mehr. Kameraoriginale werden innerhalb des aktuellen Ereignisordners anhand ihrer Identität wiedergefunden; der konkrete Pfad ist nur der zuletzt beobachtete IST-Ort.
+- Vor jeder Bearbeitung eines archivierten Ereignisses wird dessen realer Ordner read-only neu gescannt. Manuell später gelöschte Archivdateien werden nicht zurückgefordert; der aktuelle Bestand ist die Grundlage des neuen IST→SOLL-Auftrags.
+- Der Scanner erfasst XMP-Sidecars, Exporte und weitere aktuelle Ereignisdateien. XMP wird bei eindeutigem Stem einer Ursprungsdatei oder – bei RAF+JPEG – der gemeinsamen Kamerafamilie zugeordnet.
+- Für neue Bild-/Exportdateien wird die vorhandene Metadatenlogik genutzt: echte Aufnahmeinformationen wie DateTimeOriginal haben Vorrang vor Erstell-/Dateisystemzeiten. Unklare Zuordnungen werden nicht geraten und blockieren den manuellen Abschluss sichtbar.
+- Archivänderungsaufträge beziehen aktuelle XMP-/Exportdateien ein und erhalten die vorhandene Arbeitsstruktur `Alle`/`Sortiert`/`Export`, auch bei Neu-Zuordnungen.
+- Die SSD-Freigabe prüft jetzt den gesamten aktuellen Ereignisbestand. Kameraoriginale, XMPs, Exporte und weitere reguläre Dateien müssen vor dem Löschen der SSD jeweils als echte SHA-identische Datei im Archiv vorhanden sein; ihre Unterordnerposition darf zwischen SSD und Archiv abweichen.
+- Symlinks bleiben in allen Ereignis- und Archivprüfungen strikt unzulässig. Die Kamerabibliothek bleibt bei Archivänderungen vollständig read-only.
+
 ### 0.26.2 – Logikhärtung nach vollständigem Konsistenz-Audit
 
 - Archivnachweise akzeptieren keine Symlinks mehr: erwartete Archivpfade und ihre vorhandenen Komponenten werden mit `lstat` geprüft, bevor SHA-Prüfung oder SSD-Freigabe möglich sind.
