@@ -318,18 +318,33 @@ def scan_event_inventory(
         asset_kind = _asset_kind(event_rel, media_type, known_file_id)
 
         # Bei Exporten ist CreateDate/ModifyDate häufig der Zeitpunkt des
-        # Lightroom-Exports und ausdrücklich NICHT die Aufnahmezeit. Ohne echte
-        # DateTimeOriginal-Information oder spätere eindeutige Verknüpfung zum
-        # Kameraoriginal wird deshalb keine zeitliche Zuordnung geraten.
-        if (
-            known_file_id is None
-            and asset_kind == "export"
-            and capture_time
-            and "DateTimeOriginal" not in str(capture_source or "")
-        ):
-            capture_time = None
-            capture_source = None
-            confidence = "missing"
+        # Lightroom-Exports und ausdrücklich NICHT die Aufnahmezeit. Nur echte
+        # DateTimeOriginal-Information (oder später eine eindeutige Beziehung
+        # zum Kameraoriginal) darf die zeitliche Zuordnung steuern.
+        if known_file_id is None and asset_kind == "export":
+            if not capture_time or "DateTimeOriginal" not in str(capture_source or ""):
+                capture_time = None
+                capture_source = None
+                confidence = "missing"
+            else:
+                original_candidates = [
+                    str(item.get("normalized_datetime") or "")
+                    for item in metadata.get("metadata_candidates", [])
+                    if item.get("usable")
+                    and "DateTimeOriginal" in str(item.get("tag_name") or "")
+                    and item.get("normalized_datetime")
+                ]
+                distinct_originals = set(original_candidates)
+                if len(distinct_originals) > 1:
+                    # Zwei widersprüchliche echte Aufnahmezeiten: nicht raten.
+                    capture_time = None
+                    capture_source = None
+                    confidence = "conflict"
+                elif distinct_originals:
+                    # Konflikte mit CreateDate/ModifyDate sind für einen Export
+                    # unerheblich; die echte Aufnahmezeit bleibt maßgeblich.
+                    capture_time = next(iter(distinct_originals))
+                    confidence = "high"
 
         scanned.append({
             "event_id": event_id,
