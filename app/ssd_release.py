@@ -10,6 +10,7 @@ import stat
 import uuid
 
 from app.archive_transfer import verify_event_archive
+from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.database import database_connection
 from app.workspace_layout import shared_work_root
 
@@ -636,6 +637,11 @@ def release_event_ssd(
             "Bitte zuerst alle freien Familien zuordnen und die Nachsortierung abschließen."
         )
 
+    if int(event.get("resort_required") or 0):
+        raise SsdReleaseError(
+            "SSD-Freigabe gesperrt: Für dieses Ereignis ist noch eine Nachsortierung offen."
+        )
+
     if str(event.get("status")) == "archived":
         raise SsdReleaseError(
             "Ereignis ist bereits archiviert, aber ein abgeschlossener "
@@ -704,12 +710,15 @@ def release_event_ssd(
             file_id = int(row["file_id"])
             relative = row["relative"]
             source = row["source"]
-            archive = archive_root.joinpath(*relative.parts).resolve(strict=False)
+            try:
+                archive = archive_path_without_symlinks(
+                    archive_root,
+                    relative.as_posix(),
+                )
+            except ArchiveLocationError as exc:
+                raise SsdReleaseError(str(exc)) from exc
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
-
-            if not _is_relative_to(archive, archive_root):
-                raise SsdReleaseError("Archivdatei verlässt die Kamerabibliothek.")
 
             _archive_stat, archive_hash = _verify_regular_file(
                 archive,
