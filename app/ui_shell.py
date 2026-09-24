@@ -847,6 +847,17 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   border-radius: 3px;
 }
 
+@media (min-width: 821px) {
+  .bk-workspace-subnav {
+    position: sticky;
+    top: var(--bk-shell-sticky-height, 92px);
+    z-index: 2600;
+    background: color-mix(in srgb, var(--bk-page-bg) 96%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+}
+
 .bk-dialog {
   width: min(560px, calc(100vw - 28px));
   border: 1px solid var(--bk-line);
