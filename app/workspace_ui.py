@@ -371,13 +371,58 @@ WORKSPACE_HTML = r"""<!doctype html>
     .existing-segment-static{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);padding:9px 10px}
     .selection-bar-anchor{height:0}
     @media (min-width:821px){
-      .bk-workspace-subnav{position:sticky;top:var(--bk-shell-sticky-height,92px);z-index:2600;align-items:center;gap:4px 8px;background:color-mix(in srgb,var(--background) 96%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:padding .18s ease,box-shadow .18s ease,background .18s ease}
-      .bk-workspace-subnav.has-selection-dock{box-shadow:0 9px 18px rgb(0 0 0 / .05)}
-      .selection-bar.is-docked{position:static;z-index:auto;flex:1 1 580px;width:auto;margin:0 0 0 auto;border-color:transparent;border-radius:0;background:transparent !important;padding:2px 44px 2px 8px;backdrop-filter:none;-webkit-backdrop-filter:none;transition:background .18s ease,border-color .18s ease,padding .18s ease}
-      .selection-bar.is-docked .selection-top-button{right:2px;top:2px}
+      .selection-bar{
+        transform-origin:top left;
+        transition:
+          padding 220ms cubic-bezier(.2,.78,.2,1),
+          border-radius 220ms cubic-bezier(.2,.78,.2,1),
+          background 220ms ease,
+          box-shadow 220ms ease,
+          border-color 70ms ease 145ms;
+      }
+      .selection-bar.is-morphing{pointer-events:none}
+      .selection-bar.is-docked{
+        position:relative;
+        top:auto;
+        z-index:auto;
+        flex:1 1 auto;
+        width:auto;
+        min-width:0;
+        margin:0;
+        padding:5px 44px 5px 10px;
+        border-color:transparent;
+        border-radius:10px;
+        background:transparent !important;
+        box-shadow:none;
+        backdrop-filter:none;
+        -webkit-backdrop-filter:none;
+        justify-content:flex-end;
+        flex-wrap:nowrap;
+      }
+      .selection-bar.is-docked .selection-summary{
+        flex:0 1 auto;
+        white-space:nowrap;
+      }
       .selection-bar.is-docked .selection-actions{flex-wrap:nowrap}
+      .selection-bar.is-docked .selection-top-button{
+        right:2px;
+        top:50%;
+        transform:translateY(-50%);
+      }
+      .selection-bar.is-docked .selection-top-button:active{
+        transform:translateY(-50%) scale(.98);
+      }
     }
-    @media (min-width:821px) and (max-width:1180px){.bk-workspace-subnav.has-selection-dock{flex-wrap:wrap}.selection-bar.is-docked{flex:1 0 100%;margin-left:0;padding-left:0}}
+    @media (min-width:821px) and (max-width:1180px){
+      .selection-bar.is-docked{
+        width:100%;
+        flex:1 1 100%;
+        justify-content:flex-start;
+        flex-wrap:wrap;
+        padding-left:0;
+      }
+      .selection-bar.is-docked .selection-actions{flex-wrap:wrap}
+    }
     @media (max-width:820px){.event-boundaries,.create-subevent-grid,.create-subevent-boundary{grid-template-columns:1fr}}
 
     .preview {
@@ -1302,21 +1347,109 @@ WORKSPACE_HTML = r"""<!doctype html>
       document.getElementById("selection-bar");
     const selectionBarAnchor=document.getElementById("selection-bar-anchor");
     const workspaceSubnav=document.querySelector(".bk-workspace-subnav");
-    let selectionDocked=false,selectionDockTrigger=0;
-    function measureSelectionDock(){if(!selectionBarAnchor||selectionDocked)return;selectionDockTrigger=selectionBarAnchor.getBoundingClientRect().top+window.scrollY;}
-    function updateSelectionDock(){
-      if(!selectionBarAnchor||!workspaceSubnav||!selectionBar)return;
-      const desktop=window.matchMedia("(min-width: 821px)").matches;
-      if(!desktop){if(selectionDocked){selectionBarAnchor.after(selectionBar);selectionBar.classList.remove("is-docked");workspaceSubnav.classList.remove("has-selection-dock");selectionBarAnchor.style.height="0px";selectionDocked=false;}return;}
-      if(!selectionDockTrigger)measureSelectionDock();
-      const shellHeight=Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bk-shell-sticky-height"))||92;
-      const shouldDock=window.scrollY+shellHeight+workspaceSubnav.offsetHeight+8>=selectionDockTrigger;
-      if(shouldDock&&!selectionDocked){selectionBarAnchor.style.height=selectionBar.getBoundingClientRect().height+"px";workspaceSubnav.appendChild(selectionBar);selectionBar.classList.add("is-docked");workspaceSubnav.classList.add("has-selection-dock");selectionDocked=true;}
-      else if(!shouldDock&&selectionDocked){selectionBarAnchor.after(selectionBar);selectionBar.classList.remove("is-docked");workspaceSubnav.classList.remove("has-selection-dock");selectionBarAnchor.style.height="0px";selectionDocked=false;measureSelectionDock();}
+    const selectionDockTarget=document.getElementById("bk-workspace-dock");
+    let selectionDocked=false;
+    let selectionMorphAnimation=null;
+
+    function workspaceStickyDesktop(){
+      return window.matchMedia("(min-width: 821px)").matches;
     }
+
+    function shellStickyHeight(){
+      return Number.parseFloat(
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--bk-shell-sticky-height")
+      ) || 92;
+    }
+
+    function animateSelectionMorph(dock){
+      if(!selectionBarAnchor||!workspaceSubnav||!selectionDockTarget||!selectionBar)return;
+
+      if(selectionMorphAnimation){
+        selectionMorphAnimation.cancel();
+        selectionMorphAnimation=null;
+      }
+
+      const first=selectionBar.getBoundingClientRect();
+
+      if(dock){
+        selectionBarAnchor.style.height=Math.ceil(first.height)+"px";
+        selectionDockTarget.appendChild(selectionBar);
+        selectionBar.classList.add("is-docked");
+        workspaceSubnav.classList.add("has-selection-dock");
+      }else{
+        selectionBarAnchor.after(selectionBar);
+        selectionBar.classList.remove("is-docked");
+        workspaceSubnav.classList.remove("has-selection-dock");
+        selectionBarAnchor.style.height="0px";
+      }
+
+      const last=selectionBar.getBoundingClientRect();
+      const dx=first.left-last.left;
+      const dy=first.top-last.top;
+      const sx=last.width ? Math.max(.82,Math.min(1.18,first.width/last.width)) : 1;
+      const sy=last.height ? Math.max(.82,Math.min(1.18,first.height/last.height)) : 1;
+
+      selectionBar.classList.add("is-morphing");
+      if(typeof selectionBar.animate==="function"){
+        selectionMorphAnimation=selectionBar.animate(
+          [
+            {transform:`translate(${dx}px,${dy}px) scale(${sx},${sy})`},
+            {transform:"translate(0,0) scale(1,1)"}
+          ],
+          {duration:220,easing:"cubic-bezier(.2,.78,.2,1)"}
+        );
+        selectionMorphAnimation.addEventListener("finish",()=>{
+          selectionBar.classList.remove("is-morphing");
+          selectionMorphAnimation=null;
+        },{once:true});
+        selectionMorphAnimation.addEventListener("cancel",()=>{
+          selectionBar.classList.remove("is-morphing");
+        },{once:true});
+      }else{
+        selectionBar.classList.remove("is-morphing");
+      }
+    }
+
+    function restoreSelectionBarImmediately(){
+      if(!selectionDocked)return;
+      if(selectionMorphAnimation){
+        selectionMorphAnimation.cancel();
+        selectionMorphAnimation=null;
+      }
+      selectionBarAnchor.after(selectionBar);
+      selectionBar.classList.remove("is-docked","is-morphing");
+      workspaceSubnav?.classList.remove("has-selection-dock","is-stuck");
+      selectionBarAnchor.style.height="0px";
+      selectionDocked=false;
+    }
+
+    function updateSelectionDock(){
+      if(!selectionBarAnchor||!workspaceSubnav||!selectionDockTarget||!selectionBar)return;
+
+      if(!workspaceStickyDesktop()){
+        restoreSelectionBarImmediately();
+        return;
+      }
+
+      const shellHeight=shellStickyHeight();
+      const shouldDock=window.scrollY>0
+        && workspaceSubnav.getBoundingClientRect().top<=shellHeight+1;
+
+      workspaceSubnav.classList.toggle("is-stuck",shouldDock);
+
+      if(shouldDock&&!selectionDocked){
+        selectionDocked=true;
+        animateSelectionMorph(true);
+      }else if(!shouldDock&&selectionDocked){
+        selectionDocked=false;
+        animateSelectionMorph(false);
+      }
+    }
+
     window.addEventListener("scroll",updateSelectionDock,{passive:true});
-    window.addEventListener("resize",()=>{if(!selectionDocked)measureSelectionDock();updateSelectionDock();});
-    requestAnimationFrame(()=>{measureSelectionDock();updateSelectionDock();});
+    window.addEventListener("resize",updateSelectionDock);
+    requestAnimationFrame(updateSelectionDock);
     const eventSuggestionsPanel = document.getElementById("event-suggestions-panel");
     const eventSuggestionList = document.getElementById("event-suggestion-list");
     const eventSuggestionStatus = document.getElementById("event-suggestion-status");
@@ -1884,6 +2017,100 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     }
 
+
+
+    function planningOverview() {
+      if (
+        workspace
+        && workspace.planning_overview
+      ) {
+        return workspace.planning_overview;
+      }
+
+      const groups =
+        workspace
+        && Array.isArray(
+          workspace.day_groups
+        )
+          ? workspace.day_groups
+          : [];
+
+      return {
+        event_groups: [],
+        available_day_groups:
+          groups,
+        timeline_groups:
+          groups.map(
+            group => ({
+              ...group,
+              group_type: "day"
+            })
+          )
+      };
+    }
+
+
+    function availableDayGroups() {
+      return (
+        planningOverview()
+          .available_day_groups
+        || []
+      );
+    }
+
+
+    function formatTimelineDateRange(
+      startValue,
+      endValue
+    ) {
+      const start = String(
+        startValue || ""
+      ).slice(0, 10);
+
+      const end = String(
+        endValue || ""
+      ).slice(0, 10);
+
+      if (!start) {
+        return "Ohne Zeitraum";
+      }
+
+      if (
+        !end
+        || start === end
+      ) {
+        return formatDay(start);
+      }
+
+      const startDate =
+        new Date(
+          `${start}T12:00:00`
+        );
+
+      const endDate =
+        new Date(
+          `${end}T12:00:00`
+        );
+
+      return (
+        startDate.toLocaleDateString(
+          "de-DE",
+          {
+            day: "2-digit",
+            month: "2-digit"
+          }
+        )
+        + "–"
+        + endDate.toLocaleDateString(
+          "de-DE",
+          {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric"
+          }
+        )
+      );
+    }
 
 
     function renderDays() {

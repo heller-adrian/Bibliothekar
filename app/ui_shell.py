@@ -847,14 +847,55 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   border-radius: 3px;
 }
 
+.bk-workspace-links {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.bk-workspace-dock:empty { display: none; }
+
 @media (min-width: 821px) {
   .bk-workspace-subnav {
     position: sticky;
     top: var(--bk-shell-sticky-height, 92px);
     z-index: 2600;
+    align-items: center;
+    gap: 8px 14px;
+    background: transparent;
+    border-radius: 0 0 15px 15px;
+    transition:
+      background 180ms ease,
+      box-shadow 180ms ease,
+      padding-top 180ms ease,
+      padding-bottom 180ms ease;
+  }
+  .bk-workspace-subnav.is-stuck {
     background: color-mix(in srgb, var(--bk-page-bg) 96%, transparent);
+    box-shadow: 0 12px 24px -24px rgb(0 0 0 / .55);
     -webkit-backdrop-filter: blur(14px);
     backdrop-filter: blur(14px);
+  }
+  .bk-workspace-subnav.has-selection-dock {
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+  .bk-workspace-dock {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+@media (min-width: 821px) and (max-width: 1180px) {
+  .bk-workspace-subnav.has-selection-dock {
+    flex-wrap: wrap;
+  }
+  .bk-workspace-subnav.has-selection-dock .bk-workspace-dock {
+    flex: 1 0 100%;
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 
@@ -1723,10 +1764,18 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
     subnav = ""
     if active == "workspace":
+        dock_slot = (
+            '<div id="bk-workspace-dock" class="bk-workspace-dock"></div>'
+            if subarea == "captures"
+            else ""
+        )
         subnav = f"""
 <div class="bk-workspace-subnav" aria-label="Arbeitsbereich">
-  <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Aufnahmen</a>
-  <a href="/events" class="{'active' if subarea == 'events' else ''}">Ereignisse</a>
+  <div class="bk-workspace-links">
+    <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Aufnahmen</a>
+    <a href="/events" class="{'active' if subarea == 'events' else ''}">Ereignisse</a>
+  </div>
+  {dock_slot}
 </div>
 """
 
