@@ -2342,38 +2342,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       </div>`;
     }
 
-    function renderNoEventRangeGeneratorFields() {
-      const fixedMonth=activeNoEventMonthKey();
-      const startLabel=eventStartDate.closest("label");
-      const endLabel=eventEndDate.closest("label");
-      if (!fixedMonth) {
-        startLabel.hidden=false;
-        endLabel.hidden=false;
-        startLabel.querySelector("span").textContent="Zeitspanne von";
-        endLabel.querySelector("span").textContent="Zeitspanne bis";
-        return;
-      }
-      startLabel.hidden=true;
-      endLabel.hidden=true;
-      const label=fixedMonth.slice(5,7)+"/"+fixedMonth.slice(0,4);
-      const max=daysInMonth(fixedMonth);
-      const wrapper=document.createElement("div");
-      wrapper.dataset.fixedRangeGenerator="1";
-      wrapper.className="full-width";
-      wrapper.style.cssText="display:grid;grid-template-columns:minmax(130px,.9fr) minmax(90px,.55fr) minmax(130px,.9fr) minmax(90px,.55fr);gap:8px;align-items:end";
-      wrapper.innerHTML=`
-        <label><span>Monat/Jahr</span><input type="text" value="${escapeHtml(label)}" disabled></label>
-        <label><span>Von Tag</span><input data-fixed-range-start-day type="number" min="1" max="${max}"></label>
-        <label><span>Monat/Jahr</span><input type="text" value="${escapeHtml(label)}" disabled></label>
-        <label><span>Bis Tag</span><input data-fixed-range-end-day type="number" min="1" max="${max}"></label>`;
-      const sync=()=>{
-        const a=Number(wrapper.querySelector("[data-fixed-range-start-day]")?.value||0);
-        const b=Number(wrapper.querySelector("[data-fixed-range-end-day]")?.value||0);
-        eventStartDate.value=a>0 ? `${fixedMonth}-${String(Math.min(max,Math.max(1,a))).padStart(2,"0")}` : "";
-        eventEndDate.value=b>0 ? `${fixedMonth}-${String(Math.min(max,Math.max(1,b))).padStart(2,"0")}` : "";
-      };
-      wrapper.querySelectorAll("input[type=number]").forEach(input=>input.addEventListener("input",sync));
-    }
 
     function segmentRowHtml(day) {
       const dayKey=day.day_key||"",start=day.start_time||"00:00",end=day.end_time||"23:59",count=Number(day.family_count||0);
