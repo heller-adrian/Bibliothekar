@@ -29,7 +29,7 @@ def test_empty_month_filter_lists_all_canonical_noevent_targets(tmp_path):
 
 def test_workspace_has_collapsed_timeblocks_and_manual_target_picker():
     assert 'id="no-event-range-details"' in WORKSPACE_HTML
-    assert '<details id="no-event-range-details" class="card"' in WORKSPACE_HTML
+    assert '<details id="no-event-range-details" class="card collapse-card"' in WORKSPACE_HTML
     assert 'Zeitblock ${index+1}' in WORKSPACE_HTML
     assert 'Noch keine Zeitblöcke.' in WORKSPACE_HTML
     assert 'Neue Monats-Sammlung / noch kein Ziel' in WORKSPACE_HTML

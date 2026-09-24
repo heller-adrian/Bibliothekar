@@ -16,5 +16,7 @@ def test_event_card_navigates_directly_and_editor_closes_on_save():
     assert 'data-reassign-workspace=' not in EVENTS_HTML
     assert 'a.plan-button { display:inline-flex;' in EVENTS_HTML
     assert 'list-style:none !important' in EVENTS_HTML
-    assert '.event-details[open] > summary::before' in EVENTS_HTML
+    assert 'class="event-card-actions" hidden' in EVENTS_HTML
+    assert 'data-view-event=' in EVENTS_HTML
+    assert 'function renderEventViewer' in EVENTS_HTML
     assert 'eventEditDialog.close();\n\n      if (result.archive_manual?' in EVENTS_HTML
