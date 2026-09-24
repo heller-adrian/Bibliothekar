@@ -636,6 +636,20 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 .bk-tab.is-navigating:not(.active) {
   transform: translateY(-8px);
 }
+
+/*
+ * Sobald eine inaktive Karte angehoben wird, wird ihre zuvor verdeckte
+ * Innenkante wieder zur vollständigen Kartenrundung. Im Ruhezustand bleiben
+ * die inneren Rundungen weiterhin verborgen, damit die Registerfugen glatt
+ * unter der aktiven Karte verschwinden.
+ */
+.bk-tab:hover:not(.active)::before,
+.bk-tab:active:not(.active)::before,
+.bk-tab.is-navigating:not(.active)::before {
+  border-top-left-radius: 17px;
+  border-top-right-radius: 17px;
+}
+
 .bk-tab.active {
   animation: bk-tab-arrive 180ms cubic-bezier(.2,.8,.2,1);
 }
@@ -1321,6 +1335,12 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   .bk-tab.active::before,
   .bk-tab.is-active::before {
     bottom: calc(-1 * var(--bk-page-bridge-height));
+  }
+  .bk-tab:hover:not(.active)::before,
+  .bk-tab:active:not(.active)::before,
+  .bk-tab.is-navigating:not(.active)::before {
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
   }
   .bk-tab-label { display: none; }
   .bk-tab-mobile-label {
