@@ -109,7 +109,7 @@ def test_0267_scroll_morph_progress_is_continuous():
     end = WORKSPACE_HTML.index("    function selectionDockGeometry()", start)
     helpers = WORKSPACE_HTML[start:end]
     script = helpers + r"""
-const d=128;
+const selectionMorphDistance=128;
 const far=selectionMorphProgressForPositions(500,100);
 const halfway=selectionMorphProgressForPositions(164,100);
 const dock=selectionMorphProgressForPositions(100,100);
