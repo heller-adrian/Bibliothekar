@@ -563,9 +563,9 @@ def test_selection_passes_exact_bounds_in_executable_ui():
     from app.workspace_ui import WORKSPACE_HTML
     a=WORKSPACE_HTML.index('    function applyAutomaticFreeTimeSuggestion')
     b=WORKSPACE_HTML.index('    async function openTaskReassignment',a)
-    script="""const eventStartTime={},eventEndTime={},useTimeRange={},timeFields={},childEventName={};\n"""+WORKSPACE_HTML[a:b]+"""
+    script="""const eventStartTime={},eventEndTime={},useTimeRange={};let visible=false;function setParentTimeFieldsVisible(value){visible=value;}\n"""+WORKSPACE_HTML[a:b]+"""
 applyAutomaticFreeTimeSuggestion([{start_datetime:'2026-07-23T15:01:00',start_time:'15:01',end_time:'23:59'}]);
-if(eventStartTime.value!=='15:01'||eventEndTime.value!=='23:59'||!useTimeRange.checked||childEventName.required) process.exit(1);
+if(eventStartTime.value!=='15:01'||eventEndTime.value!=='23:59'||!useTimeRange.checked||!visible) process.exit(1);
 """
     subprocess.run(['node','-e',script],check=True,capture_output=True)
 

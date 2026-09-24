@@ -29,6 +29,6 @@ def test_0202_ui_contracts_present():
     assert 'task.startsWith("reassign:")' in WORKSPACE_HTML
     assert '/events?job=' in WORKSPACE_HTML
     assert 'reassignment_segments' in EVENTS_HTML
-    assert 'edit-noevent-existing-ranges' in EVENTS_HTML
-    assert 'Zeitblock ${i+1}' in EVENTS_HTML
-    assert 'Monat/Jahr' in WORKSPACE_HTML
+    assert 'id="no-event-segments"' in EVENTS_HTML
+    assert '＋ Tagessegment hinzufügen' in EVENTS_HTML
+    assert 'existing-segment-static' in WORKSPACE_HTML

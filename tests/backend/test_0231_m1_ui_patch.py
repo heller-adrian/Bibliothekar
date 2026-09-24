@@ -31,7 +31,7 @@ def test_0231_workspace_status_is_localized():
     html = main.workspace_interface().body.decode("utf-8")
 
     assert 'planned: "Geplant"' in html
-    assert 'workspaceStatusLabel(event.status)' in html
+    assert 'workspaceStatusLabel(event.status || "")' in html
     assert 'workspaceStatusLabel(group.status)' in html
 
 

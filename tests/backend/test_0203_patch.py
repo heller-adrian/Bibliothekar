@@ -7,12 +7,11 @@ def test_0203_version():
     assert APP_VERSION == "0.26.6"
 
 
-def test_no_event_range_generator_locks_existing_month():
-    assert "renderNoEventRangeGeneratorFields" in WORKSPACE_HTML
-    assert "data-fixed-range-start-day" in WORKSPACE_HTML
-    assert "data-fixed-range-end-day" in WORKSPACE_HTML
-    assert "Monat/Jahr" in WORKSPACE_HTML
-
+def test_no_event_continuation_uses_only_day_segments_and_locks_existing():
+    assert "renderNoEventRangeGeneratorFields" not in WORKSPACE_HTML
+    assert 'existing-segment-static' in WORKSPACE_HTML
+    assert "_locked:true,_existing:true" in WORKSPACE_HTML
+    assert "Zeitblock hinzufügen" not in WORKSPACE_HTML
 
 def test_reassignment_is_compact_by_day_without_family_drilldown():
     # 0.25 removes the target selector: assignment happens through workspace cards.
@@ -23,9 +22,7 @@ def test_reassignment_is_compact_by_day_without_family_drilldown():
     assert 'segment.family_count' in EVENTS_HTML and 'segment.file_count' in EVENTS_HTML
 
 
-def test_existing_no_event_time_blocks_are_editable():
-    assert "data-existing-range" in EVENTS_HTML
-    assert "data-edit-range-start-day" in EVENTS_HTML
-    assert "data-edit-range-end-day" in EVENTS_HTML
-    assert "data-apply-existing-range" in EVENTS_HTML
-    assert "Zeitblock übernehmen" in EVENTS_HTML
+def test_existing_no_event_segments_are_not_editable_in_continue_dialog():
+    assert "data-existing-range" not in EVENTS_HTML
+    assert "Zeitblock übernehmen" not in EVENTS_HTML
+    assert 'id="add-no-event-segment"' in EVENTS_HTML

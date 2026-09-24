@@ -53,12 +53,11 @@ def test_normal_event_range_is_canonical_not_old_day_selection():
     assert "2026-07-21" in preview["structure_text"]
 
 
-def test_workspace_has_segment_generator_and_preserve_toggle_for_no_event():
-    assert "Zeitspanne" in WORKSPACE_HTML
-    assert "· Auswahlhilfe" in WORKSPACE_HTML
-    assert "no-event-range-fields" in WORKSPACE_HTML
+def test_workspace_has_canonical_segments_and_preserve_toggle_for_no_event():
+    assert "Zeitspanne · Auswahlhilfe" not in WORKSPACE_HTML
+    assert "no-event-range-fields" not in WORKSPACE_HTML
+    assert 'id="no-event-segment-list"' in WORKSPACE_HTML
     assert "syncNoEventRangeDisplayFromSegments" in WORKSPACE_HTML
-    assert "syncNoEventSegmentsFromRange" in WORKSPACE_HTML
     assert "base.preserve_day_folders = preserveDayFolders.checked" in WORKSPACE_HTML
 
 from app.database import initialize_database, database_connection, create_planned_event
