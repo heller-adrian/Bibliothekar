@@ -389,6 +389,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
   --bk-tab-accent: #87939a;
   --bk-tab-bg: #5f686d;
   --bk-tab-edge-gradient: linear-gradient(to right, transparent, transparent);
+  --bk-tab-motion-tail: 9px;
   position: relative;
   flex: 1 1 0;
   min-width: 0;
@@ -443,6 +444,17 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
   backface-visibility: hidden;
   box-shadow: none;
   pointer-events: none;
+}
+
+/*
+ * Bewegungsreserve:
+ * Inaktive Karten reichen unsichtbar unter den Seiten-Puffer. Dadurch kann
+ * die Karte beim Hover/Klick nach oben gleiten, ohne unten die dunkle
+ * Headerfläche freizulegen. Die Reserve liegt weiterhin hinter dem
+ * Seiten-Puffer und hinter dem aktiven Reiter.
+ */
+.bk-tab:not(.active)::before {
+  bottom: calc(-1 * var(--bk-tab-motion-tail));
 }
 
 /*
@@ -619,12 +631,10 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 }
 .bk-tab:hover:not(.active) {
   transform: translateY(-3px);
-  z-index: 55 !important;
 }
 .bk-tab:active:not(.active),
 .bk-tab.is-navigating:not(.active) {
   transform: translateY(-8px);
-  z-index: 60 !important;
 }
 .bk-tab.active {
   animation: bk-tab-arrive 180ms cubic-bezier(.2,.8,.2,1);
@@ -1304,7 +1314,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     height: 49px;
   }
   .bk-tab::before {
-    inset: 0;
+    inset: 0 0 calc(-1 * var(--bk-tab-motion-tail)) 0;
     transform: perspective(88px) rotateX(5deg);
     border-radius: 12px 12px 0 0;
   }
