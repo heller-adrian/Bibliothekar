@@ -409,11 +409,21 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
   place-items: center;
   cursor: pointer;
   isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
   transform: translateY(0);
   transition:
     transform 150ms cubic-bezier(.2,.8,.2,1),
     filter 150ms ease;
   will-change: transform;
+}
+.bk-tab:focus {
+  outline: none;
+}
+.bk-tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--bk-tab-accent) 72%, #fff);
+  outline-offset: -5px;
 }
 .bk-tab:first-child { margin-left: 0; }
 .bk-tab[data-area="import"] { --bk-tab-accent: var(--bk-red); }

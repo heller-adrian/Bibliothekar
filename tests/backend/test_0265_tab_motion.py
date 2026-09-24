@@ -20,6 +20,9 @@ def test_0265_main_tabs_lift_instead_of_brighten():
     assert "border-top-right-radius: 12px;" in BIBLIOTHEKAR_CSS
     assert "@keyframes bk-tab-arrive" in BIBLIOTHEKAR_CSS
     assert "prefers-reduced-motion: reduce" in BIBLIOTHEKAR_CSS
+    assert "-webkit-tap-highlight-color: transparent;" in BIBLIOTHEKAR_CSS
+    assert "-webkit-touch-callout: none;" in BIBLIOTHEKAR_CSS
+    assert ".bk-tab:focus-visible" in BIBLIOTHEKAR_CSS
 
 
 def test_0265_main_tab_click_animation_preserves_modified_clicks():
