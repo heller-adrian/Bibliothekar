@@ -360,6 +360,25 @@ WORKSPACE_HTML = r"""<!doctype html>
       gap: 8px;
       min-width: 0;
     }
+    .event-boundaries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .event-boundary{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(110px,.75fr);gap:8px;align-items:end}
+    .create-subevents{display:grid;gap:8px;margin-top:4px}
+    .create-subevent-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .create-subevent-card{border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:10px}
+    .create-subevent-grid{display:grid;grid-template-columns:minmax(150px,1.2fr) repeat(2,minmax(170px,1fr));gap:8px;align-items:end}
+    .create-subevent-boundary{display:grid;grid-template-columns:minmax(0,1fr) 100px;gap:6px;align-items:end}
+    .dialog-inline-error{margin-top:12px;border:1px solid var(--danger,#b42318);border-radius:10px;background:color-mix(in srgb,var(--danger,#b42318) 10%,var(--surface));color:var(--text);padding:10px 12px;font-weight:650}
+    .existing-segment-static{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);padding:9px 10px}
+    .selection-bar-anchor{height:0}
+    @media (min-width:821px){
+      .bk-workspace-subnav{position:sticky;top:var(--bk-shell-sticky-height,92px);z-index:2600;align-items:center;gap:4px 8px;background:color-mix(in srgb,var(--background) 96%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:padding .18s ease,box-shadow .18s ease,background .18s ease}
+      .bk-workspace-subnav.has-selection-dock{box-shadow:0 9px 18px rgb(0 0 0 / .05)}
+      .selection-bar.is-docked{position:static;z-index:auto;flex:1 1 580px;width:auto;margin:0 0 0 auto;border-color:transparent;border-radius:0;background:transparent !important;padding:2px 44px 2px 8px;backdrop-filter:none;-webkit-backdrop-filter:none;transition:background .18s ease,border-color .18s ease,padding .18s ease}
+      .selection-bar.is-docked .selection-top-button{right:2px;top:2px}
+      .selection-bar.is-docked .selection-actions{flex-wrap:nowrap}
+    }
+    @media (min-width:821px) and (max-width:1180px){.bk-workspace-subnav.has-selection-dock{flex-wrap:wrap}.selection-bar.is-docked{flex:1 0 100%;margin-left:0;padding-left:0}}
+    @media (max-width:820px){.event-boundaries,.create-subevent-grid,.create-subevent-boundary{grid-template-columns:1fr}}
 
     .preview {
       position: sticky;
@@ -949,6 +968,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       <p id="event-suggestion-status" class="muted" role="status" aria-live="polite"></p>
     </section>
 
+    <div id="selection-bar-anchor" class="selection-bar-anchor" aria-hidden="true"></div>
     <section
       id="selection-bar"
       class="selection-bar"
@@ -1063,29 +1083,6 @@ WORKSPACE_HTML = r"""<!doctype html>
             Noch kein Arbeitsbestand ausgewählt.
           </div>
         </div>
-
-        <section
-          id="saved-events-section"
-          class="events-section"
-        >
-          <div class="section-header">
-            <h2>Gespeicherte Ereignisse</h2>
-
-            <span
-              id="event-count-label"
-              class="muted"
-            ></span>
-          </div>
-
-          <div
-            id="saved-event-list"
-            class="event-list"
-          >
-            <div class="empty">
-              Noch keine Ereignisse gespeichert.
-            </div>
-          </div>
-        </section>
       </div>
 
       <aside class="card preview">
@@ -1157,90 +1154,32 @@ WORKSPACE_HTML = r"""<!doctype html>
             <span>Bestehende „Ohne Ereignis“-Sammlung</span>
             <select id="existing-no-event-target"></select>
           </label>
-          <details id="no-event-range-details" class="card collapse-card" style="padding:10px;margin-bottom:10px">
-            <summary style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer">
-              <span><strong>Zeitspanne</strong> <span class="muted">· Auswahlhilfe</span></span>
-              <button id="add-no-event-range-block" type="button" style="margin-left:auto">＋ Zeitblock hinzufügen</button>
-            </summary>
-            <div id="no-event-range-generator" hidden style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-color, #30363d)">
-              <div id="no-event-range-fields" class="form-grid"></div>
-              <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
-                <button id="cancel-no-event-range-block" type="button">Abbrechen</button>
-                <button id="apply-no-event-range-block" type="button" class="plan-button">Zeitblock übernehmen</button>
-              </div>
-            </div>
-            <div id="no-event-range-summary" style="display:grid;gap:6px;margin-top:8px"></div>
-          </details>
           <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px">
-            <strong>Tagessegmente</strong>
+            <div><strong>Tagessegmente</strong><div class="muted" style="font-size:.86rem;margin-top:2px">Jeder Tag bzw. Teil eines Tages wird einzeln gespeichert.</div></div>
             <button id="add-no-event-segment" type="button">＋ Tagessegment</button>
           </div>
           <div id="no-event-segment-list" style="display:grid;gap:6px"></div>
         </div>
 
-        <label>
-          <span>Beginn</span>
+        <div id="event-boundaries" class="event-boundaries full-width">
+          <div class="event-boundary">
+            <label><span>Beginn</span><input id="event-start-date" type="date" required></label>
+            <label id="event-start-time-label" hidden><span>Startzeit</span><input id="event-start-time" type="time" value="00:00"></label>
+          </div>
+          <div class="event-boundary">
+            <label><span>Ende</span><input id="event-end-date" type="date" required></label>
+            <label id="event-end-time-label" hidden><span>Endzeit</span><input id="event-end-time" type="time" value="23:59"></label>
+          </div>
+        </div>
 
-          <input
-            id="event-start-date"
-            type="date"
-            required
-          >
-        </label>
+        <label class="full-width check-row"><input id="use-time-range" type="checkbox"><span>Uhrzeiten berücksichtigen</span></label>
 
-        <label>
-          <span>Ende</span>
-
-          <input
-            id="event-end-date"
-            type="date"
-            required
-          >
-        </label>
-
-        <label class="full-width check-row">
-          <input
-            id="use-time-range"
-            type="checkbox"
-          >
-
-          <span>Uhrzeiten berücksichtigen</span>
-        </label>
-
-        <div
-          id="time-fields"
-          class="form-grid full-width time-fields"
-          hidden
-        >
-          <label class="full-width">
-            <span>Unterereignis (optional)</span>
-
-            <input
-              id="child-event-name"
-              type="text"
-              placeholder="Zum Beispiel Stadtfest"
-            >
-          </label>
-
-          <label>
-            <span>Startzeit</span>
-
-            <input
-              id="event-start-time"
-              type="time"
-              value="00:00"
-            >
-          </label>
-
-          <label>
-            <span>Endzeit</span>
-
-            <input
-              id="event-end-time"
-              type="time"
-              value="23:59"
-            >
-          </label>
+        <div id="create-subevents" class="create-subevents full-width">
+          <div class="create-subevent-head">
+            <div><strong>Unterereignisse (optional)</strong><div class="muted" style="font-size:.86rem;margin-top:2px">Unterereignisse organisieren Teilzeiträume; Lücken bleiben beim Oberereignis.</div></div>
+            <button id="add-create-subevent" type="button">＋ Unterereignis hinzufügen</button>
+          </div>
+          <div id="create-subevent-list" style="display:grid;gap:8px"></div>
         </div>
 
         <label class="full-width check-row">
@@ -1255,6 +1194,8 @@ WORKSPACE_HTML = r"""<!doctype html>
           </span>
         </label>
       </div>
+
+      <div id="dialog-error" class="dialog-inline-error" role="alert" hidden></div>
 
       <div
         id="dialog-preview"
@@ -1359,6 +1300,23 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     const selectionBar =
       document.getElementById("selection-bar");
+    const selectionBarAnchor=document.getElementById("selection-bar-anchor");
+    const workspaceSubnav=document.querySelector(".bk-workspace-subnav");
+    let selectionDocked=false,selectionDockTrigger=0;
+    function measureSelectionDock(){if(!selectionBarAnchor||selectionDocked)return;selectionDockTrigger=selectionBarAnchor.getBoundingClientRect().top+window.scrollY;}
+    function updateSelectionDock(){
+      if(!selectionBarAnchor||!workspaceSubnav||!selectionBar)return;
+      const desktop=window.matchMedia("(min-width: 821px)").matches;
+      if(!desktop){if(selectionDocked){selectionBarAnchor.after(selectionBar);selectionBar.classList.remove("is-docked");workspaceSubnav.classList.remove("has-selection-dock");selectionBarAnchor.style.height="0px";selectionDocked=false;}return;}
+      if(!selectionDockTrigger)measureSelectionDock();
+      const shellHeight=Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bk-shell-sticky-height"))||92;
+      const shouldDock=window.scrollY+shellHeight+workspaceSubnav.offsetHeight+8>=selectionDockTrigger;
+      if(shouldDock&&!selectionDocked){selectionBarAnchor.style.height=selectionBar.getBoundingClientRect().height+"px";workspaceSubnav.appendChild(selectionBar);selectionBar.classList.add("is-docked");workspaceSubnav.classList.add("has-selection-dock");selectionDocked=true;}
+      else if(!shouldDock&&selectionDocked){selectionBarAnchor.after(selectionBar);selectionBar.classList.remove("is-docked");workspaceSubnav.classList.remove("has-selection-dock");selectionBarAnchor.style.height="0px";selectionDocked=false;measureSelectionDock();}
+    }
+    window.addEventListener("scroll",updateSelectionDock,{passive:true});
+    window.addEventListener("resize",()=>{if(!selectionDocked)measureSelectionDock();updateSelectionDock();});
+    requestAnimationFrame(()=>{measureSelectionDock();updateSelectionDock();});
     const eventSuggestionsPanel = document.getElementById("event-suggestions-panel");
     const eventSuggestionList = document.getElementById("event-suggestion-list");
     const eventSuggestionStatus = document.getElementById("event-suggestion-status");
@@ -1411,13 +1369,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     const noEventSegmentEditor = document.getElementById("no-event-segment-editor");
     const noEventSegmentList = document.getElementById("no-event-segment-list");
-    const noEventRangeFields = document.getElementById("no-event-range-fields");
-    const noEventRangeSummary = document.getElementById("no-event-range-summary");
-    const noEventRangeDetails = document.getElementById("no-event-range-details");
-    const noEventRangeGenerator = document.getElementById("no-event-range-generator");
-    const addNoEventRangeBlock = document.getElementById("add-no-event-range-block");
-    const applyNoEventRangeBlock = document.getElementById("apply-no-event-range-block");
-    const cancelNoEventRangeBlock = document.getElementById("cancel-no-event-range-block");
+    // 0.26.6: „Ohne Ereignis“ besitzt nur noch kanonische Tagessegmente.
     const existingNoEventTargetRow = document.getElementById("existing-no-event-target-row");
     const existingNoEventTarget = document.getElementById("existing-no-event-target");
     let noEventTargetCache = [];
@@ -1426,13 +1378,13 @@ WORKSPACE_HTML = r"""<!doctype html>
     const useTimeRange =
       document.getElementById("use-time-range");
 
-    const timeFields =
-      document.getElementById("time-fields");
-
-    const childEventName =
-      document.getElementById(
-        "child-event-name"
-      );
+    const eventBoundaries=document.getElementById("event-boundaries");
+    const eventStartTimeLabel=document.getElementById("event-start-time-label");
+    const eventEndTimeLabel=document.getElementById("event-end-time-label");
+    const createSubevents=document.getElementById("create-subevents");
+    const createSubeventList=document.getElementById("create-subevent-list");
+    const addCreateSubevent=document.getElementById("add-create-subevent");
+    const dialogError=document.getElementById("dialog-error");
 
     const eventStartTime =
       document.getElementById(
@@ -1481,16 +1433,6 @@ WORKSPACE_HTML = r"""<!doctype html>
     const applySavedEventStatus = document.getElementById("apply-saved-event-status");
     const plannedEventSelection = document.getElementById("planned-event-selection");
     let lastSavedEvent = null;
-
-    const savedEventList =
-      document.getElementById(
-        "saved-event-list"
-      );
-
-    const eventCountLabel =
-      document.getElementById(
-        "event-count-label"
-      );
 
     const previewToggle =
       document.getElementById(
@@ -1762,7 +1704,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       renderSummary();
       renderEventSuggestions();
       renderDays();
-      renderEvents();
       renderPlannedActions();
       renderSelection();
 
@@ -1900,7 +1841,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       const childCount = Array.isArray(event.child_events) ? event.child_events.length : 0;
       const segmentCount = Array.isArray(event.time_segments) ? event.time_segments.length : 0;
       const details = [
-        `<div><strong>Datenbank-Zeitraum:</strong> ${escapeHtml(start)} bis ${escapeHtml(end)}</div>`,
+        event.event_kind === "no_event"
+          ? `<div><strong>Datenbank-Zeitraum:</strong> komplex</div>`
+          : `<div><strong>Datenbank-Zeitraum:</strong> ${escapeHtml(start)} bis ${escapeHtml(end)}</div>`,
         `<div><strong>Status:</strong> ${escapeHtml(status)} · ${escapeHtml(kind)}</div>`,
         `<div><strong>Ordnerlogik:</strong> ${escapeHtml(dayFolders)}</div>`,
         `<div><strong>Zugeordnet:</strong> ${Number(event.assigned_family_count || 0)} Familien</div>`
@@ -1941,218 +1884,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     }
 
-
-    function renderEvents() {
-      const allEvents =
-        workspace?.events || [];
-
-      const parentEvents =
-        allEvents.filter(
-          event =>
-            event.event_level === "parent"
-        );
-
-      eventCountLabel.textContent =
-        parentEvents.length === 1
-          ? "1 Ereignis"
-          : `${parentEvents.length} Ereignisse`;
-
-      savedEventList.innerHTML = "";
-
-      if (!parentEvents.length) {
-        savedEventList.innerHTML =
-          '<div class="empty">'
-          + "Noch keine Ereignisse gespeichert."
-          + "</div>";
-
-        return;
-      }
-
-      for (const event of parentEvents) {
-        const childEvents =
-          allEvents.filter(
-            child =>
-              child.parent_event_id === event.id
-          );
-
-        const card =
-          document.createElement("article");
-
-        card.className = "event-card";
-        card.dataset.previewEventId = event.id;
-        card.style.cursor = "pointer";
-        card.addEventListener("click", e => {
-          if (e.target.closest("button,input,a,summary")) return;
-          openStoredEventPreview(event.id);
-        });
-
-        const kindLabel =
-          event.event_kind === "no_event"
-            ? "Ohne Ereignis"
-            : "Ereignis";
-
-        const childText =
-          childEvents.length
-            ? childEvents
-                .map(
-                  child =>
-                    `<div class="event-folder">
-                      Unterereignis:
-                      ${escapeHtml(child.folder_name)}
-                    </div>`
-                )
-                .join("")
-            : "";
-
-        card.innerHTML = `
-          <div class="event-card-header">
-            <div>
-              <div class="event-name">
-                ${escapeHtml(event.display_title || event.name)}
-              </div>
-
-              <div class="event-folder">
-                ${escapeHtml(event.folder_name)}
-              </div>
-
-              ${childText}
-            </div>
-
-            <span class="badge success">
-              ${escapeHtml(workspaceStatusLabel(event.status))}
-            </span>
-          </div>
-
-          <div class="event-meta">
-            <span>
-              ${escapeHtml(kindLabel)}
-            </span>
-
-            <span>
-              ${escapeHtml(event.start_datetime)}
-            </span>
-
-            <span>
-              bis
-              ${escapeHtml(event.end_datetime)}
-            </span>
-
-            <span>
-              ${
-                event.preserve_day_folders
-                  ? "Tagesordner bleiben erhalten"
-                  : "Ohne Tagesunterordner"
-              }
-            </span>
-
-            <span>
-              ${
-                Number(
-                  event.assigned_family_count || 0
-                )
-              }
-              Familien
-            </span>
-          </div>
-        `;
-
-        savedEventList.appendChild(card);
-      }
-    }
-
-
-    function planningOverview() {
-      if (
-        workspace
-        && workspace.planning_overview
-      ) {
-        return workspace.planning_overview;
-      }
-
-      const groups =
-        workspace
-        && Array.isArray(
-          workspace.day_groups
-        )
-          ? workspace.day_groups
-          : [];
-
-      return {
-        event_groups: [],
-        available_day_groups:
-          groups,
-        timeline_groups:
-          groups.map(
-            group => ({
-              ...group,
-              group_type: "day"
-            })
-          )
-      };
-    }
-
-
-    function availableDayGroups() {
-      return (
-        planningOverview()
-          .available_day_groups
-        || []
-      );
-    }
-
-
-    function formatTimelineDateRange(
-      startValue,
-      endValue
-    ) {
-      const start = String(
-        startValue || ""
-      ).slice(0, 10);
-
-      const end = String(
-        endValue || ""
-      ).slice(0, 10);
-
-      if (!start) {
-        return "Ohne Zeitraum";
-      }
-
-      if (
-        !end
-        || start === end
-      ) {
-        return formatDay(start);
-      }
-
-      const startDate =
-        new Date(
-          `${start}T12:00:00`
-        );
-
-      const endDate =
-        new Date(
-          `${end}T12:00:00`
-        );
-
-      return (
-        startDate.toLocaleDateString(
-          "de-DE",
-          {
-            day: "2-digit",
-            month: "2-digit"
-          }
-        )
-        + "–"
-        + endDate.toLocaleDateString(
-          "de-DE",
-          {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric"
-          }
-        )
-      );
-    }
 
 
     function renderDays() {
@@ -2615,7 +2346,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       const fixedMonth=activeNoEventMonthKey();
       const startLabel=eventStartDate.closest("label");
       const endLabel=eventEndDate.closest("label");
-      noEventRangeFields.querySelectorAll("[data-fixed-range-generator]").forEach(node=>node.remove());
       if (!fixedMonth) {
         startLabel.hidden=false;
         endLabel.hidden=false;
@@ -2636,7 +2366,6 @@ WORKSPACE_HTML = r"""<!doctype html>
         <label><span>Von Tag</span><input data-fixed-range-start-day type="number" min="1" max="${max}"></label>
         <label><span>Monat/Jahr</span><input type="text" value="${escapeHtml(label)}" disabled></label>
         <label><span>Bis Tag</span><input data-fixed-range-end-day type="number" min="1" max="${max}"></label>`;
-      noEventRangeFields.appendChild(wrapper);
       const sync=()=>{
         const a=Number(wrapper.querySelector("[data-fixed-range-start-day]")?.value||0);
         const b=Number(wrapper.querySelector("[data-fixed-range-end-day]")?.value||0);
@@ -2647,114 +2376,14 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function segmentRowHtml(day) {
-      const dayKey = day.day_key || "";
-      const start = day.start_time || "00:00";
-      const end = day.end_time || "23:59";
-      const count = Number(day.family_count || 0);
-      const locked = Boolean(day._locked || day.locked);
-      const isNew = Boolean(day._new || day.new_segment);
-      const isExisting = Boolean(day._existing || day.existing_segment || locked);
-      const state = isExisting ? "BESTEHEND" : (isNew ? "NEU" : "");
-      const border = isNew ? "border:2px solid currentColor;" : "";
-      return `
-        <details data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="${locked?"1":"0"}" data-new-segment="${isNew?"1":"0"}" data-existing-segment="${isExisting?"1":"0"}" class="card collapse-card" style="padding:8px 10px;${border}">
-          <summary style="display:flex;justify-content:space-between;gap:8px;align-items:center;cursor:pointer">
-            <strong>${escapeHtml(dayKey || "Neues Segment")}${state ? ` · ${state}` : ""}</strong>
-            <span class="muted">${escapeHtml(start)}–${escapeHtml(end)}${count ? ` · ${count} freie Familien` : ""}</span>
-          </summary>
-          <div style="display:grid;grid-template-columns:minmax(210px,1.7fr) 110px 110px auto;gap:8px;align-items:end;margin-top:8px">
-            ${lockedMonthDayControls(dayKey, locked)}
-            <label><span>Von</span><input data-segment-start type="time" value="${escapeHtml(start)}" ${locked?"disabled":""}></label>
-            <label><span>Bis</span><input data-segment-end type="time" value="${escapeHtml(end)}" ${locked?"disabled":""}></label>
-            ${locked ? '<span class="muted">bereits gespeichert</span>' : '<button type="button" class="danger-button" data-remove-no-event-segment>Entfernen</button>'}
-          </div>
-        </details>`;
+      const dayKey=day.day_key||"",start=day.start_time||"00:00",end=day.end_time||"23:59",count=Number(day.family_count||0);
+      const existing=Boolean(day._existing||day.existing_segment||day._locked||day.locked),isNew=Boolean(day._new||day.new_segment);
+      if(existing)return `<div data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="1" data-new-segment="0" data-existing-segment="1" class="existing-segment-static"><strong>${escapeHtml(dayKey)} · BESTEHEND</strong><span class="muted">${escapeHtml(start)}–${escapeHtml(end)}${count?` · ${count} Familien`:""}</span></div>`;
+      return `<details data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="0" data-new-segment="${isNew?"1":"0"}" data-existing-segment="0" class="card collapse-card" style="padding:8px 10px;${isNew?"border:2px solid currentColor;":""}"><summary style="display:flex;justify-content:space-between;gap:8px;align-items:center;cursor:pointer"><strong>${escapeHtml(dayKey||"Neues Segment")}${isNew?" · NEU":""}</strong><span class="muted">${escapeHtml(start)}–${escapeHtml(end)}${count?` · ${count} freie Familien`:""}</span></summary><div style="display:grid;grid-template-columns:minmax(210px,1.7fr) 110px 110px auto;gap:8px;align-items:end;margin-top:8px">${lockedMonthDayControls(dayKey,false)}<label><span>Von</span><input data-segment-start type="time" value="${escapeHtml(start)}"></label><label><span>Bis</span><input data-segment-end type="time" value="${escapeHtml(end)}"></label><button type="button" class="danger-button" data-remove-no-event-segment>Entfernen</button></div></details>`;
     }
 
-    function noEventContiguousRanges() {
-      const days=[...new Set(selectedNoEventSegments().map(s=>s.day_key))].sort();
-      const ranges=[];
-      for (const day of days) {
-        if (!ranges.length) { ranges.push([day,day]); continue; }
-        const prev=new Date(`${ranges[ranges.length-1][1]}T12:00:00`);
-        prev.setDate(prev.getDate()+1);
-        const next=`${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,"0")}-${String(prev.getDate()).padStart(2,"0")}`;
-        if (day===next) ranges[ranges.length-1][1]=day; else ranges.push([day,day]);
-      }
-      return ranges;
-    }
+    function syncNoEventRangeDisplayFromSegments(){const segs=selectedNoEventSegments(true);if(segs.length){eventStartDate.value=segs[0].day_key;eventEndDate.value=segs[segs.length-1].day_key;}}
 
-    function formatGermanIsoDate(value) {
-      const m=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      return m ? `${m[3]}.${m[2]}.${m[1]}` : String(value||"");
-    }
-
-    function renderNoEventRangeBlocks() {
-      const ranges=noEventContiguousRanges();
-      if (!ranges.length) {
-        noEventRangeSummary.innerHTML='<span class="muted">Noch keine Zeitblöcke.</span>';
-        return ranges;
-      }
-      const fixedMonth=activeNoEventMonthKey();
-      const rangeField=(value, attr, label)=>{
-        if (!fixedMonth) return `<label><span>${label}</span><input ${attr} type="date" value="${escapeHtml(value)}"></label>`;
-        const day=String(Number(String(value||"").slice(8,10))||"");
-        return `<div style="display:grid;grid-template-columns:minmax(118px,.8fr) minmax(86px,.55fr);gap:8px;align-items:end">
-          <label><span>Monat/Jahr</span><input type="text" value="${escapeHtml(fixedMonth.slice(5,7)+"/"+fixedMonth.slice(0,4))}" disabled></label>
-          <label><span>${label}</span><input ${attr}-day type="number" min="1" max="${daysInMonth(fixedMonth)}" value="${escapeHtml(day)}"></label>
-          <input ${attr} type="hidden" value="${escapeHtml(value)}">
-        </div>`;
-      };
-      noEventRangeSummary.innerHTML = ranges.map(([a,b],index)=>`
-        <details class="card collapse-card" style="padding:7px 9px">
-          <summary style="cursor:pointer"><strong>Zeitblock ${index+1}</strong> <span class="muted">· ${escapeHtml(formatGermanIsoDate(a))}${a===b?"":` bis ${escapeHtml(formatGermanIsoDate(b))}`} · ${selectedNoEventSegments().filter(s=>s.day_key>=a && s.day_key<=b).length} Zeitsegmente</span></summary>
-          <div class="form-grid" style="margin-top:8px">
-            ${rangeField(a,'data-range-block-start','Von')}
-            ${rangeField(b,'data-range-block-end','Bis')}
-          </div>
-          <div style="display:flex;justify-content:flex-end;margin-top:8px"><button type="button" data-extend-no-event-block>Fehlende Tagessegmente ergänzen</button></div>
-        </details>`).join("");
-      if (fixedMonth) {
-        noEventRangeSummary.querySelectorAll('[data-range-block-start-day],[data-range-block-end-day]').forEach(input=>{
-          input.oninput=()=>{
-            const attr=input.hasAttribute('data-range-block-start-day')?'data-range-block-start':'data-range-block-end';
-            const hidden=input.closest('div')?.querySelector(`[${attr}]`);
-            const n=Math.max(1,Math.min(daysInMonth(fixedMonth),Number(input.value||0)));
-            if (hidden && Number(input.value||0)>0) hidden.value=`${fixedMonth}-${String(n).padStart(2,'0')}`;
-          };
-        });
-      }
-      noEventRangeSummary.querySelectorAll("[data-extend-no-event-block]").forEach(button => {
-        button.onclick = () => {
-          const box=button.closest("details");
-          const start=box?.querySelector("[data-range-block-start]")?.value || "";
-          const end=box?.querySelector("[data-range-block-end]")?.value || "";
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) return;
-          const existing=new Map(selectedNoEventSegments(true).map(seg=>[`${seg.day_key}|${seg.start_time}|${seg.end_time}`,seg]));
-          for (const dayKey of daysInRange(start,end)) {
-            if (![...existing.values()].some(seg=>seg.day_key===dayKey)) existing.set(`${dayKey}|00:00|23:59`,{day_key:dayKey,start_time:"00:00",end_time:"23:59",_new:true});
-          }
-          renderNoEventSegmentEditor([...existing.values()]);
-          syncNoEventRangeDisplayFromSegments();
-        };
-      });
-      return ranges;
-    }
-
-    function syncNoEventRangeDisplayFromSegments({updateGenerator=true}={}) {
-      if (!["no_event","existing_no_event"].includes(dialogMode)) return;
-      const ranges=renderNoEventRangeBlocks();
-      if (!updateGenerator) return;
-      if (ranges.length===1) {
-        eventStartDate.value=ranges[0][0];
-        eventEndDate.value=ranges[0][1];
-      } else {
-        // Bei mehreren Blöcken bleiben die Generatorfelder bewusst leer.
-        // So wird keine künstlich durchgehende Zeitspanne suggeriert.
-        eventStartDate.value="";
-        eventEndDate.value="";
-      }
-    }
 
     function bindNoEventSegmentRows() {
       noEventSegmentList.querySelectorAll("[data-remove-no-event-segment]").forEach(button => {
@@ -2781,32 +2410,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     function renderNoEventSegmentEditor(days) {
       noEventSegmentList.innerHTML = (days || []).map(day => segmentRowHtml(day)).join("");
       bindNoEventSegmentRows();
-      if (["no_event","existing_no_event"].includes(dialogMode)) renderNoEventRangeBlocks();
-      scheduleDialogPreview();
-    }
-
-    function daysInRange(start, end) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(start || "") || !/^\d{4}-\d{2}-\d{2}$/.test(end || "") || end < start) return [];
-      const out=[];
-      let d=new Date(`${start}T12:00:00`);
-      const last=new Date(`${end}T12:00:00`);
-      while (d <= last && out.length < 370) {
-        out.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
-        d.setDate(d.getDate()+1);
-      }
-      return out;
-    }
-
-    function syncNoEventSegmentsFromRange() {
-      if (!["no_event","existing_no_event"].includes(dialogMode)) return;
-      const existing = new Map(selectedNoEventSegments(true).map(seg => [`${seg.day_key}|${seg.start_time}|${seg.end_time}`, seg]));
-      for (const dayKey of daysInRange(eventStartDate.value, eventEndDate.value)) {
-        const alreadyForDay=[...existing.values()].some(seg=>seg.day_key===dayKey);
-        if (!alreadyForDay) existing.set(`${dayKey}|00:00|23:59`, {day_key:dayKey,start_time:"00:00",end_time:"23:59",_new:true});
-      }
-      const groups = new Map((workspace?.day_groups || workspace?.days || []).map(day => [day.day_key, day]));
-      renderNoEventSegmentEditor([...existing.values()].sort((a,b)=>a.day_key.localeCompare(b.day_key)||a.start_time.localeCompare(b.start_time)).map(seg => ({...seg, family_count:seg._locked?0:Number(groups.get(seg.day_key)?.family_count||0)})));
       syncNoEventRangeDisplayFromSegments();
+      scheduleDialogPreview();
     }
 
     function monthKeysForNoEventDialog() {
@@ -2823,10 +2428,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       dialogTitle.textContent="„Ohne Ereignis“ fortführen";
       const currentNew=selectedNoEventSegments(false).filter(seg=>!seg._existing).map(seg=>({...seg,_new:true}));
-      const targetLocked=String(activeNoEventTarget.status||"") !== "planned";
       const existing=(activeNoEventTarget.segments||[]).map(seg=>({
         day_key:seg.day_key,start_time:seg.start_time,end_time:seg.end_time,
-        _locked:targetLocked,_existing:true
+        _locked:true,_existing:true
       }));
       const keys=new Set(existing.map(seg=>`${seg.day_key}|${seg.start_time}|${seg.end_time}`));
       const merged=[...existing,...currentNew.filter(seg=>!keys.has(`${seg.day_key}|${seg.start_time}|${seg.end_time}`))];
@@ -2873,26 +2477,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       activateNoEventTarget(null);
     }
 
-    async function handleNoEventRangeChange() {
-      const start=eventStartDate.value || "";
-      const end=eventEndDate.value || "";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) {
-        // Ein noch unvollständiges Datum darf nicht durch die Segment-Synchronisierung
-        // wieder geleert werden.
-        return;
-      }
-      syncNoEventSegmentsFromRange();
-      await autoAttachExistingNoEventCollection();
-    }
-
     function applyAutomaticFreeTimeSuggestion(dated) {
       if (!dated.length) return;
       const ordered=[...dated].sort((a,b)=>String(a.start_datetime).localeCompare(String(b.start_datetime)));
       eventStartTime.value=ordered[0].start_time || "00:00";
       eventEndTime.value=ordered[ordered.length-1].end_time || "23:59";
       useTimeRange.checked=true;
-      timeFields.hidden=false;
-      childEventName.required=false;
+      setParentTimeFieldsVisible(true);
     }
 
     async function openTaskReassignment(eventId) {
@@ -2928,92 +2519,36 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventName.value=parent.name || "";
       eventName.disabled=true;
       useTimeRange.checked=true;
-      timeFields.hidden=false;
-      childEventName.required=false;
+      setParentTimeFieldsVisible(true);
       applyAutomaticFreeTimeSuggestion(selectedDatedGroups());
-      childEventName.required=false;
     }
 
-    async function openEventDialog(mode) {
-      dialogMode = mode;
-      const dated = selectedDatedGroups();
-      const noEvent = mode === "no_event" || mode === "existing_no_event";
-      const existingNoEvent = mode === "existing_no_event";
-      activeNoEventTarget = null;
-      const parentCandidates = noEvent ? [] : plannedParentCandidates(dated);
-      existingParentRow.hidden = noEvent || parentCandidates.length === 0;
-      const startLabel=eventStartDate.closest("label");
-      const endLabel=eventEndDate.closest("label");
-      const useTimeLabel=useTimeRange.closest("label");
-      const formGrid=document.querySelector("#event-form .form-grid");
-      if (noEvent) {
-        noEventRangeFields.append(startLabel, endLabel);
-      } else {
-        formGrid.insertBefore(startLabel, useTimeLabel);
-        formGrid.insertBefore(endLabel, useTimeLabel);
-      }
-      if (!existingParentRow.hidden) {
-        existingParentEvent.innerHTML = `<option value="">Neues Oberereignis anlegen</option>` + parentCandidates.map(parent => `<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");
-        existingParentEvent.value = "";
-      } else {
-        existingParentEvent.innerHTML = "";
-      }
-      eventName.value = noEvent ? "Ohne Ereignis" : "";
-      eventName.disabled = noEvent;
-      dialogTitle.textContent = existingNoEvent ? "Zu bestehendem „Ohne Ereignis“ hinzufügen" : (noEvent ? "Als „Ohne Ereignis“ zuordnen" : "Ereignis erstellen");
-      eventStartDate.value = dated.length ? dated[0].day_key : "";
-      eventEndDate.value = dated.length ? dated[dated.length - 1].day_key : "";
-      useTimeRange.checked = false;
-      timeFields.hidden = true;
-      childEventName.value = "";
-      childEventName.required = false;
-      eventStartTime.value = "00:00";
-      eventEndTime.value = "23:59";
-      preserveDayFolders.checked = false;
-      preserveDayFolders.disabled = false;
-
-      noEventSegmentEditor.hidden = !noEvent;
-      existingNoEventTargetRow.hidden = !existingNoEvent;
-      if (existingNoEvent) {
-        const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];
-        noEventTargetCache = [];
-        if (months.length) {
-          try {
-            const targetData=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months.join(","))}`);
-            noEventTargetCache=targetData.targets||[];
-          } catch (_) {}
-        }
-        existingNoEventTarget.innerHTML=noEventTargetCache.map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(String(e.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(e.status))}${e.same_job?"":" · andere Sicherung"}</option>`).join("");
-        if (!noEventTargetCache.length) {
-          existingNoEventTarget.innerHTML='<option value="">Keine passende Monats-Sammlung vorhanden</option>';
-        }
-      }
-      eventStartDate.closest("label").hidden = false;
-      eventEndDate.closest("label").hidden = false;
-      eventStartDate.closest("label").querySelector("span").textContent = noEvent ? "Zeitspanne von" : "Beginn";
-      eventEndDate.closest("label").querySelector("span").textContent = noEvent ? "Zeitspanne bis" : "Ende";
-      useTimeRange.closest("label").hidden = noEvent;
-      preserveDayFolders.closest("label").hidden = false;
-      if (noEvent) {
-        if (noEventRangeDetails) noEventRangeDetails.open=false;
-        if (noEventRangeGenerator) noEventRangeGenerator.hidden=true;
-        renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));
-
-        await autoAttachExistingNoEventCollection();
-      } else {
-        applyAutomaticFreeTimeSuggestion(dated);
-        if (parentCandidates.length) applyExistingParentChoice();
-      }
-
-      dialogPreview.textContent = "Vorschau wird vorbereitet …";
-      dialogPreview.hidden = true;
-      calculatePreviewButton.textContent = "Vorschau einblenden";
-      saveResult.hidden = true;
-      saveResult.textContent = "";
-      eventDialog.showModal();
-      scheduleDialogPreview();
+    function setParentTimeFieldsVisible(visible){eventStartTimeLabel.hidden=!visible;eventEndTimeLabel.hidden=!visible;}
+    function addCreateSubeventCard(value={}){
+      const row=document.createElement("details");row.className="create-subevent-card";row.dataset.createSubevent="1";row.open=true;
+      const sd=String(value.start_date||eventStartDate.value||""),ed=String(value.end_date||eventEndDate.value||sd);
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(value.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><label><span>Name</span><input data-create-child-name value="${escapeHtml(value.name||"")}" placeholder="Zum Beispiel Konzert"></label><div class="create-subevent-boundary"><label><span>Beginn</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(value.start_time||"00:00")}"></label></div><div class="create-subevent-boundary"><label><span>Ende</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(value.end_time||"23:59")}"></label></div></div><div style="display:flex;justify-content:flex-end;margin-top:8px"><button type="button" class="danger-button" data-remove-create-subevent>Unterereignis entfernen</button></div>`;
+      const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
+      name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
+      row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});
+      row.querySelectorAll("input").forEach(input=>input.addEventListener("change",scheduleDialogPreview));
+      createSubeventList.appendChild(row);name?.focus();
     }
+    function collectCreateSubevents(){return [...createSubeventList.querySelectorAll("[data-create-subevent]")].map(row=>{const name=row.querySelector("[data-create-child-name]")?.value?.trim()||"",sd=row.querySelector("[data-create-child-start-date]")?.value||"",st=row.querySelector("[data-create-child-start-time]")?.value||"00:00",ed=row.querySelector("[data-create-child-end-date]")?.value||"",et=row.querySelector("[data-create-child-end-time]")?.value||"23:59";return{name,start_datetime:`${sd}T${st}:00`,end_datetime:`${ed}T${et}:59`};});}
 
+    async function openEventDialog(mode){
+      dialogMode=mode;const dated=selectedDatedGroups(),noEvent=mode==="no_event"||mode==="existing_no_event",existingNoEvent=mode==="existing_no_event";activeNoEventTarget=null;
+      const parentCandidates=noEvent?[]:plannedParentCandidates(dated);existingParentRow.hidden=noEvent||parentCandidates.length===0;
+      if(!existingParentRow.hidden){existingParentEvent.innerHTML=`<option value="">Neues Oberereignis anlegen</option>`+parentCandidates.map(parent=>`<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");existingParentEvent.value="";}else existingParentEvent.innerHTML="";
+      eventName.value=noEvent?"Ohne Ereignis":"";eventName.disabled=noEvent;dialogTitle.textContent=existingNoEvent?"Zu bestehendem „Ohne Ereignis“ hinzufügen":(noEvent?"Als „Ohne Ereignis“ zuordnen":"Ereignis erstellen");
+      eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";useTimeRange.checked=false;setParentTimeFieldsVisible(false);
+      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;eventBoundaries.hidden=noEvent;useTimeRange.closest("label").hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;dialogError.hidden=true;dialogError.textContent="";
+      noEventSegmentEditor.hidden=!noEvent;existingNoEventTargetRow.hidden=!existingNoEvent;
+      if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
+      else if(noEvent){renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));await autoAttachExistingNoEventCollection();}
+      else{applyAutomaticFreeTimeSuggestion(dated);if(parentCandidates.length)applyExistingParentChoice();}
+      dialogPreview.textContent="Vorschau wird vorbereitet …";dialogPreview.hidden=true;calculatePreviewButton.textContent="Vorschau einblenden";saveResult.hidden=true;saveResult.textContent="";eventDialog.showModal();scheduleDialogPreview();
+    }
 
     function collectEventPayload() {
       const base = {
@@ -3022,7 +2557,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         start_date: eventStartDate.value,
         end_date: eventEndDate.value,
         uses_time_range: useTimeRange.checked,
-        child_event_name: childEventName.value.trim(),
+        subevents: ["no_event","existing_no_event"].includes(dialogMode) ? [] : collectCreateSubevents(),
         selected_intervals: selectedDatedGroups().map(g=>({start_datetime:g.start_datetime,end_datetime:g.end_datetime})),
         start_time: eventStartTime.value,
         end_time: eventEndTime.value,
@@ -3051,7 +2586,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       if (!eventDialog.open) return;
       clearTimeout(dialogPreviewTimer);
       dialogPreviewTimer = setTimeout(() => {
-        calculateDialogPreview().catch(error => { dialogPreview.textContent = error.message; });
+        calculateDialogPreview().catch(error=>{dialogPreview.textContent=error.message;dialogError.hidden=false;dialogError.textContent=error.message;});
       }, 120);
     }
 
@@ -3179,8 +2714,10 @@ WORKSPACE_HTML = r"""<!doctype html>
         eventDialog.close();
 
       } catch (error) {
-        saveResult.textContent =
-          error.message;
+        saveResult.hidden=false;
+        saveResult.textContent=error.message;
+        dialogError.hidden=false;
+        dialogError.textContent=error.message;
 
         if (
           String(error.message).includes(
@@ -3256,54 +2793,10 @@ WORKSPACE_HTML = r"""<!doctype html>
       () => openEventDialog("no_event")
     );
 
-    useTimeRange.addEventListener(
-      "change",
-      () => {
-        timeFields.hidden =
-          !useTimeRange.checked;
-
-        childEventName.required = false;
-
-        if (
-          useTimeRange.checked
-          && !childEventName.value
-        ) {
-          childEventName.focus();
-        }
-      }
-    );
+    useTimeRange.addEventListener("change",()=>{setParentTimeFieldsVisible(useTimeRange.checked);scheduleDialogPreview();});
+    addCreateSubevent?.addEventListener("click",()=>addCreateSubeventCard());
 
     existingParentEvent?.addEventListener("change", applyExistingParentChoice);
-    addNoEventRangeBlock?.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (noEventRangeDetails) noEventRangeDetails.open=true;
-      if (noEventRangeGenerator) noEventRangeGenerator.hidden=false;
-      eventStartDate.value="";
-      eventEndDate.value="";
-      renderNoEventRangeGeneratorFields();
-      const fixedStart=noEventRangeFields.querySelector("[data-fixed-range-start-day]");
-      (fixedStart || eventStartDate).focus();
-    });
-    cancelNoEventRangeBlock?.addEventListener("click", () => {
-      if (noEventRangeGenerator) noEventRangeGenerator.hidden=true;
-      eventStartDate.value="";
-      eventEndDate.value="";
-      noEventRangeFields.querySelectorAll("[data-fixed-range-generator]").forEach(node=>node.remove());
-    });
-    applyNoEventRangeBlock?.addEventListener("click", async () => {
-      const start=eventStartDate.value || "";
-      const end=eventEndDate.value || "";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) {
-        dialogPreview.textContent="Bitte einen gültigen Zeitraum für den neuen Zeitblock eingeben.";
-        return;
-      }
-      syncNoEventSegmentsFromRange();
-      await autoAttachExistingNoEventCollection();
-      if (noEventRangeGenerator) noEventRangeGenerator.hidden=true;
-      eventStartDate.value="";
-      eventEndDate.value="";
-    });
 
     existingNoEventTarget?.addEventListener("change", () => {
       const target=noEventTargetCache.find(item=>String(item.id)===String(existingNoEventTarget.value));

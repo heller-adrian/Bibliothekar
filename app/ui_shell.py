@@ -1625,6 +1625,16 @@ BIBLIOTHEKAR_JS = r"""
   refreshTasks();
   setInterval(refreshTasks, 30000);
 
+  function syncShellStickyHeight() {
+    const shell=document.querySelector(".bk-shell");
+    if(!shell)return;
+    const bridge=parseFloat(getComputedStyle(shell).getPropertyValue("--bk-page-bridge-height"))||0;
+    root.style.setProperty("--bk-shell-sticky-height", Math.ceil(shell.getBoundingClientRect().height + bridge) + "px");
+  }
+  syncShellStickyHeight();
+  window.addEventListener("resize", syncShellStickyHeight);
+  if(document.fonts?.ready)document.fonts.ready.then(syncShellStickyHeight).catch(()=>{});
+
   document.querySelectorAll(".bk-tab").forEach(tab => {
     tab.addEventListener("click", event => {
       if (

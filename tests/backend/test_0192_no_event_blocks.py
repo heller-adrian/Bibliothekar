@@ -27,20 +27,18 @@ def test_empty_month_filter_lists_all_canonical_noevent_targets(tmp_path):
     assert len(targets[1]['segments'])==2
 
 
-def test_workspace_has_collapsed_timeblocks_and_manual_target_picker():
-    assert 'id="no-event-range-details"' in WORKSPACE_HTML
-    assert '<details id="no-event-range-details" class="card collapse-card"' in WORKSPACE_HTML
-    assert 'Zeitblock ${index+1}' in WORKSPACE_HTML
-    assert 'Noch keine Zeitblöcke.' in WORKSPACE_HTML
+def test_workspace_uses_only_canonical_day_segments_and_manual_target_picker():
+    assert 'id="no-event-range-details"' not in WORKSPACE_HTML
+    assert 'Zeitblock hinzufügen' not in WORKSPACE_HTML
+    assert '＋ Tagessegment' in WORKSPACE_HTML
     assert 'Neue Monats-Sammlung / noch kein Ziel' in WORKSPACE_HTML
-    assert '＋ Zeitblock hinzufügen' in WORKSPACE_HTML
-    assert 'Fehlende Tagessegmente ergänzen' in WORKSPACE_HTML
     assert 'noEventTargetCache.find' in WORKSPACE_HTML
-    assert 'Ein noch unvollständiges Datum darf nicht' in WORKSPACE_HTML
+    assert 'BESTEHEND' in WORKSPACE_HTML
+    assert 'existing-segment-static' in WORKSPACE_HTML
 
 
-def test_event_editor_uses_segment_envelope_and_responsive_remove():
-    assert 'const noEventRangeStart = noEventDays.length ? noEventDays[0]' in EVENTS_HTML
-    assert 'const noEventRangeEnd = noEventDays.length ? noEventDays[noEventDays.length - 1]' in EVENTS_HTML
+def test_event_editor_uses_only_day_segments_and_responsive_remove():
+    assert 'Zeitspanne ergänzen' not in EVENTS_HTML
+    assert 'Zeitspanne übernehmen' not in EVENTS_HTML
+    assert '＋ Tagessegment hinzufügen' in EVENTS_HTML
     assert 'grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px' in EVENTS_HTML
-    assert 'edit-noevent-range-apply' in EVENTS_HTML

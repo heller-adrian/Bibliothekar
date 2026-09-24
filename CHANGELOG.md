@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### 0.26.6 – Planned-UI-Abschluss und konsistentes Ereignismodell
+
+- „Ohne Ereignis“ zeigt in der Zielstruktur-Vorschau keinen irreführenden Min/Max-Zeitraum mehr, sondern „Datenbank-Zeitraum: komplex“.
+- Die doppelte Liste „Gespeicherte Ereignisse“ wurde aus „Aufnahmen“ entfernt; Ereignisse bleiben in der Tagesansicht sichtbar und werden vollständig im Reiter „Ereignisse“ verwaltet.
+- Auf Desktop bleibt die Arbeitsbereich-Navigation beim Scrollen unter dem Hauptheader sichtbar. Die Auswahlleiste mit Gruppenanzahl und den Aktionen für Tage/Ereignisse dockt beim Scrollen kompakt in diesen Header ein; auf schmaleren Desktopfenstern darf sie umbrechen. Mobil bleibt unverändert.
+- „Ohne Ereignis“ verwendet beim Erstellen, Fortführen und Bearbeiten ausschließlich echte Tages-/Zeitsegmente. Die frühere Zeitspannen-/Zeitblock-Auswahlhilfe wurde entfernt.
+- Beim Fortführen einer bestehenden „Ohne Ereignis“-Sammlung sind vorhandene Segmente reine Information und können dort weder geöffnet, geändert noch entfernt werden. Änderungen erfolgen ausschließlich über „Ereignisse → Bearbeiten“.
+- Der Nur-Lesen-Inspektor zeigt große „Ohne Ereignis“-Sammlungen portionsweise: zunächst zehn Segmente, danach über „Weitere“. Dateifamilien nach Aufnahmetag sind standardmäßig eingeklappt und werden ebenfalls in Zehnerpaketen nachgeladen.
+- Fehler beim Speichern eines Ereignisses erscheinen im geöffneten Bearbeitungsdialog statt hinter dem Modal.
+- Bei normalen Ereignissen stehen Startzeit direkt neben Beginn und Endzeit direkt neben Ende.
+- Neue Ereignisse können bereits beim Erstellen mehrere echte Unterereignisse mit eigenem Namen sowie Beginn/Ende und Uhrzeiten erhalten. Lücken zwischen Unterereignissen bleiben beim Oberereignis; Verschachtelung ist nicht vorgesehen.
+- Die fachliche Planned-Logik bleibt unverändert. 0.26.6 bündelt die im manuellen Planned-Regressionslauf PR1–PR10 vereinbarten UI- und Bedienverbesserungen.
+
+
 ### 0.26.5 – XMP-sichere Nachsortierung und Kartenbewegung
 
 - Nachträglich erzeugte Lightroom-XMPs werden bei der Nachsortierung eines angewendeten Ereignisses live im aktuellen SSD-Ereignisbestand erkannt und über Stem/Familie an ihre Kamerafamilie gebunden.

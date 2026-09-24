@@ -9,8 +9,8 @@ def source(path: str) -> str:
 
 
 def test_version_is_0264():
-    assert 'APP_VERSION = "0.26.5"' in source("app/main.py")
-    assert "Aktueller Entwicklungsstand: **0.26.5**" in source("README.md")
+    assert 'APP_VERSION = "0.26.6"' in source("app/main.py")
+    assert "Aktueller Entwicklungsstand: **0.26.6**" in source("README.md")
 
 
 def test_workspace_preview_preserves_tree_and_db_facts():
@@ -25,7 +25,8 @@ def test_workspace_preview_preserves_tree_and_db_facts():
 def test_workspace_uses_markerless_card_expansion():
     html = source("app/workspace_ui.py")
     assert 'class="collapse-card card"' in html
-    assert 'id="no-event-range-details" class="card collapse-card"' in html
+    assert 'id="no-event-range-details"' not in html
+    assert 'existing-segment-static' in html
     assert 'class="card collapse-card"' in html
     assert ".collapse-card > summary::before" in html
 
@@ -38,6 +39,10 @@ def test_events_tab_opens_read_only_before_editing():
     assert "function openEventViewer" in html
     assert 'id="inspect-edit-event"' in html
     assert "Datenbank-Beginn" in html
+    assert "Datenbank-Zeitraum" in html
+    assert "komplex" in html
+    assert 'id="inspect-more-segments"' in html
+    assert 'id="inspect-family-days"' in html
     assert "Dateifamilien nach Aufnahmetag" in html
     assert "edit-mode .sort-plan-content" in html
 

@@ -101,7 +101,12 @@ EVENTS_HTML = r"""<!doctype html>
     .edit-family input { width:20px; height:20px; margin-top:2px; }
     .edit-family.blocked { opacity:.55; }
     .edit-warning { border:1px solid var(--warning); border-radius:12px; padding:11px; color:var(--warning); }
+    .edit-inline-error { border:1px solid var(--danger); border-radius:12px; padding:11px; margin-bottom:12px; background:color-mix(in srgb,var(--danger) 10%,var(--surface)); color:var(--text); font-weight:650; }
     .edit-actions { display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; margin-top:16px; }
+    .edit-boundaries { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;grid-column:1/-1; }
+    .edit-boundary { display:grid;grid-template-columns:minmax(0,1.45fr) minmax(105px,.7fr);gap:8px;align-items:end; }
+    .inspect-more { margin-top:9px; }
+    @media (max-width:760px){.edit-boundaries,.edit-boundary{grid-template-columns:1fr}}
 
     main {
       width: min(1120px, 100%);
@@ -2360,103 +2365,90 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
 
-    function inspectDayCards(context) {
-      const grouped = new Map();
-      for (const family of (context.families || []).filter(item => item.assigned_here)) {
-        const day = String(family.selected_capture_time || "").slice(0,10) || "Ohne Datum";
-        if (!grouped.has(day)) grouped.set(day, []);
+    function inspectDayEntries(context) {
+      const grouped=new Map();
+      for(const family of (context.families||[]).filter(item=>item.assigned_here)){
+        const day=String(family.selected_capture_time||"").slice(0,10)||"Ohne Datum";
+        if(!grouped.has(day))grouped.set(day,[]);
         grouped.get(day).push(family);
       }
-      return [...grouped.entries()]
-        .sort((a,b)=>a[0].localeCompare(b[0]))
-        .map(([day,families]) => `
-          <details class="inspect-card collapse-card">
-            <summary><strong>${escapeHtml(day === "Ohne Datum" ? day : germanDay(day))}</strong><span class="muted">${families.length} Familien</span></summary>
-            ${inspectFamilyRows(families)}
-          </details>`)
-        .join("");
+      return [...grouped.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
     }
 
+    function inspectDayCards(entries) {
+      return entries.map(([day,families])=>`
+        <details class="inspect-card collapse-card">
+          <summary><strong>${escapeHtml(day==="Ohne Datum"?day:germanDay(day))}</strong><span class="muted">${families.length} Familien</span></summary>
+          ${inspectFamilyRows(families)}
+        </details>`).join("");
+    }
 
     function renderEventViewer(context, structureData) {
-      currentEditContext = null;
-      const event = context.event;
-      const noEvent = event.event_kind === "no_event";
-      const assigned = (context.families || []).filter(item => item.assigned_here);
-      const segments = context.time_segments || [];
-      const childEvents = context.child_events || [];
+      currentEditContext=null;
+      const event=context.event;
+      const noEvent=event.event_kind==="no_event";
+      const assigned=(context.families||[]).filter(item=>item.assigned_here);
+      const segments=context.time_segments||[];
+      const childEvents=context.child_events||[];
+      const dayEntries=inspectDayEntries(context);
       eventEditDialog.classList.remove("edit-mode");
       eventEditDialog.classList.add("view-mode");
-      eventEditTitle.textContent = `${noEvent ? "Ohne Ereignis öffnen" : "Ereignis öffnen"} · ${event.name}`;
-      eventEditSubtitle.textContent =
-        "Nur-Lesen-Ansicht der aktuell in der Datenbank gespeicherten Definition und Dateizuordnung.";
+      eventEditTitle.textContent=`${noEvent?"Ohne Ereignis öffnen":"Ereignis öffnen"} · ${event.name}`;
+      eventEditSubtitle.textContent="Nur-Lesen-Ansicht der aktuell in der Datenbank gespeicherten Definition und Dateizuordnung.";
 
-      const segmentCards = noEvent
-        ? segments.map((segment,index) => {
-            const start = segment.start_datetime || `${segment.day_key}T${segment.start_time || "00:00"}:00`;
-            const end = segment.end_datetime || `${segment.day_key}T${segment.end_time || "23:59"}:59`;
-            const families = inspectRangeFamilies(context,start,end);
-            return `
-              <details class="inspect-card collapse-card">
-                <summary><strong>Tagessegment ${index+1} · ${escapeHtml(germanDay(String(segment.day_key || start).slice(0,10)))}</strong><span class="muted">${escapeHtml(String(segment.start_time || start.slice(11,16)))}–${escapeHtml(String(segment.end_time || end.slice(11,16)))} · ${families.length} Familien</span></summary>
-                ${inspectFamilyRows(families)}
-              </details>`;
-          }).join("")
-        : "";
+      const childCards=!noEvent?childEvents.map(child=>{
+        const families=inspectRangeFamilies(context,child.start_datetime,child.end_datetime);
+        return `<details class="inspect-card collapse-card"><summary><strong>${escapeHtml(child.name||child.folder_name||"Unterereignis")}</strong><span class="muted">${escapeHtml(inspectDateTime(child.start_datetime))} – ${escapeHtml(inspectDateTime(child.end_datetime))}</span></summary>${inspectFamilyRows(families)}</details>`;
+      }).join(""):"";
 
-      const childCards = !noEvent
-        ? childEvents.map(child => {
-            const families = inspectRangeFamilies(context, child.start_datetime, child.end_datetime);
-            return `
-              <details class="inspect-card collapse-card">
-                <summary><strong>${escapeHtml(child.name || child.folder_name || "Unterereignis")}</strong><span class="muted">${escapeHtml(inspectDateTime(child.start_datetime))} – ${escapeHtml(inspectDateTime(child.end_datetime))}</span></summary>
-                ${inspectFamilyRows(families)}
-              </details>`;
-          }).join("")
-        : "";
-
-      eventEditBody.innerHTML = `
+      eventEditBody.innerHTML=`
         <div class="inspect-summary">
           <div class="inspect-field"><span>Status</span><strong>${escapeHtml(eventStatusLabel(event.status))}</strong></div>
-          <div class="inspect-field"><span>Art</span><strong>${noEvent ? "Ohne Ereignis" : "Ereignis"}</strong></div>
-          <div class="inspect-field"><span>Datenbank-Beginn</span><strong>${escapeHtml(inspectDateTime(event.start_datetime))}</strong></div>
-          <div class="inspect-field"><span>Datenbank-Ende</span><strong>${escapeHtml(inspectDateTime(event.end_datetime))}</strong></div>
-          <div class="inspect-field"><span>Tagesordner</span><strong>${event.preserve_day_folders ? "Erhalten" : "Nicht erhalten"}</strong></div>
+          <div class="inspect-field"><span>Art</span><strong>${noEvent?"Ohne Ereignis":"Ereignis"}</strong></div>
+          ${noEvent
+            ? '<div class="inspect-field"><span>Datenbank-Zeitraum</span><strong>komplex</strong></div>'
+            : `<div class="inspect-field"><span>Datenbank-Beginn</span><strong>${escapeHtml(inspectDateTime(event.start_datetime))}</strong></div><div class="inspect-field"><span>Datenbank-Ende</span><strong>${escapeHtml(inspectDateTime(event.end_datetime))}</strong></div>`}
+          <div class="inspect-field"><span>Tagesordner</span><strong>${event.preserve_day_folders?"Erhalten":"Nicht erhalten"}</strong></div>
           <div class="inspect-field"><span>Zugeordnet</span><strong>${assigned.length} Familien</strong></div>
         </div>
+        ${event.notes?`<div class="inspect-section"><strong>Notizen</strong><p class="muted">${escapeHtml(event.notes)}</p></div>`:""}
+        ${noEvent?`<div class="inspect-section"><strong>Gespeicherte Tages-/Zeitsegmente</strong><div id="inspect-segment-host"></div><button type="button" id="inspect-more-segments" class="inspect-more" hidden>Weitere</button></div>`:""}
+        ${childEvents.length?`<div class="inspect-section"><strong>Unterereignisse</strong>${childCards}</div>`:""}
+        <details class="inspect-section inspect-card collapse-card" id="inspect-family-days">
+          <summary><strong>Dateifamilien nach Aufnahmetag</strong><span class="muted">${dayEntries.length} Tage</span></summary>
+          <div id="inspect-family-day-host"></div>
+          <button type="button" id="inspect-more-family-days" class="inspect-more" hidden>Weitere</button>
+        </details>
+        <div class="inspect-section"><strong>Zielstruktur</strong><pre class="inspect-structure">${escapeHtml(structureData?.structure_text||"Keine Struktur vorhanden.")}</pre></div>
+        <div class="inspect-actions"><button type="button" id="inspect-edit-event" class="plan-button bk-positive-action">Bearbeiten</button></div>`;
 
-        ${event.notes ? `<div class="inspect-section"><strong>Notizen</strong><p class="muted">${escapeHtml(event.notes)}</p></div>` : ""}
+      if(noEvent){
+        let segmentLimit=10;
+        const host=document.getElementById("inspect-segment-host");
+        const more=document.getElementById("inspect-more-segments");
+        const draw=()=>{
+          host.innerHTML=segments.slice(0,segmentLimit).map((segment,index)=>{
+            const start=segment.start_datetime||`${segment.day_key}T${segment.start_time||"00:00"}:00`;
+            const end=segment.end_datetime||`${segment.day_key}T${segment.end_time||"23:59"}:59`;
+            const families=inspectRangeFamilies(context,start,end);
+            return `<details class="inspect-card collapse-card"><summary><strong>Tagessegment ${index+1} · ${escapeHtml(germanDay(String(segment.day_key||start).slice(0,10)))}</strong><span class="muted">${escapeHtml(String(segment.start_time||start.slice(11,16)))}–${escapeHtml(String(segment.end_time||end.slice(11,16)))} · ${families.length} Familien</span></summary>${inspectFamilyRows(families)}</details>`;
+          }).join("")||'<p class="muted">Keine Segmente gespeichert.</p>';
+          more.hidden=segmentLimit>=segments.length;
+        };
+        more.onclick=()=>{segmentLimit+=10;draw();};
+        draw();
+      }
 
-        ${noEvent ? `
-          <div class="inspect-section">
-            <strong>Gespeicherte Tages-/Zeitsegmente</strong>
-            ${segmentCards || '<p class="muted">Keine Segmente gespeichert.</p>'}
-          </div>` : ""}
-
-        ${childEvents.length ? `
-          <div class="inspect-section">
-            <strong>Unterereignisse</strong>
-            ${childCards}
-          </div>` : ""}
-
-        <div class="inspect-section">
-          <strong>Dateifamilien nach Aufnahmetag</strong>
-          ${inspectDayCards(context) || '<p class="muted">Keine zugeordneten Familien.</p>'}
-        </div>
-
-        <div class="inspect-section">
-          <strong>Zielstruktur</strong>
-          <pre class="inspect-structure">${escapeHtml(structureData?.structure_text || "Keine Struktur vorhanden.")}</pre>
-        </div>
-
-        <div class="inspect-actions">
-          <button type="button" id="inspect-edit-event" class="plan-button bk-positive-action">Bearbeiten</button>
-        </div>
-      `;
-
-      document.getElementById("inspect-edit-event")?.addEventListener("click", () => {
-        renderEventEditor(context);
-      });
+      let familyDayLimit=10;
+      const familyHost=document.getElementById("inspect-family-day-host");
+      const familyMore=document.getElementById("inspect-more-family-days");
+      const drawDays=()=>{
+        familyHost.innerHTML=inspectDayCards(dayEntries.slice(0,familyDayLimit))||'<p class="muted">Keine zugeordneten Familien.</p>';
+        familyMore.hidden=familyDayLimit>=dayEntries.length;
+      };
+      familyMore.onclick=()=>{familyDayLimit+=10;drawDays();};
+      drawDays();
+      document.getElementById("inspect-edit-event")?.addEventListener("click",()=>renderEventEditor(context));
     }
 
 
@@ -2531,35 +2523,29 @@ EVENTS_HTML = r"""<!doctype html>
       }).join("");
 
       eventEditBody.innerHTML = `
+        <div id="event-edit-inline-error" class="edit-inline-error" role="alert" hidden></div>
         ${archivedChange ? `<div class="edit-warning">ARCHIVIERTES Ereignis: Die Kamerabibliothek bleibt strikt read-only. Nach dem Speichern erhältst du einen manuellen Änderungsauftrag mit IST- und SOLL-Zustand.</div><br>` : ""}
         <div class="edit-grid">
           <label class="edit-field full"><span>Ereignisname</span><input id="edit-name" maxlength="160" value="${escapeHtml(event.display_title || event.name)}" ${noEvent ? "disabled" : ""}></label>
           ${noEvent ? `
             <div class="edit-field full">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
-                <span>Zeitspanne · nur Auswahlhilfe</span>
-                ${structural ? `<button id="edit-noevent-range-open" type="button">＋ Zeitspanne ergänzen</button>` : ""}
-              </div>
-              <div id="edit-noevent-existing-ranges" style="display:grid;gap:6px;margin-bottom:8px"></div>
-              <div id="edit-noevent-range-panel" hidden style="padding:10px;border:1px solid var(--border-color, #30363d);border-radius:10px;margin-bottom:10px">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">
-                  <div style="display:grid;grid-template-columns:minmax(118px,.85fr) minmax(86px,.55fr);gap:8px"><label class="edit-field"><span>Monat/Jahr</span><input value="${escapeHtml(fixedNoEventMonth.slice(5,7)+"/"+fixedNoEventMonth.slice(0,4))}" disabled></label><label class="edit-field"><span>Von Tag</span><input id="edit-noevent-range-start-day" type="number" min="1" max="31" value=""></label><input id="edit-noevent-range-start" type="hidden" value=""></div>
-                  <div style="display:grid;grid-template-columns:minmax(118px,.85fr) minmax(86px,.55fr);gap:8px"><label class="edit-field"><span>Monat/Jahr</span><input value="${escapeHtml(fixedNoEventMonth.slice(5,7)+"/"+fixedNoEventMonth.slice(0,4))}" disabled></label><label class="edit-field"><span>Bis Tag</span><input id="edit-noevent-range-end-day" type="number" min="1" max="31" value=""></label><input id="edit-noevent-range-end" type="hidden" value=""></div>
-                </div>
-                ${structural ? `<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button id="edit-noevent-range-cancel" type="button">Abbrechen</button><button id="edit-noevent-range-apply" type="button" class="plan-button">Zeitspanne übernehmen</button></div>` : ""}
-              </div>
-              <span>Tagessegmente</span>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px"><span>Tagessegmente</span>${structural ? `<button id="add-no-event-segment" type="button">＋ Tagessegment hinzufügen</button>` : ""}</div>
               <div id="no-event-segments">${segmentHtml || `<p class="muted">Noch keine Segmente.</p>`}</div>
-              ${structural ? `<button id="add-no-event-segment" type="button">＋ Tagessegment hinzufügen</button>` : ""}
               <p class="muted">Jeder Tag bzw. Teil eines Tages wird separat gespeichert. Zwischenräume gehören ausdrücklich nicht zu „Ohne Ereignis“.</p>
             </div>
             <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>` : `
-          <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
-          <label class="edit-field"><span>Ende</span><input id="edit-end-date" type="date" value="${escapeHtml(isoDate(event.end_datetime))}" ${structural ? "" : "disabled"}></label>
+          <div class="edit-boundaries">
+            <div class="edit-boundary">
+              <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
+              <label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="${escapeHtml(isoTime(event.start_datetime,'00:00'))}" ${structural ? "" : "disabled"}></label>
+            </div>
+            <div class="edit-boundary">
+              <label class="edit-field"><span>Ende</span><input id="edit-end-date" type="date" value="${escapeHtml(isoDate(event.end_datetime))}" ${structural ? "" : "disabled"}></label>
+              <label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="${escapeHtml(isoTime(event.end_datetime,'23:59'))}" ${structural ? "" : "disabled"}></label>
+            </div>
+          </div>
           <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
           <input id="edit-time-enabled" type="hidden" value="1">
-          <label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="${escapeHtml(isoTime(event.start_datetime,'00:00'))}"></label>
-          <label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="${escapeHtml(isoTime(event.end_datetime,'23:59'))}"></label>
           <div class="edit-field full"><span>Optionale Unterereignisse</span><div id="normal-event-segments">${normalSegmentHtml}</div><button id="add-normal-segment" type="button">Unterereignis hinzufügen</button></div>`}
 
           <label class="edit-field full"><span>Notizen</span><textarea id="edit-notes" maxlength="4000">${escapeHtml(event.notes || "")}</textarea></label>
@@ -2595,126 +2581,25 @@ EVENTS_HTML = r"""<!doctype html>
           bind();
         };
       } else if (structural) {
-        const container = document.getElementById("no-event-segments");
-        const renderRangeSummary = () => {
-          const host=document.getElementById("edit-noevent-existing-ranges");
-          if (!host) return;
-          const values=[...container.querySelectorAll("[data-segment-day]")].map(input=>input.value).filter(Boolean);
-          const ranges=contiguousDayRangesFromValues(values);
-          const monthLabel=fixedNoEventMonth.slice(5,7)+"/"+fixedNoEventMonth.slice(0,4);
-          const maxDay=new Date(Number(fixedNoEventMonth.slice(0,4)),Number(fixedNoEventMonth.slice(5,7)),0).getDate();
-          host.innerHTML=ranges.length ? ranges.map(([a,b],i)=>{
-            const aDay=Number(a.slice(8,10));
-            const bDay=Number(b.slice(8,10));
-            return `<details class="card collapse-card" data-existing-range data-range-start="${escapeHtml(a)}" data-range-end="${escapeHtml(b)}" style="padding:7px 9px">
-              <summary style="cursor:pointer"><strong>Zeitblock ${i+1}</strong> <span class="muted">· ${escapeHtml(germanDay(a))}${a===b?"":` bis ${escapeHtml(germanDay(b))}`} · ${values.filter(v=>v>=a && v<=b).length} Zeitsegmente</span></summary>
-              <div style="display:grid;grid-template-columns:minmax(118px,.85fr) minmax(86px,.55fr) minmax(118px,.85fr) minmax(86px,.55fr);gap:8px;align-items:end;margin-top:8px">
-                <label class="edit-field"><span>Monat/Jahr</span><input value="${escapeHtml(monthLabel)}" disabled></label>
-                <label class="edit-field"><span>Von Tag</span><input data-edit-range-start-day type="number" min="1" max="${maxDay}" value="${aDay}"></label>
-                <label class="edit-field"><span>Monat/Jahr</span><input value="${escapeHtml(monthLabel)}" disabled></label>
-                <label class="edit-field"><span>Bis Tag</span><input data-edit-range-end-day type="number" min="1" max="${maxDay}" value="${bDay}"></label>
-              </div>
-              <div style="display:flex;justify-content:flex-end;margin-top:8px"><button type="button" data-apply-existing-range class="plan-button">Zeitblock übernehmen</button></div>
-            </details>`;
-          }).join("") : '<span class="muted">Noch keine Zeitblöcke.</span>';
-          host.querySelectorAll("[data-apply-existing-range]").forEach(button=>{
-            button.onclick=()=>{
-              const box=button.closest("[data-existing-range]");
-              const oldStart=box?.dataset.rangeStart||"";
-              const oldEnd=box?.dataset.rangeEnd||"";
-              const from=Number(box?.querySelector("[data-edit-range-start-day]")?.value||0);
-              const to=Number(box?.querySelector("[data-edit-range-end-day]")?.value||0);
-              if (!from || !to || from>to) return;
-              const newStart=`${fixedNoEventMonth}-${String(Math.min(maxDay,Math.max(1,from))).padStart(2,"0")}`;
-              const newEnd=`${fixedNoEventMonth}-${String(Math.min(maxDay,Math.max(1,to))).padStart(2,"0")}`;
-              [...container.querySelectorAll("[data-segment-row]")].forEach(row=>{
-                const day=row.querySelector("[data-segment-day]")?.value||"";
-                if (day>=oldStart && day<=oldEnd && (day<newStart || day>newEnd)) row.remove();
-              });
-              const existing=new Set([...container.querySelectorAll("[data-segment-day]")].map(input=>input.value));
-              let d=new Date(`${newStart}T12:00:00`), last=new Date(`${newEnd}T12:00:00`);
-              while (d<=last) {
-                const day=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-                if (!existing.has(day)) {
-                  const row=document.createElement("details");
-                  row.className="no-event-segment card collapse-card"; row.dataset.segmentRow="1"; row.open=false; row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
-                  row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>${day}</strong> <span class="muted">· 00:00–23:59</span></summary><div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">${noEventDayControl(fixedNoEventMonth, day, true)}<label class="edit-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button></div>`;
-                  container.appendChild(row); existing.add(day);
-                }
-                d.setDate(d.getDate()+1);
-              }
-              bindRemove();
-              bindLockedMonthDays();
-              renderRangeSummary();
-            };
-          });
+        const container=document.getElementById("no-event-segments");
+        const bindNoEventRows=()=>{
+          container.querySelectorAll("[data-remove-segment]").forEach(button=>{button.onclick=()=>button.closest("[data-segment-row]")?.remove();});
+          container.querySelectorAll("[data-segment-day-number]").forEach(input=>{input.oninput=()=>{const hidden=input.closest("[data-segment-row]")?.querySelector("[data-segment-day]");const maxDay=new Date(Number(fixedNoEventMonth.slice(0,4)),Number(fixedNoEventMonth.slice(5,7)),0).getDate();const n=Math.max(1,Math.min(maxDay,Number(input.value||0)));if(hidden&&Number(input.value||0)>0)hidden.value=`${fixedNoEventMonth}-${String(n).padStart(2,"0")}`;};});
         };
-        const bindRemove = () => {
-          container.querySelectorAll("[data-remove-segment]").forEach(button => {
-            button.onclick = () => { button.closest("[data-segment-row]").remove(); renderRangeSummary(); };
-          });
-        };
-        bindRemove();
-        renderRangeSummary();
-        const bindLockedMonthDays = () => {
-          container.querySelectorAll("[data-segment-day-number]").forEach(input=>{
-            input.oninput=()=>{
-              const hidden=input.closest("[data-segment-row]")?.querySelector("[data-segment-day]");
-              const maxDay=new Date(Number(fixedNoEventMonth.slice(0,4)),Number(fixedNoEventMonth.slice(5,7)),0).getDate();
-              const n=Math.max(1,Math.min(maxDay,Number(input.value||0)));
-              if (hidden && Number(input.value||0)>0) hidden.value=`${fixedNoEventMonth}-${String(n).padStart(2,"0")}`;
-              renderRangeSummary();
-            };
-          });
-        };
-        bindLockedMonthDays();
-        const syncRangeDay=(id,hiddenId)=>{ const input=document.getElementById(id); const hidden=document.getElementById(hiddenId); if(!input||!hidden)return; input.oninput=()=>{ const maxDay=new Date(Number(fixedNoEventMonth.slice(0,4)),Number(fixedNoEventMonth.slice(5,7)),0).getDate(); const n=Math.max(1,Math.min(maxDay,Number(input.value||0))); if(Number(input.value||0)>0) hidden.value=`${fixedNoEventMonth}-${String(n).padStart(2,"0")}`; }; };
-        syncRangeDay("edit-noevent-range-start-day","edit-noevent-range-start");
-        syncRangeDay("edit-noevent-range-end-day","edit-noevent-range-end");
-        const rangePanel=document.getElementById("edit-noevent-range-panel");
-        document.getElementById("edit-noevent-range-open")?.addEventListener("click", () => {
-          if (rangePanel) rangePanel.hidden=false;
-          for (const id of ["edit-noevent-range-start-day","edit-noevent-range-end-day","edit-noevent-range-start","edit-noevent-range-end"]) { const el=document.getElementById(id); if (el) el.value=""; }
-          document.getElementById("edit-noevent-range-start-day")?.focus();
-        });
-        document.getElementById("edit-noevent-range-cancel")?.addEventListener("click", () => {
-          if (rangePanel) rangePanel.hidden=true;
-        });
-        document.getElementById("edit-noevent-range-apply")?.addEventListener("click", () => {
-          const start=document.getElementById("edit-noevent-range-start")?.value || "";
-          const end=document.getElementById("edit-noevent-range-end")?.value || "";
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) return;
-          const existing=new Set([...container.querySelectorAll("[data-segment-day]")].map(input=>input.value));
-          let d=new Date(`${start}T12:00:00`), last=new Date(`${end}T12:00:00`);
-          while (d<=last) {
-            const day=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-            if (!existing.has(day)) {
-              const row=document.createElement("details"); row.className="no-event-segment card collapse-card"; row.dataset.segmentRow="1"; row.open=false; row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
-              row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>${day}</strong> <span class="muted">· 00:00–23:59</span></summary><div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">${noEventDayControl(fixedNoEventMonth, day, true)}<label class="edit-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button></div>`;
-              container.appendChild(row); existing.add(day);
-            }
-            d.setDate(d.getDate()+1);
-          }
-          bindRemove();
-          bindLockedMonthDays();
-          renderRangeSummary();
-          if (rangePanel) rangePanel.hidden=true;
-        });
-        document.getElementById("add-no-event-segment")?.addEventListener("click", () => {
-          const row = document.createElement("details");
-          row.className = "no-event-segment card collapse-card";
-          row.dataset.segmentRow = "1";
-          row.open = true;
-          row.style.cssText = "display:block;padding:8px 10px;margin:6px 0";
-          row.innerHTML = `<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>Neues Tagessegment</strong> <span class="muted">· 00:00–23:59</span></summary><div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">${noEventDayControl(fixedNoEventMonth, "", true)}<label class="edit-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button></div>`;
-          container.appendChild(row);
-          bindRemove();
-          bindLockedMonthDays();
-          renderRangeSummary();
-          row.querySelector("[data-segment-day-number]")?.focus();
+        bindNoEventRows();
+        document.getElementById("add-no-event-segment")?.addEventListener("click",()=>{
+          const row=document.createElement("details");row.className="no-event-segment card collapse-card";row.dataset.segmentRow="1";row.open=true;row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
+          row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>Neues Tagessegment</strong><span class="muted">· 00:00–23:59</span></summary><div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">${noEventDayControl(fixedNoEventMonth,"",true)}<label class="edit-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button></div>`;
+          container.appendChild(row);bindNoEventRows();row.querySelector("[data-segment-day-number]")?.focus();
         });
       }
       document.getElementById("edit-cancel").addEventListener("click", () => eventEditDialog.close());
+    }
+
+    function showEventEditError(message) {
+      let node=document.getElementById("event-edit-inline-error");
+      if(!node){node=document.createElement("div");node.id="event-edit-inline-error";node.className="edit-inline-error";node.setAttribute("role","alert");eventEditBody.prepend(node);}
+      node.textContent=String(message||"Unbekannter Fehler");node.hidden=false;node.scrollIntoView({block:"nearest"});
     }
 
     async function openEventEditor(eventId, jobId) {
@@ -2992,7 +2877,8 @@ EVENTS_HTML = r"""<!doctype html>
     changeRequestClose.addEventListener("click", () => changeRequestDialog.close());
     eventEditForm.addEventListener("submit", event => {
       event.preventDefault();
-      saveEventEditor().catch(error => setStatus(error.message, true));
+      const old=document.getElementById("event-edit-inline-error");if(old)old.hidden=true;
+      saveEventEditor().catch(error => showEventEditError(error.message));
     });
 
     sortPlanCloseButton.addEventListener(

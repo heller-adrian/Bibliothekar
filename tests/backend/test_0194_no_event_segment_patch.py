@@ -23,8 +23,8 @@ def test_workspace_switch_to_new_collection_clears_imported_segments():
 
 
 def test_events_editor_uses_day_segment_terms_and_compact_rows():
-    assert '＋ Zeitspanne ergänzen' in EVENTS_HTML
-    assert 'Zeitspanne übernehmen' in EVENTS_HTML
+    assert '＋ Zeitspanne ergänzen' not in EVENTS_HTML
+    assert 'Zeitspanne übernehmen' not in EVENTS_HTML
     assert '<span>Tagessegmente</span>' in EVENTS_HTML
     assert '＋ Tagessegment hinzufügen' in EVENTS_HTML
     assert 'grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px' in EVENTS_HTML
