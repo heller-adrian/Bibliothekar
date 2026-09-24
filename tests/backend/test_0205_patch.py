@@ -9,7 +9,7 @@ NOW='2026-09-10T20:00:00+00:00'
 
 
 def test_version_0205():
-    assert APP_VERSION == '0.26.6'
+    assert APP_VERSION == '0.26.7'
 
 
 def test_editor_context_returns_all_child_time_segments(tmp_path: Path):

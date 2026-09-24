@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-### 0.26.6 – Planned-UI-Abschluss und konsistentes Ereignismodell
+### 0.26.7 – Planned-UI-Abschluss und konsistentes Ereignismodell
 
 - „Ohne Ereignis“ zeigt in der Zielstruktur-Vorschau keinen irreführenden Min/Max-Zeitraum mehr, sondern „Datenbank-Zeitraum: komplex“.
 - Die doppelte Liste „Gespeicherte Ereignisse“ wurde aus „Aufnahmen“ entfernt; Ereignisse bleiben in der Tagesansicht sichtbar und werden vollständig im Reiter „Ereignisse“ verwaltet.
@@ -13,7 +13,7 @@
 - Fehler beim Speichern eines Ereignisses erscheinen im geöffneten Bearbeitungsdialog statt hinter dem Modal.
 - Bei normalen Ereignissen stehen Startzeit direkt neben Beginn und Endzeit direkt neben Ende.
 - Neue Ereignisse können bereits beim Erstellen mehrere echte Unterereignisse mit eigenem Namen sowie Beginn/Ende und Uhrzeiten erhalten. Lücken zwischen Unterereignissen bleiben beim Oberereignis; Verschachtelung ist nicht vorgesehen.
-- Die fachliche Planned-Logik bleibt unverändert. 0.26.6 bündelt die im manuellen Planned-Regressionslauf PR1–PR10 vereinbarten UI- und Bedienverbesserungen.
+- Die fachliche Planned-Logik bleibt unverändert. 0.26.7 bündelt die im manuellen Planned-Regressionslauf PR1–PR10 vereinbarten UI- und Bedienverbesserungen.
 
 
 ### 0.26.5 – XMP-sichere Nachsortierung und Kartenbewegung

@@ -9,8 +9,8 @@ def source(path: str) -> str:
 
 
 def test_version_is_0264():
-    assert 'APP_VERSION = "0.26.6"' in source("app/main.py")
-    assert "Aktueller Entwicklungsstand: **0.26.6**" in source("README.md")
+    assert 'APP_VERSION = "0.26.7"' in source("app/main.py")
+    assert "Aktueller Entwicklungsstand: **0.26.7**" in source("README.md")
 
 
 def test_workspace_preview_preserves_tree_and_db_facts():
