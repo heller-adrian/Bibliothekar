@@ -85,6 +85,13 @@ def _event_and_known_files(
                 FROM event_assignments
                 WHERE event_id IN (SELECT id FROM event_tree)
                   AND family_id IS NOT NULL
+
+                UNION
+
+                SELECT DISTINCT family_id
+                FROM event_reapply_removed_families
+                WHERE event_id=?
+                  AND job_id=?
             ),
             assigned_files AS (
                 SELECT DISTINCT file_id
@@ -114,7 +121,7 @@ def _event_and_known_files(
                   )
             ORDER BY f.id
             """,
-            (event_id, job_id),
+            (event_id, event_id, job_id, job_id),
         ).fetchall()
     return dict(event), [dict(row) for row in rows]
 
@@ -228,6 +235,7 @@ def scan_event_inventory(
     root_kind: str,
     persist: bool = True,
     update_known_file_locations: bool = False,
+    event_prefix_override: str | PurePosixPath | None = None,
 ) -> dict[str, Any]:
     """Scan the *current* event tree.
 
@@ -240,7 +248,11 @@ def scan_event_inventory(
 
     event, known_files = _event_and_known_files(database_path, job_id, event_id)
     root = storage_root.expanduser().resolve(strict=False)
-    prefix = event_root_relative(event)
+    prefix = (
+        _safe_relative(str(event_prefix_override))
+        if event_prefix_override is not None
+        else event_root_relative(event)
+    )
     event_root = root.joinpath(*prefix.parts)
 
     try:

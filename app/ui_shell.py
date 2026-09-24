@@ -408,6 +408,11 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
   place-items: center;
   cursor: pointer;
   isolation: isolate;
+  transform: translateY(0);
+  transition:
+    transform 150ms cubic-bezier(.2,.8,.2,1),
+    filter 150ms ease;
+  will-change: transform;
 }
 .bk-tab:first-child { margin-left: 0; }
 .bk-tab[data-area="import"] { --bk-tab-accent: var(--bk-red); }
@@ -613,7 +618,31 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
     );
 }
 .bk-tab:hover:not(.active) {
-  filter: brightness(1.025);
+  transform: translateY(-3px);
+  z-index: 55 !important;
+}
+.bk-tab:active:not(.active),
+.bk-tab.is-navigating:not(.active) {
+  transform: translateY(-8px);
+  z-index: 60 !important;
+}
+.bk-tab.active {
+  animation: bk-tab-arrive 180ms cubic-bezier(.2,.8,.2,1);
+}
+@keyframes bk-tab-arrive {
+  from { transform: translateY(-6px); }
+  to { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bk-tab {
+    transition: none !important;
+    animation: none !important;
+  }
+  .bk-tab:hover:not(.active),
+  .bk-tab:active:not(.active),
+  .bk-tab.is-navigating:not(.active) {
+    transform: none;
+  }
 }
 .bk-shell-actions {
   position: relative;
@@ -1555,6 +1584,32 @@ BIBLIOTHEKAR_JS = r"""
   }
   refreshTasks();
   setInterval(refreshTasks, 30000);
+
+  document.querySelectorAll(".bk-tab").forEach(tab => {
+    tab.addEventListener("click", event => {
+      if (
+        tab.classList.contains("active")
+        || event.defaultPrevented
+        || event.button !== 0
+        || event.metaKey
+        || event.ctrlKey
+        || event.shiftKey
+        || event.altKey
+        || matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        return;
+      }
+
+      const href = tab.href;
+      if (!href) return;
+
+      event.preventDefault();
+      tab.classList.add("is-navigating");
+      window.setTimeout(() => {
+        window.location.assign(href);
+      }, 105);
+    });
+  });
 
   fetch("/api/health", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(data => {
     if (!data) return;

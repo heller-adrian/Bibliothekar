@@ -258,14 +258,28 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
         source_root = Path(str(run["source_root"])).resolve(strict=False)
         target_root = Path(str(run["target_root"])).resolve(strict=False)
         with database_connection(database_path) as connection:
-            operations = [
-                dict(row) for row in connection.execute(
+            camera_operations = [
+                {**dict(row), "_operation_kind": "camera"}
+                for row in connection.execute(
                     """SELECT * FROM sort_operations
                        WHERE sort_run_id=?
                        ORDER BY sequence_number,id""",
                     (run_id,),
                 ).fetchall()
             ]
+            asset_operations = [
+                {**dict(row), "_operation_kind": "asset"}
+                for row in connection.execute(
+                    """SELECT * FROM sort_asset_operations
+                       WHERE sort_run_id=?
+                       ORDER BY sequence_number,id""",
+                    (run_id,),
+                ).fetchall()
+            ]
+            operations = sorted(
+                [*camera_operations, *asset_operations],
+                key=lambda row: (int(row["sequence_number"]), int(row["id"])),
+            )
 
         try:
             for operation in reversed(operations):
@@ -311,10 +325,15 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
                     )
 
                 with database_connection(database_path) as connection:
+                    table = (
+                        "sort_asset_operations"
+                        if operation.get("_operation_kind") == "asset"
+                        else "sort_operations"
+                    )
                     connection.execute(
-                        """UPDATE sort_operations
-                           SET status='rolled_back',rolled_back_at=?,error_message=NULL
-                           WHERE sort_run_id=? AND id=?""",
+                        f"""UPDATE {table}
+                            SET status='rolled_back',rolled_back_at=?,error_message=NULL
+                            WHERE sort_run_id=? AND id=?""",
                         (_now(), run_id, int(operation["id"])),
                     )
 
@@ -619,6 +638,27 @@ def _update_operation(
         )
 
 
+def _update_asset_operation(
+    database_path: Path,
+    run_id: str,
+    source_relative_path: str,
+    **values: Any,
+) -> None:
+    assignments = ", ".join(f"{key} = ?" for key in values)
+    parameters = [*values.values(), run_id, source_relative_path]
+
+    with database_connection(database_path) as connection:
+        connection.execute(
+            f"""
+            UPDATE sort_asset_operations
+            SET {assignments}
+            WHERE sort_run_id = ?
+              AND source_relative_path = ?
+            """,
+            parameters,
+        )
+
+
 def _created_directory_candidates(
     plan: dict[str, Any],
 ) -> list[Path]:
@@ -806,7 +846,7 @@ def _remove_empty_source_directories(
     source_root = Path(plan["source_root"]).resolve(strict=False)
     candidates: set[Path] = set()
 
-    for entry in plan["files"]:
+    for entry in [*plan["files"], *(plan.get("assets") or [])]:
         if entry["status"] != "move":
             continue
 
@@ -869,6 +909,41 @@ def _record_verified_progress(
             (now, run_id, file_id),
         )
 
+        connection.execute(
+            """
+            UPDATE sort_runs
+            SET verified_file_count = verified_file_count + 1,
+                verified_bytes = verified_bytes + ?,
+                phase = 'SHA-256-Prüfung der Quelldateien',
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (size_bytes, now, run_id),
+        )
+
+
+def _record_verified_asset_progress(
+    database_path: Path,
+    run_id: str,
+    source_relative_path: str,
+    size_bytes: int,
+) -> None:
+    now = _now()
+
+    with database_connection(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE sort_asset_operations
+            SET status = CASE
+                    WHEN status = 'planned' THEN 'verified'
+                    ELSE status
+                END,
+                verified_at = COALESCE(verified_at, ?)
+            WHERE sort_run_id = ?
+              AND source_relative_path = ?
+            """,
+            (now, run_id, source_relative_path),
+        )
         connection.execute(
             """
             UPDATE sort_runs
@@ -1056,6 +1131,15 @@ def _finalize_database(
                 str(path) for path in removed_directories
             ],
             "file_count": int(plan["summary"]["file_count"]),
+            "camera_file_count": int(
+                plan["summary"].get("camera_file_count")
+                or len(plan["files"])
+            ),
+            "asset_count": int(
+                plan["summary"].get("asset_count")
+                or len(plan.get("assets") or [])
+            ),
+            "xmp_count": int(plan["summary"].get("xmp_count") or 0),
             "move_count": int(plan["summary"]["move_count"]),
             "total_size_bytes": int(
                 plan["summary"]["total_size_bytes"]
@@ -1215,6 +1299,14 @@ def execute_sort_run(
                     size_bytes,
                 )
             ),
+            asset_verification_callback=lambda source_relative_path, size_bytes: (
+                _record_verified_asset_progress(
+                    database_path,
+                    run_id,
+                    source_relative_path,
+                    size_bytes,
+                )
+            ),
         )
 
         if str(plan["plan_token"]) != expected_plan_token:
@@ -1285,7 +1377,7 @@ def execute_sort_run(
                 entry,
             )
 
-            moved_entries.append(entry)
+            moved_entries.append({**entry, "_operation_kind": "camera"})
             _fsync_directory(source.parent)
             _fsync_directory(destination.parent)
             moved_count += 1
@@ -1312,6 +1404,64 @@ def execute_sort_run(
                 database_path,
                 run_id,
                 file_id,
+                status="destination_verified",
+                destination_verified_at=_now(),
+            )
+
+            _update_run(
+                database_path,
+                run_id,
+                phase=(
+                    f"Dateien werden verschoben und geprüft "
+                    f"({moved_count}/{int(plan['summary']['move_count'])})"
+                ),
+                moved_file_count=moved_count,
+                moved_bytes=moved_bytes,
+            )
+
+            if (
+                test_fail_after_moves is not None
+                and moved_count >= test_fail_after_moves
+            ):
+                raise SortApplyError(
+                    "Absichtlich ausgelöster Testfehler nach Verschiebung."
+                )
+
+        for entry in plan.get("assets") or []:
+            if entry["status"] == "already_at_target":
+                continue
+
+            source = Path(entry["source_absolute_path"])
+            destination = Path(entry["destination_absolute_path"])
+
+            _move_without_overwrite(source, destination, entry)
+
+            moved_entries.append({**entry, "_operation_kind": "asset"})
+            _fsync_directory(source.parent)
+            _fsync_directory(destination.parent)
+            moved_count += 1
+            moved_bytes += int(entry["expected_size_bytes"])
+            now = _now()
+
+            _update_asset_operation(
+                database_path,
+                run_id,
+                str(entry["source_relative_path"]),
+                status="moved",
+                moved_at=now,
+            )
+
+            destination_checksum = _sha256_file(destination)
+            if destination_checksum != str(entry["stored_sha256"]):
+                raise SortApplyError(
+                    "Die Prüfsumme am XMP-Ziel stimmt nach der Verschiebung nicht: "
+                    + str(destination)
+                )
+
+            _update_asset_operation(
+                database_path,
+                run_id,
+                str(entry["source_relative_path"]),
                 status="destination_verified",
                 destination_verified_at=_now(),
             )
@@ -1380,23 +1530,41 @@ def execute_sort_run(
 
             try:
                 _rollback_one(source, destination)
-                _update_operation(
-                    database_path,
-                    run_id,
-                    int(entry["file_id"]),
-                    status="rolled_back",
-                    rolled_back_at=_now(),
-                )
-            except Exception as rollback_error:
-                rollback_errors.append(str(rollback_error))
-                try:
+                if entry.get("_operation_kind") == "asset":
+                    _update_asset_operation(
+                        database_path,
+                        run_id,
+                        str(entry["source_relative_path"]),
+                        status="rolled_back",
+                        rolled_back_at=_now(),
+                    )
+                else:
                     _update_operation(
                         database_path,
                         run_id,
                         int(entry["file_id"]),
-                        status="failed",
-                        error_message=str(rollback_error),
+                        status="rolled_back",
+                        rolled_back_at=_now(),
                     )
+            except Exception as rollback_error:
+                rollback_errors.append(str(rollback_error))
+                try:
+                    if entry.get("_operation_kind") == "asset":
+                        _update_asset_operation(
+                            database_path,
+                            run_id,
+                            str(entry["source_relative_path"]),
+                            status="failed",
+                            error_message=str(rollback_error),
+                        )
+                    else:
+                        _update_operation(
+                            database_path,
+                            run_id,
+                            int(entry["file_id"]),
+                            status="failed",
+                            error_message=str(rollback_error),
+                        )
                 except Exception:
                     pass
 

@@ -30,6 +30,8 @@ ALLOWED_FAMILY_STATUSES = {
     "complete",
 }
 
+WORKSPACE_BRANCHES = {"Alle", "Sortiert", "Export"}
+
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -423,12 +425,72 @@ def _build_family_target_groups(
 
 
 
+def _reapply_physical_event_prefix(
+    database_path: Path,
+    job_id: str,
+    event_id: str,
+) -> PurePosixPath | None:
+    """Return the still-physical event root before an applied edit.
+
+    Applied edits persist their SOLL definition before files are moved.  The
+    mutation snapshot therefore remains the authoritative source for the old
+    physical event folder until the confirmed reapply has finished.
+    """
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT original_state_json
+               FROM event_mutations
+               WHERE job_id=?
+                 AND status IN ('pending_reassignment','pending_apply')
+               ORDER BY created_at DESC,id DESC""",
+            (job_id,),
+        ).fetchall()
+
+        for row in rows:
+            try:
+                state = json.loads(str(row["original_state_json"] or "{}"))
+            except json.JSONDecodeError:
+                continue
+            for old_event in state.get("events") or []:
+                if (
+                    str(old_event.get("id") or "") != str(event_id)
+                    or old_event.get("parent_event_id")
+                ):
+                    continue
+                start = str(old_event.get("start_datetime") or "")
+                folder = str(old_event.get("folder_name") or "").strip()
+                year = start[:4]
+                if len(year) == 4 and year.isdigit() and folder:
+                    return _safe_relative_path(
+                        PurePosixPath(year, folder).as_posix(),
+                        "Bisheriger Ereignisordner",
+                    )
+
+        current = connection.execute(
+            """SELECT start_datetime,folder_name
+               FROM events
+               WHERE id=? AND job_id=? AND parent_event_id IS NULL""",
+            (event_id, job_id),
+        ).fetchone()
+        if current is None:
+            return None
+        year = str(current["start_datetime"] or "")[:4]
+        folder = str(current["folder_name"] or "").strip()
+        if len(year) == 4 and year.isdigit() and folder:
+            return _safe_relative_path(
+                PurePosixPath(year, folder).as_posix(),
+                "Ereignisordner",
+            )
+    return None
+
+
 def _build_plan_token(
     job_id: str,
     event: dict[str, Any],
     source_root: Path,
     target_root: Path,
     entries: list[dict[str, Any]],
+    asset_entries: list[dict[str, Any]],
     directory_rows: list[dict[str, Any]],
 ) -> str:
     payload = {
@@ -454,6 +516,25 @@ def _build_plan_token(
             for entry in sorted(
                 entries,
                 key=lambda item: int(item["file_id"]),
+            )
+        ],
+        "assets": [
+            {
+                "asset_kind": str(entry.get("asset_kind") or "other"),
+                "family_id": entry.get("family_id"),
+                "source_file_id": entry.get("source_file_id"),
+                "source": str(entry["source_relative_path"]),
+                "destination": str(entry["destination_relative_path"]),
+                "size": int(entry["expected_size_bytes"]),
+                "sha256": str(entry.get("stored_sha256") or ""),
+                "source_device": entry.get("source_device"),
+                "source_inode": entry.get("source_inode"),
+                "source_mtime_ns": entry.get("source_mtime_ns"),
+                "status": str(entry.get("status") or ""),
+            }
+            for entry in sorted(
+                asset_entries,
+                key=lambda item: str(item["source_relative_path"]),
             )
         ],
         "directories": [
@@ -484,6 +565,9 @@ def build_event_sort_plan(
     verification_callback: (
         Callable[[int, int], None] | None
     ) = None,
+    asset_verification_callback: (
+        Callable[[str, int], None] | None
+    ) = None,
     allow_reapply: bool = False,
 ) -> dict[str, Any]:
     """
@@ -499,6 +583,33 @@ def build_event_sort_plan(
     """
 
     workspace_root = _resolve_workspace_root(workspace_path)
+
+    reapply_inventory: dict[str, Any] | None = None
+    if allow_reapply:
+        try:
+            inventory_root = shared_work_root(workspace_root)
+        except WorkspaceLayoutError as error:
+            raise SortPlanError(str(error)) from error
+        physical_prefix = _reapply_physical_event_prefix(
+            database_path,
+            job_id,
+            event_id,
+        )
+        try:
+            from app.event_inventory import EventInventoryError, scan_event_inventory
+
+            reapply_inventory = scan_event_inventory(
+                database_path,
+                inventory_root,
+                job_id,
+                event_id,
+                root_kind="shared_workspace",
+                persist=False,
+                update_known_file_locations=False,
+                event_prefix_override=physical_prefix,
+            )
+        except EventInventoryError as error:
+            raise SortPlanError(str(error)) from error
 
     with database_connection(database_path) as connection:
         job_row = connection.execute(
@@ -852,6 +963,12 @@ def build_event_sort_plan(
             ),
         })
 
+    reapply_inventory_by_file_id = {
+        int(item["known_file_id"]): item
+        for item in (reapply_inventory or {}).get("files", [])
+        if item.get("known_file_id") is not None
+    }
+
     seen_source_ids: set[int] = set()
 
     for row in file_rows:
@@ -901,15 +1018,27 @@ def build_event_sort_plan(
         )
         day_key = str(capture_time or "")[:10]
 
+        inventory_file = reapply_inventory_by_file_id.get(file_id)
         source_relative = _safe_relative_path(
-            file_record.get("current_relative_path")
+            (
+                inventory_file.get("relative_path")
+                if inventory_file is not None
+                else None
+            )
+            or file_record.get("current_relative_path")
             or file_record.get("original_relative_path"),
             "Aktueller relativer Dateipfad",
         )
 
-        current_root_kind = str(
-            file_record.get("current_root_kind")
-            or "job_root"
+        current_root_kind = (
+            "shared_workspace"
+            if inventory_file is not None
+            else str(file_record.get("current_root_kind") or "job_root")
+        )
+        current_branch = (
+            str(inventory_file.get("branch") or "")
+            if inventory_file is not None
+            else ""
         )
 
         if current_root_kind not in {"job_root", "shared_workspace"}:
@@ -982,7 +1111,12 @@ def build_event_sort_plan(
         if is_free_stock:
             destination_parts.append(filename)
         else:
-            destination_parts.extend(["Alle", filename])
+            destination_branch = (
+                current_branch
+                if allow_reapply and current_branch in WORKSPACE_BRANCHES
+                else "Alle"
+            )
+            destination_parts.extend([destination_branch, filename])
 
         destination_relative = PurePosixPath(*destination_parts)
         source_base = target_root if current_root_kind == "shared_workspace" else source_root
@@ -1214,6 +1348,225 @@ def build_event_sort_plan(
             "status": entry_status,
         })
 
+    asset_entries: list[dict[str, Any]] = []
+
+    if allow_reapply and reapply_inventory is not None:
+        camera_entries_by_file = {
+            int(entry["file_id"]): entry
+            for entry in entries
+        }
+        camera_entries_by_family: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for entry in entries:
+            if entry.get("family_id") is not None:
+                camera_entries_by_family[int(entry["family_id"])].append(entry)
+
+        for asset in reapply_inventory.get("files", []):
+            if asset.get("known_file_id") is not None:
+                continue
+            if str(asset.get("asset_kind") or "") != "xmp":
+                continue
+
+            source_relative = _safe_relative_path(
+                asset.get("relative_path"),
+                "XMP-Quellpfad",
+            )
+            source_absolute = target_root.joinpath(*source_relative.parts).resolve(
+                strict=False
+            )
+            family_id = (
+                int(asset["family_id"])
+                if asset.get("family_id") is not None
+                else None
+            )
+            source_file_id = (
+                int(asset["source_file_id"])
+                if asset.get("source_file_id") is not None
+                else None
+            )
+
+            if family_id is None:
+                blockers.append({
+                    "code": "xmp_family_unresolved",
+                    "path": str(source_relative),
+                    "message": (
+                        "Eine XMP-Datei konnte keiner Kamerafamilie eindeutig "
+                        "zugeordnet werden: " + str(source_relative)
+                    ),
+                })
+                continue
+
+            candidates: list[dict[str, Any]] = []
+            if source_file_id is not None and source_file_id in camera_entries_by_file:
+                candidates = [camera_entries_by_file[source_file_id]]
+            if not candidates:
+                candidates = list(camera_entries_by_family.get(family_id, []))
+
+            branch = str(asset.get("branch") or "")
+            if len(candidates) > 1 and branch in WORKSPACE_BRANCHES:
+                same_branch = [
+                    candidate
+                    for candidate in candidates
+                    if PurePosixPath(
+                        str(candidate["destination_relative_path"])
+                    ).parent.name == branch
+                ]
+                if same_branch:
+                    candidates = same_branch
+
+            target_parents = {
+                str(PurePosixPath(str(candidate["destination_relative_path"])).parent)
+                for candidate in candidates
+            }
+            if not candidates or len(target_parents) != 1:
+                blockers.append({
+                    "code": "xmp_target_ambiguous",
+                    "family_id": family_id,
+                    "path": str(source_relative),
+                    "message": (
+                        "Das Ziel einer XMP-Datei ist innerhalb ihrer "
+                        "Kamerafamilie nicht eindeutig: " + str(source_relative)
+                    ),
+                })
+                continue
+
+            destination_parent = PurePosixPath(next(iter(target_parents)))
+            filename = _safe_component(source_relative.name, "XMP-Dateiname")
+            destination_relative = destination_parent / filename
+            destination_absolute = target_root.joinpath(
+                *destination_relative.parts
+            ).resolve(strict=False)
+
+            if not _is_relative_to(source_absolute, target_root):
+                blockers.append({
+                    "code": "xmp_source_outside_root",
+                    "path": str(source_relative),
+                    "message": "XMP-Quelle verlässt den Arbeitsbereich.",
+                })
+            if not _is_relative_to(destination_absolute, target_root):
+                blockers.append({
+                    "code": "xmp_target_outside_root",
+                    "path": str(destination_relative),
+                    "message": "XMP-Ziel verlässt den Arbeitsbereich.",
+                })
+
+            source_exists = source_absolute.exists()
+            source_is_symlink = source_absolute.is_symlink() if source_exists else False
+            source_is_file = source_absolute.is_file() if source_exists else False
+            source_readable = os.access(source_absolute, os.R_OK) if source_exists else False
+            source_stat = (
+                source_absolute.stat(follow_symlinks=False)
+                if source_is_file and not source_is_symlink
+                else None
+            )
+            source_size = int(source_stat.st_size) if source_stat is not None else None
+            expected_size = int(asset.get("size_bytes") or 0)
+            expected_sha256 = str(asset.get("sha256") or "").strip()
+            same_path = source_absolute == destination_absolute
+            target_exists = destination_absolute.exists()
+            target_conflict = target_exists and not same_path
+
+            if not source_exists:
+                blockers.append({
+                    "code": "xmp_source_missing",
+                    "path": str(source_relative),
+                    "message": "XMP-Datei fehlt: " + str(source_relative),
+                })
+            elif not source_is_file or source_is_symlink:
+                blockers.append({
+                    "code": "xmp_source_not_regular",
+                    "path": str(source_relative),
+                    "message": "XMP-Quelle ist keine reguläre Datei: " + str(source_relative),
+                })
+            elif not source_readable:
+                blockers.append({
+                    "code": "xmp_source_not_readable",
+                    "path": str(source_relative),
+                    "message": "XMP-Datei ist nicht lesbar: " + str(source_relative),
+                })
+            if source_is_file and source_size != expected_size:
+                blockers.append({
+                    "code": "xmp_source_size_mismatch",
+                    "path": str(source_relative),
+                    "message": "XMP-Dateigröße änderte sich während der Planung.",
+                })
+            if not expected_sha256:
+                blockers.append({
+                    "code": "xmp_checksum_missing",
+                    "path": str(source_relative),
+                    "message": "Für die XMP-Datei fehlt die SHA-256-Summe.",
+                })
+            if target_conflict:
+                blockers.append({
+                    "code": "xmp_target_exists",
+                    "path": str(destination_relative),
+                    "message": (
+                        "Am geplanten XMP-Ziel existiert bereits ein anderer "
+                        "Eintrag: " + str(destination_relative)
+                    ),
+                })
+            if _path_has_symlink(source_absolute, target_root):
+                blockers.append({
+                    "code": "xmp_source_symlink_component",
+                    "path": str(source_relative),
+                    "message": "Der XMP-Quellpfad enthält einen symbolischen Link.",
+                })
+            if _path_has_symlink(destination_absolute.parent, target_root):
+                blockers.append({
+                    "code": "xmp_target_symlink_component",
+                    "path": str(destination_relative),
+                    "message": "Der XMP-Zielpfad enthält einen symbolischen Link.",
+                })
+
+            status = "move"
+            if same_path:
+                status = "already_at_target"
+            elif not source_exists:
+                status = "blocked_missing_source"
+            elif target_conflict:
+                status = "blocked_target_exists"
+            elif source_is_file and source_size != expected_size:
+                status = "blocked_size_mismatch"
+
+            planned_directories.add(str(destination_relative.parent))
+            asset_entry = {
+                "asset_kind": "xmp",
+                "family_id": family_id,
+                "source_file_id": source_file_id,
+                "source_relative_path": str(source_relative),
+                "source_absolute_path": str(source_absolute),
+                "destination_relative_path": str(destination_relative),
+                "destination_absolute_path": str(destination_absolute),
+                "expected_size_bytes": expected_size,
+                "source_size_bytes": source_size,
+                "source_device": (
+                    int(source_stat.st_dev) if source_stat is not None else None
+                ),
+                "source_inode": (
+                    int(source_stat.st_ino) if source_stat is not None else None
+                ),
+                "source_mtime_ns": (
+                    int(source_stat.st_mtime_ns) if source_stat is not None else None
+                ),
+                "stored_sha256": expected_sha256 or None,
+                "source_exists": source_exists,
+                "source_readable": source_readable,
+                "source_is_regular_file": source_is_file and not source_is_symlink,
+                "target_exists": target_exists,
+                "same_path": same_path,
+                "status": status,
+            }
+            asset_entries.append(asset_entry)
+
+            if (
+                verify_sha256
+                and status in {"move", "already_at_target"}
+                and asset_verification_callback is not None
+            ):
+                asset_verification_callback(
+                    str(source_relative),
+                    expected_size,
+                )
+
     if not entries:
         blockers.append({
             "code": "no_files",
@@ -1234,7 +1587,7 @@ def build_event_sort_plan(
     families, target_groups = _build_family_target_groups(entries)
 
     for family in families:
-        if not family["split_across_targets"]:
+        if not family["split_across_targets"] or allow_reapply:
             continue
 
         blockers.append({
@@ -1252,7 +1605,7 @@ def build_event_sort_plan(
 
     destination_counts = Counter(
         entry["destination_relative_path"]
-        for entry in entries
+        for entry in [*entries, *asset_entries]
     )
     duplicate_destinations = sorted(
         destination
@@ -1287,7 +1640,7 @@ def build_event_sort_plan(
     available_bytes = int(statvfs.f_bavail * statvfs.f_frsize)
     total_bytes = sum(
         int(entry["expected_size_bytes"])
-        for entry in entries
+        for entry in [*entries, *asset_entries]
         if not entry["same_path"]
     )
     required_extra_bytes = 0 if same_filesystem else total_bytes
@@ -1359,12 +1712,18 @@ def build_event_sort_plan(
         "ready": len(blockers) == 0,
         "family_count": len(families),
         "target_group_count": len(target_groups),
-        "file_count": len(entries),
+        "file_count": len(entries) + len(asset_entries),
+        "camera_file_count": len(entries),
+        "asset_count": len(asset_entries),
+        "xmp_count": sum(
+            entry.get("asset_kind") == "xmp" for entry in asset_entries
+        ),
         "move_count": sum(
-            entry["status"] == "move" for entry in entries
+            entry["status"] == "move" for entry in [*entries, *asset_entries]
         ),
         "already_at_target_count": sum(
-            entry["status"] == "already_at_target" for entry in entries
+            entry["status"] == "already_at_target"
+            for entry in [*entries, *asset_entries]
         ),
         "directory_count": len(directory_rows),
         "directory_create_count": sum(
@@ -1372,7 +1731,7 @@ def build_event_sort_plan(
         ),
         "total_size_bytes": sum(
             int(entry["expected_size_bytes"])
-            for entry in entries
+            for entry in [*entries, *asset_entries]
         ),
         "available_bytes": available_bytes,
         "required_extra_bytes": required_extra_bytes,
@@ -1398,6 +1757,7 @@ def build_event_sort_plan(
         source_root,
         target_root,
         entries,
+        asset_entries,
         directory_rows,
     )
 
@@ -1441,4 +1801,5 @@ def build_event_sort_plan(
         "target_groups": target_groups,
         "families": families,
         "files": entries,
+        "assets": asset_entries,
     }

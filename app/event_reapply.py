@@ -222,6 +222,39 @@ def prepare_reapply_sort_run(
             operations,
         )
 
+        asset_operations = []
+        sequence_offset = len(plan["files"])
+        for asset_index, entry in enumerate(plan.get("assets") or [], start=1):
+            status_value = (
+                "already_at_target"
+                if entry["status"] == "already_at_target"
+                else "planned"
+            )
+            asset_operations.append((
+                run_id,
+                sequence_offset + asset_index,
+                str(entry.get("asset_kind") or "other"),
+                entry.get("family_id"),
+                entry.get("source_file_id"),
+                str(entry["source_relative_path"]),
+                str(entry["destination_relative_path"]),
+                int(entry["expected_size_bytes"]),
+                str(entry["stored_sha256"]),
+                status_value,
+            ))
+
+        connection.executemany(
+            """
+            INSERT INTO sort_asset_operations (
+                sort_run_id, sequence_number, asset_kind, family_id,
+                source_file_id, source_relative_path, destination_relative_path,
+                expected_size_bytes, expected_sha256, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            asset_operations,
+        )
+
         connection.execute(
             """
             INSERT INTO audit_log (
@@ -236,6 +269,9 @@ def prepare_reapply_sort_run(
                     "event_id": event_id,
                     "plan_token": str(plan["plan_token"]),
                     "file_count": int(summary["file_count"]),
+                    "camera_file_count": int(summary.get("camera_file_count") or 0),
+                    "asset_count": int(summary.get("asset_count") or 0),
+                    "xmp_count": int(summary.get("xmp_count") or 0),
                     "move_count": int(summary["move_count"]),
                     "run_kind": "reapply",
                 }),

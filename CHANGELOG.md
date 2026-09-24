@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### 0.26.5 – XMP-sichere Nachsortierung und Kartenbewegung
+
+- Nachträglich erzeugte Lightroom-XMPs werden bei der Nachsortierung eines angewendeten Ereignisses live im aktuellen SSD-Ereignisbestand erkannt und über Stem/Familie an ihre Kamerafamilie gebunden.
+- Reapply liest den noch physischen Ereignisordner aus dem gespeicherten Ursprungszustand einer offenen Änderung. Damit bleibt die Nachsortierung auch dann sicher, wenn Name oder Ereignisordner im SQLite-SOLL bereits geändert wurden.
+- Manuell zwischen `Alle` und `Sortiert` verschobene Kameraoriginale behalten bei einer Nachsortierung ihren aktuellen Arbeitszweig. XMPs folgen dem eindeutigen Ziel ihrer Familie bzw. dem passenden Zweig.
+- XMP-Bewegungen erhalten ein eigenes persistentes Reapply-Journal mit Größe, SHA-256, Quell-/Zielpfad und Status. Verifikation, Rollback und Wiederanlauf behandeln sie damit genauso transaktional wie Kameraoriginale, ohne künstliche `files`-Datensätze anzulegen.
+- Uneindeutige XMP-Familien oder -Ziele werden nicht geraten, sondern blockieren die Nachsortierung sichtbar.
+- Die drei Hauptreiter `Import & Prüfung`, `Arbeitsbereich` und `Archiv` werden beim Hover leicht angehoben und beim Klick noch etwas weiter angehoben. Die bisherige Helligkeitsänderung entfällt; der Zielreiter kommt nach dem Seitenwechsel weich in seine aktive Position.
+- Nutzer mit reduzierter Bewegungsdarstellung erhalten weiterhin eine animationsfreie Navigation.
+
+
 ### 0.26.4 – Ereignis-Inspektor und konsistente Karten-UI
 
 - Die Zielstruktur-Vorschau erhält wieder eine echte mehrzeilige Baumdarstellung; gespeicherte Ereignisse zeigen zusätzlich die in SQLite persistierten Zeitgrenzen, Status, Tagesordnerlogik sowie Unterereignis-/Segmentanzahl.
