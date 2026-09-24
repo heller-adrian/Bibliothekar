@@ -387,6 +387,58 @@ WORKSPACE_HTML = r"""<!doctype html>
         monospace;
       font-size: 0.9rem;
       line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .tree.rich-preview {
+      white-space: normal;
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+    .stored-preview-meta {
+      display:grid;
+      gap:5px;
+      margin-bottom:12px;
+      color:var(--muted);
+      font-size:.84rem;
+    }
+    .stored-preview-meta strong { color:var(--text); }
+    .structure-lines {
+      margin:0;
+      padding-top:10px;
+      border-top:1px solid var(--border);
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+      font-family:
+        ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        monospace;
+      font-size:.88rem;
+      line-height:1.5;
+      color:var(--text);
+    }
+    .collapse-card {
+      overflow:hidden;
+    }
+    .collapse-card > summary {
+      list-style:none !important;
+      cursor:pointer;
+      user-select:none;
+    }
+    .collapse-card > summary::-webkit-details-marker { display:none; }
+    .collapse-card > summary::marker { content:""; }
+    .collapse-card > summary::before {
+      content:none !important;
+      display:none !important;
+    }
+    .collapse-card[open] > summary {
+      border-bottom:1px solid var(--border);
+      padding-bottom:9px;
+      margin-bottom:9px;
     }
     .preview-root-title { margin-bottom:8px; font-weight:750; }
     .preview-days { display:grid; gap:7px; }
@@ -426,15 +478,22 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     .timeline-event-card {
       min-width: 0;
-      border: 1px solid var(--accent);
+      border: 1px solid var(--border);
       border-radius: 16px;
+      background: var(--surface-2);
+      padding: 15px;
+      transition: border-color .15s ease, background .15s ease;
+    }
+
+    .timeline-event-card.selected-preview,
+    .event-card.selected-preview {
+      border-color: var(--accent);
       background:
         color-mix(
           in srgb,
           var(--accent) 12%,
           var(--surface)
         );
-      padding: 15px;
     }
 
     .timeline-event-header {
@@ -875,7 +934,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     <section id="post-save-action" class="card" hidden style="margin:0 0 18px; border-color:#6ea8ff;">
       <strong id="post-save-title">Geplante Änderungen</strong>
       <p id="post-save-detail" class="muted" style="margin:8px 0 12px;">Alle geplanten Ereignisse sind standardmäßig ausgewählt.</p>
-      <details style="margin:0 0 14px;">
+      <details class="collapse-card card" style="margin:0 0 14px;padding:10px 12px;">
         <summary>Auswahl anpassen</summary>
         <div id="planned-event-selection" style="display:grid;gap:8px;margin-top:10px;"></div>
       </details>
@@ -1098,7 +1157,7 @@ WORKSPACE_HTML = r"""<!doctype html>
             <span>Bestehende „Ohne Ereignis“-Sammlung</span>
             <select id="existing-no-event-target"></select>
           </label>
-          <details id="no-event-range-details" class="card" style="padding:10px;margin-bottom:10px">
+          <details id="no-event-range-details" class="card collapse-card" style="padding:10px;margin-bottom:10px">
             <summary style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer">
               <span><strong>Zeitspanne</strong> <span class="muted">· Auswahlhilfe</span></span>
               <button id="add-no-event-range-block" type="button" style="margin-left:auto">＋ Zeitblock hinzufügen</button>
@@ -1446,6 +1505,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     let jobs = [];
     let workspace = null;
     let selectedDays = new Set();
+    let selectedPreviewEventId = null;
     let dialogMode = "event";
 
 
@@ -1816,6 +1876,72 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function setSelectedPreviewEvent(eventId) {
+      selectedPreviewEventId = eventId || null;
+      document.querySelectorAll("[data-preview-event-id]").forEach(node => {
+        node.classList.toggle(
+          "selected-preview",
+          Boolean(selectedPreviewEventId)
+          && node.dataset.previewEventId === selectedPreviewEventId
+        );
+      });
+    }
+
+
+    function renderStoredEventPreview(data) {
+      const event = data?.event || {};
+      const start = String(event.start_datetime || "");
+      const end = String(event.end_datetime || "");
+      const status = workspaceStatusLabel(event.status || "");
+      const kind = event.event_kind === "no_event" ? "Ohne Ereignis" : "Ereignis";
+      const dayFolders = event.preserve_day_folders
+        ? "Tagesordner bleiben erhalten"
+        : "Ohne Tagesunterordner";
+      const childCount = Array.isArray(event.child_events) ? event.child_events.length : 0;
+      const segmentCount = Array.isArray(event.time_segments) ? event.time_segments.length : 0;
+      const details = [
+        `<div><strong>Datenbank-Zeitraum:</strong> ${escapeHtml(start)} bis ${escapeHtml(end)}</div>`,
+        `<div><strong>Status:</strong> ${escapeHtml(status)} · ${escapeHtml(kind)}</div>`,
+        `<div><strong>Ordnerlogik:</strong> ${escapeHtml(dayFolders)}</div>`,
+        `<div><strong>Zugeordnet:</strong> ${Number(event.assigned_family_count || 0)} Familien</div>`
+      ];
+      if (childCount) {
+        details.push(`<div><strong>Unterereignisse:</strong> ${childCount}</div>`);
+      }
+      if (segmentCount) {
+        details.push(`<div><strong>Zeitsegmente:</strong> ${segmentCount}</div>`);
+      }
+      structurePreview.classList.add("rich-preview");
+      structurePreview.innerHTML =
+        `<div class="preview-root-title">${escapeHtml(event.name || "Gespeichertes Ereignis")}</div>`
+        + `<div class="stored-preview-meta">${details.join("")}</div>`
+        + `<pre class="structure-lines">${escapeHtml(data?.structure_text || "Keine Struktur vorhanden.")}</pre>`;
+      previewBody.hidden = false;
+    }
+
+
+    async function openStoredEventPreview(eventId) {
+      if (!eventId || !jobSelect.value) return;
+      setSelectedPreviewEvent(eventId);
+      structurePreview.classList.add("rich-preview");
+      structurePreview.innerHTML = '<span class="muted">Ereignisstruktur wird geladen …</span>';
+      previewBody.hidden = false;
+      try {
+        const data = await getJson(
+          `/api/jobs/${encodeURIComponent(jobSelect.value)}/events/${encodeURIComponent(eventId)}/structure`
+        );
+        if (selectedPreviewEventId === eventId) {
+          renderStoredEventPreview(data);
+        }
+      } catch (error) {
+        if (selectedPreviewEventId === eventId) {
+          structurePreview.classList.remove("rich-preview");
+          structurePreview.textContent = error.message;
+        }
+      }
+    }
+
+
     function renderEvents() {
       const allEvents =
         workspace?.events || [];
@@ -1853,10 +1979,11 @@ WORKSPACE_HTML = r"""<!doctype html>
           document.createElement("article");
 
         card.className = "event-card";
-        card.addEventListener("click",async(e)=>{
-          if(e.target.closest('button,input,a,summary')) return;
-          const data=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/events/${encodeURIComponent(event.id)}/structure`);
-          structurePreview.textContent=data.structure_text; previewBody.hidden=false;
+        card.dataset.previewEventId = event.id;
+        card.style.cursor = "pointer";
+        card.addEventListener("click", e => {
+          if (e.target.closest("button,input,a,summary")) return;
+          openStoredEventPreview(event.id);
         });
 
         const kindLabel =
@@ -2082,11 +2209,10 @@ WORKSPACE_HTML = r"""<!doctype html>
 
           card.className =
             "timeline-event-card";
+          card.dataset.previewEventId = group.event_id;
           card.style.cursor="pointer";
-          card.addEventListener("click",async()=>{
-            const data=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/events/${encodeURIComponent(group.event_id)}/structure`);
-            structurePreview.textContent=data.structure_text;
-            previewBody.hidden=false;
+          card.addEventListener("click",()=>{
+            openStoredEventPreview(group.event_id);
           });
 
           const range =
@@ -2393,11 +2519,17 @@ WORKSPACE_HTML = r"""<!doctype html>
           : `${groups.length} Gruppen ausgewählt`;
 
       if (!groups.length) {
-        structurePreview.textContent =
-          "Noch keine Auswahl.";
+        if (!selectedPreviewEventId) {
+          structurePreview.classList.remove("rich-preview");
+          structurePreview.textContent =
+            "Noch keine Auswahl.";
+        }
 
         return;
       }
+
+      setSelectedPreviewEvent(null);
+      structurePreview.classList.remove("rich-preview");
 
       const dated =
         selectedDatedGroups();
@@ -2525,7 +2657,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const state = isExisting ? "BESTEHEND" : (isNew ? "NEU" : "");
       const border = isNew ? "border:2px solid currentColor;" : "";
       return `
-        <details data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="${locked?"1":"0"}" data-new-segment="${isNew?"1":"0"}" data-existing-segment="${isExisting?"1":"0"}" class="card" style="padding:8px 10px;${border}">
+        <details data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="${locked?"1":"0"}" data-new-segment="${isNew?"1":"0"}" data-existing-segment="${isExisting?"1":"0"}" class="card collapse-card" style="padding:8px 10px;${border}">
           <summary style="display:flex;justify-content:space-between;gap:8px;align-items:center;cursor:pointer">
             <strong>${escapeHtml(dayKey || "Neues Segment")}${state ? ` · ${state}` : ""}</strong>
             <span class="muted">${escapeHtml(start)}–${escapeHtml(end)}${count ? ` · ${count} freie Familien` : ""}</span>
@@ -2574,7 +2706,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         </div>`;
       };
       noEventRangeSummary.innerHTML = ranges.map(([a,b],index)=>`
-        <details class="card" style="padding:7px 9px">
+        <details class="card collapse-card" style="padding:7px 9px">
           <summary style="cursor:pointer"><strong>Zeitblock ${index+1}</strong> <span class="muted">· ${escapeHtml(formatGermanIsoDate(a))}${a===b?"":` bis ${escapeHtml(formatGermanIsoDate(b))}`} · ${selectedNoEventSegments().filter(s=>s.day_key>=a && s.day_key<=b).length} Zeitsegmente</span></summary>
           <div class="form-grid" style="margin-top:8px">
             ${rangeField(a,'data-range-block-start','Von')}

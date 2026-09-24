@@ -142,7 +142,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.26.3"
+APP_VERSION = "0.26.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4166,21 +4166,104 @@ def api_create_event(
 
 @app.get("/api/jobs/{job_id}/events/{event_id}/structure")
 def api_event_structure(job_id: str, event_id: str):
-    context = get_event_edit_context(DATABASE_FILE,job_id,event_id)
-    event = context['event']
+    """Return the visible target tree plus the persisted event facts.
+
+    The workspace uses this endpoint as a read-only inspector.  Keeping the
+    database facts next to the rendered tree prevents the UI from having to
+    infer time boundaries from file names or from the folder layout.
+    """
+    context = get_event_edit_context(DATABASE_FILE, job_id, event_id)
+    event = context["event"]
     from app.structure_view import render_structure
+
     with database_connection(DATABASE_FILE) as c:
-        cr = c.execute("SELECT * FROM event_change_requests WHERE event_id=? AND status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt') ORDER BY version DESC LIMIT 1",(event_id,)).fetchone()
-    days = sorted({str(f['selected_capture_time'])[:10] for f in context['families'] if f['assigned_here'] and f['selected_capture_time']})
+        cr = c.execute(
+            """SELECT * FROM event_change_requests
+               WHERE event_id=?
+                 AND status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt')
+               ORDER BY version DESC
+               LIMIT 1""",
+            (event_id,),
+        ).fetchone()
+
+    assigned_families = [
+        family
+        for family in context["families"]
+        if family.get("assigned_here")
+    ]
+    days = sorted({
+        str(family["selected_capture_time"])[:10]
+        for family in assigned_families
+        if family.get("selected_capture_time")
+    })
+
     if cr:
         import json
-        children=json.loads(cr['child_segments_json'] or '[]')
-        if cr['child_folder']:
-            children=[{'folder_name':cr['child_folder']}]
-        lines=render_structure(str(cr['start_date'])[:4],cr['parent_folder'],json.loads(cr['selected_day_keys'] or '[]'),children,bool(cr['preserve_day_folders']))
+        children = json.loads(cr["child_segments_json"] or "[]")
+        if cr["child_folder"]:
+            children = [{"folder_name": cr["child_folder"]}]
+        lines = render_structure(
+            str(cr["start_date"])[:4],
+            cr["parent_folder"],
+            json.loads(cr["selected_day_keys"] or "[]"),
+            children,
+            bool(cr["preserve_day_folders"]),
+        )
     else:
-        lines=render_structure(str(event['start_datetime'])[:4],event['folder_name'],days,context['child_events'],bool(event['preserve_day_folders']))
-    return {'structure_text':'\n'.join(lines),'planned_change':bool(cr or event.get('resort_required'))}
+        lines = render_structure(
+            str(event["start_datetime"])[:4],
+            event["folder_name"],
+            days,
+            context["child_events"],
+            bool(event["preserve_day_folders"]),
+        )
+
+    event_facts = {
+        "id": str(event.get("id") or event_id),
+        "name": str(event.get("display_title") or event.get("name") or ""),
+        "status": str(event.get("status") or ""),
+        "event_kind": str(event.get("event_kind") or "event"),
+        "start_datetime": str(event.get("start_datetime") or ""),
+        "end_datetime": str(event.get("end_datetime") or ""),
+        "preserve_day_folders": bool(event.get("preserve_day_folders")),
+        "assigned_family_count": len(assigned_families),
+        "child_events": [
+            {
+                "id": str(child.get("id") or ""),
+                "name": str(child.get("name") or ""),
+                "folder_name": str(child.get("folder_name") or ""),
+                "start_datetime": str(child.get("start_datetime") or ""),
+                "end_datetime": str(child.get("end_datetime") or ""),
+            }
+            for child in context.get("child_events", [])
+        ],
+        "time_segments": [
+            {
+                "id": str(segment.get("id") or ""),
+                "day_key": str(
+                    segment.get("day_key")
+                    or str(segment.get("start_datetime") or "")[:10]
+                ),
+                "start_time": str(
+                    segment.get("start_time")
+                    or str(segment.get("start_datetime") or "")[11:16]
+                ),
+                "end_time": str(
+                    segment.get("end_time")
+                    or str(segment.get("end_datetime") or "")[11:16]
+                ),
+                "start_datetime": str(segment.get("start_datetime") or ""),
+                "end_datetime": str(segment.get("end_datetime") or ""),
+            }
+            for segment in context.get("time_segments", [])
+        ],
+    }
+
+    return {
+        "structure_text": "\n".join(lines),
+        "planned_change": bool(cr or event.get("resort_required")),
+        "event": event_facts,
+    }
 
 
 @app.get(

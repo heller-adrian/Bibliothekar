@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 0.26.4 – Ereignis-Inspektor und konsistente Karten-UI
+
+- Die Zielstruktur-Vorschau erhält wieder eine echte mehrzeilige Baumdarstellung; gespeicherte Ereignisse zeigen zusätzlich die in SQLite persistierten Zeitgrenzen, Status, Tagesordnerlogik sowie Unterereignis-/Segmentanzahl.
+- Vorhandene Ereignisse im Arbeitsbereich sind im Ruhezustand neutral grau und werden erst bei Auswahl blau hervorgehoben. Damit ist eindeutig sichtbar, welches Ereignis die rechte Vorschau steuert.
+- Aufklappbare UI-Bereiche verwenden die vorhandene Kartenlogik ohne zusätzliche Disclosure-Dreiecke. Das betrifft insbesondere „Auswahl anpassen“ sowie Zeitspanne, Zeitblöcke und Tagessegmente bei „Ohne Ereignis“.
+- Im Reiter „Ereignisse“ klappt die ganze Ereigniskarte die Aktionen auf. Der separate „Öffnen“-Disclosure mit Dreieck entfällt.
+- „Öffnen“ zeigt Ereignisse zunächst schreibgeschützt: Datenbank-Beginn/-Ende, Status, Tagesordner, Unterereignisse bzw. „Ohne Ereignis“-Segmente, Zielstruktur und kompakte Dateifamilien nach Aufnahmetag. Erst „Bearbeiten“ wechselt in den bestehenden Editor.
+- Der Bearbeitungsmodus erhält einen dezenten rötlichen Hintergrundakzent, damit reine Einsicht und aktive Änderung visuell klar getrennt sind.
+- Die Struktur-API liefert neben dem Baum nun die persistierten Ereignisfakten, damit die UI keine Zeitgrenzen aus Dateinamen oder Ordnerpfaden rekonstruieren muss.
+- Die fachliche Ereignis-/Zeitlogik bleibt unverändert; 0.26.4 ist ein UI-/Einsehbarkeits-Patch auf Basis von 0.26.3.
+
+
 ### 0.26.3 – Ereignis-Inventur, XMP/Export und aktueller Archiv-IST
 
 - `Alle`, `Sortiert` und `Export` sind keine dauerhaft vorgeschriebenen Dateipositionen mehr. Kameraoriginale werden innerhalb des aktuellen Ereignisordners anhand ihrer Identität wiedergefunden; der konkrete Pfad ist nur der zuletzt beobachtete IST-Ort.

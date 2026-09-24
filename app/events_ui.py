@@ -217,8 +217,33 @@ EVENTS_HTML = r"""<!doctype html>
       min-width: 0;
       border: 1px solid var(--border);
       border-radius: 16px;
-      background: var(--surface);
+      background: var(--surface-2);
       padding: 16px;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease;
+    }
+
+    .event-card.is-open {
+      border-color: var(--accent);
+      background:
+        color-mix(
+          in srgb,
+          var(--accent) 9%,
+          var(--surface)
+        );
+    }
+
+    .event-card-actions {
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:14px;
+      padding-top:14px;
+      border-top:1px solid var(--border);
+    }
+
+    .event-card-actions[hidden] {
+      display:none;
     }
 
     .event-card-header {
@@ -247,6 +272,126 @@ EVENTS_HTML = r"""<!doctype html>
       margin-top: 12px;
       color: var(--muted);
       font-size: 0.92rem;
+    }
+
+    .collapse-card {
+      overflow:hidden;
+    }
+    .collapse-card > summary {
+      list-style:none !important;
+      cursor:pointer;
+      user-select:none;
+    }
+    .collapse-card > summary::-webkit-details-marker { display:none; }
+    .collapse-card > summary::marker { content:""; }
+    .collapse-card > summary::before {
+      content:none !important;
+      display:none !important;
+    }
+    .collapse-card[open] > summary {
+      border-bottom:1px solid var(--border);
+      padding-bottom:9px;
+      margin-bottom:9px;
+    }
+
+    #event-edit-dialog.edit-mode .sort-plan-content {
+      background:
+        color-mix(
+          in srgb,
+          var(--danger) 4%,
+          var(--surface)
+        );
+    }
+
+    .inspect-summary {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:10px;
+      margin-bottom:14px;
+    }
+    .inspect-field {
+      min-width:0;
+      border:1px solid var(--border);
+      border-radius:11px;
+      background:var(--surface-2);
+      padding:10px 12px;
+    }
+    .inspect-field span {
+      display:block;
+      margin-bottom:4px;
+      color:var(--muted);
+      font-size:.78rem;
+    }
+    .inspect-field strong {
+      display:block;
+      overflow-wrap:anywhere;
+    }
+    .inspect-section {
+      margin-top:16px;
+    }
+    .inspect-card {
+      margin-top:7px;
+      padding:9px 11px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:var(--surface-2);
+    }
+    .inspect-card > summary {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .inspect-family-list {
+      display:grid;
+      gap:4px;
+      max-height:320px;
+      overflow:auto;
+      padding-top:2px;
+    }
+    .inspect-family-row {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:10px;
+      align-items:baseline;
+      min-width:0;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+      font-size:.78rem;
+      line-height:1.35;
+    }
+    .inspect-family-row span:first-child {
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .inspect-family-row span:last-child {
+      white-space:nowrap;
+      color:var(--muted);
+      font-variant-numeric:tabular-nums;
+    }
+    .inspect-structure {
+      margin:8px 0 0;
+      padding:11px;
+      border:1px solid var(--border);
+      border-radius:11px;
+      background:var(--surface-2);
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+      font-size:.82rem;
+      line-height:1.5;
+    }
+    .inspect-actions {
+      display:flex;
+      justify-content:flex-end;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:16px;
+    }
+
+    @media (max-width:640px) {
+      .inspect-summary { grid-template-columns:1fr; }
     }
 
     .badge {
@@ -813,14 +958,7 @@ EVENTS_HTML = r"""<!doctype html>
       padding:4px 0;
     }
     .event-details > summary::-webkit-details-marker { display:none; }
-    .event-details > summary::before {
-      content:"▸";
-      flex:0 0 12px;
-      width:12px;
-      font-size:1.08rem;
-      line-height:1;
-    }
-    .event-details[open] > summary::before { content:"▾"; }
+    .event-details > summary::before { content:none !important; display:none !important; }
     button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button, #calculate-preview-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
     button.danger-button, .danger-button { background:#b42318 !important; border-color:#b42318 !important; color:white !important; }
   </style>
@@ -1306,15 +1444,15 @@ EVENTS_HTML = r"""<!doctype html>
           <div class="event-card-header"><div><strong class="event-name">${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder">${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
           ${mutation}
           ${reassign}
-          <details class="event-details"><summary>Öffnen</summary><div class="event-actions">
-            <button type="button" data-edit-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" ${event.mutation_id ? 'disabled title="Offene Änderung zuerst abschließen oder verwerfen"' : ''}>Bearbeiten</button>
+          <div class="event-card-actions" hidden>
+            <button type="button" data-view-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Öffnen</button>
             <button type="button" class="plan-button bk-positive-action" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">${event.status === "applied" ? "Nachsortierung prüfen" : "Sortierung prüfen"}</button>
             ${isDeletable(event)
               ? `<button type="button" class="danger-button" data-delete-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Ereignis löschen</button>`
               : event.mutation_id
                 ? `<button type="button" class="danger-button" disabled title="Offene Änderung dieser Sicherung zuerst abschließen oder verwerfen">Ereignis löschen</button>`
                 : ""}
-          </div></details>`;
+          </div>`;
         eventList.appendChild(card);
       }
     }
@@ -2188,8 +2326,160 @@ EVENTS_HTML = r"""<!doctype html>
       return m ? `${m[3]}.${m[2]}.${m[1]}` : String(value||"");
     }
 
+    function inspectDateTime(value) {
+      const raw = String(value || "");
+      const day = raw.slice(0, 10);
+      const time = raw.slice(11, 16);
+      return [germanDay(day), time].filter(Boolean).join(" ");
+    }
+
+
+    function inspectFamilyRows(families) {
+      const rows = (families || []).map(family => {
+        const key = String(family.family_key || "Dateifamilie").split("/").pop();
+        const capture = String(family.selected_capture_time || "");
+        const stamp = capture
+          ? `${germanDay(capture.slice(0,10))} ${capture.slice(11,19)}`
+          : "Zeit unbekannt";
+        return `<div class="inspect-family-row"><span title="${escapeHtml(key)}">${escapeHtml(key)}</span><span>${escapeHtml(stamp)}</span></div>`;
+      }).join("");
+      return rows
+        ? `<div class="inspect-family-list">${rows}</div>`
+        : '<span class="muted">Keine Dateifamilien in diesem Bereich.</span>';
+    }
+
+
+    function inspectRangeFamilies(context, startValue, endValue) {
+      const start = String(startValue || "").slice(0,19);
+      const end = String(endValue || "").slice(0,19);
+      return (context.families || []).filter(family => {
+        if (!family.assigned_here) return false;
+        const capture = String(family.selected_capture_time || "").slice(0,19);
+        return Boolean(capture) && (!start || capture >= start) && (!end || capture <= end);
+      });
+    }
+
+
+    function inspectDayCards(context) {
+      const grouped = new Map();
+      for (const family of (context.families || []).filter(item => item.assigned_here)) {
+        const day = String(family.selected_capture_time || "").slice(0,10) || "Ohne Datum";
+        if (!grouped.has(day)) grouped.set(day, []);
+        grouped.get(day).push(family);
+      }
+      return [...grouped.entries()]
+        .sort((a,b)=>a[0].localeCompare(b[0]))
+        .map(([day,families]) => `
+          <details class="inspect-card collapse-card">
+            <summary><strong>${escapeHtml(day === "Ohne Datum" ? day : germanDay(day))}</strong><span class="muted">${families.length} Familien</span></summary>
+            ${inspectFamilyRows(families)}
+          </details>`)
+        .join("");
+    }
+
+
+    function renderEventViewer(context, structureData) {
+      currentEditContext = null;
+      const event = context.event;
+      const noEvent = event.event_kind === "no_event";
+      const assigned = (context.families || []).filter(item => item.assigned_here);
+      const segments = context.time_segments || [];
+      const childEvents = context.child_events || [];
+      eventEditDialog.classList.remove("edit-mode");
+      eventEditDialog.classList.add("view-mode");
+      eventEditTitle.textContent = `${noEvent ? "Ohne Ereignis öffnen" : "Ereignis öffnen"} · ${event.name}`;
+      eventEditSubtitle.textContent =
+        "Nur-Lesen-Ansicht der aktuell in der Datenbank gespeicherten Definition und Dateizuordnung.";
+
+      const segmentCards = noEvent
+        ? segments.map((segment,index) => {
+            const start = segment.start_datetime || `${segment.day_key}T${segment.start_time || "00:00"}:00`;
+            const end = segment.end_datetime || `${segment.day_key}T${segment.end_time || "23:59"}:59`;
+            const families = inspectRangeFamilies(context,start,end);
+            return `
+              <details class="inspect-card collapse-card">
+                <summary><strong>Tagessegment ${index+1} · ${escapeHtml(germanDay(String(segment.day_key || start).slice(0,10)))}</strong><span class="muted">${escapeHtml(String(segment.start_time || start.slice(11,16)))}–${escapeHtml(String(segment.end_time || end.slice(11,16)))} · ${families.length} Familien</span></summary>
+                ${inspectFamilyRows(families)}
+              </details>`;
+          }).join("")
+        : "";
+
+      const childCards = !noEvent
+        ? childEvents.map(child => {
+            const families = inspectRangeFamilies(context, child.start_datetime, child.end_datetime);
+            return `
+              <details class="inspect-card collapse-card">
+                <summary><strong>${escapeHtml(child.name || child.folder_name || "Unterereignis")}</strong><span class="muted">${escapeHtml(inspectDateTime(child.start_datetime))} – ${escapeHtml(inspectDateTime(child.end_datetime))}</span></summary>
+                ${inspectFamilyRows(families)}
+              </details>`;
+          }).join("")
+        : "";
+
+      eventEditBody.innerHTML = `
+        <div class="inspect-summary">
+          <div class="inspect-field"><span>Status</span><strong>${escapeHtml(eventStatusLabel(event.status))}</strong></div>
+          <div class="inspect-field"><span>Art</span><strong>${noEvent ? "Ohne Ereignis" : "Ereignis"}</strong></div>
+          <div class="inspect-field"><span>Datenbank-Beginn</span><strong>${escapeHtml(inspectDateTime(event.start_datetime))}</strong></div>
+          <div class="inspect-field"><span>Datenbank-Ende</span><strong>${escapeHtml(inspectDateTime(event.end_datetime))}</strong></div>
+          <div class="inspect-field"><span>Tagesordner</span><strong>${event.preserve_day_folders ? "Erhalten" : "Nicht erhalten"}</strong></div>
+          <div class="inspect-field"><span>Zugeordnet</span><strong>${assigned.length} Familien</strong></div>
+        </div>
+
+        ${event.notes ? `<div class="inspect-section"><strong>Notizen</strong><p class="muted">${escapeHtml(event.notes)}</p></div>` : ""}
+
+        ${noEvent ? `
+          <div class="inspect-section">
+            <strong>Gespeicherte Tages-/Zeitsegmente</strong>
+            ${segmentCards || '<p class="muted">Keine Segmente gespeichert.</p>'}
+          </div>` : ""}
+
+        ${childEvents.length ? `
+          <div class="inspect-section">
+            <strong>Unterereignisse</strong>
+            ${childCards}
+          </div>` : ""}
+
+        <div class="inspect-section">
+          <strong>Dateifamilien nach Aufnahmetag</strong>
+          ${inspectDayCards(context) || '<p class="muted">Keine zugeordneten Familien.</p>'}
+        </div>
+
+        <div class="inspect-section">
+          <strong>Zielstruktur</strong>
+          <pre class="inspect-structure">${escapeHtml(structureData?.structure_text || "Keine Struktur vorhanden.")}</pre>
+        </div>
+
+        <div class="inspect-actions">
+          <button type="button" id="inspect-edit-event" class="plan-button bk-positive-action">Bearbeiten</button>
+        </div>
+      `;
+
+      document.getElementById("inspect-edit-event")?.addEventListener("click", () => {
+        renderEventEditor(context);
+      });
+    }
+
+
+    async function openEventViewer(eventId, jobId) {
+      eventEditDialog.classList.remove("edit-mode");
+      eventEditDialog.classList.add("view-mode");
+      eventEditTitle.textContent = "Ereignis öffnen";
+      eventEditSubtitle.textContent = "Datenbankzustand wird geladen …";
+      eventEditBody.textContent = "Ereignisdaten werden geladen …";
+      if (!eventEditDialog.open) eventEditDialog.showModal();
+      const [context, structureData] = await Promise.all([
+        requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/edit`),
+        requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/structure`)
+      ]);
+      context._job_id = jobId;
+      renderEventViewer(context, structureData);
+    }
+
+
     function renderEventEditor(context) {
       currentEditContext = context;
+      eventEditDialog.classList.remove("view-mode");
+      eventEditDialog.classList.add("edit-mode");
       const event = context.event;
       if (context.legacy_disjoint) throw new Error(context.legacy_warning);
       const child = context.child_event;
@@ -2214,7 +2504,7 @@ EVENTS_HTML = r"""<!doctype html>
         const day=segment.day_key || isoDate(segment.start_datetime);
         const start=segment.start_time || isoTime(segment.start_datetime,"00:00");
         const end=segment.end_time || isoTime(segment.end_datetime,"23:59");
-        return `<details class="no-event-segment card" data-segment-row style="display:block;padding:8px 10px;margin:6px 0">
+        return `<details class="no-event-segment card collapse-card" data-segment-row style="display:block;padding:8px 10px;margin:6px 0">
           <summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>${escapeHtml(day)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
           <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">
             ${noEventDayControl(fixedNoEventMonth, day, structural)}
@@ -2316,7 +2606,7 @@ EVENTS_HTML = r"""<!doctype html>
           host.innerHTML=ranges.length ? ranges.map(([a,b],i)=>{
             const aDay=Number(a.slice(8,10));
             const bDay=Number(b.slice(8,10));
-            return `<details class="card" data-existing-range data-range-start="${escapeHtml(a)}" data-range-end="${escapeHtml(b)}" style="padding:7px 9px">
+            return `<details class="card collapse-card" data-existing-range data-range-start="${escapeHtml(a)}" data-range-end="${escapeHtml(b)}" style="padding:7px 9px">
               <summary style="cursor:pointer"><strong>Zeitblock ${i+1}</strong> <span class="muted">· ${escapeHtml(germanDay(a))}${a===b?"":` bis ${escapeHtml(germanDay(b))}`} · ${values.filter(v=>v>=a && v<=b).length} Zeitsegmente</span></summary>
               <div style="display:grid;grid-template-columns:minmax(118px,.85fr) minmax(86px,.55fr) minmax(118px,.85fr) minmax(86px,.55fr);gap:8px;align-items:end;margin-top:8px">
                 <label class="edit-field"><span>Monat/Jahr</span><input value="${escapeHtml(monthLabel)}" disabled></label>
@@ -2347,7 +2637,7 @@ EVENTS_HTML = r"""<!doctype html>
                 const day=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
                 if (!existing.has(day)) {
                   const row=document.createElement("details");
-                  row.className="no-event-segment card"; row.dataset.segmentRow="1"; row.open=false; row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
+                  row.className="no-event-segment card collapse-card"; row.dataset.segmentRow="1"; row.open=false; row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
                   row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>${day}</strong> <span class="muted">· 00:00–23:59</span></summary><div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">${noEventDayControl(fixedNoEventMonth, day, true)}<label class="edit-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button></div>`;
                   container.appendChild(row); existing.add(day);
                 }
@@ -2399,7 +2689,7 @@ EVENTS_HTML = r"""<!doctype html>
           while (d<=last) {
             const day=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
             if (!existing.has(day)) {
-              const row=document.createElement("details"); row.className="no-event-segment card"; row.dataset.segmentRow="1"; row.open=false; row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
+              const row=document.createElement("details"); row.className="no-event-segment card collapse-card"; row.dataset.segmentRow="1"; row.open=false; row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
               row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>${day}</strong> <span class="muted">· 00:00–23:59</span></summary><div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">${noEventDayControl(fixedNoEventMonth, day, true)}<label class="edit-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button></div>`;
               container.appendChild(row); existing.add(day);
             }
@@ -2412,7 +2702,7 @@ EVENTS_HTML = r"""<!doctype html>
         });
         document.getElementById("add-no-event-segment")?.addEventListener("click", () => {
           const row = document.createElement("details");
-          row.className = "no-event-segment card";
+          row.className = "no-event-segment card collapse-card";
           row.dataset.segmentRow = "1";
           row.open = true;
           row.style.cssText = "display:block;padding:8px 10px;margin:6px 0";
@@ -2428,6 +2718,8 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
     async function openEventEditor(eventId, jobId) {
+      eventEditDialog.classList.remove("view-mode");
+      eventEditDialog.classList.add("edit-mode");
       eventEditBody.textContent = "Bearbeitungsdaten werden geladen …";
       if (!eventEditDialog.open) eventEditDialog.showModal();
       const context = await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/edit`);
@@ -2712,6 +3004,18 @@ EVENTS_HTML = r"""<!doctype html>
     eventList.addEventListener(
       "click",
       event => {
+        const viewButton = event.target.closest("[data-view-event]");
+        if (viewButton && !viewButton.disabled) {
+          openEventViewer(
+            viewButton.dataset.viewEvent,
+            viewButton.dataset.jobId
+          ).catch(error => {
+            eventEditBody.textContent = error.message;
+            setStatus(error.message, true);
+          });
+          return;
+        }
+
         const planButton = event.target.closest(
           "[data-sort-plan-event]"
         );
@@ -2776,22 +3080,32 @@ EVENTS_HTML = r"""<!doctype html>
           "[data-delete-event]"
         );
 
-        if (
-          !deleteButton
-          || deleteButton.disabled
-        ) {
+        if (deleteButton && !deleteButton.disabled) {
+          deleteEvent(
+            deleteButton.dataset.deleteEvent,
+            deleteButton.dataset.jobId
+          ).catch(
+            error => setStatus(
+              error.message,
+              true
+            )
+          );
           return;
         }
 
-        deleteEvent(
-          deleteButton.dataset.deleteEvent,
-          deleteButton.dataset.jobId
-        ).catch(
-          error => setStatus(
-            error.message,
-            true
-          )
-        );
+        if (event.target.closest("button,a,input,select,textarea,summary")) {
+          return;
+        }
+
+        const card = event.target.closest(".event-card");
+        if (card) {
+          const actions = card.querySelector(".event-card-actions");
+          if (actions) {
+            const willOpen = actions.hidden;
+            actions.hidden = !willOpen;
+            card.classList.toggle("is-open", willOpen);
+          }
+        }
       }
     );
 
