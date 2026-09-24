@@ -852,7 +852,7 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   gap: 6px;
   min-width: 0;
 }
-.bk-workspace-dock:empty { display: none; }
+.bk-workspace-dock { display: none; }
 
 @media (min-width: 821px) {
   .bk-workspace-subnav {

@@ -6,7 +6,7 @@
 
 - „Ohne Ereignis“ zeigt in der Zielstruktur-Vorschau keinen irreführenden Min/Max-Zeitraum mehr, sondern „Datenbank-Zeitraum: komplex“.
 - Die doppelte Liste „Gespeicherte Ereignisse“ wurde aus „Aufnahmen“ entfernt; Ereignisse bleiben in der Tagesansicht sichtbar und werden vollständig im Reiter „Ereignisse“ verwaltet.
-- Auf Desktop bleibt die Arbeitsbereich-Navigation beim Scrollen unter dem Hauptheader sichtbar. Die Auswahlleiste mit Gruppenanzahl und den Aktionen für Tage/Ereignisse dockt beim Scrollen kompakt in diesen Header ein; auf schmaleren Desktopfenstern darf sie umbrechen. Mobil bleibt unverändert.
+- Auf Desktop bleibt die Arbeitsbereich-Navigation beim Scrollen unter dem Hauptheader sichtbar. Die Auswahlleiste morpht erst bei ihrer tatsächlichen Annäherung an den Sekundärheader scrollgebunden und kontinuierlich: Abstände/Höhe reduzieren sich über die letzten 128 px, Rahmen und Kartenfläche blenden erst unmittelbar vor dem Einrasten aus. Auf schmaleren Desktopfenstern darf sie umbrechen; mobil bleibt unverändert. Die Aufnahmen-Seite erhält unten zusätzliche Scroll-/Atemreserve.
 - „Ohne Ereignis“ verwendet beim Erstellen, Fortführen und Bearbeiten ausschließlich echte Tages-/Zeitsegmente. Die frühere Zeitspannen-/Zeitblock-Auswahlhilfe wurde entfernt.
 - Beim Fortführen einer bestehenden „Ohne Ereignis“-Sammlung sind vorhandene Segmente reine Information und können dort weder geöffnet, geändert noch entfernt werden. Änderungen erfolgen ausschließlich über „Ereignisse → Bearbeiten“.
 - Der Nur-Lesen-Inspektor zeigt große „Ohne Ereignis“-Sammlungen portionsweise: zunächst zehn Segmente, danach über „Weitere“. Dateifamilien nach Aufnahmetag sind standardmäßig eingeklappt und werden ebenfalls in Zehnerpaketen nachgeladen.
