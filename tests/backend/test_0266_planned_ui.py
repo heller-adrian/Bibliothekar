@@ -43,7 +43,8 @@ def test_0266_noevent_preview_is_complex_and_workspace_controls_can_dock():
     assert "Datenbank-Zeitraum:</strong> komplex" in WORKSPACE_HTML
     assert 'id="selection-bar-anchor"' in WORKSPACE_HTML
     assert "selection-bar.is-docked" in WORKSPACE_HTML
-    assert "has-selection-dock" in WORKSPACE_HTML
+    assert "is-scroll-floating" in WORKSPACE_HTML
+    assert "selectionDockTarget.appendChild(selectionBar)" not in WORKSPACE_HTML
     assert "min-width:821px" in WORKSPACE_HTML
     assert "--bk-shell-sticky-height" in BIBLIOTHEKAR_JS
 
