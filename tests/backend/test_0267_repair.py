@@ -97,6 +97,11 @@ def test_0267_sticky_header_is_scroll_linked_and_not_time_triggered():
     assert "selectionBarAnchor.after(selectionBar)" not in WORKSPACE_HTML
     assert 'setProperty("position","fixed","important")' in WORKSPACE_HTML
     assert "const padRight=64" in WORKSPACE_HTML
+    assert "const moveP=clamp01(p/.68)" in WORKSPACE_HTML
+    assert "const compactP=clamp01(p/.52)" in WORKSPACE_HTML
+    assert "const preferredLeft=subnavRect.left+subnavRect.width*.26" in WORKSPACE_HTML
+    assert 'setProperty("--selection-button-height",buttonHeight+"px")' in WORKSPACE_HTML
+    assert 'setProperty("--selection-button-font-size",buttonFont+"rem")' in WORKSPACE_HTML
     assert 'classList.toggle("is-stuck",subnavStuck)' in WORKSPACE_HTML
     assert 'selectionMorphProgressForPositions(anchorTop,target.top)' in WORKSPACE_HTML
     assert 'padding-bottom:clamp(170px,18vh,240px) !important;' in WORKSPACE_HTML
@@ -104,6 +109,8 @@ def test_0267_sticky_header_is_scroll_linked_and_not_time_triggered():
     assert 'window.matchMedia("(min-width: 821px)")' in WORKSPACE_HTML
     assert ".selection-bar.is-docked" in WORKSPACE_HTML
     assert ".selection-bar.is-scroll-floating .selection-top-button" in WORKSPACE_HTML
+    assert 'body[data-bk-area="workspace"] .bk-shell::after' in BIBLIOTHEKAR_CSS
+    assert "--bk-page-bridge-height: 0px" in BIBLIOTHEKAR_CSS
     assert ".bk-workspace-subnav.is-stuck" in BIBLIOTHEKAR_CSS
     assert "@media (min-width: 821px) and (max-width: 1180px)" in BIBLIOTHEKAR_CSS
 

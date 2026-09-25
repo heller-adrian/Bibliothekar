@@ -332,6 +332,15 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
   background: var(--bk-page-bg, var(--bk-paper));
   pointer-events: none;
 }
+
+body[data-bk-area="workspace"] .bk-shell {
+  --bk-page-bridge-height: 0px;
+  --bk-tab-page-mask: 0px;
+  margin-bottom: 0;
+}
+body[data-bk-area="workspace"] .bk-shell::after {
+  display: none;
+}
 .bk-brand,
 .bk-tabs,
 .bk-shell-actions {
@@ -861,6 +870,7 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
     z-index: 2600;
     align-items: center;
     gap: 8px 14px;
+    min-height: 43px;
     background: transparent;
     border-radius: 0 0 15px 15px;
     transition:

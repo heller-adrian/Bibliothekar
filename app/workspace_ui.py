@@ -384,13 +384,36 @@ WORKSPACE_HTML = r"""<!doctype html>
         z-index:2650 !important;
         margin:0 !important;
         flex-wrap:nowrap;
+        align-items:center;
+      }
+      .selection-bar.is-scroll-floating .selection-summary{
+        display:flex;
+        align-items:center;
+        line-height:1;
+        font-size:var(--selection-label-font-size,1rem);
       }
       .selection-bar.is-scroll-floating .selection-actions{
         flex-wrap:nowrap;
+        align-items:center;
+        gap:var(--selection-action-gap,8px);
+      }
+      .selection-bar.is-scroll-floating .selection-actions button{
+        min-height:var(--selection-button-height,42px) !important;
+        height:var(--selection-button-height,42px) !important;
+        padding:0 var(--selection-button-pad-x,12px) !important;
+        font-size:var(--selection-button-font-size,1rem) !important;
+        line-height:1 !important;
+        white-space:nowrap;
       }
       .selection-bar.is-scroll-floating .selection-top-button{
+        width:var(--selection-arrow-size,42px) !important;
+        min-width:var(--selection-arrow-size,42px) !important;
+        height:var(--selection-arrow-size,42px) !important;
+        min-height:var(--selection-arrow-size,42px) !important;
+        padding:0 !important;
         right:12px !important;
         top:50% !important;
+        font-size:var(--selection-button-font-size,1rem) !important;
         transform:translateY(-50%) !important;
       }
       .selection-bar.is-scroll-floating .selection-top-button:active{
@@ -1367,22 +1390,28 @@ WORKSPACE_HTML = r"""<!doctype html>
       const anchorRect=selectionBarAnchor.getBoundingClientRect();
       const subnavRect=workspaceSubnav.getBoundingClientRect();
       const dockRect=selectionDockTarget.getBoundingClientRect();
-      const compactHeight=44;
+      const compactHeight=36;
+      const preferredLeft=subnavRect.left+subnavRect.width*.26;
 
       if(window.innerWidth<=1180){
         const style=getComputedStyle(workspaceSubnav);
         const leftInset=Number.parseFloat(style.paddingLeft)||0;
         const rightInset=Number.parseFloat(style.paddingRight)||0;
+        const left=Math.max(
+          subnavRect.left+leftInset+220,
+          subnavRect.left+subnavRect.width*.24
+        );
         return {
-          left:subnavRect.left+leftInset,
-          width:Math.max(1,subnavRect.width-leftInset-rightInset),
-          top:subnavRect.bottom+4
+          left,
+          width:Math.max(1,subnavRect.right-rightInset-left),
+          top:subnavRect.top+Math.max(0,(subnavRect.height-compactHeight)/2)
         };
       }
 
+      const left=Math.max(dockRect.left,preferredLeft);
       return {
-        left:dockRect.left,
-        width:Math.max(1,dockRect.width||anchorRect.width),
+        left,
+        width:Math.max(1,subnavRect.right-left-12),
         top:subnavRect.top+Math.max(0,(subnavRect.height-compactHeight)/2)
       };
     }
@@ -1392,7 +1421,10 @@ WORKSPACE_HTML = r"""<!doctype html>
       [
         "position","z-index","left","top","width","margin",
         "padding","border-radius","border-color","background",
-        "box-shadow","backdrop-filter","-webkit-backdrop-filter"
+        "box-shadow","backdrop-filter","-webkit-backdrop-filter",
+        "--selection-button-height","--selection-button-pad-x",
+        "--selection-button-font-size","--selection-label-font-size",
+        "--selection-action-gap","--selection-arrow-size"
       ].forEach(property=>selectionBar.style.removeProperty(property));
       selectionBarAnchor.style.height="0px";
       selectionFloating=false;
@@ -1421,14 +1453,29 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       const anchorRect=selectionBarAnchor.getBoundingClientRect();
       const target=selectionDockGeometry();
-      const left=anchorRect.left+(target.left-anchorRect.left)*p;
-      const top=anchorRect.top+(target.top-anchorRect.top)*p;
-      const width=anchorRect.width+(target.width-anchorRect.width)*p;
 
-      const padY=12*(1-p);
-      const padLeft=12+(10-12)*p;
+      // Geometrie und Kompaktheit erreichen ihr Ziel deutlich vor dem Fade.
+      // Dadurch läuft der Kartenrahmen nicht über „Ereignisse“.
+      const moveP=clamp01(p/.68);
+      const compactP=clamp01(p/.52);
+      const verticalP=clamp01(p/.72);
+
+      const left=anchorRect.left+(target.left-anchorRect.left)*moveP;
+      const top=anchorRect.top+(target.top-anchorRect.top)*verticalP;
+      const width=anchorRect.width+(target.width-anchorRect.width)*moveP;
+
+      const padY=12*(1-compactP);
+      const padLeft=12+(8-12)*compactP;
       const padRight=64;
-      const radius=14+(10-14)*p;
+      const radius=14+(8-14)*compactP;
+
+      const buttonHeight=42+(34-42)*compactP;
+      const buttonPadX=12+(9-12)*compactP;
+      const buttonFont=1+(.88-1)*compactP;
+      const labelFont=1+(.93-1)*compactP;
+      const actionGap=8+(6-8)*compactP;
+      const arrowSize=42+(34-42)*compactP;
+
       const frameFade=clamp01((p-.78)/.20);
       const surfaceFade=clamp01((p-.84)/.14);
       const frameStrength=Math.round((1-frameFade)*100);
@@ -1443,6 +1490,12 @@ WORKSPACE_HTML = r"""<!doctype html>
       selectionBar.style.setProperty("margin","0","important");
       selectionBar.style.padding=`${padY}px ${padRight}px ${padY}px ${padLeft}px`;
       selectionBar.style.borderRadius=radius+"px";
+      selectionBar.style.setProperty("--selection-button-height",buttonHeight+"px");
+      selectionBar.style.setProperty("--selection-button-pad-x",buttonPadX+"px");
+      selectionBar.style.setProperty("--selection-button-font-size",buttonFont+"rem");
+      selectionBar.style.setProperty("--selection-label-font-size",labelFont+"rem");
+      selectionBar.style.setProperty("--selection-action-gap",actionGap+"px");
+      selectionBar.style.setProperty("--selection-arrow-size",arrowSize+"px");
       selectionBar.style.setProperty(
         "border-color",
         `color-mix(in srgb,var(--bk-line) ${frameStrength}%,transparent)`,
