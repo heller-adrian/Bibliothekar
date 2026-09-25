@@ -96,9 +96,14 @@ def test_0267_sticky_header_is_scroll_linked_and_not_time_triggered():
     assert "selectionDockTarget.appendChild(selectionBar)" not in WORKSPACE_HTML
     assert "selectionBarAnchor.after(selectionBar)" not in WORKSPACE_HTML
     assert 'setProperty("position","fixed","important")' in WORKSPACE_HTML
+    assert 'setProperty("z-index","3105","important")' in WORKSPACE_HTML
+    assert "z-index:3105 !important" in WORKSPACE_HTML
     assert "const padRight=64" in WORKSPACE_HTML
     assert "const xP=1-Math.pow(1-p,2.15)" in WORKSPACE_HTML
     assert "const yP=normalizedExpo(p,1.35,6)" in WORKSPACE_HTML
+    assert "const summaryTargetCenter=window.innerWidth/2" in WORKSPACE_HTML
+    assert "let selectionSummaryStartCenter=0" in WORKSPACE_HTML
+    assert 'selectionSummary.style.position="absolute"' in WORKSPACE_HTML
     assert "const compactP=smoothStep(clamp01(p/.86))" in WORKSPACE_HTML
     assert "const preferredLeft=subnavRect.left+subnavRect.width*.26" in WORKSPACE_HTML
     assert 'setProperty("--selection-button-height",buttonHeight+"px")' in WORKSPACE_HTML
@@ -148,3 +153,12 @@ if (!(xP > .7)) throw new Error("horizontal midpoint should already be advanced:
 if (!(yP < .4)) throw new Error("vertical midpoint should still lag: "+yP);
 """
     subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+
+
+def test_0267_selection_summary_targets_true_viewport_center():
+    assert 'const selectionSummary=selectionBar?.querySelector(".selection-summary")' in WORKSPACE_HTML
+    assert "const summaryTargetCenter=window.innerWidth/2" in WORKSPACE_HTML
+    assert "summaryTargetCenter-selectionSummaryStartCenter" in WORKSPACE_HTML
+    assert 'selectionSummary.style.left=(summaryCenter-left-summaryWidth/2)+"px"' in WORKSPACE_HTML
+    assert "margin-left:auto" in WORKSPACE_HTML
+    assert "z-index:3105 !important" in WORKSPACE_HTML

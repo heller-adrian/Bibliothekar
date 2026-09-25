@@ -381,7 +381,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       .selection-bar.is-scroll-floating{
         position:fixed !important;
-        z-index:2650 !important;
+        z-index:3105 !important;
         margin:0 !important;
         flex-wrap:nowrap;
         align-items:center;
@@ -391,11 +391,16 @@ WORKSPACE_HTML = r"""<!doctype html>
         align-items:center;
         line-height:1;
         font-size:var(--selection-label-font-size,1rem);
+        z-index:2;
+        white-space:nowrap;
       }
       .selection-bar.is-scroll-floating .selection-actions{
         flex-wrap:nowrap;
         align-items:center;
         gap:var(--selection-action-gap,8px);
+        margin-left:auto;
+        position:relative;
+        z-index:3;
       }
       .selection-bar.is-scroll-floating .selection-actions button{
         min-height:var(--selection-button-height,42px) !important;
@@ -1357,12 +1362,14 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     const selectionBar =
       document.getElementById("selection-bar");
+    const selectionSummary=selectionBar?.querySelector(".selection-summary");
     const selectionBarAnchor=document.getElementById("selection-bar-anchor");
     const workspaceSubnav=document.querySelector(".bk-workspace-subnav");
     const selectionDockTarget=document.getElementById("bk-workspace-dock");
     const selectionMorphDistance=128;
     let selectionFloating=false;
     let selectionNaturalSpace=0;
+    let selectionSummaryStartCenter=0;
 
     function workspaceStickyDesktop(){
       return window.matchMedia("(min-width: 821px)").matches;
@@ -1438,17 +1445,27 @@ WORKSPACE_HTML = r"""<!doctype html>
         "--selection-button-font-size","--selection-label-font-size",
         "--selection-action-gap","--selection-arrow-size"
       ].forEach(property=>selectionBar.style.removeProperty(property));
+      if(selectionSummary){
+        [
+          "position","left","top","transform","margin","z-index"
+        ].forEach(property=>selectionSummary.style.removeProperty(property));
+      }
       selectionBarAnchor.style.height="0px";
       selectionFloating=false;
       selectionNaturalSpace=0;
+      selectionSummaryStartCenter=0;
     }
 
     function beginSelectionFloating(){
       if(selectionFloating)return;
       const rect=selectionBar.getBoundingClientRect();
+      const summaryRect=selectionSummary?.getBoundingClientRect();
       const style=getComputedStyle(selectionBar);
       const marginBottom=Number.parseFloat(style.marginBottom)||0;
       selectionNaturalSpace=Math.ceil(rect.height+marginBottom);
+      selectionSummaryStartCenter=summaryRect
+        ? summaryRect.left+summaryRect.width/2
+        : rect.left+rect.width/2;
       selectionBarAnchor.style.height=selectionNaturalSpace+"px";
       selectionBar.classList.add("is-scroll-floating");
       selectionFloating=true;
@@ -1479,6 +1496,11 @@ WORKSPACE_HTML = r"""<!doctype html>
       const top=anchorRect.top+(target.top-anchorRect.top)*yP;
       const width=anchorRect.width+(target.width-anchorRect.width)*xP;
 
+      const summaryP=smoothStep(clamp01(p/.88));
+      const summaryTargetCenter=window.innerWidth/2;
+      const summaryCenter=selectionSummaryStartCenter
+        +(summaryTargetCenter-selectionSummaryStartCenter)*summaryP;
+
       const padY=12+(2-12)*compactP;
       const padLeft=12+(9-12)*compactP;
       const padRight=64;
@@ -1499,11 +1521,22 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       selectionBar.classList.toggle("is-docked",p>=.999);
       selectionBar.style.setProperty("position","fixed","important");
-      selectionBar.style.setProperty("z-index","2650","important");
+      selectionBar.style.setProperty("z-index","3105","important");
       selectionBar.style.left=left+"px";
       selectionBar.style.top=top+"px";
       selectionBar.style.width=width+"px";
       selectionBar.style.setProperty("margin","0","important");
+
+      if(selectionSummary){
+        const summaryWidth=selectionSummary.getBoundingClientRect().width;
+        selectionSummary.style.position="absolute";
+        selectionSummary.style.left=(summaryCenter-left-summaryWidth/2)+"px";
+        selectionSummary.style.top="50%";
+        selectionSummary.style.transform="translateY(-50%)";
+        selectionSummary.style.margin="0";
+        selectionSummary.style.zIndex="2";
+      }
+
       selectionBar.style.padding=`${padY}px ${padRight}px ${padY}px ${padLeft}px`;
       selectionBar.style.borderRadius=radius+"px";
       selectionBar.style.setProperty("--selection-button-height",buttonHeight+"px");
