@@ -2076,7 +2076,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         const source = reconcileTargets.find(event=>event.reconcile_source_event_id)?.reconcile_source_event_id || "";
         postSaveTitle.textContent = reconcileTargets.length === 1
           ? "Gemeinsame Nachsortierung offen"
-          : "${reconcileTargets.length} Ziele gehören zu offenen Nachsortierungen";
+          : `${reconcileTargets.length} Ziele gehören zu offenen Nachsortierungen`;
         postSaveDetail.textContent = "Dieses geplante Ziel wird nicht separat angewendet. Es wird zusammen mit dem bearbeiteten Ursprungsereignis geprüft und angewendet.";
         applySavedEventButton.textContent = "Nachsortierung unter Ereignisse öffnen";
         applySavedEventButton.dataset.action = "reconcile";

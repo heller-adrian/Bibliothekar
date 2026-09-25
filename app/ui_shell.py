@@ -1773,7 +1773,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
             else ""
         )
         subnav = f"""
-<div class="bk-workspace-subnav bk-workspace-subnav-${escape(subarea or 'root')}" aria-label="Arbeitsbereich">
+<div class="bk-workspace-subnav bk-workspace-subnav-{escape(subarea or 'root')}" aria-label="Arbeitsbereich">
   <div class="bk-workspace-links">
     <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Aufnahmen</a>
     <a href="/events" class="{'active' if subarea == 'events' else ''}">Ereignisse</a>
