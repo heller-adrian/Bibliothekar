@@ -1379,6 +1379,18 @@ WORKSPACE_HTML = r"""<!doctype html>
       return Math.max(0,Math.min(1,Number(value)||0));
     }
 
+    function smoothStep(value){
+      const p=clamp01(value);
+      return p*p*(3-2*p);
+    }
+
+    function normalizedExpo(value,base=1.35,span=6){
+      const p=clamp01(value);
+      const denominator=Math.pow(base,span)-1;
+      if(!denominator)return p;
+      return (Math.pow(base,p*span)-1)/denominator;
+    }
+
     function selectionMorphProgressForPositions(anchorTop,targetTop){
       return clamp01(
         (targetTop+selectionMorphDistance-anchorTop)
@@ -1390,7 +1402,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const anchorRect=selectionBarAnchor.getBoundingClientRect();
       const subnavRect=workspaceSubnav.getBoundingClientRect();
       const dockRect=selectionDockTarget.getBoundingClientRect();
-      const compactHeight=36;
+      const compactHeight=42;
       const preferredLeft=subnavRect.left+subnavRect.width*.26;
 
       if(window.innerWidth<=1180){
@@ -1454,30 +1466,34 @@ WORKSPACE_HTML = r"""<!doctype html>
       const anchorRect=selectionBarAnchor.getBoundingClientRect();
       const target=selectionDockGeometry();
 
-      // Geometrie und Kompaktheit erreichen ihr Ziel deutlich vor dem Fade.
-      // Dadurch läuft der Kartenrahmen nicht über „Ereignisse“.
-      const moveP=clamp01(p/.68);
-      const compactP=clamp01(p/.52);
-      const verticalP=clamp01(p/.72);
+      // Gekrümmte Flugbahn:
+      // horizontal läuft die Karte früh voraus; nach oben zieht sie zunächst
+      // nur wenig und wird erst im späteren Verlauf deutlich steiler.
+      const xP=1-Math.pow(1-p,2.15);
+      const yP=normalizedExpo(p,1.35,6);
 
-      const left=anchorRect.left+(target.left-anchorRect.left)*moveP;
-      const top=anchorRect.top+(target.top-anchorRect.top)*verticalP;
-      const width=anchorRect.width+(target.width-anchorRect.width)*moveP;
+      // Größenänderungen beginnen sanft und enden weniger kompakt als zuvor.
+      const compactP=smoothStep(clamp01(p/.86));
 
-      const padY=12*(1-compactP);
-      const padLeft=12+(8-12)*compactP;
+      const left=anchorRect.left+(target.left-anchorRect.left)*xP;
+      const top=anchorRect.top+(target.top-anchorRect.top)*yP;
+      const width=anchorRect.width+(target.width-anchorRect.width)*xP;
+
+      const padY=12+(2-12)*compactP;
+      const padLeft=12+(9-12)*compactP;
       const padRight=64;
-      const radius=14+(8-14)*compactP;
+      const radius=14+(9-14)*compactP;
 
-      const buttonHeight=42+(34-42)*compactP;
-      const buttonPadX=12+(9-12)*compactP;
-      const buttonFont=1+(.88-1)*compactP;
-      const labelFont=1+(.93-1)*compactP;
-      const actionGap=8+(6-8)*compactP;
-      const arrowSize=42+(34-42)*compactP;
+      const buttonHeight=42+(38-42)*compactP;
+      const buttonPadX=12+(10-12)*compactP;
+      const buttonFont=1+(.94-1)*compactP;
+      const labelFont=1+(.96-1)*compactP;
+      const actionGap=8+(7-8)*compactP;
+      const arrowSize=42+(38-42)*compactP;
 
-      const frameFade=clamp01((p-.78)/.20);
-      const surfaceFade=clamp01((p-.84)/.14);
+      // Rahmen und Kartenfläche verschwinden bereits ab der mittleren Phase.
+      const frameFade=clamp01((p-.40)/.30);
+      const surfaceFade=clamp01((p-.46)/.30);
       const frameStrength=Math.round((1-frameFade)*100);
       const surfaceStrength=Math.round((1-surfaceFade)*100);
 

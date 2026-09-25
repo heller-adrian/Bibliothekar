@@ -333,14 +333,6 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
   pointer-events: none;
 }
 
-body[data-bk-area="workspace"] .bk-shell {
-  --bk-page-bridge-height: 0px;
-  --bk-tab-page-mask: 0px;
-  margin-bottom: 0;
-}
-body[data-bk-area="workspace"] .bk-shell::after {
-  display: none;
-}
 .bk-brand,
 .bk-tabs,
 .bk-shell-actions {
@@ -830,7 +822,7 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 .bk-workspace-subnav {
   width: min(1440px, calc(100% - 48px));
   box-sizing: border-box;
-  margin: 18px auto -2px;
+  margin: 24px auto -2px;
   padding-left: 18px;
   padding-right: 18px;
   display: flex;
@@ -870,7 +862,7 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
     z-index: 2600;
     align-items: center;
     gap: 8px 14px;
-    min-height: 43px;
+    min-height: 49px;
     background: transparent;
     border-radius: 0 0 15px 15px;
     transition:
