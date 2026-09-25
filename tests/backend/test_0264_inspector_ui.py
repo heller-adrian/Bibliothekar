@@ -37,7 +37,8 @@ def test_events_tab_opens_read_only_before_editing():
     assert "data-view-event=" in html
     assert "function renderEventViewer" in html
     assert "function openEventViewer" in html
-    assert 'id="inspect-edit-event"' in html
+    assert 'id="event-edit-header-button"' in html
+    assert 'id="inspect-edit-event"' not in html
     assert "Datenbank-Beginn" in html
     assert "Datenbank-Zeitraum" in html
     assert "komplex" in html

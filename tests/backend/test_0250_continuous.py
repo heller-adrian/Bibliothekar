@@ -69,13 +69,15 @@ def test_disjoint_normal_selection_rejected(tmp_path):
 
 def test_extension_updates_parent_no_child(tmp_path):
     db=tmp_path/'db';event,cards=split_day(db)
-    for card in reversed(cards):
-        create(db,payload(card['start_datetime'],card['end_datetime'],existing_parent_event_id=event['id'],selected_intervals=[card]))
+    # 0.26.8: the quick extension path is deliberately end-only.
+    create(db,payload(cards[1]['start_datetime'],cards[1]['end_datetime'],existing_parent_event_id=event['id'],selected_intervals=[cards[1]]))
     context=get_event_edit_context(db,'j',event['id'])
-    assert context['event']['start_datetime']=='2026-07-23T00:00:00'
+    assert context['event']['start_datetime']=='2026-07-23T13:00:00'
     assert context['event']['end_datetime']=='2026-07-23T23:59:59'
     assert context['child_events']==[]
-    assert len(context['assigned_family_ids'])==3
+    assert len(context['assigned_family_ids'])==2
+    with pytest.raises(ValueError,match='unmittelbar nach'):
+        create(db,payload(cards[0]['start_datetime'],cards[0]['end_datetime'],existing_parent_event_id=event['id'],selected_intervals=[cards[0]]))
 
 
 def test_nonadjacent_extension_rejected(tmp_path):
