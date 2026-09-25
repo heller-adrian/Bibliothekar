@@ -192,8 +192,16 @@ def _workspace_structure_text(
 
     lines: list[str] = []
 
+    branch_order = {"Alle": 0, "Sortiert": 1, "Export": 2}
+
+    def sort_key(item: tuple[str, Any]) -> tuple[int, Any]:
+        name = item[0]
+        if name in branch_order:
+            return (0, branch_order[name])
+        return (1, name.casefold())
+
     def render(node: dict[str, Any], prefix: str = "") -> None:
-        items = sorted(node.items(), key=lambda item: item[0].casefold())
+        items = sorted(node.items(), key=sort_key)
         for index, (name, children) in enumerate(items):
             last = index == len(items) - 1
             lines.append(prefix + ("└── " if last else "├── ") + name)
