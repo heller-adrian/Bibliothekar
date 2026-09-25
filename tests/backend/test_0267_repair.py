@@ -107,7 +107,8 @@ def test_0267_sticky_header_is_scroll_linked_and_not_time_triggered():
     assert "let selectionSummaryStartCenter=0" in WORKSPACE_HTML
     assert 'selectionSummary.style.position="absolute"' in WORKSPACE_HTML
     assert "const compactP=smoothStep(clamp01(p/.86))" in WORKSPACE_HTML
-    assert "const preferredLeft=subnavRect.left+subnavRect.width*.26" in WORKSPACE_HTML
+    assert "const targetFrameLeft=summaryTargetCenter-summaryWidth/2-14" in WORKSPACE_HTML
+    assert "selectionFrameLeft(" in WORKSPACE_HTML
     assert 'setProperty("--selection-button-height",buttonHeight+"px")' in WORKSPACE_HTML
     assert 'setProperty("--selection-button-font-size",buttonFont+"rem")' in WORKSPACE_HTML
     assert "const buttonHeight=42+(38-42)*compactP" in WORKSPACE_HTML
