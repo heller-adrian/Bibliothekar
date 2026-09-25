@@ -89,18 +89,22 @@ def test_0267_sticky_header_is_scroll_linked_and_not_time_triggered():
     assert 'id="selection-bar-anchor"' in WORKSPACE_HTML
     assert 'getElementById("bk-workspace-dock")' in WORKSPACE_HTML
     assert "const selectionMorphDistance=128" in WORKSPACE_HTML
-    assert "function selectionMorphProgressForPositions(anchorTop,dockLine)" in WORKSPACE_HTML
+    assert "function selectionMorphProgressForPositions(anchorTop,targetTop)" in WORKSPACE_HTML
     assert "function applySelectionMorphProgress(progress)" in WORKSPACE_HTML
     assert "selectionBar.animate" not in WORKSPACE_HTML
     assert "animateSelectionMorph" not in WORKSPACE_HTML
+    assert "selectionDockTarget.appendChild(selectionBar)" not in WORKSPACE_HTML
+    assert "selectionBarAnchor.after(selectionBar)" not in WORKSPACE_HTML
+    assert 'setProperty("position","fixed","important")' in WORKSPACE_HTML
+    assert "const padRight=64" in WORKSPACE_HTML
     assert 'classList.toggle("is-stuck",subnavStuck)' in WORKSPACE_HTML
-    assert 'selectionMorphProgressForPositions(anchorTop,dockLine)' in WORKSPACE_HTML
+    assert 'selectionMorphProgressForPositions(anchorTop,target.top)' in WORKSPACE_HTML
     assert 'padding-bottom:clamp(170px,18vh,240px) !important;' in WORKSPACE_HTML
     assert 'border-color:transparent !important;' in WORKSPACE_HTML
     assert 'window.matchMedia("(min-width: 821px)")' in WORKSPACE_HTML
     assert ".selection-bar.is-docked" in WORKSPACE_HTML
+    assert ".selection-bar.is-scroll-floating .selection-top-button" in WORKSPACE_HTML
     assert ".bk-workspace-subnav.is-stuck" in BIBLIOTHEKAR_CSS
-    assert ".bk-workspace-subnav.has-selection-dock" in BIBLIOTHEKAR_CSS
     assert "@media (min-width: 821px) and (max-width: 1180px)" in BIBLIOTHEKAR_CSS
 
 

@@ -377,52 +377,40 @@ WORKSPACE_HTML = r"""<!doctype html>
       .selection-bar{
         transition:none;
         transform:none;
-        will-change:width,margin-left,padding,border-radius;
+        will-change:left,top,width,padding,border-radius,background,border-color;
       }
-      .selection-bar.is-scroll-morphing{
-        pointer-events:auto;
-      }
-      .selection-bar.is-docked{
-        position:relative;
-        top:auto;
-        z-index:auto;
-        flex:1 1 auto;
-        width:auto !important;
-        min-width:0;
+      .selection-bar.is-scroll-floating{
+        position:fixed !important;
+        z-index:2650 !important;
         margin:0 !important;
-        padding:5px 44px 5px 10px !important;
-        border-color:transparent !important;
-        border-radius:10px !important;
-        background:transparent !important;
-        box-shadow:none !important;
-        backdrop-filter:none;
-        -webkit-backdrop-filter:none;
-        justify-content:flex-end;
         flex-wrap:nowrap;
       }
-      .selection-bar.is-docked .selection-summary{
-        flex:0 1 auto;
-        white-space:nowrap;
+      .selection-bar.is-scroll-floating .selection-actions{
+        flex-wrap:nowrap;
       }
-      .selection-bar.is-docked .selection-actions{flex-wrap:nowrap}
-      .selection-bar.is-docked .selection-top-button{
-        right:2px;
-        top:50%;
-        transform:translateY(-50%);
+      .selection-bar.is-scroll-floating .selection-top-button{
+        right:12px !important;
+        top:50% !important;
+        transform:translateY(-50%) !important;
       }
-      .selection-bar.is-docked .selection-top-button:active{
-        transform:translateY(-50%) scale(.98);
+      .selection-bar.is-scroll-floating .selection-top-button:active{
+        transform:translateY(-50%) scale(.98) !important;
+      }
+      .selection-bar.is-docked{
+        border-color:transparent !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        backdrop-filter:none !important;
+        -webkit-backdrop-filter:none !important;
       }
     }
     @media (min-width:821px) and (max-width:1180px){
-      .selection-bar.is-docked{
-        width:100% !important;
-        flex:1 1 100%;
-        justify-content:flex-start;
+      .selection-bar.is-scroll-floating{
         flex-wrap:wrap;
-        padding-left:0 !important;
       }
-      .selection-bar.is-docked .selection-actions{flex-wrap:wrap}
+      .selection-bar.is-scroll-floating .selection-actions{
+        flex-wrap:wrap;
+      }
     }
     @media (max-width:820px){.event-boundaries,.create-subevent-grid,.create-subevent-boundary{grid-template-columns:1fr}}
 
@@ -1350,7 +1338,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     const workspaceSubnav=document.querySelector(".bk-workspace-subnav");
     const selectionDockTarget=document.getElementById("bk-workspace-dock");
     const selectionMorphDistance=128;
-    let selectionDocked=false;
+    let selectionFloating=false;
+    let selectionNaturalSpace=0;
 
     function workspaceStickyDesktop(){
       return window.matchMedia("(min-width: 821px)").matches;
@@ -1367,43 +1356,58 @@ WORKSPACE_HTML = r"""<!doctype html>
       return Math.max(0,Math.min(1,Number(value)||0));
     }
 
-    function selectionMorphProgressForPositions(anchorTop,dockLine){
+    function selectionMorphProgressForPositions(anchorTop,targetTop){
       return clamp01(
-        (dockLine+selectionMorphDistance-anchorTop)
+        (targetTop+selectionMorphDistance-anchorTop)
         / selectionMorphDistance
       );
     }
 
     function selectionDockGeometry(){
       const anchorRect=selectionBarAnchor.getBoundingClientRect();
+      const subnavRect=workspaceSubnav.getBoundingClientRect();
       const dockRect=selectionDockTarget.getBoundingClientRect();
+      const compactHeight=44;
 
       if(window.innerWidth<=1180){
-        const subnavRect=workspaceSubnav.getBoundingClientRect();
         const style=getComputedStyle(workspaceSubnav);
         const leftInset=Number.parseFloat(style.paddingLeft)||0;
         const rightInset=Number.parseFloat(style.paddingRight)||0;
         return {
           left:subnavRect.left+leftInset,
-          width:Math.max(0,subnavRect.width-leftInset-rightInset)
+          width:Math.max(1,subnavRect.width-leftInset-rightInset),
+          top:subnavRect.bottom+4
         };
       }
 
       return {
         left:dockRect.left,
-        width:dockRect.width||anchorRect.width
+        width:Math.max(1,dockRect.width||anchorRect.width),
+        top:subnavRect.top+Math.max(0,(subnavRect.height-compactHeight)/2)
       };
     }
 
     function clearSelectionMorphStyles(){
-      selectionBar.classList.remove("is-scroll-morphing");
-      selectionBar.style.removeProperty("width");
-      selectionBar.style.removeProperty("margin-left");
-      selectionBar.style.removeProperty("padding");
-      selectionBar.style.removeProperty("border-radius");
-      selectionBar.style.removeProperty("border-color");
-      selectionBar.style.removeProperty("background");
-      selectionBar.style.removeProperty("box-shadow");
+      selectionBar.classList.remove("is-scroll-floating","is-docked");
+      [
+        "position","z-index","left","top","width","margin",
+        "padding","border-radius","border-color","background",
+        "box-shadow","backdrop-filter","-webkit-backdrop-filter"
+      ].forEach(property=>selectionBar.style.removeProperty(property));
+      selectionBarAnchor.style.height="0px";
+      selectionFloating=false;
+      selectionNaturalSpace=0;
+    }
+
+    function beginSelectionFloating(){
+      if(selectionFloating)return;
+      const rect=selectionBar.getBoundingClientRect();
+      const style=getComputedStyle(selectionBar);
+      const marginBottom=Number.parseFloat(style.marginBottom)||0;
+      selectionNaturalSpace=Math.ceil(rect.height+marginBottom);
+      selectionBarAnchor.style.height=selectionNaturalSpace+"px";
+      selectionBar.classList.add("is-scroll-floating");
+      selectionFloating=true;
     }
 
     function applySelectionMorphProgress(progress){
@@ -1413,23 +1417,30 @@ WORKSPACE_HTML = r"""<!doctype html>
         return;
       }
 
+      beginSelectionFloating();
+
       const anchorRect=selectionBarAnchor.getBoundingClientRect();
       const target=selectionDockGeometry();
-      const targetWidth=Math.max(1,target.width||anchorRect.width);
-      const width=anchorRect.width+(targetWidth-anchorRect.width)*p;
-      const marginLeft=(target.left-anchorRect.left)*p;
-      const padY=12+(5-12)*p;
+      const left=anchorRect.left+(target.left-anchorRect.left)*p;
+      const top=anchorRect.top+(target.top-anchorRect.top)*p;
+      const width=anchorRect.width+(target.width-anchorRect.width)*p;
+
+      const padY=12*(1-p);
       const padLeft=12+(10-12)*p;
-      const padRight=12+(44-12)*p;
+      const padRight=64;
       const radius=14+(10-14)*p;
-      const frameFade=clamp01((p-.80)/.20);
-      const surfaceFade=clamp01((p-.88)/.12);
+      const frameFade=clamp01((p-.78)/.20);
+      const surfaceFade=clamp01((p-.84)/.14);
       const frameStrength=Math.round((1-frameFade)*100);
       const surfaceStrength=Math.round((1-surfaceFade)*100);
 
-      selectionBar.classList.add("is-scroll-morphing");
+      selectionBar.classList.toggle("is-docked",p>=.999);
+      selectionBar.style.setProperty("position","fixed","important");
+      selectionBar.style.setProperty("z-index","2650","important");
+      selectionBar.style.left=left+"px";
+      selectionBar.style.top=top+"px";
       selectionBar.style.width=width+"px";
-      selectionBar.style.marginLeft=marginLeft+"px";
+      selectionBar.style.setProperty("margin","0","important");
       selectionBar.style.padding=`${padY}px ${padRight}px ${padY}px ${padLeft}px`;
       selectionBar.style.borderRadius=radius+"px";
       selectionBar.style.setProperty(
@@ -1442,42 +1453,17 @@ WORKSPACE_HTML = r"""<!doctype html>
         `color-mix(in srgb,var(--bk-surface) ${surfaceStrength}%,var(--bk-page-bg))`,
         "important"
       );
-      selectionBar.style.setProperty(
-        "box-shadow",
-        "none",
-        "important"
-      );
-    }
+      selectionBar.style.setProperty("box-shadow","none","important");
 
-    function dockSelectionBar(){
-      if(selectionDocked)return;
-      const rect=selectionBar.getBoundingClientRect();
-      selectionBarAnchor.style.height=Math.ceil(rect.height)+"px";
-      selectionDockTarget.appendChild(selectionBar);
-      clearSelectionMorphStyles();
-      selectionBar.classList.add("is-docked");
-      workspaceSubnav.classList.add("has-selection-dock");
-      selectionDocked=true;
-    }
-
-    function undockSelectionBar(progress){
-      if(!selectionDocked)return;
-      selectionBarAnchor.after(selectionBar);
-      selectionBar.classList.remove("is-docked");
-      workspaceSubnav.classList.remove("has-selection-dock");
-      selectionBarAnchor.style.height="0px";
-      selectionDocked=false;
-      applySelectionMorphProgress(progress);
+      if(p>=.999){
+        selectionBar.style.setProperty("border-color","transparent","important");
+        selectionBar.style.setProperty("background","transparent","important");
+        selectionBar.style.setProperty("backdrop-filter","none","important");
+        selectionBar.style.setProperty("-webkit-backdrop-filter","none","important");
+      }
     }
 
     function resetSelectionDock(){
-      if(selectionDocked){
-        selectionBarAnchor.after(selectionBar);
-        selectionBar.classList.remove("is-docked");
-        workspaceSubnav?.classList.remove("has-selection-dock");
-        selectionDocked=false;
-      }
-      selectionBarAnchor.style.height="0px";
       clearSelectionMorphStyles();
       workspaceSubnav?.classList.remove("is-stuck");
     }
@@ -1495,26 +1481,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       const subnavStuck=window.scrollY>0 && subnavRect.top<=shellHeight+1;
       workspaceSubnav.classList.toggle("is-stuck",subnavStuck);
 
+      const target=selectionDockGeometry();
       const anchorTop=selectionBarAnchor.getBoundingClientRect().top;
-      const dockLine=workspaceSubnav.getBoundingClientRect().bottom;
       const progress=subnavStuck
-        ? selectionMorphProgressForPositions(anchorTop,dockLine)
+        ? selectionMorphProgressForPositions(anchorTop,target.top)
         : 0;
 
-      if(selectionDocked && progress<.999){
-        undockSelectionBar(progress);
-        return;
-      }
-
-      if(!selectionDocked && progress>=.999){
-        applySelectionMorphProgress(1);
-        dockSelectionBar();
-        return;
-      }
-
-      if(!selectionDocked){
-        applySelectionMorphProgress(progress);
-      }
+      applySelectionMorphProgress(progress);
     }
 
     window.addEventListener("scroll",updateSelectionDock,{passive:true});
