@@ -4,6 +4,10 @@
 
 ### 0.26.8 – Applied-Reconcile, Zustandsklarheit und Sortierplan
 
+- Der Nur-Lesen-Dialog eines Ereignisses führt „Bearbeiten“ nun oben rechts direkt neben „Schließen“; die zusätzliche untere Aktionszeile entfällt.
+- Der Nachsortierplan dedupliziert identische Hinweise. Die Bestätigungskarte ist kompakter: Hilfe steckt im bekannten Fragezeichen-Tooltip, der Anwenden-/Schließen-Button sitzt oben rechts und die Checkbox-Zeile ist vertikal sauber ausgerichtet.
+- „Bestehendes Ereignis erweitern“ ist jetzt ein enger Schnellweg statt eines zweiten Bearbeiten-Dialogs: angeboten wird nur unmittelbar nach dem bisherigen Ende angrenzende freie Zeit. Beginn/Start bleiben fest, nur der neue Endpunkt kann innerhalb der ausgewählten freien Zeit gesetzt werden; Zeitmodus, Tagesordnerlogik und Unterereignisse werden unverändert vom bestehenden Ereignis übernommen.
+- Dieselbe End-only-Regel wird serverseitig validiert, damit Rückwärts-Erweiterungen oder Lücken nicht über direkte API-Aufrufe umgangen werden können.
 - Nach erfolgreicher Applied-Nachsortierung bleiben die verwalteten Standardzweige `Alle`, `Sortiert` und `Export` am aktiven Ziel erhalten. Der Cleanup entfernt leere Standardzweige eines weiterhin aktiven Ereignis-/Tagesziels nicht mehr; fremde oder nichtleere Inhalte werden weiterhin niemals gelöscht.
 - Applied-Ereignisse bleiben fachlich „angewendet“. Während einer offenen Änderung unterscheidet die Oberfläche jetzt klar zwischen „Neu-Zuordnung offen“ und „Nachsortierung offen“, statt pauschal „Änderung noch nicht angewendet“ zu melden.
 - Neu erzeugte geplante Ziele einer Applied-Neu-Zuordnung werden nicht mehr als unabhängig anzuwendende Planung angeboten. Sie werden als Ziel der gemeinsamen Nachsortierung markiert und führen direkt zum Reconcile des Ursprungsereignisses; die globale Aufgabenliste erzeugt dafür keinen doppelten Planned-Apply-Auftrag.

@@ -499,6 +499,14 @@ EVENTS_HTML = r"""<!doctype html>
       margin-bottom: 5px;
     }
 
+    .sort-plan-header-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
     .sort-plan-summary {
       display: grid;
       grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -766,8 +774,10 @@ EVENTS_HTML = r"""<!doctype html>
 
     .sort-apply-panel {
       display: grid;
-      gap: 12px;
-      margin-top: 20px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px 14px;
+      margin-top: 18px;
       border: 1px solid var(--accent);
       border-radius: 14px;
       background:
@@ -776,7 +786,14 @@ EVENTS_HTML = r"""<!doctype html>
           var(--accent) 10%,
           var(--surface-2)
         );
-      padding: 14px;
+      padding: 12px 14px;
+    }
+
+    .sort-apply-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
     }
 
     .sort-apply-panel.blocked {
@@ -784,24 +801,33 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
     .sort-apply-confirm {
+      grid-column: 1 / -1;
       display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      line-height: 1.45;
+      align-items: center;
+      gap: 9px;
+      min-height: 28px;
+      line-height: 1.3;
     }
 
     .sort-apply-confirm input {
       width: 22px;
       height: 22px;
-      margin-top: 1px;
+      margin: 0;
       flex: 0 0 auto;
     }
 
     .sort-apply-actions {
+      grid-column: 2;
+      grid-row: 1;
       display: flex;
+      align-items: center;
       justify-content: flex-end;
-      gap: 10px;
-      flex-wrap: wrap;
+      gap: 8px;
+      flex-wrap: nowrap;
+    }
+
+    .sort-apply-panel .sort-run-progress {
+      grid-column: 1 / -1;
     }
 
     .sort-apply-button {
@@ -906,9 +932,14 @@ EVENTS_HTML = r"""<!doctype html>
         display: block;
       }
 
-      .sort-plan-header button {
+      .sort-plan-header-actions {
         width: 100%;
         margin-top: 10px;
+      }
+
+      .sort-plan-header-actions button,
+      .sort-plan-header > button {
+        width: 100%;
       }
 
       .plan-file-path {
@@ -1067,7 +1098,10 @@ EVENTS_HTML = r"""<!doctype html>
           <h2 id="event-edit-title">Ereignis bearbeiten</h2>
           <p id="event-edit-subtitle" class="muted"></p>
         </div>
-        <button id="event-edit-close" type="button">Schließen</button>
+        <div class="sort-plan-header-actions">
+          <button id="event-edit-header-button" class="plan-button bk-positive-action" type="button" hidden>Bearbeiten</button>
+          <button id="event-edit-close" type="button">Schließen</button>
+        </div>
       </div>
       <div id="event-edit-body">Bearbeitungsdaten werden geladen …</div>
     </form>
@@ -1200,6 +1234,7 @@ EVENTS_HTML = r"""<!doctype html>
     const eventEditSubtitle = document.getElementById("event-edit-subtitle");
     const eventEditBody = document.getElementById("event-edit-body");
     const eventEditClose = document.getElementById("event-edit-close");
+    const eventEditHeaderButton = document.getElementById("event-edit-header-button");
     let currentEditContext = null;
 
     const reassignmentDialog = document.getElementById("reassignment-dialog");
@@ -1531,7 +1566,15 @@ EVENTS_HTML = r"""<!doctype html>
       className,
       emptyMessage
     ) {
-      if (!items.length) {
+      const seenMessages = new Set();
+      const uniqueItems = (items || []).filter(item => {
+        const message = String(item?.message || "").trim();
+        if (!message || seenMessages.has(message)) return false;
+        seenMessages.add(message);
+        return true;
+      });
+
+      if (!uniqueItems.length) {
         return `
           <div class="message-item">
             ${escapeHtml(emptyMessage)}
@@ -1541,7 +1584,7 @@ EVENTS_HTML = r"""<!doctype html>
 
       return `
         <div class="message-list">
-          ${items.map(
+          ${uniqueItems.map(
             item => `
               <div class="message-item ${className}">
                 ${escapeHtml(item.message)}
@@ -1950,27 +1993,15 @@ EVENTS_HTML = r"""<!doctype html>
 
         ${ready ? `
           <section class="sort-apply-panel">
-            <strong>Sortierung anwenden</strong>
-
-            <div class="muted">
-              Nach der Bestätigung werden alle Quelldateien noch einmal
-              vollständig per SHA-256 geprüft. Erst danach werden sie
-              innerhalb des SSD-Arbeitsbereichs ohne Überschreiben an die
-              geplanten Ziele verschoben. Bei einem Fehler wird automatisch
-              zurückgerollt.
+            <div class="sort-apply-head">
+              <strong>Sortierung anwenden</strong>
+              <button
+                class="bk-help"
+                type="button"
+                aria-label="Hinweis zur bestätigten Sortierung"
+                data-help="Nach der Bestätigung werden alle Quelldateien vollständig per SHA-256 geprüft und erst danach innerhalb des SSD-Arbeitsbereichs ohne Überschreiben verschoben. Die Kamerabibliothek bleibt unberührt; bei einem Fehler wird automatisch zurückgerollt."
+              >?</button>
             </div>
-
-            <label class="sort-apply-confirm">
-              <input
-                id="sort-apply-confirmation"
-                type="checkbox"
-              >
-              <span>
-                Ich bestätige diesen Zielplan. Die Kamerabibliothek bleibt
-                unberührt; verändert wird ausschließlich der angezeigte
-                SSD-Arbeitsbestand.
-              </span>
-            </label>
 
             <div class="sort-apply-actions">
               <button
@@ -1982,6 +2013,14 @@ EVENTS_HTML = r"""<!doctype html>
                 Sortierung jetzt anwenden
               </button>
             </div>
+
+            <label class="sort-apply-confirm">
+              <input
+                id="sort-apply-confirmation"
+                type="checkbox"
+              >
+              <span>Ich bestätige diesen Zielplan; verändert wird ausschließlich der angezeigte SSD-Arbeitsbestand.</span>
+            </label>
 
             <div
               id="sort-run-status"
@@ -2411,6 +2450,8 @@ EVENTS_HTML = r"""<!doctype html>
       const dayEntries=inspectDayEntries(context);
       eventEditDialog.classList.remove("edit-mode");
       eventEditDialog.classList.add("view-mode");
+      eventEditHeaderButton.hidden = false;
+      eventEditHeaderButton.onclick = () => renderEventEditor(context);
       eventEditTitle.textContent=`${noEvent?"Ohne Ereignis öffnen":"Ereignis öffnen"} · ${event.name}`;
       eventEditSubtitle.textContent="Nur-Lesen-Ansicht der aktuell in der Datenbank gespeicherten Definition und Dateizuordnung.";
 
@@ -2437,8 +2478,7 @@ EVENTS_HTML = r"""<!doctype html>
           <div id="inspect-family-day-host"></div>
           <button type="button" id="inspect-more-family-days" class="inspect-more" hidden>Weitere</button>
         </details>
-        <div class="inspect-section"><strong>Zielstruktur</strong><pre class="inspect-structure">${escapeHtml(structureData?.structure_text||"Keine Struktur vorhanden.")}</pre></div>
-        <div class="inspect-actions"><button type="button" id="inspect-edit-event" class="plan-button bk-positive-action">Bearbeiten</button></div>`;
+        <div class="inspect-section"><strong>Zielstruktur</strong><pre class="inspect-structure">${escapeHtml(structureData?.structure_text||"Keine Struktur vorhanden.")}</pre></div>`;
 
       if(noEvent){
         let segmentLimit=10;
@@ -2466,13 +2506,14 @@ EVENTS_HTML = r"""<!doctype html>
       };
       familyMore.onclick=()=>{familyDayLimit+=10;drawDays();};
       drawDays();
-      document.getElementById("inspect-edit-event")?.addEventListener("click",()=>renderEventEditor(context));
     }
 
 
     async function openEventViewer(eventId, jobId) {
       eventEditDialog.classList.remove("edit-mode");
       eventEditDialog.classList.add("view-mode");
+      eventEditHeaderButton.hidden = true;
+      eventEditHeaderButton.onclick = null;
       eventEditTitle.textContent = "Ereignis öffnen";
       eventEditSubtitle.textContent = "Datenbankzustand wird geladen …";
       eventEditBody.textContent = "Ereignisdaten werden geladen …";
@@ -2490,6 +2531,8 @@ EVENTS_HTML = r"""<!doctype html>
       currentEditContext = context;
       eventEditDialog.classList.remove("view-mode");
       eventEditDialog.classList.add("edit-mode");
+      eventEditHeaderButton.hidden = true;
+      eventEditHeaderButton.onclick = null;
       const event = context.event;
       if (context.legacy_disjoint) throw new Error(context.legacy_warning);
       const child = context.child_event;

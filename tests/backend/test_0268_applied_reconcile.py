@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from app.database import _validated_forward_extension
 from app.obsolete_structure import cleanup_obsolete_structure
 from app.workspace_reconcile import _workspace_structure_text
 from app.events_ui import EVENTS_HTML
@@ -104,3 +107,51 @@ def test_0268_events_subnav_is_opaque():
     assert 'data-bk-workspace-subarea="events"' in markup
     assert '.bk-workspace-subnav[data-bk-workspace-subarea="events"]' in BIBLIOTHEKAR_CSS
     assert "var(--bk-page-bg) 98%" in BIBLIOTHEKAR_CSS
+
+
+def test_0268_sort_apply_panel_is_compact_and_messages_are_deduped():
+    assert "const seenMessages = new Set();" in EVENTS_HTML
+    assert "const uniqueItems = (items || []).filter" in EVENTS_HTML
+    assert 'class="sort-apply-head"' in EVENTS_HTML
+    assert 'class="bk-help"' in EVENTS_HTML
+    assert "grid-template-columns: minmax(0, 1fr) auto" in EVENTS_HTML
+    assert "align-items: center;" in EVENTS_HTML
+    assert "Ich bestätige diesen Zielplan; verändert wird ausschließlich" in EVENTS_HTML
+
+
+def test_0268_event_viewer_edit_action_is_in_header():
+    assert 'id="event-edit-header-button"' in EVENTS_HTML
+    assert 'id="inspect-edit-event"' not in EVENTS_HTML
+    assert "eventEditHeaderButton.hidden = false;" in EVENTS_HTML
+    assert "eventEditHeaderButton.onclick = () => renderEventEditor(context);" in EVENTS_HTML
+
+
+def test_0268_existing_event_extension_is_forward_only_and_structure_locked():
+    assert "Date.parse(d.start_datetime) - Date.parse(event.end_datetime) - 1000" in WORKSPACE_HTML
+    assert 'dialogTitle.textContent="Ereignis erweitern"' in WORKSPACE_HTML
+    assert "eventStartDate.disabled=true" in WORKSPACE_HTML
+    assert "eventStartTime.disabled=true" in WORKSPACE_HTML
+    assert "useTimeRange.disabled=true" in WORKSPACE_HTML
+    assert "preserveDayFolders.disabled=true" in WORKSPACE_HTML
+    assert "createSubevents.hidden=true" in WORKSPACE_HTML
+    assert "base.subevents = [];" in WORKSPACE_HTML
+    assert "base.preserve_day_folders = Boolean(parent.preserve_day_folders);" in WORKSPACE_HTML
+
+
+def test_0268_forward_extension_guard_accepts_only_immediate_end_extension():
+    assert _validated_forward_extension(
+        ("2026-07-20T00:00:00", "2026-07-20T23:59:59"),
+        [{"start_datetime": "2026-07-21T00:00:00", "end_datetime": "2026-07-21T18:30:59"}],
+    ) == ("2026-07-20T00:00:00", "2026-07-21T18:30:59")
+
+    with pytest.raises(ValueError, match="unmittelbar nach"):
+        _validated_forward_extension(
+            ("2026-07-20T00:00:00", "2026-07-20T23:59:59"),
+            [{"start_datetime": "2026-07-19T00:00:00", "end_datetime": "2026-07-19T23:59:59"}],
+        )
+
+    with pytest.raises(ValueError, match="unmittelbar nach"):
+        _validated_forward_extension(
+            ("2026-07-20T00:00:00", "2026-07-20T23:59:59"),
+            [{"start_datetime": "2026-07-22T00:00:00", "end_datetime": "2026-07-22T23:59:59"}],
+        )

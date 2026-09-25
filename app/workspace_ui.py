@@ -2876,8 +2876,16 @@ WORKSPACE_HTML = r"""<!doctype html>
     function plannedParentCandidates(dated) {
       if (!workspace || !dated.length) return [];
       if (dated.some(group => Boolean(group.reassignment_pending))) return [];
-      return (workspace.events || []).filter(event => event.event_level === "parent" && event.event_kind === "event" && (dated[0].archive_change_request_id ? event.status === "archived" : ["planned","applied"].includes(event.status)) && dated.some(d =>
-        Math.abs(Date.parse(d.start_datetime)-Date.parse(event.end_datetime)-1000)<1 || Math.abs(Date.parse(event.start_datetime)-Date.parse(d.end_datetime)-1000)<1));
+      return (workspace.events || []).filter(event =>
+        event.event_level === "parent"
+        && event.event_kind === "event"
+        && (dated[0].archive_change_request_id
+          ? event.status === "archived"
+          : ["planned","applied"].includes(event.status))
+        && dated.some(d =>
+          Math.abs(Date.parse(d.start_datetime) - Date.parse(event.end_datetime) - 1000) < 1
+        )
+      );
     }
 
     function nextMinute(value) {
@@ -2890,15 +2898,73 @@ WORKSPACE_HTML = r"""<!doctype html>
     function applyExistingParentChoice() {
       const id=existingParentEvent?.value || "";
       const parent=(workspace?.events||[]).find(event=>event.id===id);
+      const dated=[...selectedDatedGroups()].sort((a,b)=>String(a.start_datetime).localeCompare(String(b.start_datetime)));
+
       if (!parent) {
+        dialogTitle.textContent="Ereignis erstellen";
         eventName.disabled=false;
+        eventStartDate.disabled=false;
+        eventStartTime.disabled=false;
+        eventEndDate.disabled=false;
+        eventEndTime.disabled=false;
+        eventEndDate.removeAttribute("min");
+        eventEndDate.removeAttribute("max");
+        useTimeRange.disabled=false;
+        preserveDayFolders.disabled=false;
+        createSubevents.hidden=false;
+        if (dated.length) {
+          eventStartDate.value=dated[0].day_key || String(dated[0].start_datetime||"").slice(0,10);
+          eventEndDate.value=dated[dated.length-1].day_key || String(dated[dated.length-1].end_datetime||"").slice(0,10);
+          applyAutomaticFreeTimeSuggestion(dated);
+        }
+        scheduleDialogPreview();
         return;
       }
-      eventName.value=parent.name || "";
+
+      const parentStart=String(parent.start_datetime||"");
+      const parentEnd=String(parent.end_datetime||"");
+      const parentStartTime=parentStart.slice(11,16)||"00:00";
+      const parentEndTime=parentEnd.slice(11,16)||"23:59";
+      const usesTimes=Boolean(Number(parent.uses_time_range||0))
+        || parentStartTime!=="00:00"
+        || parentEndTime!=="23:59";
+      const extensionStart=dated[0] || null;
+      const extensionEnd=dated[dated.length-1] || extensionStart;
+
+      dialogTitle.textContent="Ereignis erweitern";
+      eventName.value=parent.display_title || parent.name || "";
       eventName.disabled=true;
-      useTimeRange.checked=true;
-      setParentTimeFieldsVisible(true);
-      applyAutomaticFreeTimeSuggestion(selectedDatedGroups());
+
+      eventStartDate.value=parentStart.slice(0,10);
+      eventStartTime.value=parentStartTime;
+      eventStartDate.disabled=true;
+      eventStartTime.disabled=true;
+
+      if (extensionEnd) {
+        eventEndDate.value=extensionEnd.day_key || String(extensionEnd.end_datetime||"").slice(0,10);
+        eventEndTime.value=extensionEnd.end_time
+          || String(extensionEnd.end_datetime||"").slice(11,16)
+          || "23:59";
+      }
+      eventEndDate.disabled=false;
+      eventEndTime.disabled=!usesTimes;
+      if (extensionStart) {
+        eventEndDate.min=extensionStart.day_key || String(extensionStart.start_datetime||"").slice(0,10);
+      }
+      if (extensionEnd) {
+        eventEndDate.max=extensionEnd.day_key || String(extensionEnd.end_datetime||"").slice(0,10);
+      }
+
+      useTimeRange.checked=usesTimes;
+      useTimeRange.disabled=true;
+      setParentTimeFieldsVisible(usesTimes);
+
+      preserveDayFolders.checked=Boolean(parent.preserve_day_folders);
+      preserveDayFolders.disabled=true;
+
+      createSubevents.hidden=true;
+      createSubeventList.innerHTML="";
+      scheduleDialogPreview();
     }
 
     function setParentTimeFieldsVisible(visible){eventStartTimeLabel.hidden=!visible;eventEndTimeLabel.hidden=!visible;}
@@ -2919,7 +2985,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       const parentCandidates=noEvent?[]:plannedParentCandidates(dated);existingParentRow.hidden=noEvent||parentCandidates.length===0;
       if(!existingParentRow.hidden){existingParentEvent.innerHTML=`<option value="">Neues Ereignis anlegen</option>`+parentCandidates.map(parent=>`<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");existingParentEvent.value="";}else existingParentEvent.innerHTML="";
       eventName.value=noEvent?"Ohne Ereignis":"";eventName.disabled=noEvent;dialogTitle.textContent=existingNoEvent?"Zu bestehendem „Ohne Ereignis“ hinzufügen":(noEvent?"Als „Ohne Ereignis“ zuordnen":"Ereignis erstellen");
-      eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";useTimeRange.checked=false;setParentTimeFieldsVisible(false);
+      eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";
+      eventStartDate.disabled=false;eventStartTime.disabled=false;eventEndDate.disabled=false;eventEndTime.disabled=false;eventEndDate.removeAttribute("min");eventEndDate.removeAttribute("max");
+      useTimeRange.checked=false;useTimeRange.disabled=false;setParentTimeFieldsVisible(false);
       createSubeventList.innerHTML="";createSubevents.hidden=noEvent;eventBoundaries.hidden=noEvent;useTimeRange.closest("label").hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;dialogError.hidden=true;dialogError.textContent="";
       noEventSegmentEditor.hidden=!noEvent;existingNoEventTargetRow.hidden=!existingNoEvent;
       if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
@@ -2943,6 +3011,20 @@ WORKSPACE_HTML = r"""<!doctype html>
         selected_day_keys: selectedDatedGroups().map(group => group.day_key),
         existing_parent_event_id: (!["no_event","existing_no_event"].includes(dialogMode) ? (existingParentEvent?.value || null) : null)
       };
+      const parentId = base.existing_parent_event_id;
+      const parent = parentId ? (workspace?.events||[]).find(event=>event.id===parentId) : null;
+      if (parent) {
+        const selected=[...selectedDatedGroups()].sort((a,b)=>String(a.start_datetime).localeCompare(String(b.start_datetime)));
+        const extensionStart=String(selected[0]?.start_datetime||"");
+        const endClock=base.uses_time_range ? (base.end_time||"23:59") : "23:59";
+        const extensionEnd=base.end_date ? `${base.end_date}T${endClock}:59` : "";
+        base.selected_intervals = extensionStart && extensionEnd
+          ? [{start_datetime:extensionStart,end_datetime:extensionEnd}]
+          : [];
+        base.subevents = [];
+        base.preserve_day_folders = Boolean(parent.preserve_day_folders);
+      }
+
       if (["no_event","existing_no_event"].includes(dialogMode)) {
         const allSegments = selectedNoEventSegments(true);
         const newSegments = selectedNoEventSegments(false);

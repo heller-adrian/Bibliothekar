@@ -2129,6 +2129,45 @@ def list_archive_change_reviews(
     ]
 
 
+def _validated_forward_extension(
+    existing_range: tuple[str, str],
+    selected_intervals: list[dict[str, Any]],
+) -> tuple[str, str]:
+    """Return an end-only extension; backwards or gapped extensions are rejected."""
+    from datetime import datetime, timedelta
+    from app.released_ranges import merge_intervals
+
+    selected = [
+        (
+            str(item.get("start_datetime") or "")[:19],
+            str(item.get("end_datetime") or "")[:19],
+        )
+        for item in (selected_intervals or [])
+        if item.get("start_datetime") and item.get("end_datetime")
+    ]
+    merged = merge_intervals(selected)
+    if len(merged) != 1:
+        raise ValueError(
+            "Die Erweiterung muss aus einem zusammenhängenden freien Zeitraum bestehen."
+        )
+
+    current_start, current_end = existing_range
+    extension_start, extension_end = merged[0]
+    expected_start = (
+        datetime.fromisoformat(current_end)
+        + timedelta(seconds=1)
+    ).isoformat(timespec="seconds")
+
+    if extension_start != expected_start:
+        raise ValueError(
+            "Ein bestehendes Ereignis kann hier nur unmittelbar nach seinem bisherigen Ende erweitert werden."
+        )
+    if extension_end < extension_start:
+        raise ValueError("Der neue Endpunkt liegt vor dem Beginn der Erweiterung.")
+
+    return current_start, extension_end
+
+
 def create_planned_event(
     database_path: Path,
     job_id: str,
@@ -2180,7 +2219,6 @@ def create_planned_event(
         context = get_event_edit_context(database_path, job_id, existing_parent_event_id)
         existing = context['event']
         if existing['status'] == 'applied':
-            from app.released_ranges import merge_intervals
             from app.event_timeline import assert_editable_normal
             from app.event_structure import build_event_preview
             with database_connection(database_path) as connection:
@@ -2188,10 +2226,7 @@ def create_planned_event(
             selected = preview.get('selected_intervals') or [{
                 'start_datetime': start_date + 'T' + str(preview.get('start_time') or '00:00') + ':00',
                 'end_datetime': end_date + 'T' + str(preview.get('end_time') or '23:59') + ':59'}]
-            union = merge_intervals([current] + [(x['start_datetime'], x['end_datetime']) for x in selected])
-            if len(union) != 1:
-                raise ValueError('Die freie Auswahl grenzt nicht unmittelbar an das bestehende Ereignis an.')
-            start, end = union[0]
+            start, end = _validated_forward_extension(current, selected)
             expanded = build_event_preview({
                 'event_kind': 'event', 'event_name': existing['name'],
                 'start_date': start[:10], 'end_date': end[:10],
@@ -2346,13 +2381,9 @@ def create_planned_event(
                 connection.rollback()
                 raise ValueError("Dieses normale Ereignis kann nicht direkt erweitert werden.")
             from app.event_timeline import assert_editable_normal
-            from app.released_ranges import merge_intervals
             existing_range = assert_editable_normal(connection, existing_parent_event_id)
             selected = preview.get('selected_intervals') or [{'start_datetime': assignment_start, 'end_datetime': assignment_end}]
-            union = merge_intervals([existing_range] + [(x['start_datetime'], x['end_datetime']) for x in selected])
-            if len(union) != 1:
-                raise ValueError('Die freie Auswahl grenzt nicht unmittelbar an das bestehende Ereignis an.')
-            parent_start, parent_end = union[0]
+            parent_start, parent_end = _validated_forward_extension(existing_range, selected)
 
         family_rows = connection.execute(
             f"""
