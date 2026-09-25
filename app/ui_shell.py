@@ -871,8 +871,9 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
       padding-top 180ms ease,
       padding-bottom 180ms ease;
   }
-  .bk-workspace-subnav.is-stuck {
-    background: color-mix(in srgb, var(--bk-page-bg) 96%, transparent);
+  .bk-workspace-subnav.is-stuck,
+  .bk-workspace-subnav-events {
+    background: color-mix(in srgb, var(--bk-page-bg) 98%, transparent);
     box-shadow: 0 12px 24px -24px rgb(0 0 0 / .55);
     -webkit-backdrop-filter: blur(14px);
     backdrop-filter: blur(14px);
@@ -1772,7 +1773,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
             else ""
         )
         subnav = f"""
-<div class="bk-workspace-subnav" aria-label="Arbeitsbereich">
+<div class="bk-workspace-subnav bk-workspace-subnav-${escape(subarea or 'root')}" aria-label="Arbeitsbereich">
   <div class="bk-workspace-links">
     <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Aufnahmen</a>
     <a href="/events" class="{'active' if subarea == 'events' else ''}">Ereignisse</a>

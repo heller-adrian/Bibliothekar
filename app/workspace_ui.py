@@ -1211,9 +1211,9 @@ WORKSPACE_HTML = r"""<!doctype html>
         </label>
 
         <label id="existing-parent-row" class="full-width" hidden>
-          <span>Oberereignis</span>
+          <span>Bestehendes Ereignis erweitern</span>
           <select id="existing-parent-event"></select>
-          <small class="muted">Wenn an diesem Tag bereits ein geplantes Oberereignis existiert, wird es standardmäßig fortgeführt. „Neues Oberereignis“ bleibt jederzeit möglich.</small>
+          <small class="muted">Nur für regulär freie, direkt angrenzende Zeit. Freigewordene Bereiche aus einer Applied-Bearbeitung werden stattdessen als neues Ziel der offenen Neu-Zuordnung angelegt.</small>
         </label>
 
         <div id="no-event-segment-editor" class="full-width" hidden>
@@ -2047,22 +2047,51 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function renderPlannedActions() {
-      const planned = (workspace?.events || []).filter(event =>
+      const allPlanned = (workspace?.events || []).filter(event =>
         event.event_level === "parent" && event.status === "planned"
       );
-      postSaveAction.hidden = planned.length === 0;
-      plannedEventSelection.innerHTML = planned.map(event => `
-        <label class="planned-choice">
-          <input class="planned-check" type="checkbox" data-planned-event="${escapeHtml(event.id)}" checked>
-          <span>${escapeHtml(event.display_title || event.name)} · ${Number(event.assigned_family_count || 0)} Familien</span>
-        </label>`).join("");
+      const reconcileTargets = allPlanned.filter(event => Boolean(Number(event.reconcile_target||0)));
+      const planned = allPlanned.filter(event => !Boolean(Number(event.reconcile_target||0)));
+
+      postSaveAction.hidden = allPlanned.length === 0;
+      plannedEventSelection.innerHTML =
+        planned.map(event => `
+          <label class="planned-choice">
+            <input class="planned-check" type="checkbox" data-planned-event="${escapeHtml(event.id)}" checked>
+            <span>${escapeHtml(event.display_title || event.name)} · ${Number(event.assigned_family_count || 0)} Familien</span>
+          </label>`).join("")
+        + reconcileTargets.map(event => `
+          <div class="planned-choice">
+            <span>↳</span>
+            <span><strong>${escapeHtml(event.display_title || event.name)}</strong> · Ziel einer offenen gemeinsamen Nachsortierung</span>
+          </div>`).join("");
+
       const families = planned.reduce((sum,event)=>sum+Number(event.assigned_family_count||0),0);
       const files = planned.reduce((sum,event)=>sum+Number(event.assigned_file_count||0),0);
+
+      applySavedEventButton.dataset.action = "apply";
+      delete applySavedEventButton.dataset.reconcileSource;
+
+      if (!planned.length && reconcileTargets.length) {
+        const source = reconcileTargets.find(event=>event.reconcile_source_event_id)?.reconcile_source_event_id || "";
+        postSaveTitle.textContent = reconcileTargets.length === 1
+          ? "Gemeinsame Nachsortierung offen"
+          : "${reconcileTargets.length} Ziele gehören zu offenen Nachsortierungen";
+        postSaveDetail.textContent = "Dieses geplante Ziel wird nicht separat angewendet. Es wird zusammen mit dem bearbeiteten Ursprungsereignis geprüft und angewendet.";
+        applySavedEventButton.textContent = "Nachsortierung unter Ereignisse öffnen";
+        applySavedEventButton.dataset.action = "reconcile";
+        applySavedEventButton.dataset.reconcileSource = source;
+        applySavedEventButton.disabled = !source;
+        return;
+      }
+
       postSaveTitle.textContent = planned.length === 1 ? "1 geplantes Ereignis" : `${planned.length} geplante Ereignisse`;
-      postSaveDetail.textContent = `${families} Familien · ${files} Dateien. Standardmäßig werden alle geplanten Ereignisse angewendet.`;
+      postSaveDetail.textContent = `${families} Familien · ${files} Dateien. Standardmäßig werden alle unabhängigen geplanten Ereignisse angewendet.`
+        + (reconcileTargets.length ? ` ${reconcileTargets.length} Ziel(e) einer offenen Nachsortierung sind davon ausgenommen und werden gemeinsam reconciled.` : "");
       applySavedEventButton.textContent = planned.length === 1 ? "Ereignis anwenden" : "Alle geplanten Ereignisse anwenden";
       applySavedEventButton.disabled = planned.length === 0;
     }
+
 
     function renderSummary() {
       const statistics =
@@ -2846,6 +2875,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     function plannedParentCandidates(dated) {
       if (!workspace || !dated.length) return [];
+      if (dated.some(group => Boolean(group.reassignment_pending))) return [];
       return (workspace.events || []).filter(event => event.event_level === "parent" && event.event_kind === "event" && (dated[0].archive_change_request_id ? event.status === "archived" : ["planned","applied"].includes(event.status)) && dated.some(d =>
         Math.abs(Date.parse(d.start_datetime)-Date.parse(event.end_datetime)-1000)<1 || Math.abs(Date.parse(event.start_datetime)-Date.parse(d.end_datetime)-1000)<1));
     }
@@ -2887,7 +2917,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     async function openEventDialog(mode){
       dialogMode=mode;const dated=selectedDatedGroups(),noEvent=mode==="no_event"||mode==="existing_no_event",existingNoEvent=mode==="existing_no_event";activeNoEventTarget=null;
       const parentCandidates=noEvent?[]:plannedParentCandidates(dated);existingParentRow.hidden=noEvent||parentCandidates.length===0;
-      if(!existingParentRow.hidden){existingParentEvent.innerHTML=`<option value="">Neues Oberereignis anlegen</option>`+parentCandidates.map(parent=>`<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");existingParentEvent.value="";}else existingParentEvent.innerHTML="";
+      if(!existingParentRow.hidden){existingParentEvent.innerHTML=`<option value="">Neues Ereignis anlegen</option>`+parentCandidates.map(parent=>`<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");existingParentEvent.value="";}else existingParentEvent.innerHTML="";
       eventName.value=noEvent?"Ohne Ereignis":"";eventName.disabled=noEvent;dialogTitle.textContent=existingNoEvent?"Zu bestehendem „Ohne Ereignis“ hinzufügen":(noEvent?"Als „Ohne Ereignis“ zuordnen":"Ereignis erstellen");
       eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";useTimeRange.checked=false;setParentTimeFieldsVisible(false);
       createSubeventList.innerHTML="";createSubevents.hidden=noEvent;eventBoundaries.hidden=noEvent;useTimeRange.closest("label").hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;dialogError.hidden=true;dialogError.textContent="";
@@ -3222,6 +3252,13 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     applySavedEventButton.addEventListener("click", () => {
+      if (applySavedEventButton.dataset.action === "reconcile") {
+        const source = applySavedEventButton.dataset.reconcileSource || "";
+        if (source && jobSelect.value) {
+          location.href = `/events?job=${encodeURIComponent(jobSelect.value)}&task=resort:${encodeURIComponent(source)}`;
+        }
+        return;
+      }
       applyPlannedEvents().catch(error => {
         applySavedEventStatus.textContent = error.message;
         applySavedEventButton.disabled = false;

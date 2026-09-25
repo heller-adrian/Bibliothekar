@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 0.26.8 – Applied-Reconcile, Zustandsklarheit und Sortierplan
+
+- Nach erfolgreicher Applied-Nachsortierung bleiben die verwalteten Standardzweige `Alle`, `Sortiert` und `Export` am aktiven Ziel erhalten. Der Cleanup entfernt leere Standardzweige eines weiterhin aktiven Ereignis-/Tagesziels nicht mehr; fremde oder nichtleere Inhalte werden weiterhin niemals gelöscht.
+- Applied-Ereignisse bleiben fachlich „angewendet“. Während einer offenen Änderung unterscheidet die Oberfläche jetzt klar zwischen „Neu-Zuordnung offen“ und „Nachsortierung offen“, statt pauschal „Änderung noch nicht angewendet“ zu melden.
+- Neu erzeugte geplante Ziele einer Applied-Neu-Zuordnung werden nicht mehr als unabhängig anzuwendende Planung angeboten. Sie werden als Ziel der gemeinsamen Nachsortierung markiert und führen direkt zum Reconcile des Ursprungsereignisses; die globale Aufgabenliste erzeugt dafür keinen doppelten Planned-Apply-Auftrag.
+- „Bestehendes Ereignis erweitern“ bleibt für regulär freie, direkt angrenzende Bereiche erhalten. Bei freigewordenen Bereichen einer Applied-Bearbeitung wird diese Option ausgeblendet, damit die Neu-Zuordnung nicht versehentlich wieder in das gerade verkleinerte Ereignis zurückführt.
+- Der gemeinsame Nachsortierplan zeigt eine echte Zielordner-Baumstruktur aus den geplanten Verzeichnissen statt der technischen Zusammenfassung „Gemeinsamer Arbeitsbereich-Abgleich“.
+- Das Sortierplan-Modal ist auf Desktop breiter; seine sieben Kennzahlen passen auf eine Zeile. Sicherheitsstatus, Arbeitsbestand und Zielstruktur sind ein-/ausklappbar, die Zielstruktur ist standardmäßig geöffnet.
+- Nach erfolgreicher Sortierung/Nachsortierung wird die Ereignisliste sofort vollständig neu geladen. Der veraltete Hinweis auf eine offene Änderung verschwindet ohne Browser-Reload; der untere Anwenden-Button wird anschließend zu „Schließen“.
+- Auf der Seite „Ereignisse“ besitzt die sticky Arbeitsbereich-Unterleiste einen deckenden Seitenhintergrund und läuft beim Scrollen nicht mehr transparent über den Seitentitel.
+- Die 0.25.1-Sicherheitsarchitektur bleibt unverändert: Applied-Bearbeitungen speichern zunächst SOLL-Zustand und Aufgaben; physische SSD-Bewegungen erfolgen erst im ausdrücklich bestätigten, SHA-geprüften gemeinsamen Reconcile.
+
 ### 0.26.7 – Planned-UI-Abschluss und konsistentes Ereignismodell
 
 - „Ohne Ereignis“ zeigt in der Zielstruktur-Vorschau keinen irreführenden Min/Max-Zeitraum mehr, sondern „Datenbank-Zeitraum: komplex“.

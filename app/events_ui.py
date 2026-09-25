@@ -465,7 +465,7 @@ EVENTS_HTML = r"""<!doctype html>
     a.plan-button { display:inline-flex; align-items:center; padding:10px 14px; border:1px solid var(--accent); border-radius:10px; text-decoration:none; }
 
     .sort-plan-dialog {
-      inline-size: min(980px, calc(100dvw - 28px));
+      inline-size: min(1240px, calc(100dvw - 28px));
       max-inline-size: calc(100dvw - 28px);
       max-block-size: calc(100dvh - 28px);
       overflow: hidden;
@@ -501,10 +501,15 @@ EVENTS_HTML = r"""<!doctype html>
 
     .sort-plan-summary {
       display: grid;
-      grid-template-columns:
-        repeat(auto-fit, minmax(135px, 1fr));
+      grid-template-columns: repeat(7, minmax(0, 1fr));
       gap: 10px;
       margin-bottom: 16px;
+    }
+
+    @media (max-width: 1080px) {
+      .sort-plan-summary {
+        grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+      }
     }
 
     .sort-plan-summary .card {
@@ -517,6 +522,22 @@ EVENTS_HTML = r"""<!doctype html>
 
     .sort-plan-section h3 {
       margin-bottom: 8px;
+    }
+
+    .sort-plan-disclosure {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+
+    .sort-plan-disclosure > summary {
+      cursor: pointer;
+      font-weight: 760;
+      list-style-position: inside;
+      padding: 4px 0 8px;
+    }
+
+    .sort-plan-disclosure > summary::marker {
+      color: var(--accent);
     }
 
     .plan-ready {
@@ -1435,23 +1456,29 @@ EVENTS_HTML = r"""<!doctype html>
         card.dataset.jobId = event._job_id || event.job_id || "";
         const statusClass = ["planned","applied","archived"].includes(event.status) ? event.status : "";
         const isMutationAnchor = event.mutation_id && event.id === event.mutation_anchor_event_id;
+        const isReconcileTarget = Boolean(Number(event.reconcile_target||0));
         const reassign = Number(event.pending_reassignment_count||0) > 0 ? `
           <div class="reassignment-resume">
-            <span><strong>⚠ ${Number(event.pending_reassignment_count)} ${Number(event.pending_reassignment_count)===1?"Familie":"Familien"} noch neu zuzuordnen</strong><br><span class="muted">Die Änderung bleibt bis zur Neu-Zuordnung im sicheren Schwebezustand. Ursprungs- und Zielzustand sind weiterhin nachvollziehbar.</span></span>
+            <span><strong>⚠ Neu-Zuordnung offen · ${Number(event.pending_reassignment_count)} ${Number(event.pending_reassignment_count)===1?"Familie":"Familien"}</strong><br><span class="muted">Das Ereignis bleibt angewendet. Die herausgefallenen Familien sind im Plan wieder frei, haben aber noch kein neues Ziel. Erst nach ihrer Zuordnung folgt die gemeinsame, ausdrücklich bestätigte Nachsortierung.</span></span>
             <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
               <a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=free">In Aufnahmen öffnen</a>
               ${isMutationAnchor ? `<button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button>` : ""}
             </div>
           </div>` : "";
         const mutation = isMutationAnchor && Number(event.pending_reassignment_count||0) === 0 ? `
-          <div class="reassignment-resume"><span><strong>⚠ Änderung noch nicht angewendet</strong><br><span class="muted">Die Neu-Zuordnung ist vollständig. Die neue Struktur ist gespeichert, aber die verifizierte Nachsortierung auf der SSD steht noch aus.</span></span><button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button></div>` : "";
+          <div class="reassignment-resume"><span><strong>⚠ Nachsortierung offen</strong><br><span class="muted">Das Ereignis bleibt angewendet und die Neu-Zuordnung ist vollständig. Der gespeicherte SOLL-Zustand muss nur noch per SHA-256 geprüft und ausdrücklich auf den SSD-Arbeitsbereich angewendet werden.</span></span><button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button></div>` : "";
+        const reconcileTargetNotice = isReconcileTarget ? `
+          <div class="reassignment-resume"><span><strong>↳ Ziel einer offenen Nachsortierung</strong><br><span class="muted">Dieses geplante Ereignis wird nicht separat angewendet. Es wird zusammen mit dem bearbeiteten Ursprungsereignis im gemeinsamen Nachsortierplan geprüft und angewendet.</span></span></div>` : "";
         card.innerHTML = `
           <div class="event-card-header"><div><strong class="event-name">${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder">${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
           ${mutation}
           ${reassign}
+          ${reconcileTargetNotice}
           <div class="event-card-actions" hidden>
             <button type="button" data-view-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Öffnen</button>
-            <button type="button" class="plan-button bk-positive-action" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">${event.status === "applied" ? "Nachsortierung prüfen" : "Sortierung prüfen"}</button>
+            ${isReconcileTarget && event.reconcile_source_event_id
+              ? `<a class="plan-button bk-positive-action" href="/events?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=resort:${encodeURIComponent(event.reconcile_source_event_id)}">Gemeinsame Nachsortierung öffnen</a>`
+              : `<button type="button" class="plan-button bk-positive-action" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">${event.status === "applied" ? "Nachsortierung prüfen" : "Sortierung prüfen"}</button>`}
             ${isDeletable(event)
               ? `<button type="button" class="danger-button" data-delete-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Ereignis löschen</button>`
               : event.mutation_id
@@ -1670,7 +1697,7 @@ EVENTS_HTML = r"""<!doctype html>
       let familyIndex = 0;
 
       sortPlanTitle.textContent =
-        `Sortierplan · ${plan.event.name}`;
+        `${plan._reconcile ? "Nachsortierplan" : "Sortierplan"} · ${plan.event.name}`;
 
       sortPlanSubtitle.textContent = ready
         ? "Die rein lesende Prüfung ist ohne Blocker abgeschlossen."
@@ -1855,59 +1882,31 @@ EVENTS_HTML = r"""<!doctype html>
           ).join("")}
         </div>
 
-        <section class="sort-plan-section">
-          <h3>Sicherheitsstatus</h3>
+        <details class="sort-plan-section sort-plan-disclosure">
+          <summary>Sicherheitsstatus</summary>
           <div class="path-box">
-            <div>
-              Modus: rein lesender Sortierplan
-            </div>
-            <div>
-              Dateien verändert: nein
-            </div>
-            <div>
-              Ordner verändert: nein
-            </div>
-            <div>
-              Datenbank verändert: nein
-            </div>
-            <div>
-              Gleiches Dateisystem: ${
-                summary.same_filesystem
-                  ? "ja"
-                  : "nein"
-              }
-            </div>
-            <div>
-              Familien auf mehrere Ziele verteilt: ${
-                Number(summary.family_split_count || 0)
-              }
-            </div>
+            <div>Modus: rein lesender Sortierplan</div>
+            <div>Dateien verändert: nein</div>
+            <div>Ordner verändert: nein</div>
+            <div>Datenbank verändert: nein</div>
+            <div>Gleiches Dateisystem: ${summary.same_filesystem ? "ja" : "nein"}</div>
+            <div>Familien auf mehrere Ziele verteilt: ${Number(summary.family_split_count || 0)}</div>
           </div>
-        </section>
+        </details>
 
-        <section class="sort-plan-section">
-          <h3>Arbeitsbestand</h3>
+        <details class="sort-plan-section sort-plan-disclosure">
+          <summary>Arbeitsbestand</summary>
           <div class="path-box">
-            <div>
-              Quelle: ${escapeHtml(plan.source_root)}
-            </div>
-            <div>
-              Ziel: ${escapeHtml(plan.target_root)}
-            </div>
-            <div>
-              Freier Speicher: ${formatBytes(
-                summary.available_bytes
-              )}
-            </div>
+            <div>Quelle: ${escapeHtml(plan.source_root)}</div>
+            <div>Ziel: ${escapeHtml(plan.target_root)}</div>
+            <div>Freier Speicher: ${formatBytes(summary.available_bytes)}</div>
           </div>
-        </section>
+        </details>
 
-        <section class="sort-plan-section">
-          <h3>Zielstruktur</h3>
-          <pre class="plan-tree">${escapeHtml(
-            plan.structure_text
-          )}</pre>
-        </section>
+        <details class="sort-plan-section sort-plan-disclosure" open>
+          <summary>Zielstruktur</summary>
+          <pre class="plan-tree">${escapeHtml(plan.structure_text)}</pre>
+        </details>
 
         <section class="sort-plan-section">
           <h3>Blocker</h3>
@@ -2057,7 +2056,12 @@ EVENTS_HTML = r"""<!doctype html>
 
         applyButton.addEventListener(
           "click",
-          () => applyCurrentSortPlan().catch(
+          () => {
+            if (applyButton.dataset.completed === "true") {
+              sortPlanDialog.close();
+              return;
+            }
+            applyCurrentSortPlan().catch(
             error => {
               const statusContainer =
                 document.getElementById(
@@ -2078,7 +2082,8 @@ EVENTS_HTML = r"""<!doctype html>
                 true
               );
             }
-          )
+          );
+          }
         );
       }
     }
@@ -2178,7 +2183,20 @@ EVENTS_HTML = r"""<!doctype html>
 
         if (run.terminal) {
           if (run.status === "applied") {
-            await loadEvents();
+            await loadEvents({reset:true});
+            refreshGlobalTasks();
+
+            const applyButton = document.getElementById("sort-apply-button");
+            const confirmation = document.getElementById("sort-apply-confirmation");
+            if (confirmation?.closest(".sort-apply-confirm")) {
+              confirmation.closest(".sort-apply-confirm").hidden = true;
+            }
+            if (applyButton) {
+              applyButton.disabled = false;
+              applyButton.dataset.completed = "true";
+              applyButton.textContent = "Schließen";
+            }
+
             setStatus(
               "Sortierung vollständig angewendet und geprüft.",
               false,
