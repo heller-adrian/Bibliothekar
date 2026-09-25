@@ -3,9 +3,23 @@ import json
 from pathlib import Path
 
 
+WORKSPACE_BRANCHES = {"Alle", "Sortiert", "Export"}
+
+
 def cleanup_obsolete_structure(root: Path, sources, destinations, event_ids):
     root = root.resolve()
     destinations = {Path(p).resolve() for p in destinations}
+
+    # A concrete destination in one standard branch makes the sibling branches
+    # part of the active managed target as well. Never prune empty Sortiert /
+    # Export merely because all camera originals currently live in Alle.
+    active_branch_roots = set()
+    for target in destinations:
+        for parent in (target.parent, *target.parents):
+            if parent.name in WORKSPACE_BRANCHES and root in parent.parents:
+                active_branch_roots.add(parent.parent)
+                break
+
     candidates = set()
     documents = set()
     for source in sources:
@@ -37,6 +51,8 @@ def cleanup_obsolete_structure(root: Path, sources, destinations, event_ids):
     removed=[]
     for directory in sorted(candidates,key=lambda p:len(p.parts),reverse=True):
         if directory==root or directory.is_symlink() or any(directory in target.parents for target in destinations):
+            continue
+        if directory.name in WORKSPACE_BRANCHES and directory.parent in active_branch_roots:
             continue
         try:
             directory.rmdir()

@@ -1924,6 +1924,15 @@ def list_job_events(
                 FROM event_reapply_removed_families
                 WHERE job_id = ? AND target_event_id IS NULL
                 GROUP BY event_id
+            ),
+
+            reconcile_targets AS (
+                SELECT target_event_id,
+                       MIN(event_id) AS reconcile_source_event_id,
+                       COUNT(*) AS reconcile_link_count
+                FROM event_reapply_removed_families
+                WHERE job_id = ? AND target_event_id IS NOT NULL
+                GROUP BY target_event_id
             )
 
             SELECT
@@ -1957,7 +1966,12 @@ def list_job_events(
                     WHEN e.event_level = 'parent'
                     THEN COALESCE(pending.pending_count, 0)
                     ELSE 0
-                END AS pending_reassignment_count
+                END AS pending_reassignment_count,
+
+                CASE WHEN reconcile_target.target_event_id IS NOT NULL THEN 1 ELSE 0 END
+                    AS reconcile_target,
+                reconcile_target.reconcile_source_event_id AS reconcile_source_event_id,
+                COALESCE(reconcile_target.reconcile_link_count, 0) AS reconcile_link_count
 
             FROM events AS e
 
@@ -1970,6 +1984,9 @@ def list_job_events(
             LEFT JOIN pending_reassignments AS pending
                 ON pending.event_id = e.id
 
+            LEFT JOIN reconcile_targets AS reconcile_target
+                ON reconcile_target.target_event_id = e.id
+
             WHERE e.job_id = ?
 
             ORDER BY
@@ -1978,6 +1995,7 @@ def list_job_events(
                 e.name
             """,
             (
+                job_id,
                 job_id,
                 job_id,
                 job_id,
@@ -2028,18 +2046,27 @@ def search_events(
               SELECT id,job_id,anchor_event_id,status,affected_event_ids_json
               FROM event_mutations
               WHERE status IN ('pending_reassignment','pending_apply','manual_archive')
+            ), reconcile_target AS (
+              SELECT target_event_id, MIN(event_id) AS source_event_id, COUNT(*) AS link_count
+              FROM event_reapply_removed_families
+              WHERE target_event_id IS NOT NULL
+              GROUP BY target_event_id
             )
             SELECT e.*, COALESCE(root.family_count,0) AS assigned_family_count,
                    COALESCE(root.file_count,0) AS assigned_file_count,
                    COALESCE(pending.pending_count,0) AS pending_reassignment_count,
                    active_mutation.id AS mutation_id, active_mutation.status AS mutation_status,
                    active_mutation.anchor_event_id AS mutation_anchor_event_id,
+                   CASE WHEN reconcile_target.target_event_id IS NOT NULL THEN 1 ELSE 0 END AS reconcile_target,
+                   reconcile_target.source_event_id AS reconcile_source_event_id,
+                   COALESCE(reconcile_target.link_count,0) AS reconcile_link_count,
                    j.created_at AS job_created_at, j.source_volume_label, j.operation
             FROM events e
             JOIN jobs j ON j.id=e.job_id
             LEFT JOIN root_counts root ON root.root_event_id=e.id
             LEFT JOIN pending ON pending.event_id=e.id
             LEFT JOIN active_mutation ON active_mutation.job_id=e.job_id
+            LEFT JOIN reconcile_target ON reconcile_target.target_event_id=e.id
             WHERE {where_sql}
             ORDER BY COALESCE(e.updated_at,e.created_at) DESC, e.start_datetime DESC
             LIMIT ? OFFSET ?
@@ -3804,10 +3831,14 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
         # sie müssen noch angewendet werden. Erweiterungs-/Nachtragszeilen werden
         # dabei genauso behandelt, weil auch sie einen offenen Sortierlauf darstellen.
         for row in connection.execute(
-            """SELECT id,job_id,name,folder_name FROM events
-               WHERE parent_event_id IS NULL AND status='planned'
-                 AND COALESCE(TRIM(linkage_kind),'')=''
-               ORDER BY updated_at"""
+            """SELECT e.id,e.job_id,e.name,e.folder_name FROM events e
+               WHERE e.parent_event_id IS NULL AND e.status='planned'
+                 AND COALESCE(TRIM(e.linkage_kind),'')=''
+                 AND NOT EXISTS (
+                   SELECT 1 FROM event_reapply_removed_families r
+                   WHERE r.target_event_id=e.id
+                 )
+               ORDER BY e.updated_at"""
         ).fetchall():
             tasks.append({
                 'kind': 'planned_apply', 'job_id': row['job_id'], 'event_id': row['id'],

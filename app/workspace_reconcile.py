@@ -8,7 +8,7 @@ physisch verändert; sie werden als manueller Anteil gemeldet.
 from __future__ import annotations
 
 from collections import deque
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 import hashlib
 import json
@@ -176,6 +176,40 @@ def _recover_missing_workspace_sources(plans: list[dict[str, Any]]) -> list[dict
     return plans
 
 
+def _workspace_structure_text(
+    directory_rows: list[dict[str, Any]],
+    archived_impacts: list[dict[str, Any]] | None = None,
+) -> str:
+    """Render the actual planned folder tree for the shared reconciliation."""
+    tree: dict[str, Any] = {}
+    for row in directory_rows:
+        raw = str(row.get("relative_path") or "").strip()
+        if not raw:
+            continue
+        node = tree
+        for part in PurePosixPath(raw).parts:
+            node = node.setdefault(part, {})
+
+    lines: list[str] = []
+
+    def render(node: dict[str, Any], prefix: str = "") -> None:
+        items = sorted(node.items(), key=lambda item: item[0].casefold())
+        for index, (name, children) in enumerate(items):
+            last = index == len(items) - 1
+            lines.append(prefix + ("└── " if last else "├── ") + name)
+            render(children, prefix + ("    " if last else "│   "))
+
+    for name, children in sorted(tree.items(), key=lambda item: item[0].casefold()):
+        lines.append(name)
+        render(children)
+
+    for item in archived_impacts or []:
+        if lines:
+            lines.append("")
+        lines.append(f"ARCHIVIERT · {item['name']} · nur manueller Auftrag")
+    return "\n".join(lines) or "Keine Zielstruktur vorhanden."
+
+
 def _event_interval(row: Any) -> tuple[str, str]:
     return (str(row["start_datetime"] or "")[:19], str(row["end_datetime"] or "")[:19])
 
@@ -301,11 +335,10 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     anchor_plan = next((p for p in plans if str(p.get("event",{}).get("id")) == anchor_event_id), plans[0] if plans else None)
     event_obj = dict(anchor_plan.get("event") or {}) if anchor_plan else {"id":anchor_event_id,"name":"Gemeinsame Änderung"}
     job_obj = dict(anchor_plan.get("job") or {}) if anchor_plan else {"id":job_id}
-    structure_lines=["Gemeinsamer Arbeitsbereich-Abgleich"]
-    for p in plans:
-        structure_lines.append(f"├── {p.get('event',{}).get('name','Ereignis')} · applied")
-    for item in archived_impacts:
-        structure_lines.append(f"└── ARCHIVIERT: {item['name']} · nur manueller Auftrag")
+    structure_text = _workspace_structure_text(
+        list(directories.values()),
+        archived_impacts,
+    )
     payload={
         "job_id":job_id,"anchor_event_id":anchor_event_id,"event_ids":event_ids,
         "archived_impacts":archived_impacts,
@@ -320,7 +353,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
         "source_root":str(anchor_plan.get("target_root") or "") if anchor_plan else "",
         "target_root":str(anchor_plan.get("target_root") or "") if anchor_plan else "",
         "directories":list(directories.values()),"blockers":blockers,"warnings":warnings,
-        "structure_text":"\n".join(structure_lines),
+        "structure_text":structure_text,
         "plan_token":token,"apply_confirmation_phrase":CONFIRMATION_PHRASE,
         "summary":{"ready":not blockers and not archived_impacts,"event_count":len(event_ids),"file_count":len(files),"family_count":len(families),"target_group_count":len(target_groups),"move_count":move_count,"directory_count":len(directories),"directory_create_count":sum(1 for d in directories.values() if not d.get('exists')),"total_size_bytes":total,"available_bytes":int((anchor_plan.get("summary") or {}).get("available_bytes") or 0) if anchor_plan else 0,"required_extra_bytes":0,"same_filesystem":True if anchor_plan else False,"archived_event_count":len(archived_impacts),"blocker_count":len(blockers)},
         "manual_archive_required":bool(archived_impacts),
