@@ -360,13 +360,18 @@ WORKSPACE_HTML = r"""<!doctype html>
       gap: 8px;
       min-width: 0;
     }
-    .event-boundaries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-    .event-boundary{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(110px,.75fr);gap:8px;align-items:end}
-    .create-subevents{display:grid;gap:8px;margin-top:4px}
-    .create-subevent-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
-    .create-subevent-card{border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:10px}
-    .create-subevent-grid{display:grid;grid-template-columns:minmax(150px,1.2fr) repeat(2,minmax(170px,1fr));gap:8px;align-items:end}
-    .create-subevent-boundary{display:grid;grid-template-columns:minmax(0,1fr) 100px;gap:6px;align-items:end}
+    #event-dialog{inline-size:min(700px,calc(100dvw - 32px))}
+    .event-boundaries{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+    .event-boundary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(130px,.7fr);gap:10px;align-items:end}
+    .create-subevents{display:grid;gap:10px;margin-top:4px}
+    .create-subevent-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .create-subevent-head button{white-space:nowrap;min-height:38px;padding:8px 12px}
+    .create-subevent-card{border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:12px}
+    .create-subevent-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;align-items:end}
+    .create-subevent-name{display:grid}
+    .create-subevent-boundary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(130px,.7fr);gap:8px;align-items:end}
+    .create-subevent-end-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
+    .create-subevent-remove{white-space:nowrap;align-self:end;min-height:44px}
     .dialog-inline-error{margin-top:12px;border:1px solid var(--danger,#b42318);border-radius:10px;background:color-mix(in srgb,var(--danger,#b42318) 10%,var(--surface));color:var(--text);padding:10px 12px;font-weight:650}
     .existing-segment-static{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);padding:9px 10px}
     .selection-bar-anchor{height:0}
@@ -440,7 +445,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         flex-wrap:wrap;
       }
     }
-    @media (max-width:820px){.event-boundaries,.create-subevent-grid,.create-subevent-boundary{grid-template-columns:1fr}}
+    @media (max-width:820px){.event-boundaries,.event-boundary,.create-subevent-grid,.create-subevent-boundary,.create-subevent-end-row{grid-template-columns:1fr}.create-subevent-remove{width:100%}}
 
     .preview {
       position: sticky;
@@ -1238,7 +1243,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         <div id="create-subevents" class="create-subevents full-width">
           <div class="create-subevent-head">
-            <div><strong>Unterereignisse (optional)</strong><div class="muted" style="font-size:.86rem;margin-top:2px">Unterereignisse organisieren Teilzeiträume; Lücken bleiben beim Oberereignis.</div></div>
+            <strong>Unterereignisse (optional)</strong>
             <button id="add-create-subevent" type="button">＋ Unterereignis hinzufügen</button>
           </div>
           <div id="create-subevent-list" style="display:grid;gap:8px"></div>
@@ -1406,33 +1411,27 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function selectionDockGeometry(){
-      const anchorRect=selectionBarAnchor.getBoundingClientRect();
       const subnavRect=workspaceSubnav.getBoundingClientRect();
-      const dockRect=selectionDockTarget.getBoundingClientRect();
       const compactHeight=42;
-      const preferredLeft=subnavRect.left+subnavRect.width*.26;
 
       if(window.innerWidth<=1180){
         const style=getComputedStyle(workspaceSubnav);
-        const leftInset=Number.parseFloat(style.paddingLeft)||0;
         const rightInset=Number.parseFloat(style.paddingRight)||0;
-        const left=Math.max(
-          subnavRect.left+leftInset+220,
-          subnavRect.left+subnavRect.width*.24
-        );
         return {
-          left,
-          width:Math.max(1,subnavRect.right-rightInset-left),
+          right:subnavRect.right-rightInset,
           top:subnavRect.top+Math.max(0,(subnavRect.height-compactHeight)/2)
         };
       }
 
-      const left=Math.max(dockRect.left,preferredLeft);
       return {
-        left,
-        width:Math.max(1,subnavRect.right-left-12),
+        right:subnavRect.right-12,
         top:subnavRect.top+Math.max(0,(subnavRect.height-compactHeight)/2)
       };
+    }
+
+    function selectionFrameLeft(anchorLeft,targetLeft,xProgress,summaryLeft,padding=14){
+      const curved=anchorLeft+(targetLeft-anchorLeft)*clamp01(xProgress);
+      return Math.min(curved,summaryLeft-padding);
     }
 
     function clearSelectionMorphStyles(){
@@ -1492,14 +1491,24 @@ WORKSPACE_HTML = r"""<!doctype html>
       // Größenänderungen beginnen sanft und enden weniger kompakt als zuvor.
       const compactP=smoothStep(clamp01(p/.86));
 
-      const left=anchorRect.left+(target.left-anchorRect.left)*xP;
       const top=anchorRect.top+(target.top-anchorRect.top)*yP;
-      const width=anchorRect.width+(target.width-anchorRect.width)*xP;
 
       const summaryP=smoothStep(clamp01(p/.88));
       const summaryTargetCenter=window.innerWidth/2;
       const summaryCenter=selectionSummaryStartCenter
         +(summaryTargetCenter-selectionSummaryStartCenter)*summaryP;
+      const summaryWidth=selectionSummary?.getBoundingClientRect().width||0;
+      const summaryLeft=summaryCenter-summaryWidth/2;
+      const targetFrameLeft=summaryTargetCenter-summaryWidth/2-14;
+      const left=selectionFrameLeft(
+        anchorRect.left,
+        targetFrameLeft,
+        xP,
+        summaryLeft,
+        14
+      );
+      const right=anchorRect.right+(target.right-anchorRect.right)*xP;
+      const width=Math.max(1,right-left);
 
       const padY=12+(2-12)*compactP;
       const padLeft=12+(9-12)*compactP;
@@ -1528,7 +1537,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       selectionBar.style.setProperty("margin","0","important");
 
       if(selectionSummary){
-        const summaryWidth=selectionSummary.getBoundingClientRect().width;
         selectionSummary.style.position="absolute";
         selectionSummary.style.left=(summaryCenter-left-summaryWidth/2)+"px";
         selectionSummary.style.top="50%";
@@ -2867,7 +2875,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     function addCreateSubeventCard(value={}){
       const row=document.createElement("details");row.className="create-subevent-card";row.dataset.createSubevent="1";row.open=true;
       const sd=String(value.start_date||eventStartDate.value||""),ed=String(value.end_date||eventEndDate.value||sd);
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(value.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><label><span>Name</span><input data-create-child-name value="${escapeHtml(value.name||"")}" placeholder="Zum Beispiel Konzert"></label><div class="create-subevent-boundary"><label><span>Beginn</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(value.start_time||"00:00")}"></label></div><div class="create-subevent-boundary"><label><span>Ende</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(value.end_time||"23:59")}"></label></div></div><div style="display:flex;justify-content:flex-end;margin-top:8px"><button type="button" class="danger-button" data-remove-create-subevent>Unterereignis entfernen</button></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(value.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(value.name||"")}" placeholder="Zum Beispiel Konzert"></label><div class="create-subevent-boundary"><label><span>Beginn</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(value.start_time||"00:00")}"></label></div><div class="create-subevent-end-row"><div class="create-subevent-boundary"><label><span>Ende</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(value.end_time||"23:59")}"></label></div><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
       row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});

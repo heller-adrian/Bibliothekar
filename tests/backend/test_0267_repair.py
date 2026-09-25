@@ -102,6 +102,8 @@ def test_0267_sticky_header_is_scroll_linked_and_not_time_triggered():
     assert "const xP=1-Math.pow(1-p,2.15)" in WORKSPACE_HTML
     assert "const yP=normalizedExpo(p,1.35,6)" in WORKSPACE_HTML
     assert "const summaryTargetCenter=window.innerWidth/2" in WORKSPACE_HTML
+    assert "function selectionFrameLeft(anchorLeft,targetLeft,xProgress,summaryLeft,padding=14)" in WORKSPACE_HTML
+    assert "const targetFrameLeft=summaryTargetCenter-summaryWidth/2-14" in WORKSPACE_HTML
     assert "let selectionSummaryStartCenter=0" in WORKSPACE_HTML
     assert 'selectionSummary.style.position="absolute"' in WORKSPACE_HTML
     assert "const compactP=smoothStep(clamp01(p/.86))" in WORKSPACE_HTML
@@ -162,3 +164,28 @@ def test_0267_selection_summary_targets_true_viewport_center():
     assert 'selectionSummary.style.left=(summaryCenter-left-summaryWidth/2)+"px"' in WORKSPACE_HTML
     assert "margin-left:auto" in WORKSPACE_HTML
     assert "z-index:3105 !important" in WORKSPACE_HTML
+
+
+def test_0267_selection_frame_keeps_summary_inside_and_finishes_snug():
+    start = WORKSPACE_HTML.index("    function clamp01(value)")
+    end = WORKSPACE_HTML.index("    function clearSelectionMorphStyles()", start)
+    helpers = WORKSPACE_HTML[start:end]
+    script = helpers + r"""
+const summaryLeft=500;
+const midway=selectionFrameLeft(100,486,.75,summaryLeft,14);
+if (midway > 486) throw new Error("frame must never overtake summary left edge");
+const end=selectionFrameLeft(100,486,1,summaryLeft,14);
+if (end !== 486) throw new Error("end frame must finish 14px before summary");
+"""
+    subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+
+
+def test_0267_event_creation_dialog_uses_spacious_two_row_layout():
+    assert "#event-dialog{inline-size:min(700px" in WORKSPACE_HTML
+    assert ".event-boundaries{display:grid;grid-template-columns:minmax(0,1fr)" in WORKSPACE_HTML
+    assert ".create-subevent-grid{display:grid;grid-template-columns:minmax(0,1fr)" in WORKSPACE_HTML
+    assert ".create-subevent-end-row{display:grid;grid-template-columns:minmax(0,1fr) auto" in WORKSPACE_HTML
+    assert 'class="create-subevent-name"' in WORKSPACE_HTML
+    assert 'class="danger-button create-subevent-remove"' in WORKSPACE_HTML
+    assert "Unterereignisse organisieren Teilzeiträume" not in WORKSPACE_HTML
+    assert ".create-subevent-head button{white-space:nowrap" in WORKSPACE_HTML

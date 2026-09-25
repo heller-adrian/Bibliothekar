@@ -37,6 +37,8 @@ def test_0266_event_creation_uses_real_subevents_and_paired_boundaries():
     assert "collectCreateSubevents()" in WORKSPACE_HTML
     assert "subevents:" in WORKSPACE_HTML
     assert 'id="child-event-name"' not in WORKSPACE_HTML
+    assert 'class="create-subevent-end-row"' in WORKSPACE_HTML
+    assert "Unterereignisse organisieren Teilzeiträume" not in WORKSPACE_HTML
 
 
 def test_0266_noevent_preview_is_complex_and_workspace_controls_can_dock():
