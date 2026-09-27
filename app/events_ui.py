@@ -1261,6 +1261,7 @@ EVENTS_HTML = r"""<!doctype html>
     let jobs = [];
     let currentEvents = [];
     let currentSortPlan = null;
+    let mandatoryMutationContext = null;
 
 
     function escapeHtml(value) {
@@ -1740,11 +1741,15 @@ EVENTS_HTML = r"""<!doctype html>
       let familyIndex = 0;
 
       sortPlanTitle.textContent =
-        `${plan._reconcile ? "Nachsortierplan" : "Sortierplan"} · ${plan.event.name}`;
+        `${plan._mandatory ? "Änderungen anwenden" : (plan._reconcile ? "Nachsortierplan" : "Sortierplan")} · ${plan.event.name}`;
 
-      sortPlanSubtitle.textContent = ready
-        ? "Die rein lesende Prüfung ist ohne Blocker abgeschlossen."
-        : "Die Planung ist blockiert. Es wurde nichts verändert.";
+      sortPlanSubtitle.textContent = plan._mandatory
+        ? (ready
+          ? "Diese Applied-Änderung muss jetzt angewendet oder vollständig verworfen werden."
+          : "Die Änderung ist blockiert. Sie kann nur korrigiert/verworfen werden; nichts wurde physisch verändert.")
+        : (ready
+          ? "Die rein lesende Prüfung ist ohne Blocker abgeschlossen."
+          : "Die Planung ist blockiert. Es wurde nichts verändert.");
 
       const cards = [
         [
@@ -2084,6 +2089,11 @@ EVENTS_HTML = r"""<!doctype html>
           "sort-apply-button"
         );
 
+      if (mandatoryMutationContext && applyConfirmation && applyButton) {
+        applyConfirmation.checked = true;
+        applyButton.disabled = false;
+      }
+
       if (applyConfirmation && applyButton) {
         applyConfirmation.addEventListener(
           "change",
@@ -2097,6 +2107,10 @@ EVENTS_HTML = r"""<!doctype html>
           "click",
           () => {
             if (applyButton.dataset.completed === "true") {
+              mandatoryMutationContext=null;
+              sortPlanCloseButton.hidden=false;
+              sortPlanCloseButton.textContent="Schließen";
+              sortPlanCloseButton.classList.remove("danger-button");
               sortPlanDialog.close();
               return;
             }
@@ -2234,6 +2248,10 @@ EVENTS_HTML = r"""<!doctype html>
               applyButton.disabled = false;
               applyButton.dataset.completed = "true";
               applyButton.textContent = "Schließen";
+            }
+            if (mandatoryMutationContext) {
+              mandatoryMutationContext = null;
+              sortPlanCloseButton.hidden = true;
             }
 
             setStatus(
@@ -2613,7 +2631,7 @@ EVENTS_HTML = r"""<!doctype html>
         </div>
         <div class="edit-actions">
           <button type="button" id="edit-cancel">Abbrechen</button>
-          <button type="submit" class="plan-button bk-positive-action">Änderungen speichern</button>
+          <button type="submit" class="plan-button bk-positive-action">${event.status === "applied" ? "Änderungen anwenden" : "Änderungen speichern"}</button>
         </div>`;
 
       if (!noEvent) {
@@ -2673,6 +2691,31 @@ EVENTS_HTML = r"""<!doctype html>
       renderEventEditor(context);
     }
 
+    function confirmEditEmptySubevents(error) {
+      if (error?.data?.confirmation_required !== "empty_subevents") return false;
+      const names=(error.data.empty_subevents||[]).map(item=>String(item.name||"Unterereignis"));
+      return window.confirm(
+        "Mindestens ein Unterereignis enthält aktuell keine passenden Dateifamilien."
+        + (names.length ? "\n\nOhne passende Dateifamilien: "+names.join(", ") : "")
+        + "\n\nDie leere Ordnerstruktur wird trotzdem angelegt. Trotzdem fortfahren?"
+      );
+    }
+
+    async function updateEventWithEmptySubeventConfirmation(context, payload) {
+      const url=`/api/jobs/${encodeURIComponent(context._job_id)}/events/${encodeURIComponent(context.event.id)}`;
+      const requestBody=body=>requestJson(url,{
+        method:"PUT",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body),
+      });
+      try {
+        return await requestBody(payload);
+      } catch (error) {
+        if (!confirmEditEmptySubevents(error)) throw error;
+        return requestBody({...payload,confirm_empty_subevents:true});
+      }
+    }
+
     async function saveEventEditor() {
       const context = currentEditContext;
       if (!context) return;
@@ -2702,7 +2745,16 @@ EVENTS_HTML = r"""<!doctype html>
             end_date:document.getElementById('edit-end-date').value,
             start_time:document.getElementById('edit-start-time').value,end_time:document.getElementById('edit-end-time').value,
             uses_time_range:true,preserve_day_folders:document.getElementById('edit-preserve').value==='1',
-            subevents:[...eventEditBody.querySelectorAll('[data-child-segment]')].map(row=>({id:row.dataset.childId||null,name:row.querySelector('[data-child-name]').value,start_datetime:row.querySelector('[data-child-start]').value,end_datetime:row.querySelector('[data-child-end]').value}))
+            subevents:[...eventEditBody.querySelectorAll('[data-child-segment]')].map(row=>({
+              id:row.dataset.childId||null,
+              name:row.querySelector('[data-child-name]').value,
+              start_datetime:row.querySelector('[data-child-start]')
+                ? row.querySelector('[data-child-start]').value
+                : `${row.querySelector('[data-child-start-date]').value}T${row.querySelector('[data-child-start-time]').value}:00`,
+              end_datetime:row.querySelector('[data-child-end]')
+                ? row.querySelector('[data-child-end]').value
+                : `${row.querySelector('[data-child-end-date]').value}T${row.querySelector('[data-child-end-time]').value}:59`
+            }))
           });
         }
       }
@@ -2721,13 +2773,7 @@ EVENTS_HTML = r"""<!doctype html>
       }
       setStatus("Ereignisänderungen werden gespeichert …");
       let result;
-      try {
-        result = await requestJson(`/api/jobs/${encodeURIComponent(context._job_id)}/events/${encodeURIComponent(context.event.id)}`, {
-          method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload),
-        });
-      } catch (error) {
-        throw error;
-      }
+      result = await updateEventWithEmptySubeventConfirmation(context, payload);
       eventEditDialog.close();
 
       if (result.archive_manual?.change_request_ids?.length) {
@@ -2738,20 +2784,31 @@ EVENTS_HTML = r"""<!doctype html>
         refreshGlobalTasks();
         return;
       }
+      const cascadeNeedsReconcile = (result.cascade?.preview?.items || []).some(
+        item => String(item.status || "") === "applied"
+      );
+      const needsReconcile = Boolean(result.resort_required || cascadeNeedsReconcile);
+      const appliedTransaction = context.event.status === "applied" && Boolean(result.mutation_id);
+
+      if (appliedTransaction && needsReconcile) {
+        await loadEvents({reset:true});
+        await loadReapplyPlan(
+          context.event.id,
+          context._job_id,
+          {mandatory:true,mutationId:result.mutation_id}
+        );
+        setStatus(
+          "Applied-Änderung vorbereitet. Jetzt anwenden oder vollständig verwerfen.",
+          false,
+          true
+        );
+        return;
+      }
+
       if (result.reassignment_required && (result.removed_family_ids || []).length) {
         await openReassignmentWorkflow(context.event.id, context._job_id, Boolean(result.resort_required));
       } else {
-        // Eine bestätigte Kaskade bleibt eine gemeinsame Operation. Bei
-        // applied-Bestand wird der gemeinsame Reconcile-Plan jedoch nur
-        // angezeigt; die Dateioperation benötigt anschließend die ausdrückliche
-        // Bestätigung des Nutzers.
-        const cascadeNeedsReconcile = (result.cascade?.preview?.items || []).some(
-          item => String(item.status || "") === "applied"
-        );
-        const needsReconcile = Boolean(result.resort_required || cascadeNeedsReconcile);
         if (needsReconcile) {
-          // 0.16.10: genau EIN Lauf für die gesamte verbundene Änderungsgruppe.
-          // Der Abgleich ermittelt selbst alle betroffenen applied-Ereignisse.
           await loadReapplyPlan(context.event.id, context._job_id);
           setStatus(
             "Änderung gespeichert. Bitte den angezeigten Nachsortierplan prüfen und ausdrücklich bestätigen.",
@@ -2762,7 +2819,7 @@ EVENTS_HTML = r"""<!doctype html>
           const plannedCascade = String(result.mutation_id || "") && !Boolean(result.resort_required);
           setStatus(
             plannedCascade
-              ? "Gemeinsame Planänderung gespeichert. Es wurden keine Dateien verschoben; die beteiligten Ereignisse bleiben bis zur Anwendung gesperrt oder können gemeinsam verworfen werden."
+              ? "Gemeinsame Planänderung gespeichert."
               : "Ereignis wurde gespeichert.",
             false, true
           );
@@ -2819,10 +2876,18 @@ EVENTS_HTML = r"""<!doctype html>
 
     reassignmentClose.addEventListener("click", () => reassignmentDialog.close());
 
-    async function loadReapplyPlan(eventId, jobId) {
+    async function loadReapplyPlan(eventId, jobId, options={}) {
       const event = currentEvents.find(item => item.id === eventId && (!jobId || item._job_id === jobId));
       if (!jobId || !event) throw new Error("Ereignis wurde nicht gefunden.");
-      sortPlanTitle.textContent = `Nachsortierung · ${event.name}`;
+      mandatoryMutationContext = options.mandatory
+        ? {eventId,jobId,mutationId:String(options.mutationId||event.mutation_id||"")}
+        : null;
+      sortPlanCloseButton.hidden = false;
+      sortPlanCloseButton.textContent = mandatoryMutationContext ? "Änderungen verwerfen" : "Schließen";
+      sortPlanCloseButton.classList.toggle("danger-button", Boolean(mandatoryMutationContext));
+      sortPlanTitle.textContent = mandatoryMutationContext
+        ? `Änderungen anwenden · ${event.name}`
+        : `Nachsortierung · ${event.name}`;
       sortPlanSubtitle.textContent = "Alte und neue Pfade werden rein lesend geprüft …";
       sortPlanBody.textContent = "Dateien, Ziele und Konflikte werden geprüft …";
       if (!sortPlanDialog.open) sortPlanDialog.showModal();
@@ -2830,10 +2895,15 @@ EVENTS_HTML = r"""<!doctype html>
       plan._job_id = jobId;
       plan._reapply = true;
       plan._reconcile = true;
+      plan._mandatory = Boolean(mandatoryMutationContext);
       renderSortPlan(plan);
     }
 
     async function loadSortPlan(eventId, jobId) {
+      mandatoryMutationContext = null;
+      sortPlanCloseButton.hidden = false;
+      sortPlanCloseButton.textContent = "Schließen";
+      sortPlanCloseButton.classList.remove("danger-button");
       const event = currentEvents.find(
         item => item.id === eventId && (!jobId || item._job_id === jobId)
       );
@@ -2894,7 +2964,7 @@ EVENTS_HTML = r"""<!doctype html>
       const statusText = event.status === "planned" || event.status === "draft"
         ? "Die Planung wird sofort entfernt; Dateien und Ordner bleiben unverändert."
         : event.status === "applied"
-          ? "Die Familien müssen anschließend neu zugeordnet werden. Danach prüfst und bestätigst du den Nachsortierplan; erst dann wird das leere Ereignis entfernt."
+          ? "Die Dateien werden nach deiner Bestätigung wieder in den freien Tagesbestand zurückgeführt. Anschließend wird das Ereignis wirklich entfernt. Dieser Vorgang muss jetzt angewendet oder verworfen werden."
           : "Für den archivierten Bestand wird ein manueller IST→SOLL-Löschauftrag erstellt. Die Kamerabibliothek bleibt read-only.";
       const confirmed = window.confirm(`Ereignis „${event.name}“ löschen?\n\n${statusText}`);
 
@@ -2915,19 +2985,30 @@ EVENTS_HTML = r"""<!doctype html>
         }
       );
 
-      await loadEvents({reset:true});
-      refreshGlobalTasks();
       if (result.change_request_id) {
+        await loadEvents({reset:true});
+        refreshGlobalTasks();
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
         await showChangeRequestDetail(result.change_request_id);
         setStatus("Manueller Löschauftrag erstellt. Die Kamerabibliothek wurde nicht verändert.", false, true);
         return;
       }
-      if (result.pending_delete && result.reassignment_required) {
-        setStatus(result.message || "Löschung vorbereitet; Familien neu zuordnen.", false, true);
-        await openReassignmentWorkflow(eventId, jobId, true);
+      if (result.pending_delete) {
+        await loadEvents({reset:true});
+        await loadReapplyPlan(
+          eventId,
+          jobId,
+          {mandatory:true,mutationId:result.mutation_id}
+        );
+        setStatus(
+          "Löschung vorbereitet. Jetzt anwenden oder vollständig verwerfen.",
+          false,
+          true
+        );
         return;
       }
+      await loadEvents({reset:true});
+      refreshGlobalTasks();
       setStatus(`Ereignis gelöscht: ${result.event_name} · ${Number(result.released_family_count||0)} Familien wieder frei.`, false, true);
     }
 
@@ -2942,10 +3023,35 @@ EVENTS_HTML = r"""<!doctype html>
       saveEventEditor().catch(error => showEventEditError(error.message));
     });
 
+    async function discardMandatoryMutation() {
+      const ctx=mandatoryMutationContext;
+      if (!ctx) {
+        sortPlanDialog.close();
+        return;
+      }
+      if (!window.confirm("Diese Applied-Änderung vollständig verwerfen und den Zustand vor der Bearbeitung wiederherstellen?")) return;
+      await requestJson(
+        `/api/jobs/${encodeURIComponent(ctx.jobId)}/event-mutations/${encodeURIComponent(ctx.mutationId)}/cancel`,
+        {method:"POST"}
+      );
+      mandatoryMutationContext=null;
+      sortPlanDialog.close();
+      sortPlanCloseButton.classList.remove("danger-button");
+      sortPlanCloseButton.textContent="Schließen";
+      sortPlanCloseButton.hidden=false;
+      await loadEvents({reset:true});
+      refreshGlobalTasks();
+      setStatus("Änderung verworfen. Der vorherige Zustand wurde wiederhergestellt.",false,true);
+    }
+
     sortPlanCloseButton.addEventListener(
       "click",
-      () => sortPlanDialog.close()
+      () => discardMandatoryMutation().catch(error=>setStatus(error.message,true))
     );
+
+    sortPlanDialog.addEventListener("cancel", event => {
+      if (mandatoryMutationContext) event.preventDefault();
+    });
 
 
     eventList.addEventListener(
@@ -3385,6 +3491,20 @@ EVENTS_HTML = r"""<!doctype html>
           const target = (data.events||[]).find(item=>item.id===eventId);
           if (target && !currentEvents.some(item=>item.id===eventId)) currentEvents.push({...target,_job_id:jobId});
           await loadReapplyPlan(eventId, jobId);
+        }
+      }
+      if (!task) {
+        const pending=currentEvents.find(item =>
+          item.status === "applied"
+          && item.mutation_id
+          && item.id === item.mutation_anchor_event_id
+        );
+        if (pending) {
+          await loadReapplyPlan(
+            pending.id,
+            pending._job_id || pending.job_id,
+            {mandatory:true,mutationId:pending.mutation_id}
+          );
         }
       }
       refreshGlobalTasks();
