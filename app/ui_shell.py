@@ -321,13 +321,6 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
   overflow: visible;
   isolation: isolate;
 }
-.bk-shell.has-open-task-panel {
-  z-index: 10000;
-}
-.bk-shell.has-open-task-panel .bk-task-panel {
-  z-index: 10001;
-}
-
 .bk-shell::after {
   content: "";
   position: absolute;
@@ -581,6 +574,8 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
  * links um einen zusätzlichen responsiven Bleed verlängert. So bleibt die
  * Fuge Import -> Arbeitsbereich auch auf Handy/engen Fenstern geschlossen. */
 @media (max-width: 820px) {
+  .bk-capture-heading { display:block; }
+  .bk-capture-summary-slot { margin-top:12px; }
   .bk-tabs-active-archive .bk-tab[data-area="workspace"] {
     --bk-tab-edge-gradient:
       linear-gradient(
@@ -770,6 +765,11 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 }
 .bk-menu[hidden],
 .bk-task-panel[hidden] { display: none !important; }
+.bk-task-panel.bk-task-panel-portaled {
+  position: fixed !important;
+  z-index: 10000 !important;
+  margin: 0 !important;
+}
 .bk-menu {
   display: grid;
   gap: 2px;
@@ -825,6 +825,14 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   max-width: 760px;
   line-height: 1.45;
 }
+.bk-capture-heading {
+  display:grid;
+  grid-template-columns:minmax(260px,.75fr) minmax(430px,1.25fr);
+  align-items:end;
+  gap:18px;
+}
+.bk-capture-heading-copy { min-width:0; }
+.bk-capture-summary-slot { min-width:0; }
 
 .bk-workspace-subnav {
   width: min(1440px, calc(100% - 48px));
@@ -866,11 +874,11 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   .bk-workspace-subnav {
     position: sticky;
     top: var(--bk-shell-sticky-height, 92px);
-    z-index: 2600;
+    z-index: 3100;
     align-items: center;
     gap: 8px 14px;
     min-height: 49px;
-    background: transparent;
+    background: color-mix(in srgb, var(--bk-page-bg) 98%, transparent);
     border-radius: 0 0 15px 15px;
     transition:
       background 180ms ease,
@@ -895,17 +903,6 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
     justify-content: flex-end;
     flex: 1 1 auto;
     min-width: 0;
-  }
-}
-
-@media (min-width: 821px) and (max-width: 1180px) {
-  .bk-workspace-subnav.has-selection-dock {
-    flex-wrap: wrap;
-  }
-  .bk-workspace-subnav.has-selection-dock .bk-workspace-dock {
-    flex: 1 0 100%;
-    width: 100%;
-    justify-content: flex-start;
   }
 }
 
@@ -1591,19 +1588,32 @@ BIBLIOTHEKAR_JS = r"""
   const menu = document.getElementById("bk-menu");
   const tasksButton = document.getElementById("bk-task-button");
   const taskPanel = document.getElementById("bk-task-panel");
-  const shell = document.querySelector(".bk-shell");
+  const taskPanelHome = taskPanel?.parentNode || null;
+  const taskPanelHomeNext = taskPanel?.nextSibling || null;
 
-  function syncTaskPanelLayer() {
-    shell?.classList.toggle(
-      "has-open-task-panel",
-      Boolean(taskPanel && !taskPanel.hasAttribute("hidden"))
-    );
+  function restoreTaskPanel() {
+    if (!taskPanel) return;
+    taskPanel.setAttribute("hidden", "");
+    taskPanel.classList.remove("bk-task-panel-portaled");
+    taskPanel.style.removeProperty("top");
+    taskPanel.style.removeProperty("right");
+    taskPanel.style.removeProperty("left");
+    if (taskPanelHome) taskPanelHome.insertBefore(taskPanel, taskPanelHomeNext);
+  }
+
+  function openTaskPanel() {
+    if (!taskPanel || !tasksButton) return;
+    const rect=tasksButton.getBoundingClientRect();
+    document.body.appendChild(taskPanel);
+    taskPanel.classList.add("bk-task-panel-portaled");
+    taskPanel.style.top=Math.round(rect.bottom + 8)+"px";
+    taskPanel.style.right=Math.max(10,Math.round(window.innerWidth - rect.right))+"px";
+    taskPanel.removeAttribute("hidden");
   }
 
   function closePopovers(except) {
     if (except !== menu) menu?.setAttribute("hidden", "");
-    if (except !== taskPanel) taskPanel?.setAttribute("hidden", "");
-    syncTaskPanelLayer();
+    if (except !== taskPanel) restoreTaskPanel();
   }
 
   menuButton?.addEventListener("click", (event) => {
@@ -1617,12 +1627,11 @@ BIBLIOTHEKAR_JS = r"""
     event.stopPropagation();
     const willOpen = taskPanel?.hasAttribute("hidden");
     closePopovers(willOpen ? taskPanel : null);
-    if (willOpen) taskPanel?.removeAttribute("hidden"); else taskPanel?.setAttribute("hidden", "");
-    syncTaskPanelLayer();
+    if (willOpen) openTaskPanel(); else restoreTaskPanel();
   });
 
   document.addEventListener("click", (event) => {
-    if (!event.target.closest(".bk-shell-actions")) closePopovers(null);
+    if (!event.target.closest(".bk-shell-actions") && !event.target.closest(".bk-task-panel")) closePopovers(null);
   });
 
   function openDialog(id) {
@@ -1799,7 +1808,18 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 </div>
 """
 
-    heading = f"""
+    if active == "workspace" and subarea == "captures":
+        heading = f"""
+<section class="bk-page-heading bk-capture-heading">
+  <div class="bk-capture-heading-copy">
+    <h1>{escape(heading_title)}</h1>
+    <p>{escape(heading_subtitle)}</p>
+  </div>
+  <div id="bk-capture-summary-slot" class="bk-capture-summary-slot"></div>
+</section>
+"""
+    else:
+        heading = f"""
 <section class="bk-page-heading">
   <h1>{escape(heading_title)}</h1>
   <p>{escape(heading_subtitle)}</p>
