@@ -131,8 +131,10 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert ".child-segment-boundaries" in EVENTS_HTML
     assert "minmax(140px,.82fr)" in EVENTS_HTML
     assert "minmax(140px,.82fr)" in WORKSPACE_HTML
-    assert "const safety=4;" in WORKSPACE_HTML
     assert "const minimum=10;" in WORKSPACE_HTML
+    assert "while(node.scrollWidth>node.clientWidth+1 && size>minimum)" in WORKSPACE_HTML
+    assert "padding-right:4px;" in WORKSPACE_HTML
+    assert "box-sizing:border-box;" in WORKSPACE_HTML
     assert "structureFitMutationObserver.observe(structurePreview" in WORKSPACE_HTML
     assert 'root.matches?.(".structure-lines,.plan-tree")' in WORKSPACE_HTML
     assert 'root.matches?.(".tree,.structure-lines,.plan-tree")' not in WORKSPACE_HTML

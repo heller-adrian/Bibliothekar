@@ -516,7 +516,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     .stored-preview-meta strong { color:var(--text); }
     .structure-lines {
       margin:0;
+      width:100%;
+      box-sizing:border-box;
       padding-top:10px;
+      padding-right:4px;
       border-top:1px solid var(--border);
       white-space:pre;
       overflow-wrap:normal;
@@ -1422,8 +1425,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         node.style.removeProperty("font-size");
         let size=parseFloat(getComputedStyle(node).fontSize)||14;
         const minimum=10;
-        const safety=4;
-        while(node.scrollWidth>Math.max(0,node.clientWidth-safety) && size>minimum){
+        while(node.scrollWidth>node.clientWidth+1 && size>minimum){
           size-=.5;
           node.style.fontSize=size+"px";
         }
