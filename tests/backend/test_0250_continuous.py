@@ -112,9 +112,15 @@ def test_released_intervals_persist_and_manual_assignment_resolves(tmp_path,stat
     assert len(result['removed_family_ids'])==2
     for _ in range(2):
         cards=list_job_planning_overview(db,'j')['available_day_groups']
-        assert len(cards)==2 and all(c['reassignment_pending'] for c in cards)
+        assert len(cards)==2
         task=list_event_reassignments(db,'j',event['id'])
-        assert [(s['start_time'],s['end_time']) for s in task['reassignment_segments']]==[('00:00','12:59'),('15:01','23:59')]
+        if status=='applied':
+            assert all(c['reassignment_pending'] for c in cards)
+            assert [(s['start_time'],s['end_time']) for s in task['reassignment_segments']]==[('00:00','12:59'),('15:01','23:59')]
+        else:
+            assert all(not c['reassignment_pending'] for c in cards)
+            assert all(c['released_free'] for c in cards)
+            assert task['reassignment_segments']==[]
     target=create(db,{'event_kind':'no_event','no_event_segments':cards})['parent_event']
     with database_connection(db) as c:
         reconcile_stale_event_reassignments(c,'j',event['id'])

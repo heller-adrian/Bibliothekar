@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.database import database_connection, initialize_database, update_event_definition
 from app.event_reassignment import list_event_reassignments, assign_event_reassignments
+from app.planning import list_job_planning_overview
 
 NOW = "2026-09-07T18:00:00"
 
@@ -41,21 +42,18 @@ def _segments(db: Path):
     return list_event_reassignments(db, 'j', 'src')['reassignment_segments']
 
 
-def test_planned_removed_family_must_be_reassigned_and_queue_clears(tmp_path):
+def test_planned_removed_family_is_released_free_without_queue(tmp_path):
     db=tmp_path/'db.sqlite3'; ids=seed(db,source_status='planned')
     result=edit_drop_second(db,ids)
-    assert result['reassignment_required'] is True
+    assert result['reassignment_required'] is False
     assert result['removed_family_ids'] == [ids[1]]
     state=list_event_reassignments(db,'j','src')
-    assert [int(f['family_id']) for f in state['families']] == [ids[1]]
-
-    assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='existing_no_event',target_event_id='target',segments=state['reassignment_segments'])
-    assert assigned['pending_family_count'] == 0
-    assert assigned['source_resort_required'] is False
+    assert state['families'] == []
+    assert state['reassignment_segments'] == []
     with database_connection(db) as c:
-        row=c.execute("SELECT event_id FROM event_assignments WHERE family_id=?",(ids[1],)).fetchone()
-        assert row['event_id'] == 'target'
         assert c.execute("SELECT COUNT(*) FROM event_reapply_removed_families WHERE event_id='src'").fetchone()[0] == 0
+        marker=c.execute("SELECT family_id FROM released_free_families WHERE job_id='j' AND family_id=?",(ids[1],)).fetchone()
+        assert marker is not None
 
 
 def test_applied_removed_family_keeps_target_for_reapply(tmp_path):
@@ -76,18 +74,14 @@ def test_applied_removed_family_keeps_target_for_reapply(tmp_path):
         assert row['reassigned_at']
 
 
-def test_new_event_can_be_created_from_removed_family(tmp_path):
+def test_planned_removed_family_is_plain_released_free_stock(tmp_path):
     db=tmp_path/'db.sqlite3'; ids=seed(db,source_status='planned')
     edit_drop_second(db,ids)
-    assigned=assign_event_reassignments(db,'j','src',[ids[1]],target_mode='new_event',new_event_name='Neues Ziel',segments=_segments(db))
-    assert assigned['pending_family_count'] == 0
-    target_id=assigned['target']['event_id']
-    with database_connection(db) as c:
-        event=c.execute("SELECT name,status FROM events WHERE id=?",(target_id,)).fetchone()
-        assert event['name'] == 'Neues Ziel'
-        assert event['status'] == 'planned'
-        row=c.execute("SELECT COALESCE(e.parent_event_id,e.id) AS root_id FROM event_assignments ea JOIN events e ON e.id=ea.event_id WHERE ea.family_id=?",(ids[1],)).fetchone()
-        assert row['root_id'] == target_id
+    cards=list_job_planning_overview(db,'j')['available_day_groups']
+    released=[card for card in cards if ids[1] in card.get('family_ids',[])]
+    assert len(released) == 1
+    assert released[0]['reassignment_pending'] is False
+    assert released[0]['released_free'] is True
 
 
 def test_events_and_import_use_archive_background_principle():

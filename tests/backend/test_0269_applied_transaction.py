@@ -15,7 +15,7 @@ def _source(relative: str) -> str:
 
 
 def test_0269_version():
-    assert APP_VERSION == "0.26.10"
+    assert APP_VERSION == "0.26.11"
 
 
 def test_0269_empty_subevent_is_detected_and_kept_in_preview_structure():
@@ -83,7 +83,7 @@ def test_0269_applied_edit_and_delete_are_mandatory_transactions():
     reconcile = _source("app/workspace_reconcile.py")
 
     assert 'status="pending_apply"' in database
-    assert '"reassignment_required": False if is_applied else bool(removed_ids)' in database
+    assert '"reassignment_required": False,' in database
     assert '"reassignment_required": False, "removed_family_ids": family_ids' in database
     assert "INSERT OR REPLACE INTO released_free_families" in reconcile
     assert 'DELETE FROM events WHERE id=? AND job_id=?' in reconcile
