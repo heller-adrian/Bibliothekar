@@ -2930,6 +2930,43 @@ def delete_planned_event(
 
         if status in {"draft", "planned"} and event["applied_at"] is None and event["archived_at"] is None:
             connection.execute("BEGIN IMMEDIATE")
+            if family_ids:
+                if str(event["event_kind"] or "event") == "no_event":
+                    release_rows = connection.execute(
+                        "SELECT start_datetime,end_datetime FROM event_time_segments WHERE event_id=? ORDER BY start_datetime,id",
+                        (event_id,),
+                    ).fetchall()
+                    release_ranges = [
+                        (str(r["start_datetime"])[:19], str(r["end_datetime"])[:19])
+                        for r in release_rows
+                    ]
+                else:
+                    from app.event_timeline import normal_event_ranges
+                    release_ranges = normal_event_ranges(connection, event_id)
+                from app.released_ranges import split_intervals_by_day, range_for_capture
+                release_ranges = split_intervals_by_day(release_ranges)
+                fp = ",".join("?" for _ in family_ids)
+                capture_rows = connection.execute(
+                    f"SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN ({fp})",
+                    (job_id, *family_ids),
+                ).fetchall()
+                release_by_family = {
+                    int(r["id"]): range_for_capture(
+                        str(r["selected_capture_time"] or "")[:19], release_ranges
+                    )
+                    for r in capture_rows
+                }
+                connection.executemany(
+                    """INSERT OR REPLACE INTO released_free_families(
+                           job_id,family_id,released_start_datetime,released_end_datetime,created_at)
+                       VALUES (?,?,?,?,?)""",
+                    [(
+                        job_id, fid,
+                        release_by_family.get(fid)[0] if release_by_family.get(fid) else None,
+                        release_by_family.get(fid)[1] if release_by_family.get(fid) else None,
+                        now,
+                    ) for fid in family_ids],
+                )
             connection.execute("DELETE FROM events WHERE id=? AND job_id=?", (event_id, job_id))
             connection.execute(
                 """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
@@ -3229,6 +3266,27 @@ def update_event_definition(
             row = connection.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
             return {"event": dict(row), "structural_changed": False, "resort_required": False}
 
+        # 0.26.11: Draft/planned edits are complete when saved. Legacy
+        # reassignment rows from older versions are informational free stock now,
+        # not unfinished user work. Applied events keep their durable physical
+        # reconcile evidence until the confirmed workspace transaction finishes.
+        if not is_applied:
+            connection.execute(
+                """INSERT OR REPLACE INTO released_free_families(
+                       job_id,family_id,released_start_datetime,released_end_datetime,created_at)
+                   SELECT job_id,family_id,released_start_datetime,released_end_datetime,?
+                   FROM event_reapply_removed_families
+                   WHERE event_id=? AND job_id=? AND target_event_id IS NULL
+                     AND COALESCE(target_kind,'') <> 'released_free'""",
+                (now, event_id, job_id),
+            )
+            connection.execute(
+                """DELETE FROM event_reapply_removed_families
+                   WHERE event_id=? AND job_id=? AND target_event_id IS NULL
+                     AND COALESCE(target_kind,'') <> 'released_free'""",
+                (event_id, job_id),
+            )
+
         pending_reassignment = connection.execute(
             """SELECT COUNT(*) AS n FROM event_reapply_removed_families
                WHERE event_id = ? AND job_id = ?
@@ -3236,11 +3294,11 @@ def update_event_definition(
                  AND COALESCE(target_kind,'') <> 'released_free'""",
             (event_id, job_id),
         ).fetchone()
-        if pending_reassignment is not None and int(pending_reassignment["n"] or 0) > 0:
+        if is_applied and pending_reassignment is not None and int(pending_reassignment["n"] or 0) > 0:
             connection.rollback()
             raise ValueError(
-                "Für dieses Ereignis sind noch herausfallende Familien ohne Ziel offen. "
-                "Bitte zuerst die Neu-Zuordnung abschließen."
+                "Für dieses angewendete Ereignis ist noch ein physischer Abgleich offen. "
+                "Bitte diesen zuerst anwenden oder vollständig verwerfen."
             )
 
         if is_applied and int(event["resort_required"] or 0):
@@ -3512,11 +3570,11 @@ def update_event_definition(
         children=store_subevents(connection,event_id,organizational,now)
         assignment_rows=[(assignment_target(event_id,children,str(row['selected_capture_time'])[:19]),int(row['id']),'date_time_range',now) for row in rows]
         assignment_event_id = event_id
-        # 0.16.3: Herausfallende Familien werden für planned UND applied
-        # zunächst in derselben sicheren Neu-Zuordnungs-Warteschlange geführt.
-        # planned benötigt später nur eine DB-Zuordnung; applied behält die
-        # Zeilen bis zum verifizierten Reapply-Lauf, damit auch die Dateien
-        # zielgenau verschoben werden können.
+        # 0.26.11: A planned definition is only database planning. Saving an
+        # edit therefore finishes the change immediately: removed families are
+        # free stock (yellow informational marker), never a reassignment task.
+        # Applied events still need the durable queue as physical move evidence
+        # until their mandatory workspace reconcile is confirmed.
         removed_ids = sorted(old_assigned_ids - set(requested_ids))
         connection.execute(
             "DELETE FROM event_reapply_removed_families WHERE event_id = ?",
@@ -3533,16 +3591,29 @@ def update_event_definition(
                 int(r["id"]): range_for_capture(str(r["selected_capture_time"] or "")[:19], released_definition_ranges)
                 for r in removed_capture_rows
             }
-            connection.executemany(
-                """INSERT INTO event_reapply_removed_families
-                   (event_id, job_id, family_id, created_at, released_start_datetime, released_end_datetime)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                [(
-                    event_id, job_id, family_id, now,
-                    released_by_family.get(family_id)[0] if released_by_family.get(family_id) else None,
-                    released_by_family.get(family_id)[1] if released_by_family.get(family_id) else None,
-                ) for family_id in removed_ids],
-            )
+            if is_applied:
+                connection.executemany(
+                    """INSERT INTO event_reapply_removed_families
+                       (event_id, job_id, family_id, created_at, released_start_datetime, released_end_datetime)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    [(
+                        event_id, job_id, family_id, now,
+                        released_by_family.get(family_id)[0] if released_by_family.get(family_id) else None,
+                        released_by_family.get(family_id)[1] if released_by_family.get(family_id) else None,
+                    ) for family_id in removed_ids],
+                )
+            else:
+                connection.executemany(
+                    """INSERT OR REPLACE INTO released_free_families(
+                           job_id,family_id,released_start_datetime,released_end_datetime,created_at)
+                       VALUES (?,?,?,?,?)""",
+                    [(
+                        job_id, family_id,
+                        released_by_family.get(family_id)[0] if released_by_family.get(family_id) else None,
+                        released_by_family.get(family_id)[1] if released_by_family.get(family_id) else None,
+                        now,
+                    ) for family_id in removed_ids],
+                )
 
         connection.execute(
             "DELETE FROM event_assignments WHERE event_id = ? OR event_id IN (SELECT id FROM events WHERE parent_event_id = ?)",
@@ -3559,6 +3630,12 @@ def update_event_definition(
                 """INSERT INTO event_assignments(event_id, family_id, file_id, assignment_source, created_at)
                    VALUES (?, ?, NULL, ?, ?)""",
                 [(assignment_event_id, family_id, "date_time_range" if uses_time_range else "date_range", now) for family_id in requested_ids],
+            )
+        if requested_ids:
+            rp = ",".join("?" for _ in requested_ids)
+            connection.execute(
+                f"DELETE FROM released_free_families WHERE job_id=? AND family_id IN ({rp})",
+                (job_id, *requested_ids),
             )
         if mutation_id is not None:
             target_state = capture_job_event_state(connection, job_id)
@@ -3593,7 +3670,7 @@ def update_event_definition(
         "assigned_family_ids": requested_ids,
         "resort_required": bool(is_applied),
         "removed_family_ids": removed_ids,
-        "reassignment_required": False if is_applied else bool(removed_ids),
+        "reassignment_required": False,
         "cascade": cascade_result,
         "mutation_id": mutation_id,
         "neutralized_files": neutralized_files,
