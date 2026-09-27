@@ -129,6 +129,11 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert 'sortPlanCloseButton.textContent = "Schließen";' in EVENTS_HTML
     assert ".child-segment-top" in EVENTS_HTML
     assert ".child-segment-boundaries" in EVENTS_HTML
+    assert "minmax(140px,.82fr)" in EVENTS_HTML
+    assert "minmax(140px,.82fr)" in WORKSPACE_HTML
+    assert "const safety=8;" in WORKSPACE_HTML
+    assert "const minimum=9;" in WORKSPACE_HTML
+    assert "structureFitMutationObserver.observe(structurePreview" in WORKSPACE_HTML
     assert "@media (max-width:440px){.edit-boundary{grid-template-columns:1fr}}" in EVENTS_HTML
     assert "width: fit-content;" in WORKSPACE_HTML
     assert "@media (max-width:460px){.event-boundary,.create-subevent-boundary{grid-template-columns:1fr}" in WORKSPACE_HTML

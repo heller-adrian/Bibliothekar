@@ -104,7 +104,7 @@ EVENTS_HTML = r"""<!doctype html>
     .edit-inline-error { border:1px solid var(--danger); border-radius:12px; padding:11px; margin-bottom:12px; background:color-mix(in srgb,var(--danger) 10%,var(--surface)); color:var(--text); font-weight:650; }
     .edit-actions { display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; margin-top:16px; }
     .edit-boundaries { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;grid-column:1/-1; }
-    .edit-boundary { display:grid;grid-template-columns:minmax(0,1.45fr) minmax(105px,.7fr);gap:8px;align-items:end; }
+    .edit-boundary { display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:8px;align-items:end; }
     .inspect-more { margin-top:9px; }
     @media (max-width:760px){.edit-boundaries{grid-template-columns:1fr}}
     @media (max-width:440px){.edit-boundary{grid-template-columns:1fr}}
@@ -990,7 +990,7 @@ EVENTS_HTML = r"""<!doctype html>
     .child-segment-top { display:flex; align-items:end; justify-content:space-between; gap:12px; }
     .child-segment-name { flex:0 1 55%; min-width:220px; }
     .child-segment-boundaries { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-    .child-segment-boundary { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(105px,.65fr); gap:8px; align-items:end; }
+    .child-segment-boundary { display:grid; grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr); gap:8px; align-items:end; }
     .child-segment-remove { white-space:nowrap; align-self:end; min-height:44px; flex:0 0 auto; }
     @media (max-width:760px) {
       .child-segment-boundaries { grid-template-columns:1fr; }
@@ -1740,8 +1740,9 @@ EVENTS_HTML = r"""<!doctype html>
       if (!node) return;
       node.style.removeProperty("font-size");
       let size=parseFloat(getComputedStyle(node).fontSize)||14;
-      const minimum=10;
-      while(node.scrollWidth>node.clientWidth+1 && size>minimum){
+      const minimum=9;
+      const safety=8;
+      while(node.scrollWidth>Math.max(0,node.clientWidth-safety) && size>minimum){
         size-=.5;
         node.style.fontSize=size+"px";
       }
@@ -1756,6 +1757,7 @@ EVENTS_HTML = r"""<!doctype html>
       requestAnimationFrame(()=>requestAnimationFrame(run));
       if (document.fonts?.ready) document.fonts.ready.then(()=>requestAnimationFrame(run));
       setTimeout(run,120);
+      setTimeout(run,360);
     }
     window.addEventListener("resize",()=>fitVisibleTrees(document));
 

@@ -369,7 +369,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
     #event-dialog{inline-size:min(700px,calc(100dvw - 32px))}
     .event-boundaries{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
-    .event-boundary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(115px,.65fr);gap:10px;align-items:end}
+    .event-boundary{display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:10px;align-items:end}
     .create-subevents{display:grid;gap:10px;margin-top:4px}
     .create-subevent-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
     .create-subevent-head button{white-space:nowrap;min-height:38px;padding:8px 12px}
@@ -378,7 +378,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     .create-subevent-top{display:flex;align-items:end;justify-content:space-between;gap:10px}
     .create-subevent-name{display:grid;flex:0 1 55%;min-width:220px}
     .create-subevent-boundaries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-    .create-subevent-boundary{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(105px,.65fr);gap:8px;align-items:end}
+    .create-subevent-boundary{display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:8px;align-items:end}
     .create-subevent-remove{white-space:nowrap;align-self:end;min-height:44px;flex:0 0 auto}
     .dialog-inline-error{margin-top:12px;border:1px solid var(--danger,#b42318);border-radius:10px;background:color-mix(in srgb,var(--danger,#b42318) 10%,var(--surface));color:var(--text);padding:10px 12px;font-weight:650}
     .existing-segment-static{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);padding:9px 10px}
@@ -1421,8 +1421,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       for(const node of nodes){
         node.style.removeProperty("font-size");
         let size=parseFloat(getComputedStyle(node).fontSize)||14;
-        const minimum=10;
-        while(node.scrollWidth>node.clientWidth+1 && size>minimum){
+        const minimum=9;
+        const safety=8;
+        while(node.scrollWidth>Math.max(0,node.clientWidth-safety) && size>minimum){
           size-=.5;
           node.style.fontSize=size+"px";
         }
@@ -1434,6 +1435,18 @@ WORKSPACE_HTML = r"""<!doctype html>
       requestAnimationFrame(()=>requestAnimationFrame(run));
       if(document.fonts?.ready)document.fonts.ready.then(()=>requestAnimationFrame(run));
       setTimeout(run,120);
+      setTimeout(run,360);
+    }
+
+    const structureFitMutationObserver = new MutationObserver(()=>{
+      scheduleTreeFit(structurePreview);
+    });
+    if(structurePreview){
+      structureFitMutationObserver.observe(structurePreview,{
+        childList:true,
+        subtree:true,
+        characterData:true
+      });
     }
 
     function positionWorkspaceChrome(){
