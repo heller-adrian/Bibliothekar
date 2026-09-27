@@ -383,73 +383,84 @@ WORKSPACE_HTML = r"""<!doctype html>
     .existing-segment-static{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);padding:9px 10px}
     .selection-bar-anchor{height:0}
     @media (min-width:821px){
-      main{
-        padding-bottom:clamp(170px,18vh,240px) !important;
-      }
-      .selection-bar{
-        transition:none;
-        transform:none;
-        will-change:left,top,width,padding,border-radius,background,border-color;
-      }
-      .selection-bar.is-scroll-floating{
-        position:fixed !important;
-        z-index:3105 !important;
+      main{padding-bottom:18px !important}
+      .selection-bar-anchor{display:none}
+      .selection-bar.is-header-docked{
+        position:relative !important;
+        z-index:1 !important;
+        width:100%;
+        min-height:42px;
         margin:0 !important;
-        flex-wrap:nowrap;
-        align-items:center;
-      }
-      .selection-bar.is-scroll-floating .selection-summary{
-        display:flex;
-        align-items:center;
-        line-height:1;
-        font-size:var(--selection-label-font-size,1rem);
-        z-index:2;
-        white-space:nowrap;
-      }
-      .selection-bar.is-scroll-floating .selection-actions{
-        flex-wrap:nowrap;
-        align-items:center;
-        gap:var(--selection-action-gap,8px);
-        margin-left:auto;
-        position:relative;
-        z-index:3;
-      }
-      .selection-bar.is-scroll-floating .selection-actions button{
-        min-height:var(--selection-button-height,42px) !important;
-        height:var(--selection-button-height,42px) !important;
-        padding:0 var(--selection-button-pad-x,12px) !important;
-        font-size:var(--selection-button-font-size,1rem) !important;
-        line-height:1 !important;
-        white-space:nowrap;
-      }
-      .selection-bar.is-scroll-floating .selection-top-button{
-        width:var(--selection-arrow-size,42px) !important;
-        min-width:var(--selection-arrow-size,42px) !important;
-        height:var(--selection-arrow-size,42px) !important;
-        min-height:var(--selection-arrow-size,42px) !important;
-        padding:0 !important;
-        right:12px !important;
-        top:50% !important;
-        font-size:var(--selection-button-font-size,1rem) !important;
-        transform:translateY(-50%) !important;
-      }
-      .selection-bar.is-scroll-floating .selection-top-button:active{
-        transform:translateY(-50%) scale(.98) !important;
-      }
-      .selection-bar.is-docked{
-        border-color:transparent !important;
+        padding:2px 50px 2px 8px !important;
+        border:0 !important;
+        border-radius:0 !important;
         background:transparent !important;
         box-shadow:none !important;
         backdrop-filter:none !important;
         -webkit-backdrop-filter:none !important;
+        flex-wrap:nowrap;
+        align-items:center;
+        overflow:visible;
       }
-    }
-    @media (min-width:821px) and (max-width:1180px){
-      .selection-bar.is-scroll-floating{
-        flex-wrap:wrap;
+      .selection-bar.is-header-docked .selection-summary{
+        position:absolute;
+        top:50%;
+        transform:translate(-50%,-50%);
+        display:flex;
+        align-items:center;
+        white-space:nowrap;
+        line-height:1;
+        margin:0;
+        z-index:2;
       }
-      .selection-bar.is-scroll-floating .selection-actions{
-        flex-wrap:wrap;
+      .selection-bar.is-header-docked .selection-actions{
+        margin-left:auto;
+        display:flex;
+        flex-wrap:nowrap;
+        align-items:center;
+        gap:7px;
+        z-index:3;
+      }
+      .selection-bar.is-header-docked .selection-actions button{
+        min-height:38px !important;
+        height:38px !important;
+        padding:0 10px !important;
+        font-size:.94rem !important;
+        line-height:1 !important;
+        white-space:nowrap;
+      }
+      .selection-bar.is-header-docked .selection-top-button{
+        position:absolute;
+        right:2px !important;
+        top:50% !important;
+        width:38px !important;
+        min-width:38px !important;
+        height:38px !important;
+        min-height:38px !important;
+        padding:0 !important;
+        transform:translateY(-50%) !important;
+      }
+      .summary.compact-heading-summary{
+        display:grid;
+        grid-template-columns:repeat(4,minmax(82px,1fr));
+        gap:8px;
+        margin:0;
+      }
+      .summary.compact-heading-summary .card{
+        padding:8px 10px;
+        border-radius:12px;
+      }
+      .summary.compact-heading-summary .muted{
+        font-size:.78rem;
+        white-space:nowrap;
+      }
+      .summary.compact-heading-summary .number{
+        margin-top:2px;
+        font-size:clamp(1.05rem,1.6vw,1.45rem);
+        line-height:1.05;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:clip;
       }
     }
     @media (max-width:820px){.event-boundaries,.event-boundary,.create-subevent-grid,.create-subevent-boundary,.create-subevent-end-row{grid-template-columns:1fr}.create-subevent-remove{width:100%}}
@@ -480,8 +491,9 @@ WORKSPACE_HTML = r"""<!doctype html>
         monospace;
       font-size: 0.9rem;
       line-height: 1.5;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
+      white-space: pre;
+      overflow-wrap: normal;
+      overflow-x: hidden;
     }
     .tree.rich-preview {
       white-space: normal;
@@ -503,8 +515,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       margin:0;
       padding-top:10px;
       border-top:1px solid var(--border);
-      white-space:pre-wrap;
-      overflow-wrap:anywhere;
+      white-space:pre;
+      overflow-wrap:normal;
+      overflow-x:hidden;
       font-family:
         ui-monospace,
         SFMono-Regular,
@@ -1376,249 +1389,68 @@ WORKSPACE_HTML = r"""<!doctype html>
       document.getElementById("selection-bar");
     const selectionSummary=selectionBar?.querySelector(".selection-summary");
     const selectionBarAnchor=document.getElementById("selection-bar-anchor");
-    const workspaceSubnav=document.querySelector(".bk-workspace-subnav");
     const selectionDockTarget=document.getElementById("bk-workspace-dock");
     const workspaceTab=document.querySelector('.bk-tab[data-area="workspace"]');
-    const selectionMorphDistance=128;
-    let selectionFloating=false;
-    let selectionNaturalSpace=0;
-    let selectionSummaryStartCenter=0;
+    const captureSummarySlot=document.getElementById("bk-capture-summary-slot");
+    const summarySection=document.querySelector("section.summary");
+    const summaryHomeParent=summarySection?.parentNode || null;
+    const summaryHomeNext=summarySection?.nextSibling || null;
 
-    function workspaceStickyDesktop(){
+    function workspaceStaticDesktop(){
       return window.matchMedia("(min-width: 821px)").matches;
     }
 
-    function shellStickyHeight(){
-      return Number.parseFloat(
-        getComputedStyle(document.documentElement)
-          .getPropertyValue("--bk-shell-sticky-height")
-      ) || 92;
+    function alignHeaderSelectionSummary(){
+      if(!workspaceStaticDesktop() || !selectionSummary || !workspaceTab || !selectionBar)return;
+      const tabRect=workspaceTab.getBoundingClientRect();
+      const barRect=selectionBar.getBoundingClientRect();
+      selectionSummary.style.left=(tabRect.left+tabRect.width/2-barRect.left)+"px";
     }
 
-    function clamp01(value){
-      return Math.max(0,Math.min(1,Number(value)||0));
-    }
-
-    function smoothStep(value){
-      const p=clamp01(value);
-      return p*p*(3-2*p);
-    }
-
-    function normalizedExpo(value,base=1.35,span=6){
-      const p=clamp01(value);
-      const denominator=Math.pow(base,span)-1;
-      if(!denominator)return p;
-      return (Math.pow(base,p*span)-1)/denominator;
-    }
-
-    function selectionMorphProgressForPositions(anchorTop,targetTop){
-      return clamp01(
-        (targetTop+selectionMorphDistance-anchorTop)
-        / selectionMorphDistance
-      );
-    }
-
-    function selectionSummaryTargetCenter(){
-      const rect=workspaceTab?.getBoundingClientRect();
-      if(rect && rect.width>0){
-        return rect.left+rect.width/2;
-      }
-      return window.innerWidth/2;
-    }
-
-    function selectionDockGeometry(){
-      const subnavRect=workspaceSubnav.getBoundingClientRect();
-      const compactHeight=42;
-
-      if(window.innerWidth<=1180){
-        const style=getComputedStyle(workspaceSubnav);
-        const rightInset=Number.parseFloat(style.paddingRight)||0;
-        return {
-          right:subnavRect.right-rightInset,
-          top:subnavRect.top+Math.max(0,(subnavRect.height-compactHeight)/2)
-        };
-      }
-
-      return {
-        right:subnavRect.right-12,
-        top:subnavRect.top+Math.max(0,(subnavRect.height-compactHeight)/2)
-      };
-    }
-
-    function selectionFrameLeft(anchorLeft,targetLeft,xProgress,summaryLeft,padding=14){
-      const curved=anchorLeft+(targetLeft-anchorLeft)*clamp01(xProgress);
-      return Math.min(curved,summaryLeft-padding);
-    }
-
-    function clearSelectionMorphStyles(){
-      selectionBar.classList.remove("is-scroll-floating","is-docked");
-      [
-        "position","z-index","left","top","width","margin",
-        "padding","border-radius","border-color","background",
-        "box-shadow","backdrop-filter","-webkit-backdrop-filter",
-        "--selection-button-height","--selection-button-pad-x",
-        "--selection-button-font-size","--selection-label-font-size",
-        "--selection-action-gap","--selection-arrow-size"
-      ].forEach(property=>selectionBar.style.removeProperty(property));
-      if(selectionSummary){
-        [
-          "position","left","top","transform","margin","z-index"
-        ].forEach(property=>selectionSummary.style.removeProperty(property));
-      }
-      selectionBarAnchor.style.height="0px";
-      selectionFloating=false;
-      selectionNaturalSpace=0;
-      selectionSummaryStartCenter=0;
-    }
-
-    function beginSelectionFloating(){
-      if(selectionFloating)return;
-      const rect=selectionBar.getBoundingClientRect();
-      const summaryRect=selectionSummary?.getBoundingClientRect();
-      const style=getComputedStyle(selectionBar);
-      const marginBottom=Number.parseFloat(style.marginBottom)||0;
-      selectionNaturalSpace=Math.ceil(rect.height+marginBottom);
-      selectionSummaryStartCenter=summaryRect
-        ? summaryRect.left+summaryRect.width/2
-        : rect.left+rect.width/2;
-      selectionBarAnchor.style.height=selectionNaturalSpace+"px";
-      selectionBar.classList.add("is-scroll-floating");
-      selectionFloating=true;
-    }
-
-    function applySelectionMorphProgress(progress){
-      const p=clamp01(progress);
-      if(p<=0){
-        clearSelectionMorphStyles();
-        return;
-      }
-
-      beginSelectionFloating();
-
-      const anchorRect=selectionBarAnchor.getBoundingClientRect();
-      const target=selectionDockGeometry();
-
-      // Gekrümmte Flugbahn:
-      // horizontal läuft die Karte früh voraus; nach oben zieht sie zunächst
-      // nur wenig und wird erst im späteren Verlauf deutlich steiler.
-      const xP=1-Math.pow(1-p,2.15);
-      const yP=normalizedExpo(p,1.35,6);
-
-      // Größenänderungen beginnen sanft und enden weniger kompakt als zuvor.
-      const compactP=smoothStep(clamp01(p/.86));
-
-      const top=anchorRect.top+(target.top-anchorRect.top)*yP;
-
-      const summaryP=smoothStep(clamp01(p/.88));
-      const summaryTargetCenter=selectionSummaryTargetCenter();
-      const summaryCenter=selectionSummaryStartCenter
-        +(summaryTargetCenter-selectionSummaryStartCenter)*summaryP;
-      const summaryWidth=selectionSummary?.getBoundingClientRect().width||0;
-      const summaryLeft=summaryCenter-summaryWidth/2;
-      const targetFrameLeft=summaryTargetCenter-summaryWidth/2-14;
-      const left=selectionFrameLeft(
-        anchorRect.left,
-        targetFrameLeft,
-        xP,
-        summaryLeft,
-        14
-      );
-      const right=anchorRect.right+(target.right-anchorRect.right)*xP;
-      const width=Math.max(1,right-left);
-
-      const padY=12+(2-12)*compactP;
-      const padLeft=12+(9-12)*compactP;
-      const padRight=64;
-      const radius=14+(9-14)*compactP;
-
-      const buttonHeight=42+(38-42)*compactP;
-      const buttonPadX=12+(10-12)*compactP;
-      const buttonFont=1+(.94-1)*compactP;
-      const labelFont=1+(.96-1)*compactP;
-      const actionGap=8+(7-8)*compactP;
-      const arrowSize=42+(38-42)*compactP;
-
-      // Rahmen und Kartenfläche verschwinden bereits ab der mittleren Phase.
-      const frameFade=clamp01((p-.40)/.30);
-      const surfaceFade=clamp01((p-.46)/.30);
-      const frameStrength=Math.round((1-frameFade)*100);
-      const surfaceStrength=Math.round((1-surfaceFade)*100);
-
-      selectionBar.classList.toggle("is-docked",p>=.999);
-      selectionBar.style.setProperty("position","fixed","important");
-      selectionBar.style.setProperty("z-index","3105","important");
-      selectionBar.style.left=left+"px";
-      selectionBar.style.top=top+"px";
-      selectionBar.style.width=width+"px";
-      selectionBar.style.setProperty("margin","0","important");
-
-      if(selectionSummary){
-        selectionSummary.style.position="absolute";
-        selectionSummary.style.left=(summaryCenter-left-summaryWidth/2)+"px";
-        selectionSummary.style.top="50%";
-        selectionSummary.style.transform="translateY(-50%)";
-        selectionSummary.style.margin="0";
-        selectionSummary.style.zIndex="2";
-      }
-
-      selectionBar.style.padding=`${padY}px ${padRight}px ${padY}px ${padLeft}px`;
-      selectionBar.style.borderRadius=radius+"px";
-      selectionBar.style.setProperty("--selection-button-height",buttonHeight+"px");
-      selectionBar.style.setProperty("--selection-button-pad-x",buttonPadX+"px");
-      selectionBar.style.setProperty("--selection-button-font-size",buttonFont+"rem");
-      selectionBar.style.setProperty("--selection-label-font-size",labelFont+"rem");
-      selectionBar.style.setProperty("--selection-action-gap",actionGap+"px");
-      selectionBar.style.setProperty("--selection-arrow-size",arrowSize+"px");
-      selectionBar.style.setProperty(
-        "border-color",
-        `color-mix(in srgb,var(--bk-line) ${frameStrength}%,transparent)`,
-        "important"
-      );
-      selectionBar.style.setProperty(
-        "background",
-        `color-mix(in srgb,var(--bk-surface) ${surfaceStrength}%,var(--bk-page-bg))`,
-        "important"
-      );
-      selectionBar.style.setProperty("box-shadow","none","important");
-
-      if(p>=.999){
-        selectionBar.style.setProperty("border-color","transparent","important");
-        selectionBar.style.setProperty("background","transparent","important");
-        selectionBar.style.setProperty("backdrop-filter","none","important");
-        selectionBar.style.setProperty("-webkit-backdrop-filter","none","important");
+    function fitTreeText(root){
+      if(!root)return;
+      const nodes=root.matches?.(".tree,.structure-lines,.plan-tree")
+        ? [root]
+        : [...root.querySelectorAll?.(".tree,.structure-lines,.plan-tree")||[]];
+      for(const node of nodes){
+        node.style.removeProperty("font-size");
+        let size=parseFloat(getComputedStyle(node).fontSize)||14;
+        const minimum=10;
+        while(node.scrollWidth>node.clientWidth+1 && size>minimum){
+          size-=.5;
+          node.style.fontSize=size+"px";
+        }
       }
     }
 
-    function resetSelectionDock(){
-      clearSelectionMorphStyles();
-      workspaceSubnav?.classList.remove("is-stuck");
-    }
-
-    function updateSelectionDock(){
-      if(!selectionBarAnchor||!workspaceSubnav||!selectionDockTarget||!selectionBar)return;
-
-      if(!workspaceStickyDesktop()){
-        resetSelectionDock();
-        return;
+    function positionWorkspaceChrome(){
+      if(!selectionBar || !selectionBarAnchor)return;
+      if(workspaceStaticDesktop() && selectionDockTarget){
+        if(selectionBar.parentNode!==selectionDockTarget) selectionDockTarget.appendChild(selectionBar);
+        selectionBar.classList.add("is-header-docked");
+        document.querySelector(".bk-workspace-subnav")?.classList.add("has-selection-dock");
+        if(summarySection && captureSummarySlot && summarySection.parentNode!==captureSummarySlot){
+          captureSummarySlot.appendChild(summarySection);
+        }
+        summarySection?.classList.add("compact-heading-summary");
+        requestAnimationFrame(alignHeaderSelectionSummary);
+      } else {
+        if(selectionBar.parentNode!==selectionBarAnchor.parentNode){
+          selectionBarAnchor.parentNode?.insertBefore(selectionBar,selectionBarAnchor.nextSibling);
+        }
+        selectionBar.classList.remove("is-header-docked");
+        selectionSummary?.style.removeProperty("left");
+        document.querySelector(".bk-workspace-subnav")?.classList.remove("has-selection-dock");
+        if(summarySection && summaryHomeParent && summarySection.parentNode!==summaryHomeParent){
+          summaryHomeParent.insertBefore(summarySection,summaryHomeNext);
+        }
+        summarySection?.classList.remove("compact-heading-summary");
       }
-
-      const shellHeight=shellStickyHeight();
-      const subnavRect=workspaceSubnav.getBoundingClientRect();
-      const subnavStuck=window.scrollY>0 && subnavRect.top<=shellHeight+1;
-      workspaceSubnav.classList.toggle("is-stuck",subnavStuck);
-
-      const target=selectionDockGeometry();
-      const anchorTop=selectionBarAnchor.getBoundingClientRect().top;
-      const progress=subnavStuck
-        ? selectionMorphProgressForPositions(anchorTop,target.top)
-        : 0;
-
-      applySelectionMorphProgress(progress);
+      fitTreeText(document);
     }
 
-    window.addEventListener("scroll",updateSelectionDock,{passive:true});
-    window.addEventListener("resize",updateSelectionDock);
-    requestAnimationFrame(updateSelectionDock);
+    window.addEventListener("resize",positionWorkspaceChrome);
+    requestAnimationFrame(positionWorkspaceChrome);
     const eventSuggestionsPanel = document.getElementById("event-suggestions-panel");
     const eventSuggestionList = document.getElementById("event-suggestion-list");
     const eventSuggestionStatus = document.getElementById("event-suggestion-status");
@@ -1910,9 +1742,10 @@ WORKSPACE_HTML = r"""<!doctype html>
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.detail || "Anfrage fehlgeschlagen."
-        );
+        const error = new Error(data.detail || "Anfrage fehlgeschlagen.");
+        error.data = data;
+        error.status = response.status;
+        throw error;
       }
 
       return data;
@@ -3128,6 +2961,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           + (empty.length
             ? "\n\nHinweis: ohne passende Dateifamilien · "+empty.map(item=>item.name).join(", ")
             : "");
+        requestAnimationFrame(()=>fitTreeText(dialogPreview));
 
       } catch (error) {
         dialogPreview.textContent =
