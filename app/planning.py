@@ -302,11 +302,17 @@ def interval_cards(database_path, job_id, available_families, total_by_day):
                 """SELECT family_id
                    FROM event_reapply_removed_families
                    WHERE job_id=? AND target_event_id IS NULL
-                   UNION
-                   SELECT family_id
+                     AND COALESCE(target_kind,'') <> 'released_free'""",
+                (job_id,),
+            )
+        }
+        released = {
+            int(r['family_id'])
+            for r in c.execute(
+                """SELECT family_id
                    FROM released_free_families
                    WHERE job_id=?""",
-                (job_id, job_id),
+                (job_id,),
             )
         }
         for day in sorted(d for d in total_by_day if d):
@@ -319,7 +325,9 @@ def interval_cards(database_path, job_id, available_families, total_by_day):
                     continue
                 group = _group_available_families(families,total_by_day)[0]
                 result.append({**group, **segment, 'card_key': segment['start_datetime']+'/'+segment['end_datetime'],
-                    'families': families, 'reassignment_pending': any(f['family_id'] in pending for f in families)})
+                    'families': families,
+                    'reassignment_pending': any(f['family_id'] in pending for f in families),
+                    'released_free': any(f['family_id'] in released for f in families)})
     result.extend(_group_available_families([f for f in available_families if not f.get('day_key')],total_by_day))
     return result
 

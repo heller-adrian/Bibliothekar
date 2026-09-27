@@ -77,6 +77,7 @@ def test_0269_sort_plan_materializes_empty_subevent_directories():
     assert '"code": "empty_subevent"' in sort_plan
 
 
+
 def test_0269_applied_edit_and_delete_are_mandatory_transactions():
     database = _source("app/database.py")
     reconcile = _source("app/workspace_reconcile.py")
@@ -84,7 +85,8 @@ def test_0269_applied_edit_and_delete_are_mandatory_transactions():
     assert 'status="pending_apply"' in database
     assert '"reassignment_required": False if is_applied else bool(removed_ids)' in database
     assert '"reassignment_required": False, "removed_family_ids": family_ids' in database
-    assert "target_kind='released_free'" in reconcile
+    assert "INSERT OR REPLACE INTO released_free_families" in reconcile
+    assert 'DELETE FROM events WHERE id=? AND job_id=?' in reconcile
 
     assert 'let mandatoryMutationContext = null' in EVENTS_HTML
     assert 'sortPlanCloseButton.textContent = mandatoryMutationContext ? "Änderungen verwerfen" : "Schließen"' in EVENTS_HTML
@@ -93,20 +95,85 @@ def test_0269_applied_edit_and_delete_are_mandatory_transactions():
     assert 'event.status === "applied" ? "Änderungen anwenden" : "Änderungen speichern"' in EVENTS_HTML
     assert "discardMandatoryMutation()" in EVENTS_HTML
 
+def test_0269_released_free_marker_is_not_an_open_task_or_reassignment(tmp_path):
+    from app.database import database_connection, delete_planned_event, list_global_tasks
+    from app.planning import list_job_planning_overview
+    from app.sort_apply import CONFIRMATION_PHRASE
+    from app.workspace_reconcile import (
+        build_workspace_reconcile_plan,
+        execute_workspace_reconcile_run,
+        prepare_workspace_reconcile_run,
+    )
+    from tests.backend.test_0250_continuous import attach_files, create, payload, setup
 
-def test_0269_released_free_marker_is_not_an_open_task_or_reassignment():
-    database = _source("app/database.py")
-    reassignment = _source("app/event_reassignment.py")
-    reconcile = _source("app/workspace_reconcile.py")
+    db=tmp_path/'db'; workspace=tmp_path/'workspace'
+    setup(db,['2026-07-23T10:00:00'])
+    source=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
+    attach_files(db,workspace,source['id'])
+
+    prepared=delete_planned_event(db,'j',source['id'])
+    assert prepared['pending_delete'] is True
+    assert prepared['reassignment_required'] is False
+    with database_connection(db) as connection:
+        assert tuple(connection.execute(
+            "SELECT pending_delete,resort_required FROM events WHERE id=?",(source['id'],)
+        ).fetchone()) == (1,1)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM released_free_families WHERE job_id='j'"
+        ).fetchone()[0] == 0
+
+    before_tasks=list_global_tasks(db)
+    assert not any(
+        item['kind'] in {'reassignment','resort','unassigned_families'}
+        for item in before_tasks
+    )
+
+    plan=build_workspace_reconcile_plan(db,'j',source['id'],workspace)
+    assert plan['summary']['ready'],plan['blockers']
+    run=prepare_workspace_reconcile_run(
+        db,'j',source['id'],workspace,
+        expected_plan_token=plan['plan_token'],
+        confirmation_phrase=CONFIRMATION_PHRASE,
+    )
+    execute_workspace_reconcile_run(db,run['id'],workspace)
+
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE id=?",(source['id'],)
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM event_reapply_removed_families WHERE event_id=?",(source['id'],)
+        ).fetchone()[0] == 0
+        marker=connection.execute(
+            "SELECT released_start_datetime,released_end_datetime "
+            "FROM released_free_families WHERE job_id='j'"
+        ).fetchone()
+        assert tuple(marker) == ('2026-07-23T00:00:00','2026-07-23T23:59:59')
+
+    assert (workspace/'Arbeitsbereich'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
+    tasks=list_global_tasks(db)
+    assert not any(
+        item['kind'] in {'reassignment','resort','unassigned_families'}
+        for item in tasks
+    )
+    cards=list_job_planning_overview(db,'j')['available_day_groups']
+    assert len(cards)==1
+    assert cards[0].get('released_free') is True
+    assert cards[0].get('reassignment_pending') is False
+
+    target_payload=payload('2026-07-23T00:00','2026-07-23T23:59')
+    target_payload['event_name']='Neu verwendet'
+    create(db,target_payload)
+    list_global_tasks(db)
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM released_free_families WHERE job_id='j'"
+        ).fetchone()[0] == 0
+
     planning = _source("app/planning.py")
-    assert database.count("COALESCE(target_kind,'') <> 'released_free'") >= 3
-    assert reassignment.count("COALESCE(target_kind,'') <> 'released_free'") >= 3
-    assert "released_free_families" in database
-    assert "released_free_families" in planning
-    assert "INSERT OR REPLACE INTO released_free_families" in reconcile
-    assert "reconcile_released_free_markers" in reassignment
-
-
+    assert "'released_free': any(" in planning
+    assert 'group.reassignment_pending || group.released_free' in WORKSPACE_HTML
+    assert 'Freigegeben durch Applied-Änderung' in WORKSPACE_HTML
 def test_0269_workspace_header_is_static_and_morph_is_gone():
     assert 'selectionBar.classList.add("is-header-docked")' in WORKSPACE_HTML
     assert "function positionWorkspaceChrome()" in WORKSPACE_HTML

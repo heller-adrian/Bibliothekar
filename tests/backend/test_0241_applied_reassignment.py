@@ -284,24 +284,28 @@ def test_0241_reassignment_rejects_simple_target_outside_segment(tmp_path: Path)
         )
 
 
+
 def test_0241_reassignment_tasks_use_canonical_exact_segment_ui(tmp_path: Path):
     db = tmp_path / "db.sqlite3"
     _make_applied(db)
-    delete_planned_event(db, "j", "b")
-    task = next(item for item in list_global_tasks(db) if item["kind"] == "reassignment")
-    assert task["href"].startswith("/events?job=")
-    assert "&task=reassign:" in task["href"]
+    result = delete_planned_event(db, "j", "b")
+    assert result["reassignment_required"] is False
+    tasks = list_global_tasks(db)
+    assert not any(item["kind"] == "reassignment" for item in tasks)
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM event_reapply_removed_families "
+            "WHERE event_id='b' AND target_event_id IS NULL"
+        ).fetchone()[0] > 0
+        assert connection.execute(
+            "SELECT status FROM event_mutations WHERE anchor_event_id='b' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()[0] == "pending_apply"
 
-    assert 'task.startsWith("reassign:")' in EVENTS_HTML
-    assert "In Aufnahmen öffnen" in EVENTS_HTML
-    assert 'id="reassignment-target"' not in EVENTS_HTML
+    assert "mandatoryMutationContext" in EVENTS_HTML
+    assert "Änderungen anwenden" in EVENTS_HTML
+    assert "discardMandatoryMutation()" in EVENTS_HTML
     assert "runAutomaticReapply" not in EVENTS_HTML
-
-    assert 'task.startsWith("reassign:")' in WORKSPACE_HTML
-    assert "/events?job=" in WORKSPACE_HTML
     assert "runAutomaticTaskReapply" not in WORKSPACE_HTML
-
-
 def test_0241_applied_reconcile_requires_visible_confirmation():
     assert "Bitte den angezeigten Nachsortierplan prüfen und ausdrücklich bestätigen." in EVENTS_HTML
     assert "Bitte den Nachsortierplan prüfen und ausdrücklich bestätigen." in EVENTS_HTML

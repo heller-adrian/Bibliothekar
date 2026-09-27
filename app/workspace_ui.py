@@ -1233,7 +1233,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         <label id="existing-parent-row" class="full-width" hidden>
           <span>Bestehendes Ereignis erweitern</span>
           <select id="existing-parent-event"></select>
-          <small class="muted">Nur für regulär freie, direkt angrenzende Zeit. Freigewordene Bereiche aus einer Applied-Bearbeitung werden stattdessen als neues Ziel der offenen Neu-Zuordnung angelegt.</small>
+          <small class="muted">Direkt angrenzende freie Zeit kann ein bestehendes Ereignis erweitern. Gelb markierte, bereits freigegebene Applied-Bereiche sind normaler freier Bestand und erzeugen keine Neu-Zuordnungsaufgabe.</small>
         </label>
 
         <div id="no-event-segment-editor" class="full-width" hidden>
@@ -2376,9 +2376,12 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-name";
         name.textContent =
           formatDay(group.day_key) + (group.start_time && (group.start_time !== "00:00" || group.end_time !== "23:59") ? ` · ${group.start_time}–${group.end_time}` : "");
-        if (group.reassignment_pending) {
+        if (group.reassignment_pending || group.released_free) {
           const marker=document.createElement("span");
-          marker.textContent="●"; marker.title="Offene Neu-Zuordnung";
+          marker.textContent="●";
+          marker.title=group.reassignment_pending
+            ? "Offene Neu-Zuordnung"
+            : "Freigegeben durch Applied-Änderung";
           marker.style.cssText="color:#d99a20;margin-left:6px";
           name.appendChild(marker);
         }

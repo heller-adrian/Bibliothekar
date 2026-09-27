@@ -167,7 +167,9 @@ def attach_files(db,workspace,event_id):
 
 
 @pytest.mark.parametrize('rename',[False,True])
+
 def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
+    from app.database import list_global_tasks
     from app.workspace_reconcile import build_workspace_reconcile_plan,prepare_workspace_reconcile_run,execute_workspace_reconcile_run
     from app.sort_apply import CONFIRMATION_PHRASE, SortApplyError
     from app.event_document import build_event_document_from_db,write_event_document
@@ -187,6 +189,7 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
     edited=update_event_definition(db,'j',event['id'],preview,event_name=new_name,notes='',expected_revision=1,workspace_path=workspace)
     assert edited['neutralized_file_count']==0
     assert edited['neutralized_files']==[]
+    assert edited['reassignment_required'] is False
     with database_connection(db) as c:
         after_edit_paths={int(r['id']):str(r['current_relative_path']) for r in c.execute("SELECT id,current_relative_path FROM files WHERE job_id='j' ORDER BY id")}
     assert after_edit_paths==before_paths
@@ -198,11 +201,6 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
         assert not new_document_path.exists()
     plan=build_workspace_reconcile_plan(db,'j',event['id'],workspace)
     assert plan['summary']['ready'],plan['blockers']
-    from app.event_reassignment import assign_event_reassignments,EventReassignmentError
-    with pytest.raises(EventReassignmentError,match='Nachsortierung des Quellereignisses'):
-        assign_event_reassignments(
-            db,'j',event['id'],edited['removed_family_ids'],target_mode='new_no_event'
-        )
     assert sorted(
         f['destination_relative_path'] for f in plan['files']
         if f['family_id'] in edited['removed_family_ids']
@@ -220,30 +218,45 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
     else:
         assert document_path.read_bytes()!=original_document
     with database_connection(db) as c:
-        assert c.execute('SELECT COUNT(*) FROM event_reapply_removed_families WHERE target_event_id IS NULL').fetchone()[0]==2
+        assert c.execute('SELECT COUNT(*) FROM event_reapply_removed_families WHERE target_event_id IS NULL').fetchone()[0]==0
+        assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==2
+    assert not any(
+        task['kind'] in {'reassignment','resort','unassigned_families'}
+        for task in list_global_tasks(db)
+    )
     assert len(list((root/'2026'/'2026-07-23 · 00-00–12-59').glob('*.JPG')))==1
     assert len(list((root/'2026'/'2026-07-23 · 15-01–23-59').glob('*.JPG')))==1
     cards=list_job_planning_overview(db,'j')['available_day_groups']
+    released_cards=[card for card in cards if card.get('released_free')]
+    assert len(released_cards)==2
+    assert all(not card.get('reassignment_pending') for card in released_cards)
     target=create(db,{'event_kind':'no_event','no_event_segments':cards})['parent_event']
-    # Merely creating the next plan still leaves its files in free stock.
+    # Creating a new plan does not move files. Refreshing tasks only clears the
+    # informational release marker because the families are assigned again.
     assert len(list((root/'2026'/'2026-07-23 · 00-00–12-59').glob('*.JPG')))==1
     assert len(list((root/'2026'/'2026-07-23 · 15-01–23-59').glob('*.JPG')))==1
-    assert list_event_reassignments(db,'j',event['id'])['reassignment_segments']==[]
+    list_global_tasks(db)
     with database_connection(db) as c:
-        assert c.execute('SELECT COUNT(*) FROM event_reapply_removed_families WHERE target_event_id=?',(target['id'],)).fetchone()[0]==2
+        assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==0
         assert c.execute('SELECT status FROM events WHERE id=?',(target['id'],)).fetchone()[0]=='planned'
-
-
 @pytest.mark.parametrize('preserve',[False,True])
+
 def test_0260_applied_delete_releases_files_and_keeps_open_task(tmp_path,preserve):
-    from app.database import delete_planned_event
+    from app.database import delete_planned_event,list_global_tasks
     from app.workspace_reconcile import build_workspace_reconcile_plan,prepare_workspace_reconcile_run,execute_workspace_reconcile_run
-    from app.sort_apply import CONFIRMATION_PHRASE
+    from app.sort_plan import build_event_sort_plan
+    from app.sort_apply import CONFIRMATION_PHRASE,prepare_sort_run,execute_sort_run
     db=tmp_path/'db';workspace=tmp_path/'workspace'
     setup(db,['2026-07-23T10:00:00'])
     event=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,event['id'])
-    delete_planned_event(db,'j',event['id'])
+    result=delete_planned_event(db,'j',event['id'])
+    assert result['pending_delete'] is True
+    assert result['reassignment_required'] is False
+    with database_connection(db) as c:
+        assert tuple(c.execute(
+            'SELECT pending_delete,resort_required FROM events WHERE id=?',(event['id'],)
+        ).fetchone())==(1,1)
     plan=build_workspace_reconcile_plan(db,'j',event['id'],workspace)
     assert plan['summary']['ready'],plan['blockers']
     run=prepare_workspace_reconcile_run(
@@ -252,59 +265,46 @@ def test_0260_applied_delete_releases_files_and_keeps_open_task(tmp_path,preserv
     )
     execute_workspace_reconcile_run(db,run['id'],workspace)
     with database_connection(db) as c:
-        row=c.execute('SELECT pending_delete,resort_required FROM events WHERE id=?',(event['id'],)).fetchone()
-        assert tuple(row)==(1,0)
-        assert c.execute(
-            'SELECT COUNT(*) FROM event_reapply_removed_families '
-            'WHERE event_id=? AND target_event_id IS NULL',(event['id'],),
-        ).fetchone()[0]==1
-    assert len(list_event_reassignments(db,'j',event['id'])['families'])==1
-    assert (workspace/'Arbeitsbereich'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
-    from app.event_reassignment import assign_event_reassignments
-    from app.sort_plan import build_event_sort_plan
-    from app.sort_apply import prepare_sort_run,execute_sort_run
-    state=list_event_reassignments(db,'j',event['id'])
-    reassigned=assign_event_reassignments(
-        db,'j',event['id'],[item['family_id'] for item in state['families']],target_mode='new_event',
-        new_event_name='Neues Ereignis',segments=state['reassignment_segments'],
-        preserve_day_folders=preserve,
-    )
-    target_id=reassigned['target']['event_id']
-    assert reassigned['target']['preserve_day_folders'] is preserve
-    with database_connection(db) as c:
-        assert c.execute('SELECT pending_delete FROM events WHERE id=?',(event['id'],)).fetchone()[0]==1
-    target_plan=build_event_sort_plan(db,'j',target_id,workspace)
-    assert target_plan['summary']['ready'],target_plan['blockers']
-    target_run=prepare_sort_run(
-        db,'j',target_id,workspace,
-        expected_plan_token=target_plan['plan_token'],confirmation_phrase=CONFIRMATION_PHRASE,
-    )
-    execute_sort_run(db,target_run['id'],workspace)
-    with database_connection(db) as c:
         assert c.execute('SELECT COUNT(*) FROM events WHERE id=?',(event['id'],)).fetchone()[0]==0
-        assert c.execute('SELECT status FROM events WHERE id=?',(target_id,)).fetchone()[0]=='applied'
-        assert c.execute(
-            'SELECT COUNT(*) FROM event_reapply_removed_families WHERE event_id=?',(event['id'],),
-        ).fetchone()[0]==0
+        assert c.execute('SELECT COUNT(*) FROM event_reapply_removed_families WHERE event_id=?',(event['id'],)).fetchone()[0]==0
+        assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==1
         assert c.execute(
             "SELECT status FROM event_mutations WHERE anchor_event_id=? ORDER BY created_at DESC LIMIT 1",
             (event['id'],),
         ).fetchone()[0]=='completed'
         assert c.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE entity_id=? AND action='event_deleted_after_target_apply'",
+            "SELECT COUNT(*) FROM audit_log WHERE entity_id=? AND action='event_deleted_after_reconcile'",
             (event['id'],),
         ).fetchone()[0]==1
-    assert any(
-        (workspace/'Arbeitsbereich'/item['destination_relative_path']).read_bytes()==b'1'
-        for item in target_plan['files'] if item['status'] in {'move','already_sorted'}
+    assert (workspace/'Arbeitsbereich'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
+    assert not any(
+        task['kind'] in {'reassignment','resort','unassigned_families'}
+        for task in list_global_tasks(db)
     )
+    cards=list_job_planning_overview(db,'j')['available_day_groups']
+    assert len(cards)==1 and cards[0].get('released_free') is True
+    assert not cards[0].get('reassignment_pending')
+    target_payload=payload('2026-07-23T00:00','2026-07-23T23:59',preserve_day_folders=preserve)
+    target_payload['event_name']='Neues Ereignis'
+    target=create(db,target_payload)['parent_event']
+    list_global_tasks(db)
     with database_connection(db) as c:
-        target_path=c.execute('SELECT current_relative_path FROM files WHERE family_id=?',(state['families'][0]['family_id'],)).fetchone()[0]
-        assert bool(c.execute('SELECT preserve_day_folders FROM events WHERE id=?',(target_id,)).fetchone()[0]) is preserve
+        assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==0
+    target_plan=build_event_sort_plan(db,'j',target['id'],workspace)
+    assert target_plan['summary']['ready'],target_plan['blockers']
+    target_run=prepare_sort_run(
+        db,'j',target['id'],workspace,
+        expected_plan_token=target_plan['plan_token'],confirmation_phrase=CONFIRMATION_PHRASE,
+    )
+    execute_sort_run(db,target_run['id'],workspace)
+    with database_connection(db) as c:
+        applied=c.execute('SELECT status,preserve_day_folders FROM events WHERE id=?',(target['id'],)).fetchone()
+        assert applied['status']=='applied'
+        assert bool(applied['preserve_day_folders']) is preserve
+        target_path=c.execute('SELECT current_relative_path FROM files WHERE job_id=?',('j',)).fetchone()[0]
     assert ('/2026-07-23/Alle/' in target_path) is preserve
-
-
 @pytest.mark.parametrize('preserve',[False,True])
+
 def test_0260_workspace_free_card_new_event_finishes_reassignment(tmp_path,preserve):
     from app.database import delete_planned_event,list_global_tasks
     from app.workspace_reconcile import build_workspace_reconcile_plan,prepare_workspace_reconcile_run,execute_workspace_reconcile_run
@@ -322,13 +322,21 @@ def test_0260_workspace_free_card_new_event_finishes_reassignment(tmp_path,prese
         confirmation_phrase=CONFIRMATION_PHRASE,
     )
     execute_workspace_reconcile_run(db,source_run['id'],workspace)
-    assert list_event_reassignments(db,'j',source['id'])['family_count']==1
+    with database_connection(db) as c:
+        assert c.execute('SELECT COUNT(*) FROM events WHERE id=?',(source['id'],)).fetchone()[0]==0
+        assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==1
+    tasks=list_global_tasks(db)
+    assert not any(t['kind'] in {'reassignment','resort','unassigned_families'} for t in tasks)
+    cards=list_job_planning_overview(db,'j')['available_day_groups']
+    assert len(cards)==1 and cards[0].get('released_free') is True
+    assert not cards[0].get('reassignment_pending')
 
     target_payload=payload('2026-07-23T00:00','2026-07-23T23:59',preserve_day_folders=preserve)
     target_payload['event_name']='Ziel'
-    target=create(db,target_payload)['parent_event']  # normal free-card API path
+    target=create(db,target_payload)['parent_event']
     list_global_tasks(db)
-    assert list_event_reassignments(db,'j',source['id'])['family_count']==0
+    with database_connection(db) as c:
+        assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==0
     target_plan=build_event_sort_plan(db,'j',target['id'],workspace)
     assert target_plan['summary']['ready'],target_plan['blockers']
     target_run=prepare_sort_run(
@@ -346,8 +354,6 @@ def test_0260_workspace_free_card_new_event_finishes_reassignment(tmp_path,prese
     assert path.read_bytes()==b'1'
     assert ('/2026-07-23/Alle/' in file['current_relative_path']) is preserve
     assert len(list((workspace/'Arbeitsbereich').rglob('1.JPG')))==1
-
-
 @pytest.mark.parametrize('cancel',[False,True])
 def test_0260_applied_year_change_document_lifecycle(tmp_path,cancel):
     from app.event_document import build_event_document_from_db,write_event_document

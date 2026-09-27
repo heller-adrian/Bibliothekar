@@ -291,11 +291,14 @@ def test_cross_job_reconcile_rolls_back_after_late_destination_collision(tmp_pat
         ).fetchone()[0] == "failed"
 
 
+
 def test_deleting_one_of_two_events_merges_free_stock_across_jobs(tmp_path):
+    from app.database import list_global_tasks
     db, workspace, file_ids = _seed_cross_job_shift(tmp_path)
     root = workspace / "Arbeitsbereich"
     old_free = root / "2026/2026-07-23 · 11-01–14-59"
-    delete_planned_event(db, "first", "first-event")
+    result = delete_planned_event(db, "first", "first-event")
+    assert result["reassignment_required"] is False
     plan = build_workspace_reconcile_plan(db, "first", "first-event", workspace)
     assert plan["summary"]["ready"], plan["blockers"]
     by_id = {item["file_id"]: item for item in plan["files"]}
@@ -315,11 +318,19 @@ def test_deleting_one_of_two_events_merges_free_stock_across_jobs(tmp_path):
     assert (root / "2026/07-23 - Second/Alle/other.JPG").read_bytes() == b"other"
     with database_connection(db) as connection:
         assert connection.execute(
-            "SELECT COUNT(*) FROM event_reapply_removed_families "
-            "WHERE event_id='first-event' AND target_event_id IS NULL"
+            "SELECT COUNT(*) FROM event_reapply_removed_families WHERE event_id='first-event'"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM released_free_families WHERE job_id='first'"
         ).fetchone()[0] == 1
-
-
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE id='first-event'"
+        ).fetchone()[0] == 0
+    assert not any(
+        task["kind"] in {"reassignment","resort","unassigned_families"}
+        for task in list_global_tasks(db)
+        if task.get("job_id") == "first"
+    )
 @pytest.mark.parametrize("preserve", [False, True])
 def test_reassignment_new_event_uses_explicit_day_folder_option(tmp_path, preserve):
     db = tmp_path / "db.sqlite3"
@@ -384,6 +395,7 @@ def test_reassignment_year_boundary_creates_separate_no_event_months(tmp_path):
     assert list_event_reassignments(db, "j", "source")["family_count"] == 0
 
 
+
 def test_cross_job_no_event_workspace_target_finishes_applied_reassignment(tmp_path):
     from app.database import assign_free_families_to_existing_no_event, list_global_tasks
     from app.sort_apply import execute_sort_run, prepare_sort_run
@@ -413,8 +425,13 @@ def test_cross_job_no_event_workspace_target_finishes_applied_reassignment(tmp_p
         confirmation_phrase=CONFIRMATION_PHRASE,
     )
     execute_workspace_reconcile_run(db, source_run["id"], workspace)
-    state = list_event_reassignments(db, "j", source["id"])
-    assert state["family_count"] == 1
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE id=?", (source["id"],)
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM released_free_families WHERE job_id='j'"
+        ).fetchone()[0] == 1
 
     result = assign_free_families_to_existing_no_event(
         db, "j", other_target["id"],
@@ -422,8 +439,11 @@ def test_cross_job_no_event_workspace_target_finishes_applied_reassignment(tmp_p
     )
     assert result["cross_job"] is True
     target_id = result["event_id"]
-    list_global_tasks(db)  # The normal workspace task refresh links the durable queue.
-    assert list_event_reassignments(db, "j", source["id"])["family_count"] == 0
+    list_global_tasks(db)
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM released_free_families WHERE job_id='j'"
+        ).fetchone()[0] == 0
     target_plan = build_event_sort_plan(db, "j", target_id, workspace)
     assert target_plan["summary"]["ready"], target_plan["blockers"]
     target_run = prepare_sort_run(
@@ -434,9 +454,6 @@ def test_cross_job_no_event_workspace_target_finishes_applied_reassignment(tmp_p
     execute_sort_run(db, target_run["id"], workspace)
 
     with database_connection(db) as connection:
-        assert connection.execute(
-            "SELECT COUNT(*) FROM events WHERE id=?", (source["id"],)
-        ).fetchone()[0] == 0
         target = connection.execute(
             "SELECT status,event_kind,linked_event_id FROM events WHERE id=?", (target_id,)
         ).fetchone()

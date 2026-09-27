@@ -119,7 +119,9 @@ def test_applied_no_event_removed_family_uses_same_no_move_rule(tmp_path):
     _assert_removed_family_stays_in_place(db,workspace,ids[1],before)
 
 
+
 def test_0260_applied_no_event_shrink_reconciles_removed_family_to_free_stock(tmp_path):
+    from app.database import list_global_tasks
     from app.sort_apply import CONFIRMATION_PHRASE
     from app.workspace_reconcile import (
         build_workspace_reconcile_plan,
@@ -150,11 +152,19 @@ def test_0260_applied_no_event_shrink_reconciles_removed_family_to_free_stock(tm
     with database_connection(db) as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM event_reapply_removed_families "
-            "WHERE event_id='src' AND family_id=? AND target_event_id IS NULL",
+            "WHERE event_id='src' AND family_id=?",
             (ids[1],),
-        ).fetchone()[0] == 1
-
-
+        ).fetchone()[0] == 0
+        marker = connection.execute(
+            "SELECT released_start_datetime,released_end_datetime "
+            "FROM released_free_families WHERE job_id='j' AND family_id=?",
+            (ids[1],),
+        ).fetchone()
+        assert tuple(marker) == ('2026-09-08T00:00:00', '2026-09-08T23:59:59')
+    assert not any(
+        task['kind'] in {'reassignment','resort','unassigned_families'}
+        for task in list_global_tasks(db)
+    )
 def test_cancel_applied_edit_restores_db_without_moving_files(tmp_path):
     db,workspace,ids,folder=_seed(tmp_path,no_event=False)
     before=_current_paths(db,ids[1])

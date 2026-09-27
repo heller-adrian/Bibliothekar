@@ -18,28 +18,28 @@ def _segments(db: Path):
     return list_event_reassignments(db, 'j', 'b')['reassignment_segments']
 
 
+
 def test_delete_reassignment_new_event_ignores_source_event_being_deleted(tmp_path):
     db = tmp_path / 'db.sqlite3'
     fids = _make_applied(db)
     result = delete_planned_event(db, 'j', 'b')
-    assert result['reassignment_required'] is True
+    assert result['reassignment_required'] is False
     assert result['removed_family_ids'] == fids[4:]
     with database_connection(db) as c:
-        c.execute("UPDATE events SET resort_required=0 WHERE id='b'")
-
-    reassigned = assign_event_reassignments(
-        db, 'j', 'b', fids[4:], target_mode='new_event', new_event_name='Ersatz Abend', segments=_segments(db)
-    )
-    assert reassigned['status'] == 'reassigned'
-    assert reassigned['pending_family_count'] == 0
-    with database_connection(db) as c:
-        target_id = reassigned['target']['event_id']
-        target = c.execute("SELECT status,name FROM events WHERE id=?", (target_id,)).fetchone()
-        assert tuple(target) == ('planned', 'Ersatz Abend')
-        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id IN (SELECT id FROM events WHERE id=? OR parent_event_id=?)", (target_id, target_id)).fetchone()[0] == 4
-        assert c.execute("SELECT status FROM event_mutations WHERE anchor_event_id='b'").fetchone()[0] == 'pending_apply'
-
-
+        source = c.execute(
+            "SELECT pending_delete,resort_required,status FROM events WHERE id='b'"
+        ).fetchone()
+        assert tuple(source) == (1, 1, 'applied')
+        assert c.execute(
+            "SELECT COUNT(*) FROM event_assignments WHERE event_id='b'"
+        ).fetchone()[0] == 0
+        assert c.execute(
+            "SELECT COUNT(*) FROM event_reapply_removed_families "
+            "WHERE event_id='b' AND target_event_id IS NULL"
+        ).fetchone()[0] == len(fids[4:])
+        assert c.execute(
+            "SELECT status FROM event_mutations WHERE anchor_event_id='b' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()[0] == 'pending_apply'
 def test_delete_reassignment_new_no_event_ignores_source_event_being_deleted(tmp_path):
     db = tmp_path / 'db.sqlite3'
     fids = _make_applied(db)

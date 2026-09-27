@@ -85,6 +85,7 @@ def test_migration_017_and_direct_creation_ui(tmp_path):
     assert "Ereignis löschen" in EVENTS_HTML
 
 
+
 def test_applied_delete_becomes_reassignment_then_verified_delete(tmp_path):
     db = tmp_path / "db.sqlite3"
     seed_job(db)
@@ -93,15 +94,16 @@ def test_applied_delete_becomes_reassignment_then_verified_delete(tmp_path):
 
     result = delete_planned_event(db, "j", "applied")
     assert result["pending_delete"] is True
-    assert result["reassignment_required"] is True
+    assert result["reassignment_required"] is False
     assert result["removed_family_ids"] == [fid]
     with database_connection(db) as c:
         event = c.execute("SELECT pending_delete,resort_required,status FROM events WHERE id='applied'").fetchone()
         assert tuple(event) == (1, 1, "applied")
         assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id='applied'").fetchone()[0] == 0
         assert c.execute("SELECT COUNT(*) FROM event_reapply_removed_families WHERE event_id='applied' AND family_id=?", (fid,)).fetchone()[0] == 1
-
-
+        assert c.execute(
+            "SELECT status FROM event_mutations WHERE anchor_event_id='applied' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()[0] == "pending_apply"
 def test_archived_delete_is_manual_move_and_finishes_without_touching_archive(tmp_path):
     db = tmp_path / "db.sqlite3"
     seed_job(db)
