@@ -3,7 +3,7 @@ from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
 def test_0231_version():
-    assert main.APP_VERSION == "0.26.8"
+    assert main.APP_VERSION == "0.26.9"
 
 
 def test_0231_workspace_main_actions_are_blue_and_card_is_aligned():
