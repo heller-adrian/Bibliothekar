@@ -110,7 +110,7 @@ def reconcile_stale_event_reassignments(connection, job_id: str | None = None, e
         clauses.append("r.event_id=?"); params.append(str(event_id))
     where=" AND ".join(clauses)
     rows=connection.execute(f"""
-        SELECT r.job_id,r.event_id,r.family_id
+        SELECT r.job_id,r.event_id,r.family_id,r.target_kind
         FROM event_reapply_removed_families r
         WHERE {where}
           AND EXISTS (
@@ -125,7 +125,12 @@ def reconcile_stale_event_reassignments(connection, job_id: str | None = None, e
     for r in rows:
         source = connection.execute('SELECT status FROM events WHERE id=?',(r['event_id'],)).fetchone()
         target = connection.execute("SELECT COALESCE(e.parent_event_id,e.id) AS id, e.status,e.event_kind,e.name,e.folder_name,e.preserve_day_folders,e.linkage_kind FROM event_assignments a JOIN events e ON e.id=a.event_id WHERE a.family_id=? AND e.status IN ('draft','planned','applied','archived') LIMIT 1",(r['family_id'],)).fetchone()
-        if source and source['status']=='applied' and target and target['id'] != r['event_id']:
+        if str(r['target_kind'] or '') == 'released_free':
+            connection.execute(
+                "DELETE FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id=?",
+                (r['job_id'],r['event_id'],r['family_id']),
+            )
+        elif source and source['status']=='applied' and target and target['id'] != r['event_id']:
             connection.execute("UPDATE event_reapply_removed_families SET target_event_id=?,target_status=?,target_kind=?,target_name=?,target_folder_name=?,target_preserve_day_folders=?,target_linkage_kind=? WHERE job_id=? AND event_id=? AND family_id=?",(target['id'],target['status'],target['event_kind'],target['name'],target['folder_name'],target['preserve_day_folders'],target['linkage_kind'],r['job_id'],r['event_id'],r['family_id']))
         else:
             connection.execute("DELETE FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id=? AND target_event_id IS NULL",(r['job_id'],r['event_id'],r['family_id']))

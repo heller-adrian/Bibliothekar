@@ -443,16 +443,30 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 c.execute("UPDATE files SET current_relative_path=?,current_root_kind='shared_workspace',updated_at=? WHERE id=?",(str(f['destination_relative_path']),now,int(f['file_id'])))
             for eid in plan['event_ids']:
                 row = c.execute("SELECT pending_delete FROM events WHERE id=? AND job_id=?", (eid,job_id)).fetchone()
-                # Only resolved transitions are consumed by the physical run.
-                # Open rows remain as fachliche tasks after safe release into
-                # canonical free stock.
-                c.execute("DELETE FROM event_reapply_removed_families WHERE event_id=? AND job_id=? AND target_event_id IS NOT NULL",(eid,job_id))
-                open_reassignments = c.execute(
-                    "SELECT COUNT(*) FROM event_reapply_removed_families "
-                    "WHERE event_id=? AND job_id=? AND target_event_id IS NULL",
-                    (eid, job_id),
-                ).fetchone()[0]
-                if row is not None and int(row['pending_delete'] or 0) and not open_reassignments:
+                # 0.26.9: an unresolved row at this point means “release to the
+                # canonical free stock”, not unfinished user work. The confirmed
+                # transaction already moved those files there. For a retained
+                # source event keep a lightweight marker so the workspace can
+                # highlight the released area without creating a task.
+                c.execute(
+                    "DELETE FROM event_reapply_removed_families "
+                    "WHERE event_id=? AND job_id=? AND target_event_id IS NOT NULL",
+                    (eid,job_id),
+                )
+                is_pending_delete = row is not None and int(row['pending_delete'] or 0)
+                if is_pending_delete:
+                    c.execute(
+                        "DELETE FROM event_reapply_removed_families WHERE event_id=? AND job_id=?",
+                        (eid,job_id),
+                    )
+                else:
+                    c.execute(
+                        """UPDATE event_reapply_removed_families
+                           SET target_kind='released_free', reassigned_at=?
+                           WHERE event_id=? AND job_id=? AND target_event_id IS NULL""",
+                        (now,eid,job_id),
+                    )
+                if is_pending_delete:
                     c.execute(
                         "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'event_deleted_after_reconcile','event',?,?,?)",
                         (job_id,eid,_json_details({'run_id':run_id}),now),

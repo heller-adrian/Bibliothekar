@@ -2955,7 +2955,7 @@ def delete_planned_event(
             mutation_id = begin_mutation(
                 connection, job_id=job_id, anchor_event_id=event_id, mutation_kind="delete",
                 affected_event_ids=[event_id], original_state=original_mutation_state,
-                status="pending_reassignment" if family_ids else "pending_apply",
+                status="pending_apply",
             )
             connection.execute("DELETE FROM event_reapply_removed_families WHERE event_id=?", (event_id,))
             if family_ids:
@@ -3005,7 +3005,7 @@ def delete_planned_event(
             )
             set_mutation_target(
                 connection, mutation_id, capture_job_event_state(connection, job_id),
-                status="pending_reassignment" if family_ids else "pending_apply",
+                status="pending_apply",
             )
             connection.execute(
                 """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
@@ -3021,9 +3021,9 @@ def delete_planned_event(
                 "folder_name": folder_name, "released_family_count": len(family_ids),
                 "released_file_count": file_count, "files_changed": False,
                 "folders_changed": False, "pending_delete": True,
-                "reassignment_required": bool(family_ids), "removed_family_ids": family_ids,
+                "reassignment_required": False, "removed_family_ids": family_ids,
                 "status": "pending_delete", "mutation_id": mutation_id,
-                "message": "Löschung vorbereitet. Die Familien müssen noch neu zugeordnet werden; danach wird die SSD automatisch nachsortiert. Bis zum Abschluss kann die Änderung verworfen werden.",
+                "message": "Löschung vorbereitet. Bitte den Zielplan prüfen und die Löschung jetzt anwenden oder verwerfen.",
             }
 
         if status == "archived" or event["archived_at"] is not None:
@@ -3228,7 +3228,9 @@ def update_event_definition(
 
         pending_reassignment = connection.execute(
             """SELECT COUNT(*) AS n FROM event_reapply_removed_families
-               WHERE event_id = ? AND job_id = ? AND target_event_id IS NULL""",
+               WHERE event_id = ? AND job_id = ?
+                 AND target_event_id IS NULL
+                 AND COALESCE(target_kind,'') <> 'released_free'""",
             (event_id, job_id),
         ).fetchone()
         if pending_reassignment is not None and int(pending_reassignment["n"] or 0) > 0:
@@ -3559,7 +3561,7 @@ def update_event_definition(
             target_state = capture_job_event_state(connection, job_id)
             set_mutation_target(
                 connection, mutation_id, target_state,
-                status="pending_reassignment" if removed_ids else "pending_apply",
+                status="pending_apply",
             )
 
         connection.execute(
@@ -3588,7 +3590,7 @@ def update_event_definition(
         "assigned_family_ids": requested_ids,
         "resort_required": bool(is_applied),
         "removed_family_ids": removed_ids,
-        "reassignment_required": bool(removed_ids),
+        "reassignment_required": False if is_applied else bool(removed_ids),
         "cascade": cascade_result,
         "mutation_id": mutation_id,
         "neutralized_files": neutralized_files,
@@ -3815,6 +3817,13 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                FROM event_reapply_removed_families r
                JOIN events e ON e.id=r.event_id
                WHERE r.target_event_id IS NULL
+                 AND COALESCE(r.target_kind,'') <> 'released_free'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM event_mutations m
+                   WHERE m.job_id=r.job_id
+                     AND m.anchor_event_id=r.event_id
+                     AND m.status IN ('pending_reassignment','pending_apply')
+                 )
                GROUP BY r.job_id, r.event_id, e.name
                ORDER BY MIN(r.created_at)"""
         ).fetchall():
@@ -3843,6 +3852,12 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  AND NOT EXISTS (
                    SELECT 1 FROM event_reapply_removed_families r
                    WHERE r.event_id=e.id AND r.job_id=e.job_id AND r.target_event_id IS NULL
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM event_mutations m
+                   WHERE m.job_id=e.job_id
+                     AND m.anchor_event_id=e.id
+                     AND m.status IN ('pending_reassignment','pending_apply')
                  )
                  AND NOT EXISTS (
                    SELECT 1 FROM sort_runs sr

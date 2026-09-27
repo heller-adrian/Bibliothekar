@@ -666,6 +666,15 @@ def build_event_sort_plan(
                     "Dieses Ereignis wurde bereits angewendet oder archiviert."
                 )
 
+        child_definition_rows = connection.execute(
+            """SELECT id,folder_name,start_datetime,end_datetime
+               FROM events
+               WHERE parent_event_id=? AND job_id=?
+               ORDER BY start_datetime,id""",
+            (event_id, job_id),
+        ).fetchall()
+        child_definitions = [dict(row) for row in child_definition_rows]
+
         assignment_rows = connection.execute(
             """
             SELECT
@@ -712,7 +721,8 @@ def build_event_sort_plan(
                           target_name, target_folder_name, target_preserve_day_folders,
                           target_linkage_kind
                    FROM event_reapply_removed_families
-                   WHERE event_id = ? AND job_id = ?""",
+                   WHERE event_id = ? AND job_id = ?
+                     AND COALESCE(target_kind,'') <> 'released_free'""",
                 (event_id, job_id),
             ).fetchall()
             removed_family_ids = {int(row["family_id"]) for row in removed_rows}
@@ -908,6 +918,42 @@ def build_event_sort_plan(
     warnings: list[dict[str, Any]] = []
     entries: list[dict[str, Any]] = []
     planned_directories: set[str] = set()
+
+    # Organizational subevents are part of the target structure even when no
+    # camera family currently falls into their interval. This keeps DB, preview
+    # and physical workspace identical and allows future files to land there.
+    for child in child_definitions:
+        child_folder_name = _safe_component(
+            child.get("folder_name"),
+            "Unterereignisordner",
+        )
+        child_root = PurePosixPath(year, *physical_parent_parts, child_folder_name)
+        if preserve_day_folders:
+            start_day = datetime.fromisoformat(str(child["start_datetime"])[:19]).date()
+            end_day = datetime.fromisoformat(str(child["end_datetime"])[:19]).date()
+            day = start_day
+            from datetime import timedelta
+            while day <= end_day:
+                leaf = child_root / day.isoformat()
+                planned_directories.add(str(leaf / "Alle"))
+                planned_directories.add(str(leaf / "Sortiert"))
+                planned_directories.add(str(leaf / "Export"))
+                day += timedelta(days=1)
+        else:
+            planned_directories.add(str(child_root / "Alle"))
+            planned_directories.add(str(child_root / "Sortiert"))
+            planned_directories.add(str(child_root / "Export"))
+
+        if child_folder_name not in branch_order:
+            branch_order.append(child_folder_name)
+        if preserve_day_folders:
+            start_day = datetime.fromisoformat(str(child["start_datetime"])[:19]).date()
+            end_day = datetime.fromisoformat(str(child["end_datetime"])[:19]).date()
+            day = start_day
+            from datetime import timedelta
+            while day <= end_day:
+                branch_days[child_folder_name].add(day.isoformat())
+                day += timedelta(days=1)
     branch_days: dict[str | None, set[str]] = defaultdict(set)
     branch_order: list[str | None] = []
     family_statuses: dict[int, str] = {}

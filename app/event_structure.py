@@ -315,6 +315,22 @@ def build_event_preview(
             f"{start_date}T{start_time or '00:00'}:00",f"{end_date}T{end_time or '23:59'}:59")
     except ValueError as error:
         raise EventPreviewError(str(error)) from error
+    empty_subevents = []
+    for subevent in subevents:
+        matching = [
+            family for family in candidate_families
+            if subevent["start_datetime"]
+            <= _capture_second(family["selected_capture_time"])
+            <= subevent["end_datetime"]
+        ]
+        if not matching:
+            empty_subevents.append({
+                "name": subevent["name"],
+                "start_datetime": subevent["start_datetime"],
+                "end_datetime": subevent["end_datetime"],
+                "folder_name": subevent["folder_name"],
+            })
+
     requested_family_ids = {
         int(value)
         for value in (payload.get("selected_family_ids") or [])
@@ -483,6 +499,7 @@ def build_event_preview(
             selected_family_count
         ),
         "subevents": subevents,
+        "empty_subevents": empty_subevents,
         "selected_intervals": selected_intervals,
         "existing_parent_event_id": str(payload.get("existing_parent_event_id") or "").strip() or None,
         "structure_lines": lines,
