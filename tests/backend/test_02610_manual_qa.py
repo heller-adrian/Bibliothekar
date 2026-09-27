@@ -1,4 +1,4 @@
-"""0.26.10 regressions found by the manual 0.26.9 deep test."""
+"""0.26.11 regressions found by the manual 0.26.9 deep test."""
 
 import json
 
@@ -18,7 +18,7 @@ from tests.backend.test_0260_free_stock import _seed_cross_job_shift
 
 
 def test_02610_version():
-    assert APP_VERSION == "0.26.10"
+    assert APP_VERSION == "0.26.11"
 
 
 def test_removed_empty_child_directory_is_cleaned_but_desired_empty_child_survives(tmp_path):

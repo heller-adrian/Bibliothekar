@@ -5,7 +5,7 @@ from app.pipeline import copy_and_verify, source_manifest
 
 
 def test_0220_version_and_app_shell():
-    assert main.APP_VERSION == "0.26.10"
+    assert main.APP_VERSION == "0.26.11"
 
     html = main.index()
     assert "Bibliothekar" in html
