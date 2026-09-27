@@ -321,6 +321,13 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
   overflow: visible;
   isolation: isolate;
 }
+.bk-shell.has-open-task-panel {
+  z-index: 10000;
+}
+.bk-shell.has-open-task-panel .bk-task-panel {
+  z-index: 10001;
+}
+
 .bk-shell::after {
   content: "";
   position: absolute;
@@ -1584,10 +1591,19 @@ BIBLIOTHEKAR_JS = r"""
   const menu = document.getElementById("bk-menu");
   const tasksButton = document.getElementById("bk-task-button");
   const taskPanel = document.getElementById("bk-task-panel");
+  const shell = document.querySelector(".bk-shell");
+
+  function syncTaskPanelLayer() {
+    shell?.classList.toggle(
+      "has-open-task-panel",
+      Boolean(taskPanel && !taskPanel.hasAttribute("hidden"))
+    );
+  }
 
   function closePopovers(except) {
     if (except !== menu) menu?.setAttribute("hidden", "");
     if (except !== taskPanel) taskPanel?.setAttribute("hidden", "");
+    syncTaskPanelLayer();
   }
 
   menuButton?.addEventListener("click", (event) => {
@@ -1602,6 +1618,7 @@ BIBLIOTHEKAR_JS = r"""
     const willOpen = taskPanel?.hasAttribute("hidden");
     closePopovers(willOpen ? taskPanel : null);
     if (willOpen) taskPanel?.removeAttribute("hidden"); else taskPanel?.setAttribute("hidden", "");
+    syncTaskPanelLayer();
   });
 
   document.addEventListener("click", (event) => {

@@ -131,7 +131,8 @@ def _load_active_assignments(
                 root.end_datetime AS root_end_datetime,
                 root.status AS root_status,
                 root.event_kind,
-                root.preserve_day_folders
+                root.preserve_day_folders,
+                root.resort_required AS root_resort_required
 
             FROM event_assignments AS ea
 
@@ -396,6 +397,9 @@ def list_job_planning_overview(
                 ),
                 "preserve_day_folders": bool(
                     row["preserve_day_folders"]
+                ),
+                "resort_required": bool(
+                    row["root_resort_required"]
                 ),
                 "day_keys": [],
                 "child_events": [],

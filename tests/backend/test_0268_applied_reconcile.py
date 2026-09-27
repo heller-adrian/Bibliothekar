@@ -7,7 +7,7 @@ from app.obsolete_structure import cleanup_obsolete_structure
 from app.workspace_reconcile import _workspace_structure_text
 from app.events_ui import EVENTS_HTML
 from app.workspace_ui import WORKSPACE_HTML
-from app.ui_shell import BIBLIOTHEKAR_CSS, _shell_markup
+from app.ui_shell import BIBLIOTHEKAR_CSS, BIBLIOTHEKAR_JS, _shell_markup
 
 
 def test_0268_cleanup_keeps_empty_standard_branches_for_active_target(tmp_path: Path):
@@ -155,3 +155,31 @@ def test_0268_forward_extension_guard_accepts_only_immediate_end_extension():
             ("2026-07-20T00:00:00", "2026-07-20T23:59:59"),
             [{"start_datetime": "2026-07-22T00:00:00", "end_datetime": "2026-07-22T23:59:59"}],
         )
+
+
+def test_0268_dialog_errors_are_red_only_and_success_box_is_success_only():
+    assert 'saveResult.hidden=true;\n        saveResult.textContent="";\n        dialogError.hidden=false;' in WORKSPACE_HTML
+    assert "saveResult.textContent=error.message" not in WORKSPACE_HTML
+    assert "function clearDialogFeedbackForEdit()" in WORKSPACE_HTML
+
+
+def test_0268_workspace_cards_show_pending_resort_badge():
+    planning = (Path(__file__).resolve().parents[2] / "app/planning.py").read_text(encoding="utf-8")
+    assert "root.resort_required AS root_resort_required" in planning
+    assert 'group.status === "applied" && Boolean(group.resort_required)' in WORKSPACE_HTML
+    assert "Nachsortierung ausstehend" in WORKSPACE_HTML
+    assert 'class="timeline-event-statuses"' in WORKSPACE_HTML
+
+
+def test_0268_task_panel_outranks_selection_morph_when_open():
+    assert ".bk-shell.has-open-task-panel" in BIBLIOTHEKAR_CSS
+    assert "z-index: 10000;" in BIBLIOTHEKAR_CSS
+    assert "function syncTaskPanelLayer()" in BIBLIOTHEKAR_JS
+    assert '"has-open-task-panel"' in BIBLIOTHEKAR_JS
+
+
+def test_0268_selection_summary_targets_workspace_tab_geometry():
+    assert "const workspaceTab=document.querySelector('.bk-tab[data-area=\"workspace\"]');" in WORKSPACE_HTML
+    assert "function selectionSummaryTargetCenter()" in WORKSPACE_HTML
+    assert "return rect.left+rect.width/2;" in WORKSPACE_HTML
+    assert "const summaryTargetCenter=selectionSummaryTargetCenter();" in WORKSPACE_HTML

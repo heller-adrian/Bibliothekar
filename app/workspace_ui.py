@@ -319,6 +319,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       color: var(--success);
     }
 
+    .timeline-event-statuses {
+      display: grid;
+      justify-items: end;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
+
     .suggestions-panel { margin:0 20px 18px; border-color:#6ea8ff; }
     .suggestion-list { display:grid; gap:10px; margin-top:12px; }
     .suggestion-card { border:1px solid var(--border); border-radius:14px; padding:14px; background:var(--panel-soft); }
@@ -1371,6 +1378,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     const selectionBarAnchor=document.getElementById("selection-bar-anchor");
     const workspaceSubnav=document.querySelector(".bk-workspace-subnav");
     const selectionDockTarget=document.getElementById("bk-workspace-dock");
+    const workspaceTab=document.querySelector('.bk-tab[data-area="workspace"]');
     const selectionMorphDistance=128;
     let selectionFloating=false;
     let selectionNaturalSpace=0;
@@ -1408,6 +1416,14 @@ WORKSPACE_HTML = r"""<!doctype html>
         (targetTop+selectionMorphDistance-anchorTop)
         / selectionMorphDistance
       );
+    }
+
+    function selectionSummaryTargetCenter(){
+      const rect=workspaceTab?.getBoundingClientRect();
+      if(rect && rect.width>0){
+        return rect.left+rect.width/2;
+      }
+      return window.innerWidth/2;
     }
 
     function selectionDockGeometry(){
@@ -1494,7 +1510,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const top=anchorRect.top+(target.top-anchorRect.top)*yP;
 
       const summaryP=smoothStep(clamp01(p/.88));
-      const summaryTargetCenter=window.innerWidth/2;
+      const summaryTargetCenter=selectionSummaryTargetCenter();
       const summaryCenter=selectionSummaryStartCenter
         +(summaryTargetCenter-selectionSummaryStartCenter)*summaryP;
       const summaryWidth=selectionSummary?.getBoundingClientRect().width||0;
@@ -2361,6 +2377,11 @@ WORKSPACE_HTML = r"""<!doctype html>
               group.end_datetime
             );
 
+          const pendingSortBadge =
+            group.status === "applied" && Boolean(group.resort_required)
+              ? '<span class="badge warning">Nachsortierung ausstehend</span>'
+              : "";
+
           const childText =
             (group.child_events || [])
               .map(
@@ -2403,11 +2424,14 @@ WORKSPACE_HTML = r"""<!doctype html>
                 ${childText}
               </div>
 
-              <span class="badge success">
-                ${escapeHtml(
-                  workspaceStatusLabel(group.status)
-                )}
-              </span>
+              <div class="timeline-event-statuses">
+                <span class="badge success">
+                  ${escapeHtml(
+                    workspaceStatusLabel(group.status)
+                  )}
+                </span>
+                ${pendingSortBadge}
+              </div>
             </div>
 
             <div
@@ -3174,8 +3198,8 @@ WORKSPACE_HTML = r"""<!doctype html>
         eventDialog.close();
 
       } catch (error) {
-        saveResult.hidden=false;
-        saveResult.textContent=error.message;
+        saveResult.hidden=true;
+        saveResult.textContent="";
         dialogError.hidden=false;
         dialogError.textContent=error.message;
 
@@ -3295,11 +3319,22 @@ WORKSPACE_HTML = r"""<!doctype html>
       if (willShow) scheduleDialogPreview();
     });
 
+    function clearDialogFeedbackForEdit() {
+      saveResult.hidden=true;
+      saveResult.textContent="";
+      dialogError.hidden=true;
+      dialogError.textContent="";
+    }
+
     eventForm?.addEventListener("input", event => {
       if (event.target?.id === "calculate-preview-button") return;
+      clearDialogFeedbackForEdit();
       scheduleDialogPreview();
     });
-    eventForm?.addEventListener("change", () => scheduleDialogPreview());
+    eventForm?.addEventListener("change", () => {
+      clearDialogFeedbackForEdit();
+      scheduleDialogPreview();
+    });
 
     async function applyPlannedEvents() {
       const jobId = jobSelect.value;

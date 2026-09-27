@@ -4,6 +4,10 @@
 
 ### 0.26.8 – Applied-Reconcile, Zustandsklarheit und Sortierplan
 
+- Dialogfehler werden nur noch im roten Fehlerfeld gezeigt; die grüne Statusbox ist wieder ausschließlich positiven Meldungen vorbehalten.
+- Applied-Ereignisse mit noch offener physischer Nachsortierung zeigen im Arbeitsbereich zusätzlich zum Badge „Angewendet“ den sichtbaren Badge „Nachsortierung ausstehend“.
+- Das geöffnete Aufgaben-Popup hebt den App-Header temporär über Sticky-Unterleiste und Auswahl-Morph, damit Aufgaben nie von „Ohne Ereignis“/„Ereignis“ oder anderen Dock-Elementen überdeckt werden.
+- Der Text „x Gruppen ausgewählt“ zielt beim Desktop-Morph nicht mehr auf die geometrische Fenstermitte, sondern exakt auf die Mitte des Reiters „Arbeitsbereich“ und bleibt dort auch im eingerasteten Zustand ausgerichtet.
 - Der Nur-Lesen-Dialog eines Ereignisses führt „Bearbeiten“ nun oben rechts direkt neben „Schließen“; die zusätzliche untere Aktionszeile entfällt.
 - Der Nachsortierplan dedupliziert identische Hinweise. Die Bestätigungskarte ist kompakter: Hilfe steckt im bekannten Fragezeichen-Tooltip, der Anwenden-/Schließen-Button sitzt oben rechts und die Checkbox-Zeile ist vertikal sauber ausgerichtet.
 - „Bestehendes Ereignis erweitern“ ist jetzt ein enger Schnellweg statt eines zweiten Bearbeiten-Dialogs: angeboten wird nur unmittelbar nach dem bisherigen Ende angrenzende freie Zeit. Beginn/Start bleiben fest, nur der neue Endpunkt kann innerhalb der ausgewählten freien Zeit gesetzt werden; Zeitmodus, Tagesordnerlogik und Unterereignisse werden unverändert vom bestehenden Ereignis übernommen.
