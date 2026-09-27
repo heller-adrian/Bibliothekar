@@ -131,10 +131,11 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert ".child-segment-boundaries" in EVENTS_HTML
     assert "minmax(140px,.82fr)" in EVENTS_HTML
     assert "minmax(140px,.82fr)" in WORKSPACE_HTML
-    assert "const safety=8;" in WORKSPACE_HTML
-    assert "padding-right:12px;" in WORKSPACE_HTML
-    assert "const minimum=9;" in WORKSPACE_HTML
+    assert "const safety=4;" in WORKSPACE_HTML
+    assert "const minimum=10;" in WORKSPACE_HTML
     assert "structureFitMutationObserver.observe(structurePreview" in WORKSPACE_HTML
+    assert 'root.matches?.(".structure-lines,.plan-tree")' in WORKSPACE_HTML
+    assert 'root.matches?.(".tree,.structure-lines,.plan-tree")' not in WORKSPACE_HTML
     assert WORKSPACE_HTML.index("const structurePreview =") < WORKSPACE_HTML.index("structureFitMutationObserver.observe(structurePreview")
     assert "@media (max-width:440px){.edit-boundary{grid-template-columns:1fr}}" in EVENTS_HTML
     assert "width: fit-content;" in WORKSPACE_HTML

@@ -517,7 +517,6 @@ WORKSPACE_HTML = r"""<!doctype html>
     .structure-lines {
       margin:0;
       padding-top:10px;
-      padding-right:12px;
       border-top:1px solid var(--border);
       white-space:pre;
       overflow-wrap:normal;
@@ -1416,14 +1415,14 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     function fitTreeText(root){
       if(!root)return;
-      const nodes=root.matches?.(".tree,.structure-lines,.plan-tree")
+      const nodes=root.matches?.(".structure-lines,.plan-tree")
         ? [root]
-        : [...root.querySelectorAll?.(".tree,.structure-lines,.plan-tree")||[]];
+        : [...root.querySelectorAll?.(".structure-lines,.plan-tree")||[]];
       for(const node of nodes){
         node.style.removeProperty("font-size");
         let size=parseFloat(getComputedStyle(node).fontSize)||14;
-        const minimum=9;
-        const safety=8;
+        const minimum=10;
+        const safety=4;
         while(node.scrollWidth>Math.max(0,node.clientWidth-safety) && size>minimum){
           size-=.5;
           node.style.fontSize=size+"px";
