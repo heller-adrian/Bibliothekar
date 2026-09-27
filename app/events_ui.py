@@ -984,9 +984,15 @@ EVENTS_HTML = r"""<!doctype html>
     #normal-event-segments { display:grid; gap:10px; }
     .child-segment-card { padding:12px 14px !important; margin:0 !important; }
     .child-segment-card > summary { padding:2px 0 8px; }
-    .child-segment-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; padding-top:4px; }
+    .child-segment-fields { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; padding-top:4px; }
     .child-segment-fields > label { display:grid; gap:6px; }
-    .child-segment-remove { grid-column:1/-1; justify-self:start; margin-top:4px; }
+    .child-segment-boundary { display:grid; grid-template-columns:minmax(220px,1.65fr) minmax(130px,.65fr); gap:10px; align-items:end; }
+    .child-segment-end-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:end; }
+    .child-segment-remove { white-space:nowrap; align-self:end; min-height:44px; }
+    @media (max-width:760px) {
+      .child-segment-boundary,.child-segment-end-row { grid-template-columns:1fr; }
+      .child-segment-remove { width:100%; }
+    }
     .event-browser-toolbar { display:flex; gap:28px; align-items:end; justify-content:space-between; flex-wrap:wrap; margin:8px 0 20px; }
     .event-browser-heading { min-width:250px; }
     .event-browser-search { min-width:min(100%,380px); flex:0 1 420px; }
@@ -2594,9 +2600,17 @@ EVENTS_HTML = r"""<!doctype html>
           <summary><strong data-child-summary>${escapeHtml(title)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
           <div class="child-segment-fields">
             <label class="edit-field"><span>Name</span><input data-child-name value="${escapeHtml(segment.name||"")}" ${structural ? "" : "disabled"}></label>
-            <label class="edit-field"><span>Beginn</span><input data-child-start type="datetime-local" value="${escapeHtml(String(segment.start_datetime).slice(0,16))}" ${structural ? "" : "disabled"}></label>
-            <label class="edit-field"><span>Ende</span><input data-child-end type="datetime-local" value="${escapeHtml(String(segment.end_datetime).slice(0,16))}" ${structural ? "" : "disabled"}></label>
-            ${structural ? `<button type="button" data-remove-child-segment class="danger-button child-segment-remove">Unterereignis entfernen</button>` : ""}
+            <div class="child-segment-boundary">
+              <label class="edit-field"><span>Beginn</span><input data-child-start-date type="date" value="${escapeHtml(isoDate(segment.start_datetime))}" ${structural ? "" : "disabled"}></label>
+              <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
+            </div>
+            <div class="child-segment-end-row">
+              <div class="child-segment-boundary">
+                <label class="edit-field"><span>Ende</span><input data-child-end-date type="date" value="${escapeHtml(isoDate(segment.end_datetime))}" ${structural ? "" : "disabled"}></label>
+                <label class="edit-field"><span>Endzeit</span><input data-child-end-time type="time" value="${escapeHtml(end)}" ${structural ? "" : "disabled"}></label>
+              </div>
+              ${structural ? `<button type="button" data-remove-child-segment class="danger-button child-segment-remove">Unterereignis entfernen</button>` : ""}
+            </div>
           </div>
         </details>`;
       }).join("");
@@ -2655,7 +2669,20 @@ EVENTS_HTML = r"""<!doctype html>
           row.open=true;
           row.dataset.childSegment='1';
           row.className='card child-segment-card';
-          row.innerHTML=`<summary><strong data-child-summary>Unterereignis</strong></summary><div class="child-segment-fields"><label class="edit-field"><span>Name</span><input data-child-name></label><label class="edit-field"><span>Beginn</span><input data-child-start type="datetime-local" value="${event.start_datetime.slice(0,16)}"></label><label class="edit-field"><span>Ende</span><input data-child-end type="datetime-local" value="${event.end_datetime.slice(0,16)}"></label><button type="button" class="danger-button child-segment-remove" data-remove-child-segment>Unterereignis entfernen</button></div>`;
+          row.innerHTML=`<summary><strong data-child-summary>Unterereignis</strong></summary><div class="child-segment-fields">
+            <label class="edit-field"><span>Name</span><input data-child-name></label>
+            <div class="child-segment-boundary">
+              <label class="edit-field"><span>Beginn</span><input data-child-start-date type="date" value="${isoDate(event.start_datetime)}"></label>
+              <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${isoTime(event.start_datetime,"00:00")}"></label>
+            </div>
+            <div class="child-segment-end-row">
+              <div class="child-segment-boundary">
+                <label class="edit-field"><span>Ende</span><input data-child-end-date type="date" value="${isoDate(event.end_datetime)}"></label>
+                <label class="edit-field"><span>Endzeit</span><input data-child-end-time type="time" value="${isoTime(event.end_datetime,"23:59")}"></label>
+              </div>
+              <button type="button" class="danger-button child-segment-remove" data-remove-child-segment>Unterereignis entfernen</button>
+            </div>
+          </div>`;
           normalContainer.appendChild(row);
           bind();
         };
