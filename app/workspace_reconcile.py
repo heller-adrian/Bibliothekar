@@ -300,6 +300,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     owner_by_family={int(r['family_id']):str(r['root_event_id']) for r in owner_rows}
 
     plans=[]; by_file: dict[int,dict[str,Any]]={}; by_file_source: dict[int,str]={}; directories: dict[str,dict[str,Any]]={}
+    managed_event_roots: set[str] = set()
     warnings=[]
     for eid in event_ids:
         try:
@@ -314,7 +315,17 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     _recover_missing_workspace_sources(plans)
 
     for p in plans:
-        eid=str(p.get('event',{}).get('id') or '')
+        event_info = dict(p.get("event") or {})
+        eid=str(event_info.get('id') or '')
+        target_root_raw = str(p.get("target_root") or "")
+        year = str(event_info.get("start_datetime") or "")[:4]
+        physical_parts = [str(part) for part in (event_info.get("physical_folder_parts") or []) if str(part)]
+        if not physical_parts and event_info.get("folder_name"):
+            physical_parts = [str(event_info.get("folder_name"))]
+        if target_root_raw and len(year) == 4 and physical_parts:
+            managed_event_roots.add(
+                str(Path(target_root_raw).joinpath(year, *physical_parts).resolve(strict=False))
+            )
         for b in p.get('blockers',[]): blockers.append({**b,"event_id":eid})
         for w in p.get('warnings',[]): warnings.append({**w,"event_id":eid})
         for d in p.get('directories',[]): directories[str(d['relative_path'])]=d
@@ -350,12 +361,14 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     payload={
         "job_id":job_id,"anchor_event_id":anchor_event_id,"event_ids":event_ids,
         "archived_impacts":archived_impacts,
+        "managed_event_roots":sorted(managed_event_roots),
         "files":[[int(f['file_id']),str(f['source_relative_path']),str(f['destination_relative_path']),str(f.get('stored_sha256') or '')] for f in files],
     }
     token=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return {
         "kind":"workspace_reconciliation","job_id":job_id,"anchor_event_id":anchor_event_id,
         "event_ids":event_ids,"archived_impacts":archived_impacts,"files":files,
+        "managed_event_roots":sorted(managed_event_roots),
         "event":event_obj,"job":job_obj,"families":families,"target_groups":target_groups,
         "workspace_root":str(anchor_plan.get("workspace_root") or "") if anchor_plan else "",
         "source_root":str(anchor_plan.get("target_root") or "") if anchor_plan else "",
@@ -380,7 +393,7 @@ def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_
         for eid in plan['event_ids']:
             active=c.execute("SELECT id FROM sort_runs WHERE event_id=? AND status IN (?,?,?,?,?,?) LIMIT 1",(eid,*ACTIVE)).fetchone()
             if active: raise SortApplyError("Für mindestens ein betroffenes Ereignis läuft bereits eine Sortierung.")
-        details={"event_ids":plan['event_ids'],"archived_impacts":plan['archived_impacts'],"planned_directories":[str(d['relative_path']) for d in plan['directories']]}
+        details={"event_ids":plan['event_ids'],"archived_impacts":plan['archived_impacts'],"planned_directories":[str(d['relative_path']) for d in plan['directories']],"managed_event_roots":plan.get('managed_event_roots',[])}
         c.execute("""INSERT INTO sort_runs(id,job_id,event_id,plan_token,status,phase,source_root,target_root,file_count,verified_file_count,move_count,moved_file_count,directory_count,created_directory_count,total_size_bytes,verified_bytes,moved_bytes,error_message,details_json,created_at,started_at,updated_at,completed_at,run_kind)
                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                   (run_id,job_id,anchor_event_id,plan['plan_token'],'queued',
@@ -471,8 +484,32 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                     c.execute("DELETE FROM events WHERE id=? AND job_id=?", (eid,job_id))
                 else:
                     c.execute("UPDATE events SET resort_required=0,status='applied',applied_at=COALESCE(applied_at,?),updated_at=? WHERE id=?",(now,now,eid))
+            receipt = {
+                'anchor_event_id': anchor,
+                'event_ids': plan['event_ids'],
+                'file_count': len(plan['files']),
+                'verified_file_count': len(plan['files']),
+                'move_count': int(plan['summary'].get('move_count') or 0),
+                'moved_file_count': int(plan['summary'].get('move_count') or 0),
+                'directory_count': len(plan['directories']),
+                'created_directory_count': len(created),
+                'total_size_bytes': int(plan['summary'].get('total_size_bytes') or 0),
+                'verified_bytes': int(plan['summary'].get('total_size_bytes') or 0),
+                'moved_bytes': sum(
+                    int(f.get('expected_size_bytes') or 0)
+                    for f in plan['files'] if f.get('status') == 'move'
+                ),
+                'source_root': str(run['source_root']),
+                'target_root': str(run['target_root']),
+                'plan_token': str(run['plan_token']),
+                'run_kind': str(run['run_kind'] or 'reapply'),
+            }
             c.execute("UPDATE sort_runs SET status='applied',phase='Gemeinsamer Arbeitsbereich-Abgleich abgeschlossen',completed_at=?,updated_at=? WHERE id=?",(now,now,run_id))
-            c.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_applied','sort_run',?,?,?)",(job_id,run_id,_json_details({'event_ids':plan['event_ids'],'file_count':len(plan['files'])}),now))
+            # The source event may be deleted above. sort_runs.event_id still has
+            # the historical ON DELETE CASCADE FK, so the run row can vanish in
+            # the same transaction. This audit receipt is intentionally event-
+            # independent and lets polling report the verified success.
+            c.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_applied','sort_run',?,?,?)",(job_id,run_id,_json_details(receipt),now))
             from app.event_mutation import mark_job_mutation_completed
             mark_job_mutation_completed(c, job_id)
             c.commit()
@@ -480,12 +517,20 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         try:
             from app.event_document import build_event_document_from_db, write_event_document
             from app.obsolete_structure import cleanup_obsolete_structure
+            # Read the OLD event.json before overwriting it: it is the ownership
+            # proof for removed empty subevents such as a deleted "Teil B".
+            cleanup_obsolete_structure(
+                root,
+                [src for src,_,_,_ in moved],
+                [f['destination_absolute_path'] for f in plan['files']],
+                set(plan['event_ids']),
+                managed_event_roots=plan.get('managed_event_roots') or [],
+                desired_directories=[d['absolute_path'] for d in plan['directories']],
+            )
             for eid in plan['event_ids']:
                 document=build_event_document_from_db(database_path,workspace_path,job_id,eid)
                 if document:
                     write_event_document(workspace_path,document)
-            cleanup_obsolete_structure(root,[src for src,_,_,_ in moved],
-                [f['destination_absolute_path'] for f in plan['files']],set(plan['event_ids']))
         except Exception as metadata_error:
             with database_connection(database_path) as c:
                 c.execute("UPDATE sort_runs SET phase=?,error_message=? WHERE id=?",('Abgleich abgeschlossen; Strukturmetadaten prüfen',str(metadata_error),run_id))

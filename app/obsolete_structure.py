@@ -1,14 +1,82 @@
 """Remove only empty, known old workspace structure after verified reconciliation."""
 import json
+import re
 from pathlib import Path
 
 
 WORKSPACE_BRANCHES = {"Alle", "Sortiert", "Export"}
+DAY_DIRECTORY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def cleanup_obsolete_structure(root: Path, sources, destinations, event_ids):
+def _inside(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _safe_component(value) -> str | None:
+    raw = str(value or "").strip()
+    if not raw or raw in {".", ".."} or "/" in raw or "\\" in raw:
+        return None
+    return raw
+
+
+def _managed_candidates_from_document(event_root: Path, data: dict) -> set[Path]:
+    """Return only directories whose names/shapes are owned by the app.
+
+    event.json is the ownership proof for the event root. We never delete files
+    here; rmdir later removes only empty managed directories.
+    """
+    candidates: set[Path] = {event_root}
+    event = data.get("event") or {}
+    preserve = bool(event.get("preserve_day_folders"))
+    bases = [event_root]
+    for child in data.get("child_events") or []:
+        name = _safe_component(child.get("folder_name") or child.get("name"))
+        if name:
+            bases.append(event_root / name)
+
+    for base in bases:
+        candidates.add(base)
+        if preserve:
+            try:
+                day_dirs = [
+                    item for item in base.iterdir()
+                    if item.is_dir() and not item.is_symlink() and DAY_DIRECTORY.match(item.name)
+                ]
+            except OSError:
+                day_dirs = []
+            for day_dir in day_dirs:
+                candidates.add(day_dir)
+                candidates.update(day_dir / branch for branch in WORKSPACE_BRANCHES)
+        else:
+            candidates.update(base / branch for branch in WORKSPACE_BRANCHES)
+    return candidates
+
+
+def cleanup_obsolete_structure(
+    root: Path,
+    sources,
+    destinations,
+    event_ids,
+    *,
+    managed_event_roots=(),
+    desired_directories=(),
+):
     root = root.resolve()
     destinations = {Path(p).resolve() for p in destinations}
+    desired_directories = {
+        Path(p).resolve() for p in desired_directories
+        if _inside(Path(p).resolve(), root)
+    }
+    explicit_roots = {
+        Path(p).resolve() for p in managed_event_roots
+        if _inside(Path(p).resolve(), root) and Path(p).resolve() != root
+    }
+
+    def required(directory: Path) -> bool:
+        return (
+            any(directory == target or directory in target.parents for target in destinations)
+            or any(directory == target or directory in target.parents for target in desired_directories)
+        )
 
     # A concrete destination in one standard branch makes the sibling branches
     # part of the active managed target as well. Never prune empty Sortiert /
@@ -16,41 +84,76 @@ def cleanup_obsolete_structure(root: Path, sources, destinations, event_ids):
     active_branch_roots = set()
     for target in destinations:
         for parent in (target.parent, *target.parents):
-            if parent.name in WORKSPACE_BRANCHES and root in parent.parents:
+            if parent.name in WORKSPACE_BRANCHES and _inside(parent, root):
                 active_branch_roots.add(parent.parent)
                 break
+    for directory in desired_directories:
+        if directory.name in WORKSPACE_BRANCHES:
+            active_branch_roots.add(directory.parent)
 
-    candidates = set()
-    documents = set()
+    candidates: set[Path] = set()
+    documents: set[Path] = set()
+
+    # Existing behavior: source paths prove which old free/event ancestors were
+    # touched by this reconciliation.
     for source in sources:
-        current = Path(source).parent
-        while current != root and root in current.parents:
+        current = Path(source).resolve(strict=False).parent
+        while current != root and _inside(current, root):
             if current.is_symlink():
                 break
             candidates.add(current)
-            if current.name == 'Alle':
-                candidates.update(current.parent / name for name in ('Sortiert','Export'))
-            document = current / 'event.json'
+            if current.name == "Alle":
+                candidates.update(current.parent / name for name in WORKSPACE_BRANCHES)
+            document = current / "event.json"
             if document.is_file() and not document.is_symlink():
                 documents.add(document)
             current = current.parent
+
+    # 0.26.10: an empty removed child has no source file and therefore cannot
+    # appear above. The current event root is supplied explicitly; its old
+    # event.json proves ownership and tells us which empty child structures were
+    # managed by Bibliothekar.
+    for event_root in explicit_roots:
+        document = event_root / "event.json"
+        if document.is_file() and not document.is_symlink():
+            documents.add(document)
+
+    valid_documents: dict[Path, dict] = {}
     for document in documents:
-        if any(document.parent in target.parents for target in destinations):
+        try:
+            data = json.loads(document.read_text())
+        except (OSError, ValueError, TypeError):
+            continue
+        if (
+            data.get("source") != "kamera-automatisierung"
+            or str((data.get("event") or {}).get("id")) not in event_ids
+        ):
+            continue
+        valid_documents[document] = data
+        candidates.update(_managed_candidates_from_document(document.parent, data))
+
+    # Remove event.json only when the complete old event root is obsolete and
+    # contains no unknown file/directory. An edited event keeps its document
+    # until the fresh document is written after cleanup.
+    for document, data in valid_documents.items():
+        if required(document.parent):
             continue
         try:
-            data=json.loads(document.read_text())
-            if data.get('source') != 'kamera-automatisierung' or str(data.get('event',{}).get('id')) not in event_ids:
-                continue
-            # Unknown files and directories keep the entire old structure intact.
-            contents=list(document.parent.rglob('*'))
-            if any(p.is_symlink() or (p.is_file() and p!=document) or (p.is_dir() and p not in candidates) for p in contents):
+            contents = list(document.parent.rglob("*"))
+            if any(
+                p.is_symlink()
+                or (p.is_file() and p != document)
+                or (p.is_dir() and p not in candidates)
+                for p in contents
+            ):
                 continue
             document.unlink()
-        except (OSError,ValueError,TypeError):
+        except OSError:
             continue
-    removed=[]
-    for directory in sorted(candidates,key=lambda p:len(p.parts),reverse=True):
-        if directory==root or directory.is_symlink() or any(directory in target.parents for target in destinations):
+
+    removed = []
+    for directory in sorted(candidates, key=lambda p: len(p.parts), reverse=True):
+        if directory == root or directory.is_symlink() or required(directory):
             continue
         if directory.name in WORKSPACE_BRANCHES and directory.parent in active_branch_roots:
             continue

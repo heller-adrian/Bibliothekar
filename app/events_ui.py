@@ -106,7 +106,8 @@ EVENTS_HTML = r"""<!doctype html>
     .edit-boundaries { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;grid-column:1/-1; }
     .edit-boundary { display:grid;grid-template-columns:minmax(0,1.45fr) minmax(105px,.7fr);gap:8px;align-items:end; }
     .inspect-more { margin-top:9px; }
-    @media (max-width:760px){.edit-boundaries,.edit-boundary{grid-template-columns:1fr}}
+    @media (max-width:760px){.edit-boundaries{grid-template-columns:1fr}}
+    @media (max-width:440px){.edit-boundary{grid-template-columns:1fr}}
 
     main {
       width: min(1120px, 100%);
@@ -986,13 +987,19 @@ EVENTS_HTML = r"""<!doctype html>
     .child-segment-card { padding:12px 14px !important; margin:0 !important; }
     .child-segment-card > summary { padding:2px 0 8px; }
     .child-segment-fields { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; padding-top:4px; }
-    .child-segment-fields > label { display:grid; gap:6px; }
-    .child-segment-boundary { display:grid; grid-template-columns:minmax(220px,1.65fr) minmax(130px,.65fr); gap:10px; align-items:end; }
-    .child-segment-end-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:end; }
-    .child-segment-remove { white-space:nowrap; align-self:end; min-height:44px; }
+    .child-segment-top { display:flex; align-items:end; justify-content:space-between; gap:12px; }
+    .child-segment-name { flex:0 1 55%; min-width:220px; }
+    .child-segment-boundaries { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .child-segment-boundary { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(105px,.65fr); gap:8px; align-items:end; }
+    .child-segment-remove { white-space:nowrap; align-self:end; min-height:44px; flex:0 0 auto; }
     @media (max-width:760px) {
-      .child-segment-boundary,.child-segment-end-row { grid-template-columns:1fr; }
-      .child-segment-remove { width:100%; }
+      .child-segment-boundaries { grid-template-columns:1fr; }
+    }
+    @media (max-width:520px) {
+      .child-segment-top { align-items:stretch; }
+      .child-segment-name { min-width:0; flex:1 1 auto; }
+      .child-segment-boundary { grid-template-columns:1fr; }
+      .child-segment-remove { min-width:44px; }
     }
     .event-browser-toolbar { display:flex; gap:28px; align-items:end; justify-content:space-between; flex-wrap:wrap; margin:8px 0 20px; }
     .event-browser-heading { min-width:250px; }
@@ -1744,6 +1751,14 @@ EVENTS_HTML = r"""<!doctype html>
       root.querySelectorAll?.(".plan-tree,.inspect-structure").forEach(node=>fitMonospaceTree(node));
     }
 
+    function scheduleVisibleTreeFit(root=document) {
+      const run=()=>fitVisibleTrees(root);
+      requestAnimationFrame(()=>requestAnimationFrame(run));
+      if (document.fonts?.ready) document.fonts.ready.then(()=>requestAnimationFrame(run));
+      setTimeout(run,120);
+    }
+    window.addEventListener("resize",()=>fitVisibleTrees(document));
+
     function renderSortPlan(plan) {
       currentSortPlan = plan;
 
@@ -2068,7 +2083,7 @@ EVENTS_HTML = r"""<!doctype html>
         `}
       `;
 
-      requestAnimationFrame(()=>fitVisibleTrees(sortPlanBody));
+      scheduleVisibleTreeFit(sortPlanBody);
 
       sortPlanBody
         .querySelectorAll(".plan-family")
@@ -2276,8 +2291,10 @@ EVENTS_HTML = r"""<!doctype html>
             }
             if (mandatoryMutationContext) {
               mandatoryMutationContext = null;
-              sortPlanCloseButton.hidden = true;
             }
+            sortPlanCloseButton.hidden = false;
+            sortPlanCloseButton.textContent = "Schließen";
+            sortPlanCloseButton.classList.remove("danger-button");
 
             setStatus(
               "Sortierung vollständig angewendet und geprüft.",
@@ -2549,7 +2566,7 @@ EVENTS_HTML = r"""<!doctype html>
       };
       familyMore.onclick=()=>{familyDayLimit+=10;drawDays();};
       drawDays();
-      requestAnimationFrame(()=>fitVisibleTrees(eventEditBody));
+      scheduleVisibleTreeFit(eventEditBody);
     }
 
 
@@ -2619,17 +2636,19 @@ EVENTS_HTML = r"""<!doctype html>
         return `<details class="card child-segment-card" data-child-segment data-child-id="${escapeHtml(segment.id)}" open>
           <summary><strong data-child-summary>${escapeHtml(title)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
           <div class="child-segment-fields">
-            <label class="edit-field"><span>Name</span><input data-child-name value="${escapeHtml(segment.name||"")}" ${structural ? "" : "disabled"}></label>
-            <div class="child-segment-boundary">
-              <label class="edit-field"><span>Beginn</span><input data-child-start-date type="date" value="${escapeHtml(isoDate(segment.start_datetime))}" ${structural ? "" : "disabled"}></label>
-              <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
+            <div class="child-segment-top">
+              <label class="edit-field child-segment-name"><span>Name</span><input data-child-name value="${escapeHtml(segment.name||"")}" ${structural ? "" : "disabled"}></label>
+              ${structural ? `<button type="button" data-remove-child-segment class="danger-button child-segment-remove">Unterereignis entfernen</button>` : ""}
             </div>
-            <div class="child-segment-end-row">
+            <div class="child-segment-boundaries">
+              <div class="child-segment-boundary">
+                <label class="edit-field"><span>Beginn</span><input data-child-start-date type="date" value="${escapeHtml(isoDate(segment.start_datetime))}" ${structural ? "" : "disabled"}></label>
+                <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
+              </div>
               <div class="child-segment-boundary">
                 <label class="edit-field"><span>Ende</span><input data-child-end-date type="date" value="${escapeHtml(isoDate(segment.end_datetime))}" ${structural ? "" : "disabled"}></label>
                 <label class="edit-field"><span>Endzeit</span><input data-child-end-time type="time" value="${escapeHtml(end)}" ${structural ? "" : "disabled"}></label>
               </div>
-              ${structural ? `<button type="button" data-remove-child-segment class="danger-button child-segment-remove">Unterereignis entfernen</button>` : ""}
             </div>
           </div>
         </details>`;
@@ -2690,17 +2709,19 @@ EVENTS_HTML = r"""<!doctype html>
           row.dataset.childSegment='1';
           row.className='card child-segment-card';
           row.innerHTML=`<summary><strong data-child-summary>Unterereignis</strong></summary><div class="child-segment-fields">
-            <label class="edit-field"><span>Name</span><input data-child-name></label>
-            <div class="child-segment-boundary">
-              <label class="edit-field"><span>Beginn</span><input data-child-start-date type="date" value="${isoDate(event.start_datetime)}"></label>
-              <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${isoTime(event.start_datetime,"00:00")}"></label>
+            <div class="child-segment-top">
+              <label class="edit-field child-segment-name"><span>Name</span><input data-child-name></label>
+              <button type="button" class="danger-button child-segment-remove" data-remove-child-segment>Unterereignis entfernen</button>
             </div>
-            <div class="child-segment-end-row">
+            <div class="child-segment-boundaries">
+              <div class="child-segment-boundary">
+                <label class="edit-field"><span>Beginn</span><input data-child-start-date type="date" value="${isoDate(event.start_datetime)}"></label>
+                <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${isoTime(event.start_datetime,"00:00")}"></label>
+              </div>
               <div class="child-segment-boundary">
                 <label class="edit-field"><span>Ende</span><input data-child-end-date type="date" value="${isoDate(event.end_datetime)}"></label>
                 <label class="edit-field"><span>Endzeit</span><input data-child-end-time type="time" value="${isoTime(event.end_datetime,"23:59")}"></label>
               </div>
-              <button type="button" class="danger-button child-segment-remove" data-remove-child-segment>Unterereignis entfernen</button>
             </div>
           </div>`;
           normalContainer.appendChild(row);

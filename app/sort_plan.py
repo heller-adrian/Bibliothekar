@@ -921,58 +921,63 @@ def build_event_sort_plan(
     branch_days: dict[str | None, set[str]] = defaultdict(set)
     branch_order: list[str | None] = [None]
     family_statuses: dict[int, str] = {}
+    pending_delete = bool(int(event.get("pending_delete") or 0))
 
-    # Organizational subevents are part of the target structure even when no
-    # camera family currently falls into their interval. This keeps DB, preview
-    # and physical workspace identical and allows future files to land there.
-    for child in child_definitions:
-        child_folder_name = _safe_component(
-            child.get("folder_name"),
-            "Unterereignisordner",
-        )
-        child_root = PurePosixPath(year, *physical_parent_parts, child_folder_name)
-        if preserve_day_folders:
-            start_day = datetime.fromisoformat(str(child["start_datetime"])[:19]).date()
-            end_day = datetime.fromisoformat(str(child["end_datetime"])[:19]).date()
-            day = start_day
-            from datetime import timedelta
-            while day <= end_day:
-                leaf = child_root / day.isoformat()
-                planned_directories.add(str(leaf / "Alle"))
-                planned_directories.add(str(leaf / "Sortiert"))
-                planned_directories.add(str(leaf / "Export"))
-                day += timedelta(days=1)
-        else:
-            planned_directories.add(str(child_root / "Alle"))
-            planned_directories.add(str(child_root / "Sortiert"))
-            planned_directories.add(str(child_root / "Export"))
-
-        if child_folder_name not in branch_order:
-            branch_order.append(child_folder_name)
-        if preserve_day_folders:
-            start_day = datetime.fromisoformat(str(child["start_datetime"])[:19]).date()
-            end_day = datetime.fromisoformat(str(child["end_datetime"])[:19]).date()
-            day = start_day
-            from datetime import timedelta
-            while day <= end_day:
-                branch_days[child_folder_name].add(day.isoformat())
-                day += timedelta(days=1)
-    assigned_child_ids = {
-        str(row["assigned_event_id"])
-        for row in assignment_rows
-        if row["parent_event_id"] is not None
-    }
-    for child in child_definitions:
-        if str(child["id"]) not in assigned_child_ids:
-            warnings.append({
-                "code": "empty_subevent",
-                "message": (
-                    "Unterereignis „" + str(child.get("folder_name") or child.get("id"))
-                    + "“ enthält aktuell keine Dateifamilien; die leere Ordnerstruktur wird trotzdem angelegt."
-                ),
-                "event_id": str(child["id"]),
-            })
-
+    # During a confirmed delete the event hierarchy is source-only: the
+    # complete event will disappear and only canonical free-stock directories
+    # are valid targets. Do not recreate empty parent/child structure.
+    if not (allow_reapply and pending_delete):
+        # Organizational subevents are part of the target structure even when no
+        # camera family currently falls into their interval. This keeps DB, preview
+        # and physical workspace identical and allows future files to land there.
+        for child in child_definitions:
+            child_folder_name = _safe_component(
+                child.get("folder_name"),
+                "Unterereignisordner",
+            )
+            child_root = PurePosixPath(year, *physical_parent_parts, child_folder_name)
+            if preserve_day_folders:
+                start_day = datetime.fromisoformat(str(child["start_datetime"])[:19]).date()
+                end_day = datetime.fromisoformat(str(child["end_datetime"])[:19]).date()
+                day = start_day
+                from datetime import timedelta
+                while day <= end_day:
+                    leaf = child_root / day.isoformat()
+                    planned_directories.add(str(leaf / "Alle"))
+                    planned_directories.add(str(leaf / "Sortiert"))
+                    planned_directories.add(str(leaf / "Export"))
+                    day += timedelta(days=1)
+            else:
+                planned_directories.add(str(child_root / "Alle"))
+                planned_directories.add(str(child_root / "Sortiert"))
+                planned_directories.add(str(child_root / "Export"))
+    
+            if child_folder_name not in branch_order:
+                branch_order.append(child_folder_name)
+            if preserve_day_folders:
+                start_day = datetime.fromisoformat(str(child["start_datetime"])[:19]).date()
+                end_day = datetime.fromisoformat(str(child["end_datetime"])[:19]).date()
+                day = start_day
+                from datetime import timedelta
+                while day <= end_day:
+                    branch_days[child_folder_name].add(day.isoformat())
+                    day += timedelta(days=1)
+        assigned_child_ids = {
+            str(row["assigned_event_id"])
+            for row in assignment_rows
+            if row["parent_event_id"] is not None
+        }
+        for child in child_definitions:
+            if str(child["id"]) not in assigned_child_ids:
+                warnings.append({
+                    "code": "empty_subevent",
+                    "message": (
+                        "Unterereignis „" + str(child.get("folder_name") or child.get("id"))
+                        + "“ enthält aktuell keine Dateifamilien; die leere Ordnerstruktur wird trotzdem angelegt."
+                    ),
+                    "event_id": str(child["id"]),
+                })
+    
     job_ready, job_blocker = job_sort_readiness(job)
     if not job_ready:
         blockers.append({

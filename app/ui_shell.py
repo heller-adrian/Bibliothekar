@@ -878,16 +878,18 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
     align-items: center;
     gap: 8px 14px;
     min-height: 49px;
-    background: color-mix(in srgb, var(--bk-page-bg) 98%, transparent);
-    border-radius: 0 0 15px 15px;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     transition:
       background 180ms ease,
       box-shadow 180ms ease,
       padding-top 180ms ease,
       padding-bottom 180ms ease;
   }
-  .bk-workspace-subnav.is-stuck,
-  .bk-workspace-subnav[data-bk-workspace-subarea="events"] {
+  .bk-workspace-subnav.is-stuck {
     background: color-mix(in srgb, var(--bk-page-bg) 98%, transparent);
     box-shadow: 0 12px 24px -24px rgb(0 0 0 / .55);
     -webkit-backdrop-filter: blur(14px);

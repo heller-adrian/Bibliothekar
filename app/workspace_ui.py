@@ -369,16 +369,17 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
     #event-dialog{inline-size:min(700px,calc(100dvw - 32px))}
     .event-boundaries{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
-    .event-boundary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(130px,.7fr);gap:10px;align-items:end}
+    .event-boundary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(115px,.65fr);gap:10px;align-items:end}
     .create-subevents{display:grid;gap:10px;margin-top:4px}
     .create-subevent-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
     .create-subevent-head button{white-space:nowrap;min-height:38px;padding:8px 12px}
     .create-subevent-card{border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:12px}
     .create-subevent-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;align-items:end}
-    .create-subevent-name{display:grid}
-    .create-subevent-boundary{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(130px,.7fr);gap:8px;align-items:end}
-    .create-subevent-end-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
-    .create-subevent-remove{white-space:nowrap;align-self:end;min-height:44px}
+    .create-subevent-top{display:flex;align-items:end;justify-content:space-between;gap:10px}
+    .create-subevent-name{display:grid;flex:0 1 55%;min-width:220px}
+    .create-subevent-boundaries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .create-subevent-boundary{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(105px,.65fr);gap:8px;align-items:end}
+    .create-subevent-remove{white-space:nowrap;align-self:end;min-height:44px;flex:0 0 auto}
     .dialog-inline-error{margin-top:12px;border:1px solid var(--danger,#b42318);border-radius:10px;background:color-mix(in srgb,var(--danger,#b42318) 10%,var(--surface));color:var(--text);padding:10px 12px;font-weight:650}
     .existing-segment-static{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);padding:9px 10px}
     .selection-bar-anchor{height:0}
@@ -463,7 +464,8 @@ WORKSPACE_HTML = r"""<!doctype html>
         text-overflow:clip;
       }
     }
-    @media (max-width:820px){.event-boundaries,.event-boundary,.create-subevent-grid,.create-subevent-boundary,.create-subevent-end-row{grid-template-columns:1fr}.create-subevent-remove{width:100%}}
+    @media (max-width:820px){.event-boundaries,.create-subevent-grid{grid-template-columns:1fr}.create-subevent-boundaries{grid-template-columns:1fr}}
+    @media (max-width:460px){.event-boundary,.create-subevent-boundary{grid-template-columns:1fr}.create-subevent-name{min-width:0;flex:1 1 auto}}
 
     .preview {
       position: sticky;
@@ -796,6 +798,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       align-items: center;
       gap: 10px;
       min-height: 44px;
+      width: fit-content;
+      max-width: 100%;
+      justify-self: start;
     }
 
     .check-row input {
@@ -1423,6 +1428,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     }
 
+    function scheduleTreeFit(root){
+      const run=()=>fitTreeText(root);
+      requestAnimationFrame(()=>requestAnimationFrame(run));
+      if(document.fonts?.ready)document.fonts.ready.then(()=>requestAnimationFrame(run));
+      setTimeout(run,120);
+    }
+
     function positionWorkspaceChrome(){
       if(!selectionBar || !selectionBarAnchor)return;
       if(workspaceStaticDesktop() && selectionDockTarget){
@@ -2027,6 +2039,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         + `<div class="stored-preview-meta">${details.join("")}</div>`
         + `<pre class="structure-lines">${escapeHtml(data?.structure_text || "Keine Struktur vorhanden.")}</pre>`;
       previewBody.hidden = false;
+      scheduleTreeFit(structurePreview);
     }
 
 
@@ -2834,7 +2847,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     function addCreateSubeventCard(value={}){
       const row=document.createElement("details");row.className="create-subevent-card";row.dataset.createSubevent="1";row.open=true;
       const sd=String(value.start_date||eventStartDate.value||""),ed=String(value.end_date||eventEndDate.value||sd);
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(value.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(value.name||"")}" placeholder="Zum Beispiel Konzert"></label><div class="create-subevent-boundary"><label><span>Beginn</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(value.start_time||"00:00")}"></label></div><div class="create-subevent-end-row"><div class="create-subevent-boundary"><label><span>Ende</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(value.end_time||"23:59")}"></label></div><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(value.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(value.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(value.start_time||"00:00")}"></label></div><div class="create-subevent-boundary"><label><span>Ende</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(value.end_time||"23:59")}"></label></div></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
       row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});
@@ -2964,7 +2977,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           + (empty.length
             ? "\n\nHinweis: ohne passende Dateifamilien · "+empty.map(item=>item.name).join(", ")
             : "");
-        requestAnimationFrame(()=>fitTreeText(dialogPreview));
+        scheduleTreeFit(dialogPreview);
 
       } catch (error) {
         dialogPreview.textContent =

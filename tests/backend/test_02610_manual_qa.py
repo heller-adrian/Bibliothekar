@@ -1,0 +1,136 @@
+"""0.26.10 regressions found by the manual 0.26.9 deep test."""
+
+import json
+
+from app.database import database_connection, delete_planned_event
+from app.main import APP_VERSION
+from app.obsolete_structure import cleanup_obsolete_structure
+from app.sort_apply import CONFIRMATION_PHRASE, get_sort_run
+from app.workspace_reconcile import (
+    build_workspace_reconcile_plan,
+    execute_workspace_reconcile_run,
+    prepare_workspace_reconcile_run,
+)
+from app.events_ui import EVENTS_HTML
+from app.workspace_ui import WORKSPACE_HTML
+from app.ui_shell import BIBLIOTHEKAR_CSS
+from tests.backend.test_0260_free_stock import _seed_cross_job_shift
+
+
+def test_02610_version():
+    assert APP_VERSION == "0.26.10"
+
+
+def test_removed_empty_child_directory_is_cleaned_but_desired_empty_child_survives(tmp_path):
+    root = tmp_path / "Arbeitsbereich"
+    event_root = root / "2026" / "07-23 - Test"
+    for branch in ("Alle", "Sortiert", "Export"):
+        (event_root / branch).mkdir(parents=True)
+        (event_root / "Teil A" / branch).mkdir(parents=True)
+        (event_root / "Teil B" / branch).mkdir(parents=True)
+    (event_root / "event.json").write_text(json.dumps({
+        "source": "kamera-automatisierung",
+        "event": {"id": "e", "preserve_day_folders": False},
+        "child_events": [
+            {"folder_name": "Teil A"},
+            {"folder_name": "Teil B"},
+        ],
+    }))
+
+    desired = [
+        event_root / branch for branch in ("Alle", "Sortiert", "Export")
+    ] + [
+        event_root / "Teil A" / branch for branch in ("Alle", "Sortiert", "Export")
+    ]
+    cleanup_obsolete_structure(
+        root, [], [], {"e"},
+        managed_event_roots=[event_root],
+        desired_directories=desired,
+    )
+
+    assert event_root.is_dir()
+    assert (event_root / "event.json").is_file()
+    assert (event_root / "Teil A").is_dir()
+    assert not (event_root / "Teil B").exists()
+
+
+def test_applied_delete_preview_removes_event_tree_and_completed_run_stays_pollable(tmp_path):
+    db, workspace, file_ids = _seed_cross_job_shift(tmp_path)
+    root = workspace / "Arbeitsbereich"
+    event_root = root / "2026" / "07-23 - First"
+
+    with database_connection(db) as connection:
+        connection.execute(
+            """INSERT INTO events(
+                   id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                   uses_time_range,folder_name,status,created_at,updated_at,event_kind,
+                   revision,applied_at,time_model_version
+               ) VALUES (
+                   'empty-child','first','first-event','child','Teil B',
+                   '2026-07-23T10:30:00','2026-07-23T10:45:59',1,'Teil B',
+                   'applied','now','now','event',1,'now',2
+               )"""
+        )
+
+    for branch in ("Alle", "Sortiert", "Export"):
+        (event_root / branch).mkdir(parents=True, exist_ok=True)
+        (event_root / "Teil B" / branch).mkdir(parents=True, exist_ok=True)
+    (event_root / "event.json").write_text(json.dumps({
+        "source": "kamera-automatisierung",
+        "event": {"id": "first-event", "preserve_day_folders": False},
+        "child_events": [{"folder_name": "Teil B"}],
+    }))
+
+    prepared = delete_planned_event(db, "first", "first-event")
+    assert prepared["pending_delete"] is True
+    plan = build_workspace_reconcile_plan(db, "first", "first-event", workspace)
+    assert plan["summary"]["ready"], plan["blockers"]
+    assert "07-23 - First" not in plan["structure_text"]
+    assert all(
+        "07-23 - First" not in str(item["relative_path"])
+        for item in plan["directories"]
+    )
+
+    run = prepare_workspace_reconcile_run(
+        db, "first", "first-event", workspace,
+        expected_plan_token=plan["plan_token"],
+        confirmation_phrase=CONFIRMATION_PHRASE,
+    )
+    run_id = run["id"]
+    execute_workspace_reconcile_run(db, run_id, workspace)
+
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE id='first-event'"
+        ).fetchone()[0] == 0
+        # Historical FK behavior still removes the physical run row.
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sort_runs WHERE id=?", (run_id,)
+        ).fetchone()[0] == 0
+
+    receipt = get_sort_run(db, "first", run_id)
+    assert receipt is not None
+    assert receipt["status"] == "applied"
+    assert receipt["terminal"] is True
+    assert receipt["progress_percent"] == 100
+    assert not event_root.exists()
+
+    free_file = root / next(
+        item["destination_relative_path"]
+        for item in plan["files"] if item["file_id"] == file_ids["event"]
+    )
+    assert free_file.read_bytes() == b"event"
+
+
+def test_02610_ui_contracts_from_manual_deep_test():
+    assert "function scheduleTreeFit(root)" in WORKSPACE_HTML
+    assert "scheduleTreeFit(structurePreview);" in WORKSPACE_HTML
+    assert "function scheduleVisibleTreeFit(root=document)" in EVENTS_HTML
+    assert 'sortPlanCloseButton.textContent = "Schließen";' in EVENTS_HTML
+    assert ".child-segment-top" in EVENTS_HTML
+    assert ".child-segment-boundaries" in EVENTS_HTML
+    assert "@media (max-width:440px){.edit-boundary{grid-template-columns:1fr}}" in EVENTS_HTML
+    assert "width: fit-content;" in WORKSPACE_HTML
+    assert "@media (max-width:460px){.event-boundary,.create-subevent-boundary{grid-template-columns:1fr}" in WORKSPACE_HTML
+    assert "background: transparent;" in BIBLIOTHEKAR_CSS
+    assert ".bk-workspace-subnav.is-stuck {" in BIBLIOTHEKAR_CSS

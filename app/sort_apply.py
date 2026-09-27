@@ -162,8 +162,53 @@ def get_sort_run(
             """,
             (run_id, job_id),
         ).fetchone()
+        if row is not None:
+            return _run_dict(row)
 
-    return _run_dict(row) if row is not None else None
+        # A successfully confirmed delete removes the source event. Historical
+        # schema 005 ties sort_runs.event_id to it with ON DELETE CASCADE, so the
+        # just-finished run can disappear at commit time. Only an explicit
+        # workspace_reconciliation_applied audit receipt is accepted as proof of
+        # success; an arbitrary missing run remains missing.
+        receipt_row = connection.execute(
+            """SELECT details_json,created_at
+               FROM audit_log
+               WHERE job_id=? AND entity_type='sort_run' AND entity_id=?
+                 AND action='workspace_reconciliation_applied'
+               ORDER BY id DESC LIMIT 1""",
+            (job_id, run_id),
+        ).fetchone()
+        if receipt_row is None:
+            return None
+        details = _load_json(receipt_row["details_json"])
+        completed_at = str(receipt_row["created_at"] or "")
+        synthetic = {
+            "id": run_id,
+            "job_id": job_id,
+            "event_id": str(details.get("anchor_event_id") or ""),
+            "plan_token": str(details.get("plan_token") or ""),
+            "status": "applied",
+            "phase": "Gemeinsamer Arbeitsbereich-Abgleich abgeschlossen",
+            "source_root": str(details.get("source_root") or ""),
+            "target_root": str(details.get("target_root") or ""),
+            "file_count": int(details.get("file_count") or 0),
+            "verified_file_count": int(details.get("verified_file_count") or details.get("file_count") or 0),
+            "move_count": int(details.get("move_count") or 0),
+            "moved_file_count": int(details.get("moved_file_count") or details.get("move_count") or 0),
+            "directory_count": int(details.get("directory_count") or 0),
+            "created_directory_count": int(details.get("created_directory_count") or 0),
+            "total_size_bytes": int(details.get("total_size_bytes") or 0),
+            "verified_bytes": int(details.get("verified_bytes") or details.get("total_size_bytes") or 0),
+            "moved_bytes": int(details.get("moved_bytes") or 0),
+            "error_message": None,
+            "details_json": json.dumps(details, ensure_ascii=False, sort_keys=True),
+            "created_at": completed_at,
+            "started_at": completed_at,
+            "updated_at": completed_at,
+            "completed_at": completed_at,
+            "run_kind": str(details.get("run_kind") or "reapply"),
+        }
+        return _run_dict(synthetic)
 
 
 def latest_event_sort_run(
