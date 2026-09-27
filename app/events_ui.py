@@ -990,7 +990,7 @@ EVENTS_HTML = r"""<!doctype html>
     .child-segment-top { display:flex; align-items:end; justify-content:space-between; gap:12px; }
     .child-segment-name { flex:0 1 55%; min-width:220px; }
     .child-segment-boundaries { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-    .child-segment-boundary { display:grid; grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr); gap:8px; align-items:end; }
+    .child-segment-boundary { display:grid; grid-template-columns:minmax(160px,1.25fr) minmax(130px,.75fr); gap:8px; align-items:end; }
     .child-segment-remove { white-space:nowrap; align-self:end; min-height:44px; flex:0 0 auto; }
     @media (max-width:760px) {
       .child-segment-boundaries { grid-template-columns:1fr; }

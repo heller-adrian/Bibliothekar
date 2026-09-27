@@ -131,6 +131,9 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert ".child-segment-boundaries" in EVENTS_HTML
     assert "minmax(140px,.82fr)" in EVENTS_HTML
     assert "minmax(140px,.82fr)" in WORKSPACE_HTML
+    assert "grid-template-columns:minmax(190px,1.55fr) 118px 118px auto" in WORKSPACE_HTML
+    assert "minmax(160px,1.25fr) minmax(130px,.75fr)" in WORKSPACE_HTML
+    assert "minmax(160px,1.25fr) minmax(130px,.75fr)" in EVENTS_HTML
     assert "const minimum=10;" in WORKSPACE_HTML
     assert "while(node.scrollWidth>node.clientWidth+1 && size>minimum)" in WORKSPACE_HTML
     assert "padding-right:4px;" in WORKSPACE_HTML
