@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### 0.26.9 – verbindliche Applied-Transaktionen und statischer Arbeitsbereich
+
+- Bearbeiten und Löschen bereits angewendeter Ereignisse sind jetzt verbindliche Transaktionen: Nach der Definition öffnet sich unmittelbar der vorhandene SHA-geprüfte Arbeitsbereich-Abgleich. Dieser Zustand kann nicht auf später vertagt werden; oben steht nur „Änderungen verwerfen“, unten wird der Zielplan bestätigt und angewendet.
+- Herausfallende Familien müssen vor einer Applied-Änderung nicht mehr neu zugeordnet werden. Der bestätigte Abgleich führt sie direkt in den kanonischen freien Tages-/Zeitbestand zurück. Dort bleiben sie als aus einer Bearbeitung freigewordene Bereiche gelb erkennbar, erzeugen aber keine Neu-Zuordnungs- oder Nachsortierungsaufgabe.
+- Das Löschen eines Applied-Ereignisses verwendet denselben verpflichtenden Ablauf. Nach erfolgreicher Bestätigung wird das Ereignis wirklich entfernt und seine Dateien werden in den freien Arbeitsbestand zurückgeführt; ein Verwerfen stellt den vorherigen Zustand wieder her.
+- Leere Unterereignisse sind ausdrücklich zulässig. Vor Erstellen oder Bearbeiten warnt die App, wenn aktuell keine passende Dateifamilie vorhanden ist; nach bewusster Bestätigung wird die vollständige leere Zielstruktur mit `Alle`, `Sortiert` und `Export` trotzdem angelegt.
+- Zielstruktur-Vorschauen und Ereignis-Inspektor behalten lange Baumzeilen auf einer Zeile und verkleinern die Monospace-Schrift bei Bedarf statt die Ordnerbezeichnung umzubrechen.
+- Unterereignisse im Bearbeiten-Dialog zeigen Name, Beginn/Startzeit und Ende/Endzeit wieder in getrennten, ausreichend breiten Feldern.
+- Die Scroll-/Morph-Animation der Auswahlleiste entfällt vollständig. Ihr bisheriger Endzustand ist auf Desktop nun von Anfang an der feste Zustand im Workspace-Unterheader; „x Gruppen ausgewählt“ bleibt direkt unter dem Hauptreiter „Arbeitsbereich“ zentriert.
+- Die vier Kennzahlen Tage, Dateien, Familien und Prüffälle stehen kompakt neben der Überschrift „Aufnahmen“, sodass Tagesordner und Zielstruktur deutlich früher beginnen.
+- Das Aufgaben-Popup wird beim Öffnen in die oberste Dokumentebene verschoben. Dadurch bleiben Workspace-Aktionsbuttons über dem dekorativen Header-Überstand sichtbar, während „Offene Aufgaben“ selbst weiterhin über allen Bedienelementen liegt.
+- Die sichere Grundregel bleibt unverändert: Keine physische Applied-Änderung erfolgt ohne den explizit bestätigten, blockerfreien und SHA-256-geprüften Abgleich; 0.26.9 beseitigt lediglich den unsicheren bzw. verwirrenden „später erledigen“-Zwischenzustand.
+
 ### 0.26.8 – Applied-Reconcile, Zustandsklarheit und Sortierplan
 
 - Dialogfehler werden nur noch im roten Fehlerfeld gezeigt; die grüne Statusbox ist wieder ausschließlich positiven Meldungen vorbehalten.

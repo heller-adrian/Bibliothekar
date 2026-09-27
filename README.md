@@ -2,7 +2,7 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.26.8**
+Aktueller Entwicklungsstand: **0.26.9**
 
 ## Ziel
 
