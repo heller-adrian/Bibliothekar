@@ -126,6 +126,9 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert "function scheduleTreeFit(root)" in WORKSPACE_HTML
     assert "scheduleTreeFit(structurePreview);" in WORKSPACE_HTML
     assert "function scheduleVisibleTreeFit(root=document)" in EVENTS_HTML
+    assert "const minimum=10;" in EVENTS_HTML
+    assert "while(node.scrollWidth>node.clientWidth+1 && size>minimum)" in EVENTS_HTML
+    assert "Math.max(0,node.clientWidth-safety)" not in EVENTS_HTML
     assert 'sortPlanCloseButton.textContent = "Schließen";' in EVENTS_HTML
     assert ".child-segment-top" in EVENTS_HTML
     assert ".child-segment-boundaries" in EVENTS_HTML

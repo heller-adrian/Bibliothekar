@@ -1740,9 +1740,8 @@ EVENTS_HTML = r"""<!doctype html>
       if (!node) return;
       node.style.removeProperty("font-size");
       let size=parseFloat(getComputedStyle(node).fontSize)||14;
-      const minimum=9;
-      const safety=8;
-      while(node.scrollWidth>Math.max(0,node.clientWidth-safety) && size>minimum){
+      const minimum=10;
+      while(node.scrollWidth>node.clientWidth+1 && size>minimum){
         size-=.5;
         node.style.fontSize=size+"px";
       }
