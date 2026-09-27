@@ -918,6 +918,9 @@ def build_event_sort_plan(
     warnings: list[dict[str, Any]] = []
     entries: list[dict[str, Any]] = []
     planned_directories: set[str] = set()
+    branch_days: dict[str | None, set[str]] = defaultdict(set)
+    branch_order: list[str | None] = [None]
+    family_statuses: dict[int, str] = {}
 
     # Organizational subevents are part of the target structure even when no
     # camera family currently falls into their interval. This keeps DB, preview
@@ -954,9 +957,21 @@ def build_event_sort_plan(
             while day <= end_day:
                 branch_days[child_folder_name].add(day.isoformat())
                 day += timedelta(days=1)
-    branch_days: dict[str | None, set[str]] = defaultdict(set)
-    branch_order: list[str | None] = []
-    family_statuses: dict[int, str] = {}
+    assigned_child_ids = {
+        str(row["assigned_event_id"])
+        for row in assignment_rows
+        if row["parent_event_id"] is not None
+    }
+    for child in child_definitions:
+        if str(child["id"]) not in assigned_child_ids:
+            warnings.append({
+                "code": "empty_subevent",
+                "message": (
+                    "Unterereignis „" + str(child.get("folder_name") or child.get("id"))
+                    + "“ enthält aktuell keine Dateifamilien; die leere Ordnerstruktur wird trotzdem angelegt."
+                ),
+                "event_id": str(child["id"]),
+            })
 
     job_ready, job_blocker = job_sort_readiness(job)
     if not job_ready:
