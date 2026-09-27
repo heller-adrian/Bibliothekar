@@ -134,6 +134,7 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert "const safety=8;" in WORKSPACE_HTML
     assert "const minimum=9;" in WORKSPACE_HTML
     assert "structureFitMutationObserver.observe(structurePreview" in WORKSPACE_HTML
+    assert WORKSPACE_HTML.index("const structurePreview =") < WORKSPACE_HTML.index("structureFitMutationObserver.observe(structurePreview")
     assert "@media (max-width:440px){.edit-boundary{grid-template-columns:1fr}}" in EVENTS_HTML
     assert "width: fit-content;" in WORKSPACE_HTML
     assert "@media (max-width:460px){.event-boundary,.create-subevent-boundary{grid-template-columns:1fr}" in WORKSPACE_HTML

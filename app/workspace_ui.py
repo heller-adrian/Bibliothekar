@@ -1438,17 +1438,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       setTimeout(run,360);
     }
 
-    const structureFitMutationObserver = new MutationObserver(()=>{
-      scheduleTreeFit(structurePreview);
-    });
-    if(structurePreview){
-      structureFitMutationObserver.observe(structurePreview,{
-        childList:true,
-        subtree:true,
-        characterData:true
-      });
-    }
-
     function positionWorkspaceChrome(){
       if(!selectionBar || !selectionBarAnchor)return;
       if(workspaceStaticDesktop() && selectionDockTarget){
@@ -1497,6 +1486,17 @@ WORKSPACE_HTML = r"""<!doctype html>
       document.getElementById(
         "structure-preview"
       );
+
+    const structureFitMutationObserver = new MutationObserver(()=>{
+      scheduleTreeFit(structurePreview);
+    });
+    if(structurePreview){
+      structureFitMutationObserver.observe(structurePreview,{
+        childList:true,
+        subtree:true,
+        characterData:true
+      });
+    }
 
     const eventDialog =
       document.getElementById("event-dialog");
