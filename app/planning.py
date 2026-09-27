@@ -296,7 +296,19 @@ def interval_cards(database_path, job_id, available_families, total_by_day):
     from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
     result = []
     with database_connection(database_path) as c:
-        pending = {int(r['family_id']) for r in c.execute("SELECT family_id FROM event_reapply_removed_families WHERE job_id=? AND target_event_id IS NULL", (job_id,))}
+        pending = {
+            int(r['family_id'])
+            for r in c.execute(
+                """SELECT family_id
+                   FROM event_reapply_removed_families
+                   WHERE job_id=? AND target_event_id IS NULL
+                   UNION
+                   SELECT family_id
+                   FROM released_free_families
+                   WHERE job_id=?""",
+                (job_id, job_id),
+            )
+        }
         for day in sorted(d for d in total_by_day if d):
             a,b = day+'T00:00:00', day+'T23:59:59'
             occupied = [(r['effective_start'],r['effective_end']) for r in continuous_event_overlaps(c,job_id,a,b)]

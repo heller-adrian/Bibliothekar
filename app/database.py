@@ -3800,8 +3800,13 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
         # Veraltete Neu-Zuordnungen sind keine Aufgaben. Sie entstehen z. B.,
         # wenn eine Familie spaeter wieder direkt einem gueltigen Ereignis
         # zugeordnet wurde.
-        from app.event_reassignment import reconcile_stale_event_reassignments
-        if reconcile_stale_event_reassignments(connection):
+        from app.event_reassignment import (
+            reconcile_stale_event_reassignments,
+            reconcile_released_free_markers,
+        )
+        cleaned = reconcile_stale_event_reassignments(connection)
+        cleaned += reconcile_released_free_markers(connection)
+        if cleaned:
             connection.commit()
         active_reconcile_event_ids: set[str] = set()
         for active in connection.execute(
@@ -3911,6 +3916,10 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  AND NOT EXISTS (
                    SELECT 1 FROM event_reapply_removed_families r
                    WHERE r.job_id=ff.job_id AND r.family_id=ff.id AND r.target_event_id IS NULL
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM released_free_families marker
+                   WHERE marker.job_id=ff.job_id AND marker.family_id=ff.id
                  )
                GROUP BY ff.job_id,j.source_volume_label
                HAVING COUNT(*) > 0
