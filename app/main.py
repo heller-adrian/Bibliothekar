@@ -4120,6 +4120,16 @@ def api_create_event(
             available_families,
         )
 
+        if preview.get("empty_subevents") and not bool(payload.get("confirm_empty_subevents")):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "Mindestens ein Unterereignis enthält aktuell keine passenden Dateifamilien.",
+                    "confirmation_required": "empty_subevents",
+                    "empty_subevents": preview["empty_subevents"],
+                },
+            )
+
         result = create_planned_event(
             DATABASE_FILE,
             job_id,
@@ -4634,6 +4644,16 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                 preview["child_segments"] = child_segments
             else:
                 preview = build_event_preview(edit_payload, editable_families)
+
+            if preview.get("empty_subevents") and not bool(payload.get("confirm_empty_subevents")):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "Mindestens ein Unterereignis enthält aktuell keine passenden Dateifamilien.",
+                        "confirmation_required": "empty_subevents",
+                        "empty_subevents": preview["empty_subevents"],
+                    },
+                )
 
         archive_bundle = None
         if preview is not None and cascade_confirmed and cascade_preview.get("has_conflicts"):
