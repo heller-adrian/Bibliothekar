@@ -171,15 +171,16 @@ def test_0268_workspace_cards_show_pending_resort_badge():
     assert 'class="timeline-event-statuses"' in WORKSPACE_HTML
 
 
-def test_0268_task_panel_outranks_selection_morph_when_open():
-    assert ".bk-shell.has-open-task-panel" in BIBLIOTHEKAR_CSS
-    assert "z-index: 10000;" in BIBLIOTHEKAR_CSS
-    assert "function syncTaskPanelLayer()" in BIBLIOTHEKAR_JS
-    assert '"has-open-task-panel"' in BIBLIOTHEKAR_JS
+def test_0268_task_panel_is_portaled_above_static_workspace_header():
+    assert ".bk-task-panel.bk-task-panel-portaled" in BIBLIOTHEKAR_CSS
+    assert "z-index: 10000" in BIBLIOTHEKAR_CSS
+    assert "function openTaskPanel()" in BIBLIOTHEKAR_JS
+    assert "document.body.appendChild(taskPanel)" in BIBLIOTHEKAR_JS
+    assert "function restoreTaskPanel()" in BIBLIOTHEKAR_JS
 
 
 def test_0268_selection_summary_targets_workspace_tab_geometry():
     assert "const workspaceTab=document.querySelector('.bk-tab[data-area=\"workspace\"]');" in WORKSPACE_HTML
-    assert "function selectionSummaryTargetCenter()" in WORKSPACE_HTML
-    assert "return rect.left+rect.width/2;" in WORKSPACE_HTML
-    assert "const summaryTargetCenter=selectionSummaryTargetCenter();" in WORKSPACE_HTML
+    assert "function alignHeaderSelectionSummary()" in WORKSPACE_HTML
+    assert 'selectionSummary.style.left=(tabRect.left+tabRect.width/2-barRect.left)+"px"' in WORKSPACE_HTML
+    assert "selectionMorphDistance" not in WORKSPACE_HTML
