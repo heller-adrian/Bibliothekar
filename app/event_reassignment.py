@@ -212,6 +212,7 @@ def list_event_reassignments(database_path: Path, job_id: str, event_id: str) ->
             JOIN file_families ff ON ff.id = r.family_id AND ff.job_id = r.job_id
             LEFT JOIN files f ON f.family_id = ff.id AND f.job_id = ff.job_id
             WHERE r.job_id = ? AND r.event_id = ? AND r.target_event_id IS NULL
+              AND COALESCE(r.target_kind,'') <> 'released_free'
             GROUP BY r.event_id, r.family_id
             ORDER BY ff.selected_capture_time, ff.id
             """,
@@ -634,6 +635,7 @@ def assign_event_reassignments(
             f"""SELECT family_id,released_start_datetime,released_end_datetime
                 FROM event_reapply_removed_families
                 WHERE job_id=? AND event_id=? AND target_event_id IS NULL
+                  AND COALESCE(target_kind,'') <> 'released_free'
                   AND family_id IN ({placeholders})""",
             (job_id, event_id, *selected),
         ).fetchall()
@@ -653,7 +655,8 @@ def assign_event_reassignments(
             all_open = connection.execute(
                 """SELECT family_id,released_start_datetime,released_end_datetime
                    FROM event_reapply_removed_families
-                   WHERE job_id=? AND event_id=? AND target_event_id IS NULL""",
+                   WHERE job_id=? AND event_id=? AND target_event_id IS NULL
+                     AND COALESCE(target_kind,'') <> 'released_free'""",
                 (job_id, event_id),
             ).fetchall()
             chosen_ranges = {

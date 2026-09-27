@@ -1923,6 +1923,7 @@ def list_job_events(
                 SELECT event_id, COUNT(*) AS pending_count
                 FROM event_reapply_removed_families
                 WHERE job_id = ? AND target_event_id IS NULL
+                  AND COALESCE(target_kind,'') <> 'released_free'
                 GROUP BY event_id
             ),
 
@@ -2041,7 +2042,9 @@ def search_events(
             ), pending AS (
               SELECT event_id, COUNT(*) AS pending_count
               FROM event_reapply_removed_families
-              WHERE target_event_id IS NULL GROUP BY event_id
+              WHERE target_event_id IS NULL
+                AND COALESCE(target_kind,'') <> 'released_free'
+              GROUP BY event_id
             ), active_mutation AS (
               SELECT id,job_id,anchor_event_id,status,affected_event_ids_json
               FROM event_mutations
@@ -3852,6 +3855,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  AND NOT EXISTS (
                    SELECT 1 FROM event_reapply_removed_families r
                    WHERE r.event_id=e.id AND r.job_id=e.job_id AND r.target_event_id IS NULL
+                     AND COALESCE(r.target_kind,'') <> 'released_free'
                  )
                  AND NOT EXISTS (
                    SELECT 1 FROM event_mutations m
