@@ -97,9 +97,14 @@ def test_0269_applied_edit_and_delete_are_mandatory_transactions():
 def test_0269_released_free_marker_is_not_an_open_task_or_reassignment():
     database = _source("app/database.py")
     reassignment = _source("app/event_reassignment.py")
-    assert database.count("COALESCE(target_kind,'') <> 'released_free'") >= 4
+    reconcile = _source("app/workspace_reconcile.py")
+    planning = _source("app/planning.py")
+    assert database.count("COALESCE(target_kind,'') <> 'released_free'") >= 3
     assert reassignment.count("COALESCE(target_kind,'') <> 'released_free'") >= 3
-    assert "str(r['target_kind'] or '') == 'released_free'" in reassignment
+    assert "released_free_families" in database
+    assert "released_free_families" in planning
+    assert "INSERT OR REPLACE INTO released_free_families" in reconcile
+    assert "reconcile_released_free_markers" in reassignment
 
 
 def test_0269_workspace_header_is_static_and_morph_is_gone():

@@ -39,7 +39,7 @@ def test_0231_event_actions_use_blue_positive_action_class():
     html = main.events_interface().body.decode("utf-8")
 
     assert 'class="plan-button bk-positive-action" data-sort-plan-event=' in html
-    assert '<button type="submit" class="plan-button bk-positive-action">Änderungen speichern</button>' in html
+    assert 'event.status === "applied" ? "Änderungen anwenden" : "Änderungen speichern"' in html
 
 
 def test_0231_multiple_time_ranges_have_explicit_editor_mode():

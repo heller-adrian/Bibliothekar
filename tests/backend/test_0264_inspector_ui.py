@@ -15,7 +15,8 @@ def test_version_is_0264():
 
 def test_workspace_preview_preserves_tree_and_db_facts():
     html = source("app/workspace_ui.py")
-    assert "white-space: pre-wrap;" in html
+    assert "white-space: pre;" in html
+    assert "function fitTreeText(root)" in html
     assert "function renderStoredEventPreview" in html
     assert "Datenbank-Zeitraum:" in html
     assert 'class="structure-lines"' in html
