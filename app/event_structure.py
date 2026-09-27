@@ -315,22 +315,6 @@ def build_event_preview(
             f"{start_date}T{start_time or '00:00'}:00",f"{end_date}T{end_time or '23:59'}:59")
     except ValueError as error:
         raise EventPreviewError(str(error)) from error
-    empty_subevents = []
-    for subevent in subevents:
-        matching = [
-            family for family in candidate_families
-            if subevent["start_datetime"]
-            <= _capture_second(family["selected_capture_time"])
-            <= subevent["end_datetime"]
-        ]
-        if not matching:
-            empty_subevents.append({
-                "name": subevent["name"],
-                "start_datetime": subevent["start_datetime"],
-                "end_datetime": subevent["end_datetime"],
-                "folder_name": subevent["folder_name"],
-            })
-
     requested_family_ids = {
         int(value)
         for value in (payload.get("selected_family_ids") or [])
@@ -375,6 +359,71 @@ def build_event_preview(
     selected_family_count = len(
         selected_family_ids
     )
+
+    structure_subevents = []
+    empty_subevents = []
+    empty_subevent_days = []
+    child_family_ids = set()
+
+    if subevents:
+        from datetime import date, timedelta
+
+    for subevent in subevents:
+        matching = [
+            family for family in candidate_families
+            if subevent["start_datetime"]
+            <= _capture_second(family["selected_capture_time"])
+            <= subevent["end_datetime"]
+        ]
+        matching_day_keys = sorted({
+            str(family["day_key"])
+            for family in matching
+            if family.get("day_key")
+        })
+        child_family_ids.update(
+            int(family["family_id"]) for family in matching
+        )
+        structure_subevents.append({
+            **subevent,
+            "day_keys": matching_day_keys,
+        })
+
+        if not matching:
+            empty_subevents.append({
+                "name": subevent["name"],
+                "start_datetime": subevent["start_datetime"],
+                "end_datetime": subevent["end_datetime"],
+                "folder_name": subevent["folder_name"],
+            })
+            continue
+
+        if preserve_day_folders:
+            start_day = date.fromisoformat(subevent["start_datetime"][:10])
+            end_day = date.fromisoformat(subevent["end_datetime"][:10])
+            occupied = set(matching_day_keys)
+            missing_days = []
+            current_day = start_day
+            while current_day <= end_day:
+                day_key = current_day.isoformat()
+                if day_key not in occupied:
+                    missing_days.append(day_key)
+                current_day += timedelta(days=1)
+            if missing_days:
+                empty_subevent_days.append({
+                    "name": subevent["name"],
+                    "folder_name": subevent["folder_name"],
+                    "day_keys": missing_days,
+                })
+
+    if subevents:
+        parent_structure_day_keys = sorted({
+            str(family["day_key"])
+            for family in candidate_families
+            if family.get("day_key")
+            and int(family["family_id"]) not in child_family_ids
+        })
+    else:
+        parent_structure_day_keys = selected_day_keys
 
     if event_kind == "no_event":
         parent_name = "Ohne Ereignis"
@@ -453,8 +502,14 @@ def build_event_preview(
         )
 
     from app.structure_view import render_structure
-    lines = render_structure(start_date[:4],parent_folder,selected_day_keys,
-        subevents or ([{'folder_name':child_folder}] if child_folder else []),preserve_day_folders)
+    lines = render_structure(
+        start_date[:4],
+        parent_folder,
+        parent_structure_day_keys,
+        structure_subevents
+        or ([{"folder_name": child_folder, "day_keys": selected_day_keys}] if child_folder else []),
+        preserve_day_folders,
+    )
     lines.extend([
         "",
         "Zeitraum:",
@@ -500,6 +555,7 @@ def build_event_preview(
         ),
         "subevents": subevents,
         "empty_subevents": empty_subevents,
+        "empty_subevent_days": empty_subevent_days,
         "selected_intervals": selected_intervals,
         "existing_parent_event_id": str(payload.get("existing_parent_event_id") or "").strip() or None,
         "structure_lines": lines,

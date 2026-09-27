@@ -682,12 +682,20 @@ def build_event_sort_plan(
                 ea.file_id,
                 assigned.id AS assigned_event_id,
                 assigned.parent_event_id,
-                assigned.folder_name AS assigned_folder_name
+                assigned.folder_name AS assigned_folder_name,
+                COALESCE(ff.selected_capture_time, direct_ff.selected_capture_time)
+                    AS assignment_capture_time
 
             FROM event_assignments AS ea
 
             JOIN events AS assigned
                 ON assigned.id = ea.event_id
+            LEFT JOIN file_families AS ff
+                ON ff.id = ea.family_id
+            LEFT JOIN files AS direct_file
+                ON direct_file.id = ea.file_id
+            LEFT JOIN file_families AS direct_ff
+                ON direct_ff.id = direct_file.family_id
 
             WHERE assigned.job_id = ?
               AND (
@@ -708,12 +716,17 @@ def build_event_sort_plan(
         direct_file_assignments: list[int] = []
         removed_family_ids: set[int] = set()
         removed_targets: dict[int, dict[str, Any]] = {}
+        child_assignment_days: dict[str, set[str]] = defaultdict(set)
 
         for row in assignment_rows:
             if row["family_id"] is not None:
                 family_assignments[int(row["family_id"])] = dict(row)
             elif row["file_id"] is not None:
                 direct_file_assignments.append(int(row["file_id"]))
+            if row["parent_event_id"] is not None:
+                day_key = str(row["assignment_capture_time"] or "")[:10]
+                if len(day_key) == 10:
+                    child_assignment_days[str(row["assigned_event_id"])].add(day_key)
 
         if allow_reapply:
             removed_rows = connection.execute(
@@ -927,41 +940,65 @@ def build_event_sort_plan(
     # complete event will disappear and only canonical free-stock directories
     # are valid targets. Do not recreate empty parent/child structure.
     if not (allow_reapply and pending_delete):
-        # Organizational subevents are part of the target structure even when no
-        # camera family currently falls into their interval. This keeps DB, preview
-        # and physical workspace identical and allows future files to land there.
+        # Organizational subevents always keep their own structure. With
+        # "Tagesordner erhalten", however, a day directory represents actual
+        # content and is created only for capture days that really land in this
+        # subevent. An entirely empty subevent keeps the explicitly confirmed
+        # empty Alle/Sortiert/Export triplet directly below its folder.
         for child in child_definitions:
             child_folder_name = _safe_component(
                 child.get("folder_name"),
                 "Unterereignisordner",
             )
             child_root = PurePosixPath(year, *physical_parent_parts, child_folder_name)
-            if preserve_day_folders:
-                start_day = datetime.fromisoformat(str(child["start_datetime"])[:19]).date()
-                end_day = datetime.fromisoformat(str(child["end_datetime"])[:19]).date()
-                day = start_day
-                from datetime import timedelta
-                while day <= end_day:
-                    leaf = child_root / day.isoformat()
+            assigned_days = sorted(
+                child_assignment_days.get(str(child["id"]), set())
+            )
+
+            if preserve_day_folders and assigned_days:
+                for day_key in assigned_days:
+                    leaf = child_root / day_key
                     planned_directories.add(str(leaf / "Alle"))
                     planned_directories.add(str(leaf / "Sortiert"))
                     planned_directories.add(str(leaf / "Export"))
+                    branch_days[child_folder_name].add(day_key)
+
+                start_day = datetime.fromisoformat(
+                    str(child["start_datetime"])[:19]
+                ).date()
+                end_day = datetime.fromisoformat(
+                    str(child["end_datetime"])[:19]
+                ).date()
+                from datetime import timedelta
+                occupied_days = set(assigned_days)
+                missing_days = []
+                day = start_day
+                while day <= end_day:
+                    day_key = day.isoformat()
+                    if day_key not in occupied_days:
+                        missing_days.append(day_key)
                     day += timedelta(days=1)
+                if missing_days:
+                    warnings.append({
+                        "code": "empty_subevent_days",
+                        "message": (
+                            "Unterereignis „"
+                            + str(child.get("folder_name") or child.get("id"))
+                            + "“ enthält an "
+                            + ", ".join(missing_days)
+                            + " keine Dateifamilien; für diese Tage werden "
+                              "keine Tagesordner angelegt."
+                        ),
+                        "event_id": str(child["id"]),
+                        "days": missing_days,
+                    })
             else:
                 planned_directories.add(str(child_root / "Alle"))
                 planned_directories.add(str(child_root / "Sortiert"))
                 planned_directories.add(str(child_root / "Export"))
-    
+
             if child_folder_name not in branch_order:
                 branch_order.append(child_folder_name)
-            if preserve_day_folders:
-                start_day = datetime.fromisoformat(str(child["start_datetime"])[:19]).date()
-                end_day = datetime.fromisoformat(str(child["end_datetime"])[:19]).date()
-                day = start_day
-                from datetime import timedelta
-                while day <= end_day:
-                    branch_days[child_folder_name].add(day.isoformat())
-                    day += timedelta(days=1)
         assigned_child_ids = {
             str(row["assigned_event_id"])
             for row in assignment_rows

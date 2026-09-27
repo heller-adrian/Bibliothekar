@@ -126,6 +126,22 @@ def build_event_document_from_db(
 
         families = _families_of_event(connection, job_id, event_id)
 
+        assignment_day_rows = connection.execute(
+            """
+            SELECT assigned.id AS assigned_event_id,
+                   assigned.parent_event_id,
+                   COALESCE(ff.selected_capture_time, direct_ff.selected_capture_time) AS selected_capture_time
+            FROM event_assignments AS ea
+            JOIN events AS assigned ON assigned.id = ea.event_id
+            LEFT JOIN file_families AS ff ON ff.id = ea.family_id
+            LEFT JOIN files AS direct_file ON direct_file.id = ea.file_id
+            LEFT JOIN file_families AS direct_ff ON direct_ff.id = direct_file.family_id
+            WHERE assigned.job_id = ?
+              AND (assigned.id = ? OR assigned.parent_event_id = ?)
+            """,
+            (job_id, event_id, event_id),
+        ).fetchall()
+
         file_rows = connection.execute(
             """
             SELECT f.current_relative_path, f.original_filename, f.size_bytes,
@@ -175,17 +191,31 @@ def build_event_document_from_db(
     ]
     for child in children:
         structure_lines.append(f"    └── {child['folder_name']}")
-    day_keys = sorted({
-        str(row["selected_capture_time"] or "")[:10]
-        for row in families
-        if row["selected_capture_time"]
-    })
-    if preserve_day_folders and day_keys:
-        structure_lines.extend(f"        └── {day}" for day in day_keys)
-    structure_lines.extend(["            ├── Alle", "            ├── Sortiert", "            └── Export"])
+    days_by_event: dict[str, set[str]] = {}
+    for row in assignment_day_rows:
+        capture = str(row["selected_capture_time"] or "")
+        day_key = capture[:10]
+        if len(day_key) != 10:
+            continue
+        days_by_event.setdefault(str(row["assigned_event_id"]), set()).add(day_key)
+
+    day_keys = sorted(days_by_event.get(str(event_id), set()))
+    structure_children = [
+        {
+            **child,
+            "day_keys": sorted(days_by_event.get(str(child["id"]), set())),
+        }
+        for child in children
+    ]
 
     from app.structure_view import render_structure
-    structure_lines = render_structure(str(event['start_datetime'])[:4],event['folder_name'],day_keys,children,preserve_day_folders)
+    structure_lines = render_structure(
+        str(event["start_datetime"])[:4],
+        event["folder_name"],
+        day_keys,
+        structure_children,
+        preserve_day_folders,
+    )
     return {
         "document_version": EVENT_DOCUMENT_VERSION,
         "source": "kamera-automatisierung",
