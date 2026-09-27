@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0266_version():
-    assert APP_VERSION == "0.26.9"
+    assert APP_VERSION == "0.26.10"
 
 
 def test_0266_workspace_removes_duplicate_saved_events_and_noevent_range_helper():
@@ -37,7 +37,8 @@ def test_0266_event_creation_uses_real_subevents_and_paired_boundaries():
     assert "collectCreateSubevents()" in WORKSPACE_HTML
     assert "subevents:" in WORKSPACE_HTML
     assert 'id="child-event-name"' not in WORKSPACE_HTML
-    assert 'class="create-subevent-end-row"' in WORKSPACE_HTML
+    assert 'class="create-subevent-top"' in WORKSPACE_HTML
+    assert 'class="create-subevent-boundaries"' in WORKSPACE_HTML
     assert "Unterereignisse organisieren Teilzeiträume" not in WORKSPACE_HTML
 
 

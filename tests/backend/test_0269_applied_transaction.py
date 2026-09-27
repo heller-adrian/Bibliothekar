@@ -15,7 +15,7 @@ def _source(relative: str) -> str:
 
 
 def test_0269_version():
-    assert APP_VERSION == "0.26.9"
+    assert APP_VERSION == "0.26.10"
 
 
 def test_0269_empty_subevent_is_detected_and_kept_in_preview_structure():
@@ -208,4 +208,5 @@ def test_0269_subevent_editor_uses_split_date_and_time_fields():
     assert 'data-child-end-date' in EVENTS_HTML
     assert 'data-child-end-time' in EVENTS_HTML
     assert ".child-segment-boundary" in EVENTS_HTML
-    assert ".child-segment-end-row" in EVENTS_HTML
+    assert ".child-segment-top" in EVENTS_HTML
+    assert ".child-segment-boundaries" in EVENTS_HTML

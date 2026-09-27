@@ -101,11 +101,12 @@ def test_0268_sort_plan_modal_is_compact_and_disclosed():
     assert '<summary>Zielstruktur</summary>' in EVENTS_HTML
 
 
-def test_0268_events_subnav_is_opaque():
+def test_0268_events_subnav_is_transparent_until_stuck():
     markup = _shell_markup("workspace", "events")
     assert 'class="bk-workspace-subnav"' in markup
     assert 'data-bk-workspace-subarea="events"' in markup
-    assert '.bk-workspace-subnav[data-bk-workspace-subarea="events"]' in BIBLIOTHEKAR_CSS
+    assert "background: transparent;" in BIBLIOTHEKAR_CSS
+    assert ".bk-workspace-subnav.is-stuck {" in BIBLIOTHEKAR_CSS
     assert "var(--bk-page-bg) 98%" in BIBLIOTHEKAR_CSS
 
 

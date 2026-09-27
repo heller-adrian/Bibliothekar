@@ -13,7 +13,7 @@ def _js_block(start_marker: str, end_marker: str) -> str:
 
 
 def test_0267_version_and_planning_helpers_are_present():
-    assert APP_VERSION == "0.26.9"
+    assert APP_VERSION == "0.26.10"
     assert "function planningOverview()" in WORKSPACE_HTML
     assert "function availableDayGroups()" in WORKSPACE_HTML
 
@@ -114,11 +114,13 @@ def test_0267_metrics_move_into_capture_heading_on_desktop():
     assert ".summary.compact-heading-summary" in WORKSPACE_HTML
 
 
-def test_0267_event_creation_dialog_uses_spacious_two_row_layout():
+def test_0267_event_creation_dialog_keeps_date_time_pairs_compact():
     assert "#event-dialog{inline-size:min(700px" in WORKSPACE_HTML
     assert ".event-boundaries{display:grid;grid-template-columns:minmax(0,1fr)" in WORKSPACE_HTML
     assert ".create-subevent-grid{display:grid;grid-template-columns:minmax(0,1fr)" in WORKSPACE_HTML
-    assert ".create-subevent-end-row{display:grid;grid-template-columns:minmax(0,1fr) auto" in WORKSPACE_HTML
+    assert ".create-subevent-top{display:flex" in WORKSPACE_HTML
+    assert ".create-subevent-boundaries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))" in WORKSPACE_HTML
+    assert "@media (max-width:460px){.event-boundary,.create-subevent-boundary{grid-template-columns:1fr}" in WORKSPACE_HTML
     assert 'class="create-subevent-name"' in WORKSPACE_HTML
     assert 'class="danger-button create-subevent-remove"' in WORKSPACE_HTML
     assert "Unterereignisse organisieren Teilzeiträume" not in WORKSPACE_HTML
