@@ -1880,9 +1880,12 @@ WORKSPACE_HTML = r"""<!doctype html>
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
+        const error = new Error(
           data.detail || "Anfrage fehlgeschlagen."
         );
+        error.data = data;
+        error.status = response.status;
+        throw error;
       }
 
       return data;
@@ -3119,8 +3122,12 @@ WORKSPACE_HTML = r"""<!doctype html>
           payload
         );
 
+        const empty=(result.preview.empty_subevents||[]);
         dialogPreview.textContent =
-          result.preview.structure_text;
+          result.preview.structure_text
+          + (empty.length
+            ? "\n\nHinweis: ohne passende Dateifamilien · "+empty.map(item=>item.name).join(", ")
+            : "");
 
       } catch (error) {
         dialogPreview.textContent =
@@ -3132,6 +3139,34 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     }
 
+
+    function confirmEmptySubevents(error) {
+      if (error?.data?.confirmation_required !== "empty_subevents") return false;
+      const names=(error.data.empty_subevents||[]).map(item=>String(item.name||"Unterereignis"));
+      const detail=names.length
+        ? "\n\nOhne passende Dateifamilien: "+names.join(", ")
+        : "";
+      return window.confirm(
+        "Mindestens ein Unterereignis enthält aktuell keine passenden Dateifamilien."
+        + detail
+        + "\n\nDie leere Ordnerstruktur wird trotzdem angelegt. Trotzdem fortfahren?"
+      );
+    }
+
+    async function createEventWithEmptySubeventConfirmation(jobId, payload) {
+      try {
+        return await postJson(
+          `/api/jobs/${encodeURIComponent(jobId)}/events`,
+          payload
+        );
+      } catch (error) {
+        if (!confirmEmptySubevents(error)) throw error;
+        return postJson(
+          `/api/jobs/${encodeURIComponent(jobId)}/events`,
+          {...payload,confirm_empty_subevents:true}
+        );
+      }
+    }
 
     async function saveEvent() {
       const jobId = jobSelect.value;
@@ -3181,9 +3216,10 @@ WORKSPACE_HTML = r"""<!doctype html>
           });
           saveResult.textContent = `Fortgeführt: ${result.assigned_family_count} Familien`;
         } else {
-          result = await postJson(
-            `/api/jobs/${encodeURIComponent(jobId)}/events`,
-            collectEventPayload()
+          const eventPayload=collectEventPayload();
+          result = await createEventWithEmptySubeventConfirmation(
+            jobId,
+            eventPayload
           );
           saveResult.textContent = `Gespeichert: ${result.parent_event.folder_name} · ${result.assigned_family_count} Familien`;
           lastSavedEvent = result.parent_event;
