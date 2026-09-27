@@ -96,7 +96,7 @@ def _assert_removed_family_stays_in_place(db, workspace, family_id, expected_pat
 
 
 def test_version_0204():
-    assert APP_VERSION == '0.26.9'
+    assert APP_VERSION == '0.26.10'
 
 
 def test_applied_normal_event_removed_family_stays_at_old_path_until_reconcile(tmp_path):
