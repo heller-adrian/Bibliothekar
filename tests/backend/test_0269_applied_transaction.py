@@ -70,7 +70,8 @@ def test_0269_empty_subevents_require_explicit_confirmation_in_both_flows():
 def test_0269_sort_plan_materializes_empty_subevent_directories():
     sort_plan = _source("app/sort_plan.py")
     assert "child_definition_rows = connection.execute" in sort_plan
-    assert "Organizational subevents are part of the target structure" in sort_plan
+    assert '"code": "empty_subevent_days"' in sort_plan
+    assert "An entirely empty subevent keeps the explicitly confirmed" in sort_plan
     assert 'planned_directories.add(str(child_root / "Alle"))' in sort_plan
     assert 'planned_directories.add(str(child_root / "Sortiert"))' in sort_plan
     assert 'planned_directories.add(str(child_root / "Export"))' in sort_plan
