@@ -381,8 +381,9 @@ EVENTS_HTML = r"""<!doctype html>
       border:1px solid var(--border);
       border-radius:11px;
       background:var(--surface-2);
-      white-space:pre-wrap;
-      overflow-wrap:anywhere;
+      white-space:pre;
+      overflow-wrap:normal;
+      overflow-x:hidden;
       font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
       font-size:.82rem;
       line-height:1.5;
@@ -581,7 +582,7 @@ EVENTS_HTML = r"""<!doctype html>
 
     .plan-tree {
       margin: 0;
-      overflow-x: auto;
+      overflow-x: hidden;
       border: 1px solid var(--border);
       border-radius: 13px;
       background: var(--surface-2);
@@ -1200,6 +1201,7 @@ EVENTS_HTML = r"""<!doctype html>
     document.getElementById("global-task-fab")?.addEventListener("click",()=>document.getElementById("global-task-panel")?.classList.toggle("open"));
     refreshGlobalTasks();
     setInterval(refreshGlobalTasks,30000);
+    window.addEventListener("resize",()=>requestAnimationFrame(()=>fitVisibleTrees(document)));
 
 
     const statusElement =
@@ -1727,6 +1729,21 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
 
+    function fitMonospaceTree(node) {
+      if (!node) return;
+      node.style.removeProperty("font-size");
+      let size=parseFloat(getComputedStyle(node).fontSize)||14;
+      const minimum=10;
+      while(node.scrollWidth>node.clientWidth+1 && size>minimum){
+        size-=.5;
+        node.style.fontSize=size+"px";
+      }
+    }
+
+    function fitVisibleTrees(root=document) {
+      root.querySelectorAll?.(".plan-tree,.inspect-structure").forEach(node=>fitMonospaceTree(node));
+    }
+
     function renderSortPlan(plan) {
       currentSortPlan = plan;
 
@@ -2050,6 +2067,8 @@ EVENTS_HTML = r"""<!doctype html>
           </section>
         `}
       `;
+
+      requestAnimationFrame(()=>fitVisibleTrees(sortPlanBody));
 
       sortPlanBody
         .querySelectorAll(".plan-family")
@@ -2530,6 +2549,7 @@ EVENTS_HTML = r"""<!doctype html>
       };
       familyMore.onclick=()=>{familyDayLimit+=10;drawDays();};
       drawDays();
+      requestAnimationFrame(()=>fitVisibleTrees(eventEditBody));
     }
 
 
