@@ -132,5 +132,6 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert "@media (max-width:440px){.edit-boundary{grid-template-columns:1fr}}" in EVENTS_HTML
     assert "width: fit-content;" in WORKSPACE_HTML
     assert "@media (max-width:460px){.event-boundary,.create-subevent-boundary{grid-template-columns:1fr}" in WORKSPACE_HTML
-    assert "background: transparent;" in BIBLIOTHEKAR_CSS
+    assert "background: color-mix(in srgb, var(--bk-page-bg) 98%, transparent);" in BIBLIOTHEKAR_CSS
+    assert "body.bibliothekar-redesign .selection-bar.is-header-docked{" in WORKSPACE_HTML
     assert ".bk-workspace-subnav.is-stuck {" in BIBLIOTHEKAR_CSS

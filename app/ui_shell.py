@@ -878,8 +878,8 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
     align-items: center;
     gap: 8px 14px;
     min-height: 49px;
-    background: transparent;
-    border-radius: 0;
+    background: color-mix(in srgb, var(--bk-page-bg) 98%, transparent);
+    border-radius: 0 0 15px 15px;
     box-shadow: none;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;

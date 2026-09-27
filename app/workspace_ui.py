@@ -386,7 +386,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     @media (min-width:821px){
       main{padding-bottom:18px !important}
       .selection-bar-anchor{display:none}
-      .selection-bar.is-header-docked{
+      body.bibliothekar-redesign .selection-bar.is-header-docked{
         position:relative !important;
         z-index:1 !important;
         width:100%;
