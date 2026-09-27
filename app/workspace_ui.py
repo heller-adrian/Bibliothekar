@@ -517,6 +517,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     .structure-lines {
       margin:0;
       padding-top:10px;
+      padding-right:12px;
       border-top:1px solid var(--border);
       white-space:pre;
       overflow-wrap:normal;
