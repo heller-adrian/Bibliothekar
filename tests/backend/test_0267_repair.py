@@ -13,7 +13,7 @@ def _js_block(start_marker: str, end_marker: str) -> str:
 
 
 def test_0267_version_and_planning_helpers_are_present():
-    assert APP_VERSION == "0.27.2"
+    assert APP_VERSION == "0.27.3"
     assert "function planningOverview()" in WORKSPACE_HTML
     assert "function availableDayGroups()" in WORKSPACE_HTML
 

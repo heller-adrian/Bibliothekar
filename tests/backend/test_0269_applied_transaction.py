@@ -15,7 +15,7 @@ def _source(relative: str) -> str:
 
 
 def test_0269_version():
-    assert APP_VERSION == "0.27.2"
+    assert APP_VERSION == "0.27.3"
 
 
 def test_0269_empty_subevent_is_detected_and_kept_in_preview_structure():
