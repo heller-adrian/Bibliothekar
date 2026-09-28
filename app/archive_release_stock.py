@@ -541,7 +541,7 @@ def cleanup_archive_release_stock(
     release_root = (root / RELEASE_DIRECTORY_NAME).resolve(strict=False)
     for parent in sorted(parents, key=lambda p: len(p.parts), reverse=True):
         cursor = parent
-        while cursor != root and cursor != release_root.parent:
+        while cursor != root and cursor != release_root and cursor != release_root.parent:
             try:
                 if cursor.exists() and cursor.is_dir() and not any(cursor.iterdir()):
                     cursor.rmdir()
@@ -549,9 +549,11 @@ def cleanup_archive_release_stock(
                     break
             except OSError:
                 break
-            if cursor == release_root:
-                break
             cursor = cursor.parent
+    try:
+        release_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        warnings.append("Stammordner „Freigewordene Archivdateien“ konnte nicht erhalten werden: " + str(exc))
     return {
         "removed_file_count": removed,
         "warnings": warnings,

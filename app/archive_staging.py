@@ -302,8 +302,20 @@ def describe_archive_change_staging(
     delete_event: bool = False,
 ) -> dict[str, Any]:
     """Compute Später zuordnen as SOLL minus the real IST archive structure."""
-    target_root = _target_root(preview)
     current_root = _current_event_root(database_path, event_id)
+    if delete_event:
+        return {
+            "required": False,
+            "target_root": current_root.as_posix(),
+            "current_root": current_root.as_posix(),
+            "desired_directories": [],
+            "missing_directories": [],
+            "helper_directories": [],
+            "obsolete_directories": [current_root.as_posix()],
+            "incoming_file_count": 0,
+            "prepared_structure_path": "",
+        }
+    target_root = _target_root(preview)
     # Für das SOLL zählt die tatsächlich bereits vorhandene Zielstruktur.
     # Bei einer Umbenennung darf die alte Ereignisstruktur nicht so behandelt
     # werden, als läge sie schon im neuen Zielordner.
@@ -666,6 +678,7 @@ def cleanup_archive_change_staging(
     cr_id: str,
     *,
     remove_originals: bool,
+    event_document_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Remove only known helper links and, after verification, their SSD originals."""
     work_root = shared_work_root(workspace_path).resolve(strict=False)
@@ -738,8 +751,11 @@ def cleanup_archive_change_staging(
                     )
 
     try:
-        from app.archive_change_document import projected_archive_event_document_spec
-        event_document = projected_archive_event_document_spec(database_path, cr_id)
+        if event_document_spec is None:
+            from app.archive_change_document import projected_archive_event_document_spec
+            event_document = projected_archive_event_document_spec(database_path, cr_id)
+        else:
+            event_document = event_document_spec
         if event_document is not None:
             document_rel = (
                 PurePosixPath(STAGING_DIRECTORY_NAME)
@@ -776,16 +792,35 @@ def cleanup_archive_change_staging(
                     except OSError:
                         pass
                 current = prepared_root.parent
-                while _inside(current, staging_base) and current != work_root:
+                while _inside(current, staging_base) and current != work_root and current != staging_base:
                     try:
                         current.rmdir()
                     except OSError:
                         break
-                    if current == staging_base:
-                        break
                     current = current.parent
         except Exception as exc:
             warnings.append("Leere vorbereitete Struktur konnte nicht vollständig entfernt werden: " + str(exc))
+
+    reversal_root = staging_base / "Rückänderung" / cr_id
+    if reversal_root.exists() and reversal_root.is_dir():
+        # Nur bekannte Rückänderungs-Hilfsdateien werden entfernt. Der komplette
+        # Baum gehört ausschließlich zu diesem Change Request.
+        import shutil
+        try:
+            shutil.rmtree(reversal_root)
+            parent = reversal_root.parent
+            if parent != staging_base:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    pass
+        except OSError as exc:
+            warnings.append("Rückänderungs-Hilfsbereich konnte nicht vollständig entfernt werden: " + str(exc))
+
+    try:
+        staging_base.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        warnings.append("Stammordner „Später zuordnen“ konnte nicht erhalten werden: " + str(exc))
 
     return {
         "removed_staging_file_count": removed_staged,

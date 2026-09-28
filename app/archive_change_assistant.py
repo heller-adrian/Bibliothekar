@@ -227,6 +227,7 @@ def build_archive_change_assistant(
     release_stock = describe_archive_release_stock(database_path, cr_id)
 
     status = str(cr.get("status") or "")
+    delete_event = bool(cr.get("delete_event") or 0)
     preparation_required = bool(
         description.get("required") or release_stock.get("required")
     )
@@ -261,270 +262,293 @@ def build_archive_change_assistant(
 
     operations: list[dict[str, Any]] = []
 
-    # Minimal user action: copy complete top-level prepared structures.  If the
-    # event root itself is new (rename), copy that root once instead.
-    copy_roots = _collapse_copy_roots(missing, target_root, archive_root)
-    if status != "aenderbar_vorschlagen" and helper_root:
-        try:
-            work_root = shared_work_root(workspace_path).resolve(strict=False)
-            prepared = work_root.joinpath(*PurePosixPath(helper_root).parts).resolve(strict=False)
-            target_archive_root = _safe_archive_path(archive_root, target_root)
-            if prepared.is_dir():
-                if not target_archive_root.is_dir():
-                    copy_roots = [target_root]
-                else:
-                    copy_roots = sorted({
-                        (PurePosixPath(target_root) / child.name).as_posix()
-                        for child in prepared.iterdir()
-                        if child.is_dir() and not child.is_symlink()
-                    })
-        except Exception:
-            pass
-
-    covered_workspace_ids: set[int] = set()
-    if copy_roots:
-        for root_value in copy_roots:
-            for row in workspace_rows:
-                file_id = row.get("file_id")
-                if file_id is not None and _path_is_under(
-                    str(row.get("new_path") or ""), root_value
-                ):
-                    covered_workspace_ids.add(int(file_id))
-
-        parent = (
-            PurePosixPath(target_root).parent.as_posix()
-            if copy_roots == [target_root]
-            else target_root
-        )
-        names = [_basename(value) for value in copy_roots]
-        copy_state = None
-        if scan_live:
-            directory_done = all(
-                _safe_archive_path(archive_root, value).is_dir()
-                for value in copy_roots
-            )
-            covered_rows = [
-                row for row in workspace_rows
-                if row.get("file_id") is not None
-                and int(row["file_id"]) in covered_workspace_ids
-            ]
-            file_done = all(
-                live_states.get(
-                    (str(row.get("review_kind") or "camera"), int(row["id"])),
-                    {},
-                ).get("at_target")
-                for row in covered_rows
-            ) if covered_rows else True
-            copy_state = "done" if directory_done and file_done else "pending"
-
-        helper_sources = [
-            f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{value}"
-            for value in copy_roots
-        ]
-        helper_items = list(names)
-        includes_event_document = False
-        if event_document and copy_roots != [target_root]:
-            document_rel = str(event_document.get("target_relative_path") or "")
-            if document_rel:
-                helper_sources.append(
-                    f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{document_rel}"
-                )
-                helper_items.append("event.json")
-                includes_event_document = True
-                if scan_live:
-                    target_document = _safe_archive_path(archive_root, document_rel)
-                    document_done = (
-                        target_document.is_file()
-                        and not target_document.is_symlink()
-                        and int(target_document.stat().st_size)
-                            == int(event_document.get("size_bytes") or 0)
-                        and _sha256_file(target_document)
-                            == str(event_document.get("sha256") or "")
-                    )
-                    if not document_done:
-                        copy_state = "pending"
-
-        operations.append({
-            "kind": "copy_helper_folders",
-            "title": (
-                f"Vorbereitete Struktur ins Archiv übernehmen"
-                if len(helper_items) == 1
-                else f"{len(helper_items)} vorbereitete Elemente ins Archiv übernehmen"
-            ),
-            "sources": helper_sources,
-            "items": helper_items,
-            "target": f"Kamerabibliothek/{parent}",
-            "detail": (
-                "Die vorbereiteten Ordner"
-                + (" und die neue event.json" if includes_event_document else "")
-                + " gemeinsam in einem Arbeitsschritt vollständig übernehmen."
-            ),
-            "state": copy_state,
-        })
-
-    remaining_workspace = [
-        row for row in workspace_rows
-        if row.get("file_id") is None
-        or int(row["file_id"]) not in covered_workspace_ids
-    ]
-    grouped_workspace: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for row in remaining_workspace:
-        source = _parent_dir(
-            row.get("workspace_staging_path")
-            or f"{STAGING_DIRECTORY_NAME}/{row.get('new_path') or ''}"
-        )
-        target = _parent_dir(row.get("new_path"))
-        grouped_workspace.setdefault((source, target), []).append(row)
-    for (source, target), members in sorted(grouped_workspace.items()):
+    if delete_event and (
+        not bool(release_stock.get("required"))
+        or bool(release_stock.get("archive_removed"))
+    ):
+        old_root = str(description.get("current_root") or "")
+        old_path = _safe_archive_path(archive_root, old_root)
         state = None
-        pending_members = members
         if scan_live:
-            pending_members = [
-                row for row in members
-                if not live_states.get(
-                    (str(row.get("review_kind") or "camera"), int(row["id"])),
-                    {},
-                ).get("at_target")
-            ]
-            state = "done" if not pending_members else "pending"
-        shown_members = pending_members if scan_live and pending_members else members
+            state = "done" if not old_path.exists() else "pending"
         operations.append({
-            "kind": "copy_files",
-            "title": "Neue Dateien in einen vorhandenen Archivordner übernehmen",
-            "source": f"Arbeitsbereich/{source}",
-            "target": f"Kamerabibliothek/{target}",
-            "items": [_basename(row.get("new_path")) for row in shown_members],
-            "file_count": len(shown_members),
+            "kind": "remove_deleted_event_root",
+            "title": "Alten Ereignisordner vollständig entfernen",
+            "paths": [f"Kamerabibliothek/{old_root}"] if old_path.exists() else [],
+            "all_paths": [f"Kamerabibliothek/{old_root}"],
             "detail": (
-                f"{len(shown_members)} Datei" + ("" if len(shown_members) == 1 else "en")
-                + " in den vorhandenen Zielordner übernehmen."
+                "Nachdem alle Archivdateien sicher auf die SSD zurückgeholt wurden, "
+                "den bisherigen Ereignisordner einschließlich event.json vollständig entfernen."
             ),
             "state": state,
         })
 
-    # The projected event.json is copied with the whole event root on a rename.
-    document_covered_by_root_copy = bool(
-        copy_roots == [target_root]
-        or (copy_roots and event_document)
-    )
-    if event_document and not document_covered_by_root_copy:
-        target_rel = str(event_document.get("target_relative_path") or "")
-        target_abs = _safe_archive_path(archive_root, target_rel)
-        document_state = None
-        if scan_live:
-            if (
-                target_abs.is_file()
-                and not target_abs.is_symlink()
-                and int(target_abs.stat().st_size) == int(event_document.get("size_bytes") or 0)
-                and _sha256_file(target_abs) == str(event_document.get("sha256") or "")
-            ):
-                document_state = "done"
-            else:
-                document_state = "pending"
-        operations.append({
-            "kind": "replace_event_document",
-            "title": "Aktuelle event.json ins Archiv übernehmen",
-            "source": f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{target_rel}",
-            "target": f"Kamerabibliothek/{target_rel}",
-            "items": ["event.json"],
-            "file_count": 1,
-            "detail": (
-                "Die bisherige event.json ist nach der Strukturänderung veraltet. "
-                "Durch die vorbereitete neue Ereignisbeschreibung ersetzen."
-            ),
-            "state": document_state,
-        })
+    # Minimal user action: copy complete top-level prepared structures.
+    # Bei Löschaufträgen gibt es bewusst keine neue SOLL-Struktur.
+    if not delete_event:  If the
+        # event root itself is new (rename), copy that root once instead.
+        copy_roots = _collapse_copy_roots(missing, target_root, archive_root)
+        if status != "aenderbar_vorschlagen" and helper_root:
+            try:
+                work_root = shared_work_root(workspace_path).resolve(strict=False)
+                prepared = work_root.joinpath(*PurePosixPath(helper_root).parts).resolve(strict=False)
+                target_archive_root = _safe_archive_path(archive_root, target_root)
+                if prepared.is_dir():
+                    if not target_archive_root.is_dir():
+                        copy_roots = [target_root]
+                    else:
+                        copy_roots = sorted({
+                            (PurePosixPath(target_root) / child.name).as_posix()
+                            for child in prepared.iterdir()
+                            if child.is_dir() and not child.is_symlink()
+                        })
+            except Exception:
+                pass
 
-    grouped_archive: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for row in archive_rows:
-        source = _parent_dir(row.get("old_path"))
-        target = _parent_dir(row.get("new_path"))
-        grouped_archive.setdefault((source, target), []).append(row)
+        covered_workspace_ids: set[int] = set()
+        if copy_roots:
+            for root_value in copy_roots:
+                for row in workspace_rows:
+                    file_id = row.get("file_id")
+                    if file_id is not None and _path_is_under(
+                        str(row.get("new_path") or ""), root_value
+                    ):
+                        covered_workspace_ids.add(int(file_id))
 
-    for (planned_source, target), members in sorted(grouped_archive.items()):
-        state = None
-        shown_members = members
-        source_dirs = [planned_source]
-        if scan_live:
-            pending: list[dict[str, Any]] = []
-            current_dirs: set[str] = set()
-            missing_count = 0
-            ambiguous_count = 0
-            for row in members:
-                live = live_states.get(
-                    (str(row.get("review_kind") or "camera"), int(row["id"])),
-                    {},
+            parent = (
+                PurePosixPath(target_root).parent.as_posix()
+                if copy_roots == [target_root]
+                else target_root
+            )
+            names = [_basename(value) for value in copy_roots]
+            copy_state = None
+            if scan_live:
+                directory_done = all(
+                    _safe_archive_path(archive_root, value).is_dir()
+                    for value in copy_roots
                 )
-                if live.get("at_target"):
-                    continue
-                pending.append(row)
-                if live.get("current_path"):
-                    current_dirs.add(_parent_dir(live["current_path"]))
-                elif live.get("state") == "ambiguous":
-                    ambiguous_count += 1
-                else:
-                    missing_count += 1
-            if not pending:
-                state = "done"
-                shown_members = members
-            else:
-                state = "pending"
-                shown_members = pending
-                source_dirs = sorted(current_dirs) or [planned_source]
-                if missing_count or ambiguous_count:
-                    state = "attention"
-
-        operations.append({
-            "kind": "move_archive_files",
-            "title": "Dateien innerhalb der Kamerabibliothek verschieben",
-            "source": (
-                f"Kamerabibliothek/{source_dirs[0]}"
-                if len(source_dirs) == 1 else ""
-            ),
-            "sources": (
-                [f"Kamerabibliothek/{value}" for value in source_dirs]
-                if len(source_dirs) > 1 else []
-            ),
-            "target": f"Kamerabibliothek/{target}",
-            "items": [
-                _basename(
+                covered_rows = [
+                    row for row in workspace_rows
+                    if row.get("file_id") is not None
+                    and int(row["file_id"]) in covered_workspace_ids
+                ]
+                file_done = all(
                     live_states.get(
                         (str(row.get("review_kind") or "camera"), int(row["id"])),
                         {},
-                    ).get("current_path")
-                    or row.get("old_path")
-                )
-                for row in shown_members
-            ],
-            "file_count": len(shown_members),
-            "detail": (
-                f"{len(shown_members)} Datei" + ("" if len(shown_members) == 1 else "en")
-                + " in den angegebenen Zielordner verschieben."
-            ),
-            "state": state,
-        })
+                    ).get("at_target")
+                    for row in covered_rows
+                ) if covered_rows else True
+                copy_state = "done" if directory_done and file_done else "pending"
 
-    if obsolete:
-        pending_obsolete = list(obsolete)
-        obsolete_state = None
-        if scan_live:
-            pending_obsolete = [
-                value for value in obsolete
-                if _safe_archive_path(archive_root, value).exists()
+            helper_sources = [
+                f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{value}"
+                for value in copy_roots
             ]
-            obsolete_state = "done" if not pending_obsolete else "pending"
-        operations.append({
-            "kind": "remove_directories",
-            "title": "Nicht mehr benötigte alte Ordner entfernen",
-            "items": [_basename(value) for value in pending_obsolete],
-            "paths": [f"Kamerabibliothek/{value}" for value in pending_obsolete],
-            "all_paths": [f"Kamerabibliothek/{value}" for value in obsolete],
-            "detail": (
-                "Diese alten Ordner müssen nach den Verschiebungen leer sein "
-                "und können dann entfernt werden."
-            ),
-            "state": obsolete_state,
-        })
+            helper_items = list(names)
+            includes_event_document = False
+            if event_document and copy_roots != [target_root]:
+                document_rel = str(event_document.get("target_relative_path") or "")
+                if document_rel:
+                    helper_sources.append(
+                        f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{document_rel}"
+                    )
+                    helper_items.append("event.json")
+                    includes_event_document = True
+                    if scan_live:
+                        target_document = _safe_archive_path(archive_root, document_rel)
+                        document_done = (
+                            target_document.is_file()
+                            and not target_document.is_symlink()
+                            and int(target_document.stat().st_size)
+                                == int(event_document.get("size_bytes") or 0)
+                            and _sha256_file(target_document)
+                                == str(event_document.get("sha256") or "")
+                        )
+                        if not document_done:
+                            copy_state = "pending"
+
+            operations.append({
+                "kind": "copy_helper_folders",
+                "title": (
+                    f"Vorbereitete Struktur ins Archiv übernehmen"
+                    if len(helper_items) == 1
+                    else f"{len(helper_items)} vorbereitete Elemente ins Archiv übernehmen"
+                ),
+                "sources": helper_sources,
+                "items": helper_items,
+                "target": f"Kamerabibliothek/{parent}",
+                "detail": (
+                    "Die vorbereiteten Ordner"
+                    + (" und die neue event.json" if includes_event_document else "")
+                    + " gemeinsam in einem Arbeitsschritt vollständig übernehmen."
+                ),
+                "state": copy_state,
+            })
+
+        remaining_workspace = [
+            row for row in workspace_rows
+            if row.get("file_id") is None
+            or int(row["file_id"]) not in covered_workspace_ids
+        ]
+        grouped_workspace: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for row in remaining_workspace:
+            source = _parent_dir(
+                row.get("workspace_staging_path")
+                or f"{STAGING_DIRECTORY_NAME}/{row.get('new_path') or ''}"
+            )
+            target = _parent_dir(row.get("new_path"))
+            grouped_workspace.setdefault((source, target), []).append(row)
+        for (source, target), members in sorted(grouped_workspace.items()):
+            state = None
+            pending_members = members
+            if scan_live:
+                pending_members = [
+                    row for row in members
+                    if not live_states.get(
+                        (str(row.get("review_kind") or "camera"), int(row["id"])),
+                        {},
+                    ).get("at_target")
+                ]
+                state = "done" if not pending_members else "pending"
+            shown_members = pending_members if scan_live and pending_members else members
+            operations.append({
+                "kind": "copy_files",
+                "title": "Neue Dateien in einen vorhandenen Archivordner übernehmen",
+                "source": f"Arbeitsbereich/{source}",
+                "target": f"Kamerabibliothek/{target}",
+                "items": [_basename(row.get("new_path")) for row in shown_members],
+                "file_count": len(shown_members),
+                "detail": (
+                    f"{len(shown_members)} Datei" + ("" if len(shown_members) == 1 else "en")
+                    + " in den vorhandenen Zielordner übernehmen."
+                ),
+                "state": state,
+            })
+
+        # The projected event.json is copied with the whole event root on a rename.
+        document_covered_by_root_copy = bool(
+            copy_roots == [target_root]
+            or (copy_roots and event_document)
+        )
+        if event_document and not document_covered_by_root_copy:
+            target_rel = str(event_document.get("target_relative_path") or "")
+            target_abs = _safe_archive_path(archive_root, target_rel)
+            document_state = None
+            if scan_live:
+                if (
+                    target_abs.is_file()
+                    and not target_abs.is_symlink()
+                    and int(target_abs.stat().st_size) == int(event_document.get("size_bytes") or 0)
+                    and _sha256_file(target_abs) == str(event_document.get("sha256") or "")
+                ):
+                    document_state = "done"
+                else:
+                    document_state = "pending"
+            operations.append({
+                "kind": "replace_event_document",
+                "title": "Aktuelle event.json ins Archiv übernehmen",
+                "source": f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{target_rel}",
+                "target": f"Kamerabibliothek/{target_rel}",
+                "items": ["event.json"],
+                "file_count": 1,
+                "detail": (
+                    "Die bisherige event.json ist nach der Strukturänderung veraltet. "
+                    "Durch die vorbereitete neue Ereignisbeschreibung ersetzen."
+                ),
+                "state": document_state,
+            })
+
+        grouped_archive: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for row in archive_rows:
+            source = _parent_dir(row.get("old_path"))
+            target = _parent_dir(row.get("new_path"))
+            grouped_archive.setdefault((source, target), []).append(row)
+
+        for (planned_source, target), members in sorted(grouped_archive.items()):
+            state = None
+            shown_members = members
+            source_dirs = [planned_source]
+            if scan_live:
+                pending: list[dict[str, Any]] = []
+                current_dirs: set[str] = set()
+                missing_count = 0
+                ambiguous_count = 0
+                for row in members:
+                    live = live_states.get(
+                        (str(row.get("review_kind") or "camera"), int(row["id"])),
+                        {},
+                    )
+                    if live.get("at_target"):
+                        continue
+                    pending.append(row)
+                    if live.get("current_path"):
+                        current_dirs.add(_parent_dir(live["current_path"]))
+                    elif live.get("state") == "ambiguous":
+                        ambiguous_count += 1
+                    else:
+                        missing_count += 1
+                if not pending:
+                    state = "done"
+                    shown_members = members
+                else:
+                    state = "pending"
+                    shown_members = pending
+                    source_dirs = sorted(current_dirs) or [planned_source]
+                    if missing_count or ambiguous_count:
+                        state = "attention"
+
+            operations.append({
+                "kind": "move_archive_files",
+                "title": "Dateien innerhalb der Kamerabibliothek verschieben",
+                "source": (
+                    f"Kamerabibliothek/{source_dirs[0]}"
+                    if len(source_dirs) == 1 else ""
+                ),
+                "sources": (
+                    [f"Kamerabibliothek/{value}" for value in source_dirs]
+                    if len(source_dirs) > 1 else []
+                ),
+                "target": f"Kamerabibliothek/{target}",
+                "items": [
+                    _basename(
+                        live_states.get(
+                            (str(row.get("review_kind") or "camera"), int(row["id"])),
+                            {},
+                        ).get("current_path")
+                        or row.get("old_path")
+                    )
+                    for row in shown_members
+                ],
+                "file_count": len(shown_members),
+                "detail": (
+                    f"{len(shown_members)} Datei" + ("" if len(shown_members) == 1 else "en")
+                    + " in den angegebenen Zielordner verschieben."
+                ),
+                "state": state,
+            })
+
+        if obsolete:
+            pending_obsolete = list(obsolete)
+            obsolete_state = None
+            if scan_live:
+                pending_obsolete = [
+                    value for value in obsolete
+                    if _safe_archive_path(archive_root, value).exists()
+                ]
+                obsolete_state = "done" if not pending_obsolete else "pending"
+            operations.append({
+                "kind": "remove_directories",
+                "title": "Nicht mehr benötigte alte Ordner entfernen",
+                "items": [_basename(value) for value in pending_obsolete],
+                "paths": [f"Kamerabibliothek/{value}" for value in pending_obsolete],
+                "all_paths": [f"Kamerabibliothek/{value}" for value in obsolete],
+                "detail": (
+                    "Diese alten Ordner müssen nach den Verschiebungen leer sein "
+                    "und können dann entfernt werden."
+                ),
+                "state": obsolete_state,
+            })
 
     if status == "aenderbar_vorschlagen" and preparation_required:
         phase = "prepare"
@@ -563,13 +587,22 @@ def build_archive_change_assistant(
         },
         "release_stock": release_stock,
         "operations": operations,
-        "target_structure": {
-            "root": f"Kamerabibliothek/{target_root}",
-            "lines": _tree_lines(
-                target_root,
-                list(description.get("desired_directories") or []),
-            ),
-        },
+        "target_structure": (
+            {
+                "root": "",
+                "lines": ["Ereignis wird vollständig aus der Kamerabibliothek entfernt."],
+                "deleted": True,
+            }
+            if delete_event
+            else {
+                "root": f"Kamerabibliothek/{target_root}",
+                "lines": _tree_lines(
+                    target_root,
+                    list(description.get("desired_directories") or []),
+                ),
+                "deleted": False,
+            }
+        ),
         "obsolete_directories": obsolete,
         "technical_file_count": len(rows),
     }

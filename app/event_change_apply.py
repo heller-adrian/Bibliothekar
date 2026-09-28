@@ -516,6 +516,14 @@ def finish_event_change(
             f"{verification['open_reassignment_count']} weitere Dateien benötigen Klärung."
         )
 
+    event_document_cleanup_spec = None
+    if workspace_path is not None:
+        try:
+            from app.archive_change_document import projected_archive_event_document_spec
+            event_document_cleanup_spec = projected_archive_event_document_spec(database_path, cr_id)
+        except Exception:
+            event_document_cleanup_spec = None
+
     selected_ids = sorted({int(v) for v in json.loads(cr["selected_family_ids"] or "[]")})
     delete_event = bool(cr.get("delete_event") or 0)
     if not selected_ids and not delete_event:
@@ -675,6 +683,15 @@ def finish_event_change(
             )
 
         if delete_event:
+            if workspace_path is not None:
+                from app.archive_staging import cleanup_archive_change_staging
+                cleanup_archive_change_staging(
+                    database_path,
+                    workspace_path,
+                    cr_id,
+                    remove_originals=False,
+                    event_document_spec=event_document_cleanup_spec,
+                )
             connection.execute(
                 """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
                    VALUES (?,'archived_event_deleted_after_release','event_change_request',?,?,?)""",
@@ -925,7 +942,11 @@ def finish_event_change(
     if workspace_path is not None:
         from app.archive_staging import cleanup_archive_change_staging
         ssd_cleanup = cleanup_archive_change_staging(
-            database_path, workspace_path, cr_id, remove_originals=True
+            database_path,
+            workspace_path,
+            cr_id,
+            remove_originals=True,
+            event_document_spec=event_document_cleanup_spec,
         )
 
     inventory_refresh_error = None

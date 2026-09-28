@@ -947,6 +947,15 @@ def _remove_empty_source_directories(
             else source_root
         )
         current = Path(entry["source_absolute_path"]).parent
+        if entry_source_root == target_root:
+            for persistent_name in ("Freigewordene Archivdateien", "Später zuordnen"):
+                persistent_root = (target_root / persistent_name).resolve(strict=False)
+                try:
+                    current.relative_to(persistent_root)
+                except ValueError:
+                    continue
+                entry_source_root = persistent_root
+                break
 
         while current != entry_source_root and _is_relative_to(current, entry_source_root):
             candidates.add(current)
