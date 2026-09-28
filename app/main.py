@@ -4033,14 +4033,96 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
     job = get_job(DATABASE_FILE, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
+    family_ids = [
+        int(value)
+        for value in (payload.get("family_ids") or [payload.get("family_id")])
+        if value is not None
+    ]
+    target_event_id = str(payload.get("target_event_id") or "")
     try:
+        with database_connection(DATABASE_FILE) as connection:
+            target = connection.execute(
+                """SELECT * FROM events
+                   WHERE id=? AND parent_event_id IS NULL
+                     AND event_kind='event'""",
+                (target_event_id,),
+            ).fetchone()
+
+        if target is not None and str(target["status"] or "") == "archived":
+            target_job_id = str(target["job_id"])
+            context = get_event_edit_context(
+                DATABASE_FILE, target_job_id, target_event_id
+            )
+            incoming_available = {
+                int(family["family_id"]): dict(family)
+                for family in list_job_available_families(DATABASE_FILE, job_id)
+                if int(family["family_id"]) in set(family_ids)
+            }
+            if set(incoming_available) != set(family_ids):
+                raise ValueError(
+                    "Mindestens eine ausgewählte Familie ist nicht mehr frei."
+                )
+            family_map = {
+                int(family["family_id"]): dict(family)
+                for family in (context.get("families") or [])
+                if family.get("assigned_here")
+            }
+            family_map.update(incoming_available)
+            target_start = str(target["start_datetime"] or "")[:19]
+            target_end = str(target["end_datetime"] or "")[:19]
+            preview = build_event_preview(
+                {
+                    "event_kind": "event",
+                    "event_name": str(target["name"]),
+                    "start_date": target_start[:10],
+                    "end_date": target_end[:10],
+                    "start_time": target_start[11:16],
+                    "end_time": target_end[11:16],
+                    "uses_time_range": bool(target["uses_time_range"]),
+                    "preserve_day_folders": bool(target["preserve_day_folders"]),
+                    "subevents": [
+                        {
+                            "id": child.get("id"),
+                            "name": child.get("name"),
+                            "start_datetime": child.get("start_datetime"),
+                            "end_datetime": child.get("end_datetime"),
+                        }
+                        for child in (context.get("child_events") or [])
+                    ],
+                },
+                list(family_map.values()),
+            )
+            result = propose_event_change(
+                DATABASE_FILE,
+                target_job_id,
+                target_event_id,
+                preview,
+                event_name=str(target["name"]),
+                notes=str(target["notes"] or ""),
+                archive_root=ARCHIVE_ROOT,
+                workspace_path=WORKSPACE_PATH,
+            )
+            return {
+                "job_id": job_id,
+                "event_id": target_event_id,
+                "target_event_id": target_event_id,
+                "target_status": "archived",
+                "linkage_kind": "archive_change_request",
+                "name": str(target["name"]),
+                "family_ids": family_ids,
+                "family_count": len(family_ids),
+                "status": "archive_change_request_created",
+                "change_request_id": result["change_request_id"],
+                "prepared_structure_path": result.get("prepared_structure_path") or "",
+            }
+
         result = accept_event_suggestion(
             DATABASE_FILE,
             job_id,
-            [int(value) for value in (payload.get("family_ids") or [payload.get("family_id")])],
-            str(payload.get("target_event_id") or ""),
+            family_ids,
+            target_event_id,
         )
-    except (ValueError, TypeError, EventSuggestionError) as error:
+    except (ValueError, TypeError, EventSuggestionError, EventChangeRequestError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return {"job_id": job_id, **result}
 
