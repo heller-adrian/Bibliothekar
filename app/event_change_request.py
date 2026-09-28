@@ -103,21 +103,20 @@ def _compute_event_plan(
                     incoming_placeholders = ",".join("?" for _ in incoming_requested)
                     occupied = connection.execute(
                         f"""
-                        SELECT DISTINCT ea.family_id, COALESCE(root.name,assigned.name) AS event_name
+                        SELECT DISTINCT ea.family_id
                         FROM event_assignments ea
                         JOIN events assigned ON assigned.id=ea.event_id
-                        LEFT JOIN events root ON root.id=assigned.parent_event_id
                         WHERE ea.family_id IN ({incoming_placeholders})
                           AND assigned.status IN ('draft','planned','applied','archived')
                         """,
                         tuple(sorted(incoming_requested)),
                     ).fetchall()
-                    if occupied:
-                        names = sorted({str(row["event_name"] or "") for row in occupied})
-                        raise EventChangeRequestError(
-                            "Mindestens eine neu hinzukommende Familie ist nicht mehr frei"
-                            + (": " + ", ".join(f"„{name}“" for name in names) if names else ".")
-                        )
+                    occupied_ids = {int(row["family_id"]) for row in occupied}
+                    # Bereits anders belegte Familien sind keine SSD-Zuführung.
+                    # Sie bleiben aus der Dateiplanung heraus, damit die weiter
+                    # unten folgende Ereignis-/Zeitkonfliktprüfung die fachlich
+                    # richtige Überschneidung meldet.
+                    incoming_requested -= occupied_ids
                 requested_ids = sorted(
                     (requested & current_family_ids) | incoming_requested
                 )
