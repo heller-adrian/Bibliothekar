@@ -147,7 +147,7 @@ def continuous_event_overlaps(
     connection, job_id: str, start_datetime: str, end_datetime: str, *, exclude_event_id: str | None = None
 ) -> list[dict[str, Any]]:
     """Parent occupancy for v2; preserve historical child occupancy verbatim."""
-    rows = connection.execute("SELECT * FROM events WHERE event_level='parent' AND event_kind='event' AND pending_delete=0 AND status IN ('draft','planned','applied','archived')").fetchall()
+    rows = connection.execute("SELECT * FROM events WHERE event_level='parent' AND event_kind='event' AND pending_delete=0 AND COALESCE(linkage_kind,'')='' AND status IN ('draft','planned','applied','archived')").fetchall()
     result = []
     for row in rows:
         event = dict(row)
