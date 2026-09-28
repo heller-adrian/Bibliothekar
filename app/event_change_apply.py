@@ -88,6 +88,7 @@ def cancel_event_change(
     database_path: Path,
     cr_id: str,
     archive_root: Path | None = None,
+    workspace_path: Path | None = None,
 ) -> dict[str, Any]:
     """Abort only while the original archive state is still provably intact.
 
@@ -125,33 +126,68 @@ def cancel_event_change(
             new_rel = str(review.get("new_path") or "")
             expected_size = int(review.get("expected_size_bytes") or 0)
             expected_sha = str(review.get("expected_sha256") or "").strip()
+            source_root_kind = str(review.get("source_root_kind") or "camera_archive")
             if not expected_sha:
                 raise EventChangeApplyError(
-                    "Abbruch gesperrt: Für mindestens eine Archivdatei fehlt die gespeicherte SHA-256-Summe."
+                    "Abbruch gesperrt: Für mindestens eine Datei fehlt die gespeicherte SHA-256-Summe."
                 )
 
-            old_path = _safe_archive_path(root, old_rel)
-            if not old_path.is_file():
-                raise EventChangeApplyError(
-                    "Abbruch gesperrt: Der ursprüngliche Archivzustand ist nicht mehr vollständig vorhanden."
-                )
-            if expected_size and int(old_path.stat().st_size) != expected_size:
-                raise EventChangeApplyError(
-                    "Abbruch gesperrt: Eine ursprüngliche Archivdatei hat eine abweichende Größe."
-                )
-            if _sha256_file(old_path) != expected_sha:
-                raise EventChangeApplyError(
-                    "Abbruch gesperrt: Eine ursprüngliche Archivdatei hat eine abweichende SHA-256-Summe."
-                )
+            if source_root_kind == "shared_workspace":
+                if workspace_path is None:
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Der SSD-Arbeitsbereich ist für die Sicherheitsprüfung nicht verfügbar."
+                    )
+                from app.workspace_layout import shared_work_root
+                work_root = shared_work_root(workspace_path).resolve(strict=False)
+                source_rel = str(review.get("workspace_original_path") or old_rel)
+                try:
+                    source_parts = PurePosixPath(source_rel.replace("\\", "/"))
+                    source_path = work_root.joinpath(*source_parts.parts).resolve(strict=False)
+                    source_path.relative_to(work_root)
+                except Exception as exc:
+                    raise EventChangeApplyError("Abbruch gesperrt: Unsicherer SSD-Quellpfad.") from exc
+                if not source_path.is_file() or source_path.is_symlink():
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Die ursprüngliche SSD-Datei ist nicht mehr vollständig vorhanden."
+                    )
+                if expected_size and int(source_path.stat().st_size) != expected_size:
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Eine ursprüngliche SSD-Datei hat eine abweichende Größe."
+                    )
+                if _sha256_file(source_path) != expected_sha:
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Eine ursprüngliche SSD-Datei hat eine abweichende SHA-256-Summe."
+                    )
+            else:
+                old_path = _safe_archive_path(root, old_rel)
+                if not old_path.is_file():
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Der ursprüngliche Archivzustand ist nicht mehr vollständig vorhanden."
+                    )
+                if expected_size and int(old_path.stat().st_size) != expected_size:
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Eine ursprüngliche Archivdatei hat eine abweichende Größe."
+                    )
+                if _sha256_file(old_path) != expected_sha:
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Eine ursprüngliche Archivdatei hat eine abweichende SHA-256-Summe."
+                    )
 
             action = str(review.get("action") or "")
-            if action in {"move", "merge"} and new_rel and new_rel != old_rel:
+            if action in {"move", "merge"} and new_rel:
                 new_path = _safe_archive_path(root, new_rel)
-                if new_path.exists() or new_path.is_symlink():
+                same_archive_path = source_root_kind == "camera_archive" and new_rel == old_rel
+                if not same_archive_path and (new_path.exists() or new_path.is_symlink()):
                     raise EventChangeApplyError(
                         "Abbruch gesperrt: Am neuen Archivpfad wurden bereits manuelle Änderungen erkannt. "
-                        "Bitte zuerst den alten Archivzustand vollständig wiederherstellen."
+                        "Bitte zuerst den ursprünglichen Zustand vollständig wiederherstellen."
                     )
+
+    if workspace_path is not None:
+        from app.archive_staging import cleanup_archive_change_staging
+        cleanup_archive_change_staging(
+            database_path, workspace_path, cr_id, remove_originals=False
+        )
 
     with database_connection(database_path) as connection:
         connection.execute(
@@ -199,6 +235,7 @@ def verify_event_change(
             expected_sha = str(review.get("expected_sha256") or "").strip()
             old_rel = str(review.get("old_path") or "")
             new_rel = str(review.get("new_path") or "")
+            source_root_kind = str(review.get("source_root_kind") or "camera_archive")
 
             status = "pending"
             actual_size = None
@@ -239,11 +276,16 @@ def verify_event_change(
                         else:
                             status = "verified"
 
-                if status == "verified" and action == "move" and old_rel != new_rel:
+                if (
+                    status == "verified"
+                    and action == "move"
+                    and source_root_kind == "camera_archive"
+                    and old_rel != new_rel
+                ):
                     old_target = _safe_archive_path(root, old_rel)
                     if old_target.exists():
                         status = "old_path_still_exists"
-                        message = "Die Datei liegt zusätzlich noch am alten Pfad."
+                        message = "Die Datei liegt zusätzlich noch am alten Archivpfad."
 
             if status == "verified":
                 ok_count += 1
@@ -292,6 +334,7 @@ def finish_event_change(
     database_path: Path,
     cr_id: str,
     archive_root: Path,
+    workspace_path: Path | None = None,
 ) -> dict[str, Any]:
     """Prüfe manuelle Dateiänderungen und schließe danach nur die DB ab.
 
@@ -619,6 +662,17 @@ def finish_event_change(
         )
         connection.commit()
 
+    ssd_cleanup = {
+        "removed_staging_file_count": 0,
+        "removed_original_file_count": 0,
+        "warnings": [],
+    }
+    if workspace_path is not None:
+        from app.archive_staging import cleanup_archive_change_staging
+        ssd_cleanup = cleanup_archive_change_staging(
+            database_path, workspace_path, cr_id, remove_originals=True
+        )
+
     inventory_refresh_error = None
     inventory_summary = None
     try:
@@ -648,4 +702,7 @@ def finish_event_change(
         "created_reassignment_event_ids": created_reassignment_events,
         "inventory_summary": inventory_summary,
         "inventory_refresh_error": inventory_refresh_error,
+        "ssd_files_removed_by_app": int(ssd_cleanup.get("removed_original_file_count") or 0),
+        "staging_files_removed_by_app": int(ssd_cleanup.get("removed_staging_file_count") or 0),
+        "ssd_cleanup_warnings": list(ssd_cleanup.get("warnings") or []),
     }
