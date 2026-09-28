@@ -70,15 +70,28 @@ def _compute_event_plan(
 
         assigned_rows = connection.execute(
             """
+            WITH RECURSIVE event_tree(id) AS (
+                SELECT id
+                FROM events
+                WHERE id = ?
+                   OR (
+                        linked_event_id = ?
+                        AND linkage_kind = 'archived_manual'
+                        AND status = 'archived'
+                      )
+                UNION ALL
+                SELECT child.id
+                FROM events child
+                JOIN event_tree parent ON child.parent_event_id = parent.id
+            )
             SELECT DISTINCT ea.family_id
             FROM event_assignments ea
             JOIN events assigned ON assigned.id = ea.event_id
-            WHERE assigned.job_id = ?
-              AND COALESCE(assigned.parent_event_id, assigned.id) = ?
+            WHERE ea.event_id IN (SELECT id FROM event_tree)
               AND ea.family_id IS NOT NULL
               AND assigned.status IN ('draft','planned','applied','archived')
             """,
-            (job_id, event_id),
+            (event_id, event_id),
         ).fetchall()
         assigned_family_ids = {int(r["family_id"]) for r in assigned_rows}
         if inventory is not None:
@@ -137,10 +150,10 @@ def _compute_event_plan(
                        ff.family_key, ff.selected_capture_time
                 FROM files f
                 JOIN file_families ff ON ff.id = f.family_id AND ff.job_id = f.job_id
-                WHERE f.job_id = ? AND f.family_id IN ({placeholders})
+                WHERE f.family_id IN ({placeholders})
                 ORDER BY ff.selected_capture_time, ff.id, f.current_relative_path, f.id
                 """,
-                (job_id, *relevant_ids),
+                tuple(relevant_ids),
             ).fetchall()
         else:
             rows = []
