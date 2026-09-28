@@ -2260,7 +2260,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         if (group.group_type === "released_archive_separator") {
           const separator=document.createElement("div");
           separator.style.cssText="margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--border)";
-          separator.innerHTML='<div style="display:flex;align-items:center;gap:7px;font-weight:700">Freigewordene Archivaufnahmen <span role="img" aria-label="Information zu freigewordenen Archivaufnahmen" title="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand. Auswahl verwendet automatisch die jeweilige Ursprungssicherung." style="display:inline-grid;place-items:center;width:18px;height:18px;border:1px solid currentColor;border-radius:999px;font-size:12px;font-weight:700;cursor:help">?</span></div>';
+          separator.innerHTML='<div style="display:flex;align-items:center;gap:7px;font-weight:700">Freigewordene Archivaufnahmen <button class="bk-help" type="button" aria-label="Hinweis zu freigewordenen Archivaufnahmen" data-help="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand. Auswahl verwendet automatisch die jeweilige Ursprungssicherung.">?</button></div>';
           dayList.appendChild(separator);
           continue;
         }

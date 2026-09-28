@@ -144,7 +144,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.27.2"
+APP_VERSION = "0.27.3"
 
 CONFIG_PATH = Path(
     os.environ.get(

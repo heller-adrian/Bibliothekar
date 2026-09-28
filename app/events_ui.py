@@ -251,6 +251,38 @@ EVENTS_HTML = r"""<!doctype html>
       padding:13px 14px;
       font-weight:750;
     }
+    .change-operation > summary,
+    .change-disclosure > summary {
+      list-style:none !important;
+      display:grid !important;
+      grid-template-columns:16px minmax(0,1fr) auto !important;
+      align-items:center !important;
+      justify-content:initial !important;
+      gap:8px !important;
+      text-align:left !important;
+    }
+    .change-operation > summary::-webkit-details-marker,
+    .change-disclosure > summary::-webkit-details-marker {
+      display:none;
+    }
+    .change-operation > summary::marker,
+    .change-disclosure > summary::marker {
+      content:"";
+    }
+    .change-operation > summary::before,
+    .change-disclosure > summary::before {
+      content:"▸";
+      display:block;
+      width:16px;
+      font-size:14px;
+      line-height:1;
+      text-align:center;
+      color:currentColor;
+    }
+    .change-operation[open] > summary::before,
+    .change-disclosure[open] > summary::before {
+      content:"▾";
+    }
     .change-operation[open] > summary {
       border-bottom:1px solid var(--border);
     }
@@ -1436,6 +1468,7 @@ EVENTS_HTML = r"""<!doctype html>
           eventId: String(cr.event_id || ""),
           jobId: String(cr.job_id || "")
         };
+        changeRequestClose.disabled = false;
         changeRequestClose.textContent = "Änderung verwerfen";
         changeRequestClose.classList.add("danger-button");
         setChangeTaskInUrl(cr.id, cr.job_id || "");
@@ -1717,7 +1750,9 @@ EVENTS_HTML = r"""<!doctype html>
             <button type="button" data-view-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Öffnen</button>
             ${isReconcileTarget && event.reconcile_source_event_id
               ? `<a class="plan-button bk-positive-action" href="/events?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=resort:${encodeURIComponent(event.reconcile_source_event_id)}">Gemeinsame Nachsortierung öffnen</a>`
-              : `<button type="button" class="plan-button bk-positive-action" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">${event.status === "applied" ? "Nachsortierung prüfen" : "Sortierung prüfen"}</button>`}
+              : isSortPlannable(event)
+                ? `<button type="button" class="plan-button bk-positive-action" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">Sortierung prüfen</button>`
+                : ""}
             ${isDeletable(event)
               ? `<button type="button" class="danger-button" data-delete-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Ereignis löschen</button>`
               : event.mutation_id
@@ -3296,7 +3331,7 @@ EVENTS_HTML = r"""<!doctype html>
         changeRequestDialog.close();
         return;
       }
-      if (!window.confirm("Diese Archivänderung vollständig verwerfen? Solange der ursprüngliche Archivzustand unverändert ist, bleiben die SSD-Originale erhalten.")) return;
+      if (!window.confirm("Diese Archivänderung vollständig verwerfen?\n\nWenn du im Archiv bereits manuelle Änderungen vorgenommen hast, wird anschließend ein eigener Rückänderungsauftrag geöffnet. Er führt dich Schritt für Schritt durch die Wiederherstellung und prüft den ursprünglichen Zustand, bevor die Änderung endgültig verworfen wird.")) return;
       changeRequestAction(mandatoryArchiveChangeContext.crId, "cancel")
         .catch(error => {
           const inlineError=document.getElementById("change-request-inline-error");
@@ -3522,6 +3557,164 @@ EVENTS_HTML = r"""<!doctype html>
       }
     }
 
+    async function showArchiveReversalDetail(crId, options={}) {
+      const assistant = options.assistant || await requestJson(
+        `/api/change-requests/${encodeURIComponent(crId)}/reversal`
+        + (options.refreshLive ? "?refresh=true" : "")
+      );
+      if (!assistant.active) {
+        return showChangeRequestDetail(crId, {resume:true, skipReversalCheck:true});
+      }
+
+      mandatoryArchiveChangeContext = {
+        ...(mandatoryArchiveChangeContext || {}),
+        crId:String(crId),
+        mode:"reversal"
+      };
+      changeRequestTitle.textContent = "Rückänderungsauftrag";
+      changeRequestSubtitle.textContent =
+        `Ursprünglichen Archivzustand wiederherstellen · ${String(crId)}`;
+      changeRequestClose.textContent = "Rückänderung läuft";
+      changeRequestClose.classList.remove("danger-button");
+      changeRequestClose.disabled = true;
+
+      const phase = String(assistant.phase || "prepare");
+      const logicalOrder = ["prepare","finder","verify"];
+      const currentLogical = logicalOrder.indexOf(phase);
+      const visualSteps = [
+        {phase:"verify", number:3, label:"Prüfen & Verwerfen"},
+        {phase:"finder", number:2, label:"Finder-Rückarbeit"},
+        {phase:"prepare", number:1, label:"Vorbereiten"}
+      ];
+
+      let html = '<div class="change-stepper reversal-stepper">';
+      for (const step of visualSteps) {
+        const logical = logicalOrder.indexOf(step.phase);
+        const state = logical < currentLogical
+          ? " done"
+          : logical === currentLogical
+            ? " active"
+            : "";
+        html += `<button type="button" class="change-step${state}" disabled><span class="change-step-number">${step.number}</span><span><strong>${step.label}</strong></span></button>`;
+      }
+      html += "</div>";
+
+      if (phase === "prepare") {
+        html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Rückänderung vorbereiten</h3><p class="muted">Du hast bestätigt, dass die Archivänderung verworfen werden soll. Der ursprüngliche Zustand wird jetzt als eigener Rückweg vorbereitet.</p></div></div>`;
+        html += `<div class="card"><strong>In „Später zuordnen“ liegt dein ursprünglicher Bestand:</strong><code style="display:block;margin-top:8px;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || "Arbeitsbereich/Später zuordnen")}</code><p class="muted" style="margin-top:9px">Dateien, die noch im Archiv vorhanden sind, werden nicht unnötig kopiert: Die App findet sie per Größe und SHA-256 und zeigt dir, wohin sie zurückverschoben werden müssen. Nur fehlende Originale werden aus dem gesicherten SSD-Bestand vorbereitet.</p></div>`;
+        html += '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-prepare>Rückänderung vorbereiten</button></div></section>';
+      } else if (phase === "finder") {
+        html += `<section class="change-pane"><div class="change-pane-heading"><div><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">Finder-Rückarbeit</h3><button class="bk-help" type="button" aria-label="Hinweis zur Finder-Rückarbeit" data-help="Die App prüft den realen Archivzustand read-only. Noch vorhandene Dateien werden an ihren ursprünglichen Ort zurückverschoben; fehlende Originale kommen aus dem vorbereiteten SSD-Rückbestand.">?</button></div>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:6px">✓ Aktueller Archivbestand wurde read-only geprüft.</p>' : ''}</div><button type="button" class="plan-button change-refresh-button" data-reversal-refresh>↻ Aktualisieren</button></div>`;
+        html += `<div class="card"><strong>Ursprüngliches Ziel</strong><code style="display:block;margin-top:7px">Kamerabibliothek/${escapeHtml(assistant.original_root || "")}</code><div class="muted" style="margin-top:7px">SSD-Rückbestand</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || "")}</code></div>`;
+        let number=1;
+        for (const operation of assistant.operations || []) {
+          html += `<details class="card change-operation" ${number===1?"open":""}><summary><span>${number}. ${escapeHtml(operation.title || "Rückarbeit")}</span><span class="badge warning">Ausstehend</span></summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
+          if (operation.source) html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
+          if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+          if ((operation.paths || []).length) html += `<div class="muted">ZU ENTFERNEN</div>${operation.paths.map(path=>`<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
+          if ((operation.items || []).length) html += `<details><summary>${operation.items.length} Element${operation.items.length===1?"":"e"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name=>`<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
+          html += "</div></details>";
+          number++;
+        }
+        if (!(assistant.operations || []).length) {
+          html += '<div class="card success-text">✓ Der ursprüngliche Finder-Zustand ist bereits wiederhergestellt.</div>';
+        }
+        html += '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finder-check>Rückarbeit prüfen · weiter</button></div></section>';
+      } else {
+        html += '<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Verwerfen</h3><p class="muted">Der ursprüngliche Archivzustand wird vollständig read-only nach Ordnern, Pfaden, Größen und SHA-256 geprüft.</p></div></div>';
+        html += '<div id="reversal-verify-panel" class="card"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" class="plan-button" data-reversal-verify>Rückänderung prüfen</button><span class="muted" data-reversal-summary>Noch nicht geprüft.</span></div><div data-reversal-errors style="display:none;margin-top:10px"></div></div>';
+        html += '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finish disabled>Ursprungszustand bestätigen & Änderung verwerfen</button></div></section>';
+      }
+
+      changeRequestBody.innerHTML = html;
+
+      changeRequestBody.querySelector("[data-reversal-prepare]")?.addEventListener("click", async event => {
+        const button=event.currentTarget;
+        button.disabled=true;
+        try {
+          const next=await requestJson(
+            `/api/change-requests/${encodeURIComponent(crId)}/reversal/prepare`,
+            {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}
+          );
+          await showArchiveReversalDetail(crId,{assistant:next});
+        } catch(error) {
+          button.disabled=false;
+          setStatus(error.message,true);
+        }
+      });
+
+      changeRequestBody.querySelector("[data-reversal-refresh]")?.addEventListener("click", async event => {
+        const button=event.currentTarget;
+        button.disabled=true;
+        button.classList.add("loading");
+        button.textContent="Aktualisiere …";
+        try {
+          await showArchiveReversalDetail(crId,{refreshLive:true});
+        } catch(error) {
+          button.disabled=false;
+          setStatus(error.message,true);
+        }
+      });
+
+      changeRequestBody.querySelector("[data-reversal-finder-check]")?.addEventListener("click", async () => {
+        await showArchiveReversalDetail(crId,{refreshLive:true});
+      });
+
+      const verifyButton=changeRequestBody.querySelector("[data-reversal-verify]");
+      const finishButton=changeRequestBody.querySelector("[data-reversal-finish]");
+      verifyButton?.addEventListener("click", async () => {
+        verifyButton.disabled=true;
+        const summary=changeRequestBody.querySelector("[data-reversal-summary]");
+        const errors=changeRequestBody.querySelector("[data-reversal-errors]");
+        try {
+          const result=await requestJson(
+            `/api/change-requests/${encodeURIComponent(crId)}/reversal/verify`,
+            {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}
+          );
+          if (result.complete) {
+            verifyButton.classList.add("success");
+            verifyButton.textContent="✓ Rückänderung geprüft";
+            if(summary){summary.className="success-text";summary.textContent="Der ursprüngliche Archivzustand ist vollständig wiederhergestellt.";}
+            if(errors){errors.style.display="none";errors.innerHTML="";}
+            if(finishButton) finishButton.disabled=false;
+          } else {
+            verifyButton.disabled=false;
+            if(summary){summary.className="danger-text";summary.textContent=`${Number(result.problem_count||0)} Punkt(e) sind noch offen.`;}
+            if(errors){
+              errors.style.display="block";
+              errors.innerHTML=(result.problems||[]).map(problem=>`<div class="card" style="margin-top:7px"><strong>${escapeHtml(problem.message||"Noch offen")}</strong><code style="display:block;margin-top:5px;white-space:pre-wrap;word-break:break-word">${escapeHtml(problem.path||"")}</code></div>`).join("");
+            }
+          }
+        } catch(error) {
+          verifyButton.disabled=false;
+          setStatus(error.message,true);
+        }
+      });
+
+      finishButton?.addEventListener("click", async () => {
+        finishButton.disabled=true;
+        try {
+          await requestJson(
+            `/api/change-requests/${encodeURIComponent(crId)}/reversal/finish`,
+            {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}
+          );
+          mandatoryArchiveChangeContext=null;
+          clearChangeTaskFromUrl(crId);
+          changeRequestClose.disabled=false;
+          changeRequestClose.textContent="Schließen";
+          changeRequestClose.classList.remove("danger-button");
+          if(changeRequestDialog.open) changeRequestDialog.close();
+          await loadEvents({reset:true});
+          refreshGlobalTasks();
+          setStatus("Rückänderung abgeschlossen. Die Archivänderung wurde verworfen.",false,true);
+        } catch(error) {
+          finishButton.disabled=false;
+          setStatus(error.message,true);
+        }
+      });
+    }
+
+
     async function showChangeRequestDetail(crId, options={}) {
       try {
         changeRequestBody.textContent = "Lade Änderungsauftrag …";
@@ -3537,6 +3730,18 @@ EVENTS_HTML = r"""<!doctype html>
         if (!crRes.ok) throw new Error(`HTTP ${crRes.status}: ${crRes.statusText}`);
         const cr = await crRes.json();
         const active = syncArchiveChangeContext(cr);
+        if (active && !options.skipReversalCheck) {
+          const reversalRes = await fetch(
+            `/api/change-requests/${encodeURIComponent(crId)}/reversal`
+          );
+          if (reversalRes.ok) {
+            const reversal = await reversalRes.json();
+            if (reversal.active) {
+              await showArchiveReversalDetail(crId,{assistant:reversal});
+              return;
+            }
+          }
+        }
         if (options.resume && !active) {
           if (changeRequestDialog.open) changeRequestDialog.close();
           setStatus("Der frühere Archivänderungsauftrag ist bereits abgeschlossen.", false, true);
@@ -3595,6 +3800,7 @@ EVENTS_HTML = r"""<!doctype html>
         html += `</div>`;
 
         const targetTree = (assistant.target_structure?.lines || []).join("\n");
+        const targetStructureDeleted = Boolean(assistant.target_structure?.deleted);
 
         const renderTechnicalDetails = () => {
           const rows = (Array.isArray(reviewRows) ? reviewRows : []).filter(row => {
@@ -3602,7 +3808,7 @@ EVENTS_HTML = r"""<!doctype html>
             return action && action !== "keep";
           });
           if (!rows.length) return "";
-          let detail = `<details class="card"><summary><strong>Technische Details</strong> <span class="muted">· ${rows.length} Dateioperationen</span></summary><div style="margin-top:10px;display:grid;gap:8px">`;
+          let detail = `<details class="card change-disclosure"><summary><strong>Technische Details</strong> <span class="muted">· ${rows.length} Dateioperationen</span></summary><div style="margin-top:10px;display:grid;gap:8px">`;
           for (const row of rows) {
             const source = row.source_root_kind === "shared_workspace"
               ? (row.workspace_staging_path || row.workspace_original_path || row.old_path || "—")
@@ -3648,7 +3854,7 @@ EVENTS_HTML = r"""<!doctype html>
           const releaseRows = releaseStock.rows || [];
           const releaseSegments = releaseStock.segments || [];
           const liveRefreshAvailable = releaseStage === "complete";
-          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Finder-Arbeit</h3><p class="muted">Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv.</p>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:5px">✓ Aktueller Archivbestand wurde read-only nach Pfad, Größe und SHA-256 geprüft.</p>' : (liveRefreshAvailable ? '<p class="muted" style="margin-top:5px">„Aktualisieren“ prüft den tatsächlichen Archivbestand und passt VON-Pfade sowie Erledigt-Status an.</p>' : '')}</div>${liveRefreshAvailable ? '<button type="button" class="plan-button change-refresh-button" data-cr-refresh-live>↻ Aktualisieren</button>' : ''}</div>`;
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">Finder-Arbeit</h3><button class="bk-help" type="button" aria-label="Hinweis zur Finder-Arbeit" data-help="Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv. „Aktualisieren“ prüft den tatsächlichen Archivbestand und passt VON-Pfade sowie Erledigt-Status an.">?</button></div>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:6px">✓ Aktueller Archivbestand wurde read-only nach Pfad, Größe und SHA-256 geprüft.</p>' : ''}</div>${liveRefreshAvailable ? '<button type="button" class="plan-button change-refresh-button" data-cr-refresh-live>↻ Aktualisieren</button>' : ''}</div>`;
 
           if (releaseRequired && releaseStage === "copy_to_ssd") {
             html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">Kopiere die unten genannten Dateien aus der Kamerabibliothek in die vorbereiteten Zielordner unter <em>Arbeitsbereich/Freigewordene Archivdateien</em>. Noch nichts im Archiv löschen.</p>`;
@@ -3694,7 +3900,11 @@ EVENTS_HTML = r"""<!doctype html>
             }
 
             if (targetTree) {
-              html += `<details class="card"><summary><strong>Zielstruktur-Vorschau</strong></summary><p class="muted" style="margin-top:8px">So soll das bearbeitete Ereignis nach den folgenden Finder-Schritten im Archiv aussehen.</p><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></details>`;
+              const targetTitle = targetStructureDeleted ? "Zielzustand" : "Zielstruktur-Vorschau";
+              const targetHint = targetStructureDeleted
+                ? "Bei diesem Löschauftrag wird keine neue Archivstruktur aufgebaut."
+                : "So soll das bearbeitete Ereignis nach den folgenden Finder-Schritten im Archiv aussehen.";
+              html += `<details class="card change-disclosure"><summary><strong>${targetTitle}</strong></summary><p class="muted" style="margin-top:8px">${targetHint}</p><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></details>`;
             }
 
             for (const operation of assistant.operations || []) {
@@ -3704,7 +3914,7 @@ EVENTS_HTML = r"""<!doctype html>
                 : state === "pending" ? '<span class="badge warning">Ausstehend</span>'
                 : state === "attention" ? '<span class="badge danger">Prüfen</span>'
                 : "";
-              html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</span>${stateBadge}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
+              html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary><span>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</span>${stateBadge}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
               if ((operation.sources || []).length) {
                 html += `<div class="muted">VON</div>${operation.sources.map(source => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code>`).join("")}`;
               } else if (operation.source) {
@@ -4031,8 +4241,21 @@ EVENTS_HTML = r"""<!doctype html>
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
       if (action === "cancel") {
+        if (data.reversal_required) {
+          await showArchiveReversalDetail(
+            crId,
+            {assistant:data.reversal || undefined}
+          );
+          setStatus(
+            "Rückänderungsauftrag gestartet. Stelle jetzt den ursprünglichen Archivzustand wieder her.",
+            false,
+            true
+          );
+          return data;
+        }
         mandatoryArchiveChangeContext = null;
         clearChangeTaskFromUrl(crId);
+        changeRequestClose.disabled = false;
         changeRequestClose.textContent = "Schließen";
         changeRequestClose.classList.remove("danger-button");
         if (changeRequestDialog.open) changeRequestDialog.close();
