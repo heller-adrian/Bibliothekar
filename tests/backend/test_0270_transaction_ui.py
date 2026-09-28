@@ -1,7 +1,7 @@
 """0.27.0: Pflichttransaktionen und minimale Archiv-Hilfsstruktur."""
 from pathlib import PurePosixPath
 
-from app.archive_staging import _directory_plan
+from app.archive_staging import _desired_directory_plan
 from app.events_ui import EVENTS_HTML
 
 
@@ -40,14 +40,15 @@ def test_0270_archive_staging_contains_only_real_target_directories():
         "assets_with_plans": [],
     }
 
-    dirs = _directory_plan(preview, plan)
+    dirs = _desired_directory_plan(preview, plan)
     root = PurePosixPath("2026/07-22 - Test Archiv 2")
     assert dirs == {
         root,
+        root / "07-22 00-00...23-59 - Teil A",
         root / "07-22 00-00...23-59 - Teil A" / "Alle",
+        root / "07-22 00-00...23-59 - Teil A" / "Sortiert",
+        root / "07-22 00-00...23-59 - Teil A" / "Export",
     }
-    assert root / "07-22 00-00...23-59 - Teil A" / "Sortiert" not in dirs
-    assert root / "07-22 00-00...23-59 - Teil A" / "Export" not in dirs
     assert root / "07-23 00-00...12-00 - Leer" not in dirs
 
 
