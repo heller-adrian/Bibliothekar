@@ -3302,6 +3302,9 @@ EVENTS_HTML = r"""<!doctype html>
         let html = "<h4>Änderungsdetails</h4>";
         html += `<p><strong>Status:</strong> ${escapeHtml(cr.status)}</p>`;
         html += `<p><strong>Beschreibung:</strong> ${escapeHtml(cr.description || "—")}</p>`;
+        if (cr.prepared_structure_path) {
+          html += `<section class="preview-note"><strong>Vorbereitete SSD-Hülle</strong><p>Unter <code>Arbeitsbereich/${escapeHtml(cr.prepared_structure_path)}</code> liegt die benötigte Zielstruktur. Neue SSD-Dateien liegen dort bereits in ihrer vorgesehenen Alle-/Sortiert-/Export-Position. Die Kamerabibliothek wurde nicht verändert.</p></section>`;
+        }
 
         // Dateigenaue Arbeitsanweisung: IST -> SOLL.
         let reviewRows = [];
@@ -3312,12 +3315,21 @@ EVENTS_HTML = r"""<!doctype html>
           reviewRows = rows;
           if (rows.length > 0) {
             const fileName = path => String(path || "").split("/").filter(Boolean).pop() || "Datei";
+            const sourcePath = row => String(
+              row.source_root_kind === "shared_workspace"
+                ? (row.workspace_staging_path || row.workspace_original_path || row.old_path || "")
+                : (row.old_path || "")
+            );
+            const sourceLabel = row => row.source_root_kind === "shared_workspace"
+              ? "SSD · Später zuordnen"
+              : "Kamerabibliothek";
             const familyStem = row => fileName(row.old_path || row.new_path).replace(/\.[^.]+$/, "");
             // 0.20.0: Arbeitsgruppen werden nach dem tatsächlichen QUELL-Ereignis
             // gebildet. Der Nutzer arbeitet im Finder von einem realen Ausgangsordner
             // aus; das Ziel kann innerhalb desselben Ereignisses oder in einem anderen
             // Ereignis liegen. Dadurch entstehen keine irreführenden Zielgruppen mehr.
             const eventGroup = row => {
+              if (row.source_root_kind === "shared_workspace") return "SSD · Später zuordnen";
               const path = String(row.old_path || row.new_path || "");
               const parts = path.split("/").filter(Boolean);
               return parts.length > 1 && /^\d{4}$/.test(parts[0]) ? parts[1] : (parts[0] || cr.event_name || "Ereignis");
@@ -3339,6 +3351,7 @@ EVENTS_HTML = r"""<!doctype html>
               const lastStem=familyStem(familyEntries[familyEntries.length-1][0]);
               const groupRows=rows.filter(r=>eventGroup(r)===eventKey);
               const sourceKeys=new Set(groupRows.map(r=>{
+                if (r.source_root_kind === "shared_workspace") return "SSD · Später zuordnen";
                 const parts=String(r.old_path||"").split("/").filter(Boolean);
                 return parts.length>1 && /^\d{4}$/.test(parts[0]) ? parts[1] : (parts[0]||"");
               }).filter(Boolean));
@@ -3346,22 +3359,28 @@ EVENTS_HTML = r"""<!doctype html>
                 const parts=String(r.new_path||"").split("/").filter(Boolean);
                 return parts.length>1 && /^\d{4}$/.test(parts[0]) ? parts[1] : (parts[0]||"");
               }).filter(Boolean));
-              const purpose=(targetKeys.size===1 && targetKeys.has(eventKey))
-                ? "Innerhalb dieses Ereignisses verschieben"
-                : (targetKeys.size===1 ? `Aus diesem Ereignis nach ${[...targetKeys][0]} verschieben` : "Aus diesem Ereignis in mehrere Ziele verschieben");
+              const hasWorkspaceSource=groupRows.some(r=>r.source_root_kind==="shared_workspace");
+              const purpose=hasWorkspaceSource
+                ? (targetKeys.size===1 ? `Aus dem SSD-Hilfsbereich nach ${[...targetKeys][0]} in die Kamerabibliothek übernehmen` : "Aus dem SSD-Hilfsbereich in die angezeigten Archivziele übernehmen")
+                : ((targetKeys.size===1 && targetKeys.has(eventKey))
+                  ? "Innerhalb dieses Ereignisses verschieben"
+                  : (targetKeys.size===1 ? `Aus diesem Ereignis nach ${[...targetKeys][0]} verschieben` : "Aus diesem Ereignis in mehrere Ziele verschieben"));
               html += `<section class="card" style="margin:10px 0;padding:12px"><h4 style="margin:0 0 4px">${escapeHtml(eventKey)}</h4>`;
               html += `<div style="font-weight:600;margin-bottom:3px">${escapeHtml(purpose)}</div>`;
               html += `<div class="muted">${families.size} Familien · ${groupRows.length} Dateien · ${escapeHtml(firstStem)}${firstStem===lastStem?"":` bis ${escapeHtml(lastStem)}`}</div>`;
               for (const filesOfFamily of familyEntries) {
                 const stem=familyStem(filesOfFamily[0]);
                 const targetDir=String(filesOfFamily[0].new_path||"").split("/").slice(0,-1).join("/") || "Noch neu zuzuordnen";
-                const sourceDir=String(filesOfFamily[0].old_path||"").split("/").slice(0,-1).join("/") || "—";
+                const sourceDir=sourcePath(filesOfFamily[0]).split("/").slice(0,-1).join("/") || "—";
                 html += `<details class="card" style="margin:7px 0;padding:8px 10px"><summary style="cursor:pointer"><strong>${escapeHtml(stem)}</strong> <span class="muted">· ${filesOfFamily.length} Dateien · ${escapeHtml(sourceDir)} → ${escapeHtml(targetDir)}</span></summary>`;
                 for (const f of filesOfFamily) {
                   const action=String(f.action||f.operation||"move");
                   html += `<div style="margin-top:8px"><strong>${escapeHtml(fileName(f.old_path||f.new_path))}</strong> <span class="muted">· ${escapeHtml(action)}</span>`;
-                  html += `<div class="muted">IST</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(f.old_path||"—")}</code>`;
-                  html += `<div class="muted">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(f.new_path||"Noch neu zuzuordnen")}</code>`;
+                  html += `<div class="muted">IST · ${escapeHtml(sourceLabel(f))}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(sourcePath(f)||"—")}</code>`;
+                  if (f.source_root_kind === "shared_workspace" && f.workspace_original_path && f.workspace_original_path !== f.workspace_staging_path) {
+                    html += `<div class="muted">SSD-Original bleibt bis zum erfolgreichen Abschluss erhalten: ${escapeHtml(f.workspace_original_path)}</div>`;
+                  }
+                  html += `<div class="muted">SOLL · Kamerabibliothek</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(f.new_path||"Noch neu zuzuordnen")}</code>`;
                   if (f.verification_status) html += `<div class="muted">Prüfung: ${escapeHtml(f.verification_status)}</div>`;
                   html += `</div>`;
                 }
