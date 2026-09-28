@@ -285,8 +285,8 @@ def build_archive_change_assistant(
 
     # Minimal user action: copy complete top-level prepared structures.
     # Bei Löschaufträgen gibt es bewusst keine neue SOLL-Struktur.
-    if not delete_event:  If the
-        # event root itself is new (rename), copy that root once instead.
+    if not delete_event:
+        # If the event root itself is new (rename), copy that root once instead.
         copy_roots = _collapse_copy_roots(missing, target_root, archive_root)
         if status != "aenderbar_vorschlagen" and helper_root:
             try:
