@@ -92,11 +92,37 @@ def _compute_event_plan(
 
         if "selected_family_ids" in preview:
             requested = {int(v) for v in preview.get("selected_family_ids", [])}
-            requested_ids = sorted(
-                requested & current_family_ids
-                if inventory is not None
-                else requested
-            )
+            if inventory is not None:
+                # 0.27.0: Der reale Archivbestand bleibt die Wahrheit fuer bereits
+                # archivierte Familien. Zusaetzlich duerfen aber wirklich freie
+                # Familien aus demselben SSD-Auftrag in die neue Definition
+                # aufgenommen werden. Logisch noch zugeordnete, im Archiv jedoch
+                # manuell entfernte Familien werden dadurch nicht wiederbelebt.
+                incoming_requested = requested - assigned_family_ids
+                if incoming_requested:
+                    incoming_placeholders = ",".join("?" for _ in incoming_requested)
+                    occupied = connection.execute(
+                        f"""
+                        SELECT DISTINCT ea.family_id, COALESCE(root.name,assigned.name) AS event_name
+                        FROM event_assignments ea
+                        JOIN events assigned ON assigned.id=ea.event_id
+                        LEFT JOIN events root ON root.id=assigned.parent_event_id
+                        WHERE ea.family_id IN ({incoming_placeholders})
+                          AND assigned.status IN ('draft','planned','applied','archived')
+                        """,
+                        tuple(sorted(incoming_requested)),
+                    ).fetchall()
+                    if occupied:
+                        names = sorted({str(row["event_name"] or "") for row in occupied})
+                        raise EventChangeRequestError(
+                            "Mindestens eine neu hinzukommende Familie ist nicht mehr frei"
+                            + (": " + ", ".join(f"„{name}“" for name in names) if names else ".")
+                        )
+                requested_ids = sorted(
+                    (requested & current_family_ids) | incoming_requested
+                )
+            else:
+                requested_ids = sorted(requested)
         else:
             requested_ids = sorted(current_family_ids)
         requested_set = set(requested_ids)
@@ -107,7 +133,7 @@ def _compute_event_plan(
             rows = connection.execute(
                 f"""
                 SELECT f.id AS file_id, f.family_id, f.current_relative_path,
-                       f.original_relative_path, f.size_bytes,
+                       f.original_relative_path, f.current_root_kind, f.size_bytes,
                        f.sha256_current, f.sha256_original,
                        ff.family_key, ff.selected_capture_time
                 FROM files f
@@ -242,22 +268,37 @@ def _compute_event_plan(
         family_id = int(row["family_id"])
 
         observed = inventory_by_file_id.get(file_id)
-        if inventory is not None and observed is None:
+        incoming_workspace = family_id in added_family_ids
+        if inventory is not None and observed is None and not incoming_workspace:
             # Die Datei wurde seit der letzten Archivierung manuell entfernt.
             # Das ist ein legitimer neuer IST-Bestand und erzeugt keinen Auftrag.
             continue
 
-        stored_path = str(
-            observed["relative_path"]
-            if observed is not None
-            else row["current_relative_path"] or row["original_relative_path"] or ""
-        ).replace("\\", "/").lstrip("/")
+        if incoming_workspace:
+            if str(row["current_root_kind"] or "") != "shared_workspace":
+                raise EventChangeRequestError(
+                    "Eine neu hinzukommende Familie liegt nicht im SSD-Arbeitsbereich."
+                )
+            stored_path = str(
+                row["current_relative_path"] or row["original_relative_path"] or ""
+            ).replace("\\", "/").lstrip("/")
+            old_event_relative = ""
+            branch = ""
+            source_root_kind = "shared_workspace"
+        else:
+            stored_path = str(
+                observed["relative_path"]
+                if observed is not None
+                else row["current_relative_path"] or row["original_relative_path"] or ""
+            ).replace("\\", "/").lstrip("/")
+            old_event_relative = str(observed.get("event_relative_path") or "") if observed else ""
+            branch = str(observed.get("branch") or "") if observed else ""
+            source_root_kind = "camera_archive"
+
         filename = Path(stored_path).name
         if not filename:
             raise EventChangeRequestError(f"Dateiname fuer Datei {row['file_id']} fehlt.")
         old_path = stored_path
-        old_event_relative = str(observed.get("event_relative_path") or "") if observed else ""
-        branch = str(observed.get("branch") or "") if observed else ""
         if not branch:
             for part in Path(old_path).parts:
                 if part in {"Alle", "Sortiert", "Export"}:
@@ -302,6 +343,8 @@ def _compute_event_plan(
                 if observed is not None
                 else row["sha256_current"] or row["sha256_original"] or ""
             ),
+            "source_root_kind": source_root_kind,
+            "workspace_original_path": old_path if incoming_workspace else "",
         })
 
     if inventory is not None:
@@ -432,6 +475,7 @@ def propose_event_change(
     event_name: str | None = None,
     notes: str = "",
     archive_root: Path | None = None,
+    workspace_path: Path | None = None,
 ) -> dict[str, Any]:
     """Change-Request fuer ein archiviertes Ereignis vorschlagen.
 
@@ -556,8 +600,9 @@ def propose_event_change(
                 INSERT INTO event_change_file_reviews (
                     change_request_id, family_id, file_id, old_path, new_path,
                     action, expected_size_bytes, expected_sha256,
+                    source_root_kind, workspace_original_path,
                     confirmed, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
                 (
                     cr_id,
@@ -568,6 +613,8 @@ def propose_event_change(
                     action,
                     int(family_plan.get("expected_size_bytes") or 0),
                     str(family_plan.get("expected_sha256") or ""),
+                    str(family_plan.get("source_root_kind") or "camera_archive"),
+                    str(family_plan.get("workspace_original_path") or ""),
                     now,
                     now,
                 ),
@@ -599,6 +646,49 @@ def propose_event_change(
 
         connection.commit()
 
+    staging = {
+        "prepared_structure_path": "",
+        "staged_file_count": 0,
+        "staging_by_file_id": {},
+        "created_directories": [],
+    }
+    if workspace_path is not None:
+        from app.archive_staging import (
+            ArchiveStagingError,
+            prepare_archive_change_staging,
+        )
+        try:
+            staging = prepare_archive_change_staging(
+                database_path,
+                workspace_path,
+                cr_id,
+                event_id,
+                preview,
+                plan,
+            )
+            with database_connection(database_path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "UPDATE event_change_requests SET prepared_structure_path=?,updated_at=? WHERE id=?",
+                    (str(staging.get("prepared_structure_path") or ""), now, cr_id),
+                )
+                for file_id, staging_path in (staging.get("staging_by_file_id") or {}).items():
+                    connection.execute(
+                        """UPDATE event_change_file_reviews
+                           SET workspace_staging_path=?,updated_at=?
+                           WHERE change_request_id=? AND file_id=?
+                             AND source_root_kind='shared_workspace'""",
+                        (str(staging_path), now, cr_id, int(file_id)),
+                    )
+                connection.commit()
+        except ArchiveStagingError as exc:
+            # Ein nicht vorbereitbarer Hilfsbestand darf keinen offenen,
+            # scheinbar ausfuehrbaren Archivauftrag hinterlassen.
+            with database_connection(database_path) as connection:
+                connection.execute("DELETE FROM event_change_requests WHERE id=?", (cr_id,))
+                connection.commit()
+            raise EventChangeRequestError(str(exc)) from exc
+
     # Rueckgabe mit Plan
     return {
         "change_request_id": cr_id,
@@ -608,6 +698,8 @@ def propose_event_change(
         "plan": plan,
         "family_count": len(plan["families_with_plans"]),
         "diff_summary": plan["diff_summary"],
+        "prepared_structure_path": str(staging.get("prepared_structure_path") or ""),
+        "staged_file_count": int(staging.get("staged_file_count") or 0),
     }
 
 
