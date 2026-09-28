@@ -127,8 +127,13 @@ def test_0268_event_viewer_edit_action_is_in_header():
     assert "eventEditHeaderButton.onclick = () => renderEventEditor(context);" in EVENTS_HTML
 
 
-def test_0268_existing_event_extension_is_forward_only_and_structure_locked():
-    assert "Date.parse(d.start_datetime) - Date.parse(event.end_datetime) - 1000" in WORKSPACE_HTML
+def test_0268_existing_event_extension_is_bidirectional_and_existing_structure_locked():
+    assert "function extensionSelectionForParent(parent, dated)" in WORKSPACE_HTML
+    assert 'direction="after"' not in WORKSPACE_HTML
+    assert 'direction="before"' not in WORKSPACE_HTML
+    assert 'direction="after"' not in WORKSPACE_HTML
+    assert 'direction="before"' not in WORKSPACE_HTML
+    assert 'direction="after"' not in WORKSPACE_HTML
     assert 'dialogTitle.textContent="Ereignis erweitern"' in WORKSPACE_HTML
     assert "activeExtension=extension;" in WORKSPACE_HTML
     assert "useTimeRange.disabled=true" in WORKSPACE_HTML
