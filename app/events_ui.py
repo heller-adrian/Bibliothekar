@@ -272,6 +272,26 @@ EVENTS_HTML = r"""<!doctype html>
       margin-top:12px;
     }
     .change-progress.active { display:grid; }
+    .change-refresh-button {
+      position:relative;
+      overflow:hidden;
+      white-space:nowrap;
+    }
+    .change-refresh-button.loading::after {
+      content:"";
+      position:absolute;
+      left:0;
+      bottom:0;
+      height:3px;
+      width:38%;
+      background:currentColor;
+      animation:change-refresh-slide .8s ease-in-out infinite alternate;
+    }
+    @keyframes change-refresh-slide {
+      from { transform:translateX(-15%); }
+      to { transform:translateX(180%); }
+    }
+    .badge.danger { color:var(--danger); }
     .change-progress-track {
       height:9px;
       overflow:hidden;
@@ -3004,16 +3024,26 @@ EVENTS_HTML = r"""<!doctype html>
       }
 
       if (context.archived_change_request) {
-        setStatus("Manueller Änderungsauftrag wird berechnet …");
-        const result = await requestJson(`/api/change-requests/${encodeURIComponent(context.event.id)}/propose?job_id=${encodeURIComponent(context._job_id)}`, {
-          method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload),
-        });
         eventEditDialog.close();
-        setChangeTaskInUrl(result.change_request_id, context._job_id);
+        changeRequestTitle.textContent = "Archivänderung";
+        changeRequestSubtitle.textContent = String(context.event.name || "Ereignis");
+        changeRequestBody.innerHTML =
+          `<section class="change-pane"><div class="card"><strong>Archivänderung wird vorbereitet …</strong><p class="muted" style="margin-top:6px">IST- und SOLL-Zustand werden berechnet. Die Kamerabibliothek bleibt dabei unverändert.</p><div class="change-progress active"><div class="muted">Bitte einen Moment warten.</div><div class="change-progress-track"><div class="change-progress-bar" style="width:55%"></div></div></div></div></section>`;
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
-        await showChangeRequestDetail(result.change_request_id);
-        setStatus("Änderungsauftrag erstellt. Die Kamerabibliothek wurde nicht verändert.", false, true);
-        refreshGlobalTasks();
+        setStatus("Manueller Änderungsauftrag wird berechnet …");
+        try {
+          const result = await requestJson(`/api/change-requests/${encodeURIComponent(context.event.id)}/propose?job_id=${encodeURIComponent(context._job_id)}`, {
+            method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload),
+          });
+          setChangeTaskInUrl(result.change_request_id, context._job_id);
+          await showChangeRequestDetail(result.change_request_id);
+          setStatus("Änderungsauftrag erstellt. Die Kamerabibliothek wurde nicht verändert.", false, true);
+          refreshGlobalTasks();
+        } catch (error) {
+          changeRequestBody.innerHTML =
+            `<div class="card"><strong class="danger-text">Archivänderung konnte nicht vorbereitet werden.</strong><p class="muted" style="margin-top:7px">${escapeHtml(error.message)}</p></div>`;
+          setStatus(error.message, true);
+        }
         return;
       }
       setStatus("Ereignisänderungen werden gespeichert …");
@@ -3514,7 +3544,10 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         const [assistantRes, filesRes] = await Promise.all([
-          fetch(`/api/change-requests/${encodeURIComponent(crId)}/assistant`),
+          fetch(
+            `/api/change-requests/${encodeURIComponent(crId)}/assistant`
+            + (options.refreshLive ? "?refresh=true" : "")
+          ),
           fetch(`/api/change-requests/${encodeURIComponent(crId)}/files`)
         ]);
         if (!assistantRes.ok) {
@@ -3610,12 +3643,12 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         if (phase === "finder") {
-          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Finder-Arbeit</h3><p class="muted">Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv.</p></div></div>`;
-
           const releaseRequired = Boolean(releaseStock.required);
           const releaseStage = String(releaseStock.stage || "complete");
           const releaseRows = releaseStock.rows || [];
           const releaseSegments = releaseStock.segments || [];
+          const liveRefreshAvailable = releaseStage === "complete";
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Finder-Arbeit</h3><p class="muted">Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv.</p>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:5px">✓ Aktueller Archivbestand wurde read-only nach Pfad, Größe und SHA-256 geprüft.</p>' : (liveRefreshAvailable ? '<p class="muted" style="margin-top:5px">„Aktualisieren“ prüft den tatsächlichen Archivbestand und passt VON-Pfade sowie Erledigt-Status an.</p>' : '')}</div>${liveRefreshAvailable ? '<button type="button" class="plan-button change-refresh-button" data-cr-refresh-live>↻ Aktualisieren</button>' : ''}</div>`;
 
           if (releaseRequired && releaseStage === "copy_to_ssd") {
             html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">Kopiere die unten genannten Dateien aus der Kamerabibliothek in die vorbereiteten Zielordner unter <em>Arbeitsbereich/Freigewordene Archivdateien</em>. Noch nichts im Archiv löschen.</p>`;
@@ -3665,18 +3698,26 @@ EVENTS_HTML = r"""<!doctype html>
             }
 
             for (const operation of assistant.operations || []) {
-              html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
+              const state = String(operation.state || "");
+              const stateBadge =
+                state === "done" ? '<span class="badge success">Erledigt</span>'
+                : state === "pending" ? '<span class="badge warning">Ausstehend</span>'
+                : state === "attention" ? '<span class="badge danger">Prüfen</span>'
+                : "";
+              html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</span>${stateBadge}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
               if ((operation.sources || []).length) {
-                html += `<div class="muted">DIESE ORDNER</div>${operation.sources.map(source => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code>`).join("")}`;
+                html += `<div class="muted">VON</div>${operation.sources.map(source => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code>`).join("")}`;
               } else if (operation.source) {
                 html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
               }
-              if ((operation.items || []).length && !(operation.sources || []).length && operation.kind !== "remove_directories") {
-                html += `<details><summary>${operation.items.length} Datei${operation.items.length===1?"":"en"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name => `<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
+              if ((operation.items || []).length && operation.kind !== "remove_directories") {
+                html += `<details><summary>${operation.items.length} Element${operation.items.length===1?"":"e"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name => `<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
               }
               if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
               if ((operation.paths || []).length) {
-                html += `<div class="muted">DIESE ALTEN ORDNER</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
+                html += `<div class="muted">NOCH ZU ENTFERNEN</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
+              } else if (operation.kind === "remove_directories" && state === "done") {
+                html += `<div class="success-text">Alle vorgesehenen alten Ordner sind bereits entfernt.</div>`;
               }
               html += `</div></details>`;
               number += 1;
@@ -3699,6 +3740,21 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         changeRequestBody.innerHTML = html;
+
+        const liveRefreshButton=changeRequestBody.querySelector("[data-cr-refresh-live]");
+        liveRefreshButton?.addEventListener("click", async () => {
+          liveRefreshButton.disabled=true;
+          liveRefreshButton.classList.add("loading");
+          liveRefreshButton.textContent="Aktualisiere …";
+          try {
+            await showChangeRequestDetail(crId,{phase:"finder",refreshLive:true});
+          } catch (error) {
+            liveRefreshButton.disabled=false;
+            liveRefreshButton.classList.remove("loading");
+            liveRefreshButton.textContent="↻ Aktualisieren";
+            setStatus(error.message,true);
+          }
+        });
 
         const releaseCopyButton=changeRequestBody.querySelector("[data-cr-release-copy-verify]");
         releaseCopyButton?.addEventListener("click", async () => {
@@ -3861,6 +3917,10 @@ EVENTS_HTML = r"""<!doctype html>
             const problems = (data.files || []).filter(row => String(row.status || "") !== "verified");
             const directoryProblems = (data.directories || []).filter(row => String(row.status || "") !== "verified");
             const obsoleteDirectoryProblems = (data.obsolete_directories || []).filter(row => String(row.status || "") !== "verified");
+            const eventDocumentProblem =
+              data.event_document && String(data.event_document.status || "") !== "verified"
+                ? data.event_document
+                : null;
             if (data.complete) {
               verifyBtn.classList.add("success");
               verifyBtn.textContent = "✓ Prüfung erfolgreich";
@@ -3870,7 +3930,7 @@ EVENTS_HTML = r"""<!doctype html>
             } else {
               verifyBtn.classList.add("danger");
               verifyBtn.textContent = "✕ Prüfung mit Problemen";
-              const problemCount = problems.length + directoryProblems.length + obsoleteDirectoryProblems.length;
+              const problemCount = problems.length + directoryProblems.length + obsoleteDirectoryProblems.length + (eventDocumentProblem ? 1 : 0);
               if (summary) { summary.className = "danger-text"; summary.textContent = `${ok}/${total} Dateien bestätigt · ${problemCount} Problem${problemCount===1?"":"e"}.`; }
               if (label) label.textContent = "Bitte die angezeigten Abweichungen im Finder korrigieren und erneut prüfen.";
               if (archiveBtn) archiveBtn.disabled = true;
@@ -3892,7 +3952,10 @@ EVENTS_HTML = r"""<!doctype html>
                 const obsoleteHtml = obsoleteDirectoryProblems.map(row =>
                   `<div class="card" style="margin-top:8px"><strong>Alter Ordner noch vorhanden</strong><div class="muted">Dieser Ordner wird im SOLL nicht mehr benötigt</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
                 ).join("");
-                errors.innerHTML = fileHtml + directoryHtml + obsoleteHtml;
+                const eventDocumentHtml = eventDocumentProblem
+                  ? `<div class="card" style="margin-top:8px"><strong>event.json stimmt noch nicht</strong><div class="muted">${escapeHtml(eventDocumentProblem.message || "")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(eventDocumentProblem.path || "event.json")}</code></div>`
+                  : "";
+                errors.innerHTML = fileHtml + directoryHtml + obsoleteHtml + eventDocumentHtml;
               }
             }
           } catch (error) {
@@ -3943,12 +4006,7 @@ EVENTS_HTML = r"""<!doctype html>
             if (changeRequestDialog.open) changeRequestDialog.close();
             await loadEvents({reset:true});
             refreshGlobalTasks();
-            const cleanup = data.ssd_cleanup || {};
-            setStatus(
-              `Archivänderung abgeschlossen · ${Number(cleanup.removed_original_file_count || 0)} SSD-Dateien freigegeben · ${Number(cleanup.removed_empty_source_directory_count || 0)} leere Quellordner entfernt.`,
-              false,
-              true
-            );
+            setStatus("Archivänderung abgeschlossen.", false, true);
           } catch (error) {
             window.clearInterval(pulse);
             archiveBtn.disabled = false;

@@ -2028,6 +2028,22 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function formatStoredDateTime(value) {
+      const raw = String(value || "");
+      if (!raw) return "–";
+      const date = new Date(raw);
+      if (Number.isNaN(date.getTime())) return raw.replace("T", ", ");
+      const locale = document.documentElement.lang || navigator.language || "de-DE";
+      return new Intl.DateTimeFormat(locale, {
+        day:"2-digit",
+        month:"2-digit",
+        year:"numeric",
+        hour:"2-digit",
+        minute:"2-digit"
+      }).format(date);
+    }
+
+
     function renderStoredEventPreview(data) {
       const event = data?.event || {};
       const start = String(event.start_datetime || "");
@@ -2041,8 +2057,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       const segmentCount = Array.isArray(event.time_segments) ? event.time_segments.length : 0;
       const details = [
         event.event_kind === "no_event"
-          ? `<div><strong>Datenbank-Zeitraum:</strong> komplex</div>`
-          : `<div><strong>Datenbank-Zeitraum:</strong> ${escapeHtml(start)} bis ${escapeHtml(end)}</div>`,
+          ? `<div><strong>Datenbank-Zeitraum:</strong> mehrere gespeicherte Zeitsegmente</div>`
+          : `<div><strong>Datenbank-Zeitraum:</strong> von ${escapeHtml(formatStoredDateTime(start))} bis ${escapeHtml(formatStoredDateTime(end))}</div>`,
         `<div><strong>Status:</strong> ${escapeHtml(status)} · ${escapeHtml(kind)}</div>`,
         `<div><strong>Ordnerlogik:</strong> ${escapeHtml(dayFolders)}</div>`,
         `<div><strong>Zugeordnet:</strong> ${Number(event.assigned_family_count || 0)} Familien</div>`
@@ -2244,7 +2260,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         if (group.group_type === "released_archive_separator") {
           const separator=document.createElement("div");
           separator.style.cssText="margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--border)";
-          separator.innerHTML='<div style="font-weight:700">Freigewordene Archivaufnahmen</div><div class="muted" style="margin-top:3px">Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand. Auswahl verwendet automatisch die jeweilige Ursprungssicherung.</div>';
+          separator.innerHTML='<div style="display:flex;align-items:center;gap:7px;font-weight:700">Freigewordene Archivaufnahmen <span role="img" aria-label="Information zu freigewordenen Archivaufnahmen" title="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand. Auswahl verwendet automatisch die jeweilige Ursprungssicherung." style="display:inline-grid;place-items:center;width:18px;height:18px;border:1px solid currentColor;border-radius:999px;font-size:12px;font-weight:700;cursor:help">?</span></div>';
           dayList.appendChild(separator);
           continue;
         }
