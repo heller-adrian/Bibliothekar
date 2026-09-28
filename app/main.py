@@ -4115,6 +4115,95 @@ def api_create_event(
     )
 
     try:
+        existing_parent_event_id = str(payload.get("existing_parent_event_id") or "").strip()
+        archived_target = None
+        if existing_parent_event_id:
+            with database_connection(DATABASE_FILE) as connection:
+                archived_target = connection.execute(
+                    """SELECT * FROM events
+                       WHERE id=? AND job_id=? AND parent_event_id IS NULL
+                         AND event_kind='event' AND status='archived'""",
+                    (existing_parent_event_id, job_id),
+                ).fetchone()
+
+        if archived_target is not None:
+            from datetime import datetime, timedelta
+            context = get_event_edit_context(
+                DATABASE_FILE, job_id, existing_parent_event_id
+            )
+            current_start = str(archived_target["start_datetime"] or "")[:19]
+            current_end = str(archived_target["end_datetime"] or "")[:19]
+            selected_intervals = [
+                item for item in (payload.get("selected_intervals") or [])
+                if item.get("start_datetime") and item.get("end_datetime")
+            ]
+            if not selected_intervals:
+                raise ValueError(
+                    "Für die Archiv-Erweiterung fehlt der ausgewählte freie Zeitraum."
+                )
+            selected_intervals.sort(key=lambda item: str(item["start_datetime"]))
+            extension_start = str(selected_intervals[0]["start_datetime"])[:19]
+            extension_end = max(
+                str(item["end_datetime"])[:19] for item in selected_intervals
+            )
+            expected_start = (
+                datetime.fromisoformat(current_end) + timedelta(seconds=1)
+            ).isoformat(timespec="seconds")
+            if extension_start != expected_start:
+                raise ValueError(
+                    "Ein archiviertes Ereignis kann hier nur unmittelbar nach seinem bisherigen Ende erweitert werden."
+                )
+            if extension_end < extension_start:
+                raise ValueError("Der neue Endpunkt liegt vor dem Beginn der Erweiterung.")
+
+            editable_families = [
+                family
+                for family in (context.get("families") or [])
+                if not family.get("assigned_elsewhere") or family.get("assigned_here")
+            ]
+            uses_time = bool(archived_target["uses_time_range"])
+            combined_payload = {
+                "event_kind": "event",
+                "event_name": str(archived_target["name"]),
+                "start_date": current_start[:10],
+                "end_date": extension_end[:10],
+                "start_time": current_start[11:16] if uses_time else "00:00",
+                "end_time": extension_end[11:16] if uses_time else "23:59",
+                "uses_time_range": uses_time,
+                "preserve_day_folders": bool(archived_target["preserve_day_folders"]),
+                "subevents": [
+                    {
+                        "id": child.get("id"),
+                        "name": child.get("name"),
+                        "start_datetime": child.get("start_datetime"),
+                        "end_datetime": child.get("end_datetime"),
+                    }
+                    for child in (context.get("child_events") or [])
+                ],
+            }
+            preview = build_event_preview(combined_payload, editable_families)
+            result = propose_event_change(
+                DATABASE_FILE,
+                job_id,
+                existing_parent_event_id,
+                preview,
+                event_name=str(archived_target["name"]),
+                notes=str(archived_target["notes"] or ""),
+                archive_root=ARCHIVE_ROOT,
+                workspace_path=WORKSPACE_PATH,
+            )
+            return {
+                "job_id": job_id,
+                "status": "archive_change_request_created",
+                "preview": preview,
+                "parent_event": dict(archived_target),
+                "assigned_family_count": int(
+                    result.get("diff_summary", {}).get("added_count") or 0
+                ),
+                "change_request_id": result["change_request_id"],
+                "prepared_structure_path": result.get("prepared_structure_path") or "",
+            }
+
         preview = build_event_preview(
             payload,
             available_families,
