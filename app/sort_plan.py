@@ -919,7 +919,10 @@ def build_event_sort_plan(
     elif linkage_kind == "applied_followup":
         physical_parent_parts = ["Nachträge", f"{parent_folder} - {job_token}"]
     elif linkage_kind == "archived_manual":
-        physical_parent_parts = ["Später zuordnen", f"{parent_folder} - {job_token}"]
+        # 0.27.0: Die manuelle Archiv-Erweiterung liegt unter der kanonischen
+        # Ereignishülle. Mehrere Nachtraege duerfen dort zusammenlaufen; echte
+        # Dateikollisionen bleiben durch den No-Overwrite-Plan blockiert.
+        physical_parent_parts = ["Später zuordnen", parent_folder]
     else:
         physical_parent_parts = (
             ["Später zuordnen", f"{parent_folder} - {job_token}"]
@@ -1180,7 +1183,7 @@ def build_event_sort_plan(
             elif target_linkage == "applied_followup":
                 destination_parts = [year, "Nachträge", f"{target_folder} - {job_token}"]
             elif target_linkage == "archived_manual" or str(reassignment.get("target_status") or "") == "archived":
-                destination_parts = ["Später zuordnen", year, f"{target_folder} - {job_token}"]
+                destination_parts = ["Später zuordnen", year, target_folder]
             else:
                 destination_parts = [year, target_folder]
             file_preserve_day_folders = bool(reassignment.get("target_preserve_day_folders"))
