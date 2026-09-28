@@ -571,11 +571,7 @@ def propose_event_change(
             str(item.get("source_root_kind") or "camera_archive") == "shared_workspace"
             for item in plan.get("families_with_plans") or []
         )
-    initial_status = (
-        "aenderbar_vorschlagen"
-        if preparation["required"]
-        else "aenderbar_bestaetigt"
-    )
+    initial_status = "aenderbar_vorschlagen"
 
     # ChangeRequest erstellen
     with database_connection(database_path) as connection:
@@ -654,11 +650,6 @@ def propose_event_change(
         )
 
         connection.execute('UPDATE event_change_requests SET time_model_version=2 WHERE id=?',(cr_id,))
-        if initial_status == "aenderbar_bestaetigt":
-            connection.execute(
-                "UPDATE event_change_requests SET confirmed_at=?,updated_at=? WHERE id=?",
-                (now, now, cr_id),
-            )
         # Datei-Bestaetigungen (loeschen/bewegen/behalten) fuer jede Familie
         for family_plan in plan["families_with_plans"]:
             fid = family_plan["family_id"]
