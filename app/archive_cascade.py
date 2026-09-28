@@ -114,7 +114,12 @@ def prepare_archived_cascade_impacts(database_path:Path,job_id:str,source_event_
                      'start_time':new_start[11:16],'end_time':new_end[11:16],
                      'preserve_day_folders':bool(ev.get('preserve_day_folders')),'selected_day_keys':[]}
                 preview=build_event_preview(raw,families)
-            res=propose_event_change(database_path,job_id,eid,preview,event_name=str(ev['name']),notes=str(ev.get('notes') or '')); cr_id=str(res['change_request_id'])
+            res=propose_event_change(
+                database_path,job_id,eid,preview,
+                event_name=str(ev['name']),
+                notes=str(ev.get('notes') or ''),
+                workspace_path=workspace_path,
+            ); cr_id=str(res['change_request_id'])
         _retarget_removed_reviews(database_path,cr_id,job_id,source_preview,source_ids)
         cr_ids.append(cr_id); archived_events.append({'event_id':eid,'name':str(ev['name']),'status':'archived','change_request_id':cr_id})
     return {'change_request_ids':cr_ids,'prepared_structures':sorted(set(prepared)),'archived_events':archived_events,'archive_read_only':True}
