@@ -4056,6 +4056,44 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 'href': f"/workspace?job={row['job_id']}&task=planned:{row['id']}",
             })
 
+        # Nach einer abgeschlossenen Archivänderung liegen herausgefallene
+        # Familien wieder sicher im SSD-Arbeitsbereich. Sie besitzen bewusst
+        # keinen separaten Neu-Zuordnungsauftrag mehr, sollen aber als offene
+        # Aufgabe sichtbar bleiben, bis sie über „Aufnahmen“ neu verplant sind.
+        for row in connection.execute(
+            """SELECT marker.job_id,
+                      COALESCE(j.source_volume_label,marker.job_id) AS label,
+                      COUNT(DISTINCT marker.family_id) AS n
+               FROM released_free_families marker
+               JOIN jobs j ON j.id=marker.job_id
+               JOIN file_families ff ON ff.id=marker.family_id
+               WHERE ff.selected_capture_time IS NOT NULL
+                 AND NOT EXISTS (
+                   SELECT 1 FROM event_assignments ea
+                   JOIN events e ON e.id=ea.event_id
+                   WHERE ea.family_id=marker.family_id
+                     AND e.status IN ('draft','planned','applied','archived')
+                 )
+                 AND EXISTS (
+                   SELECT 1 FROM files f
+                   WHERE f.family_id=marker.family_id
+                     AND f.current_root_kind='shared_workspace'
+                     AND f.current_relative_path LIKE 'Freigewordene Archivdateien/%'
+                 )
+               GROUP BY marker.job_id,j.source_volume_label
+               HAVING COUNT(DISTINCT marker.family_id) > 0
+               ORDER BY MAX(marker.created_at) DESC"""
+        ).fetchall():
+            tasks.append({
+                'kind': 'released_archive_families',
+                'job_id': row['job_id'],
+                'title': 'Freigewordene Archivaufnahmen',
+                'detail': f"{int(row['n'])} Familie" + ('' if int(row['n']) == 1 else 'n') + f" · {row['label']}",
+                'count': 1,
+                'family_count': int(row['n']),
+                'href': f"/workspace?job={row['job_id']}&task=free",
+            })
+
         # Freie Familien sind nur dann eine Aufgabe, wenn sie nicht bereits aus
         # einer Ereignisänderung stammen (diese besitzen oben ihre eigene
         # Neu-Zuordnungsaufgabe). So entstehen keine Doppelmeldungen.
