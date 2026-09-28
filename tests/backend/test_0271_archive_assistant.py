@@ -1,0 +1,198 @@
+"""0.27.1: variabler Archiv-Assistent und echte IST→SOLL-Hilfsstruktur."""
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+from app.archive_change_assistant import build_archive_change_assistant
+from app.database import database_connection, initialize_database
+from app.event_change_apply import confirm_event_change, finish_event_change, verify_event_change
+from app.event_change_request import get_event_change_files, propose_event_change
+
+
+NOW = "2026-09-28T13:00:00+00:00"
+
+
+def _seed(tmp_path: Path, *, full_archive_triplet: bool = False):
+    db = tmp_path / "kamera.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    work = workspace / "Arbeitsbereich"
+    work.mkdir(parents=True)
+    archive.mkdir()
+    initialize_database(db)
+
+    folder = "07-22 - Test Archiv 2"
+    old_rel = f"2026/{folder}/Alle/alt.JPG"
+    incoming_rel = "2026/2026-07-24/neu.JPG"
+    old_payload = b"alt"
+    new_payload = b"neu"
+    old_sha = hashlib.sha256(old_payload).hexdigest()
+    new_sha = hashlib.sha256(new_payload).hexdigest()
+
+    with database_connection(db) as c:
+        for job in ("old", "new"):
+            c.execute(
+                """INSERT INTO jobs(
+                       id,kind,trigger_type,state,stage,operation,source_volume_label,
+                       created_at,updated_at
+                   ) VALUES (?, 'sd_import','manual','completed','done','folder_import',?,?,?)""",
+                (job, job, NOW, NOW),
+            )
+        old_family = int(c.execute(
+            """INSERT INTO file_families(
+                   job_id,family_key,original_stem,status,selected_capture_time,
+                   capture_time_confidence
+               ) VALUES ('old','ALT','ALT','complete','2026-07-22T12:00:00','high')"""
+        ).lastrowid)
+        new_family = int(c.execute(
+            """INSERT INTO file_families(
+                   job_id,family_key,original_stem,status,selected_capture_time,
+                   capture_time_confidence
+               ) VALUES ('new','NEU','NEU','complete','2026-07-24T10:00:00','high')"""
+        ).lastrowid)
+        c.execute(
+            """INSERT INTO files(
+                   job_id,family_id,original_relative_path,current_relative_path,
+                   original_filename,extension,media_type,size_bytes,
+                   sha256_original,sha256_current,selected_capture_time,
+                   selected_capture_source,capture_time_confidence,review_status,
+                   metadata_write_status,created_at,updated_at,current_root_kind
+               ) VALUES ('old',?,?,?,?,'.JPG','jpeg',?,?,?,?,?,'high','not_required',
+                         'not_requested',?,?,'camera_archive')""",
+            (old_family, old_rel, old_rel, "alt.JPG", len(old_payload), old_sha, old_sha,
+             "2026-07-22T12:00:00", "DateTimeOriginal", NOW, NOW),
+        )
+        c.execute(
+            """INSERT INTO files(
+                   job_id,family_id,original_relative_path,current_relative_path,
+                   original_filename,extension,media_type,size_bytes,
+                   sha256_original,sha256_current,selected_capture_time,
+                   selected_capture_source,capture_time_confidence,review_status,
+                   metadata_write_status,created_at,updated_at,current_root_kind
+               ) VALUES ('new',?,?,?,?,'.JPG','jpeg',?,?,?,?,?,'high','not_required',
+                         'not_requested',?,?,'shared_workspace')""",
+            (new_family, incoming_rel, incoming_rel, "neu.JPG", len(new_payload), new_sha, new_sha,
+             "2026-07-24T10:00:00", "DateTimeOriginal", NOW, NOW),
+        )
+        c.execute(
+            """INSERT INTO events(
+                   id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                   uses_time_range,folder_name,status,created_at,updated_at,event_kind,
+                   preserve_day_folders,revision,applied_at,archived_at,timeline_model,time_model_version
+               ) VALUES ('archive','old',NULL,'parent','Test Archiv 2',
+                         '2026-07-22T00:00:00','2026-07-22T23:59:59',0,?,'archived',
+                         ?,?,'event',0,1,?,?, 'continuous',2)""",
+            (folder, NOW, NOW, NOW, NOW),
+        )
+        c.execute(
+            """INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at)
+               VALUES ('archive',?,NULL,'date_range',?)""",
+            (old_family, NOW),
+        )
+        c.commit()
+
+    old_path = archive / old_rel
+    old_path.parent.mkdir(parents=True, exist_ok=True)
+    old_path.write_bytes(old_payload)
+    if full_archive_triplet:
+        (archive / "2026" / folder / "Sortiert").mkdir()
+        (archive / "2026" / folder / "Export").mkdir()
+
+    incoming = work / incoming_rel
+    incoming.parent.mkdir(parents=True, exist_ok=True)
+    incoming.write_bytes(new_payload)
+    return db, workspace, archive, folder, old_family, new_family, incoming_rel
+
+
+def _preview(folder: str, old_family: int, new_family: int | None):
+    ids = [old_family] + ([new_family] if new_family is not None else [])
+    return {
+        "event_kind": "event",
+        "event_name": "Test Archiv 2",
+        "parent_folder": folder,
+        "child_folder": "",
+        "uses_time_range": False,
+        "preserve_day_folders": False,
+        "start_date": "2026-07-22",
+        "end_date": "2026-07-24" if new_family is not None else "2026-07-22",
+        "start_time": "00:00",
+        "end_time": "23:59",
+        "selected_day_keys": [],
+        "selected_family_ids": ids,
+    }
+
+
+def test_0271_existing_triplet_stages_only_branch_with_new_files(tmp_path: Path):
+    db, workspace, archive, folder, old_family, new_family, _ = _seed(
+        tmp_path, full_archive_triplet=True
+    )
+    proposed = propose_event_change(
+        db, "old", "archive", _preview(folder, old_family, new_family),
+        event_name="Test Archiv 2", archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    helper = workspace / "Arbeitsbereich" / "Später zuordnen" / "2026" / folder
+    assert proposed["preparation_required"] is True
+    assert not helper.exists()
+
+    before = build_archive_change_assistant(db, archive, workspace, cr_id)
+    assert before["phase"] == "prepare"
+    assert before["preparation"]["missing_directories"] == []
+
+    confirm_event_change(db, cr_id, archive, workspace)
+    assert (helper / "Alle" / "neu.JPG").is_file()
+    assert not (helper / "Sortiert").exists()
+    assert not (helper / "Export").exists()
+
+    after = build_archive_change_assistant(db, archive, workspace, cr_id)
+    assert after["phase"] == "finder"
+    assert [item["kind"] for item in after["operations"]] == ["copy_files"]
+
+
+def test_0271_metadata_only_change_skips_preparation_and_finder(tmp_path: Path):
+    db, workspace, archive, folder, old_family, _, _ = _seed(tmp_path)
+    proposed = propose_event_change(
+        db, "old", "archive", _preview(folder, old_family, None),
+        event_name="Test Archiv 2", notes="nur Notiz",
+        archive_root=archive, workspace_path=workspace,
+    )
+    assert proposed["preparation_required"] is False
+    assert proposed["status"] == "aenderbar_bestaetigt"
+    assistant = build_archive_change_assistant(
+        db, archive, workspace, proposed["change_request_id"]
+    )
+    assert assistant["phase"] == "verify"
+    assert assistant["operations"] == []
+    assert not (workspace / "Arbeitsbereich" / "Später zuordnen").exists()
+
+
+def test_0271_finish_keeps_source_day_when_other_file_remains(tmp_path: Path):
+    db, workspace, archive, folder, old_family, new_family, incoming_rel = _seed(
+        tmp_path, full_archive_triplet=True
+    )
+    work = workspace / "Arbeitsbereich"
+    sibling = work / "2026" / "2026-07-24" / "bleibt.JPG"
+    sibling.write_bytes(b"bleibt")
+
+    proposed = propose_event_change(
+        db, "old", "archive", _preview(folder, old_family, new_family),
+        event_name="Test Archiv 2", archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+    rows = get_event_change_files(db, cr_id)
+    for row in rows:
+        if row["source_root_kind"] != "shared_workspace":
+            continue
+        staged = work / row["workspace_staging_path"]
+        target = archive / row["new_path"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(staged.read_bytes())
+
+    assert verify_event_change(db, cr_id, archive)["complete"] is True
+    finish_event_change(db, cr_id, archive, workspace)
+
+    assert not (work / incoming_rel).exists()
+    assert sibling.is_file()
+    assert sibling.parent.is_dir()

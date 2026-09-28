@@ -554,6 +554,29 @@ def propose_event_change(
         )
     )
 
+    preparation = {
+        "required": False,
+        "missing_directories": [],
+        "helper_directories": [],
+        "incoming_file_count": 0,
+        "prepared_structure_path": "",
+    }
+    if archive_root is not None:
+        from app.archive_staging import describe_archive_change_staging
+        preparation = describe_archive_change_staging(
+            database_path, archive_root, event_id, preview, plan
+        )
+    else:
+        preparation["required"] = any(
+            str(item.get("source_root_kind") or "camera_archive") == "shared_workspace"
+            for item in plan.get("families_with_plans") or []
+        )
+    initial_status = (
+        "aenderbar_vorschlagen"
+        if preparation["required"]
+        else "aenderbar_bestaetigt"
+    )
+
     # ChangeRequest erstellen
     with database_connection(database_path) as connection:
         connection.execute('BEGIN IMMEDIATE')
@@ -622,7 +645,7 @@ def propose_event_change(
                 preview.get("selected_family_count", 0),
                 json.dumps(preview.get("no_event_segments", []), ensure_ascii=False),
                 json.dumps(preview.get("subevents") or preview.get("child_segments", []), ensure_ascii=False),
-                "aenderbar_vorschlagen",
+                initial_status,
                 version,
                 now,
                 now,
@@ -631,6 +654,11 @@ def propose_event_change(
         )
 
         connection.execute('UPDATE event_change_requests SET time_model_version=2 WHERE id=?',(cr_id,))
+        if initial_status == "aenderbar_bestaetigt":
+            connection.execute(
+                "UPDATE event_change_requests SET confirmed_at=?,updated_at=? WHERE id=?",
+                (now, now, cr_id),
+            )
         # Datei-Bestaetigungen (loeschen/bewegen/behalten) fuer jede Familie
         for family_plan in plan["families_with_plans"]:
             fid = family_plan["family_id"]
@@ -689,74 +717,39 @@ def propose_event_change(
 
         connection.commit()
 
-    staging = {
-        "prepared_structure_path": "",
-        "staged_file_count": 0,
-        "staging_by_file_id": {},
-        "created_directories": [],
-    }
-    if workspace_path is not None:
-        from app.archive_staging import (
-            ArchiveStagingError,
-            prepare_archive_change_staging,
-        )
-        try:
-            staging = prepare_archive_change_staging(
-                database_path,
-                workspace_path,
-                cr_id,
-                event_id,
-                preview,
-                plan,
-            )
-            with database_connection(database_path) as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                connection.execute(
-                    "UPDATE event_change_requests SET prepared_structure_path=?,updated_at=? WHERE id=?",
-                    (str(staging.get("prepared_structure_path") or ""), now, cr_id),
-                )
-                for file_id, staging_path in (staging.get("staging_by_file_id") or {}).items():
-                    connection.execute(
-                        """UPDATE event_change_file_reviews
-                           SET workspace_staging_path=?,updated_at=?
-                           WHERE change_request_id=? AND file_id=?
-                             AND source_root_kind='shared_workspace'""",
-                        (str(staging_path), now, cr_id, int(file_id)),
-                    )
-                connection.commit()
-        except ArchiveStagingError as exc:
-            # Ein nicht vorbereitbarer Hilfsbestand darf keinen offenen,
-            # scheinbar ausfuehrbaren Archivauftrag hinterlassen.
-            with database_connection(database_path) as connection:
-                connection.execute("DELETE FROM event_change_requests WHERE id=?", (cr_id,))
-                connection.commit()
-            raise EventChangeRequestError(str(exc)) from exc
+    # 0.27.1: Der Hilfsbereich wird erst im expliziten Vorbereitungsschritt
+    # materialisiert. Der Vorschlag bleibt bis dahin rein planend.
 
     # Rueckgabe mit Plan
     return {
         "change_request_id": cr_id,
         "event_id": event_id,
         "version": version,
-        "status": "aenderbar_vorschlagen",
+        "status": initial_status,
         "plan": plan,
         "family_count": len(plan["families_with_plans"]),
         "diff_summary": plan["diff_summary"],
-        "prepared_structure_path": str(staging.get("prepared_structure_path") or ""),
-        "staged_file_count": int(staging.get("staged_file_count") or 0),
+        "preparation_required": bool(preparation.get("required")),
+        "preparation": preparation,
+        "prepared_structure_path": "",
+        "staged_file_count": 0,
     }
 
 
 def list_event_change_requests(
     database_path: Path,
-    job_id: str,
+    job_id: str | None,
     *,
     event_id: str | None = None,
     status: str | None = None,
 ) -> list[dict[str, Any]]:
     """Aenderungsauftraege fuer ein Ereignis auflisten."""
     with database_connection(database_path) as connection:
-        query = "SELECT * FROM event_change_requests WHERE job_id = ?"
-        params: list[Any] = [job_id]
+        query = "SELECT * FROM event_change_requests WHERE 1=1"
+        params: list[Any] = []
+        if job_id:
+            query += " AND job_id = ?"
+            params.append(job_id)
 
         if event_id:
             query += " AND event_id = ?"

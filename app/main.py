@@ -135,6 +135,7 @@ from app.event_suggestions import (
     list_event_suggestions,
 )
 from app.archive_cascade import prepare_archived_cascade_impacts
+from app.archive_change_assistant import build_archive_change_assistant
 from app.archive_reassignment import (
     list_archive_reassignments,
     assign_archive_reassignments,
@@ -7416,7 +7417,7 @@ def api_assign_event_reassignments(job_id: str, event_id: str, body: dict) -> JS
 
 @app.get("/api/change-requests")
 def api_list_change_requests(
-    job_id: str,
+    job_id: str = "",
     event_id: str | None = None,
     status: str | None = None,
 ) -> JSONResponse:
@@ -7438,6 +7439,17 @@ def api_get_change_request(cr_id: str) -> JSONResponse:
     if cr is None:
         raise HTTPException(status_code=404, detail="ChangeRequest nicht gefunden.")
     return JSONResponse(content=cr)
+
+
+@app.get("/api/change-requests/{cr_id}/assistant")
+def api_get_change_request_assistant(cr_id: str) -> JSONResponse:
+    """Kompakter, variabler Arbeitsassistent für eine Archivänderung."""
+    try:
+        return JSONResponse(content=build_archive_change_assistant(
+            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+        ))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/change-requests/{cr_id}/files")
@@ -7611,7 +7623,9 @@ def api_change_request_reassignments_assign(cr_id: str, payload: dict[str, Any])
 def api_confirm_change(cr_id: str) -> JSONResponse:
     """Aenderungsauftrag bestaetigen."""
     try:
-        result = confirm_event_change(DATABASE_FILE, cr_id)
+        result = confirm_event_change(
+            DATABASE_FILE, cr_id, ARCHIVE_ROOT, WORKSPACE_PATH
+        )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

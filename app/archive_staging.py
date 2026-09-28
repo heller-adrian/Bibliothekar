@@ -95,110 +95,218 @@ def _preview_child_folders(preview: dict[str, Any]) -> list[str]:
     return result
 
 
-def _needs_staging(
-    database_path: Path,
-    event_id: str,
-    preview: dict[str, Any],
-    plan: dict[str, Any],
-) -> bool:
-    """Pure event-folder renames need no helper shell; real structure changes do."""
-    incoming = any(
-        str(item.get("source_root_kind") or "camera_archive") == "shared_workspace"
-        for item in plan.get("families_with_plans") or []
-    )
-    if incoming:
-        return True
-
-    with database_connection(database_path) as connection:
-        event = connection.execute(
-            "SELECT start_datetime,preserve_day_folders FROM events WHERE id=?",
-            (event_id,),
-        ).fetchone()
-        children = connection.execute(
-            "SELECT folder_name FROM events WHERE parent_event_id=? ORDER BY id",
-            (event_id,),
-        ).fetchall()
-    if event is None:
-        raise ArchiveStagingError("Archiviertes Ereignis wurde nicht gefunden.")
-
-    if bool(event["preserve_day_folders"]) != bool(preview.get("preserve_day_folders")):
-        return True
-
-    old_children = sorted(str(row["folder_name"] or "") for row in children)
-    new_children = sorted(_preview_child_folders(preview))
-    if old_children != new_children:
-        return True
-
-    old_year = str(event["start_datetime"] or "")[:4]
-    new_year = str(preview.get("start_date") or "")[:4]
-    if old_year and new_year and old_year != new_year:
-        return True
-
-    for item in plan.get("families_with_plans") or []:
-        if str(item.get("action") or "") != "move":
-            continue
-        if str(item.get("source_root_kind") or "camera_archive") != "camera_archive":
-            return True
-        old_path = str(item.get("old_path") or "")
-        new_path = str(item.get("new_path") or "")
-        old_parts = PurePosixPath(old_path).parts
-        new_parts = PurePosixPath(new_path).parts
-        if len(old_parts) < 2 or len(new_parts) < 2:
-            return True
-        if old_parts[0] != new_parts[0]:
-            return True
-        if _suffix_after_event_root(old_path) != _suffix_after_event_root(new_path):
-            return True
-
-    return False
-
-
-def _directory_plan(
-    preview: dict[str, Any],
-    plan: dict[str, Any],
-) -> set[PurePosixPath]:
-    """Only materialize directories that are concrete targets of this change.
-
-    Später zuordnen is a work instruction, not a mirror of every possible
-    Alle/Sortiert/Export or child folder. Parent directories are created by
-    mkdir(parents=True) only as needed for the actual target paths.
-    """
+def _target_root(preview: dict[str, Any]) -> PurePosixPath:
     year = _safe_component(str(preview.get("start_date") or "")[:4], "Jahr")
     parent = _safe_component(preview.get("parent_folder"), "Ereignisordner")
-    root = PurePosixPath(year, parent)
-    directories: set[PurePosixPath] = set()
+    return PurePosixPath(year, parent)
 
-    all_items = [
+
+def _desired_directory_plan(
+    preview: dict[str, Any],
+    plan: dict[str, Any],
+    *,
+    moves_only: bool = False,
+) -> set[PurePosixPath]:
+    """Canonical SOLL directories implied by the final target files."""
+    root = _target_root(preview)
+    directories: set[PurePosixPath] = {root}
+    items = [
         *(plan.get("families_with_plans") or []),
         *(plan.get("assets_with_plans") or []),
     ]
-    for item in all_items:
+    for item in items:
         action = str(item.get("action") or "")
-        new_path = str(item.get("new_path") or "").strip()
-        if action != "move" or not new_path:
+        if action in {"delete", "unresolved"}:
             continue
-        rel = _safe_relative(new_path)
+        if moves_only and action != "move":
+            continue
+        value = str(item.get("new_path") or "").strip()
+        if not value:
+            continue
+        rel = _safe_relative(value)
         if len(rel.parts) < 2 or tuple(rel.parts[:2]) != tuple(root.parts):
             raise ArchiveStagingError(
-                "Ein vorbereiteter Zielpfad liegt außerhalb des neuen Ereignisordners."
+                "Ein SOLL-Pfad liegt außerhalb des neuen Ereignisordners."
             )
-        directories.add(root)
-        directories.add(rel.parent)
-
+        branch_index = next(
+            (index for index, part in enumerate(rel.parts) if part in BRANCHES),
+            None,
+        )
+        if branch_index is None:
+            directories.add(rel.parent)
+            continue
+        container = PurePosixPath(*rel.parts[:branch_index])
+        directories.add(container)
+        for branch in BRANCHES:
+            directories.add(container / branch)
     return directories
 
 
-def prepare_archive_change_staging(
+def _current_event_root(database_path: Path, event_id: str) -> PurePosixPath:
+    with database_connection(database_path) as connection:
+        event = connection.execute(
+            "SELECT start_datetime,folder_name FROM events WHERE id=?",
+            (event_id,),
+        ).fetchone()
+    if event is None:
+        raise ArchiveStagingError("Archiviertes Ereignis wurde nicht gefunden.")
+    return PurePosixPath(
+        _safe_component(str(event["start_datetime"] or "")[:4], "Archivjahr"),
+        _safe_component(str(event["folder_name"] or ""), "Archiv-Ereignisordner"),
+    )
+
+
+def _existing_suffixes(
+    archive_root: Path,
+    current_root: PurePosixPath,
+) -> set[tuple[str, ...]]:
+    root = archive_root.expanduser().resolve(strict=False)
+    event_root = root.joinpath(*current_root.parts).resolve(strict=False)
+    if not _inside(event_root, root) or not event_root.exists() or not event_root.is_dir():
+        raise ArchiveStagingError(
+            "Der aktuelle Ereignisordner wurde in der Kamerabibliothek nicht gefunden."
+        )
+    result: set[tuple[str, ...]] = {()}
+    for current, directories, _ in os.walk(event_root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        safe: list[str] = []
+        for name in directories:
+            child = current_path / name
+            if child.is_symlink():
+                raise ArchiveStagingError(
+                    "Symlink im archivierten Ereignis ist für eine Strukturänderung nicht zulässig: "
+                    + str(child)
+                )
+            if child.is_dir():
+                safe.append(name)
+                result.add(tuple(child.relative_to(event_root).parts))
+        directories[:] = safe
+    return result
+
+
+def describe_archive_change_staging(
     database_path: Path,
-    workspace_path: Path,
-    cr_id: str,
+    archive_root: Path,
     event_id: str,
     preview: dict[str, Any],
     plan: dict[str, Any],
 ) -> dict[str, Any]:
-    """Prepare the manual helper shell and incoming SSD hardlinks."""
-    if not _needs_staging(database_path, event_id, preview, plan):
+    """Compute Später zuordnen as SOLL minus the real IST archive structure."""
+    target_root = _target_root(preview)
+    current_root = _current_event_root(database_path, event_id)
+    existing_suffixes = _existing_suffixes(archive_root, current_root)
+    desired = _desired_directory_plan(preview, plan)
+    touched = _desired_directory_plan(preview, plan, moves_only=True)
+
+    missing: set[PurePosixPath] = set()
+    for directory in touched:
+        if tuple(directory.parts[2:]) not in existing_suffixes:
+            missing.add(directory)
+
+    incoming = [
+        item for item in (plan.get("families_with_plans") or [])
+        if str(item.get("source_root_kind") or "camera_archive") == "shared_workspace"
+        and str(item.get("action") or "") == "move"
+        and str(item.get("new_path") or "").strip()
+    ]
+    helper_directories = set(missing)
+    for item in incoming:
+        helper_directories.add(_safe_relative(item["new_path"]).parent)
+    helper_directories = {
+        directory for directory in helper_directories
+        if tuple(directory.parts[:2]) == tuple(target_root.parts)
+    }
+    required = bool(helper_directories or incoming)
+
+    return {
+        "required": required,
+        "target_root": target_root.as_posix(),
+        "current_root": current_root.as_posix(),
+        "desired_directories": sorted(path.as_posix() for path in desired),
+        "missing_directories": sorted(path.as_posix() for path in missing),
+        "helper_directories": sorted(path.as_posix() for path in helper_directories),
+        "incoming_file_count": len(incoming),
+        "prepared_structure_path": (
+            (PurePosixPath(STAGING_DIRECTORY_NAME) / target_root).as_posix()
+            if required else ""
+        ),
+    }
+
+
+def _request_preview_and_plan(
+    database_path: Path,
+    cr_id: str,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    import json
+    with database_connection(database_path) as connection:
+        cr_row = connection.execute(
+            "SELECT * FROM event_change_requests WHERE id=?",
+            (cr_id,),
+        ).fetchone()
+        if cr_row is None:
+            raise ArchiveStagingError("Änderungsauftrag wurde nicht gefunden.")
+        camera = [dict(row) for row in connection.execute(
+            "SELECT * FROM event_change_file_reviews WHERE change_request_id=? ORDER BY id",
+            (cr_id,),
+        ).fetchall()]
+        assets = [dict(row) for row in connection.execute(
+            "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? ORDER BY id",
+            (cr_id,),
+        ).fetchall()]
+    cr = dict(cr_row)
+    try:
+        subevents = json.loads(cr.get("child_segments_json") or "[]")
+    except Exception:
+        subevents = []
+    preview = {
+        "event_kind": str(cr.get("event_kind") or "event"),
+        "parent_folder": str(cr.get("parent_folder") or ""),
+        "child_folder": cr.get("child_folder"),
+        "preserve_day_folders": bool(cr.get("preserve_day_folders")),
+        "start_date": str(cr.get("start_date") or ""),
+        "end_date": str(cr.get("end_date") or ""),
+        "start_time": cr.get("start_time"),
+        "end_time": cr.get("end_time"),
+        "subevents": subevents,
+    }
+    plan = {
+        "families_with_plans": [
+            {**row, "source_root_kind": str(row.get("source_root_kind") or "camera_archive")}
+            for row in camera
+        ],
+        "assets_with_plans": [
+            {**row, "source_root_kind": "camera_archive"}
+            for row in assets
+        ],
+    }
+    return cr, preview, plan
+
+
+def describe_archive_change_staging_for_request(
+    database_path: Path,
+    archive_root: Path,
+    cr_id: str,
+) -> dict[str, Any]:
+    cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
+    return describe_archive_change_staging(
+        database_path, archive_root, str(cr["event_id"]), preview, plan
+    )
+
+
+def prepare_archive_change_staging_for_request(
+    database_path: Path,
+    workspace_path: Path,
+    archive_root: Path,
+    cr_id: str,
+) -> dict[str, Any]:
+    """Materialize only the missing helper structure and incoming SSD hardlinks."""
+    cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
+    description = describe_archive_change_staging(
+        database_path, archive_root, str(cr["event_id"]), preview, plan
+    )
+    if not description["required"]:
         return {
+            **description,
             "prepared_structure_path": "",
             "staged_file_count": 0,
             "staging_by_file_id": {},
@@ -210,17 +318,11 @@ def prepare_archive_change_staging(
     if not _inside(staging_base, work_root):
         raise ArchiveStagingError("Der Archiv-Hilfsbereich verlässt den Arbeitsbereich.")
 
-    directories = _directory_plan(preview, plan)
-    if not directories:
-        return {
-            "prepared_structure_path": "",
-            "staged_file_count": 0,
-            "staging_by_file_id": {},
-            "created_directories": [],
-        }
-    year = _safe_component(str(preview.get("start_date") or "")[:4], "Jahr")
-    parent = _safe_component(preview.get("parent_folder"), "Ereignisordner")
-    event_relative_root = PurePosixPath(year, parent)
+    directories = {
+        _safe_relative(value)
+        for value in description.get("helper_directories") or []
+    }
+    event_relative_root = _safe_relative(description["target_root"])
     prepared_rel = PurePosixPath(STAGING_DIRECTORY_NAME) / event_relative_root
     prepared_root = work_root.joinpath(*prepared_rel.parts).resolve(strict=False)
     if not _inside(prepared_root, staging_base):
@@ -290,6 +392,7 @@ def prepare_archive_change_staging(
             staging_by_file_id[file_id] = staged_rel.as_posix()
 
         return {
+            **description,
             "prepared_structure_path": prepared_rel.as_posix(),
             "staged_file_count": len(staging_by_file_id),
             "staging_by_file_id": staging_by_file_id,
@@ -323,6 +426,7 @@ def cleanup_archive_change_staging(
     staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
     removed_staged = 0
     removed_originals = 0
+    removed_empty_source_directories = 0
     warnings: list[str] = []
 
     with database_connection(database_path) as connection:
@@ -371,6 +475,21 @@ def cleanup_archive_change_staging(
         if remove_originals and original_rel != staging_rel:
             if remove_known(original_rel, expected_size, expected_sha, "SSD-Original konnte nicht freigegeben werden"):
                 removed_originals += 1
+                try:
+                    original_path = work_root.joinpath(*_safe_relative(original_rel).parts).resolve(strict=False)
+                    current = original_path.parent
+                    while _inside(current, work_root) and current != work_root and current.parent != work_root:
+                        try:
+                            current.rmdir()
+                            removed_empty_source_directories += 1
+                        except OSError:
+                            break
+                        current = current.parent
+                except Exception as exc:
+                    warnings.append(
+                        "Leerer SSD-Quellordner konnte nicht vollständig aufgeräumt werden: "
+                        + str(exc)
+                    )
 
     prepared = str(cr["prepared_structure_path"] or "") if cr is not None else ""
     if prepared:
@@ -400,5 +519,6 @@ def cleanup_archive_change_staging(
     return {
         "removed_staging_file_count": removed_staged,
         "removed_original_file_count": removed_originals,
+        "removed_empty_source_directory_count": removed_empty_source_directories,
         "warnings": warnings,
     }

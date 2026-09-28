@@ -51,7 +51,12 @@ def _safe_archive_path(archive_root: Path, relative_value: Any) -> Path:
         raise EventChangeApplyError(str(exc)) from exc
 
 
-def confirm_event_change(database_path: Path, cr_id: str) -> dict[str, Any]:
+def confirm_event_change(
+    database_path: Path,
+    cr_id: str,
+    archive_root: Path | None = None,
+    workspace_path: Path | None = None,
+) -> dict[str, Any]:
     """Markiere einen vorgeschlagenen Auftrag als bereit zur manuellen Ausführung.
 
     Diese Bestätigung verändert keine Datei und ist keine Behauptung, dass die
@@ -67,20 +72,51 @@ def confirm_event_change(database_path: Path, cr_id: str) -> dict[str, Any]:
             f"Änderungsauftrag hat Status '{cr['status']}'. Nicht bestätigbar."
         )
 
+    preparation = {
+        "prepared_structure_path": "",
+        "staged_file_count": 0,
+        "staging_by_file_id": {},
+        "missing_directories": [],
+        "helper_directories": [],
+    }
+    if archive_root is not None and workspace_path is not None:
+        from app.archive_staging import prepare_archive_change_staging_for_request
+        try:
+            preparation = prepare_archive_change_staging_for_request(
+                database_path, workspace_path, archive_root, cr_id
+            )
+        except Exception as exc:
+            raise EventChangeApplyError(str(exc)) from exc
+
     now = _now()
     with database_connection(database_path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(
-            "UPDATE event_change_requests SET status = 'aenderbar_bestaetigt', "
-            "confirmed_at = ?, updated_at = ? WHERE id = ?",
-            (now, now, cr_id),
+            "UPDATE event_change_requests SET status='aenderbar_bestaetigt', "
+            "confirmed_at=?, prepared_structure_path=?, updated_at=? WHERE id=?",
+            (
+                now,
+                str(preparation.get("prepared_structure_path") or ""),
+                now,
+                cr_id,
+            ),
         )
+        for file_id, staging_path in (preparation.get("staging_by_file_id") or {}).items():
+            connection.execute(
+                """UPDATE event_change_file_reviews
+                   SET workspace_staging_path=?,updated_at=?
+                   WHERE change_request_id=? AND file_id=?
+                     AND source_root_kind='shared_workspace'""",
+                (str(staging_path), now, cr_id, int(file_id)),
+            )
         connection.commit()
 
     return {
         "status": "bestaetigt",
         "change_request_id": cr_id,
         "confirmed_at": now,
-        "message": "Auftrag bereit. Die Kamerabibliothek wurde nicht verändert.",
+        "preparation": preparation,
+        "message": "Hilfsbereich vorbereitet. Die Kamerabibliothek wurde nicht verändert.",
     }
 
 
@@ -694,6 +730,7 @@ def finish_event_change(
     ssd_cleanup = {
         "removed_staging_file_count": 0,
         "removed_original_file_count": 0,
+        "removed_empty_source_directory_count": 0,
         "warnings": [],
     }
     if workspace_path is not None:

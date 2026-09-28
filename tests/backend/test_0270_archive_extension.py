@@ -254,18 +254,24 @@ def test_0270_cross_job_archive_extension_finishes_on_canonical_event(
         workspace_path=workspace,
     )
     cr_id = proposed["change_request_id"]
-    assert proposed["staged_file_count"] == 1
+    assert proposed["staged_file_count"] == 0
+    assert proposed["preparation_required"] is True
     staging_event = workspace / "Arbeitsbereich" / "Später zuordnen" / "2026" / folder
+    assert not staging_event.exists()
+
+    prepared = confirm_event_change(db, cr_id, archive_root, workspace)
+    assert prepared["preparation"]["staged_file_count"] == 1
+    # Das Ziel verwendet die Ereignis-Hauptebene. Dort existierte bisher nur
+    # Alle; deshalb ergänzt 0.27.1 die fehlende kanonische Struktur.
     assert (staging_event / "Alle").is_dir()
-    assert not (staging_event / "Sortiert").exists()
-    assert not (staging_event / "Export").exists()
+    assert (staging_event / "Sortiert").is_dir()
+    assert (staging_event / "Export").is_dir()
     reviews = _move_staged_ssd_files_manually(db, workspace, archive_root, cr_id)
     incoming_review = next(row for row in reviews if row["family_id"] == incoming_family)
     assert incoming_review["source_root_kind"] == "shared_workspace"
     assert incoming_review["workspace_staging_path"].startswith("Später zuordnen/")
     assert incoming_review["new_path"].endswith("/Alle/neu.JPG")
 
-    confirm_event_change(db, cr_id)
     verified = verify_event_change(db, cr_id, archive_root)
     assert verified["complete"] is True
     result = finish_event_change(db, cr_id, archive_root, workspace)
@@ -309,3 +315,5 @@ def test_0270_cross_job_archive_extension_finishes_on_canonical_event(
         int(row["family_id"]) for row in list_job_available_families(db, "new")
     }
     assert not (workspace / "Arbeitsbereich" / incoming_rel).exists()
+    assert not (workspace / "Arbeitsbereich" / "2026" / "Neue-Sicherung").exists()
+    assert (workspace / "Arbeitsbereich" / "2026").is_dir()
