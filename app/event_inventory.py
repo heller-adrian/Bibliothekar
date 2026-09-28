@@ -74,7 +74,9 @@ def _event_and_known_files(
         rows = connection.execute(
             """
             WITH RECURSIVE event_tree AS (
-                SELECT id FROM events WHERE id=?
+                SELECT id FROM events
+                WHERE id=?
+                   OR (linked_event_id=? AND linkage_kind='archived_manual' AND status='archived')
                 UNION ALL
                 SELECT child.id
                 FROM events child
@@ -114,14 +116,13 @@ def _event_and_known_files(
             FROM files f
             LEFT JOIN file_families ff
               ON ff.id=f.family_id AND ff.job_id=f.job_id
-            WHERE f.job_id=?
-              AND (
+            WHERE (
                     f.family_id IN (SELECT family_id FROM assigned_families)
                     OR f.id IN (SELECT file_id FROM assigned_files)
                   )
             ORDER BY f.id
             """,
-            (event_id, event_id, job_id, job_id),
+            (event_id, event_id, event_id, job_id),
         ).fetchall()
     return dict(event), [dict(row) for row in rows]
 
