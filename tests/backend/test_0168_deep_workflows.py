@@ -104,7 +104,7 @@ def test_applied_delete_becomes_reassignment_then_verified_delete(tmp_path):
         assert c.execute(
             "SELECT status FROM event_mutations WHERE anchor_event_id='applied' ORDER BY created_at DESC LIMIT 1"
         ).fetchone()[0] == "pending_apply"
-def test_archived_delete_is_manual_move_and_finishes_without_touching_archive(tmp_path):
+def test_archived_delete_returns_files_to_ssd_and_finishes_without_app_writing_archive(tmp_path):
     db = tmp_path / "db.sqlite3"
     seed_job(db)
     fid = add_family(db)
@@ -129,43 +129,40 @@ def test_archived_delete_is_manual_move_and_finishes_without_touching_archive(tm
         assert review["new_path"] == ""
         assert review["action"] == "delete"
         assert review["expected_sha256"] == digest
-    state = list_archive_reassignments(db, cr_id)
-    assert state["family_count"] == 1
-    assert state["reassignment_segments"][0]["family_ids"] == [fid]
-    assert source.read_bytes() == payload
-    confirm_event_change(db, cr_id)
-    assert verify_event_change(db, cr_id, archive)["open_reassignment_count"] == 1
-    with pytest.raises(EventChangeApplyError, match="Neu-Zuordnung"):
-        finish_event_change(db, cr_id, archive)
-    assign_archive_reassignments(
-        db, cr_id, [fid], target_mode="new_event", new_event_name="Ersatz",
-    )
+    workspace = tmp_path / "workspace"
+    (workspace / "Arbeitsbereich").mkdir(parents=True)
+    confirm_event_change(db, cr_id, archive, workspace)
     with database_connection(db) as c:
         review = c.execute(
-            "SELECT new_path,action FROM event_change_file_reviews WHERE change_request_id=?",
+            "SELECT old_path,workspace_release_path,action FROM event_change_file_reviews WHERE change_request_id=?",
             (cr_id,),
         ).fetchone()
-        target_rel = review["new_path"]
-        assert review["action"] == "move"
-        assert "Später zuordnen" not in target_rel
-    target = archive / target_rel
-    assert source.read_bytes() == payload
-    assert not target.exists()
-    assert not verify_event_change(db, cr_id, archive)["complete"]
-    target.parent.mkdir(parents=True)
-    source.rename(target)
+        assert review["action"] == "delete"
+        release_rel = str(review["workspace_release_path"])
+    target = workspace / "Arbeitsbereich" / release_rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(source.read_bytes())
+
+    from app.archive_release_stock import verify_archive_release_copies, verify_archive_release_removal
+    assert verify_archive_release_copies(db, archive, workspace, cr_id)["complete"]
+    source.unlink()
+    assert verify_archive_release_removal(db, archive, workspace, cr_id)["complete"]
+    # Entfernte Ereignisordner müssen vor Abschluss leer bzw. verschwunden sein.
     source.parent.rmdir()
     source.parent.parent.rmdir()
-    assert verify_event_change(db, cr_id, archive)["complete"]
-    done = finish_event_change(db, cr_id, archive)
+    assert verify_event_change(db, cr_id, archive, workspace)["complete"]
+    done = finish_event_change(db, cr_id, archive, workspace)
     assert done["event_deleted"] is True
     assert done["files_changed_by_app"] == 0
+    assert done["released_family_ids"] == [fid]
     assert target.read_bytes() == payload
     with database_connection(db) as c:
         assert c.execute("SELECT COUNT(*) FROM events WHERE id='arch'").fetchone()[0] == 0
         assert c.execute("SELECT COUNT(*) FROM event_change_requests WHERE id=?", (cr_id,)).fetchone()[0] == 0
-        assert c.execute("SELECT COUNT(*) FROM audit_log WHERE action='archived_event_deleted_after_manual_move'").fetchone()[0] == 1
-        assert c.execute("SELECT current_relative_path FROM files WHERE family_id=?",(fid,)).fetchone()[0] == target_rel
+        assert c.execute("SELECT COUNT(*) FROM audit_log WHERE action='archived_event_deleted_after_release'").fetchone()[0] == 1
+        row=c.execute("SELECT current_relative_path,current_root_kind FROM files WHERE family_id=?",(fid,)).fetchone()
+        assert row["current_relative_path"] == release_rel
+        assert row["current_root_kind"] == "shared_workspace"
 
 
 def test_direct_event_creation_uses_date_time_without_day_selection(tmp_path):

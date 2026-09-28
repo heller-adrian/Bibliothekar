@@ -341,7 +341,7 @@ def test_0271_released_stock_can_be_sorted_again_with_released_asset(tmp_path: P
                    uses_time_range,folder_name,status,created_at,updated_at,event_kind,
                    preserve_day_folders,revision,timeline_model,time_model_version
                ) VALUES ('later','old',NULL,'parent','Später',
-                         '2026-07-22T20:01:00','2026-07-22T23:59:59',1,
+                         '2026-07-22T20:01:00','2026-07-22T23:59:59',0,
                          '07-22 - Später','planned',?,?,'event',0,1,'continuous',2)""",
             (NOW, NOW),
         )

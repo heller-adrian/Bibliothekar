@@ -920,6 +920,7 @@ def finish_event_change(
         "archive_read_only": True,
         "files_changed_by_app": 0,
         "verified_file_count": verification["verified_file_count"],
+        "released_family_ids": released_family_ids,
         "inventory_summary": inventory_summary,
         "inventory_refresh_error": inventory_refresh_error,
         "ssd_files_removed_by_app": int(ssd_cleanup.get("removed_original_file_count") or 0),

@@ -4,6 +4,7 @@ import hashlib
 from app.database import initialize_database, database_connection
 from app.workspace_reconcile import build_workspace_reconcile_plan, prepare_workspace_reconcile_run, execute_workspace_reconcile_run
 from app.sort_apply import CONFIRMATION_PHRASE
+from app.archive_release_stock import verify_archive_release_copies, verify_archive_release_removal
 from app.events_ui import EVENTS_HTML
 
 NOW='2026-09-08T12:00:00+00:00'
@@ -72,10 +73,9 @@ def test_applied_ui_uses_workspace_reconciliation_not_single_event_reapply():
     assert 'id="sort-apply-confirmation"' in EVENTS_HTML
     assert 'id="sort-apply-button"' in EVENTS_HTML
 
-def test_archived_removed_family_can_become_new_archived_event_with_empty_prep_structure(tmp_path):
+def test_archived_removed_family_returns_to_free_ssd_stock(tmp_path):
     from app.event_change_request import propose_event_change, get_event_change_files
-    from app.archive_reassignment import list_archive_reassignments, assign_archive_reassignments
-    from app.event_change_apply import confirm_event_change, finish_event_change
+    from app.event_change_apply import confirm_event_change, finish_event_change, verify_event_change
     db=tmp_path/'archive.sqlite3'; initialize_database(db); workspace=tmp_path/'workspace'; (workspace/'Arbeitsbereich').mkdir(parents=True)
     archive=tmp_path/'archive'; archive.mkdir()
     with database_connection(db) as c:
@@ -87,39 +87,48 @@ def test_archived_removed_family_can_become_new_archived_event_with_empty_prep_s
                      VALUES ('arch','j','parent','Alt','2026-07-19T00:00:00','2026-07-19T23:59:59',0,'07-19 - Alt','archived',?,?,'event',0,1,?,?)""",(NOW,NOW,NOW,NOW))
         c.execute("""INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at)
                      VALUES ('archc','j','arch','child','Alt','2026-07-19T18:00:00','2026-07-19T19:30:59',1,'18-00 - 19-30 - Alt','archived',?,?,'event',0,1,?,?)""",(NOW,NOW,NOW,NOW))
-        for fid,key,payload in zip(fids,['X1','X2'],[b'x1',b'x2']):
+        for fid,key,payload,ts in zip(fids,['X1','X2'],[b'x1',b'x2'],['2026-07-19T18:10:00','2026-07-19T19:10:00']):
             c.execute("INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES ('archc',?,NULL,'manual',?)",(fid,NOW))
             rel=f'2026/07-19 - Alt/18-00 - 19-30 - Alt/Alle/{key}.JPG'; path=archive/rel; path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(payload); digest=hashlib.sha256(payload).hexdigest()
             c.execute("""INSERT INTO files(job_id,family_id,original_relative_path,current_relative_path,original_filename,extension,media_type,size_bytes,sha256_original,sha256_current,selected_capture_time,selected_capture_source,capture_time_confidence,review_status,metadata_write_status,created_at,updated_at,current_root_kind)
-                         VALUES ('j',?,?,?,?,'JPG','jpeg',?,?,?,?,?,'high','not_required','not_requested',?,?,'camera_archive')""",(fid,rel,rel,f'{key}.JPG',len(payload),digest,digest,'2026-07-19T18:10:00' if key=='X1' else '2026-07-19T19:10:00','DateTimeOriginal',NOW,NOW))
+                         VALUES ('j',?,?,?,?,'JPG','jpeg',?,?,?,?,?,'high','not_required','not_requested',?,?,'camera_archive')""",(fid,rel,rel,f'{key}.JPG',len(payload),digest,digest,ts,'DateTimeOriginal',NOW,NOW))
         c.commit()
+
     preview={'event_kind':'event','event_name':'Alt','start_date':'2026-07-19','end_date':'2026-07-19','uses_time_range':True,'start_time':'18:00','end_time':'18:30','child_event_name':'Alt','parent_folder':'07-19 - Alt','child_folder':'18-00 - 18-30 - Alt','preserve_day_folders':False,'selected_family_ids':[fids[0]],'selected_day_keys':['2026-07-19']}
     cr=propose_event_change(db,'j','arch',preview,event_name='Alt'); crid=cr['change_request_id']
-    pending=list_archive_reassignments(db,crid); assert pending['family_count']==1 and pending['families'][0]['family_id']==fids[1]
-    assigned=assign_archive_reassignments(db,crid,[fids[1]],target_mode='new_event',new_event_name='Neu',workspace_path=workspace)
-    assert assigned['prepared_structure'] and Path(assigned['prepared_structure'],'Alle').is_dir()
+    confirm_event_change(db,crid,archive,workspace)
     reviews=get_event_change_files(db,crid)
-    assert all(r['action'] in {'move','keep'} for r in reviews)
-    # Simulate the user's manual archive work exactly according to IST→SOLL.
-    for r in reviews:
-        old=archive/str(r['old_path']); new=archive/str(r['new_path'] or r['old_path'])
-        if str(r['action'])=='move' and old!=new:
+    released=next(r for r in reviews if r['family_id']==fids[1] and r['action']=='delete')
+    source=archive/str(released['old_path'])
+    target=workspace/'Arbeitsbereich'/str(released['workspace_release_path'])
+    target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(source.read_bytes())
+    assert verify_archive_release_copies(db,archive,workspace,crid)['complete']
+    source.unlink()
+    assert verify_archive_release_removal(db,archive,workspace,crid)['complete']
+
+    # Die verbleibende Familie wird nach dem neuen SOLL innerhalb des Archivs umsortiert.
+    for r in get_event_change_files(db,crid):
+        if r['action']!='move':
+            continue
+        old=archive/str(r['old_path']); new=archive/str(r['new_path'])
+        if old.exists() and old!=new:
             new.parent.mkdir(parents=True,exist_ok=True); old.replace(new)
-    # Der neu berührte Unterereignis-Container muss vollständig kanonisch sein.
-    main_child = archive/'2026/07-19 - Alt/18-00 - 18-30 - Alt'
+    main_child=archive/'2026/07-19 - Alt/18-00 - 18-30 - Alt'
     (main_child/'Sortiert').mkdir(parents=True,exist_ok=True)
     (main_child/'Export').mkdir(parents=True,exist_ok=True)
     old_child=archive/'2026/07-19 - Alt/18-00 - 19-30 - Alt'
-    (old_child/'Alle').rmdir()
-    old_child.rmdir()
-    confirm_event_change(db,crid)
-    done=finish_event_change(db,crid,archive)
-    assert done['created_reassignment_event_ids']
+    if (old_child/'Alle').exists(): (old_child/'Alle').rmdir()
+    if old_child.exists(): old_child.rmdir()
+
+    assert verify_event_change(db,crid,archive,workspace)['complete']
+    done=finish_event_change(db,crid,archive,workspace)
+    assert done['released_family_ids']==[fids[1]]
     with database_connection(db) as c:
-        new_id=done['created_reassignment_event_ids'][0]
-        row=c.execute("SELECT status,name,archived_at FROM events WHERE id=?",(new_id,)).fetchone()
-        assert row['status']=='archived' and row['name']=='Neu' and row['archived_at']
-        assert c.execute("SELECT COUNT(*) FROM event_assignments ea JOIN events e ON e.id=ea.event_id WHERE COALESCE(e.parent_event_id,e.id)=? AND ea.family_id=?",(new_id,fids[1])).fetchone()[0]==1
+        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE family_id=?",(fids[1],)).fetchone()[0]==0
+        row=c.execute("SELECT current_root_kind,current_relative_path FROM files WHERE family_id=?",(fids[1],)).fetchone()
+        assert row['current_root_kind']=='shared_workspace'
+        assert str(row['current_relative_path']).startswith('Freigewordene Archivdateien/')
+
 
 def test_migration_018_persists_archive_no_event_segments(tmp_path):
     db=tmp_path/'m.sqlite3'; info=initialize_database(db)
@@ -130,11 +139,9 @@ def test_migration_018_persists_archive_no_event_segments(tmp_path):
         assert c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='event_change_reassignments'").fetchone()
 
 
-def test_archived_no_event_edit_keeps_true_segments_on_finish(tmp_path):
-    import json
+def test_archived_no_event_edit_keeps_true_segments_and_releases_removed_family(tmp_path):
     from app.event_change_request import propose_event_change, get_event_change_files
-    from app.archive_reassignment import assign_archive_reassignments
-    from app.event_change_apply import confirm_event_change, finish_event_change
+    from app.event_change_apply import confirm_event_change, finish_event_change, verify_event_change
     db=tmp_path/'noevent.sqlite3'; initialize_database(db); workspace=tmp_path/'workspace'; (workspace/'Arbeitsbereich').mkdir(parents=True)
     archive=tmp_path/'archive'; archive.mkdir()
     with database_connection(db) as c:
@@ -151,15 +158,19 @@ def test_archived_no_event_edit_keeps_true_segments_on_finish(tmp_path):
             c.execute("""INSERT INTO files(job_id,family_id,original_relative_path,current_relative_path,original_filename,extension,media_type,size_bytes,sha256_original,sha256_current,selected_capture_time,selected_capture_source,capture_time_confidence,review_status,metadata_write_status,created_at,updated_at,current_root_kind)
                          VALUES ('j',?,?,?,?,'JPG','jpeg',?,?,?,?,?,'high','not_required','not_requested',?,?,'camera_archive')""",(fid,rel,rel,f'{key}.JPG',len(payload),digest,digest,ts,'DateTimeOriginal',NOW,NOW))
         c.commit()
+
     preview={'event_kind':'no_event','event_name':'Ohne Ereignis','start_date':'2026-07-22','end_date':'2026-07-22','uses_time_range':False,'parent_folder':'07 - Ohne Ereignis','child_folder':None,'preserve_day_folders':False,'selected_family_ids':[fids[0]],'selected_day_keys':['2026-07-22'],'no_event_segments':[{'day_key':'2026-07-22','start_time':'08:00','end_time':'10:00'}]}
     cr=propose_event_change(db,'j','no',preview,event_name='Ohne Ereignis'); crid=cr['change_request_id']
-    assign_archive_reassignments(db,crid,[fids[1]],target_mode='new_event',new_event_name='Rest',workspace_path=workspace)
-    for r in get_event_change_files(db,crid):
-        old=archive/str(r['old_path']); new=archive/str(r['new_path'] or r['old_path'])
-        if str(r['action'])=='move' and old!=new:
-            new.parent.mkdir(parents=True,exist_ok=True); old.replace(new)
-    confirm_event_change(db,crid); done=finish_event_change(db,crid,archive)
-    assert done['created_reassignment_event_ids']
+    confirm_event_change(db,crid,archive,workspace)
+    released=next(r for r in get_event_change_files(db,crid) if r['family_id']==fids[1] and r['action']=='delete')
+    source=archive/str(released['old_path']); target=workspace/'Arbeitsbereich'/str(released['workspace_release_path'])
+    target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(source.read_bytes())
+    assert verify_archive_release_copies(db,archive,workspace,crid)['complete']
+    source.unlink()
+    assert verify_archive_release_removal(db,archive,workspace,crid)['complete']
+    assert verify_event_change(db,crid,archive,workspace)['complete']
+    done=finish_event_change(db,crid,archive,workspace)
+    assert done['released_family_ids']==[fids[1]]
     with database_connection(db) as c:
         segs=c.execute("SELECT day_key,start_time,end_time FROM event_time_segments WHERE event_id='no' ORDER BY id").fetchall()
         assert [(r['day_key'],r['start_time'],r['end_time']) for r in segs]==[('2026-07-22','08:00','10:00')]

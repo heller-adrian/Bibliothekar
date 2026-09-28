@@ -463,10 +463,8 @@ def test_0260_applied_year_change_document_lifecycle(tmp_path,cancel):
     assert (root/'2025'/'2025-12-31'/'1.JPG').read_bytes()==b'1'
 
 
-def test_archive_parent_preview_keeps_files_read_only_and_cards_exact(tmp_path):
+def test_archive_parent_preview_keeps_files_read_only_and_pending_release_hidden(tmp_path):
     from app.event_change_request import propose_event_change,get_event_change_files
-    from app.archive_reassignment import assign_archive_reassignments
-    from app.event_change_apply import confirm_event_change,verify_event_change,finish_event_change
     db=tmp_path/'db';workspace=tmp_path/'workspace'
     setup(db,['2026-07-23T10:00:00','2026-07-23T14:00:00','2026-07-23T18:00:00'])
     event=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event'];attach_files(db,workspace,event['id'])
@@ -474,34 +472,16 @@ def test_archive_parent_preview_keeps_files_read_only_and_cards_exact(tmp_path):
     before={str(p):p.read_bytes() for p in workspace.rglob('*') if p.is_file()}
     preview=build_event_preview(payload(),get_event_edit_context(db,'j',event['id'])['families'])
     cr=propose_event_change(db,'j',event['id'],preview,event_name='Urlaub')
-    cards=list_job_planning_overview(db,'j')['available_day_groups']
-    assert [(x['start_time'],x['end_time']) for x in cards]==[('00:00','12:59'),('15:01','23:59')]
-    assert all(x['archive_change_request_id']==cr['change_request_id'] for x in cards)
-    with pytest.raises(ValueError,match='durchgehenden'):
-        assign_archive_reassignments(db,cr['change_request_id'],[f for x in cards for f in x['family_ids']],target_mode='new_event',new_event_name='disjoint')
-    assign_archive_reassignments(db,cr['change_request_id'],[f for x in cards for f in x['family_ids']],target_mode='new_no_event')
-    assert before=={str(p):p.read_bytes() for p in workspace.rglob('*') if p.is_file()}
+
+    # Herausfallende Archivfamilien werden während des offenen Auftrags noch
+    # nicht als normaler freier Sicherungsbestand angeboten.
     assert list_job_planning_overview(db,'j')['available_day_groups']==[]
-    archive_root=workspace/'Arbeitsbereich'
+    assert before=={str(p):p.read_bytes() for p in workspace.rglob('*') if p.is_file()}
+
     reviews=get_event_change_files(db,cr['change_request_id'])
-    assert sum(row['action']=='move' for row in reviews)==2
+    assert sum(row['action']=='delete' for row in reviews)==2
     assert sum(row['action']=='keep' for row in reviews)==1
-    assert all('Später zuordnen' not in row['new_path'] for row in reviews)
-    confirm_event_change(db,cr['change_request_id'])
-    assert not verify_event_change(db,cr['change_request_id'],archive_root)['complete']
-    for review in reviews:
-        if review['action']=='move':
-            source=archive_root/review['old_path']
-            target=archive_root/review['new_path']
-            target.parent.mkdir(parents=True,exist_ok=True)
-            source.rename(target)
-    assert verify_event_change(db,cr['change_request_id'],archive_root)['complete']
-    result=finish_event_change(db,cr['change_request_id'],archive_root)
-    assert result['files_changed_by_app']==0
-    remaining=next(row for row in reviews if row['action']=='keep')
-    assert (archive_root/remaining['old_path']).read_bytes()==b'2'
-    with database_connection(db) as c:
-        assert c.execute('SELECT COUNT(*) FROM event_assignments WHERE event_id=?',(event['id'],)).fetchone()[0]==1
+    assert all(not str(row.get('workspace_release_path') or '') for row in reviews)
 
 
 def test_0260_archived_extension_conflict_does_not_cascade(tmp_path):
