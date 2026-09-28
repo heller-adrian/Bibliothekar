@@ -905,7 +905,7 @@ def build_event_sort_plan(
     linkage_kind = str(event.get("linkage_kind") or "")
     if allow_reapply:
         # Die Nachsortierung nutzt ausschließlich die aktuelle Ereignisstruktur.
-        # Eine Umlenkung nach „Später zuzuordnen“ fand beim ursprünglichen
+        # Eine Umlenkung nach „Später zuordnen“ fand beim ursprünglichen
         # Anwenden statt und darf hier nicht erneut greifen.
         physical_parent_parts = [parent_folder]
     elif linkage_kind == "planned_extension" and str(event.get("event_kind") or "") == "no_event":
@@ -919,10 +919,10 @@ def build_event_sort_plan(
     elif linkage_kind == "applied_followup":
         physical_parent_parts = ["Nachträge", f"{parent_folder} - {job_token}"]
     elif linkage_kind == "archived_manual":
-        physical_parent_parts = ["Später zuzuordnen", f"{parent_folder} - {job_token}"]
+        physical_parent_parts = ["Später zuordnen", f"{parent_folder} - {job_token}"]
     else:
         physical_parent_parts = (
-            ["Später zuzuordnen", f"{parent_folder} - {job_token}"]
+            ["Später zuordnen", f"{parent_folder} - {job_token}"]
             if collision_redirected
             else [parent_folder]
         )
@@ -1045,7 +1045,7 @@ def build_event_sort_plan(
             "code": "archived_event_manual_followup",
             "message": (
                 "Das passende Ereignis ist bereits archiviert. Die Dateien werden "
-                "unter ‚Später zuzuordnen‘ für die manuelle Archiv-Ergänzung bereitgestellt."
+                "unter ‚Später zuordnen‘ für die manuelle Archiv-Ergänzung bereitgestellt."
             ),
         })
     elif collision_redirected:
@@ -1054,7 +1054,7 @@ def build_event_sort_plan(
             "message": (
                 "Ein gleichnamiger Ereignisordner aus einem anderen "
                 "Sicherungsauftrag existiert bereits. Die neuen Dateien "
-                "werden sicher getrennt unter ‚Später zuzuordnen‘ abgelegt."
+                "werden sicher getrennt unter ‚Später zuordnen‘ abgelegt."
             ),
         })
 
@@ -1169,7 +1169,7 @@ def build_event_sort_plan(
             file_preserve_day_folders = False
         elif reassignment:
             target_folder = _safe_component(
-                reassignment.get("target_folder_name") or "Später zuzuordnen",
+                reassignment.get("target_folder_name") or "Später zuordnen",
                 "Zielereignisordner",
             )
             target_linkage = str(reassignment.get("target_linkage_kind") or "")
@@ -1180,17 +1180,17 @@ def build_event_sort_plan(
             elif target_linkage == "applied_followup":
                 destination_parts = [year, "Nachträge", f"{target_folder} - {job_token}"]
             elif target_linkage == "archived_manual" or str(reassignment.get("target_status") or "") == "archived":
-                destination_parts = ["Später zuzuordnen", year, f"{target_folder} - {job_token}"]
+                destination_parts = ["Später zuordnen", year, f"{target_folder} - {job_token}"]
             else:
                 destination_parts = [year, target_folder]
             file_preserve_day_folders = bool(reassignment.get("target_preserve_day_folders"))
             child_folder = None
         elif linkage_kind == "archived_manual" or collision_redirected:
-            # "Später zuzuordnen" ist ein globaler technischer Bereich direkt
+            # "Später zuordnen" ist ein globaler technischer Bereich direkt
             # unter Arbeitsbereich. Die Jahresordner entstehen nur innerhalb
             # dieses Bereichs, damit die normalen Jahresordner auch langfristig
             # ausschließlich echte Ereignisse enthalten.
-            destination_parts = ["Später zuzuordnen", year, *physical_parent_parts[1:]]
+            destination_parts = ["Später zuordnen", year, *physical_parent_parts[1:]]
         else:
             destination_parts = [year, *physical_parent_parts]
 
