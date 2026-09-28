@@ -567,6 +567,26 @@ def finish_event_change(
             if children:
                 connection.execute("DELETE FROM events WHERE parent_event_id = ?", (cr["event_id"],))
 
+        selected_family_rows = []
+        if selected_ids:
+            selected_family_rows = connection.execute(
+                "SELECT id,job_id,selected_capture_time FROM file_families "
+                "WHERE id IN (" + ",".join("?" for _ in selected_ids) + ")",
+                tuple(selected_ids),
+            ).fetchall()
+        selected_job_by_family = {
+            int(row["id"]): str(row["job_id"]) for row in selected_family_rows
+        }
+        local_selected_ids = [
+            family_id for family_id in selected_ids
+            if selected_job_by_family.get(family_id) == str(cr["job_id"])
+        ]
+        foreign_by_job: dict[str, list[int]] = {}
+        for family_id in selected_ids:
+            source_job = selected_job_by_family.get(family_id)
+            if source_job and source_job != str(cr["job_id"]):
+                foreign_by_job.setdefault(source_job, []).append(family_id)
+
         connection.execute(
             "DELETE FROM event_assignments WHERE event_id = ? OR event_id IN "
             "(SELECT id FROM events WHERE parent_event_id = ?)",
@@ -574,9 +594,9 @@ def finish_event_change(
         )
         if child_segments:
             family_rows=connection.execute(
-                "SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN (" + ",".join("?" for _ in selected_ids) + ")",
-                (cr["job_id"],*selected_ids),
-            ).fetchall()
+                "SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN (" + ",".join("?" for _ in local_selected_ids) + ")",
+                (cr["job_id"],*local_selected_ids),
+            ).fetchall() if local_selected_ids else []
             assignments=[]
             for family in family_rows:
                 capture=str(family["selected_capture_time"] or "")[:19]
@@ -591,8 +611,125 @@ def finish_event_change(
         else:
             connection.executemany(
                 "INSERT INTO event_assignments(event_id, family_id, file_id, assignment_source, created_at) VALUES (?, ?, NULL, 'date_time_range', ?)",
-                [(assignment_event_id, family_id, now) for family_id in selected_ids],
+                [(assignment_event_id, family_id, now) for family_id in local_selected_ids],
             )
+
+        # 0.27.0: Familien aus spaeteren Sicherungen bleiben intern ihrem
+        # Ursprungsauftrag zugeordnet. Ein unsichtbarer archivierter Beitrag
+        # bindet sie an das kanonische Ereignis; dadurch bleiben Job-Invarianten
+        # und die globale Frei-/Belegt-Erkennung korrekt, waehrend die UI nur
+        # das kanonische Ereignis zeigt.
+        for source_job, family_ids in sorted(foreign_by_job.items()):
+            contribution = connection.execute(
+                """SELECT * FROM events
+                   WHERE job_id=? AND parent_event_id IS NULL
+                     AND linked_event_id=? AND linkage_kind='archived_manual'
+                   ORDER BY updated_at DESC,id DESC LIMIT 1""",
+                (source_job, cr["event_id"]),
+            ).fetchone()
+            contribution_id = str(contribution["id"]) if contribution is not None else ""
+            captures = [
+                str(row["selected_capture_time"] or "")[:19]
+                for row in selected_family_rows
+                if int(row["id"]) in set(family_ids) and row["selected_capture_time"]
+            ]
+            contribution_start = min(captures) if captures else parent_start
+            contribution_end = max(captures) if captures else parent_end
+            if contribution is None:
+                import uuid
+                contribution_id = "EVENT_" + uuid.uuid4().hex.upper()
+                connection.execute(
+                    """INSERT INTO events(
+                           id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                           uses_time_range,folder_name,status,created_at,updated_at,event_kind,
+                           preserve_day_folders,revision,applied_at,archived_at,notes,edited_at,
+                           linked_event_id,linkage_kind,timeline_model,time_model_version
+                       ) VALUES (?,?,NULL,'parent',?,?,?,0,?,'archived',?,?,?,?,1,?,?, '', ?,?,
+                                 'archived_manual',?,2)""",
+                    (
+                        contribution_id, source_job,
+                        str(cr["event_name"]), contribution_start, contribution_end,
+                        str(cr["parent_folder"]), now, now, event_kind,
+                        int(bool(cr["preserve_day_folders"])), now, now, now,
+                        str(cr["event_id"]),
+                        "segments" if event_kind == "no_event" else "continuous",
+                    ),
+                )
+            else:
+                contribution_start = min(
+                    str(contribution["start_datetime"] or contribution_start)[:19],
+                    contribution_start,
+                )
+                contribution_end = max(
+                    str(contribution["end_datetime"] or contribution_end)[:19],
+                    contribution_end,
+                )
+                connection.execute(
+                    """UPDATE events
+                       SET name=?,start_datetime=?,end_datetime=?,folder_name=?,
+                           event_kind=?,preserve_day_folders=?,status='archived',
+                           applied_at=COALESCE(applied_at,?),archived_at=COALESCE(archived_at,?),
+                           updated_at=?,edited_at=?,revision=revision+1
+                       WHERE id=?""",
+                    (
+                        str(cr["event_name"]), contribution_start, contribution_end,
+                        str(cr["parent_folder"]), event_kind,
+                        int(bool(cr["preserve_day_folders"])),
+                        now, now, now, now, contribution_id,
+                    ),
+                )
+
+            connection.executemany(
+                """INSERT OR IGNORE INTO event_assignments(
+                       event_id,family_id,file_id,assignment_source,created_at
+                   ) VALUES (?,?,NULL,'archive_linked_contribution',?)""",
+                [(contribution_id, family_id, now) for family_id in family_ids],
+            )
+
+            if event_kind == "no_event":
+                all_contribution_captures = [
+                    str(row["selected_capture_time"] or "")[:19]
+                    for row in connection.execute(
+                        """SELECT ff.selected_capture_time
+                           FROM event_assignments ea
+                           JOIN file_families ff ON ff.id=ea.family_id
+                           WHERE ea.event_id=? AND ff.selected_capture_time IS NOT NULL""",
+                        (contribution_id,),
+                    ).fetchall()
+                ]
+                contribution_segments = [
+                    {
+                        "day_key": segment["day_key"],
+                        "start_time": segment["start_time"],
+                        "end_time": segment["end_time"],
+                    }
+                    for segment in no_event_segments
+                    if any(
+                        segment["start_datetime"] <= capture <= segment["end_datetime"]
+                        for capture in all_contribution_captures
+                    )
+                ]
+                if contribution_segments:
+                    normalized_contribution_segments = normalize_no_event_segments(
+                        contribution_segments
+                    )
+                    replace_event_segments(
+                        connection,
+                        event_id=contribution_id,
+                        job_id=source_job,
+                        segments=normalized_contribution_segments,
+                        now=now,
+                        source="archive_linked_contribution",
+                    )
+                    connection.execute(
+                        "UPDATE events SET start_datetime=?,end_datetime=? WHERE id=?",
+                        (
+                            normalized_contribution_segments[0]["start_datetime"],
+                            normalized_contribution_segments[-1]["end_datetime"],
+                            contribution_id,
+                        ),
+                    )
+
         # 0.19.0: nach erfolgreicher manueller Prüfung den tatsächlich
         # bestätigten stabilen Archivanker je Familie speichern. Alle/Sortiert/
         # Export sind bewusst nicht Teil des Ankers.
