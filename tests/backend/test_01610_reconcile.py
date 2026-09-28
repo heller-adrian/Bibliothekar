@@ -1,6 +1,7 @@
 from pathlib import Path
 import hashlib
 
+from tests.backend.archive_change_helpers import copy_prepared_event_document
 from app.database import initialize_database, database_connection
 from app.workspace_reconcile import build_workspace_reconcile_plan, prepare_workspace_reconcile_run, execute_workspace_reconcile_run
 from app.sort_apply import CONFIRMATION_PHRASE
@@ -120,6 +121,7 @@ def test_archived_removed_family_returns_to_free_ssd_stock(tmp_path):
     if (old_child/'Alle').exists(): (old_child/'Alle').rmdir()
     if old_child.exists(): old_child.rmdir()
 
+    copy_prepared_event_document(db, workspace, archive, crid)
     assert verify_event_change(db,crid,archive,workspace)['complete']
     done=finish_event_change(db,crid,archive,workspace)
     assert done['released_family_ids']==[fids[1]]
@@ -168,6 +170,7 @@ def test_archived_no_event_edit_keeps_true_segments_and_releases_removed_family(
     assert verify_archive_release_copies(db,archive,workspace,crid)['complete']
     source.unlink()
     assert verify_archive_release_removal(db,archive,workspace,crid)['complete']
+    copy_prepared_event_document(db, workspace, archive, crid)
     assert verify_event_change(db,crid,archive,workspace)['complete']
     done=finish_event_change(db,crid,archive,workspace)
     assert done['released_family_ids']==[fids[1]]

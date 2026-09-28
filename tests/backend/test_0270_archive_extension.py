@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.backend.archive_change_helpers import copy_prepared_event_document
 from app.database import (
     database_connection,
     get_event_edit_context,
@@ -280,6 +281,7 @@ def test_0270_cross_job_archive_extension_finishes_on_canonical_event(
     assert incoming_review["workspace_staging_path"].startswith("Später zuordnen/")
     assert incoming_review["new_path"].endswith("/Alle/neu.JPG")
 
+    copy_prepared_event_document(db, workspace, archive_root, cr_id)
     verified = verify_event_change(db, cr_id, archive_root)
     assert verified["complete"] is True
     result = finish_event_change(db, cr_id, archive_root, workspace)

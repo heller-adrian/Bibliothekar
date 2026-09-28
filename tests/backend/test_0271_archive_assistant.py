@@ -5,6 +5,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
+from tests.backend.archive_change_helpers import copy_prepared_event_document
 from app.archive_change_assistant import build_archive_change_assistant
 from app.database import database_connection, initialize_database
 from app.event_change_apply import confirm_event_change, finish_event_change, verify_event_change
@@ -148,25 +149,26 @@ def test_0271_existing_triplet_stages_only_branch_with_new_files(tmp_path: Path)
 
     after = build_archive_change_assistant(db, archive, workspace, cr_id)
     assert after["phase"] == "finder"
-    assert [item["kind"] for item in after["operations"]] == ["copy_files"]
+    assert [item["kind"] for item in after["operations"]] == ["copy_helper_folders"]
+    assert set(after["operations"][0]["items"]) == {"Alle", "event.json"}
 
 
-def test_0271_metadata_only_change_skips_preparation_and_finder(tmp_path: Path):
+def test_0271_metadata_only_change_prepares_new_event_document(tmp_path: Path):
     db, workspace, archive, folder, old_family, _, _ = _seed(tmp_path)
     proposed = propose_event_change(
         db, "old", "archive", _preview(folder, old_family, None),
         event_name="Test Archiv 2", notes="nur Notiz",
         archive_root=archive, workspace_path=workspace,
     )
-    assert proposed["preparation_required"] is False
+    assert proposed["preparation_required"] is True
     assert proposed["status"] == "aenderbar_vorschlagen"
-    assistant = build_archive_change_assistant(
-        db, archive, workspace, proposed["change_request_id"]
-    )
-    assert assistant["phase"] == "verify"
-    assert assistant["operations"] == []
-    assert not (workspace / "Arbeitsbereich" / "Später zuordnen").exists()
-
+    assistant = build_archive_change_assistant(db, archive, workspace, proposed["change_request_id"])
+    assert assistant["phase"] == "prepare"
+    confirm_event_change(db, proposed["change_request_id"], archive, workspace)
+    prepared = build_archive_change_assistant(db, archive, workspace, proposed["change_request_id"])
+    assert prepared["phase"] == "finder"
+    assert [item["kind"] for item in prepared["operations"]] == ["replace_event_document"]
+    assert (workspace / "Arbeitsbereich" / "Später zuordnen" / "2026" / folder / "event.json").is_file()
 
 def test_0271_finish_keeps_source_day_when_other_file_remains(tmp_path: Path):
     db, workspace, archive, folder, old_family, new_family, incoming_rel = _seed(
@@ -191,6 +193,7 @@ def test_0271_finish_keeps_source_day_when_other_file_remains(tmp_path: Path):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(staged.read_bytes())
 
+    copy_prepared_event_document(db, workspace, archive, cr_id)
     assert verify_event_change(db, cr_id, archive)["complete"] is True
     finish_event_change(db, cr_id, archive, workspace)
 
@@ -252,11 +255,15 @@ def test_0271_new_child_is_one_folder_copy_action(tmp_path: Path):
     operations = assistant["operations"]
     assert len(operations) == 1
     assert operations[0]["kind"] == "copy_helper_folders"
-    assert operations[0]["items"] == ["07-24 00-00 - 07-24 23-59 - Teil B"]
+    assert set(operations[0]["items"]) == {
+        "07-24 00-00 - 07-24 23-59 - Teil B",
+        "event.json",
+    }
     assert operations[0]["target"] == f"Kamerabibliothek/2026/{folder}"
-    assert operations[0]["sources"] == [
-        f"Arbeitsbereich/Später zuordnen/2026/{folder}/07-24 00-00 - 07-24 23-59 - Teil B"
-    ]
+    assert set(operations[0]["sources"]) == {
+        f"Arbeitsbereich/Später zuordnen/2026/{folder}/07-24 00-00 - 07-24 23-59 - Teil B",
+        f"Arbeitsbereich/Später zuordnen/2026/{folder}/event.json",
+    }
 
 
 def test_0271_verify_requires_obsolete_old_event_folder_to_be_removed(tmp_path: Path):
@@ -274,7 +281,7 @@ def test_0271_verify_requires_obsolete_old_event_folder_to_be_removed(tmp_path: 
     cr_id = proposed["change_request_id"]
     assistant = build_archive_change_assistant(db, archive, workspace, cr_id)
     assert [item["kind"] for item in assistant["operations"]] == [
-        "move_archive_files", "remove_directories"
+        "copy_helper_folders", "move_archive_files", "remove_directories"
     ]
     assert assistant["obsolete_directories"] == [f"2026/{folder}"]
 

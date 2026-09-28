@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.backend.archive_change_helpers import copy_prepared_event_document
 from app.archive_change_assistant import build_archive_change_assistant
 from app.archive_release_stock import (
     describe_archive_release_stock,
@@ -200,6 +201,7 @@ def test_0271_release_stock_copy_remove_finish_and_reappear_globally(tmp_path: P
     after = build_archive_change_assistant(db, archive, workspace, cr_id)
     assert after["release_stock"]["stage"] == "complete"
 
+    copy_prepared_event_document(db, workspace, archive, cr_id)
     verification = verify_event_change(db, cr_id, archive, workspace)
     assert verification["complete"] is True
     result = finish_event_change(db, cr_id, archive, workspace)
@@ -377,6 +379,9 @@ def test_0271_released_stock_can_be_sorted_again_with_released_asset(tmp_path: P
     assert verify_archive_release_removal(
         case["db"], case["archive"], case["workspace"], case["cr_id"]
     )["complete"]
+    copy_prepared_event_document(
+        case["db"], case["workspace"], case["archive"], case["cr_id"]
+    )
     assert verify_event_change(
         case["db"], case["cr_id"], case["archive"], case["workspace"]
     )["complete"]
