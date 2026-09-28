@@ -42,7 +42,7 @@ def test_0212_event_ui_has_atomic_reassignment_and_segment_delete():
 def test_0212_version_and_sd_idle_copy():
     from app.main import APP_VERSION, index
 
-    assert APP_VERSION == "0.27.2"
+    assert APP_VERSION == "0.27.3"
     html = index().body.decode() if hasattr(index(), "body") else str(index())
     assert "Keine neuen Dateien" in html
     assert "Verwaltungsdateien ignoriert" in html
