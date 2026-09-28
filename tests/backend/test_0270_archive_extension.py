@@ -255,6 +255,10 @@ def test_0270_cross_job_archive_extension_finishes_on_canonical_event(
     )
     cr_id = proposed["change_request_id"]
     assert proposed["staged_file_count"] == 1
+    staging_event = workspace / "Arbeitsbereich" / "Später zuordnen" / "2026" / folder
+    assert (staging_event / "Alle").is_dir()
+    assert not (staging_event / "Sortiert").exists()
+    assert not (staging_event / "Export").exists()
     reviews = _move_staged_ssd_files_manually(db, workspace, archive_root, cr_id)
     incoming_review = next(row for row in reviews if row["family_id"] == incoming_family)
     assert incoming_review["source_root_kind"] == "shared_workspace"

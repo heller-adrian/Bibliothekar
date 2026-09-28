@@ -1277,6 +1277,67 @@ EVENTS_HTML = r"""<!doctype html>
     let currentEvents = [];
     let currentSortPlan = null;
     let mandatoryMutationContext = null;
+    let mandatoryArchiveChangeContext = null;
+
+    function archiveChangeIsActive(status) {
+      return ["aenderbar_vorschlagen", "aenderbar_bestaetigt"].includes(String(status || ""));
+    }
+
+    function hasMandatoryTransaction() {
+      return Boolean(mandatoryMutationContext || mandatoryArchiveChangeContext);
+    }
+
+    function setChangeTaskInUrl(crId, jobId) {
+      const url = new URL(window.location.href);
+      if (jobId) url.searchParams.set("job", jobId);
+      url.searchParams.set("task", `change:${crId}`);
+      history.replaceState(null, "", url);
+    }
+
+    function clearChangeTaskFromUrl(crId) {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("task") === `change:${crId}`) {
+        url.searchParams.delete("task");
+        history.replaceState(null, "", url);
+      }
+    }
+
+    function syncArchiveChangeContext(cr) {
+      if (archiveChangeIsActive(cr?.status)) {
+        mandatoryArchiveChangeContext = {
+          crId: String(cr.id),
+          eventId: String(cr.event_id || ""),
+          jobId: String(cr.job_id || "")
+        };
+        changeRequestClose.textContent = "Änderung verwerfen";
+        changeRequestClose.classList.add("danger-button");
+        setChangeTaskInUrl(cr.id, cr.job_id || "");
+        return true;
+      }
+      if (mandatoryArchiveChangeContext?.crId === String(cr?.id || "")) {
+        mandatoryArchiveChangeContext = null;
+      }
+      changeRequestClose.textContent = "Schließen";
+      changeRequestClose.classList.remove("danger-button");
+      if (cr?.id) clearChangeTaskFromUrl(cr.id);
+      return false;
+    }
+
+    async function findOpenArchiveChangeRequest(eventId = null) {
+      const res = await fetch("/api/change-requests?job_id=&status=");
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data.requests || []).find(cr =>
+        archiveChangeIsActive(cr.status)
+        && (!eventId || String(cr.event_id) === String(eventId))
+      ) || null;
+    }
+
+    window.addEventListener("beforeunload", event => {
+      if (!hasMandatoryTransaction()) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
 
 
     function escapeHtml(value) {
@@ -2572,6 +2633,13 @@ EVENTS_HTML = r"""<!doctype html>
 
 
     async function openEventViewer(eventId, jobId) {
+      const pendingChange = await findOpenArchiveChangeRequest(eventId);
+      if (pendingChange) {
+        if (eventEditDialog.open) eventEditDialog.close();
+        if (!changeRequestDialog.open) changeRequestDialog.showModal();
+        await showChangeRequestDetail(pendingChange.id, {resume:true});
+        return;
+      }
       eventEditDialog.classList.remove("edit-mode");
       eventEditDialog.classList.add("view-mode");
       eventEditHeaderButton.hidden = true;
@@ -2834,6 +2902,7 @@ EVENTS_HTML = r"""<!doctype html>
           method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload),
         });
         eventEditDialog.close();
+        setChangeTaskInUrl(result.change_request_id, context._job_id);
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
         await showChangeRequestDetail(result.change_request_id);
         setStatus("Änderungsauftrag erstellt. Die Kamerabibliothek wurde nicht verändert.", false, true);
@@ -3085,7 +3154,18 @@ EVENTS_HTML = r"""<!doctype html>
 
 
     eventEditClose.addEventListener("click", () => eventEditDialog.close());
-    changeRequestClose.addEventListener("click", () => changeRequestDialog.close());
+    changeRequestClose.addEventListener("click", () => {
+      if (!mandatoryArchiveChangeContext) {
+        changeRequestDialog.close();
+        return;
+      }
+      if (!window.confirm("Diese Archivänderung vollständig verwerfen? Solange der ursprüngliche Archivzustand unverändert ist, bleiben die SSD-Originale erhalten.")) return;
+      changeRequestAction(mandatoryArchiveChangeContext.crId, "cancel")
+        .catch(error => setStatus(error.message, true));
+    });
+    changeRequestDialog.addEventListener("cancel", event => {
+      if (mandatoryArchiveChangeContext) event.preventDefault();
+    });
     eventEditForm.addEventListener("submit", event => {
       event.preventDefault();
       const old=document.getElementById("event-edit-inline-error");if(old)old.hidden=true;
@@ -3147,9 +3227,16 @@ EVENTS_HTML = r"""<!doctype html>
           && !planButton.disabled
         ) {
           const loader = planButton.dataset.eventStatus === "applied" ? loadReapplyPlan : loadSortPlan;
+          const targetEvent = currentEvents.find(item => item.id === planButton.dataset.sortPlanEvent);
           loader(
             planButton.dataset.sortPlanEvent,
-            planButton.dataset.jobId
+            planButton.dataset.jobId,
+            loader === loadReapplyPlan
+              ? {
+                  mandatory: Boolean(targetEvent?.mutation_id && targetEvent.id === targetEvent.mutation_anchor_event_id),
+                  mutationId: targetEvent?.mutation_id || ""
+                }
+              : undefined
           ).catch(
             error => {
               sortPlanBody.textContent =
@@ -3191,7 +3278,15 @@ EVENTS_HTML = r"""<!doctype html>
           // Auch archivierte Ereignisse öffnen denselben vollständigen Editor.
           // Beim Speichern wird dort ausschließlich ein manueller Change Request
           // erzeugt; die Kamerabibliothek bleibt read-only.
-          openEventEditor(editButton.dataset.editEvent, editButton.dataset.jobId).catch(error => {
+          (async () => {
+            const pendingChange = await findOpenArchiveChangeRequest(editButton.dataset.editEvent);
+            if (pendingChange) {
+              if (!changeRequestDialog.open) changeRequestDialog.showModal();
+              await showChangeRequestDetail(pendingChange.id, {resume:true});
+              return;
+            }
+            await openEventEditor(editButton.dataset.editEvent, editButton.dataset.jobId);
+          })().catch(error => {
             eventEditBody.textContent = error.message;
             setStatus(error.message, true);
           });
@@ -3284,7 +3379,7 @@ EVENTS_HTML = r"""<!doctype html>
       }
     }
 
-    async function showChangeRequestDetail(crId) {
+    async function showChangeRequestDetail(crId, options={}) {
       try {
         changeRequestBody.textContent = "Lade Details …";
         changeRequestTitle.textContent = "Änderungsauftrag";
@@ -3297,13 +3392,20 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         const cr = await res.json();
+        const active = syncArchiveChangeContext(cr);
+        if (options.resume && !active) {
+          if (changeRequestDialog.open) changeRequestDialog.close();
+          setStatus("Der frühere Archivänderungsauftrag ist bereits abgeschlossen.", false, true);
+          return;
+        }
         changeRequestSubtitle.textContent = `ID: ${cr.id}`;
 
         let html = "<h4>Änderungsdetails</h4>";
+        html += `<section class="preview-note"><strong>IST → SOLL</strong><p><strong>IST:</strong> Datenbank und Kamerabibliothek bleiben bis zum erfolgreichen Abschluss im bisherigen Zustand.</p><p><strong>SOLL:</strong> Dieser Auftrag beschreibt den zukünftigen Zustand. Erst nach deiner Finder-Arbeit, erfolgreicher Prüfung und dem Abschluss wird er zum neuen Datenbankzustand.</p></section>`;
         html += `<p><strong>Status:</strong> ${escapeHtml(cr.status)}</p>`;
         html += `<p><strong>Beschreibung:</strong> ${escapeHtml(cr.description || "—")}</p>`;
         if (cr.prepared_structure_path) {
-          html += `<section class="preview-note"><strong>Vorbereitete SSD-Hülle</strong><p>Unter <code>Arbeitsbereich/${escapeHtml(cr.prepared_structure_path)}</code> liegt die benötigte Zielstruktur. Neue SSD-Dateien liegen dort bereits in ihrer vorgesehenen Alle-/Sortiert-/Export-Position. Die Kamerabibliothek wurde nicht verändert.</p></section>`;
+          html += `<section class="preview-note"><strong>Vorbereiteter SSD-Hilfsbereich</strong><p>Unter <code>Arbeitsbereich/${escapeHtml(cr.prepared_structure_path)}</code> liegen nur die für diese Änderung tatsächlich benötigten Zielordner und Hardlinks. Leere, unbenutzte Alle-/Sortiert-/Export- oder Unterereignisordner werden nicht vorsorglich angelegt. Die Kamerabibliothek wurde nicht verändert.</p></section>`;
         }
 
         // Dateigenaue Arbeitsanweisung: IST -> SOLL.
@@ -3342,8 +3444,39 @@ EVENTS_HTML = r"""<!doctype html>
               if (!groups.get(eventKey).has(familyKey)) groups.get(eventKey).set(familyKey, []);
               groups.get(eventKey).get(familyKey).push(row);
             }
+            const actionableRows = rows.filter(row => {
+              const action = String(row.action || row.operation || "move");
+              return action === "move" && row.new_path;
+            });
+            if (actionableRows.length) {
+              const moveGroups = new Map();
+              for (const row of actionableRows) {
+                const sourceDir = sourcePath(row).split("/").slice(0,-1).join("/") || "—";
+                const targetDir = String(row.new_path||"").split("/").slice(0,-1).join("/") || "—";
+                const key = `${row.source_root_kind || "camera_archive"}|${sourceDir}|${targetDir}`;
+                if (!moveGroups.has(key)) moveGroups.set(key, {row, sourceDir, targetDir, count:0});
+                moveGroups.get(key).count += 1;
+              }
+              html += `<section class="preview-note"><strong>Finder-Arbeit</strong><p>Führe jetzt nur die folgenden tatsächlichen Bewegungen aus. Dateien außerhalb dieser Angaben bleiben unverändert.</p>`;
+              for (const item of moveGroups.values()) {
+                const sourcePrefix = item.row.source_root_kind === "shared_workspace" ? "Arbeitsbereich/" : "Kamerabibliothek/";
+                html += `<div class="card" style="margin:8px 0;padding:10px"><strong>${Number(item.count)} Datei${Number(item.count)===1?"":"en"}</strong><div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(sourcePrefix + item.sourceDir)}</code><div class="muted" style="margin-top:6px">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml("Kamerabibliothek/" + item.targetDir)}</code></div>`;
+              }
+              const workspaceRows = actionableRows.filter(row => row.source_root_kind === "shared_workspace");
+              if (workspaceRows.length === actionableRows.length && workspaceRows.length) {
+                const childCandidates = new Set(workspaceRows.map(row => {
+                  const parts = String(row.new_path||"").split("/").filter(Boolean);
+                  return parts.length >= 5 && !["Alle","Sortiert","Export"].includes(parts[2]) ? parts.slice(0,3).join("/") : "";
+                }).filter(Boolean));
+                if (childCandidates.size === 1) {
+                  const childTarget = [...childCandidates][0];
+                  html += `<p class="muted">Wenn dieser Unterereignisordner im Archiv vollständig neu ist, kannst du den vorbereiteten Ordner <code>${escapeHtml(childTarget.split("/").pop())}</code> auch als Ganzes in <code>Kamerabibliothek/${escapeHtml(childTarget.split("/").slice(0,-1).join("/"))}</code> übernehmen.</p>`;
+                }
+              }
+              html += `</section>`;
+            }
             html += `<h4>Manuelle Änderungen · ${groups.size} Ereignis${groups.size===1?"":"se"}</h4>`;
-            html += `<p class="muted">Kompakt nach Ereignis und Dateifamilie gruppiert. Für die Arbeit im Finder reicht meist der Von–Bis-Hinweis; Einzeldateien und exakte IST→SOLL-Pfade sind ausklappbar.</p>`;
+            html += `<p class="muted">Kompakt nach Ereignis und Dateifamilie gruppiert. Einzeldateien und exakte IST→SOLL-Pfade bleiben ausklappbar.</p>`;
             html += `<div class="change-file-instructions">`;
             for (const [eventKey, families] of groups) {
               const familyEntries=[...families.values()];
@@ -3400,13 +3533,13 @@ EVENTS_HTML = r"""<!doctype html>
           html += `<section class="preview-note"><strong>Neu zuzuordnen</strong>${(archiveReassignData.reassignment_segments||[]).map(s=>`<p>${escapeHtml(s.day_key)} · ${escapeHtml(s.start_time)}–${escapeHtml(s.end_time)} · ${Number(s.family_count)} Familien · ${Number(s.file_count)} Dateien</p>`).join('')}<a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(archiveReassignData.job_id)}&task=free">In Aufnahmen öffnen</a></section>`;
         }
 
-        // Workflow-Aktionen (propose -> preview -> confirm / cancel / archive)
+        // Einheitlicher Pflicht-Workflow: vorbereiten -> Finder -> prüfen -> abschließen.
         const status = String(cr.status || "");
         html += "<h4>Workflow</h4>";
-        html += `<p><strong>Status:</strong> ${escapeHtml(status)}</p>`;
+        html += `<div class="card" style="margin:10px 0;padding:12px"><strong>1 · Änderung vorbereiten</strong><div class="muted">SOLL-Zustand und benötigter SSD-Hilfsbereich werden festgelegt.</div><br><strong>2 · Finder-Arbeit ausführen</strong><div class="muted">Nur die oben angegebenen Dateien/Ordner manuell in der Kamerabibliothek an den SOLL-Ort bringen.</div><br><strong>3 · Prüfen</strong><div class="muted">Die App prüft die Kamerabibliothek read-only nach Pfad, Größe und SHA-256.</div><br><strong>4 · Änderung abschließen & SSD freigeben</strong><div class="muted">Erst dann wird SOLL zum Datenbankzustand; nur bestätigte SSD-Originale und Hilfslinks werden freigegeben.</div></div>`;
         if (status === "aenderbar_vorschlagen") {
           html +=
-            `<button type="button" class="plan-button" data-cr-confirm="${escapeHtml(crId)}">Änderungen bestätigen</button>` +
+            `<button type="button" class="plan-button bk-positive-action" data-cr-confirm="${escapeHtml(crId)}">Änderung vorbereiten</button>` +
             ` <button type="button" class="danger-button" data-cr-cancel="${escapeHtml(crId)}">Änderung verwerfen</button>`;
         } else if (status === "aenderbar_bestaetigt") {
           const initiallyVerified = reviewRows.length > 0 && reviewRows.every(row => String(row.verification_status || "") === "verified");
@@ -3419,7 +3552,7 @@ EVENTS_HTML = r"""<!doctype html>
               `<div id="change-verify-progress" style="display:none;margin-top:10px;height:8px;border-radius:999px;overflow:hidden;background:rgba(127,127,127,.22)"><div style="width:0%;height:100%;background:currentColor;transition:width .2s ease"></div></div>` +
               `<div id="change-verify-errors" style="display:${initiallyVerified ? "none" : "block"};margin-top:10px"></div>` +
             `</div>` +
-            ` <button type="button" class="plan-button" data-cr-archive="${escapeHtml(crId)}" ${initiallyVerified ? "" : "disabled"}>Nach erfolgreicher Prüfung abschließen</button>` +
+            ` <button type="button" class="plan-button bk-positive-action" data-cr-archive="${escapeHtml(crId)}" ${initiallyVerified ? "" : "disabled"}>Änderung abschließen & SSD freigeben</button>` +
             ` <button type="button" class="danger-button" data-cr-cancel="${escapeHtml(crId)}">Änderung verwerfen</button>`;
         } else {
           html += `<p class="muted">Dieser Aenderungsantrag ist abgeschlossen (${escapeHtml(status)}).</p>`;
@@ -3503,8 +3636,25 @@ EVENTS_HTML = r"""<!doctype html>
           throw new Error(data.detail || `HTTP ${res.status}`);
         }
         const data = await res.json();
+        if (action === "cancel" || action === "archive") {
+          mandatoryArchiveChangeContext = null;
+          clearChangeTaskFromUrl(crId);
+          changeRequestClose.textContent = "Schließen";
+          changeRequestClose.classList.remove("danger-button");
+          if (changeRequestDialog.open) changeRequestDialog.close();
+          await loadEvents({reset:true});
+          refreshGlobalTasks();
+          setStatus(
+            action === "archive"
+              ? "Archivänderung abgeschlossen. Der geprüfte SOLL-Zustand ist jetzt Datenbankzustand; bestätigte SSD-Dateien wurden freigegeben."
+              : "Archivänderung verworfen. Der vorherige Zustand bleibt gültig.",
+            false,
+            true
+          );
+          return;
+        }
         setStatus(`Aenderungsauftrag: ${escapeHtml(data.status || action)}`);
-        showChangeRequestDetail(crId);
+        await showChangeRequestDetail(crId);
         refreshGlobalTasks();
       } catch (error) {
         setStatus(error.message, true);
@@ -3529,8 +3679,9 @@ EVENTS_HTML = r"""<!doctype html>
 
         const data = await res.json();
         setStatus(`Aenderungsantrag erstellt: ${data.change_request_id}`);
+        setChangeTaskInUrl(data.change_request_id, jobId || "");
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
-        showChangeRequestDetail(data.change_request_id);
+        await showChangeRequestDetail(data.change_request_id);
       } catch (error) {
         setStatus(error.message, true);
       }
@@ -3557,7 +3708,7 @@ EVENTS_HTML = r"""<!doctype html>
       if (task.startsWith("change:")) {
         const crId = task.slice("change:".length);
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
-        await showChangeRequestDetail(crId);
+        await showChangeRequestDetail(crId, {resume:true});
       } else if (task.startsWith("reassign:")) {
         const eventId = task.slice("reassign:".length);
         if (jobId) {
@@ -3578,21 +3729,34 @@ EVENTS_HTML = r"""<!doctype html>
           const data = await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events`);
           const target = (data.events||[]).find(item=>item.id===eventId);
           if (target && !currentEvents.some(item=>item.id===eventId)) currentEvents.push({...target,_job_id:jobId});
-          await loadReapplyPlan(eventId, jobId);
+          await loadReapplyPlan(
+            eventId,
+            jobId,
+            {
+              mandatory: Boolean(target?.mutation_id && target.id === target.mutation_anchor_event_id),
+              mutationId: target?.mutation_id || ""
+            }
+          );
         }
       }
       if (!task) {
-        const pending=currentEvents.find(item =>
-          item.status === "applied"
-          && item.mutation_id
-          && item.id === item.mutation_anchor_event_id
-        );
-        if (pending) {
-          await loadReapplyPlan(
-            pending.id,
-            pending._job_id || pending.job_id,
-            {mandatory:true,mutationId:pending.mutation_id}
+        const pendingArchive = await findOpenArchiveChangeRequest();
+        if (pendingArchive) {
+          if (!changeRequestDialog.open) changeRequestDialog.showModal();
+          await showChangeRequestDetail(pendingArchive.id, {resume:true});
+        } else {
+          const pending=currentEvents.find(item =>
+            item.status === "applied"
+            && item.mutation_id
+            && item.id === item.mutation_anchor_event_id
           );
+          if (pending) {
+            await loadReapplyPlan(
+              pending.id,
+              pending._job_id || pending.job_id,
+              {mandatory:true,mutationId:pending.mutation_id}
+            );
+          }
         }
       }
       refreshGlobalTasks();

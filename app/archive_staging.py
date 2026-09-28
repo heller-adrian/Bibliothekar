@@ -157,11 +157,16 @@ def _directory_plan(
     preview: dict[str, Any],
     plan: dict[str, Any],
 ) -> set[PurePosixPath]:
+    """Only materialize directories that are concrete targets of this change.
+
+    Später zuordnen is a work instruction, not a mirror of every possible
+    Alle/Sortiert/Export or child folder. Parent directories are created by
+    mkdir(parents=True) only as needed for the actual target paths.
+    """
     year = _safe_component(str(preview.get("start_date") or "")[:4], "Jahr")
     parent = _safe_component(preview.get("parent_folder"), "Ereignisordner")
     root = PurePosixPath(year, parent)
-    directories: set[PurePosixPath] = {root}
-    populated_children: set[str] = set()
+    directories: set[PurePosixPath] = set()
 
     all_items = [
         *(plan.get("families_with_plans") or []),
@@ -170,32 +175,15 @@ def _directory_plan(
     for item in all_items:
         action = str(item.get("action") or "")
         new_path = str(item.get("new_path") or "").strip()
-        if action in {"delete", "unresolved"} or not new_path:
+        if action != "move" or not new_path:
             continue
         rel = _safe_relative(new_path)
-        parent_dir = rel.parent
-        directories.add(parent_dir)
-        if parent_dir.name in BRANCHES:
-            container = parent_dir.parent
-            for branch in BRANCHES:
-                directories.add(container / branch)
-        parts = rel.parts
-        if len(parts) >= 3:
-            first_inside_event = parts[2]
-            if first_inside_event not in BRANCHES and not (
-                len(first_inside_event) == 10
-                and first_inside_event[4] == "-"
-                and first_inside_event[7] == "-"
-            ):
-                populated_children.add(first_inside_event)
-
-    for child in _preview_child_folders(preview):
-        if child in populated_children:
-            continue
-        child_root = root / child
-        directories.add(child_root)
-        for branch in BRANCHES:
-            directories.add(child_root / branch)
+        if len(rel.parts) < 2 or tuple(rel.parts[:2]) != tuple(root.parts):
+            raise ArchiveStagingError(
+                "Ein vorbereiteter Zielpfad liegt außerhalb des neuen Ereignisordners."
+            )
+        directories.add(root)
+        directories.add(rel.parent)
 
     return directories
 
@@ -223,7 +211,16 @@ def prepare_archive_change_staging(
         raise ArchiveStagingError("Der Archiv-Hilfsbereich verlässt den Arbeitsbereich.")
 
     directories = _directory_plan(preview, plan)
-    event_relative_root = min(directories, key=lambda value: len(value.parts))
+    if not directories:
+        return {
+            "prepared_structure_path": "",
+            "staged_file_count": 0,
+            "staging_by_file_id": {},
+            "created_directories": [],
+        }
+    year = _safe_component(str(preview.get("start_date") or "")[:4], "Jahr")
+    parent = _safe_component(preview.get("parent_folder"), "Ereignisordner")
+    event_relative_root = PurePosixPath(year, parent)
     prepared_rel = PurePosixPath(STAGING_DIRECTORY_NAME) / event_relative_root
     prepared_root = work_root.joinpath(*prepared_rel.parts).resolve(strict=False)
     if not _inside(prepared_root, staging_base):
