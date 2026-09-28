@@ -7653,6 +7653,50 @@ def api_cancel_change(cr_id: str) -> JSONResponse:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/api/change-requests/{cr_id}/reversal")
+def api_get_change_reversal(cr_id: str, refresh: bool = False) -> JSONResponse:
+    try:
+        from app.archive_reversal import build_archive_reversal_assistant
+        return JSONResponse(content=build_archive_reversal_assistant(
+            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id, scan_live=bool(refresh)
+        ))
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/change-requests/{cr_id}/reversal/prepare")
+def api_prepare_change_reversal(cr_id: str) -> JSONResponse:
+    try:
+        from app.archive_reversal import prepare_archive_reversal
+        return JSONResponse(content=prepare_archive_reversal(
+            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+        ))
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/change-requests/{cr_id}/reversal/verify")
+def api_verify_change_reversal(cr_id: str) -> JSONResponse:
+    try:
+        from app.archive_reversal import verify_archive_reversal
+        return JSONResponse(content=verify_archive_reversal(
+            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+        ))
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/change-requests/{cr_id}/reversal/finish")
+def api_finish_change_reversal(cr_id: str) -> JSONResponse:
+    try:
+        from app.archive_reversal import finish_archive_reversal
+        return JSONResponse(content=finish_archive_reversal(
+            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+        ))
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.post("/api/change-requests/{cr_id}/release-copy/verify")
 def api_verify_archive_release_copy(cr_id: str) -> JSONResponse:
     """Freigewordene Archivdateien auf der SSD gegen gespeicherte SHA-256 prüfen."""
