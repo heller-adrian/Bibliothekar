@@ -2117,12 +2117,22 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function releasedArchiveGroups() {
+      return Array.isArray(workspace?.released_archive_groups)
+        ? workspace.released_archive_groups
+        : [];
+    }
+
     function availableDayGroups() {
-      return (
+      const regular = (
         planningOverview()
           .available_day_groups
         || []
       );
+      const releasedForCurrentJob = releasedArchiveGroups().filter(
+        group => String(group.job_id || "") === String(jobSelect.value || "")
+      );
+      return [...regular, ...releasedForCurrentJob];
     }
 
 
@@ -2183,10 +2193,18 @@ WORKSPACE_HTML = r"""<!doctype html>
     function renderDays() {
       dayList.innerHTML = "";
 
-      const groups =
+      const timelineGroups =
         planningOverview()
           .timeline_groups
         || [];
+      const releasedGroups = releasedArchiveGroups();
+      const groups = releasedGroups.length
+        ? [
+            ...timelineGroups,
+            {group_type:"released_archive_separator"},
+            ...releasedGroups
+          ]
+        : timelineGroups;
 
       if (!groups.length) {
         dayList.innerHTML =
@@ -2223,6 +2241,14 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
 
       for (const group of groups) {
+        if (group.group_type === "released_archive_separator") {
+          const separator=document.createElement("div");
+          separator.style.cssText="margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--border)";
+          separator.innerHTML='<div style="font-weight:700">Freigewordene Archivaufnahmen</div><div class="muted" style="margin-top:3px">Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand. Auswahl verwendet automatisch die jeweilige Ursprungssicherung.</div>';
+          dayList.appendChild(separator);
+          continue;
+        }
+
         if (
           group.group_type
           === "event"
@@ -2352,6 +2378,9 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         card.className =
           "day-card";
+        if (group.released_archive) {
+          card.classList.add("released-archive-card");
+        }
 
         if (!group.has_date) {
           card.classList.add(
@@ -2380,7 +2409,32 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         checkbox.addEventListener(
           "change",
-          () => {
+          async () => {
+            if (
+              checkbox.checked
+              && group.released_archive
+              && String(group.job_id || "") !== String(jobSelect.value || "")
+            ) {
+              const targetJob=String(group.job_id || "");
+              if (![...jobSelect.options].some(option => option.value === targetJob)) {
+                checkbox.checked=false;
+                setStatus("Die Ursprungssicherung dieser freigewordenen Aufnahmen ist nicht mehr verfügbar.", true);
+                return;
+              }
+              selectedDays.clear();
+              jobSelect.value=targetJob;
+              try {
+                await loadWorkspace();
+                selectedDays.add(key);
+                renderDays();
+                renderSelection();
+                setStatus("Freigewordene Archivaufnahmen aus der Ursprungssicherung ausgewählt.");
+              } catch(error) {
+                setStatus(error.message,true);
+              }
+              return;
+            }
+
             if (checkbox.checked) {
               selectedDays.add(key);
             } else {
@@ -2409,6 +2463,13 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-name";
         name.textContent =
           formatDay(group.day_key) + (group.start_time && (group.start_time !== "00:00" || group.end_time !== "23:59") ? ` · ${group.start_time}–${group.end_time}` : "");
+        if (group.released_archive) {
+          const marker=document.createElement("span");
+          marker.className="badge warning";
+          marker.textContent="Aus Archiv freigeworden";
+          marker.style.marginLeft="8px";
+          name.appendChild(marker);
+        }
         if (group.reassignment_pending || group.released_free) {
           const marker=document.createElement("span");
           marker.textContent="●";
@@ -2428,6 +2489,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-meta";
 
         metadata.innerHTML = `
+          ${group.released_archive ? `<span>Ursprung: ${escapeHtml(group.source_label || group.job_id || "")}</span>` : ""}
           <span>
             ${Number(
               group.file_count || 0

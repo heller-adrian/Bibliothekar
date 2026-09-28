@@ -201,12 +201,25 @@ def _obsolete_directories_from_plan(
         ],
         *(plan.get("assets_with_plans") or []),
     ]
-    moves = [
+    released_family_ids = {
+        int(item["family_id"])
+        for item in (plan.get("families_with_plans") or [])
+        if str(item.get("action") or "") == "delete"
+        and item.get("family_id") is not None
+    }
+    affected_items = [
         item for item in items
-        if str(item.get("action") or "") == "move"
-        and str(item.get("old_path") or "").strip()
+        if str(item.get("old_path") or "").strip()
+        and (
+            str(item.get("action") or "") in {"move", "delete"}
+            or (
+                str(item.get("action") or "") == "unresolved"
+                and item.get("family_id") is not None
+                and int(item["family_id"]) in released_family_ids
+            )
+        )
     ]
-    if not moves:
+    if not affected_items:
         return []
     if delete_event:
         return [current_root.as_posix()]
@@ -217,14 +230,10 @@ def _obsolete_directories_from_plan(
     if current_root != target_root:
         return [current_root.as_posix()]
 
-    final_paths = [
-        _safe_relative(item.get("new_path"))
-        for item in items
-        if str(item.get("action") or "") not in {"delete", "unresolved"}
-        and str(item.get("new_path") or "").strip()
-    ]
+    desired_directories = _desired_directory_plan(preview, plan)
     affected_containers: set[PurePosixPath] = set()
-    for item in moves:
+    affected_branches: dict[PurePosixPath, set[str]] = {}
+    for item in affected_items:
         old_rel = _safe_relative(item.get("old_path"))
         if tuple(old_rel.parts[:2]) != tuple(current_root.parts):
             continue
@@ -238,19 +247,19 @@ def _obsolete_directories_from_plan(
             else old_rel.parent
         )
         affected_containers.add(container)
+        if branch_index is not None:
+            affected_branches.setdefault(container, set()).add(
+                str(old_rel.parts[branch_index])
+            )
 
     obsolete: set[PurePosixPath] = set()
     for container in affected_containers:
-        final_under_container = [
-            path for path in final_paths
-            if _path_under(path, container)
-        ]
-        if container != current_root and not final_under_container:
+        if container != current_root and container not in desired_directories:
             obsolete.add(container)
             continue
-        for branch in BRANCHES:
+        for branch in affected_branches.get(container, set()):
             branch_path = container / branch
-            if not any(_path_under(path, branch_path) for path in final_paths):
+            if branch_path not in desired_directories:
                 obsolete.add(branch_path)
     return sorted(path.as_posix() for path in obsolete)
 

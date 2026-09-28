@@ -72,7 +72,7 @@ def test_0271_archive_change_ui_is_compact_three_step_assistant():
     assert "Hilfsbereich vorbereiten" in html
     assert "Finder-Arbeit erledigt · weiter zu Prüfen" in html
     assert "Technische Details" in html
-    assert "Freigewordene Zeit wird zuerst fachlich neu zugeordnet." in html
+    assert "Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt." in html
     assert "Änderung abschließen & SSD freigeben" in html
     assert 'id="change-work-progress"' in html
     assert "SSD-Originale und Hilfslinks sicher freigeben" in html
@@ -82,11 +82,12 @@ def test_0271_archive_change_ui_is_compact_three_step_assistant():
     assert "DIESE ORDNER" in html
     assert "DIESE ALTEN ORDNER" in html
     assert "Alter Ordner noch vorhanden" in html
-    assert "Freigewordenen Zeitraum neu zuordnen" in html
-    assert "Ausgewählte Segmente zuordnen" in html
-    assert "Erst Neu-Zuordnung abschließen" in html
+    assert "Freigewordene Archivdateien auf SSD sichern" in html
+    assert "SSD-Kopien prüfen" in html
+    assert "Bestätigte Archivoriginale entfernen" in html
+    assert "Entfernung aus dem Archiv prüfen" in html
     assert "Zielstruktur-Vorschau" in html
-    assert "Nach der Zuordnung werden die endgültigen Finder-Schritte automatisch neu berechnet." in html
+    assert "Zielstruktur-Vorschau" in html
     assert 'id="change-request-inline-error"' in html
 
 

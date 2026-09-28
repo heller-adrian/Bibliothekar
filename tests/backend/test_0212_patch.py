@@ -24,6 +24,7 @@ def test_0212_schema_stores_archived_child_segments(tmp_path: Path):
     db = tmp_path / "qa.sqlite3"
     result = initialize_database(db)
     assert 23 in result["applied_versions"]
+    assert 31 in result["applied_versions"]
     with database_connection(db) as connection:
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(event_change_requests)")}
     assert "child_segments_json" in columns
@@ -47,14 +48,12 @@ def test_0212_version_and_sd_idle_copy():
     assert "Verwaltungsdateien ignoriert" in html
 
 
-def test_0212_archived_reassignment_endpoint_reads_optional_targets_from_payload():
+def test_0212_direct_archived_reassignment_endpoint_is_disabled():
     source = Path("app/main.py").read_text()
     start = source.index("def api_change_request_reassignments_assign")
     end = source.index("@app.post(\"/api/change-requests/{cr_id}/confirm\")", start)
     endpoint = source[start:end]
 
-    assert 'target_event_id=payload.get("target_event_id")' in endpoint
-    assert 'target_child_event_id=payload.get("target_child_event_id")' in endpoint
-    assert 'new_child_start=payload.get("new_child_start")' in endpoint
-    assert 'new_child_end=payload.get("new_child_end")' in endpoint
-    assert "body.get(" not in endpoint
+    assert "Direkte Neu-Zuordnung innerhalb einer Archivänderung ist deaktiviert." in endpoint
+    assert "Freigewordene Archivdateien" in endpoint
+    assert "assign_archive_reassignments(" not in endpoint

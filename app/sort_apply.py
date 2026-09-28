@@ -330,7 +330,12 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
             for operation in reversed(operations):
                 source_rel = _safe_relative(operation["source_relative_path"])
                 destination_rel = _safe_relative(operation["destination_relative_path"])
-                source = source_root.joinpath(*source_rel.parts)
+                operation_source_root = (
+                    target_root
+                    if str(operation.get("source_root_kind") or "job_root") == "shared_workspace"
+                    else source_root
+                )
+                source = operation_source_root.joinpath(*source_rel.parts)
                 destination = target_root.joinpath(*destination_rel.parts)
                 expected_size = int(operation["expected_size_bytes"])
                 expected_sha = str(operation["expected_sha256"] or "").strip()
@@ -590,6 +595,7 @@ def prepare_sort_run(
                 str(entry["destination_relative_path"]),
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
+                str(entry.get("current_root_kind") or "job_root"),
                 status_value,
             ))
 
@@ -603,11 +609,46 @@ def prepare_sort_run(
                 destination_relative_path,
                 expected_size_bytes,
                 expected_sha256,
+                source_root_kind,
                 status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             operations,
+        )
+
+        asset_operations = []
+        sequence_offset = len(plan["files"])
+        for asset_index, entry in enumerate(plan.get("assets") or [], start=1):
+            status_value = (
+                "already_at_target"
+                if entry["status"] == "already_at_target"
+                else "planned"
+            )
+            asset_operations.append((
+                run_id,
+                sequence_offset + asset_index,
+                str(entry.get("asset_kind") or "other"),
+                entry.get("family_id"),
+                entry.get("source_file_id"),
+                str(entry["source_relative_path"]),
+                str(entry["destination_relative_path"]),
+                int(entry["expected_size_bytes"]),
+                str(entry["stored_sha256"]),
+                str(entry.get("source_root_kind") or "shared_workspace"),
+                status_value,
+            ))
+
+        connection.executemany(
+            """
+            INSERT INTO sort_asset_operations (
+                sort_run_id, sequence_number, asset_kind, family_id,
+                source_file_id, source_relative_path, destination_relative_path,
+                expected_size_bytes, expected_sha256, source_root_kind, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            asset_operations,
         )
 
         connection.execute(
@@ -889,15 +930,25 @@ def _remove_empty_source_directories(
     plan: dict[str, Any],
 ) -> list[Path]:
     source_root = Path(plan["source_root"]).resolve(strict=False)
+    target_root = Path(plan["target_root"]).resolve(strict=False)
     candidates: set[Path] = set()
 
     for entry in [*plan["files"], *(plan.get("assets") or [])]:
         if entry["status"] != "move":
             continue
 
+        entry_source_root = (
+            target_root
+            if str(
+                entry.get("current_root_kind")
+                or entry.get("source_root_kind")
+                or "job_root"
+            ) == "shared_workspace"
+            else source_root
+        )
         current = Path(entry["source_absolute_path"]).parent
 
-        while current != source_root and _is_relative_to(current, source_root):
+        while current != entry_source_root and _is_relative_to(current, entry_source_root):
             candidates.add(current)
             current = current.parent
 
@@ -1090,6 +1141,14 @@ def _finalize_database(
                     job_id,
                 ),
             )
+
+        for asset in plan.get("assets") or []:
+            released_asset_id = asset.get("released_archive_asset_id")
+            if released_asset_id is not None:
+                connection.execute(
+                    "DELETE FROM released_archive_assets WHERE id=? AND job_id=?",
+                    (int(released_asset_id), job_id),
+                )
 
         if is_reapply:
             pending_delete = bool(event["pending_delete"] or 0)

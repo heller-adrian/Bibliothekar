@@ -11,6 +11,7 @@ from app.archive_staging import (
     describe_archive_change_staging_for_request,
 )
 from app.event_change_request import get_event_change_files, get_event_change_request
+from app.archive_release_stock import describe_archive_release_stock
 
 
 class ArchiveChangeAssistantError(RuntimeError):
@@ -93,9 +94,12 @@ def build_archive_change_assistant(
     description = describe_archive_change_staging_for_request(
         database_path, archive_root, cr_id
     )
+    release_stock = describe_archive_release_stock(database_path, cr_id)
 
     status = str(cr.get("status") or "")
-    preparation_required = bool(description.get("required"))
+    preparation_required = bool(
+        description.get("required") or release_stock.get("required")
+    )
     target_root = str(description.get("target_root") or "")
     helper_root = str(description.get("prepared_structure_path") or "")
     missing = list(description.get("missing_directories") or [])
@@ -215,6 +219,11 @@ def build_archive_change_assistant(
 
     if status == "aenderbar_vorschlagen" and preparation_required:
         phase = "prepare"
+    elif (
+        bool(release_stock.get("required"))
+        and not bool(release_stock.get("archive_removed"))
+    ):
+        phase = "finder"
     elif operations:
         phase = "finder"
     else:
@@ -233,11 +242,15 @@ def build_archive_change_assistant(
             "incoming_file_count": int(description.get("incoming_file_count") or 0),
             "missing_directories": missing,
             "helper_directories": list(description.get("helper_directories") or []),
+            "release_file_count": int(release_stock.get("file_count") or 0),
+            "release_segment_count": len(release_stock.get("segments") or []),
             "summary": (
                 f"{int(description.get('incoming_file_count') or 0)} neue Dateien · "
-                f"{len(missing)} fehlende Ordner"
+                f"{len(missing)} fehlende Ordner · "
+                f"{int(release_stock.get('file_count') or 0)} freigewordene Archivdateien"
             ),
         },
+        "release_stock": release_stock,
         "operations": operations,
         "target_structure": {
             "root": f"Kamerabibliothek/{target_root}",

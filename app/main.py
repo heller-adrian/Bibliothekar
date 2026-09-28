@@ -73,6 +73,7 @@ from app.event_structure import (
 from app.planning import (
     list_job_available_families,
     list_job_planning_overview,
+    list_global_released_archive_groups,
 )
 from app.sort_plan import (
     SortPlanError,
@@ -5481,6 +5482,9 @@ def api_workspace_summary(
         "events": events,
         "time_segments": list_job_time_segments(DATABASE_FILE, job_id),
         "planning_overview": planning_overview,
+        "released_archive_groups": list_global_released_archive_groups(
+            DATABASE_FILE
+        ),
         "archive_change_review_count": (
             len(archive_reviews)
         ),
@@ -7604,19 +7608,14 @@ def api_change_request_reassignments(cr_id: str):
 
 @app.post("/api/change-requests/{cr_id}/reassignments")
 def api_change_request_reassignments_assign(cr_id: str, payload: dict[str, Any]):
-    try:
-        return assign_archive_reassignments(
-            DATABASE_FILE, cr_id, list(payload.get("family_ids") or []),
-            target_mode=str(payload.get("target_mode") or ""),
-            new_event_name=payload.get("new_event_name"),
-            target_event_id=payload.get("target_event_id"),
-            target_child_event_id=payload.get("target_child_event_id"),
-            new_child_start=payload.get("new_child_start"),
-            new_child_end=payload.get("new_child_end"),
-            workspace_path=WORKSPACE_PATH,
-        )
-    except ArchiveReassignmentError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Direkte Neu-Zuordnung innerhalb einer Archivänderung ist deaktiviert. "
+            "Freigewordene Archivdateien werden zuerst sicher in den SSD-Arbeitsbereich zurückgeholt "
+            "und nach Abschluss über „Aufnahmen“ neu zugeordnet."
+        ),
+    )
 
 
 @app.post("/api/change-requests/{cr_id}/confirm")
@@ -7647,11 +7646,39 @@ def api_cancel_change(cr_id: str) -> JSONResponse:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.post("/api/change-requests/{cr_id}/release-copy/verify")
+def api_verify_archive_release_copy(cr_id: str) -> JSONResponse:
+    """Freigewordene Archivdateien auf der SSD gegen gespeicherte SHA-256 prüfen."""
+    try:
+        from app.archive_release_stock import verify_archive_release_copies
+        result = verify_archive_release_copies(
+            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+        )
+        return JSONResponse(content=result)
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/change-requests/{cr_id}/release-removal/verify")
+def api_verify_archive_release_removal(cr_id: str) -> JSONResponse:
+    """Nach bestätigter SSD-Kopie prüfen, dass die Archivoriginale entfernt wurden."""
+    try:
+        from app.archive_release_stock import verify_archive_release_removal
+        result = verify_archive_release_removal(
+            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+        )
+        return JSONResponse(content=result)
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.post("/api/change-requests/{cr_id}/verify")
 def api_verify_change(cr_id: str) -> JSONResponse:
     """Manuelle Archivänderung rein lesend gegen die Kamerabibliothek prüfen."""
     try:
-        result = verify_event_change(DATABASE_FILE, cr_id, ARCHIVE_ROOT)
+        result = verify_event_change(
+            DATABASE_FILE, cr_id, ARCHIVE_ROOT, WORKSPACE_PATH
+        )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

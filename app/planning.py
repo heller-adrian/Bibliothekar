@@ -197,13 +197,11 @@ def list_job_available_families(
         if row.get("family_id") is not None
     }
 
-    result=[f for f in family_stats if int(f['family_id']) not in assigned_family_ids]
-    known={f['family_id'] for f in result}
-    for card in archive_free_cards(database_path,job_id):
-        for family in card['families']:
-            if family['family_id'] not in known:
-                result.append(family);known.add(family['family_id'])
-    return result
+    return [
+        family
+        for family in family_stats
+        if int(family["family_id"]) not in assigned_family_ids
+    ]
 
 
 
@@ -277,22 +275,134 @@ def _group_available_families(
     return result
 
 
-def archive_free_cards(database_path, job_id):
-    from app.archive_reassignment import list_archive_reassignments
-    families={f['family_id']:f for f in _load_family_stats(database_path,job_id)}
-    with database_connection(database_path) as c:
-        requests=[str(r['id']) for r in c.execute("SELECT id FROM event_change_requests WHERE job_id=? AND status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt')",(job_id,))]
-    result=[]
-    for cr_id in requests:
-        task=list_archive_reassignments(database_path,cr_id)
-        for segment in task['reassignment_segments']:
-            fs=[families[f] for f in segment['family_ids'] if f in families]
-            if not fs: continue
-            group=_group_available_families(fs,{segment['day_key']:len(fs)})[0]
-            result.append({**group,**segment,'families':fs,'card_key':cr_id+'/'+segment['start_datetime']+'/'+segment['end_datetime'],
-                'reassignment_pending':True,'archive_change_request_id':cr_id})
-    return result
+def _released_archive_family_ids(
+    database_path: Path,
+    job_id: str,
+) -> set[int]:
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT DISTINCT marker.family_id
+               FROM released_free_families marker
+               JOIN files f ON f.family_id=marker.family_id
+               WHERE marker.job_id=?
+                 AND f.current_root_kind='shared_workspace'
+                 AND f.current_relative_path LIKE 'Freigewordene Archivdateien/%'""",
+            (job_id,),
+        ).fetchall()
+    return {int(row["family_id"]) for row in rows}
 
+
+def list_global_released_archive_groups(
+    database_path: Path,
+) -> list[dict[str, Any]]:
+    """Globaler freier SSD-Bestand, der aus abgeschlossenen Archivänderungen stammt."""
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT
+                   marker.job_id,
+                   marker.family_id,
+                   marker.released_start_datetime,
+                   marker.released_end_datetime,
+                   ff.family_key,
+                   ff.selected_capture_time,
+                   ff.capture_time_confidence,
+                   COALESCE(j.source_volume_label,marker.job_id) AS source_label,
+                   COUNT(DISTINCT f.id) AS file_count,
+                   COALESCE(SUM(CASE WHEN f.id IS NOT NULL THEN f.size_bytes ELSE 0 END),0) AS total_size_bytes,
+                   COALESCE(SUM(CASE WHEN f.review_status='required' THEN 1 ELSE 0 END),0) AS review_required_count
+               FROM released_free_families marker
+               JOIN file_families ff ON ff.id=marker.family_id
+               JOIN jobs j ON j.id=marker.job_id
+               LEFT JOIN files f ON f.family_id=ff.id
+               WHERE ff.selected_capture_time IS NOT NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM event_assignments ea
+                     JOIN events e ON e.id=ea.event_id
+                     WHERE ea.family_id=ff.id
+                       AND e.status IN ('draft','planned','applied','archived')
+                 )
+                 AND EXISTS (
+                     SELECT 1 FROM files rf
+                     WHERE rf.family_id=ff.id
+                       AND rf.current_root_kind='shared_workspace'
+                       AND rf.current_relative_path LIKE 'Freigewordene Archivdateien/%'
+                 )
+               GROUP BY marker.job_id,marker.family_id,
+                        marker.released_start_datetime,marker.released_end_datetime,
+                        ff.family_key,ff.selected_capture_time,ff.capture_time_confidence,
+                        j.source_volume_label
+               ORDER BY marker.released_start_datetime,marker.job_id,marker.family_id"""
+        ).fetchall()
+        released_asset_rows = connection.execute(
+            """SELECT job_id,family_id,COUNT(*) AS n,COALESCE(SUM(size_bytes),0) AS bytes
+               FROM released_archive_assets
+               WHERE family_id IS NOT NULL
+               GROUP BY job_id,family_id"""
+        ).fetchall()
+
+    released_asset_stats = {
+        (str(row["job_id"]), int(row["family_id"])): {
+            "file_count": int(row["n"]),
+            "total_size_bytes": int(row["bytes"]),
+        }
+        for row in released_asset_rows
+    }
+
+    grouped: dict[tuple[str,str,str], dict[str, Any]] = {}
+    for row in rows:
+        job_id = str(row["job_id"])
+        start = str(row["released_start_datetime"] or "")
+        end = str(row["released_end_datetime"] or "")
+        key = (job_id, start, end)
+        item = grouped.setdefault(key, {
+            "group_type": "released_archive",
+            "released_archive": True,
+            "job_id": job_id,
+            "source_label": str(row["source_label"] or job_id),
+            "start_datetime": start,
+            "end_datetime": end,
+            "day_key": start[:10] if len(start) >= 10 else None,
+            "start_time": start[11:16] if len(start) >= 16 else "00:00",
+            "end_time": end[11:16] if len(end) >= 16 else "23:59",
+            "has_date": bool(start[:10]),
+            "family_ids": [],
+            "family_count": 0,
+            "file_count": 0,
+            "total_size_bytes": 0,
+            "review_required_count": 0,
+            "families": [],
+            "card_key": f"released:{job_id}:{start}:{end}",
+        })
+        family_id = int(row["family_id"])
+        extra = released_asset_stats.get((job_id, family_id), {})
+        family = {
+            "family_id": family_id,
+            "family_key": str(row["family_key"]),
+            "selected_capture_time": row["selected_capture_time"],
+            "capture_time_confidence": row["capture_time_confidence"],
+            "day_key": str(row["selected_capture_time"] or "")[:10] or None,
+            "has_date": row["selected_capture_time"] is not None,
+            "file_count": int(row["file_count"]) + int(extra.get("file_count") or 0),
+            "total_size_bytes": int(row["total_size_bytes"]) + int(extra.get("total_size_bytes") or 0),
+            "review_required_count": int(row["review_required_count"]),
+        }
+        item["family_ids"].append(family["family_id"])
+        item["family_count"] += 1
+        item["file_count"] += family["file_count"]
+        item["total_size_bytes"] += family["total_size_bytes"]
+        item["review_required_count"] += family["review_required_count"]
+        item["families"].append(family)
+
+    result = list(grouped.values())
+    for item in result:
+        item["family_ids"].sort()
+        item["total_family_count"] = item["family_count"]
+        item["partially_assigned"] = False
+    result.sort(key=lambda item: (
+        str(item.get("start_datetime") or ""),
+        str(item.get("job_id") or ""),
+    ))
+    return result
 
 def interval_cards(database_path, job_id, available_families, total_by_day):
     from app.free_time import free_ranges_for_day
@@ -483,16 +593,16 @@ def list_job_planning_overview(
                     }
                 )
 
+    released_archive_ids = _released_archive_family_ids(database_path, job_id)
     available_families = [
         family
         for family in family_stats
-        if int(family["family_id"])
-        not in assigned_family_ids
+        if int(family["family_id"]) not in assigned_family_ids
+        and int(family["family_id"]) not in released_archive_ids
     ]
 
     available_day_groups = interval_cards(database_path, job_id, available_families, total_by_day)
 
-    available_day_groups.extend(archive_free_cards(database_path,job_id))
     available_day_groups.sort(key=lambda x:(str(x.get('start_datetime') or ''),str(x.get('card_key') or '')))
     event_groups = list(
         event_groups_by_id.values()

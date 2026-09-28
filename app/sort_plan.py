@@ -524,6 +524,8 @@ def _build_plan_token(
                 "family_id": entry.get("family_id"),
                 "source_file_id": entry.get("source_file_id"),
                 "source": str(entry["source_relative_path"]),
+                "source_root_kind": str(entry.get("source_root_kind") or "shared_workspace"),
+                "released_archive_asset_id": entry.get("released_archive_asset_id"),
                 "destination": str(entry["destination_relative_path"]),
                 "size": int(entry["expected_size_bytes"]),
                 "sha256": str(entry.get("stored_sha256") or ""),
@@ -1461,6 +1463,210 @@ def build_event_sort_plan(
         })
 
     asset_entries: list[dict[str, Any]] = []
+
+    # Zusatzdateien, die mit einer archivierten Familie in den Rückkehrbestand
+    # gelangt sind, werden beim nächsten normalen Anwenden wieder über dieselbe
+    # sichere Asset-Pipeline mitgeführt.
+    if family_ids and not allow_reapply:
+        with database_connection(database_path) as connection:
+            released_archive_asset_rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"""SELECT *
+                        FROM released_archive_assets
+                        WHERE job_id=?
+                          AND family_id IN ({family_placeholders})
+                        ORDER BY family_id,current_relative_path,id""",
+                    (job_id, *family_ids),
+                ).fetchall()
+            ]
+
+        camera_entries_by_family: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for entry in entries:
+            if entry.get("family_id") is not None:
+                camera_entries_by_family[int(entry["family_id"])].append(entry)
+
+        for asset in released_archive_asset_rows:
+            family_id = (
+                int(asset["family_id"])
+                if asset.get("family_id") is not None
+                else None
+            )
+            if family_id is None:
+                blockers.append({
+                    "code": "released_asset_family_missing",
+                    "path": str(asset.get("current_relative_path") or ""),
+                    "message": "Eine freigewordene Zusatzdatei besitzt keine Dateifamilie.",
+                })
+                continue
+
+            candidates = camera_entries_by_family.get(family_id, [])
+            destination_containers = {
+                PurePosixPath(str(candidate["destination_relative_path"])).parent.parent
+                for candidate in candidates
+            }
+            if not candidates or len(destination_containers) != 1:
+                blockers.append({
+                    "code": "released_asset_target_ambiguous",
+                    "family_id": family_id,
+                    "path": str(asset.get("current_relative_path") or ""),
+                    "message": (
+                        "Das Ziel einer freigewordenen Zusatzdatei ist innerhalb "
+                        "ihrer Kamerafamilie nicht eindeutig."
+                    ),
+                })
+                continue
+
+            source_relative = _safe_relative_path(
+                asset.get("current_relative_path"),
+                "Freigewordene Zusatzdatei",
+            )
+            source_absolute = target_root.joinpath(*source_relative.parts).resolve(
+                strict=False
+            )
+            branch = next(
+                (part for part in source_relative.parts if part in WORKSPACE_BRANCHES),
+                "Export" if str(asset.get("asset_kind") or "") == "export" else "Alle",
+            )
+            destination_container = next(iter(destination_containers))
+            filename = _safe_component(source_relative.name, "Zusatzdateiname")
+            destination_relative = destination_container / branch / filename
+            destination_absolute = target_root.joinpath(
+                *destination_relative.parts
+            ).resolve(strict=False)
+
+            if not _is_relative_to(source_absolute, target_root):
+                blockers.append({
+                    "code": "released_asset_source_outside_root",
+                    "path": str(source_relative),
+                    "message": "Eine freigewordene Zusatzdatei verlässt den Arbeitsbereich.",
+                })
+            if not _is_relative_to(destination_absolute, target_root):
+                blockers.append({
+                    "code": "released_asset_target_outside_root",
+                    "path": str(destination_relative),
+                    "message": "Das Ziel einer freigewordenen Zusatzdatei verlässt den Arbeitsbereich.",
+                })
+
+            source_exists = source_absolute.exists()
+            source_is_symlink = source_absolute.is_symlink() if source_exists else False
+            source_is_file = source_absolute.is_file() if source_exists else False
+            source_readable = os.access(source_absolute, os.R_OK) if source_exists else False
+            source_stat = (
+                source_absolute.stat(follow_symlinks=False)
+                if source_is_file and not source_is_symlink
+                else None
+            )
+            source_size = int(source_stat.st_size) if source_stat is not None else None
+            expected_size = int(asset.get("size_bytes") or 0)
+            expected_sha256 = str(asset.get("sha256") or "").strip()
+            same_path = source_absolute == destination_absolute
+            target_exists = destination_absolute.exists()
+            target_conflict = target_exists and not same_path
+            checksum_actual = None
+            checksum_matches = None
+
+            if verify_sha256 and source_is_file and not source_is_symlink and source_readable:
+                checksum_actual = _sha256_file(source_absolute)
+                checksum_matches = bool(expected_sha256) and checksum_actual == expected_sha256
+                if asset_verification_callback is not None:
+                    asset_verification_callback(str(source_relative), expected_size)
+
+            if not source_exists:
+                blockers.append({
+                    "code": "released_asset_source_missing",
+                    "path": str(source_relative),
+                    "message": "Freigewordene Zusatzdatei fehlt: " + str(source_relative),
+                })
+            elif not source_is_file or source_is_symlink:
+                blockers.append({
+                    "code": "released_asset_source_not_regular",
+                    "path": str(source_relative),
+                    "message": "Freigewordene Zusatzdatei ist keine reguläre Datei.",
+                })
+            elif not source_readable:
+                blockers.append({
+                    "code": "released_asset_source_not_readable",
+                    "path": str(source_relative),
+                    "message": "Freigewordene Zusatzdatei ist nicht lesbar.",
+                })
+            if source_is_file and source_size != expected_size:
+                blockers.append({
+                    "code": "released_asset_source_size_mismatch",
+                    "path": str(source_relative),
+                    "message": "Freigewordene Zusatzdatei hat eine abweichende Größe.",
+                })
+            if not expected_sha256:
+                blockers.append({
+                    "code": "released_asset_checksum_missing",
+                    "path": str(source_relative),
+                    "message": "Für eine freigewordene Zusatzdatei fehlt die SHA-256-Summe.",
+                })
+            elif verify_sha256 and checksum_matches is False:
+                blockers.append({
+                    "code": "released_asset_checksum_mismatch",
+                    "path": str(source_relative),
+                    "message": "SHA-256-Prüfung einer freigewordenen Zusatzdatei ist fehlgeschlagen.",
+                })
+            if target_conflict:
+                blockers.append({
+                    "code": "released_asset_target_exists",
+                    "path": str(destination_relative),
+                    "message": "Am Ziel einer freigewordenen Zusatzdatei existiert bereits ein anderer Eintrag.",
+                })
+            if _path_has_symlink(source_absolute, target_root):
+                blockers.append({
+                    "code": "released_asset_source_symlink_component",
+                    "path": str(source_relative),
+                    "message": "Der Quellpfad einer freigewordenen Zusatzdatei enthält einen symbolischen Link.",
+                })
+            if _path_has_symlink(destination_absolute.parent, target_root):
+                blockers.append({
+                    "code": "released_asset_target_symlink_component",
+                    "path": str(destination_relative),
+                    "message": "Der Zielpfad einer freigewordenen Zusatzdatei enthält einen symbolischen Link.",
+                })
+
+            status = "move"
+            if same_path:
+                status = "already_at_target"
+            elif not source_exists:
+                status = "blocked_missing_source"
+            elif target_conflict:
+                status = "blocked_target_exists"
+            elif source_is_file and source_size != expected_size:
+                status = "blocked_size_mismatch"
+            elif verify_sha256 and checksum_matches is False:
+                status = "blocked_checksum_mismatch"
+
+            planned_directories.add(str(destination_relative.parent))
+            asset_entries.append({
+                "released_archive_asset_id": int(asset["id"]),
+                "asset_kind": str(asset.get("asset_kind") or "other"),
+                "family_id": family_id,
+                "source_file_id": asset.get("source_file_id"),
+                "source_root_kind": "shared_workspace",
+                "current_root_kind": "shared_workspace",
+                "source_relative_path": str(source_relative),
+                "source_absolute_path": str(source_absolute),
+                "destination_relative_path": str(destination_relative),
+                "destination_absolute_path": str(destination_absolute),
+                "expected_size_bytes": expected_size,
+                "source_size_bytes": source_size,
+                "source_device": int(source_stat.st_dev) if source_stat is not None else None,
+                "source_inode": int(source_stat.st_ino) if source_stat is not None else None,
+                "source_mtime_ns": int(source_stat.st_mtime_ns) if source_stat is not None else None,
+                "stored_sha256": expected_sha256 or None,
+                "sha256_verified_now": verify_sha256,
+                "calculated_sha256": checksum_actual,
+                "sha256_matches": checksum_matches,
+                "source_exists": source_exists,
+                "source_readable": source_readable,
+                "source_is_regular_file": source_is_file and not source_is_symlink,
+                "target_exists": target_exists,
+                "same_path": same_path,
+                "status": status,
+            })
 
     if allow_reapply and reapply_inventory is not None:
         camera_entries_by_file = {

@@ -207,6 +207,7 @@ def prepare_reapply_sort_run(
                 str(entry["destination_relative_path"]),
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
+                "shared_workspace",
                 status_value,
             ))
 
@@ -215,9 +216,9 @@ def prepare_reapply_sort_run(
             INSERT INTO sort_operations (
                 sort_run_id, sequence_number, file_id,
                 source_relative_path, destination_relative_path,
-                expected_size_bytes, expected_sha256, status
+                expected_size_bytes, expected_sha256, source_root_kind, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             operations,
         )
@@ -240,6 +241,7 @@ def prepare_reapply_sort_run(
                 str(entry["destination_relative_path"]),
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
+                "shared_workspace",
                 status_value,
             ))
 
@@ -248,9 +250,9 @@ def prepare_reapply_sort_run(
             INSERT INTO sort_asset_operations (
                 sort_run_id, sequence_number, asset_kind, family_id,
                 source_file_id, source_relative_path, destination_relative_path,
-                expected_size_bytes, expected_sha256, status
+                expected_size_bytes, expected_sha256, source_root_kind, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             asset_operations,
         )

@@ -3513,10 +3513,9 @@ EVENTS_HTML = r"""<!doctype html>
           return;
         }
 
-        const [assistantRes, filesRes, reassignRes] = await Promise.all([
+        const [assistantRes, filesRes] = await Promise.all([
           fetch(`/api/change-requests/${encodeURIComponent(crId)}/assistant`),
-          fetch(`/api/change-requests/${encodeURIComponent(crId)}/files`),
-          fetch(`/api/change-requests/${encodeURIComponent(crId)}/reassignments`)
+          fetch(`/api/change-requests/${encodeURIComponent(crId)}/files`)
         ]);
         if (!assistantRes.ok) {
           const data = await assistantRes.json().catch(() => ({}));
@@ -3524,9 +3523,10 @@ EVENTS_HTML = r"""<!doctype html>
         }
         const assistant = await assistantRes.json();
         const reviewRows = filesRes.ok ? await filesRes.json() : [];
-        const reassign = reassignRes.ok ? await reassignRes.json() : null;
-        const reassignCount = Number(reassign?.family_count || 0);
-        const finderNeeded = (assistant.operations || []).length > 0 || reassignCount > 0;
+        const releaseStock = assistant.release_stock || {};
+        const finderNeeded =
+          (assistant.operations || []).length > 0
+          || Boolean(releaseStock.required);
 
         const sequence = [];
         if (assistant.preparation_required) sequence.push("prepare");
@@ -3574,7 +3574,14 @@ EVENTS_HTML = r"""<!doctype html>
             const source = row.source_root_kind === "shared_workspace"
               ? (row.workspace_staging_path || row.workspace_original_path || row.old_path || "—")
               : (row.old_path || "—");
-            detail += `<div class="card" style="padding:9px 10px"><strong>${escapeHtml(String(row.action || "Änderung"))}</strong><div class="muted">IST</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code><div class="muted" style="margin-top:5px">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "Neu zuzuordnen")}</code></div>`;
+            const releaseTarget = String(row.workspace_release_path || "");
+            const targetText = releaseTarget
+              ? `Arbeitsbereich/${releaseTarget}`
+              : (row.new_path || "—");
+            const actionText = releaseTarget
+              ? "Freigewordene Archivdatei"
+              : String(row.action || "Änderung");
+            detail += `<div class="card" style="padding:9px 10px"><strong>${escapeHtml(actionText)}</strong><div class="muted">IST</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code><div class="muted" style="margin-top:5px">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(targetText)}</code></div>`;
           }
           detail += `</div></details>`;
           return detail;
@@ -3583,14 +3590,17 @@ EVENTS_HTML = r"""<!doctype html>
         if (phase === "prepare") {
           const prep = assistant.preparation || {};
           const missing = prep.missing_directories || [];
-          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Hilfsbereich vorbereiten</h3><p class="muted">Noch wird nur <em>Später zuordnen</em> vorbereitet. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.</p></div></div>`;
-          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} neue Dateien</strong> werden als Hardlinks vorbereitet · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt.`;
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Hilfsbereiche vorbereiten</h3><p class="muted">Die App bereitet nur SSD-Hilfsstrukturen vor. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.</p></div></div>`;
+          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} neue Dateien</strong> werden unter <em>Später zuordnen</em> als Hardlinks vorbereitet · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt.`;
+          if (Number(prep.release_file_count || 0) > 0) {
+            html += `<div style="margin-top:7px"><strong>${Number(prep.release_file_count)} freigewordene Archivdateien</strong>: Die benötigten Zielordner unter <em>Freigewordene Archivdateien</em> werden angelegt. Die Dateien selbst kopierst du erst in Schritt 2 manuell.</div>`;
+          }
           if (prep.helper_root) html += `<div class="muted" style="margin-top:7px">Hilfsbereich</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(prep.helper_root)}</code>`;
           if (missing.length) {
             html += `<details style="margin-top:10px"><summary>Fehlende Struktur anzeigen</summary><div style="margin-top:7px">${missing.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
           }
           html += `</div>`;
-          html += `<details class="card"><summary><strong>Was passiert beim Vorbereiten?</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich die für diesen Auftrag benötigten Ordner und Hardlinks unter „Später zuordnen“. SSD-Originale und Kamerabibliothek werden nicht verändert.</p></details>`;
+          html += `<details class="card"><summary><strong>Was passiert beim Vorbereiten?</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und – falls nötig – Hardlinks unter „Später zuordnen“. Freigewordene Archivdateien werden nicht automatisch kopiert. Die Kamerabibliothek bleibt unverändert.</p></details>`;
           html += `<div id="change-prep-progress" class="change-progress"><div class="muted" data-progress-label>Hilfsbereich wird vorbereitet …</div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
           if (String(cr.status) === "aenderbar_bestaetigt") {
             html += `<div class="success-text">✓ Hilfsbereich ist bereits vorbereitet.</div><div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepared-next>Weiter</button></div></section>`;
@@ -3600,51 +3610,45 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         if (phase === "finder") {
-          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Finder-Arbeit</h3><p class="muted">Freigewordene Zeit wird zuerst fachlich neu zugeordnet. Danach zeigt die App nur die endgültigen manuellen Finder-Handlungen.</p></div></div>`;
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Finder-Arbeit</h3><p class="muted">Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv.</p></div></div>`;
 
-          if (reassignCount > 0) {
-            const reassignmentSegments = reassign.reassignment_segments || [];
-            const targets = reassign.targets || [];
-            const occupiedMonths = new Set(reassign.occupied_no_event_months || []);
-            const oneSegment = reassignmentSegments.length === 1;
+          const releaseRequired = Boolean(releaseStock.required);
+          const releaseStage = String(releaseStock.stage || "complete");
+          const releaseRows = releaseStock.rows || [];
+          const releaseSegments = releaseStock.segments || [];
 
-            html += `<div class="card" data-archive-reassign-panel><strong>1. Freigewordenen Zeitraum neu zuordnen</strong><p class="muted">${reassignCount} Familie${reassignCount===1?"":"n"} liegt in einem Bereich, der nach der Bearbeitung nicht mehr zu „${escapeHtml(assistant.event_name || cr.event_name || "diesem Ereignis")}“ gehört. Wähle ein oder mehrere vollständige Segmente und ihr neues fachliches Ziel.</p>`;
-
-            if (reassignmentSegments.length) {
-              html += `<div style="display:grid;gap:7px;margin:10px 0">`;
-              reassignmentSegments.forEach((segment,index) => {
-                const familyIds=(segment.family_ids || []).map(Number).filter(Number.isFinite);
-                const dayKey=String(segment.day_key || "");
-                html += `<label class="card" style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px"><input type="checkbox" data-archive-reassign-segment data-family-ids="${escapeHtml(familyIds.join(","))}" data-month="${escapeHtml(dayKey.slice(0,7))}" data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(segment.start_time || "")}" data-end-time="${escapeHtml(segment.end_time || "")}" ${oneSegment?"checked":""}><span><strong>${escapeHtml(dayKey)} · ${escapeHtml(segment.start_time || "")}–${escapeHtml(segment.end_time || "")}</strong><br><span class="muted">${Number(segment.family_count || 0)} Familien · ${Number(segment.file_count || 0)} Dateien</span></span></label>`;
-              });
+          if (releaseRequired && releaseStage === "copy_to_ssd") {
+            html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">Kopiere die unten genannten Dateien aus der Kamerabibliothek in die vorbereiteten Zielordner unter <em>Arbeitsbereich/Freigewordene Archivdateien</em>. Noch nichts im Archiv löschen.</p>`;
+            if (releaseSegments.length) {
+              html += `<div style="display:grid;gap:6px;margin-top:10px">`;
+              for (const segment of releaseSegments) {
+                const label = `${String(segment.day_key || "")} · ${String(segment.start_time || "")}–${String(segment.end_time || "")}`;
+                html += `<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;border:1px solid var(--border);border-radius:9px;padding:7px 10px"><strong>${escapeHtml(label)}</strong><span class="muted">${Number(segment.family_count || 0)} Familien · ${Number(segment.release_file_count ?? segment.file_count ?? 0)} Dateien</span></div>`;
+              }
               html += `</div>`;
             }
-
-            let targetOptions = `<option value="">Ziel wählen …</option><option value="new_event">Neues Ereignis</option><option value="new_no_event" data-mode="new_no_event">Neue „Ohne Ereignis“-Sammlung</option>`;
-            for (const target of targets) {
-              const id=String(target.id || "");
-              if (!id) continue;
-              if (String(target.event_kind || "") === "no_event") {
-                targetOptions += `<option value="existing_no_event|${escapeHtml(id)}" data-mode="existing_no_event" data-target-month="${escapeHtml(String(target.start_datetime || "").slice(0,7))}">Bestehendes Ohne Ereignis · ${escapeHtml(String(target.start_datetime || "").slice(0,7))}</option>`;
-              } else {
-                targetOptions += `<option value="existing_event|${escapeHtml(id)}" data-mode="existing_event">Bestehendes Ereignis · ${escapeHtml(target.name || target.folder_name || id)}</option>`;
-                targetOptions += `<option value="new_child|${escapeHtml(id)}" data-mode="new_child">Neues Unterereignis in · ${escapeHtml(target.name || target.folder_name || id)}</option>`;
-              }
+            html += `<details style="margin-top:10px"><summary>Konkrete Kopierpfade anzeigen</summary><div style="display:grid;gap:8px;margin-top:8px">`;
+            for (const row of releaseRows) {
+              html += `<div class="card" style="padding:9px 10px"><div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(row.old_path || "")}</code><div class="muted" style="margin-top:5px">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">Arbeitsbereich/${escapeHtml(row.workspace_release_path || row.calculated_workspace_release_path || "")}</code></div>`;
             }
-
-            html += `<div style="display:grid;gap:9px"><label><span>Ziel</span><select data-archive-reassign-target>${targetOptions}</select></label><label data-archive-reassign-name-row hidden><span>Name</span><input type="text" data-archive-reassign-name placeholder="Name des neuen Ereignisses"></label><div data-archive-reassign-child-times hidden style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><label><span>Startzeit</span><input type="time" data-archive-reassign-start></label><label><span>Endzeit</span><input type="time" data-archive-reassign-end></label></div><div class="muted" data-archive-reassign-note></div><div class="error-box" data-archive-reassign-error hidden></div><div><button type="button" class="plan-button bk-positive-action" data-archive-reassign-apply>Ausgewählte Segmente zuordnen</button></div></div>`;
-
-            if (occupiedMonths.size) {
-              html += `<p class="muted" style="margin-top:10px">Für Monate mit einer bereits vorhandenen „Ohne Ereignis“-Sammlung wird keine zweite Sammlung angelegt. Dort muss die bestehende Sammlung verwendet werden, sofern sie als archiviertes Ziel verfügbar ist.</p>`;
-            }
-            html += `</div>`;
-            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" disabled>Erst Neu-Zuordnung abschließen</button></div></section>`;
+            html += `</div></details></div>`;
+            html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-copy-verify>SSD-Kopien prüfen</button></div></section>`;
+          } else if (releaseRequired && releaseStage === "remove_archive") {
+            html += `<div class="card"><strong>✓ SSD-Kopien vollständig geprüft</strong><p class="success-text" style="margin-top:5px">Alle freigewordenen Dateien stimmen nach Größe und SHA-256 mit dem geplanten Bestand überein.</p></div>`;
+            html += `<div class="card"><strong>2. Bestätigte Archivoriginale entfernen</strong><p class="muted" style="margin-top:5px">Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.</p><details style="margin-top:10px"><summary>${releaseRows.length} Archivpfade anzeigen</summary><div style="margin-top:8px">${releaseRows.map(row => `<code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(row.old_path || "")}</code>`).join("")}</div></details></div>`;
+            html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-removal-verify>Entfernung aus dem Archiv prüfen</button></div></section>`;
           } else {
-            if (targetTree) {
-              html += `<details class="card"><summary><strong>Zielstruktur-Vorschau</strong></summary><p class="muted" style="margin-top:8px">So soll das bearbeitete Ereignis nach den Finder-Schritten im Archiv aussehen.</p><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></details>`;
+            let number = 1;
+            if (releaseRequired) {
+              html += `<div class="card"><strong>✓ Freigewordene Archivdateien sicher zurückgeholt</strong><p class="success-text" style="margin-top:5px">${Number(releaseStock.family_count || 0)} Familien bleiben nach Abschluss als freier Bestand unter <em>Freigewordene Archivdateien</em> auf der SSD erhalten.</p></div>`;
             }
 
-            let number = 1;
+            if (targetTree) {
+              html += `<details class="card"><summary><strong>Zielstruktur-Vorschau</strong></summary><p class="muted" style="margin-top:8px">So soll das bearbeitete Ereignis nach den folgenden Finder-Schritten im Archiv aussehen.</p><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></details>`;
+            }
+
             for (const operation of assistant.operations || []) {
               html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
               if ((operation.sources || []).length) {
@@ -3681,96 +3685,45 @@ EVENTS_HTML = r"""<!doctype html>
 
         changeRequestBody.innerHTML = html;
 
-        const reassignPanel=changeRequestBody.querySelector("[data-archive-reassign-panel]");
-        if (reassignPanel) {
-          const segmentChecks=[...reassignPanel.querySelectorAll("[data-archive-reassign-segment]")];
-          const targetSelect=reassignPanel.querySelector("[data-archive-reassign-target]");
-          const nameRow=reassignPanel.querySelector("[data-archive-reassign-name-row]");
-          const nameInput=reassignPanel.querySelector("[data-archive-reassign-name]");
-          const childTimes=reassignPanel.querySelector("[data-archive-reassign-child-times]");
-          const startInput=reassignPanel.querySelector("[data-archive-reassign-start]");
-          const endInput=reassignPanel.querySelector("[data-archive-reassign-end]");
-          const note=reassignPanel.querySelector("[data-archive-reassign-note]");
-          const errorBox=reassignPanel.querySelector("[data-archive-reassign-error]");
-          const applyBtn=reassignPanel.querySelector("[data-archive-reassign-apply]");
-          const occupiedMonths=new Set(reassign?.occupied_no_event_months || []);
+        const releaseCopyButton=changeRequestBody.querySelector("[data-cr-release-copy-verify]");
+        releaseCopyButton?.addEventListener("click", async () => {
+          const progress=document.getElementById("change-release-progress");
+          const label=progress?.querySelector("[data-progress-label]");
+          releaseCopyButton.disabled=true;
+          if(progress) progress.classList.add("visible","working");
+          if(label) label.textContent="SSD-Kopien werden nach Größe und SHA-256 geprüft …";
+          try {
+            const result=await postJson(`/api/change-requests/${encodeURIComponent(crId)}/release-copy/verify`,{});
+            if(!result.complete) {
+              throw new Error(`${result.verified_file_count}/${result.file_count} SSD-Kopien sind korrekt. Fehlende oder abweichende Dateien bitte korrigieren.`);
+            }
+            await showChangeRequestDetail(crId,{phase:"finder"});
+          } catch(error) {
+            releaseCopyButton.disabled=false;
+            if(progress) progress.classList.remove("working");
+            if(label) label.textContent=error.message;
+          }
+        });
 
-          const selectedChecks=()=>segmentChecks.filter(input=>input.checked);
-          const updateReassignUi=()=>{
-            const selected=selectedChecks();
-            const months=new Set(selected.map(input=>input.dataset.month).filter(Boolean));
-            const days=new Set(selected.map(input=>input.dataset.dayKey).filter(Boolean));
-            for(const option of targetSelect?.options || []) {
-              const mode=option.dataset.mode || option.value;
-              if(mode==="new_no_event") {
-                const month=months.size===1 ? [...months][0] : "";
-                option.disabled=!selected.length || months.size!==1 || occupiedMonths.has(month);
-              } else if(mode==="existing_no_event") {
-                const month=months.size===1 ? [...months][0] : "";
-                option.disabled=!selected.length || months.size!==1 || option.dataset.targetMonth!==month;
-              } else if(mode==="new_child") {
-                option.disabled=!selected.length || days.size!==1;
-              } else if(option.value) {
-                option.disabled=!selected.length;
-              }
+        const releaseRemovalButton=changeRequestBody.querySelector("[data-cr-release-removal-verify]");
+        releaseRemovalButton?.addEventListener("click", async () => {
+          const progress=document.getElementById("change-release-progress");
+          const label=progress?.querySelector("[data-progress-label]");
+          releaseRemovalButton.disabled=true;
+          if(progress) progress.classList.add("visible","working");
+          if(label) label.textContent="SSD-Kopien und entfernte Archivoriginale werden geprüft …";
+          try {
+            const result=await postJson(`/api/change-requests/${encodeURIComponent(crId)}/release-removal/verify`,{});
+            if(!result.complete) {
+              throw new Error(`${result.verified_file_count}/${result.file_count} Dateien sind vollständig freigegeben. Noch vorhandene Archivoriginale bitte entfernen.`);
             }
-            if(targetSelect?.selectedOptions?.[0]?.disabled) targetSelect.value="";
-            const raw=String(targetSelect?.value || "");
-            const mode=raw.split("|")[0];
-            if(nameRow) nameRow.hidden=!["new_event","new_child"].includes(mode);
-            if(childTimes) childTimes.hidden=mode!=="new_child";
-            if(nameInput) nameInput.placeholder=mode==="new_child" ? "Name des neuen Unterereignisses" : "Name des neuen Ereignisses";
-            if(mode==="new_child" && selected.length) {
-              const starts=selected.map(input=>String(input.dataset.startTime||"")).filter(Boolean).sort();
-              const ends=selected.map(input=>String(input.dataset.endTime||"")).filter(Boolean).sort();
-              if(startInput && !startInput.value) startInput.value=starts[0] || "00:00";
-              if(endInput && !endInput.value) endInput.value=ends[ends.length-1] || "23:59";
-            }
-            if(note) {
-              if(!selected.length) note.textContent="Zuerst mindestens ein vollständiges Tages-/Zeitsegment auswählen.";
-              else if(mode==="new_no_event" && months.size===1 && occupiedMonths.has([...months][0])) note.textContent="Für diesen Monat existiert bereits eine „Ohne Ereignis“-Sammlung; eine zweite Sammlung ist nicht zulässig.";
-              else note.textContent="Nach der Zuordnung werden die endgültigen Finder-Schritte automatisch neu berechnet.";
-            }
-            if(applyBtn) applyBtn.disabled=!selected.length || !raw;
-          };
-          segmentChecks.forEach(input=>input.addEventListener("change",updateReassignUi));
-          targetSelect?.addEventListener("change",updateReassignUi);
-          updateReassignUi();
-
-          applyBtn?.addEventListener("click", async () => {
-            const selected=selectedChecks();
-            const familyIds=[...new Set(selected.flatMap(input=>String(input.dataset.familyIds||"").split(",").map(Number).filter(Number.isFinite)))];
-            const [mode,targetEventId]=String(targetSelect?.value || "").split("|");
-            const payload={family_ids:familyIds,target_mode:mode};
-            if(mode==="new_event") payload.new_event_name=String(nameInput?.value || "").trim();
-            if(mode==="existing_event" || mode==="existing_no_event" || mode==="new_child") payload.target_event_id=targetEventId || null;
-            if(mode==="new_child") {
-              payload.new_event_name=String(nameInput?.value || "").trim();
-              payload.new_child_start=String(startInput?.value || "");
-              payload.new_child_end=String(endInput?.value || "");
-            }
-            if(errorBox) { errorBox.hidden=true; errorBox.textContent=""; }
-            applyBtn.disabled=true;
-            applyBtn.textContent="Zuordnung wird gespeichert …";
-            try {
-              const res=await fetch(`/api/change-requests/${encodeURIComponent(crId)}/reassignments`,{
-                method:"POST",
-                headers:{"Content-Type":"application/json"},
-                body:JSON.stringify(payload)
-              });
-              const data=await res.json().catch(()=>({}));
-              if(!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-              await showChangeRequestDetail(crId,{phase:"finder"});
-            } catch(error) {
-              applyBtn.disabled=false;
-              applyBtn.textContent="Ausgewählte Segmente zuordnen";
-              if(errorBox) {
-                errorBox.textContent=error.message;
-                errorBox.hidden=false;
-              }
-            }
-          });
-        }
+            await showChangeRequestDetail(crId,{phase:"finder"});
+          } catch(error) {
+            releaseRemovalButton.disabled=false;
+            if(progress) progress.classList.remove("working");
+            if(label) label.textContent=error.message;
+          }
+        });
 
         for (const button of changeRequestBody.querySelectorAll("[data-change-step]")) {
           button.addEventListener("click", () => {

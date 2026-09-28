@@ -13,7 +13,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from app.database import database_connection
-from app.archive_reassignment import apply_archive_reassignment_targets
 from app.event_timeline import normalize_no_event_segments, replace_event_segments
 from app.event_inventory import EventInventoryError, scan_event_inventory
 from app.archive_locations import (
@@ -78,13 +77,23 @@ def confirm_event_change(
         "staging_by_file_id": {},
         "missing_directories": [],
         "helper_directories": [],
+        "release_stock": {
+            "required": False,
+            "prepared_file_count": 0,
+            "created_directories": [],
+        },
     }
     if archive_root is not None and workspace_path is not None:
         from app.archive_staging import prepare_archive_change_staging_for_request
+        from app.archive_release_stock import prepare_archive_release_stock
         try:
-            preparation = prepare_archive_change_staging_for_request(
+            staging = prepare_archive_change_staging_for_request(
                 database_path, workspace_path, archive_root, cr_id
             )
+            release_stock = prepare_archive_release_stock(
+                database_path, workspace_path, cr_id
+            )
+            preparation = {**staging, "release_stock": release_stock}
         except Exception as exc:
             raise EventChangeApplyError(str(exc)) from exc
 
@@ -116,7 +125,7 @@ def confirm_event_change(
         "change_request_id": cr_id,
         "confirmed_at": now,
         "preparation": preparation,
-        "message": "Hilfsbereich vorbereitet. Die Kamerabibliothek wurde nicht verändert.",
+        "message": "Hilfsbereiche vorbereitet. Die Kamerabibliothek wurde nicht verändert.",
     }
 
 
@@ -221,8 +230,12 @@ def cancel_event_change(
 
     if workspace_path is not None:
         from app.archive_staging import cleanup_archive_change_staging
+        from app.archive_release_stock import cleanup_archive_release_stock
         cleanup_archive_change_staging(
             database_path, workspace_path, cr_id, remove_originals=False
+        )
+        cleanup_archive_release_stock(
+            database_path, workspace_path, cr_id
         )
 
     with database_connection(database_path) as connection:
@@ -239,6 +252,7 @@ def verify_event_change(
     database_path: Path,
     cr_id: str,
     archive_root: Path,
+    workspace_path: Path | None = None,
 ) -> dict[str, Any]:
     """Prüfe einen manuellen Archiv-Änderungsauftrag rein lesend."""
     from app.event_change_request import get_event_change_request, get_event_change_files
@@ -255,6 +269,17 @@ def verify_event_change(
     if not root.exists() or not root.is_dir():
         raise EventChangeApplyError("Die Kamerabibliothek ist nicht lesbar eingebunden.")
 
+    if workspace_path is not None:
+        from app.archive_release_stock import (
+            describe_archive_release_stock,
+            verify_archive_release_removal,
+        )
+        release_description = describe_archive_release_stock(database_path, cr_id)
+        if release_description.get("required"):
+            verify_archive_release_removal(
+                database_path, archive_root, workspace_path, cr_id
+            )
+
     reviews = get_event_change_files(database_path, cr_id)
     if not reviews:
         raise EventChangeApplyError("Der Änderungsauftrag enthält keine Dateien.")
@@ -263,6 +288,7 @@ def verify_event_change(
     results: list[dict[str, Any]] = []
     ok_count = 0
     open_reassignments = 0
+    open_release = 0
     directory_results: list[dict[str, Any]] = []
 
     from app.archive_staging import (
@@ -305,11 +331,21 @@ def verify_event_change(
             actual_sha = None
             message = None
 
-            if action == "delete":
-                # Herausfallende Kamerafamilien werden niemals gelöscht.
-                status = "needs_reassignment"
-                message = "Familie fällt aus dem Ereignis heraus und muss zuerst einem Zielereignis zugeordnet werden."
-                open_reassignments += 1
+            release_path = str(review.get("workspace_release_path") or "").strip()
+            if action == "delete" or (action == "unresolved" and release_path):
+                stored_status = str(review.get("verification_status") or "pending")
+                if stored_status == "verified":
+                    status = "verified"
+                    actual_size = review.get("actual_size_bytes")
+                    actual_sha = review.get("actual_sha256")
+                    ok_count += 1
+                else:
+                    status = stored_status
+                    message = (
+                        "Freigewordene Archivdatei muss zuerst vollständig auf die SSD "
+                        "gesichert und anschließend aus dem Archiv entfernt werden."
+                    )
+                    open_release += 1
             elif action == "unresolved":
                 status = "needs_assignment"
                 message = (
@@ -350,7 +386,9 @@ def verify_event_change(
                         status = "old_path_still_exists"
                         message = "Die Datei liegt zusätzlich noch am alten Archivpfad."
 
-            if status == "verified":
+            if status == "verified" and not (
+                action == "delete" or (action == "unresolved" and str(review.get("workspace_release_path") or "").strip())
+            ):
                 ok_count += 1
 
             table = (
@@ -391,6 +429,7 @@ def verify_event_change(
     complete = (
         ok_count == len(reviews)
         and open_reassignments == 0
+        and open_release == 0
         and missing_directory_count == 0
         and remaining_obsolete_directory_count == 0
     )
@@ -401,6 +440,7 @@ def verify_event_change(
         "file_count": len(reviews),
         "verified_file_count": ok_count,
         "open_reassignment_count": open_reassignments,
+        "open_release_count": open_release,
         "directory_count": len(directory_results),
         "verified_directory_count": verified_directory_count,
         "missing_directory_count": missing_directory_count,
@@ -431,12 +471,15 @@ def finish_event_change(
             f"Status '{cr['status']}' erlaubt keinen Abschluss. Änderungen erst bestätigen."
         )
 
-    verification = verify_event_change(database_path, cr_id, archive_root)
+    verification = verify_event_change(
+        database_path, cr_id, archive_root, workspace_path
+    )
     if not verification["complete"]:
         raise EventChangeApplyError(
             "Die manuelle Archivänderung ist noch nicht vollständig geprüft. "
             f"{verification['verified_file_count']} von {verification['file_count']} Dateien sind korrekt; "
-            f"{verification['open_reassignment_count']} Familien benötigen noch eine Neu-Zuordnung."
+            f"{verification.get('open_release_count', 0)} freigewordene Dateien sind noch nicht sicher zurückgeholt; "
+            f"{verification['open_reassignment_count']} weitere Dateien benötigen Klärung."
         )
 
     selected_ids = sorted({int(v) for v in json.loads(cr["selected_family_ids"] or "[]")})
@@ -444,7 +487,13 @@ def finish_event_change(
     if not selected_ids and not delete_event:
         with database_connection(database_path) as connection:
             asset_count = int(connection.execute(
-                "SELECT COUNT(*) FROM event_change_asset_reviews WHERE change_request_id=?",
+                """SELECT COUNT(*)
+                   FROM event_change_asset_reviews
+                   WHERE change_request_id=?
+                     AND NOT (
+                         action='unresolved'
+                         AND COALESCE(workspace_release_path,'')<>''
+                     )""",
                 (cr_id,),
             ).fetchone()[0])
         if asset_count == 0:
@@ -481,6 +530,24 @@ def finish_event_change(
         parent_start, parent_end = child_start, child_end
     now = _now()
 
+    from app.archive_release_stock import describe_archive_release_stock
+    release_description = describe_archive_release_stock(database_path, cr_id)
+    release_rows = list(release_description.get("rows") or [])
+    release_segments = list(release_description.get("segments") or [])
+    released_family_ids = sorted({
+        int(row["family_id"])
+        for row in release_rows
+        if row.get("family_id") is not None
+    })
+    released_range_by_family: dict[int, tuple[str, str]] = {}
+    for segment in release_segments:
+        bounds = (
+            str(segment.get("start_datetime") or ""),
+            str(segment.get("end_datetime") or ""),
+        )
+        for family_id in segment.get("family_ids") or []:
+            released_range_by_family[int(family_id)] = bounds
+
     with database_connection(database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         event = connection.execute(
@@ -491,75 +558,117 @@ def finish_event_change(
             connection.rollback()
             raise EventChangeApplyError("Das zugrunde liegende archivierte Ereignis fehlt.")
 
-        created_reassignment_events = apply_archive_reassignment_targets(connection, cr, now)
+        family_jobs: dict[int, str] = {}
+        if released_family_ids:
+            placeholders = ",".join("?" for _ in released_family_ids)
+            family_jobs = {
+                int(row["id"]): str(row["job_id"])
+                for row in connection.execute(
+                    f"SELECT id,job_id FROM file_families WHERE id IN ({placeholders})",
+                    tuple(released_family_ids),
+                ).fetchall()
+            }
+
+        for row in release_rows:
+            if str(row.get("verification_status") or "") != "verified":
+                connection.rollback()
+                raise EventChangeApplyError(
+                    "Mindestens eine freigewordene Archivdatei wurde noch nicht vollständig zurückgeholt."
+                )
+            family_id = int(row["family_id"]) if row.get("family_id") is not None else None
+            release_path = str(row.get("workspace_release_path") or "")
+            if not release_path:
+                connection.rollback()
+                raise EventChangeApplyError("Für eine freigewordene Datei fehlt der SSD-Pfad.")
+            if str(row.get("review_kind") or "camera") == "camera":
+                if row.get("file_id") is None:
+                    connection.rollback()
+                    raise EventChangeApplyError("Für eine freigewordene Kameradatei fehlt die Datei-ID.")
+                connection.execute(
+                    """UPDATE files
+                       SET current_relative_path=?,current_root_kind='shared_workspace',
+                           sha256_current=?,updated_at=?
+                       WHERE id=?""",
+                    (
+                        release_path,
+                        str(row.get("expected_sha256") or ""),
+                        now,
+                        int(row["file_id"]),
+                    ),
+                )
+            else:
+                job_id = family_jobs.get(family_id) if family_id is not None else str(cr["job_id"])
+                connection.execute(
+                    """INSERT INTO released_archive_assets(
+                           job_id,family_id,source_file_id,asset_kind,current_relative_path,
+                           size_bytes,sha256,origin_change_request_id,created_at,updated_at
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(job_id,current_relative_path) DO UPDATE SET
+                           family_id=excluded.family_id,
+                           source_file_id=excluded.source_file_id,
+                           asset_kind=excluded.asset_kind,
+                           size_bytes=excluded.size_bytes,
+                           sha256=excluded.sha256,
+                           origin_change_request_id=excluded.origin_change_request_id,
+                           updated_at=excluded.updated_at""",
+                    (
+                        job_id,
+                        family_id,
+                        row.get("source_file_id"),
+                        str(row.get("asset_kind") or "other"),
+                        release_path,
+                        int(row.get("expected_size_bytes") or 0),
+                        str(row.get("expected_sha256") or ""),
+                        cr_id,
+                        now,
+                        now,
+                    ),
+                )
+
+        for family_id in released_family_ids:
+            job_id = family_jobs.get(family_id)
+            bounds = released_range_by_family.get(family_id)
+            if job_id is None or bounds is None:
+                connection.rollback()
+                raise EventChangeApplyError(
+                    "Eine freigewordene Familie besitzt keine vollständige Herkunfts-/Zeitinformation."
+                )
+            connection.execute(
+                """INSERT OR REPLACE INTO released_free_families(
+                       job_id,family_id,released_start_datetime,released_end_datetime,created_at
+                   ) VALUES (?,?,?,?,?)""",
+                (job_id, family_id, bounds[0], bounds[1], now),
+            )
 
         if delete_event:
-            verified_rows = connection.execute(
-                """SELECT family_id,file_id,new_path
-                   FROM event_change_file_reviews
-                   WHERE change_request_id=? AND verification_status='verified'
-                   ORDER BY family_id,id""",
-                (cr_id,),
-            ).fetchall()
-            paths_by_family: dict[int, list[str]] = {}
-            for review in verified_rows:
-                family_id = int(review["family_id"])
-                owner = connection.execute(
-                    """SELECT COALESCE(assigned.parent_event_id,assigned.id) AS root_id
-                       FROM event_assignments assignment
-                       JOIN events assigned ON assigned.id=assignment.event_id
-                       WHERE assignment.family_id=? AND assigned.status='archived'
-                         AND COALESCE(assigned.parent_event_id,assigned.id)<>?
-                       LIMIT 1""",
-                    (family_id, cr["event_id"]),
-                ).fetchone()
-                if owner is None or review["file_id"] is None or not review["new_path"]:
-                    raise EventChangeApplyError(
-                        "Für eine Archivdatei fehlt ein verifiziertes fachliches Ziel."
-                    )
-                target_id = str(owner["root_id"])
-                file_id = int(review["file_id"])
-                target_path = str(review["new_path"])
-                connection.execute(
-                    """UPDATE files SET current_relative_path=?,
-                           current_root_kind='camera_archive',updated_at=? WHERE id=?""",
-                    (target_path, now, file_id),
-                )
-                record_verified_file_location(
-                    connection, target_id, family_id, file_id, target_path, now,
-                )
-                paths_by_family.setdefault(family_id, []).append(target_path)
-            for family_id, paths in paths_by_family.items():
-                owner = connection.execute(
-                    """SELECT COALESCE(assigned.parent_event_id,assigned.id) AS root_id
-                       FROM event_assignments assignment
-                       JOIN events assigned ON assigned.id=assignment.event_id
-                       WHERE assignment.family_id=? AND assigned.status='archived'
-                         AND COALESCE(assigned.parent_event_id,assigned.id)<>?
-                       LIMIT 1""",
-                    (family_id, cr["event_id"]),
-                ).fetchone()
-                record_family_anchor(connection, str(owner["root_id"]), family_id, paths, now)
-            # event_change_requests references the event with ON DELETE CASCADE.
-            # Persist the durable audit entry first, then remove the event; the
-            # completed request and its file-review rows disappear together.
             connection.execute(
                 """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
-                   VALUES (?,'archived_event_deleted_after_manual_move','event_change_request',?,?,?)""",
-                (cr["job_id"], cr_id, json.dumps({
-                    "archive_read_only": True,
-                    "verified_file_count": verification["verified_file_count"],
-                    "released_family_ids": selected_ids,
-                    "event_id": cr["event_id"],
-                }, ensure_ascii=False, sort_keys=True), now),
+                   VALUES (?,'archived_event_deleted_after_release','event_change_request',?,?,?)""",
+                (
+                    cr["job_id"],
+                    cr_id,
+                    json.dumps({
+                        "archive_read_only": True,
+                        "verified_file_count": verification["verified_file_count"],
+                        "released_family_ids": released_family_ids,
+                        "event_id": cr["event_id"],
+                    }, ensure_ascii=False, sort_keys=True),
+                    now,
+                ),
             )
-            connection.execute("DELETE FROM events WHERE id=? AND job_id=?", (cr["event_id"], cr["job_id"]))
+            connection.execute(
+                "DELETE FROM events WHERE id=? AND job_id=?",
+                (cr["event_id"], cr["job_id"]),
+            )
             connection.commit()
             return {
-                "status":"archiviert", "change_request_id":cr_id, "archive_read_only":True,
-                "files_changed_by_app":0, "verified_file_count":verification["verified_file_count"],
-                "event_deleted":True,
-                "created_reassignment_event_ids": created_reassignment_events,
+                "status": "archiviert",
+                "change_request_id": cr_id,
+                "archive_read_only": True,
+                "files_changed_by_app": 0,
+                "verified_file_count": verification["verified_file_count"],
+                "event_deleted": True,
+                "released_family_ids": released_family_ids,
             }
 
         connection.execute(
@@ -766,6 +875,7 @@ def finish_event_change(
                     "archive_read_only": True,
                     "verified_file_count": verification["verified_file_count"],
                     "selected_family_ids": selected_ids,
+                    "released_family_ids": released_family_ids,
                 }, ensure_ascii=False, sort_keys=True),
                 now,
             ),
@@ -810,7 +920,6 @@ def finish_event_change(
         "archive_read_only": True,
         "files_changed_by_app": 0,
         "verified_file_count": verification["verified_file_count"],
-        "created_reassignment_event_ids": created_reassignment_events,
         "inventory_summary": inventory_summary,
         "inventory_refresh_error": inventory_refresh_error,
         "ssd_files_removed_by_app": int(ssd_cleanup.get("removed_original_file_count") or 0),
