@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from pathlib import Path
 
 from app.archive_change_assistant import build_archive_change_assistant
@@ -227,3 +228,70 @@ def test_0271_verify_requires_touched_empty_branch_directories(tmp_path: Path):
     second = verify_event_change(db, cr_id, archive)
     assert second["complete"] is True
     assert second["missing_directory_count"] == 0
+
+
+def test_0271_new_child_is_one_folder_copy_action(tmp_path: Path):
+    db, workspace, archive, folder, old_family, new_family, _ = _seed(
+        tmp_path, full_archive_triplet=True
+    )
+    preview = _preview(folder, old_family, new_family)
+    preview["uses_time_range"] = True
+    preview["subevents"] = [{
+        "name": "Teil B",
+        "start_datetime": "2026-07-24T00:00:00",
+        "end_datetime": "2026-07-24T23:59:59",
+    }]
+    proposed = propose_event_change(
+        db, "old", "archive", preview,
+        event_name="Test Archiv 2", archive_root=archive, workspace_path=workspace,
+    )
+    assistant = build_archive_change_assistant(
+        db, archive, workspace, proposed["change_request_id"]
+    )
+    assert assistant["phase"] == "prepare"
+    operations = assistant["operations"]
+    assert len(operations) == 1
+    assert operations[0]["kind"] == "copy_helper_folders"
+    assert operations[0]["items"] == ["07-24 00-00 - 07-24 23-59 - Teil B"]
+    assert operations[0]["target"] == f"Kamerabibliothek/2026/{folder}"
+    assert operations[0]["sources"] == [
+        f"Arbeitsbereich/Später zuordnen/2026/{folder}/07-24 00-00 - 07-24 23-59 - Teil B"
+    ]
+
+
+def test_0271_verify_requires_obsolete_old_event_folder_to_be_removed(tmp_path: Path):
+    db, workspace, archive, folder, old_family, _, _ = _seed(
+        tmp_path, full_archive_triplet=True
+    )
+    new_folder = "07-22 - Test Archiv 2 umbenannt"
+    preview = _preview(folder, old_family, None)
+    preview["parent_folder"] = new_folder
+    proposed = propose_event_change(
+        db, "old", "archive", preview,
+        event_name="Test Archiv 2 umbenannt",
+        archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    assistant = build_archive_change_assistant(db, archive, workspace, cr_id)
+    assert [item["kind"] for item in assistant["operations"]] == [
+        "move_archive_files", "remove_directories"
+    ]
+    assert assistant["obsolete_directories"] == [f"2026/{folder}"]
+
+    old_file = archive / "2026" / folder / "Alle" / "alt.JPG"
+    new_file = archive / "2026" / new_folder / "Alle" / "alt.JPG"
+    new_file.parent.mkdir(parents=True, exist_ok=True)
+    old_file.replace(new_file)
+    (archive / "2026" / new_folder / "Sortiert").mkdir()
+    (archive / "2026" / new_folder / "Export").mkdir()
+
+    confirm_event_change(db, cr_id, archive, workspace)
+    first = verify_event_change(db, cr_id, archive)
+    assert first["complete"] is False
+    assert first["remaining_obsolete_directory_count"] == 1
+    assert first["obsolete_directories"][0]["path"] == f"2026/{folder}"
+
+    shutil.rmtree(archive / "2026" / folder)
+    second = verify_event_change(db, cr_id, archive)
+    assert second["complete"] is True
+    assert second["remaining_obsolete_directory_count"] == 0

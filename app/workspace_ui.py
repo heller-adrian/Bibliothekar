@@ -382,10 +382,6 @@ WORKSPACE_HTML = r"""<!doctype html>
     .create-subevent-remove{white-space:nowrap;align-self:end;min-height:44px;flex:0 0 auto}
     .dialog-inline-error{margin-top:12px;border:1px solid var(--danger,#b42318);border-radius:10px;background:color-mix(in srgb,var(--danger,#b42318) 10%,var(--surface));color:var(--text);padding:10px 12px;font-weight:650}
     .existing-segment-static{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);padding:9px 10px}
-    .existing-parent-state{display:grid;gap:8px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:11px 12px}
-    .existing-parent-state details{border-top:1px solid var(--border);padding-top:8px}
-    .existing-parent-state details:first-of-type{border-top:0}
-    .existing-parent-state summary{cursor:pointer}
     .selection-bar-anchor{height:0}
     @media (min-width:821px){
       main{padding-bottom:18px !important}
@@ -1249,8 +1245,6 @@ WORKSPACE_HTML = r"""<!doctype html>
           <small class="muted">Direkt angrenzende freie Zeit kann ein bestehendes Ereignis erweitern. Gelb markierte, bereits freigegebene Applied-Bereiche sind normaler freier Bestand und erzeugen keine Neu-Zuordnungsaufgabe.</small>
         </label>
 
-        <div id="existing-parent-state" class="existing-parent-state full-width" hidden></div>
-
         <div id="no-event-segment-editor" class="full-width" hidden>
           <label id="existing-no-event-target-row" class="full-width" hidden style="margin-bottom:10px">
             <span>Bestehende „Ohne Ereignis“-Sammlung</span>
@@ -1524,7 +1518,6 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     const existingParentRow = document.getElementById("existing-parent-row");
     const existingParentEvent = document.getElementById("existing-parent-event");
-    const existingParentState = document.getElementById("existing-parent-state");
     let activeExtension = null;
 
     const eventStartDate =
@@ -2823,20 +2816,21 @@ WORKSPACE_HTML = r"""<!doctype html>
       );
     }
 
-    function renderExistingParentState(parent) {
-      if (!existingParentState || !parent) return;
+    function renderExistingSubeventCards(parent) {
       const children=(workspace?.events||[])
         .filter(event=>event.parent_event_id===parent.id)
         .sort((a,b)=>String(a.start_datetime||"").localeCompare(String(b.start_datetime||"")));
-      const range=`${String(parent.start_datetime||"").slice(0,16).replace("T"," ")} – ${String(parent.end_datetime||"").slice(0,16).replace("T"," ")}`;
-      let html=`<div><strong>Bestehender Stand · schreibgeschützt</strong><div class="muted" style="margin-top:3px">${escapeHtml(range)}</div></div>`;
-      if(children.length){
-        html += children.map(child=>`<details><summary><strong>${escapeHtml(child.name||"Unterereignis")}</strong> <span class="muted">· bestehend</span></summary><div class="muted" style="margin-top:7px">${escapeHtml(String(child.start_datetime||"").slice(0,16).replace("T"," "))} – ${escapeHtml(String(child.end_datetime||"").slice(0,16).replace("T"," "))}</div><code style="display:block;margin-top:4px;white-space:pre-wrap;word-break:break-word">${escapeHtml(child.folder_name||"")}</code></details>`).join("");
-      }else{
-        html += `<div class="muted">Keine bestehenden Unterereignisse.</div>`;
+      for(const child of children){
+        const row=document.createElement("details");
+        row.className="create-subevent-card";
+        row.dataset.existingSubevent="1";
+        const sd=String(child.start_datetime||"").slice(0,10);
+        const st=String(child.start_datetime||"").slice(11,16);
+        const ed=String(child.end_datetime||"").slice(0,10);
+        const et=String(child.end_datetime||"").slice(11,16);
+        row.innerHTML=`<summary style="cursor:pointer"><strong>${escapeHtml(child.name||"Unterereignis")}</strong> <span class="muted">· Bestehend</span></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input value="${escapeHtml(child.name||"")}" disabled></label></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn</span><input type="date" value="${escapeHtml(sd)}" disabled></label><label><span>Startzeit</span><input type="time" value="${escapeHtml(st)}" disabled></label></div><div class="create-subevent-boundary"><label><span>Ende</span><input type="date" value="${escapeHtml(ed)}" disabled></label><label><span>Endzeit</span><input type="time" value="${escapeHtml(et)}" disabled></label></div></div></div>`;
+        createSubeventList.appendChild(row);
       }
-      existingParentState.innerHTML=html;
-      existingParentState.hidden=false;
     }
 
     function applyExistingParentChoice() {
@@ -2848,8 +2842,6 @@ WORKSPACE_HTML = r"""<!doctype html>
         activeExtension=null;
         dialogTitle.textContent="Ereignis erstellen";
         eventName.disabled=false;
-        existingParentState.hidden=true;
-        existingParentState.innerHTML="";
         eventStartDate.disabled=false;
         eventStartTime.disabled=false;
         eventEndDate.disabled=false;
@@ -2890,7 +2882,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       dialogTitle.textContent="Ereignis erweitern";
       eventName.value=parent.display_title || parent.name || "";
       eventName.disabled=true;
-      renderExistingParentState(parent);
+      createSubeventList.innerHTML="";
+      renderExistingSubeventCards(parent);
 
       useTimeRange.checked=true;
       useTimeRange.disabled=true;
@@ -2932,8 +2925,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       preserveDayFoldersRow.hidden=true;
 
       createSubevents.hidden=false;
-      createSubeventHeading.textContent="Neue Unterereignisse im Erweiterungsbereich";
-      createSubeventList.innerHTML="";
+      createSubeventHeading.textContent="Unterereignisse";
       scheduleDialogPreview();
     }
 
@@ -2964,7 +2956,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const parentCandidates=noEvent?[]:plannedParentCandidates(dated);existingParentRow.hidden=noEvent||parentCandidates.length===0;
       if(!existingParentRow.hidden){existingParentEvent.innerHTML=`<option value="">Neues Ereignis anlegen</option>`+parentCandidates.map(parent=>`<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");existingParentEvent.value="";}else existingParentEvent.innerHTML="";
       eventName.value=noEvent?"Ohne Ereignis":"";eventName.disabled=noEvent;dialogTitle.textContent=existingNoEvent?"Zu bestehendem „Ohne Ereignis“ hinzufügen":(noEvent?"Als „Ohne Ereignis“ zuordnen":"Ereignis erstellen");
-      activeExtension=null;existingParentState.hidden=true;existingParentState.innerHTML="";
+      activeExtension=null;
       eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";
       eventStartDate.disabled=false;eventStartTime.disabled=false;eventEndDate.disabled=false;eventEndTime.disabled=false;eventStartDate.removeAttribute("min");eventStartDate.removeAttribute("max");eventEndDate.removeAttribute("min");eventEndDate.removeAttribute("max");
       useTimeRange.checked=!noEvent;useTimeRange.disabled=true;setParentTimeFieldsVisible(true);
@@ -3007,6 +2999,13 @@ WORKSPACE_HTML = r"""<!doctype html>
             : [];
         }
         base.preserve_day_folders = Boolean(parent.preserve_day_folders);
+        for(const segment of base.subevents || []){
+          const a=String(segment.start_datetime||"").slice(0,19);
+          const b=String(segment.end_datetime||"").slice(0,19);
+          if(a < activeExtension.start_datetime || b > activeExtension.end_datetime){
+            throw new Error("Neue Unterereignisse dürfen nur innerhalb des neu hinzugefügten Erweiterungsbereichs liegen.");
+          }
+        }
       }
 
       if (["no_event","existing_no_event"].includes(dialogMode)) {

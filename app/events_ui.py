@@ -3590,10 +3590,17 @@ EVENTS_HTML = r"""<!doctype html>
           let number = 1;
           for (const operation of assistant.operations || []) {
             html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
-            if (operation.source) html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
+            if ((operation.sources || []).length) {
+              html += `<div class="muted">DIESE ORDNER</div>${operation.sources.map(source => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code>`).join("")}`;
+            } else if (operation.source) {
+              html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
+            }
+            if ((operation.items || []).length && !(operation.sources || []).length && operation.kind !== "remove_directories") {
+              html += `<details><summary>${operation.items.length} Datei${operation.items.length===1?"":"en"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name => `<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
+            }
             if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
-            if ((operation.missing_directories || []).length) {
-              html += `<details><summary>Diese Ordner werden dabei neu ergänzt</summary><div style="margin-top:7px">${operation.missing_directories.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
+            if ((operation.paths || []).length) {
+              html += `<div class="muted">DIESE ALTEN ORDNER</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
             }
             html += `</div></details>`;
             number += 1;
@@ -3703,6 +3710,7 @@ EVENTS_HTML = r"""<!doctype html>
             const ok = Number(data.verified_file_count || 0);
             const problems = (data.files || []).filter(row => String(row.status || "") !== "verified");
             const directoryProblems = (data.directories || []).filter(row => String(row.status || "") !== "verified");
+            const obsoleteDirectoryProblems = (data.obsolete_directories || []).filter(row => String(row.status || "") !== "verified");
             if (data.complete) {
               verifyBtn.classList.add("success");
               verifyBtn.textContent = "✓ Prüfung erfolgreich";
@@ -3712,7 +3720,7 @@ EVENTS_HTML = r"""<!doctype html>
             } else {
               verifyBtn.classList.add("danger");
               verifyBtn.textContent = "✕ Prüfung mit Problemen";
-              const problemCount = problems.length + directoryProblems.length;
+              const problemCount = problems.length + directoryProblems.length + obsoleteDirectoryProblems.length;
               if (summary) { summary.className = "danger-text"; summary.textContent = `${ok}/${total} Dateien bestätigt · ${problemCount} Problem${problemCount===1?"":"e"}.`; }
               if (label) label.textContent = "Bitte die angezeigten Abweichungen im Finder korrigieren und erneut prüfen.";
               if (archiveBtn) archiveBtn.disabled = true;
@@ -3731,7 +3739,10 @@ EVENTS_HTML = r"""<!doctype html>
                 const directoryHtml = directoryProblems.map(row =>
                   `<div class="card" style="margin-top:8px"><strong>Erforderlicher Ordner fehlt</strong><div class="muted">SOLL · Kamerabibliothek</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
                 ).join("");
-                errors.innerHTML = fileHtml + directoryHtml;
+                const obsoleteHtml = obsoleteDirectoryProblems.map(row =>
+                  `<div class="card" style="margin-top:8px"><strong>Alter Ordner noch vorhanden</strong><div class="muted">Dieser Ordner wird im SOLL nicht mehr benötigt</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
+                ).join("");
+                errors.innerHTML = fileHtml + directoryHtml + obsoleteHtml;
               }
             }
           } catch (error) {

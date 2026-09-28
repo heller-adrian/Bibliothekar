@@ -184,6 +184,88 @@ def _existing_suffixes(
     return result
 
 
+def _obsolete_directories_from_plan(
+    database_path: Path,
+    event_id: str,
+    preview: dict[str, Any],
+    plan: dict[str, Any],
+) -> list[str]:
+    """Old archive directories made obsolete by this concrete move plan."""
+    current_root = _current_event_root(database_path, event_id)
+    target_root = _target_root(preview)
+    items = [
+        *[
+            item for item in (plan.get("families_with_plans") or [])
+            if str(item.get("source_root_kind") or "camera_archive") != "shared_workspace"
+        ],
+        *(plan.get("assets_with_plans") or []),
+    ]
+    moves = [
+        item for item in items
+        if str(item.get("action") or "") == "move"
+        and str(item.get("old_path") or "").strip()
+    ]
+    if not moves:
+        return []
+    if current_root != target_root:
+        return [current_root.as_posix()]
+
+    final_paths = [
+        _safe_relative(item.get("new_path"))
+        for item in items
+        if str(item.get("action") or "") not in {"delete", "unresolved"}
+        and str(item.get("new_path") or "").strip()
+    ]
+    affected_containers: set[PurePosixPath] = set()
+    for item in moves:
+        old_rel = _safe_relative(item.get("old_path"))
+        if tuple(old_rel.parts[:2]) != tuple(current_root.parts):
+            continue
+        branch_index = next(
+            (index for index, part in enumerate(old_rel.parts) if part in BRANCHES),
+            None,
+        )
+        container = (
+            PurePosixPath(*old_rel.parts[:branch_index])
+            if branch_index is not None
+            else old_rel.parent
+        )
+        affected_containers.add(container)
+
+    obsolete: set[PurePosixPath] = set()
+    for container in affected_containers:
+        final_under_container = [
+            path for path in final_paths
+            if _path_under(path, container)
+        ]
+        if container != current_root and not final_under_container:
+            obsolete.add(container)
+            continue
+        for branch in BRANCHES:
+            branch_path = container / branch
+            if not any(_path_under(path, branch_path) for path in final_paths):
+                obsolete.add(branch_path)
+    return sorted(path.as_posix() for path in obsolete)
+
+
+def _path_under(path: PurePosixPath, root: PurePosixPath) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def required_obsolete_directories_for_request(
+    database_path: Path,
+    cr_id: str,
+) -> list[str]:
+    cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
+    return _obsolete_directories_from_plan(
+        database_path, str(cr["event_id"]), preview, plan
+    )
+
+
 def describe_archive_change_staging(
     database_path: Path,
     archive_root: Path,
@@ -216,6 +298,11 @@ def describe_archive_change_staging(
         directory for directory in helper_directories
         if tuple(directory.parts[:2]) == tuple(target_root.parts)
     }
+
+    obsolete = _obsolete_directories_from_plan(
+        database_path, event_id, preview, plan
+    )
+
     required = bool(helper_directories or incoming)
 
     return {
@@ -225,6 +312,7 @@ def describe_archive_change_staging(
         "desired_directories": sorted(path.as_posix() for path in desired),
         "missing_directories": sorted(path.as_posix() for path in missing),
         "helper_directories": sorted(path.as_posix() for path in helper_directories),
+        "obsolete_directories": list(obsolete),
         "incoming_file_count": len(incoming),
         "prepared_structure_path": (
             (PurePosixPath(STAGING_DIRECTORY_NAME) / target_root).as_posix()

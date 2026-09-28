@@ -155,9 +155,11 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert "Uhrzeiten berücksichtigen" not in WORKSPACE_HTML
     assert 'id="event-start-time-label"><span>Startzeit</span>' in WORKSPACE_HTML
     assert 'id="event-end-time-label"><span>Endzeit</span>' in WORKSPACE_HTML
-    assert 'id="existing-parent-state"' in WORKSPACE_HTML
-    assert "Bestehender Stand · schreibgeschützt" in WORKSPACE_HTML
-    assert "Neue Unterereignisse im Erweiterungsbereich" in WORKSPACE_HTML
+    assert 'id="existing-parent-state"' not in WORKSPACE_HTML
+    assert "Bestehender Stand · schreibgeschützt" not in WORKSPACE_HTML
+    assert "Neue Unterereignisse im Erweiterungsbereich" not in WORKSPACE_HTML
+    assert "renderExistingSubeventCards" in WORKSPACE_HTML
+    assert 'createSubeventHeading.textContent="Unterereignisse"' in WORKSPACE_HTML
     assert "extensionSelectionForParent" in WORKSPACE_HTML
     assert 'preserveDayFoldersRow.hidden=true' in WORKSPACE_HTML
     assert ".bk-menu.bk-menu-portaled" in BIBLIOTHEKAR_CSS

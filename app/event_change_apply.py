@@ -265,7 +265,10 @@ def verify_event_change(
     open_reassignments = 0
     directory_results: list[dict[str, Any]] = []
 
-    from app.archive_staging import required_target_directories_for_request
+    from app.archive_staging import (
+        required_target_directories_for_request,
+        required_obsolete_directories_for_request,
+    )
     required_directories = required_target_directories_for_request(
         database_path, cr_id
     )
@@ -276,6 +279,16 @@ def verify_event_change(
             "path": relative_dir,
             "status": "verified" if exists else "missing",
             "message": None if exists else "Erforderlicher SOLL-Ordner fehlt.",
+        })
+
+    obsolete_directory_results: list[dict[str, Any]] = []
+    for relative_dir in required_obsolete_directories_for_request(database_path, cr_id):
+        old_dir = _safe_archive_path(root, relative_dir)
+        gone = not old_dir.exists()
+        obsolete_directory_results.append({
+            "path": relative_dir,
+            "status": "verified" if gone else "still_exists",
+            "message": None if gone else "Alter, nicht mehr benötigter Ordner ist noch vorhanden.",
         })
 
     with database_connection(database_path) as connection:
@@ -372,10 +385,14 @@ def verify_event_change(
         1 for item in directory_results if item["status"] == "verified"
     )
     missing_directory_count = len(directory_results) - verified_directory_count
+    remaining_obsolete_directory_count = sum(
+        1 for item in obsolete_directory_results if item["status"] != "verified"
+    )
     complete = (
         ok_count == len(reviews)
         and open_reassignments == 0
         and missing_directory_count == 0
+        and remaining_obsolete_directory_count == 0
     )
     return {
         "change_request_id": cr_id,
@@ -387,8 +404,10 @@ def verify_event_change(
         "directory_count": len(directory_results),
         "verified_directory_count": verified_directory_count,
         "missing_directory_count": missing_directory_count,
+        "remaining_obsolete_directory_count": remaining_obsolete_directory_count,
         "files": results,
         "directories": directory_results,
+        "obsolete_directories": obsolete_directory_results,
     }
 
 

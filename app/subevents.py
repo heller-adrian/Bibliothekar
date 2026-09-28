@@ -66,7 +66,14 @@ def append_extension_subevents(connection,event_id,segments,extension_start,exte
     if parent_row is None:
         raise ValueError('Ereignis wurde nicht gefunden.')
     parent=dict(parent_row)
-    new_segments=normalize_subevents(segments,extension_start,extension_end)
+    try:
+        new_segments=normalize_subevents(segments,extension_start,extension_end)
+    except ValueError as exc:
+        if 'durchgehenden Elternzeitraums' in str(exc):
+            raise ValueError(
+                'Neue Unterereignisse dürfen nur innerhalb des neu hinzugefügten Erweiterungsbereichs liegen.'
+            ) from exc
+        raise
     existing=[dict(row) for row in connection.execute(
         'SELECT * FROM events WHERE parent_event_id=? ORDER BY start_datetime,id',(event_id,)
     ).fetchall()]

@@ -50,6 +50,35 @@ def _tree_lines(root: str, directories: list[str]) -> list[str]:
     return lines
 
 
+def _path_is_under(path_value: str, root_value: str) -> bool:
+    try:
+        PurePosixPath(path_value).relative_to(PurePosixPath(root_value))
+        return True
+    except ValueError:
+        return False
+
+
+def _minimal_roots(paths: list[str], event_root: str) -> list[str]:
+    root = PurePosixPath(event_root)
+    candidates = sorted(
+        {PurePosixPath(value) for value in paths if value},
+        key=lambda path: (len(path.parts), path.as_posix()),
+    )
+    result: list[PurePosixPath] = []
+    for path in candidates:
+        if path == root:
+            continue
+        if any(_path_is_under(path.as_posix(), parent.as_posix()) for parent in result):
+            continue
+        result.append(path)
+    return [path.as_posix() for path in result]
+
+
+def _basename(value: Any) -> str:
+    raw = str(value or "").replace("\\", "/").strip("/")
+    return PurePosixPath(raw).name if raw else ""
+
+
 def build_archive_change_assistant(
     database_path: Path,
     archive_root: Path,
@@ -70,6 +99,7 @@ def build_archive_change_assistant(
     target_root = str(description.get("target_root") or "")
     helper_root = str(description.get("prepared_structure_path") or "")
     missing = list(description.get("missing_directories") or [])
+    obsolete = list(description.get("obsolete_directories") or [])
 
     actionable = [
         row for row in rows
@@ -87,40 +117,68 @@ def build_archive_change_assistant(
 
     operations: list[dict[str, Any]] = []
 
-    # Wenn Struktur fehlt, ist ein Merge des vorbereiteten Ereignis-Inhalts die
-    # effizienteste Finder-Handlung. Die Detailkarte nennt trotzdem exakt, was fehlt.
-    if missing:
+    new_roots = _minimal_roots(missing, target_root)
+    covered_workspace_ids: set[int] = set()
+    grouped_roots: dict[str, list[str]] = {}
+    for root_value in new_roots:
+        parent = PurePosixPath(root_value).parent.as_posix()
+        grouped_roots.setdefault(parent, []).append(root_value)
+        for row in workspace_rows:
+            file_id = row.get("file_id")
+            if file_id is not None and _path_is_under(
+                str(row.get("new_path") or ""), root_value
+            ):
+                covered_workspace_ids.add(int(file_id))
+
+    for parent, roots in sorted(grouped_roots.items()):
+        names = [_basename(value) for value in roots]
         operations.append({
-            "kind": "merge_helper",
-            "title": "Vorbereitete Struktur in das Ereignis übernehmen",
-            "source": f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{target_root}",
-            "target": f"Kamerabibliothek/{target_root}",
-            "file_count": len(workspace_rows),
-            "missing_directories": missing,
+            "kind": "copy_helper_folders",
+            "title": (
+                f"Ordner {names[0]} ins Archiv übernehmen"
+                if len(names) == 1
+                else f"{len(names)} vorbereitete Ordner ins Archiv übernehmen"
+            ),
+            "sources": [
+                f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{value}"
+                for value in roots
+            ],
+            "items": names,
+            "target": f"Kamerabibliothek/{parent}",
             "detail": (
-                f"{len(missing)} fehlende Ordner ergänzen"
-                + (f" und {len(workspace_rows)} neue Dateien übernehmen" if workspace_rows else "")
-                + "."
+                f"Den vorbereiteten Ordner „{names[0]}“ vollständig übernehmen."
+                if len(names) == 1
+                else "Diese vorbereiteten Ordner vollständig übernehmen: "
+                + ", ".join(names) + "."
             ),
         })
-    elif workspace_rows:
-        grouped_workspace: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for row in workspace_rows:
-            source = _parent_dir(
-                row.get("workspace_staging_path")
-                or f"{STAGING_DIRECTORY_NAME}/{row.get('new_path') or ''}"
-            )
-            target = _parent_dir(row.get("new_path"))
-            grouped_workspace.setdefault((source, target), []).append(row)
-        for (source, target), members in sorted(grouped_workspace.items()):
-            operations.append({
-                "kind": "copy_files",
-                "title": "Neue Dateien in den vorhandenen Archivordner übernehmen",
-                "source": f"Arbeitsbereich/{source}",
-                "target": f"Kamerabibliothek/{target}",
-                "file_count": len(members),
-                "detail": f"{len(members)} Datei" + ("" if len(members) == 1 else "en") + " übernehmen.",
-            })
+
+    remaining_workspace = [
+        row for row in workspace_rows
+        if row.get("file_id") is None
+        or int(row["file_id"]) not in covered_workspace_ids
+    ]
+    grouped_workspace: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in remaining_workspace:
+        source = _parent_dir(
+            row.get("workspace_staging_path")
+            or f"{STAGING_DIRECTORY_NAME}/{row.get('new_path') or ''}"
+        )
+        target = _parent_dir(row.get("new_path"))
+        grouped_workspace.setdefault((source, target), []).append(row)
+    for (source, target), members in sorted(grouped_workspace.items()):
+        operations.append({
+            "kind": "copy_files",
+            "title": "Neue Dateien in einen vorhandenen Archivordner übernehmen",
+            "source": f"Arbeitsbereich/{source}",
+            "target": f"Kamerabibliothek/{target}",
+            "items": [_basename(row.get("new_path")) for row in members],
+            "file_count": len(members),
+            "detail": (
+                f"{len(members)} Datei" + ("" if len(members) == 1 else "en")
+                + " in den vorhandenen Zielordner übernehmen."
+            ),
+        })
 
     grouped_archive: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in archive_rows:
@@ -135,8 +193,24 @@ def build_archive_change_assistant(
             "title": "Dateien innerhalb der Kamerabibliothek verschieben",
             "source": f"Kamerabibliothek/{source}",
             "target": f"Kamerabibliothek/{target}",
+            "items": [_basename(row.get("old_path")) for row in members],
             "file_count": len(members),
-            "detail": f"{len(members)} Datei" + ("" if len(members) == 1 else "en") + " verschieben.",
+            "detail": (
+                f"{len(members)} Datei" + ("" if len(members) == 1 else "en")
+                + " in den angegebenen Zielordner verschieben."
+            ),
+        })
+
+    if obsolete:
+        operations.append({
+            "kind": "remove_directories",
+            "title": "Nicht mehr benötigte alte Ordner entfernen",
+            "items": [_basename(value) for value in obsolete],
+            "paths": [f"Kamerabibliothek/{value}" for value in obsolete],
+            "detail": (
+                "Diese alten Ordner müssen nach den Verschiebungen leer sein "
+                "und können dann entfernt werden."
+            ),
         })
 
     if status == "aenderbar_vorschlagen" and preparation_required:
@@ -172,5 +246,6 @@ def build_archive_change_assistant(
                 list(description.get("desired_directories") or []),
             ),
         },
+        "obsolete_directories": obsolete,
         "technical_file_count": len(rows),
     }

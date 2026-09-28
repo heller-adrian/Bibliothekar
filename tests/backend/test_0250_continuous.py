@@ -134,7 +134,7 @@ def test_extension_rejects_new_subevent_inside_existing_period(tmp_path):
         subevents=[{'name':'Altbereich','start_datetime':'2026-07-23T14:00','end_datetime':'2026-07-23T14:30'}],
     )
     preview=build_event_preview(p,list_job_available_families(db,'j'))
-    with pytest.raises(ValueError,match='Unterereignisse müssen innerhalb'):
+    with pytest.raises(ValueError,match='neu hinzugefügten Erweiterungsbereichs'):
         create_planned_event(db,'j',preview)
 
 

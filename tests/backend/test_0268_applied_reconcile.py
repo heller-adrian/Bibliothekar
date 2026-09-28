@@ -139,7 +139,11 @@ def test_0268_existing_event_extension_is_bidirectional_and_existing_structure_l
     assert "createSubevents.hidden=false" in WORKSPACE_HTML
     assert "base.subevents = [];" not in WORKSPACE_HTML
     assert "base.preserve_day_folders = Boolean(parent.preserve_day_folders);" in WORKSPACE_HTML
-    assert "Bestehender Stand · schreibgeschützt" in WORKSPACE_HTML
+    assert "Bestehender Stand · schreibgeschützt" not in WORKSPACE_HTML
+    assert "renderExistingSubeventCards" in WORKSPACE_HTML
+    assert 'row.dataset.existingSubevent="1"' in WORKSPACE_HTML
+    assert 'createSubeventHeading.textContent="Unterereignisse"' in WORKSPACE_HTML
+    assert "Neue Unterereignisse dürfen nur innerhalb des neu hinzugefügten Erweiterungsbereichs liegen." in WORKSPACE_HTML
 
 
 def test_0268_adjacent_extension_guard_accepts_both_sides():
