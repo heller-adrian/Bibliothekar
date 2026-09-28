@@ -64,17 +64,19 @@ def test_0270_archive_change_dialog_is_mandatory_and_reload_safe():
     assert "clearChangeTaskFromUrl(crId)" in html
 
 
-def test_0270_archive_change_ui_explains_ist_soll_and_four_steps():
+def test_0271_archive_change_ui_is_compact_three_step_assistant():
     html = EVENTS_HTML
-    assert "IST → SOLL" in html
-    assert "1 · Änderung vorbereiten" in html
-    assert "2 · Finder-Arbeit ausführen" in html
-    assert "3 · Prüfen" in html
-    assert "4 · Änderung abschließen & SSD freigeben" in html
-    assert "Änderung abschließen & SSD freigeben" in html
-    assert "Leere, unbenutzte Alle-/Sortiert-/Export- oder Unterereignisordner" in html
+    assert "Vorbereiten" in html
     assert "Finder-Arbeit" in html
-    assert "Dateien außerhalb dieser Angaben bleiben unverändert." in html
+    assert "Prüfen & Abschließen" in html
+    assert "Hilfsbereich vorbereiten" in html
+    assert "Finder-Arbeit erledigt · weiter zu Prüfen" in html
+    assert "Technische Details" in html
+    assert "Unveränderte Dateien werden bewusst nicht angezeigt." in html
+    assert "Änderung abschließen & SSD freigeben" in html
+    assert 'id="change-work-progress"' in html
+    assert "SSD-Originale und Hilfslinks sicher freigeben" in html
+    assert "change_step" in html
 
 
 def test_0270_applied_reload_keeps_mandatory_transaction():

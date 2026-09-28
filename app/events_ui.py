@@ -199,6 +199,109 @@ EVENTS_HTML = r"""<!doctype html>
       padding: 15px;
     }
 
+    .change-stepper {
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+      gap:8px;
+      margin:0 0 18px;
+    }
+    .change-step {
+      min-height:56px;
+      display:grid;
+      grid-template-columns:auto minmax(0,1fr);
+      gap:9px;
+      align-items:center;
+      border:1px solid var(--border);
+      border-radius:13px;
+      background:var(--surface-2);
+      padding:9px 11px;
+      text-align:left;
+    }
+    .change-step.active {
+      border-color:var(--accent);
+      background:color-mix(in srgb,var(--accent) 10%,var(--surface-2));
+    }
+    .change-step.done { border-color:var(--success); }
+    .change-step-number {
+      display:grid;
+      place-items:center;
+      width:28px;
+      height:28px;
+      border:1px solid currentColor;
+      border-radius:999px;
+      font-weight:800;
+    }
+    .change-pane {
+      display:grid;
+      gap:12px;
+    }
+    .change-pane-heading {
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:flex-start;
+    }
+    .change-pane-heading h3 { margin-bottom:4px; }
+    .change-operation {
+      padding:0;
+      overflow:hidden;
+    }
+    .change-operation > summary {
+      cursor:pointer;
+      padding:13px 14px;
+      font-weight:750;
+    }
+    .change-operation[open] > summary {
+      border-bottom:1px solid var(--border);
+    }
+    .change-operation-body {
+      display:grid;
+      gap:8px;
+      padding:12px 14px 14px;
+    }
+    .change-arrow {
+      text-align:center;
+      color:var(--muted);
+      font-size:1.15rem;
+    }
+    .change-footer {
+      display:flex;
+      justify-content:flex-end;
+      gap:9px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+    .change-progress {
+      display:none;
+      gap:8px;
+      margin-top:12px;
+    }
+    .change-progress.active { display:grid; }
+    .change-progress-track {
+      height:9px;
+      overflow:hidden;
+      border-radius:999px;
+      background:rgba(127,127,127,.22);
+    }
+    .change-progress-bar {
+      width:0;
+      height:100%;
+      background:currentColor;
+      transition:width .25s ease;
+    }
+    .change-target-tree {
+      margin:0;
+      padding:12px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:var(--surface-2);
+      white-space:pre;
+      overflow:auto;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+      font-size:.84rem;
+      line-height:1.5;
+    }
+
     .number {
       display: block;
       margin-top: 5px;
@@ -1294,12 +1397,20 @@ EVENTS_HTML = r"""<!doctype html>
       history.replaceState(null, "", url);
     }
 
+    function setChangeStepInUrl(step) {
+      const url = new URL(window.location.href);
+      if (step) url.searchParams.set("change_step", step);
+      else url.searchParams.delete("change_step");
+      history.replaceState(null, "", url);
+    }
+
     function clearChangeTaskFromUrl(crId) {
       const url = new URL(window.location.href);
       if (url.searchParams.get("task") === `change:${crId}`) {
         url.searchParams.delete("task");
-        history.replaceState(null, "", url);
       }
+      url.searchParams.delete("change_step");
+      history.replaceState(null, "", url);
     }
 
     function syncArchiveChangeContext(cr) {
@@ -3381,234 +3492,243 @@ EVENTS_HTML = r"""<!doctype html>
 
     async function showChangeRequestDetail(crId, options={}) {
       try {
-        changeRequestBody.textContent = "Lade Details …";
-        changeRequestTitle.textContent = "Änderungsauftrag";
+        changeRequestBody.textContent = "Lade Änderungsauftrag …";
+        changeRequestTitle.textContent = "Archivänderung";
         changeRequestSubtitle.textContent = "";
 
-        const res = await fetch(`/api/change-requests/${crId}`);
-
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
-
-        const cr = await res.json();
+        const crRes = await fetch(`/api/change-requests/${encodeURIComponent(crId)}`);
+        if (!crRes.ok) throw new Error(`HTTP ${crRes.status}: ${crRes.statusText}`);
+        const cr = await crRes.json();
         const active = syncArchiveChangeContext(cr);
         if (options.resume && !active) {
           if (changeRequestDialog.open) changeRequestDialog.close();
           setStatus("Der frühere Archivänderungsauftrag ist bereits abgeschlossen.", false, true);
           return;
         }
-        changeRequestSubtitle.textContent = `ID: ${cr.id}`;
 
-        let html = "<h4>Änderungsdetails</h4>";
-        html += `<section class="preview-note"><strong>IST → SOLL</strong><p><strong>IST:</strong> Datenbank und Kamerabibliothek bleiben bis zum erfolgreichen Abschluss im bisherigen Zustand.</p><p><strong>SOLL:</strong> Dieser Auftrag beschreibt den zukünftigen Zustand. Erst nach deiner Finder-Arbeit, erfolgreicher Prüfung und dem Abschluss wird er zum neuen Datenbankzustand.</p></section>`;
-        html += `<p><strong>Status:</strong> ${escapeHtml(cr.status)}</p>`;
-        html += `<p><strong>Beschreibung:</strong> ${escapeHtml(cr.description || "—")}</p>`;
-        if (cr.prepared_structure_path) {
-          html += `<section class="preview-note"><strong>Vorbereiteter SSD-Hilfsbereich</strong><p>Unter <code>Arbeitsbereich/${escapeHtml(cr.prepared_structure_path)}</code> liegen nur die für diese Änderung tatsächlich benötigten Zielordner und Hardlinks. Leere, unbenutzte Alle-/Sortiert-/Export- oder Unterereignisordner werden nicht vorsorglich angelegt. Die Kamerabibliothek wurde nicht verändert.</p></section>`;
+        const [assistantRes, filesRes, reassignRes] = await Promise.all([
+          fetch(`/api/change-requests/${encodeURIComponent(crId)}/assistant`),
+          fetch(`/api/change-requests/${encodeURIComponent(crId)}/files`),
+          fetch(`/api/change-requests/${encodeURIComponent(crId)}/reassignments`)
+        ]);
+        if (!assistantRes.ok) {
+          const data = await assistantRes.json().catch(() => ({}));
+          throw new Error(data.detail || `HTTP ${assistantRes.status}`);
         }
+        const assistant = await assistantRes.json();
+        const reviewRows = filesRes.ok ? await filesRes.json() : [];
+        const reassign = reassignRes.ok ? await reassignRes.json() : null;
+        const reassignCount = Number(reassign?.family_count || 0);
+        const finderNeeded = (assistant.operations || []).length > 0 || reassignCount > 0;
 
-        // Dateigenaue Arbeitsanweisung: IST -> SOLL.
-        let reviewRows = [];
-        const filesRes = await fetch(`/api/change-requests/${crId}/files`);
-        if (filesRes.ok) {
-          const files = await filesRes.json();
-          const rows = Array.isArray(files) ? files : (files.files || []);
-          reviewRows = rows;
-          if (rows.length > 0) {
-            const fileName = path => String(path || "").split("/").filter(Boolean).pop() || "Datei";
-            const sourcePath = row => String(
-              row.source_root_kind === "shared_workspace"
-                ? (row.workspace_staging_path || row.workspace_original_path || row.old_path || "")
-                : (row.old_path || "")
-            );
-            const sourceLabel = row => row.source_root_kind === "shared_workspace"
-              ? "SSD · Später zuordnen"
-              : "Kamerabibliothek";
-            const familyStem = row => fileName(row.old_path || row.new_path).replace(/\.[^.]+$/, "");
-            // 0.20.0: Arbeitsgruppen werden nach dem tatsächlichen QUELL-Ereignis
-            // gebildet. Der Nutzer arbeitet im Finder von einem realen Ausgangsordner
-            // aus; das Ziel kann innerhalb desselben Ereignisses oder in einem anderen
-            // Ereignis liegen. Dadurch entstehen keine irreführenden Zielgruppen mehr.
-            const eventGroup = row => {
-              if (row.source_root_kind === "shared_workspace") return "SSD · Später zuordnen";
-              const path = String(row.old_path || row.new_path || "");
-              const parts = path.split("/").filter(Boolean);
-              return parts.length > 1 && /^\d{4}$/.test(parts[0]) ? parts[1] : (parts[0] || cr.event_name || "Ereignis");
-            };
-            const groups = new Map();
-            for (const row of rows) {
-              const eventKey = eventGroup(row);
-              if (!groups.has(eventKey)) groups.set(eventKey, new Map());
-              const familyKey = String(row.family_id ?? familyStem(row));
-              if (!groups.get(eventKey).has(familyKey)) groups.get(eventKey).set(familyKey, []);
-              groups.get(eventKey).get(familyKey).push(row);
-            }
-            const actionableRows = rows.filter(row => {
-              const action = String(row.action || row.operation || "move");
-              return action === "move" && row.new_path;
-            });
-            if (actionableRows.length) {
-              const moveGroups = new Map();
-              for (const row of actionableRows) {
-                const sourceDir = sourcePath(row).split("/").slice(0,-1).join("/") || "—";
-                const targetDir = String(row.new_path||"").split("/").slice(0,-1).join("/") || "—";
-                const key = `${row.source_root_kind || "camera_archive"}|${sourceDir}|${targetDir}`;
-                if (!moveGroups.has(key)) moveGroups.set(key, {row, sourceDir, targetDir, count:0});
-                moveGroups.get(key).count += 1;
-              }
-              html += `<section class="preview-note"><strong>Finder-Arbeit</strong><p>Führe jetzt nur die folgenden tatsächlichen Bewegungen aus. Dateien außerhalb dieser Angaben bleiben unverändert.</p>`;
-              for (const item of moveGroups.values()) {
-                const sourcePrefix = item.row.source_root_kind === "shared_workspace" ? "Arbeitsbereich/" : "Kamerabibliothek/";
-                html += `<div class="card" style="margin:8px 0;padding:10px"><strong>${Number(item.count)} Datei${Number(item.count)===1?"":"en"}</strong><div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(sourcePrefix + item.sourceDir)}</code><div class="muted" style="margin-top:6px">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml("Kamerabibliothek/" + item.targetDir)}</code></div>`;
-              }
-              const workspaceRows = actionableRows.filter(row => row.source_root_kind === "shared_workspace");
-              if (workspaceRows.length === actionableRows.length && workspaceRows.length) {
-                const childCandidates = new Set(workspaceRows.map(row => {
-                  const parts = String(row.new_path||"").split("/").filter(Boolean);
-                  return parts.length >= 5 && !["Alle","Sortiert","Export"].includes(parts[2]) ? parts.slice(0,3).join("/") : "";
-                }).filter(Boolean));
-                if (childCandidates.size === 1) {
-                  const childTarget = [...childCandidates][0];
-                  html += `<p class="muted">Wenn dieser Unterereignisordner im Archiv vollständig neu ist, kannst du den vorbereiteten Ordner <code>${escapeHtml(childTarget.split("/").pop())}</code> auch als Ganzes in <code>Kamerabibliothek/${escapeHtml(childTarget.split("/").slice(0,-1).join("/"))}</code> übernehmen.</p>`;
-                }
-              }
-              html += `</section>`;
-            }
-            html += `<h4>Manuelle Änderungen · ${groups.size} Ereignis${groups.size===1?"":"se"}</h4>`;
-            html += `<p class="muted">Kompakt nach Ereignis und Dateifamilie gruppiert. Einzeldateien und exakte IST→SOLL-Pfade bleiben ausklappbar.</p>`;
-            html += `<div class="change-file-instructions">`;
-            for (const [eventKey, families] of groups) {
-              const familyEntries=[...families.values()];
-              const firstStem=familyStem(familyEntries[0][0]);
-              const lastStem=familyStem(familyEntries[familyEntries.length-1][0]);
-              const groupRows=rows.filter(r=>eventGroup(r)===eventKey);
-              const sourceKeys=new Set(groupRows.map(r=>{
-                if (r.source_root_kind === "shared_workspace") return "SSD · Später zuordnen";
-                const parts=String(r.old_path||"").split("/").filter(Boolean);
-                return parts.length>1 && /^\d{4}$/.test(parts[0]) ? parts[1] : (parts[0]||"");
-              }).filter(Boolean));
-              const targetKeys=new Set(groupRows.map(r=>{
-                const parts=String(r.new_path||"").split("/").filter(Boolean);
-                return parts.length>1 && /^\d{4}$/.test(parts[0]) ? parts[1] : (parts[0]||"");
-              }).filter(Boolean));
-              const hasWorkspaceSource=groupRows.some(r=>r.source_root_kind==="shared_workspace");
-              const purpose=hasWorkspaceSource
-                ? (targetKeys.size===1 ? `Aus dem SSD-Hilfsbereich nach ${[...targetKeys][0]} in die Kamerabibliothek übernehmen` : "Aus dem SSD-Hilfsbereich in die angezeigten Archivziele übernehmen")
-                : ((targetKeys.size===1 && targetKeys.has(eventKey))
-                  ? "Innerhalb dieses Ereignisses verschieben"
-                  : (targetKeys.size===1 ? `Aus diesem Ereignis nach ${[...targetKeys][0]} verschieben` : "Aus diesem Ereignis in mehrere Ziele verschieben"));
-              html += `<section class="card" style="margin:10px 0;padding:12px"><h4 style="margin:0 0 4px">${escapeHtml(eventKey)}</h4>`;
-              html += `<div style="font-weight:600;margin-bottom:3px">${escapeHtml(purpose)}</div>`;
-              html += `<div class="muted">${families.size} Familien · ${groupRows.length} Dateien · ${escapeHtml(firstStem)}${firstStem===lastStem?"":` bis ${escapeHtml(lastStem)}`}</div>`;
-              for (const filesOfFamily of familyEntries) {
-                const stem=familyStem(filesOfFamily[0]);
-                const targetDir=String(filesOfFamily[0].new_path||"").split("/").slice(0,-1).join("/") || "Noch neu zuzuordnen";
-                const sourceDir=sourcePath(filesOfFamily[0]).split("/").slice(0,-1).join("/") || "—";
-                html += `<details class="card" style="margin:7px 0;padding:8px 10px"><summary style="cursor:pointer"><strong>${escapeHtml(stem)}</strong> <span class="muted">· ${filesOfFamily.length} Dateien · ${escapeHtml(sourceDir)} → ${escapeHtml(targetDir)}</span></summary>`;
-                for (const f of filesOfFamily) {
-                  const action=String(f.action||f.operation||"move");
-                  html += `<div style="margin-top:8px"><strong>${escapeHtml(fileName(f.old_path||f.new_path))}</strong> <span class="muted">· ${escapeHtml(action)}</span>`;
-                  html += `<div class="muted">IST · ${escapeHtml(sourceLabel(f))}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(sourcePath(f)||"—")}</code>`;
-                  if (f.source_root_kind === "shared_workspace" && f.workspace_original_path && f.workspace_original_path !== f.workspace_staging_path) {
-                    html += `<div class="muted">SSD-Original bleibt bis zum erfolgreichen Abschluss erhalten: ${escapeHtml(f.workspace_original_path)}</div>`;
-                  }
-                  html += `<div class="muted">SOLL · Kamerabibliothek</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(f.new_path||"Noch neu zuzuordnen")}</code>`;
-                  if (f.verification_status) html += `<div class="muted">Prüfung: ${escapeHtml(f.verification_status)}</div>`;
-                  html += `</div>`;
-                }
-                html += `</details>`;
-              }
-              html += `</section>`;
-            }
-            html += `</div>`;
+        const sequence = [];
+        if (assistant.preparation_required) sequence.push("prepare");
+        if (finderNeeded) sequence.push("finder");
+        sequence.push("verify");
+
+        const urlStep = new URL(window.location.href).searchParams.get("change_step");
+        let phase = options.phase || urlStep || assistant.phase || sequence[0];
+        if (!sequence.includes(phase)) phase = sequence[0];
+        if (
+          assistant.preparation_required
+          && String(cr.status) === "aenderbar_vorschlagen"
+        ) phase = "prepare";
+        if (!assistant.preparation_required && phase === "prepare") {
+          phase = finderNeeded ? "finder" : "verify";
+        }
+        setChangeStepInUrl(phase);
+
+        changeRequestSubtitle.textContent =
+          `${assistant.event_name || cr.event_name || "Ereignis"} · ${cr.id}`;
+
+        const labels = {
+          prepare: "Vorbereiten",
+          finder: "Finder-Arbeit",
+          verify: "Prüfen & Abschließen"
+        };
+        const currentIndex = sequence.indexOf(phase);
+        let html = `<div class="change-stepper">`;
+        sequence.forEach((step, index) => {
+          const state = index < currentIndex ? " done" : index === currentIndex ? " active" : "";
+          html += `<button type="button" class="change-step${state}" data-change-step="${step}" ${index > currentIndex ? "disabled" : ""}><span class="change-step-number">${index + 1}</span><span><strong>${labels[step]}</strong></span></button>`;
+        });
+        html += `</div>`;
+
+        const renderTechnicalDetails = () => {
+          const rows = (Array.isArray(reviewRows) ? reviewRows : []).filter(row => {
+            const action = String(row.action || "");
+            return action && action !== "keep";
+          });
+          if (!rows.length) return "";
+          let detail = `<details class="card"><summary><strong>Technische Details</strong> <span class="muted">· ${rows.length} Dateioperationen</span></summary><div style="margin-top:10px;display:grid;gap:8px">`;
+          for (const row of rows) {
+            const source = row.source_root_kind === "shared_workspace"
+              ? (row.workspace_staging_path || row.workspace_original_path || row.old_path || "—")
+              : (row.old_path || "—");
+            detail += `<div class="card" style="padding:9px 10px"><strong>${escapeHtml(String(row.action || "Änderung"))}</strong><div class="muted">IST</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code><div class="muted" style="margin-top:5px">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "Neu zuzuordnen")}</code></div>`;
+          }
+          detail += `</div></details>`;
+          return detail;
+        };
+
+        if (phase === "prepare") {
+          const prep = assistant.preparation || {};
+          const missing = prep.missing_directories || [];
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Hilfsbereich vorbereiten</h3><p class="muted">Noch wird nur <em>Später zuordnen</em> vorbereitet. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.</p></div></div>`;
+          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} neue Dateien</strong> werden als Hardlinks vorbereitet · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt.`;
+          if (prep.helper_root) html += `<div class="muted" style="margin-top:7px">Hilfsbereich</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(prep.helper_root)}</code>`;
+          if (missing.length) {
+            html += `<details style="margin-top:10px"><summary>Fehlende Struktur anzeigen</summary><div style="margin-top:7px">${missing.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
+          }
+          html += `</div>`;
+          html += `<details class="card"><summary><strong>Was passiert beim Vorbereiten?</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich die für diesen Auftrag benötigten Ordner und Hardlinks unter „Später zuordnen“. SSD-Originale und Kamerabibliothek werden nicht verändert.</p></details>`;
+          html += `<div id="change-prep-progress" class="change-progress"><div class="muted" data-progress-label>Hilfsbereich wird vorbereitet …</div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
+          if (String(cr.status) === "aenderbar_bestaetigt") {
+            html += `<div class="success-text">✓ Hilfsbereich ist bereits vorbereitet.</div><div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepared-next>Weiter</button></div></section>`;
+          } else {
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepare>Hilfsbereich vorbereiten</button></div></section>`;
           }
         }
 
-        // Herausfallende Archivfamilien müssen vor der Prüfung ein klares Ziel bekommen.
-        const archiveReassignRes = await fetch(`/api/change-requests/${encodeURIComponent(crId)}/reassignments`);
-        let archiveReassignData = null;
-        if (archiveReassignRes.ok) archiveReassignData = await archiveReassignRes.json();
-        if (archiveReassignData && Number(archiveReassignData.family_count || 0) > 0) {
-          html += `<section class="preview-note"><strong>Neu zuzuordnen</strong>${(archiveReassignData.reassignment_segments||[]).map(s=>`<p>${escapeHtml(s.day_key)} · ${escapeHtml(s.start_time)}–${escapeHtml(s.end_time)} · ${Number(s.family_count)} Familien · ${Number(s.file_count)} Dateien</p>`).join('')}<a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(archiveReassignData.job_id)}&task=free">In Aufnahmen öffnen</a></section>`;
+        if (phase === "finder") {
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Was du jetzt im Finder tun musst</h3><p class="muted">Nur diese Handlungen gehören zu diesem Auftrag. Unveränderte Dateien werden bewusst nicht angezeigt.</p></div></div>`;
+          let number = 1;
+          for (const operation of assistant.operations || []) {
+            html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
+            if (operation.source) html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
+            if (operation.target) html += `<div class="change-arrow">↓</div><div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+            if ((operation.missing_directories || []).length) {
+              html += `<details><summary>Diese Ordner werden dabei neu ergänzt</summary><div style="margin-top:7px">${operation.missing_directories.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
+            }
+            html += `</div></details>`;
+            number += 1;
+          }
+          if (reassignCount > 0) {
+            html += `<div class="card"><strong>${number}. Herausfallende Aufnahmen neu zuordnen</strong><p class="muted">${reassignCount} Familie${reassignCount===1?"":"n"} benötigt noch ein fachliches Ziel.</p><a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(reassign.job_id)}&task=free">In Aufnahmen zuordnen</a></div>`;
+          }
+          html += renderTechnicalDetails();
+          html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>Finder-Arbeit erledigt · weiter zu Prüfen</button></div></section>`;
         }
 
-        // Einheitlicher Pflicht-Workflow: vorbereiten -> Finder -> prüfen -> abschließen.
-        const status = String(cr.status || "");
-        html += "<h4>Workflow</h4>";
-        html += `<div class="card" style="margin:10px 0;padding:12px"><strong>1 · Änderung vorbereiten</strong><div class="muted">SOLL-Zustand und benötigter SSD-Hilfsbereich werden festgelegt.</div><br><strong>2 · Finder-Arbeit ausführen</strong><div class="muted">Nur die oben angegebenen Dateien/Ordner manuell in der Kamerabibliothek an den SOLL-Ort bringen.</div><br><strong>3 · Prüfen</strong><div class="muted">Die App prüft die Kamerabibliothek read-only nach Pfad, Größe und SHA-256.</div><br><strong>4 · Änderung abschließen & SSD freigeben</strong><div class="muted">Erst dann wird SOLL zum Datenbankzustand; nur bestätigte SSD-Originale und Hilfslinks werden freigegeben.</div></div>`;
-        if (status === "aenderbar_vorschlagen") {
-          html +=
-            `<button type="button" class="plan-button bk-positive-action" data-cr-confirm="${escapeHtml(crId)}">Änderung vorbereiten</button>` +
-            ` <button type="button" class="danger-button" data-cr-cancel="${escapeHtml(crId)}">Änderung verwerfen</button>`;
-        } else if (status === "aenderbar_bestaetigt") {
-          const initiallyVerified = reviewRows.length > 0 && reviewRows.every(row => String(row.verification_status || "") === "verified");
-          html +=
-            `<div id="change-verify-panel" class="card" style="margin:10px 0;padding:12px">` +
-              `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">` +
-                `<button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify="${escapeHtml(crId)}">${initiallyVerified ? "✓ Prüfung erfolgreich" : "Prüfen"}</button>` +
-                `<span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} Dateien bestätigt.` : "Noch nicht vollständig geprüft."}</span>` +
-              `</div>` +
-              `<div id="change-verify-progress" style="display:none;margin-top:10px;height:8px;border-radius:999px;overflow:hidden;background:rgba(127,127,127,.22)"><div style="width:0%;height:100%;background:currentColor;transition:width .2s ease"></div></div>` +
-              `<div id="change-verify-errors" style="display:${initiallyVerified ? "none" : "block"};margin-top:10px"></div>` +
-            `</div>` +
-            ` <button type="button" class="plan-button bk-positive-action" data-cr-archive="${escapeHtml(crId)}" ${initiallyVerified ? "" : "disabled"}>Änderung abschließen & SSD freigeben</button>` +
-            ` <button type="button" class="danger-button" data-cr-cancel="${escapeHtml(crId)}">Änderung verwerfen</button>`;
-        } else {
-          html += `<p class="muted">Dieser Aenderungsantrag ist abgeschlossen (${escapeHtml(status)}).</p>`;
+        if (phase === "verify") {
+          const initiallyVerified =
+            Array.isArray(reviewRows)
+            && reviewRows.length > 0
+            && reviewRows.every(row => String(row.verification_status || "") === "verified");
+          const tree = (assistant.target_structure?.lines || []).join("\n");
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Abschließen</h3><p class="muted">So soll die Kamerabibliothek jetzt aussehen. Die Prüfung selbst bleibt vollständig read-only.</p></div></div>`;
+          if (tree) html += `<div class="card"><strong>SOLL-Struktur</strong><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(tree)}</pre></div>`;
+          html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? "✓ Prüfung erfolgreich" : "Prüfen"}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} Dateien bestätigt.` : "Noch nicht geprüft."}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
+          html += renderTechnicalDetails();
+          html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>Änderung abschließen & SSD freigeben</button></div></section>`;
         }
 
         changeRequestBody.innerHTML = html;
 
-        // Workflow-Button-Handler
-        const confirmBtn = changeRequestBody.querySelector("[data-cr-confirm]");
-        if (confirmBtn) confirmBtn.addEventListener("click", () => changeRequestAction(crId, "confirm"));
-        const cancelBtn = changeRequestBody.querySelector("[data-cr-cancel]");
-        if (cancelBtn) cancelBtn.addEventListener("click", () => changeRequestAction(crId, "cancel"));
+        for (const button of changeRequestBody.querySelectorAll("[data-change-step]")) {
+          button.addEventListener("click", () => {
+            showChangeRequestDetail(crId, {phase:button.dataset.changeStep})
+              .catch(error => setStatus(error.message, true));
+          });
+        }
+
+        const preparedNextBtn = changeRequestBody.querySelector("[data-cr-prepared-next]");
+        if (preparedNextBtn) preparedNextBtn.addEventListener("click", () => {
+          showChangeRequestDetail(crId, {phase:finderNeeded ? "finder" : "verify"})
+            .catch(error => setStatus(error.message, true));
+        });
+
+        const prepareBtn = changeRequestBody.querySelector("[data-cr-prepare]");
+        if (prepareBtn) prepareBtn.addEventListener("click", async () => {
+          const progress = changeRequestBody.querySelector("#change-prep-progress");
+          const bar = progress?.querySelector(".change-progress-bar");
+          const label = progress?.querySelector("[data-progress-label]");
+          prepareBtn.disabled = true;
+          progress?.classList.add("active");
+          if (label) label.textContent = "Ordner und Hardlinks werden unter „Später zuordnen“ vorbereitet …";
+          if (bar) bar.style.width = "35%";
+          try {
+            await changeRequestAction(crId, "confirm", {terminal:false});
+            if (bar) bar.style.width = "100%";
+            if (label) label.textContent = "Hilfsbereich ist vorbereitet.";
+            await new Promise(resolve => setTimeout(resolve, 180));
+            await showChangeRequestDetail(crId, {phase:finderNeeded ? "finder" : "verify"});
+          } catch (error) {
+            prepareBtn.disabled = false;
+            if (label) label.textContent = error.message;
+            throw error;
+          }
+        });
+
+        const finderDoneBtn = changeRequestBody.querySelector("[data-cr-finder-done]");
+        if (finderDoneBtn) finderDoneBtn.addEventListener("click", async () => {
+          finderDoneBtn.disabled = true;
+          try {
+            if (String(cr.status) === "aenderbar_vorschlagen") {
+              await changeRequestAction(crId, "confirm", {terminal:false});
+            }
+            await showChangeRequestDetail(crId, {phase:"verify"});
+          } catch (error) {
+            finderDoneBtn.disabled = false;
+            setStatus(error.message, true);
+          }
+        });
+
         const verifyBtn = changeRequestBody.querySelector("[data-cr-verify]");
         const archiveBtn = changeRequestBody.querySelector("[data-cr-archive]");
         if (verifyBtn) verifyBtn.addEventListener("click", async () => {
-          const panel = changeRequestBody.querySelector("#change-verify-panel");
-          const progress = changeRequestBody.querySelector("#change-verify-progress");
-          const progressBar = progress?.firstElementChild;
+          const progress = changeRequestBody.querySelector("#change-work-progress");
+          const bar = progress?.querySelector(".change-progress-bar");
+          const label = progress?.querySelector("[data-progress-label]");
           const summary = changeRequestBody.querySelector("#change-verify-summary");
           const errors = changeRequestBody.querySelector("#change-verify-errors");
           verifyBtn.disabled = true;
           verifyBtn.classList.remove("success", "danger");
           verifyBtn.textContent = "Prüfung läuft …";
-          if (progress) progress.style.display = "block";
-          if (progressBar) progressBar.style.width = "35%";
-          if (summary) { summary.className = "muted"; summary.textContent = "Kamerabibliothek wird read-only nach Größe und SHA-256 geprüft …"; }
+          progress?.classList.add("active");
+          if (bar) bar.style.width = "20%";
+          if (label) label.textContent = "Kamerabibliothek wird nach Pfad, Größe und SHA-256 geprüft …";
           if (errors) { errors.style.display = "none"; errors.innerHTML = ""; }
           try {
-            const data = await requestJson(`/api/change-requests/${encodeURIComponent(crId)}/verify`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
-            if (progressBar) progressBar.style.width = "100%";
+            if (String(cr.status) === "aenderbar_vorschlagen") {
+              await changeRequestAction(crId, "confirm", {terminal:false});
+            }
+            if (bar) bar.style.width = "45%";
+            const data = await requestJson(
+              `/api/change-requests/${encodeURIComponent(crId)}/verify`,
+              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}
+            );
+            if (bar) bar.style.width = "100%";
             const total = Number(data.file_count || 0);
             const ok = Number(data.verified_file_count || 0);
             const problems = (data.files || []).filter(row => String(row.status || "") !== "verified");
             if (data.complete) {
               verifyBtn.classList.add("success");
               verifyBtn.textContent = "✓ Prüfung erfolgreich";
-              if (summary) { summary.className = "success-text"; summary.textContent = `${ok}/${total} Dateien bestätigt. Alle manuellen Änderungen stimmen.`; }
+              if (summary) { summary.className = "success-text"; summary.textContent = `${ok}/${total} Dateien bestätigt. Alles stimmt mit SOLL überein.`; }
+              if (label) label.textContent = "Prüfung abgeschlossen.";
               if (archiveBtn) archiveBtn.disabled = false;
-              if (errors) errors.style.display = "none";
             } else {
               verifyBtn.classList.add("danger");
               verifyBtn.textContent = "✕ Prüfung mit Problemen";
-              if (summary) { summary.className = "danger-text"; summary.textContent = `${ok}/${total} Dateien bestätigt · ${problems.length} Problem${problems.length===1?"":"e"}.`; }
+              if (summary) { summary.className = "danger-text"; summary.textContent = `${ok}/${total} bestätigt · ${problems.length} Problem${problems.length===1?"":"e"}.`; }
+              if (label) label.textContent = "Bitte die angezeigten Abweichungen im Finder korrigieren und erneut prüfen.";
               if (archiveBtn) archiveBtn.disabled = true;
               if (errors) {
                 errors.style.display = "block";
                 errors.innerHTML = problems.map(row => {
-                  const label = row.status === "missing" ? "Fehlt am Ziel" : row.status === "old_path_still_exists" ? "Liegt noch am alten Ort" : row.status === "size_mismatch" ? "Dateigröße abweichend" : row.status === "sha256_mismatch" ? "SHA-256 abweichend" : row.status === "needs_reassignment" ? "Noch neu zuzuordnen" : (row.message || row.status || "Problem");
-                  return `<article class="card" style="margin:8px 0;padding:10px"><strong>${escapeHtml(label)}</strong>${row.message ? `<div class="muted">${escapeHtml(row.message)}</div>` : ""}<div class="muted" style="margin-top:6px">IST</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.old_path || "—")}</code><div class="muted" style="margin-top:6px">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "—")}</code></article>`;
+                  const problemLabel =
+                    row.status === "missing" ? "Fehlt am Ziel"
+                    : row.status === "old_path_still_exists" ? "Liegt noch am alten Ort"
+                    : row.status === "size_mismatch" ? "Dateigröße abweichend"
+                    : row.status === "sha256_mismatch" ? "SHA-256 abweichend"
+                    : row.status === "needs_reassignment" ? "Noch neu zuzuordnen"
+                    : (row.message || row.status || "Problem");
+                  return `<div class="card" style="margin-top:8px"><strong>${escapeHtml(problemLabel)}</strong>${row.message ? `<div class="muted">${escapeHtml(row.message)}</div>` : ""}<div class="muted" style="margin-top:5px">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "—")}</code></div>`;
                 }).join("");
               }
             }
-            setTimeout(() => { if (progress) progress.style.display = "none"; }, 400);
-            refreshGlobalTasks();
           } catch (error) {
-            if (progress) progress.style.display = "none";
             verifyBtn.classList.add("danger");
             verifyBtn.textContent = "✕ Prüfung fehlgeschlagen";
             if (summary) { summary.className = "danger-text"; summary.textContent = error.message; }
@@ -3617,48 +3737,91 @@ EVENTS_HTML = r"""<!doctype html>
             verifyBtn.disabled = false;
           }
         });
-        if (archiveBtn) archiveBtn.addEventListener("click", () => changeRequestAction(crId, "archive"));
+
+        if (archiveBtn) archiveBtn.addEventListener("click", async () => {
+          const progress = changeRequestBody.querySelector("#change-work-progress");
+          const bar = progress?.querySelector(".change-progress-bar");
+          const label = progress?.querySelector("[data-progress-label]");
+          const summary = changeRequestBody.querySelector("#change-verify-summary");
+          archiveBtn.disabled = true;
+          verifyBtn && (verifyBtn.disabled = true);
+          progress?.classList.add("active");
+          if (bar) bar.style.width = "12%";
+          if (label) label.textContent = "Geprüften SOLL-Zustand in die Datenbank übernehmen …";
+
+          let pct = 12;
+          const pulse = window.setInterval(() => {
+            pct = Math.min(78, pct + 7);
+            if (bar) bar.style.width = `${pct}%`;
+            if (pct >= 48 && label) label.textContent = "SSD-Originale und Hilfslinks sicher freigeben …";
+          }, 220);
+          try {
+            const res = await fetch(`/api/change-requests/${encodeURIComponent(crId)}/archive`, {
+              method:"POST",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({})
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            window.clearInterval(pulse);
+            if (bar) bar.style.width = "100%";
+            if (label) label.textContent = "Abgeschlossen · SSD freigegeben und leere Quellordner aufgeräumt.";
+            if (summary) { summary.className = "success-text"; summary.textContent = "Änderung vollständig abgeschlossen."; }
+            await new Promise(resolve => setTimeout(resolve, 280));
+
+            mandatoryArchiveChangeContext = null;
+            clearChangeTaskFromUrl(crId);
+            changeRequestClose.textContent = "Schließen";
+            changeRequestClose.classList.remove("danger-button");
+            if (changeRequestDialog.open) changeRequestDialog.close();
+            await loadEvents({reset:true});
+            refreshGlobalTasks();
+            const cleanup = data.ssd_cleanup || {};
+            setStatus(
+              `Archivänderung abgeschlossen · ${Number(cleanup.removed_original_file_count || 0)} SSD-Dateien freigegeben · ${Number(cleanup.removed_empty_source_directory_count || 0)} leere Quellordner entfernt.`,
+              false,
+              true
+            );
+          } catch (error) {
+            window.clearInterval(pulse);
+            archiveBtn.disabled = false;
+            verifyBtn && (verifyBtn.disabled = false);
+            if (label) label.textContent = error.message;
+            setStatus(error.message, true);
+          }
+        });
       } catch (error) {
         changeRequestBody.textContent = `Fehler: ${error.message}`;
         setStatus(error.message, true);
       }
     }
 
-    async function changeRequestAction(crId, action) {
-      try {
-        const res = await fetch(`/api/change-requests/${encodeURIComponent(crId)}/${action}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.detail || `HTTP ${res.status}`);
-        }
-        const data = await res.json();
-        if (action === "cancel" || action === "archive") {
-          mandatoryArchiveChangeContext = null;
-          clearChangeTaskFromUrl(crId);
-          changeRequestClose.textContent = "Schließen";
-          changeRequestClose.classList.remove("danger-button");
-          if (changeRequestDialog.open) changeRequestDialog.close();
-          await loadEvents({reset:true});
-          refreshGlobalTasks();
-          setStatus(
-            action === "archive"
-              ? "Archivänderung abgeschlossen. Der geprüfte SOLL-Zustand ist jetzt Datenbankzustand; bestätigte SSD-Dateien wurden freigegeben."
-              : "Archivänderung verworfen. Der vorherige Zustand bleibt gültig.",
-            false,
-            true
-          );
-          return;
-        }
-        setStatus(`Aenderungsauftrag: ${escapeHtml(data.status || action)}`);
-        await showChangeRequestDetail(crId);
+    async function changeRequestAction(crId, action, options={}) {
+      const res = await fetch(`/api/change-requests/${encodeURIComponent(crId)}/${action}`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({})
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+      if (action === "cancel") {
+        mandatoryArchiveChangeContext = null;
+        clearChangeTaskFromUrl(crId);
+        changeRequestClose.textContent = "Schließen";
+        changeRequestClose.classList.remove("danger-button");
+        if (changeRequestDialog.open) changeRequestDialog.close();
+        await loadEvents({reset:true});
         refreshGlobalTasks();
-      } catch (error) {
-        setStatus(error.message, true);
+        setStatus("Archivänderung verworfen. Der vorherige Zustand bleibt gültig.", false, true);
+        return data;
       }
+
+      if (options.terminal !== false) {
+        setStatus(`Änderungsauftrag: ${escapeHtml(data.status || action)}`);
+      }
+      refreshGlobalTasks();
+      return data;
     }
 
     async function proposeChangeRequest(eventId, jobId) {
