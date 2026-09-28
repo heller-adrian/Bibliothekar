@@ -72,7 +72,7 @@ def test_0271_archive_change_ui_is_compact_three_step_assistant():
     assert "Hilfsbereich vorbereiten" in html
     assert "Finder-Arbeit erledigt · weiter zu Prüfen" in html
     assert "Technische Details" in html
-    assert "Unveränderte Dateien werden bewusst nicht angezeigt." in html
+    assert "Freigewordene Zeit wird zuerst fachlich neu zugeordnet." in html
     assert "Änderung abschließen & SSD freigeben" in html
     assert 'id="change-work-progress"' in html
     assert "SSD-Originale und Hilfslinks sicher freigeben" in html
