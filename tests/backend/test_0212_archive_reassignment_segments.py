@@ -72,6 +72,42 @@ def test_archived_child_shrink_releases_exact_structure_range_not_capture_minmax
     assert segments[0]["file_count"] == 4
 
 
+def test_archived_multiday_release_is_split_at_calendar_day_boundaries():
+    c = _connection()
+    c.execute(
+        "INSERT INTO events VALUES ('parent',NULL,'event','2026-07-23T00:00:00','2026-07-24T23:59:59')"
+    )
+    c.executemany(
+        "INSERT INTO event_assignments VALUES ('parent',?)",
+        [(1,), (2,)],
+    )
+    cr = {
+        "event_id": "parent",
+        "event_kind": "event",
+        "start_date": "2026-07-23",
+        "end_date": "2026-07-23",
+        "uses_time_range": 1,
+        "start_time": "00:00",
+        "end_time": "20:00",
+        "child_segments_json": "[]",
+        "no_event_segments": "[]",
+    }
+    pending = [
+        {"family_id": 1, "selected_capture_time": "2026-07-23T21:30:00", "file_count": 2},
+        {"family_id": 2, "selected_capture_time": "2026-07-24T12:00:00", "file_count": 2},
+    ]
+
+    segments = build_archive_reassignment_segments(c, cr, pending)
+
+    assert [
+        (s["day_key"], s["start_time"], s["end_time"], s["family_ids"])
+        for s in segments
+    ] == [
+        ("2026-07-23", "20:01", "23:59", [1]),
+        ("2026-07-24", "00:00", "23:59", [2]),
+    ]
+
+
 def test_archived_reassignment_rejects_family_subset_of_one_released_segment():
     segments = [{
         "day_key": "2026-07-15",
