@@ -158,7 +158,7 @@ def test_0271_metadata_only_change_skips_preparation_and_finder(tmp_path: Path):
         archive_root=archive, workspace_path=workspace,
     )
     assert proposed["preparation_required"] is False
-    assert proposed["status"] == "aenderbar_bestaetigt"
+    assert proposed["status"] == "aenderbar_vorschlagen"
     assistant = build_archive_change_assistant(
         db, archive, workspace, proposed["change_request_id"]
     )
