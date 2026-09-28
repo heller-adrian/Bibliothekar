@@ -5189,30 +5189,36 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                 (target_event_id,),
             ).fetchone()
 
-        # 0.27.0: Eine archivierte Monatssammlung aus demselben Sicherungsauftrag
-        # wird nicht mehr ueber einen versteckten planned-Nachtrag fortgefuehrt.
-        # Stattdessen entsteht sofort derselbe manuelle, read-only Archivauftrag
-        # wie beim Bearbeiten unter Ereignisse. Neue freie Familien werden im
-        # SSD-Hilfsbereich vorbereitet und erst nach Archiv-SHA-Pruefung gebunden.
-        if (
-            target_row is not None
-            and str(target_row["status"] or "") == "archived"
-            and str(target_row["job_id"] or "") == str(job_id)
-        ):
+        # 0.27.0: Archivierte Monatssammlungen werden unabhaengig vom
+        # Sicherungsauftrag direkt ueber den manuellen, read-only Archivworkflow
+        # erweitert. Neue SSD-Familien werden unter "Später zuordnen" vorbereitet
+        # und erst nach erfolgreicher Archiv-SHA-Pruefung dauerhaft gebunden.
+        if target_row is not None and str(target_row["status"] or "") == "archived":
             from app.event_timeline import normalize_no_event_segments
+
+            normalized_new = normalize_no_event_segments(segments)
+            target_job_id = str(target_row["job_id"])
             context = get_event_edit_context(
-                DATABASE_FILE, str(target_row["job_id"]), target_event_id
+                DATABASE_FILE, target_job_id, target_event_id
             )
             existing_segments = [
                 {
-                    "day_key": str(item.get("day_key") or str(item.get("start_datetime") or "")[:10]),
-                    "start_time": str(item.get("start_time") or str(item.get("start_datetime") or "")[11:16]),
-                    "end_time": str(item.get("end_time") or str(item.get("end_datetime") or "")[11:16]),
+                    "day_key": str(
+                        item.get("day_key")
+                        or str(item.get("start_datetime") or "")[:10]
+                    ),
+                    "start_time": str(
+                        item.get("start_time")
+                        or str(item.get("start_datetime") or "")[11:16]
+                    ),
+                    "end_time": str(
+                        item.get("end_time")
+                        or str(item.get("end_datetime") or "")[11:16]
+                    ),
                 }
                 for item in (context.get("time_segments") or [])
             ]
-            new_segments = normalize_no_event_segments(segments)
-            combined_raw = [
+            combined_segments = normalize_no_event_segments([
                 *existing_segments,
                 *[
                     {
@@ -5220,15 +5226,38 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                         "start_time": item["start_time"],
                         "end_time": item["end_time"],
                     }
-                    for item in new_segments
+                    for item in normalized_new
                 ],
-            ]
-            combined_segments = normalize_no_event_segments(combined_raw)
-            editable_families = [
-                family
+            ])
+
+            incoming_available = list_job_available_families(
+                DATABASE_FILE, job_id
+            )
+            incoming_ids = {
+                int(family["family_id"])
+                for family in incoming_available
+                if any(
+                    segment["start_datetime"]
+                    <= str(family.get("selected_capture_time") or "")[:19]
+                    <= segment["end_datetime"]
+                    for segment in normalized_new
+                )
+            }
+            if not incoming_ids:
+                raise ValueError(
+                    "In den gewählten Zeitsegmenten gibt es keine freien Dateifamilien."
+                )
+
+            family_map = {
+                int(family["family_id"]): dict(family)
                 for family in (context.get("families") or [])
-                if not family.get("assigned_elsewhere") or family.get("assigned_here")
-            ]
+                if family.get("assigned_here")
+            }
+            for family in incoming_available:
+                family_id = int(family["family_id"])
+                if family_id in incoming_ids:
+                    family_map[family_id] = dict(family)
+
             preview = build_event_preview(
                 {
                     "event_kind": "no_event",
@@ -5239,11 +5268,11 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                     "start_date": combined_segments[0]["day_key"],
                     "end_date": combined_segments[-1]["day_key"],
                 },
-                editable_families,
+                list(family_map.values()),
             )
             result = propose_event_change(
                 DATABASE_FILE,
-                str(target_row["job_id"]),
+                target_job_id,
                 target_event_id,
                 preview,
                 event_name="Ohne Ereignis",
@@ -5251,16 +5280,13 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                 archive_root=ARCHIVE_ROOT,
                 workspace_path=WORKSPACE_PATH,
             )
-            added_count = int(result.get("diff_summary", {}).get("added_count") or 0)
             return {
                 "status": "archive_change_request_created",
                 "event_id": target_event_id,
                 "canonical_target_event_id": target_event_id,
-                "assigned_family_count": added_count,
-                "family_ids": [
-                    int(value) for value in preview.get("selected_family_ids", [])
-                ],
-                "cross_job": False,
+                "assigned_family_count": len(incoming_ids),
+                "family_ids": sorted(incoming_ids),
+                "cross_job": target_job_id != str(job_id),
                 "linkage_kind": "archive_change_request",
                 "change_request_id": result["change_request_id"],
                 "prepared_structure_path": result.get("prepared_structure_path") or "",
@@ -5271,6 +5297,7 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
         )
     except (ValueError, EventPreviewError, EventChangeRequestError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 @app.get("/api/tasks", tags=["Aufgaben"])
 def api_global_tasks() -> dict[str, Any]:
