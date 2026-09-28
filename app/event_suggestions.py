@@ -77,6 +77,7 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
                 WHERE e.parent_event_id IS NULL
                   AND e.job_id <> ?
                   AND e.event_kind = 'event'
+                  AND COALESCE(e.linkage_kind,'') = ''
                   AND e.status IN ('planned', 'applied', 'archived')
                   AND ? BETWEEN e.start_datetime AND e.end_datetime
                 ORDER BY
@@ -229,7 +230,7 @@ def accept_event_suggestion(
         prefix = {
             "planned": "Ergänzung",
             "applied": "Nachtrag",
-            "archived": "Später zuzuordnen",
+            "archived": "Später zuordnen",
         }[status]
         event_id = "EVENT_" + uuid.uuid4().hex.upper()
         name = f"{prefix}: {target['name']}"
