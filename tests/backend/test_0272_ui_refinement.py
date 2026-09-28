@@ -23,7 +23,9 @@ def test_0272_workspace_explanations_are_compact_and_readable():
     source = (ROOT / "app" / "workspace_ui.py").read_text()
     assert "formatStoredDateTime" in source
     assert "Datenbank-Zeitraum:</strong> von" in source
-    assert 'title="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand.' in source
+    assert 'class="bk-help"' in source
+    assert 'data-help="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand.' in source
+    assert 'title="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand.' not in source
     assert '<div class="muted" style="margin-top:3px">Sicher aus dem Archiv' not in source
 
 def test_0272_completion_message_is_not_misleading_counter_summary():

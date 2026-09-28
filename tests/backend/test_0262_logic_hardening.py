@@ -277,7 +277,7 @@ def test_0262_confirmed_archive_change_cannot_disappear_after_manual_work(tmp_pa
     target = archive / review["new_path"]
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
-    with pytest.raises(EventChangeApplyError, match="manuelle Änderungen"):
+    with pytest.raises(EventChangeApplyError, match="manuelle Änderungen|manuellen Änderungen"):
         cancel_event_change(db, cr_id, archive)
 
     target.unlink()

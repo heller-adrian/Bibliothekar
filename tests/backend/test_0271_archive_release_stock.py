@@ -358,10 +358,13 @@ def test_0271_cancel_cleans_release_copy_only_while_archive_original_is_intact(t
     )
     rows2 = _copy_release_rows(case2)
     (case2["archive"] / rows2[0]["old_path"]).unlink()
-    with pytest.raises(EventChangeApplyError, match="ursprünglichen|Archiv"):
-        cancel_event_change(
-            case2["db"], case2["cr_id"], case2["archive"], case2["workspace"]
-        )
+    reversal = cancel_event_change(
+        case2["db"], case2["cr_id"], case2["archive"], case2["workspace"]
+    )
+    assert reversal["status"] == "rueckaenderung_erforderlich"
+    assert reversal["reversal_required"] is True
+    assert reversal["reversal"]["active"] is True
+    assert reversal["reversal"]["phase"] == "prepare"
     assert (case2["work"] / rows2[0]["workspace_release_path"]).is_file()
 
 

@@ -445,7 +445,10 @@ def _reversal_state(
         operations.append({
             "kind": "restore_from_ssd",
             "title": "Ursprünglichen Bestand aus Später zuordnen zurückkopieren",
-            "source": "Arbeitsbereich/" + (restore_root.relative_to(work_root).as_posix()),
+            "source": "Arbeitsbereich/" + (
+                restore_root.joinpath(*_safe_relative(str(manifest["original_root"])).parts)
+                .relative_to(work_root).as_posix()
+            ),
             "target": "Kamerabibliothek/" + PurePosixPath(str(manifest["original_root"])).parent.as_posix(),
             "items": sorted(set([PurePosixPath(value).name for value in restore_items] + [PurePosixPath(value).name for value in missing_dirs])),
             "detail": "Fehlende ursprüngliche Ordner und Dateien aus dem vorbereiteten Rückänderungsbestand zurück in die alte Archivstruktur übernehmen.",
@@ -495,11 +498,16 @@ def _reversal_state(
             "state": "pending",
         })
 
+    restore_event_root = restore_root.joinpath(
+        *_safe_relative(str(manifest["original_root"])).parts
+    )
     return {
         "manifest": manifest,
         "operations": operations,
         "complete": len(operations) == 0,
-        "original_stock_path": "Arbeitsbereich/" + (restore_root.relative_to(work_root).as_posix()),
+        "original_stock_path": "Arbeitsbereich/" + (
+            restore_event_root.relative_to(work_root).as_posix()
+        ),
     }
 
 
@@ -523,7 +531,11 @@ def build_archive_reversal_assistant(
             "phase": "prepare",
             "status": "requested",
             "original_stock_path": "Arbeitsbereich/" + (
-                (_base(workspace_path, cr_id) / "Wiederherstellung")
+                (
+                    _base(workspace_path, cr_id)
+                    / "Wiederherstellung"
+                    / Path(str(manifest["original_root"]))
+                )
                 .relative_to(_work_root(workspace_path)).as_posix()
             ),
             "original_root": manifest["original_root"],
