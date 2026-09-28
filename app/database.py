@@ -2477,7 +2477,6 @@ def create_planned_event(
             WHERE ea.family_id IN (
                 {placeholders}
             )
-              AND assigned.job_id = ?
               AND assigned.status IN (
                     'draft',
                     'planned',
@@ -2498,10 +2497,7 @@ def create_planned_event(
                 ea.family_id,
                 root_event_name
             """,
-            (
-                *requested_family_ids,
-                job_id,
-            ),
+            tuple(requested_family_ids),
         ).fetchall()
 
         if ignored_event_ids and conflicting_rows:
@@ -3160,14 +3156,19 @@ def get_event_edit_context(
                     JOIN events linked_assigned ON linked_assigned.id=linked_ea.event_id
                     LEFT JOIN events linked_root ON linked_root.id=linked_assigned.parent_event_id
                     WHERE linked_ea.family_id=ff.id
-                      AND COALESCE(linked_root.linked_event_id, linked_assigned.linked_event_id)=?
-                      AND COALESCE(linked_root.linkage_kind, linked_assigned.linkage_kind)='archived_manual'
-                      AND COALESCE(linked_root.status, linked_assigned.status)='archived'
+                      AND (
+                           COALESCE(linked_root.id, linked_assigned.id)=?
+                           OR (
+                                COALESCE(linked_root.linked_event_id, linked_assigned.linked_event_id)=?
+                                AND COALESCE(linked_root.linkage_kind, linked_assigned.linkage_kind)='archived_manual'
+                                AND COALESCE(linked_root.status, linked_assigned.status)='archived'
+                              )
+                          )
                )
             GROUP BY ff.id
             ORDER BY ff.selected_capture_time, ff.id
             """,
-            (event_id, event_id, event_id, event_id, job_id, event_id),
+            (event_id, event_id, event_id, event_id, job_id, event_id, event_id),
         ).fetchall()
 
     from app.released_ranges import merge_intervals
@@ -3439,11 +3440,10 @@ def update_event_definition(
                 JOIN events assigned ON assigned.id = ea.event_id
                 LEFT JOIN events root ON root.id = assigned.parent_event_id
                 WHERE ea.family_id IN ({placeholders})
-                  AND assigned.job_id = ?
                   AND COALESCE(root.id, assigned.id) != ?
                   AND assigned.status IN ('draft','planned','applied','archived')
                 """,
-                (*requested_ids, job_id, event_id),
+                (*requested_ids, event_id),
             ).fetchall()
             if conflicts:
                 names = sorted({str(r["event_name"]) for r in conflicts})
@@ -3540,10 +3540,10 @@ def update_event_definition(
                     FROM event_assignments ea
                     JOIN events assigned ON assigned.id = ea.event_id
                     LEFT JOIN events root ON root.id = assigned.parent_event_id
-                    WHERE ea.family_id IN ({placeholders}) AND assigned.job_id=?
+                    WHERE ea.family_id IN ({placeholders})
                       AND COALESCE(root.id, assigned.id) != ?
                       AND assigned.status IN ('draft','planned','applied','archived')""",
-                (*requested_ids, job_id, event_id),
+                (*requested_ids, event_id),
             ).fetchall()
             if allow_archived_manual:
                 remaining_conflicts = [r for r in remaining_conflicts if str(r["assigned_status"]) != "archived"]
@@ -3775,7 +3775,7 @@ def assign_free_families_to_existing_no_event(
                WHERE ff.job_id=? AND ff.selected_capture_time IS NOT NULL
                  AND NOT EXISTS (
                    SELECT 1 FROM event_assignments ea JOIN events e ON e.id=ea.event_id
-                   WHERE ea.family_id=ff.id AND e.job_id=ff.job_id
+                   WHERE ea.family_id=ff.id
                      AND e.status IN ('draft','planned','applied','archived')
                  )
                ORDER BY ff.selected_capture_time,ff.id""", (job_id,)
@@ -4021,7 +4021,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                WHERE ff.selected_capture_time IS NOT NULL
                  AND NOT EXISTS (
                    SELECT 1 FROM event_assignments ea JOIN events e ON e.id=ea.event_id
-                   WHERE ea.family_id=ff.id AND e.job_id=ff.job_id
+                   WHERE ea.family_id=ff.id
                      AND e.status IN ('draft','planned','applied','archived')
                  )
                  AND NOT EXISTS (

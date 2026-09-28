@@ -136,6 +136,9 @@ def _load_active_assignments(
 
             FROM event_assignments AS ea
 
+            JOIN file_families AS source_family
+                ON source_family.id = ea.family_id
+
             JOIN events AS assigned
                 ON assigned.id = ea.event_id
 
@@ -145,7 +148,7 @@ def _load_active_assignments(
                     assigned.id
                 )
 
-            WHERE assigned.job_id = ?
+            WHERE source_family.job_id = ?
               AND ea.family_id IS NOT NULL
               AND assigned.status IN (
                     'draft',

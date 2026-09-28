@@ -53,7 +53,7 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
                     FROM event_assignments AS ea
                     JOIN events AS assigned ON assigned.id = ea.event_id
                     WHERE ea.family_id = ff.id
-                      AND assigned.job_id = ff.job_id
+                      AND assigned.status IN ('draft','planned','applied','archived')
               )
             GROUP BY ff.id
             ORDER BY ff.selected_capture_time, ff.id
@@ -209,10 +209,11 @@ def accept_event_suggestion(
                 """
                 SELECT 1 FROM event_assignments AS ea
                 JOIN events AS e ON e.id = ea.event_id
-                WHERE ea.family_id = ? AND e.job_id = ?
+                WHERE ea.family_id = ?
+                  AND e.status IN ('draft','planned','applied','archived')
                 LIMIT 1
                 """,
-                (family["id"], job_id),
+                (family["id"],),
             ).fetchone()
             if assigned is not None:
                 raise EventSuggestionError("Mindestens eine Dateifamilie ist bereits einem Ereignis zugeordnet.")

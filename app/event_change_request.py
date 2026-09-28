@@ -500,7 +500,38 @@ def propose_event_change(
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # Vorlage berechnen
+    # Fachliche Belegung zuerst prüfen. Eine belegte Familie aus einem anderen
+    # archivierten Ereignis darf niemals zuvor als vermeintliche SSD-Zuführung
+    # klassifiziert werden.
+    with database_connection(database_path) as connection:
+        from app.event_timeline import (
+            assert_editable_normal,
+            continuous_event_overlaps,
+            no_event_segment_overlaps,
+        )
+        from app.archive_reassignment_segments import proposed_ranges
+        if preview.get("child_segments"):
+            raise EventChangeRequestError(
+                "Getrennte Belegungssegmente sind für normale Ereignisse nicht zulässig."
+            )
+        if preview.get("event_kind", "event") == "event":
+            assert_editable_normal(connection, event_id)
+        for range_start, range_end in proposed_ranges(preview):
+            if (
+                continuous_event_overlaps(
+                    connection, job_id, range_start, range_end, exclude_event_id=event_id
+                )
+                or no_event_segment_overlaps(
+                    connection, job_id, range_start, range_end, exclude_event_id=event_id
+                )
+            ):
+                raise EventChangeRequestError(
+                    "Die Änderung überschneidet sich mit belegter Zeit. "
+                    "Bitte zuerst das andere Ereignis bearbeiten."
+                )
+
+    # Erst nach der fachlichen Konfliktprüfung wird zwischen bestehendem
+    # Archivbestand und wirklich freien SSD-Zuführungen unterschieden.
     plan = _compute_event_plan(database_path, job_id, event_id, preview, archive_root=archive_root)
     preview = dict(preview)
     # Die aktuelle Archiv-Inventur ist für den neuen Zustand maßgeblich.
