@@ -284,6 +284,40 @@ def test_0271_release_copy_requires_correct_sha_before_archive_removal(tmp_path:
     assert good["complete"] is True
 
 
+def test_0271_release_copy_requires_archive_original_until_first_verification(tmp_path: Path):
+    case = _release_case(tmp_path)
+    confirm_event_change(
+        case["db"], case["cr_id"], case["archive"], case["workspace"]
+    )
+    rows = _copy_release_rows(case)
+    assert len(rows) == 1
+
+    source = case["archive"] / rows[0]["old_path"]
+    target = case["work"] / rows[0]["workspace_release_path"]
+    assert source.is_file()
+    assert target.is_file()
+
+    # Ein zu früh manuell gelöschtes Archivoriginal darf Stufe 1 nicht passieren,
+    # selbst wenn die SSD-Kopie in Größe und SHA-256 korrekt ist.
+    source.unlink()
+    copied = verify_archive_release_copies(
+        case["db"], case["archive"], case["workspace"], case["cr_id"]
+    )
+    assert copied["complete"] is False
+    assert copied["verified_file_count"] == 0
+    assert copied["files"][0]["status"] == "archive_source_missing"
+
+    # Auch Stufe 2 darf nicht als Abkürzung dienen: Sie setzt eine zuvor
+    # dokumentiert erfolgreiche Kopierprüfung mit vorhandenem Original voraus.
+    removed = verify_archive_release_removal(
+        case["db"], case["archive"], case["workspace"], case["cr_id"]
+    )
+    assert removed["complete"] is False
+    assert removed["verified_file_count"] == 0
+    assert removed["files"][0]["status"] == "release_copy_not_verified"
+    assert target.read_bytes() == case["late_payload"]
+
+
 def test_0271_cancel_cleans_release_copy_only_while_archive_original_is_intact(tmp_path: Path):
     case = _release_case(tmp_path)
     confirm_event_change(

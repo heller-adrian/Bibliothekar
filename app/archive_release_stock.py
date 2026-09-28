@@ -315,6 +315,8 @@ def _verify_copy_row(
     row: dict[str, Any],
     archive_root: Path,
     workspace_path: Path,
+    *,
+    require_archive_source: bool = True,
 ) -> tuple[str, int | None, str | None, str | None]:
     expected_size = int(row.get("expected_size_bytes") or 0)
     expected_sha = str(row.get("expected_sha256") or "").strip()
@@ -335,13 +337,23 @@ def _verify_copy_row(
         return "release_sha256_mismatch", actual_size, actual_sha, "Die SSD-Kopie hat eine abweichende SHA-256-Summe."
 
     old_path = _safe_archive_path(archive_root, row.get("old_path"))
-    if old_path.exists():
-        if not old_path.is_file() or old_path.is_symlink():
-            return "archive_source_invalid", actual_size, actual_sha, "Der ursprüngliche Archivpfad ist keine reguläre Datei."
-        if expected_size and int(old_path.stat().st_size) != expected_size:
-            return "archive_source_size_mismatch", actual_size, actual_sha, "Das Archivoriginal hat sich seit der Planung verändert."
-        if _sha256_file(old_path) != expected_sha:
-            return "archive_source_sha256_mismatch", actual_size, actual_sha, "Das Archivoriginal hat sich seit der Planung verändert."
+    if old_path.is_symlink():
+        return "archive_source_invalid", actual_size, actual_sha, "Der ursprüngliche Archivpfad ist keine reguläre Datei."
+    if not old_path.exists():
+        if require_archive_source:
+            return (
+                "archive_source_missing",
+                actual_size,
+                actual_sha,
+                "Das Archivoriginal fehlt bereits. Die SSD-Kopie darf erst geprüft werden, solange das Original noch unverändert im Archiv vorhanden ist.",
+            )
+        return "release_copy_verified", actual_size, actual_sha, None
+    if not old_path.is_file():
+        return "archive_source_invalid", actual_size, actual_sha, "Der ursprüngliche Archivpfad ist keine reguläre Datei."
+    if expected_size and int(old_path.stat().st_size) != expected_size:
+        return "archive_source_size_mismatch", actual_size, actual_sha, "Das Archivoriginal hat sich seit der Planung verändert."
+    if _sha256_file(old_path) != expected_sha:
+        return "archive_source_sha256_mismatch", actual_size, actual_sha, "Das Archivoriginal hat sich seit der Planung verändert."
     return "release_copy_verified", actual_size, actual_sha, None
 
 
@@ -401,20 +413,30 @@ def verify_archive_release_removal(
     ok = 0
     with database_connection(database_path) as connection:
         for row in rows:
-            copy_status, actual_size, actual_sha, copy_message = _verify_copy_row(
-                row, archive_root, workspace_path
-            )
-            old_path = _safe_archive_path(archive_root, row.get("old_path"))
-            if copy_status != "release_copy_verified":
-                status = copy_status
-                message = copy_message
-            elif old_path.exists() or old_path.is_symlink():
-                status = "archive_source_still_exists"
-                message = "Das bestätigte Archivoriginal ist noch vorhanden."
+            prior_status = str(row.get("verification_status") or "pending")
+            if prior_status not in {"release_copy_verified", "verified"}:
+                status = "release_copy_not_verified"
+                actual_size = row.get("actual_size_bytes")
+                actual_sha = row.get("actual_sha256")
+                message = (
+                    "Die SSD-Kopie wurde noch nicht erfolgreich geprüft, während "
+                    "das Archivoriginal unverändert vorhanden war."
+                )
             else:
-                status = "verified"
-                message = None
-                ok += 1
+                copy_status, actual_size, actual_sha, copy_message = _verify_copy_row(
+                    row, archive_root, workspace_path, require_archive_source=False
+                )
+                old_path = _safe_archive_path(archive_root, row.get("old_path"))
+                if copy_status != "release_copy_verified":
+                    status = copy_status
+                    message = copy_message
+                elif old_path.exists() or old_path.is_symlink():
+                    status = "archive_source_still_exists"
+                    message = "Das bestätigte Archivoriginal ist noch vorhanden."
+                else:
+                    status = "verified"
+                    message = None
+                    ok += 1
             table = "event_change_asset_reviews" if row["review_kind"] == "asset" else "event_change_file_reviews"
             connection.execute(
                 f"""UPDATE {table}
