@@ -165,3 +165,6 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert ".bk-menu.bk-menu-portaled" in BIBLIOTHEKAR_CSS
     assert "function openMenu()" in BIBLIOTHEKAR_JS
     assert 'document.body.appendChild(menu);' in BIBLIOTHEKAR_JS
+    assert 'id="change-request-inline-error"' in EVENTS_HTML
+    assert "Zielstruktur-Vorschau" in EVENTS_HTML
+    assert "Freigewordene Zeit wird zuerst fachlich neu zugeordnet." in EVENTS_HTML

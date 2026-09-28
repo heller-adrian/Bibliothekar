@@ -82,6 +82,12 @@ def test_0271_archive_change_ui_is_compact_three_step_assistant():
     assert "DIESE ORDNER" in html
     assert "DIESE ALTEN ORDNER" in html
     assert "Alter Ordner noch vorhanden" in html
+    assert "Freigewordenen Zeitraum neu zuordnen" in html
+    assert "Ausgewählte Segmente zuordnen" in html
+    assert "Erst Neu-Zuordnung abschließen" in html
+    assert "Zielstruktur-Vorschau" in html
+    assert "Nach der Zuordnung werden die endgültigen Finder-Schritte automatisch neu berechnet." in html
+    assert 'id="change-request-inline-error"' in html
 
 
 def test_0270_applied_reload_keeps_mandatory_transaction():

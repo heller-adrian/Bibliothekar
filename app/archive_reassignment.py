@@ -34,6 +34,22 @@ def list_archive_reassignments(database_path:Path,cr_id:str)->dict[str,Any]:
         except ArchiveSegmentError as exc:
             raise ArchiveReassignmentError(str(exc)) from exc
         months=sorted({str(seg['day_key'])[:7] for seg in reassignment_segments if seg.get('day_key')})
+        occupied_no_event_months=[]
+        if months:
+            ph_months=','.join('?' for _ in months)
+            occupied_no_event_months=[
+                str(r['month'])
+                for r in c.execute(
+                    f"""SELECT DISTINCT substr(start_datetime,1,7) AS month
+                        FROM events
+                        WHERE parent_event_id IS NULL
+                          AND event_kind='no_event'
+                          AND status IN ('planned','applied','archived')
+                          AND substr(start_datetime,1,7) IN ({ph_months})
+                        ORDER BY month""",
+                    months,
+                ).fetchall()
+            ]
         clauses=["(event_kind!='no_event' AND job_id=?)"]
         params:list[Any]=[str(cr['job_id'])]
         if months:
@@ -44,8 +60,9 @@ def list_archive_reassignments(database_path:Path,cr_id:str)->dict[str,Any]:
         for r in c.execute(f"""SELECT id,job_id,name,folder_name,status,start_datetime,end_datetime,event_kind,preserve_day_folders
                                 FROM events
                                 WHERE parent_event_id IS NULL AND status='archived'
+                                  AND id<>?
                                   AND ({' OR '.join(clauses)})
-                                ORDER BY start_datetime,id""",params).fetchall():
+                                ORDER BY start_datetime,id""",[str(cr['event_id']),*params]).fetchall():
             item=dict(r); item['children']=[]
             if str(r['event_kind'])=='event':
                 item['children']=[dict(x) for x in c.execute(
@@ -53,7 +70,15 @@ def list_archive_reassignments(database_path:Path,cr_id:str)->dict[str,Any]:
                     (r['id'],),
                 ).fetchall()]
             targets.append(item)
-    return {'change_request_id':cr_id,'job_id':str(cr['job_id']),'families':rows,'family_count':len(rows),'reassignment_segments':reassignment_segments,'targets':targets}
+    return {
+        'change_request_id':cr_id,
+        'job_id':str(cr['job_id']),
+        'families':rows,
+        'family_count':len(rows),
+        'reassignment_segments':reassignment_segments,
+        'targets':targets,
+        'occupied_no_event_months':occupied_no_event_months,
+    }
 
 def _target_for_new_event(c,job_id:str,fids:list[int],name:str,range_start:str,range_end:str)->dict[str,Any]:
     clean=str(name or '').strip()

@@ -115,10 +115,14 @@ def test_archived_no_event_releases_exact_stored_segment_remainder():
     ]
 
 
-def test_archive_ui_exposes_segments_not_family_checkboxes():
+def test_archive_ui_reassigns_exact_segments_inside_change_request():
     assert "reassign.reassignment_segments" in EVENTS_HTML
-    assert 'id="archive-reassign-target"' not in EVENTS_HTML
-    assert "In Aufnahmen öffnen" in EVENTS_HTML
+    assert "data-archive-reassign-segment" in EVENTS_HTML
+    assert "data-archive-reassign-target" in EVENTS_HTML
+    assert "Ausgewählte Segmente zuordnen" in EVENTS_HTML
+    assert "Erst Neu-Zuordnung abschließen" in EVENTS_HTML
+    assert "In Aufnahmen öffnen" not in EVENTS_HTML
     assert "data-archive-family" not in EVENTS_HTML
-    assert "Tages-/Zeitsegment" in EVENTS_HTML
+    assert "vollständige Segmente" in EVENTS_HTML
+    assert "occupied_no_event_months" in EVENTS_HTML
 

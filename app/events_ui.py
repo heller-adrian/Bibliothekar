@@ -1276,6 +1276,7 @@ EVENTS_HTML = r"""<!doctype html>
         </div>
         <button id="change-request-close" type="button">Schließen</button>
       </div>
+      <div id="change-request-inline-error" class="error-box" hidden style="margin:0 0 12px"></div>
       <div id="change-request-body">Änderungsauftrag wird geladen …</div>
     </div>
   </dialog>
@@ -3267,7 +3268,13 @@ EVENTS_HTML = r"""<!doctype html>
       }
       if (!window.confirm("Diese Archivänderung vollständig verwerfen? Solange der ursprüngliche Archivzustand unverändert ist, bleiben die SSD-Originale erhalten.")) return;
       changeRequestAction(mandatoryArchiveChangeContext.crId, "cancel")
-        .catch(error => setStatus(error.message, true));
+        .catch(error => {
+          const inlineError=document.getElementById("change-request-inline-error");
+          if (inlineError) {
+            inlineError.textContent=error.message;
+            inlineError.hidden=false;
+          }
+        });
     });
     changeRequestDialog.addEventListener("cancel", event => {
       if (mandatoryArchiveChangeContext) event.preventDefault();
@@ -3490,6 +3497,11 @@ EVENTS_HTML = r"""<!doctype html>
         changeRequestBody.textContent = "Lade Änderungsauftrag …";
         changeRequestTitle.textContent = "Archivänderung";
         changeRequestSubtitle.textContent = "";
+        const inlineError=document.getElementById("change-request-inline-error");
+        if (inlineError) {
+          inlineError.hidden=true;
+          inlineError.textContent="";
+        }
 
         const crRes = await fetch(`/api/change-requests/${encodeURIComponent(crId)}`);
         if (!crRes.ok) throw new Error(`HTTP ${crRes.status}: ${crRes.statusText}`);
@@ -3549,6 +3561,8 @@ EVENTS_HTML = r"""<!doctype html>
         });
         html += `</div>`;
 
+        const targetTree = (assistant.target_structure?.lines || []).join("\n");
+
         const renderTechnicalDetails = () => {
           const rows = (Array.isArray(reviewRows) ? reviewRows : []).filter(row => {
             const action = String(row.action || "");
@@ -3586,35 +3600,71 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         if (phase === "finder") {
-          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Was du jetzt im Finder tun musst</h3><p class="muted">Nur diese Handlungen gehören zu diesem Auftrag. Unveränderte Dateien werden bewusst nicht angezeigt.</p></div></div>`;
-          let number = 1;
-          for (const operation of assistant.operations || []) {
-            html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
-            if ((operation.sources || []).length) {
-              html += `<div class="muted">DIESE ORDNER</div>${operation.sources.map(source => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code>`).join("")}`;
-            } else if (operation.source) {
-              html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
-            }
-            if ((operation.items || []).length && !(operation.sources || []).length && operation.kind !== "remove_directories") {
-              html += `<details><summary>${operation.items.length} Datei${operation.items.length===1?"":"en"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name => `<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
-            }
-            if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
-            if ((operation.paths || []).length) {
-              html += `<div class="muted">DIESE ALTEN ORDNER</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
-            }
-            html += `</div></details>`;
-            number += 1;
-          }
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Finder-Arbeit</h3><p class="muted">Freigewordene Zeit wird zuerst fachlich neu zugeordnet. Danach zeigt die App nur die endgültigen manuellen Finder-Handlungen.</p></div></div>`;
+
           if (reassignCount > 0) {
             const reassignmentSegments = reassign.reassignment_segments || [];
-            html += `<div class="card"><strong>${number}. Herausfallende Aufnahmen neu zuordnen</strong><p class="muted">${reassignCount} Familie${reassignCount===1?"":"n"} benötigt noch ein fachliches Ziel.</p>`;
+            const targets = reassign.targets || [];
+            const occupiedMonths = new Set(reassign.occupied_no_event_months || []);
+            const oneSegment = reassignmentSegments.length === 1;
+
+            html += `<div class="card" data-archive-reassign-panel><strong>1. Freigewordenen Zeitraum neu zuordnen</strong><p class="muted">${reassignCount} Familie${reassignCount===1?"":"n"} liegt in einem Bereich, der nach der Bearbeitung nicht mehr zu „${escapeHtml(assistant.event_name || cr.event_name || "diesem Ereignis")}“ gehört. Wähle ein oder mehrere vollständige Segmente und ihr neues fachliches Ziel.</p>`;
+
             if (reassignmentSegments.length) {
-              html += `<details style="margin:8px 0"><summary>Tages-/Zeitsegmente anzeigen</summary><div style="margin-top:7px;display:grid;gap:5px">${reassignmentSegments.map(segment => `<div><strong>${escapeHtml(segment.day_key || "")}</strong> · ${escapeHtml(segment.start_time || "")}–${escapeHtml(segment.end_time || "")} · ${Number(segment.family_count || 0)} Familien · ${Number(segment.file_count || 0)} Dateien</div>`).join("")}</div></details>`;
+              html += `<div style="display:grid;gap:7px;margin:10px 0">`;
+              reassignmentSegments.forEach((segment,index) => {
+                const familyIds=(segment.family_ids || []).map(Number).filter(Number.isFinite);
+                const dayKey=String(segment.day_key || "");
+                html += `<label class="card" style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px"><input type="checkbox" data-archive-reassign-segment data-family-ids="${escapeHtml(familyIds.join(","))}" data-month="${escapeHtml(dayKey.slice(0,7))}" data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(segment.start_time || "")}" data-end-time="${escapeHtml(segment.end_time || "")}" ${oneSegment?"checked":""}><span><strong>${escapeHtml(dayKey)} · ${escapeHtml(segment.start_time || "")}–${escapeHtml(segment.end_time || "")}</strong><br><span class="muted">${Number(segment.family_count || 0)} Familien · ${Number(segment.file_count || 0)} Dateien</span></span></label>`;
+              });
+              html += `</div>`;
             }
-            html += `<a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(reassign.job_id)}&task=free">In Aufnahmen zuordnen</a></div>`;
+
+            let targetOptions = `<option value="">Ziel wählen …</option><option value="new_event">Neues Ereignis</option><option value="new_no_event" data-mode="new_no_event">Neue „Ohne Ereignis“-Sammlung</option>`;
+            for (const target of targets) {
+              const id=String(target.id || "");
+              if (!id) continue;
+              if (String(target.event_kind || "") === "no_event") {
+                targetOptions += `<option value="existing_no_event|${escapeHtml(id)}" data-mode="existing_no_event" data-target-month="${escapeHtml(String(target.start_datetime || "").slice(0,7))}">Bestehendes Ohne Ereignis · ${escapeHtml(String(target.start_datetime || "").slice(0,7))}</option>`;
+              } else {
+                targetOptions += `<option value="existing_event|${escapeHtml(id)}" data-mode="existing_event">Bestehendes Ereignis · ${escapeHtml(target.name || target.folder_name || id)}</option>`;
+                targetOptions += `<option value="new_child|${escapeHtml(id)}" data-mode="new_child">Neues Unterereignis in · ${escapeHtml(target.name || target.folder_name || id)}</option>`;
+              }
+            }
+
+            html += `<div style="display:grid;gap:9px"><label><span>Ziel</span><select data-archive-reassign-target>${targetOptions}</select></label><label data-archive-reassign-name-row hidden><span>Name</span><input type="text" data-archive-reassign-name placeholder="Name des neuen Ereignisses"></label><div data-archive-reassign-child-times hidden style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><label><span>Startzeit</span><input type="time" data-archive-reassign-start></label><label><span>Endzeit</span><input type="time" data-archive-reassign-end></label></div><div class="muted" data-archive-reassign-note></div><div class="error-box" data-archive-reassign-error hidden></div><div><button type="button" class="plan-button bk-positive-action" data-archive-reassign-apply>Ausgewählte Segmente zuordnen</button></div></div>`;
+
+            if (occupiedMonths.size) {
+              html += `<p class="muted" style="margin-top:10px">Für Monate mit einer bereits vorhandenen „Ohne Ereignis“-Sammlung wird keine zweite Sammlung angelegt. Dort muss die bestehende Sammlung verwendet werden, sofern sie als archiviertes Ziel verfügbar ist.</p>`;
+            }
+            html += `</div>`;
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" disabled>Erst Neu-Zuordnung abschließen</button></div></section>`;
+          } else {
+            if (targetTree) {
+              html += `<details class="card"><summary><strong>Zielstruktur-Vorschau</strong></summary><p class="muted" style="margin-top:8px">So soll das bearbeitete Ereignis nach den Finder-Schritten im Archiv aussehen.</p><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></details>`;
+            }
+
+            let number = 1;
+            for (const operation of assistant.operations || []) {
+              html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
+              if ((operation.sources || []).length) {
+                html += `<div class="muted">DIESE ORDNER</div>${operation.sources.map(source => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code>`).join("")}`;
+              } else if (operation.source) {
+                html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
+              }
+              if ((operation.items || []).length && !(operation.sources || []).length && operation.kind !== "remove_directories") {
+                html += `<details><summary>${operation.items.length} Datei${operation.items.length===1?"":"en"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name => `<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
+              }
+              if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+              if ((operation.paths || []).length) {
+                html += `<div class="muted">DIESE ALTEN ORDNER</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
+              }
+              html += `</div></details>`;
+              number += 1;
+            }
+            html += renderTechnicalDetails();
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>Finder-Arbeit erledigt · weiter zu Prüfen</button></div></section>`;
           }
-          html += renderTechnicalDetails();
-          html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>Finder-Arbeit erledigt · weiter zu Prüfen</button></div></section>`;
         }
 
         if (phase === "verify") {
@@ -3622,15 +3672,105 @@ EVENTS_HTML = r"""<!doctype html>
             Array.isArray(reviewRows)
             && reviewRows.length > 0
             && reviewRows.every(row => String(row.verification_status || "") === "verified");
-          const tree = (assistant.target_structure?.lines || []).join("\n");
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Abschließen</h3><p class="muted">So soll die Kamerabibliothek jetzt aussehen. Die Prüfung selbst bleibt vollständig read-only.</p></div></div>`;
-          if (tree) html += `<div class="card"><strong>SOLL-Struktur</strong><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(tree)}</pre></div>`;
+          if (targetTree) html += `<div class="card"><strong>SOLL-Struktur</strong><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></div>`;
           html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? "✓ Prüfung erfolgreich" : "Prüfen"}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} Dateien bestätigt.` : "Noch nicht geprüft."}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
           html += renderTechnicalDetails();
           html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>Änderung abschließen & SSD freigeben</button></div></section>`;
         }
 
         changeRequestBody.innerHTML = html;
+
+        const reassignPanel=changeRequestBody.querySelector("[data-archive-reassign-panel]");
+        if (reassignPanel) {
+          const segmentChecks=[...reassignPanel.querySelectorAll("[data-archive-reassign-segment]")];
+          const targetSelect=reassignPanel.querySelector("[data-archive-reassign-target]");
+          const nameRow=reassignPanel.querySelector("[data-archive-reassign-name-row]");
+          const nameInput=reassignPanel.querySelector("[data-archive-reassign-name]");
+          const childTimes=reassignPanel.querySelector("[data-archive-reassign-child-times]");
+          const startInput=reassignPanel.querySelector("[data-archive-reassign-start]");
+          const endInput=reassignPanel.querySelector("[data-archive-reassign-end]");
+          const note=reassignPanel.querySelector("[data-archive-reassign-note]");
+          const errorBox=reassignPanel.querySelector("[data-archive-reassign-error]");
+          const applyBtn=reassignPanel.querySelector("[data-archive-reassign-apply]");
+          const occupiedMonths=new Set(reassign?.occupied_no_event_months || []);
+
+          const selectedChecks=()=>segmentChecks.filter(input=>input.checked);
+          const updateReassignUi=()=>{
+            const selected=selectedChecks();
+            const months=new Set(selected.map(input=>input.dataset.month).filter(Boolean));
+            const days=new Set(selected.map(input=>input.dataset.dayKey).filter(Boolean));
+            for(const option of targetSelect?.options || []) {
+              const mode=option.dataset.mode || option.value;
+              if(mode==="new_no_event") {
+                const month=months.size===1 ? [...months][0] : "";
+                option.disabled=!selected.length || months.size!==1 || occupiedMonths.has(month);
+              } else if(mode==="existing_no_event") {
+                const month=months.size===1 ? [...months][0] : "";
+                option.disabled=!selected.length || months.size!==1 || option.dataset.targetMonth!==month;
+              } else if(mode==="new_child") {
+                option.disabled=!selected.length || days.size!==1;
+              } else if(option.value) {
+                option.disabled=!selected.length;
+              }
+            }
+            if(targetSelect?.selectedOptions?.[0]?.disabled) targetSelect.value="";
+            const raw=String(targetSelect?.value || "");
+            const mode=raw.split("|")[0];
+            if(nameRow) nameRow.hidden=!["new_event","new_child"].includes(mode);
+            if(childTimes) childTimes.hidden=mode!=="new_child";
+            if(nameInput) nameInput.placeholder=mode==="new_child" ? "Name des neuen Unterereignisses" : "Name des neuen Ereignisses";
+            if(mode==="new_child" && selected.length) {
+              const starts=selected.map(input=>String(input.dataset.startTime||"")).filter(Boolean).sort();
+              const ends=selected.map(input=>String(input.dataset.endTime||"")).filter(Boolean).sort();
+              if(startInput && !startInput.value) startInput.value=starts[0] || "00:00";
+              if(endInput && !endInput.value) endInput.value=ends[ends.length-1] || "23:59";
+            }
+            if(note) {
+              if(!selected.length) note.textContent="Zuerst mindestens ein vollständiges Tages-/Zeitsegment auswählen.";
+              else if(mode==="new_no_event" && months.size===1 && occupiedMonths.has([...months][0])) note.textContent="Für diesen Monat existiert bereits eine „Ohne Ereignis“-Sammlung; eine zweite Sammlung ist nicht zulässig.";
+              else note.textContent="Nach der Zuordnung werden die endgültigen Finder-Schritte automatisch neu berechnet.";
+            }
+            if(applyBtn) applyBtn.disabled=!selected.length || !raw;
+          };
+          segmentChecks.forEach(input=>input.addEventListener("change",updateReassignUi));
+          targetSelect?.addEventListener("change",updateReassignUi);
+          updateReassignUi();
+
+          applyBtn?.addEventListener("click", async () => {
+            const selected=selectedChecks();
+            const familyIds=[...new Set(selected.flatMap(input=>String(input.dataset.familyIds||"").split(",").map(Number).filter(Number.isFinite)))];
+            const [mode,targetEventId]=String(targetSelect?.value || "").split("|");
+            const payload={family_ids:familyIds,target_mode:mode};
+            if(mode==="new_event") payload.new_event_name=String(nameInput?.value || "").trim();
+            if(mode==="existing_event" || mode==="existing_no_event" || mode==="new_child") payload.target_event_id=targetEventId || null;
+            if(mode==="new_child") {
+              payload.new_event_name=String(nameInput?.value || "").trim();
+              payload.new_child_start=String(startInput?.value || "");
+              payload.new_child_end=String(endInput?.value || "");
+            }
+            if(errorBox) { errorBox.hidden=true; errorBox.textContent=""; }
+            applyBtn.disabled=true;
+            applyBtn.textContent="Zuordnung wird gespeichert …";
+            try {
+              const res=await fetch(`/api/change-requests/${encodeURIComponent(crId)}/reassignments`,{
+                method:"POST",
+                headers:{"Content-Type":"application/json"},
+                body:JSON.stringify(payload)
+              });
+              const data=await res.json().catch(()=>({}));
+              if(!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+              await showChangeRequestDetail(crId,{phase:"finder"});
+            } catch(error) {
+              applyBtn.disabled=false;
+              applyBtn.textContent="Ausgewählte Segmente zuordnen";
+              if(errorBox) {
+                errorBox.textContent=error.message;
+                errorBox.hidden=false;
+              }
+            }
+          });
+        }
 
         for (const button of changeRequestBody.querySelectorAll("[data-change-step]")) {
           button.addEventListener("click", () => {
