@@ -5,9 +5,16 @@ from pathlib import PurePosixPath
 def render_structure(year, folder, day_keys=(), children=(), preserve_days=False):
     paths = []
     default_days = sorted(set(day_keys or ()))
-    branches = [("", default_days)]
+    child_list = list(children or ())
+    branches = []
+    # The parent branch represents files assigned directly to the parent.
+    # If children exist and the parent has no own capture days, rendering an
+    # empty Alle/Sortiert/Export triplet would describe folders that are not
+    # needed. A parent without children still keeps its normal triplet.
+    if default_days or not child_list:
+        branches.append(("", default_days))
     seen = {""}
-    for child in children:
+    for child in child_list:
         branch = str(child.get("folder_name") or child.get("folder") or "")
         if branch in seen:
             continue

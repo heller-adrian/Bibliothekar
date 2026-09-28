@@ -933,6 +933,7 @@ def build_event_sort_plan(
     planned_directories: set[str] = set()
     branch_days: dict[str | None, set[str]] = defaultdict(set)
     branch_order: list[str | None] = [None]
+    parent_branch_has_content = False
     family_statuses: dict[int, str] = {}
     pending_delete = bool(int(event.get("pending_delete") or 0))
 
@@ -1220,6 +1221,11 @@ def build_event_sort_plan(
                 else "Alle"
             )
             destination_parts.extend([destination_branch, filename])
+            # Count only files that remain in this event itself. Families sent
+            # to free stock or to another reassignment target do not justify an
+            # empty parent branch in this event's structure.
+            if child_folder is None and reassignment is None:
+                parent_branch_has_content = True
 
         destination_relative = PurePosixPath(*destination_parts)
         source_base = target_root if current_root_kind == "shared_workspace" else source_root
@@ -1793,6 +1799,12 @@ def build_event_sort_plan(
     branches: list[dict[str, Any]] = []
 
     for branch_key in branch_order:
+        if (
+            branch_key is None
+            and child_definitions
+            and not parent_branch_has_content
+        ):
+            continue
         branches.append({
             "name": branch_key,
             "days": sorted(branch_days.get(branch_key, set()))
