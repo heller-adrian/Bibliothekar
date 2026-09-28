@@ -1098,6 +1098,9 @@ body[data-bk-area="import"] .import-panel {
 .bk-status-card:nth-child(2) .bk-status-icon { color: var(--bk-blue); }
 .bk-status-card:nth-child(3) .bk-status-icon { color: #b98612; }
 
+body[data-bk-area="import"] [data-source-pane][hidden] {
+  display: none !important;
+}
 body.bibliothekar-redesign .sd-actions {
   grid-template-columns: minmax(260px,1fr) repeat(3, minmax(142px, 165px)) !important;
   align-items: stretch !important;
@@ -1105,18 +1108,19 @@ body.bibliothekar-redesign .sd-actions {
 }
 body.bibliothekar-redesign .sd-actions .mount-state {
   margin: 0 !important;
-  min-height: 72px !important;
+  min-height: 56px !important;
+  padding: 8px 12px !important;
   display: flex;
   align-items: center;
 }
 .bk-action-tile {
-  min-height: 72px !important;
-  padding: 10px 12px !important;
+  min-height: 56px !important;
+  padding: 7px 11px !important;
   display: flex !important;
   flex-direction: column;
   align-items: flex-start !important;
   justify-content: center;
-  gap: 8px;
+  gap: 5px;
   border-radius: 10px !important;
   font-weight: 760;
   text-align: left;
