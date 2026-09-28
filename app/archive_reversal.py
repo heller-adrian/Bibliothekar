@@ -355,6 +355,34 @@ def _planned_extra_directories(database_path: Path, cr_id: str, manifest: dict[s
     return []
 
 
+def _extra_archive_directories(
+    archive_root: Path,
+    manifest: dict[str, Any],
+) -> list[str]:
+    original_root = str(manifest.get("original_root") or "")
+    if not original_root:
+        return []
+    root = _safe_archive_path(archive_root, original_root)
+    if not root.is_dir():
+        return []
+    root_abs = archive_root.expanduser().resolve(strict=False)
+    original = {str(value) for value in (manifest.get("original_directories") or [])}
+    extras: list[str] = []
+    for current, directories, _files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        safe_names = []
+        for name in directories:
+            child = current_path / name
+            if child.is_symlink():
+                continue
+            safe_names.append(name)
+            relative = child.resolve(strict=False).relative_to(root_abs).as_posix()
+            if relative not in original:
+                extras.append(relative)
+        directories[:] = safe_names
+    return sorted(set(extras), key=lambda value: (len(PurePosixPath(value).parts), value), reverse=True)
+
+
 def _reversal_state(
     database_path: Path,
     archive_root: Path,
@@ -447,11 +475,16 @@ def _reversal_state(
 
     target_root = str(manifest.get("target_root") or "")
     original_root = str(manifest.get("original_root") or "")
-    remove_dirs: list[str] = []
+    remove_dirs: list[str] = _extra_archive_directories(archive_root, manifest)
     if target_root and target_root != original_root:
         target_abs = _safe_archive_path(archive_root, target_root)
         if target_abs.exists():
             remove_dirs.append(target_root)
+    remove_dirs = sorted(
+        set(remove_dirs),
+        key=lambda value: (len(PurePosixPath(value).parts), value),
+        reverse=True,
+    )
     if remove_dirs:
         operations.append({
             "kind": "remove_new_directories",
@@ -552,6 +585,12 @@ def verify_archive_reversal(
 
     target_root = str(manifest.get("target_root") or "")
     original_root = str(manifest.get("original_root") or "")
+    for extra_dir in _extra_archive_directories(archive_root, manifest):
+        problems.append({
+            "kind": "directory",
+            "path": extra_dir,
+            "message": "Dieser Ordner gehörte nicht zum ursprünglichen Archivzustand.",
+        })
     if target_root and target_root != original_root and _safe_archive_path(archive_root, target_root).exists():
         problems.append({"kind": "directory", "path": target_root, "message": "Neu erzeugter Ereignisordner ist noch vorhanden."})
 

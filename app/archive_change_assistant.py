@@ -287,23 +287,14 @@ def build_archive_change_assistant(
     # Bei Löschaufträgen gibt es bewusst keine neue SOLL-Struktur.
     if not delete_event:
         # If the event root itself is new (rename), copy that root once instead.
-        copy_roots = _collapse_copy_roots(missing, target_root, archive_root)
-        if status != "aenderbar_vorschlagen" and helper_root:
-            try:
-                work_root = shared_work_root(workspace_path).resolve(strict=False)
-                prepared = work_root.joinpath(*PurePosixPath(helper_root).parts).resolve(strict=False)
-                target_archive_root = _safe_archive_path(archive_root, target_root)
-                if prepared.is_dir():
-                    if not target_archive_root.is_dir():
-                        copy_roots = [target_root]
-                    else:
-                        copy_roots = sorted({
-                            (PurePosixPath(target_root) / child.name).as_posix()
-                            for child in prepared.iterdir()
-                            if child.is_dir() and not child.is_symlink()
-                        })
-            except Exception:
-                pass
+        request_helper_directories = list(
+            description.get("helper_directories") or missing
+        )
+        copy_roots = _collapse_copy_roots(
+            request_helper_directories,
+            target_root,
+            archive_root,
+        )
 
         covered_workspace_ids: set[int] = set()
         if copy_roots:

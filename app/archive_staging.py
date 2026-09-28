@@ -521,7 +521,12 @@ def prepare_archive_change_staging_for_request(
     """Materialize only the missing helper structure and incoming SSD hardlinks."""
     cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
     description = describe_archive_change_staging(
-        database_path, archive_root, str(cr["event_id"]), preview, plan
+        database_path,
+        archive_root,
+        str(cr["event_id"]),
+        preview,
+        plan,
+        delete_event=bool(cr.get("delete_event") or 0),
     )
     from app.archive_change_document import projected_archive_event_document_spec
     event_document = projected_archive_event_document_spec(database_path, cr_id)

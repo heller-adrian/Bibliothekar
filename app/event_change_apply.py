@@ -155,7 +155,8 @@ def cancel_event_change(
     if status == "aenderbar_bestaetigt":
         if archive_root is None or workspace_path is None:
             raise EventChangeApplyError(
-                "Der Rückweg benötigt Kamerabibliothek und SSD-Arbeitsbereich."
+                "Nach manuellen Änderungen benötigt der sichere Rückweg "
+                "Kamerabibliothek und SSD-Arbeitsbereich."
             )
         from app.archive_reversal import (
             begin_archive_reversal,
