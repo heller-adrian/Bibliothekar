@@ -3343,6 +3343,11 @@ WORKSPACE_HTML = r"""<!doctype html>
             target_event_id: button.dataset.targetEventId
           }
         );
+        if (result?.change_request_id) {
+          eventSuggestionStatus.textContent = `${result.name} wurde als manueller Archivauftrag vorbereitet.`;
+          location.href = `/events?job=${encodeURIComponent(jobSelect.value)}&task=change:${encodeURIComponent(result.change_request_id)}`;
+          return;
+        }
         eventSuggestionStatus.textContent = `${result.name} wurde als geplante Änderung angelegt.`;
         await loadWorkspace();
       } catch (error) {
