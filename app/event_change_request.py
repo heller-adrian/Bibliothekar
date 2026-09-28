@@ -727,8 +727,18 @@ def propose_event_change(
 
         connection.commit()
 
-    # 0.27.1: Der Hilfsbereich wird erst im expliziten Vorbereitungsschritt
-    # materialisiert. Der Vorschlag bleibt bis dahin rein planend.
+    # Der Hilfsbereich wird erst im expliziten Vorbereitungsschritt
+    # materialisiert. Nach dem INSERT kann 0.27.2 aber auch die projizierte
+    # event.json in die Planungsantwort einbeziehen.
+    final_preparation = preparation
+    if archive_root is not None and workspace_path is not None:
+        try:
+            from app.archive_staging import describe_archive_change_staging_for_request
+            final_preparation = describe_archive_change_staging_for_request(
+                database_path, archive_root, cr_id
+            )
+        except Exception:
+            final_preparation = preparation
 
     # Rueckgabe mit Plan
     return {
@@ -739,8 +749,8 @@ def propose_event_change(
         "plan": plan,
         "family_count": len(plan["families_with_plans"]),
         "diff_summary": plan["diff_summary"],
-        "preparation_required": bool(preparation.get("required")),
-        "preparation": preparation,
+        "preparation_required": bool(final_preparation.get("required")),
+        "preparation": final_preparation,
         "prepared_structure_path": "",
         "staged_file_count": 0,
     }

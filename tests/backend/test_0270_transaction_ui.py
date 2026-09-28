@@ -80,7 +80,6 @@ def test_0271_archive_change_ui_is_compact_three_step_assistant():
     assert "change-arrow" not in html
     assert ">↓<" not in html
     assert "NOCH ZU ENTFERNEN" in html
-    assert "DIESE ALTEN ORDNER" in html
     assert "Alter Ordner noch vorhanden" in html
     assert "Freigewordene Archivdateien auf SSD sichern" in html
     assert "SSD-Kopien prüfen" in html

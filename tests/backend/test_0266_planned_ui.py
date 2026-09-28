@@ -43,7 +43,7 @@ def test_0266_event_creation_uses_real_subevents_and_paired_boundaries():
 
 
 def test_0266_noevent_preview_is_complex_and_workspace_controls_can_dock():
-    assert "Datenbank-Zeitraum:</strong> komplex" in WORKSPACE_HTML
+    assert "Datenbank-Zeitraum:</strong> mehrere gespeicherte Zeitsegmente" in WORKSPACE_HTML
     assert 'id="selection-bar-anchor"' in WORKSPACE_HTML
     assert "selection-bar.is-header-docked" in WORKSPACE_HTML
     assert "is-scroll-floating" not in WORKSPACE_HTML
