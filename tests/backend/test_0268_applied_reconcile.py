@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.database import _validated_forward_extension
+from app.database import _validated_adjacent_extension
 from app.obsolete_structure import cleanup_obsolete_structure
 from app.workspace_reconcile import _workspace_structure_text
 from app.events_ui import EVENTS_HTML
@@ -130,29 +130,35 @@ def test_0268_event_viewer_edit_action_is_in_header():
 def test_0268_existing_event_extension_is_forward_only_and_structure_locked():
     assert "Date.parse(d.start_datetime) - Date.parse(event.end_datetime) - 1000" in WORKSPACE_HTML
     assert 'dialogTitle.textContent="Ereignis erweitern"' in WORKSPACE_HTML
-    assert "eventStartDate.disabled=true" in WORKSPACE_HTML
-    assert "eventStartTime.disabled=true" in WORKSPACE_HTML
+    assert "activeExtension=extension;" in WORKSPACE_HTML
     assert "useTimeRange.disabled=true" in WORKSPACE_HTML
     assert "preserveDayFolders.disabled=true" in WORKSPACE_HTML
-    assert "createSubevents.hidden=true" in WORKSPACE_HTML
-    assert "base.subevents = [];" in WORKSPACE_HTML
+    assert "preserveDayFoldersRow.hidden=true" in WORKSPACE_HTML
+    assert "createSubevents.hidden=false" in WORKSPACE_HTML
+    assert "base.subevents = [];" not in WORKSPACE_HTML
     assert "base.preserve_day_folders = Boolean(parent.preserve_day_folders);" in WORKSPACE_HTML
+    assert "Bestehender Stand · schreibgeschützt" in WORKSPACE_HTML
 
 
-def test_0268_forward_extension_guard_accepts_only_immediate_end_extension():
-    assert _validated_forward_extension(
+def test_0268_adjacent_extension_guard_accepts_both_sides():
+    after = _validated_adjacent_extension(
         ("2026-07-20T00:00:00", "2026-07-20T23:59:59"),
         [{"start_datetime": "2026-07-21T00:00:00", "end_datetime": "2026-07-21T18:30:59"}],
-    ) == ("2026-07-20T00:00:00", "2026-07-21T18:30:59")
+    )
+    assert after["direction"] == "after"
+    assert after["new_start"] == "2026-07-20T00:00:00"
+    assert after["new_end"] == "2026-07-21T18:30:59"
 
-    with pytest.raises(ValueError, match="unmittelbar nach"):
-        _validated_forward_extension(
-            ("2026-07-20T00:00:00", "2026-07-20T23:59:59"),
-            [{"start_datetime": "2026-07-19T00:00:00", "end_datetime": "2026-07-19T23:59:59"}],
-        )
+    before = _validated_adjacent_extension(
+        ("2026-07-20T00:00:00", "2026-07-20T23:59:59"),
+        [{"start_datetime": "2026-07-19T06:15:00", "end_datetime": "2026-07-19T23:59:59"}],
+    )
+    assert before["direction"] == "before"
+    assert before["new_start"] == "2026-07-19T06:15:00"
+    assert before["new_end"] == "2026-07-20T23:59:59"
 
-    with pytest.raises(ValueError, match="unmittelbar nach"):
-        _validated_forward_extension(
+    with pytest.raises(ValueError, match="unmittelbar angrenzende"):
+        _validated_adjacent_extension(
             ("2026-07-20T00:00:00", "2026-07-20T23:59:59"),
             [{"start_datetime": "2026-07-22T00:00:00", "end_datetime": "2026-07-22T23:59:59"}],
         )
