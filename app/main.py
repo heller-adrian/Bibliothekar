@@ -7292,6 +7292,7 @@ def api_propose_event_change(
             event_name=body.get("event_name") or preview.get("event_name"),
             notes=body.get("notes", ""),
             archive_root=ARCHIVE_ROOT,
+            workspace_path=WORKSPACE_PATH,
         )
         return JSONResponse(content=result, status_code=201)
     except EventChangeRequestError as exc:
@@ -7341,7 +7342,9 @@ def api_confirm_change(cr_id: str) -> JSONResponse:
 def api_cancel_change(cr_id: str) -> JSONResponse:
     """Aenderungsauftrag abbrechen."""
     try:
-        result = cancel_event_change(DATABASE_FILE, cr_id, ARCHIVE_ROOT)
+        result = cancel_event_change(
+            DATABASE_FILE, cr_id, ARCHIVE_ROOT, WORKSPACE_PATH
+        )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -7365,7 +7368,9 @@ def api_verify_change(cr_id: str) -> JSONResponse:
 def api_archive_change(cr_id: str) -> JSONResponse:
     """Geprüften manuellen Änderungsauftrag abschließen; Archiv bleibt read-only."""
     try:
-        result = finish_event_change(DATABASE_FILE, cr_id, ARCHIVE_ROOT)
+        result = finish_event_change(
+            DATABASE_FILE, cr_id, ARCHIVE_ROOT, WORKSPACE_PATH
+        )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
