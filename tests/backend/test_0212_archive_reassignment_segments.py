@@ -121,7 +121,7 @@ def test_archive_ui_reassigns_exact_segments_inside_change_request():
     assert "data-archive-reassign-target" in EVENTS_HTML
     assert "Ausgewählte Segmente zuordnen" in EVENTS_HTML
     assert "Erst Neu-Zuordnung abschließen" in EVENTS_HTML
-    assert "In Aufnahmen öffnen" not in EVENTS_HTML
+    assert 'href="/workspace?job=${encodeURIComponent(reassign.job_id)}&task=free"' not in EVENTS_HTML
     assert "data-archive-family" not in EVENTS_HTML
     assert "vollständige Segmente" in EVENTS_HTML
     assert "occupied_no_event_months" in EVENTS_HTML
