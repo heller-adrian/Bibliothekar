@@ -45,7 +45,7 @@ def test_archive_reassignment_new_event_has_no_implicit_child_time_folder():
 
 def test_events_ui_has_visible_change_request_verification_feedback():
     source = Path("app/events_ui.py").read_text()
-    assert 'id="change-verify-progress"' in source
+    assert 'id="change-work-progress"' in source
     assert 'Prüfung läuft …' in source
     assert '✓ Prüfung erfolgreich' in source
     assert '✕ Prüfung mit Problemen' in source

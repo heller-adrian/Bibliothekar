@@ -3604,7 +3604,12 @@ EVENTS_HTML = r"""<!doctype html>
             number += 1;
           }
           if (reassignCount > 0) {
-            html += `<div class="card"><strong>${number}. Herausfallende Aufnahmen neu zuordnen</strong><p class="muted">${reassignCount} Familie${reassignCount===1?"":"n"} benötigt noch ein fachliches Ziel.</p><a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(reassign.job_id)}&task=free">In Aufnahmen zuordnen</a></div>`;
+            const reassignmentSegments = reassign.reassignment_segments || [];
+            html += `<div class="card"><strong>${number}. Herausfallende Aufnahmen neu zuordnen</strong><p class="muted">${reassignCount} Familie${reassignCount===1?"":"n"} benötigt noch ein fachliches Ziel.</p>`;
+            if (reassignmentSegments.length) {
+              html += `<details style="margin:8px 0"><summary>Tages-/Zeitsegmente anzeigen</summary><div style="margin-top:7px;display:grid;gap:5px">${reassignmentSegments.map(segment => `<div><strong>${escapeHtml(segment.day_key || "")}</strong> · ${escapeHtml(segment.start_time || "")}–${escapeHtml(segment.end_time || "")} · ${Number(segment.family_count || 0)} Familien · ${Number(segment.file_count || 0)} Dateien</div>`).join("")}</div></details>`;
+            }
+            html += `<a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(reassign.job_id)}&task=free">In Aufnahmen zuordnen</a></div>`;
           }
           html += renderTechnicalDetails();
           html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>Finder-Arbeit erledigt · weiter zu Prüfen</button></div></section>`;

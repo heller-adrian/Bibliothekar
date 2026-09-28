@@ -116,7 +116,7 @@ def test_archived_no_event_releases_exact_stored_segment_remainder():
 
 
 def test_archive_ui_exposes_segments_not_family_checkboxes():
-    assert "archiveReassignData.reassignment_segments" in EVENTS_HTML
+    assert "reassign.reassignment_segments" in EVENTS_HTML
     assert 'id="archive-reassign-target"' not in EVENTS_HTML
     assert "In Aufnahmen öffnen" in EVENTS_HTML
     assert "data-archive-family" not in EVENTS_HTML

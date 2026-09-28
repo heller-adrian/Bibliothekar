@@ -67,6 +67,7 @@ def test_resolver_falls_back_to_stable_anchor_after_manual_sort(tmp_path):
     assert rel == '2026/07-23 - Test/Export/a.JPG'
 
 
-def test_change_request_ui_groups_by_source_event():
-    assert 'const path = String(row.old_path || row.new_path || "")' in EVENTS_HTML
-    assert 'Aus diesem Ereignis nach' in EVENTS_HTML
+def test_change_request_ui_uses_backend_assistant_operations():
+    assert '/assistant' in EVENTS_HTML
+    assert 'assistant.operations' in EVENTS_HTML
+    assert 'Dateien innerhalb der Kamerabibliothek verschieben' in Path("app/archive_change_assistant.py").read_text()

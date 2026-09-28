@@ -59,8 +59,9 @@ def test_existing_normal_target_accepts_matching_family(tmp_path):
 
 def test_archive_ui_renders_concrete_paths():
     from app.events_ui import EVENTS_HTML
-    assert 'Array.isArray(files)' in EVENTS_HTML
-    assert '>IST<' in EVENTS_HTML and '>SOLL<' in EVENTS_HTML
+    assert 'Array.isArray(reviewRows)' in EVENTS_HTML
+    assert 'Technische Details' in EVENTS_HTML
+    assert 'source' in EVENTS_HTML and 'target' in EVENTS_HTML
 
 def test_cascade_preview_detects_edge_overlap(tmp_path):
     db=tmp_path/'db.sqlite3'; seed_job(db)
