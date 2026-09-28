@@ -1198,6 +1198,45 @@ body.bibliothekar-redesign #sd-card-status {
 .bk-source-pane > h3:first-child {
   margin-top: 0;
 }
+body[data-bk-area="import"] details > summary {
+  list-style: none !important;
+  display: grid !important;
+  grid-template-columns: 20px minmax(0,1fr) !important;
+  align-items: center !important;
+  gap: 7px !important;
+}
+body[data-bk-area="import"] details > summary::-webkit-details-marker {
+  display: none !important;
+}
+body[data-bk-area="import"] details > summary::marker {
+  content: "" !important;
+}
+body[data-bk-area="import"] details > summary::before {
+  content: "▸";
+  display: block;
+  width: 20px;
+  font-size: 18px;
+  line-height: 1;
+  text-align: center;
+  color: currentColor;
+}
+body[data-bk-area="import"] details[open] > summary::before {
+  content: "▾";
+}
+body[data-bk-area="import"] .drive-actions {
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  margin-top: 10px;
+}
+body[data-bk-area="import"] #drive-folder-browser {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--bk-line);
+}
+@media (max-width: 760px) {
+  body[data-bk-area="import"] .drive-actions {
+    grid-template-columns: 1fr;
+  }
+}
 
 body.bibliothekar-redesign .jobs {
   gap: 9px !important;
@@ -1684,6 +1723,10 @@ BIBLIOTHEKAR_JS = r"""
       document.querySelectorAll("[data-source-pane]").forEach(pane => {
         pane.hidden = pane.dataset.sourcePane !== mode;
       });
+
+      // Die drei Quellkarten sind echte exklusive Ansichten. Insbesondere darf
+      // der SD-Kartenstatus nicht unter Laufwerk oder Ordner/Sicherung stehen.
+      document.body.dataset.bkSourceMode = mode;
 
       if (mode === "sd") {
         if (otherPanel) otherPanel.open = false;

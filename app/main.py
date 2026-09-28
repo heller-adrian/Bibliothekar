@@ -144,7 +144,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.27.3"
+APP_VERSION = "0.27.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -6286,11 +6286,11 @@ def index() -> str:
         </button>
       </div>
 
-      <div class="source-device-card" id="sd-card-status">
+      <div class="source-device-card" id="sd-card-status" data-source-pane="sd">
         SD-Karte wird gesucht …
       </div>
 
-      <div class="import-controls sd-actions">
+      <div class="import-controls sd-actions" data-source-pane="sd">
         <div class="source-device-card mount-state" id="sd-mount-state" aria-live="polite">SD-Karte noch nicht eingebunden</div>
         <button class="bk-action-tile bk-action-mount" id="sd-mount-button" type="button" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 14v5h14v-5"/></svg>
@@ -6306,16 +6306,16 @@ def index() -> str:
         </button>
       </div>
 
-      <div class="source-detail" id="sd-source-detail"></div>
+      <div class="source-detail" id="sd-source-detail" data-source-pane="sd"></div>
 
       <details class="other-source-panel">
         <summary>Andere Quelle verwenden</summary>
         <div class="other-source-content">
           <section class="bk-source-pane" data-source-pane="drive" hidden>
-            <h3>Externes Laufwerk vollständig sichern</h3>
+            <h3>Externes Laufwerk sichern</h3>
             <p class="section-description">
-              Eine erkannte USB-Festplatte oder ein USB-Stick wird wie eine
-              SD-Karte vollständig und nur lesend verarbeitet.
+              USB-Festplatte oder USB-Stick ausschließlich lesend einbinden.
+              Danach kannst du das komplette Laufwerk oder nur einen Ordner daraus sichern.
             </p>
             <div class="import-controls">
               <select id="device-select" aria-label="Externes Laufwerk">
@@ -6324,6 +6324,37 @@ def index() -> str:
               <button class="secondary" id="device-mount-button" type="button" disabled>
                 Laufwerk einbinden
               </button>
+            </div>
+            <div class="source-device-card mount-state" id="device-mount-state" aria-live="polite">
+              Noch kein Laufwerk eingebunden
+            </div>
+            <div class="import-controls drive-actions">
+              <button class="primary" id="device-import-button" type="button" disabled>
+                Komplettes Laufwerk sichern
+              </button>
+              <button class="secondary" id="device-folder-button" type="button" disabled>
+                Ordner auswählen
+              </button>
+              <button class="secondary" id="device-unmount-button" type="button" disabled>
+                Laufwerk auswerfen
+              </button>
+            </div>
+
+            <div class="folder-browser" id="drive-folder-browser" hidden>
+              <h3>Ordner im Laufwerk auswählen</h3>
+              <p class="section-description">
+                Nur der ausgewählte Ordner und sein Inhalt werden importiert.
+              </p>
+              <div class="folder-path" id="drive-folder-path">/</div>
+              <div class="folder-list" id="drive-folder-list"></div>
+              <div class="import-controls">
+                <button class="secondary" id="drive-folder-up-button" type="button">
+                  Eine Ebene höher
+                </button>
+                <button class="primary" id="drive-folder-import-button" type="button">
+                  Diesen Ordner importieren
+                </button>
+              </div>
             </div>
           </section>
 
@@ -6458,6 +6489,15 @@ def index() -> str:
     const sdMountState = document.getElementById("sd-mount-state");
     const deviceSelect = document.getElementById("device-select");
     const deviceMountButton = document.getElementById("device-mount-button");
+    const deviceMountState = document.getElementById("device-mount-state");
+    const deviceImportButton = document.getElementById("device-import-button");
+    const deviceFolderButton = document.getElementById("device-folder-button");
+    const deviceUnmountButton = document.getElementById("device-unmount-button");
+    const driveFolderBrowser = document.getElementById("drive-folder-browser");
+    const driveFolderPath = document.getElementById("drive-folder-path");
+    const driveFolderList = document.getElementById("drive-folder-list");
+    const driveFolderUpButton = document.getElementById("drive-folder-up-button");
+    const driveFolderImportButton = document.getElementById("drive-folder-import-button");
     const folderRootSelect = document.getElementById("folder-root-select");
     const folderPath = document.getElementById("folder-path");
     const folderList = document.getElementById("folder-list");
@@ -6912,11 +6952,41 @@ def index() -> str:
     let currentFolderRoot = "nas";
     let currentFolderPath = ".";
     let currentFolderParent = null;
+    let driveFolderBoundary = null;
+    let driveFolderPathValue = ".";
+    let driveFolderParent = null;
 
     function deviceLabel(device) {
       const kind = device.kind === "sd_card" ? "SD-Karte" : "Externes Laufwerk";
       const name = device.label || device.model || device.device_path;
       return `${kind} · ${name} · ${formatBytes(device.size_bytes)} · ${String(device.filesystem || "").toUpperCase()}`;
+    }
+
+    function currentExternalDevice() {
+      return sourceDevices.find(item => item.device_path === deviceSelect.value) || null;
+    }
+
+    function updateDriveControls() {
+      const device = currentExternalDevice();
+      const verifiedReadOnly = Boolean(device?.mounted && device?.read_only);
+      deviceMountButton.disabled = !device || Boolean(device.mounted);
+      deviceImportButton.disabled = !verifiedReadOnly;
+      deviceFolderButton.disabled = !verifiedReadOnly;
+      deviceUnmountButton.disabled = !device?.mounted;
+      if (!device) {
+        deviceMountState.textContent = "Kein externes Laufwerk erkannt.";
+      } else if (verifiedReadOnly) {
+        deviceMountState.innerHTML =
+          `<strong>✓ Nur lesend eingebunden</strong><span>${escapeHtml(deviceLabel(device))}</span>`;
+      } else if (device.mounted) {
+        deviceMountState.textContent = "Laufwerk ist eingebunden, Nur-Lese-Status aber noch nicht bestätigt.";
+      } else {
+        deviceMountState.textContent = deviceLabel(device) + " · Bereit zum Einbinden";
+      }
+      if (!verifiedReadOnly) {
+        driveFolderBrowser.hidden = true;
+        driveFolderBoundary = null;
+      }
     }
 
     async function loadSourceDevices() {
@@ -6962,11 +7032,15 @@ def index() -> str:
       }
 
       const external = sourceDevices.filter(item => item.kind !== "sd_card");
+      const previousExternal = deviceSelect.value;
       deviceSelect.innerHTML = external.length
         ? external.map(item => `<option value="${escapeHtml(item.device_path)}">${escapeHtml(deviceLabel(item))}${item.mounted ? " · eingebunden" : ""}</option>`).join("")
         : '<option value="">Kein externes Laufwerk erkannt</option>';
       deviceSelect.disabled = external.length === 0;
-      deviceMountButton.disabled = external.length === 0 || Boolean(external.find(item => item.device_path === deviceSelect.value)?.mounted);
+      if (external.some(item => item.device_path === previousExternal)) {
+        deviceSelect.value = previousExternal;
+      }
+      updateDriveControls();
       updateSdSourceDetail();
     }
 
@@ -7013,6 +7087,65 @@ def index() -> str:
         + (changed ? ` · ${changed} verändert/zu prüfen` : "")
         + (ignored ? ` · ${ignored} Verwaltungsdateien ignoriert` : "")
         + (source.import_status === "no_changes" ? " · Keine neuen Dateien" : "");
+    }
+
+    async function loadDriveFolderBrowser(relativePath=driveFolderBoundary) {
+      const device = currentExternalDevice();
+      if (!device?.mounted || !device?.read_only || !device.device_id) {
+        throw new Error("Bitte das externe Laufwerk zuerst ausschließlich lesend einbinden.");
+      }
+      if (!driveFolderBoundary) driveFolderBoundary = device.device_id;
+      const requested = String(relativePath || driveFolderBoundary);
+      if (
+        requested !== driveFolderBoundary
+        && !requested.startsWith(driveFolderBoundary + "/")
+      ) {
+        throw new Error("Der Ordner liegt außerhalb des ausgewählten Laufwerks.");
+      }
+      const params = new URLSearchParams({
+        root_key:"removable",
+        relative_path:requested
+      });
+      const response = await fetch(`/api/source-folders?${params}`, {cache:"no-store"});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Ordner im Laufwerk konnten nicht geladen werden.");
+
+      driveFolderPathValue = data.relative_path;
+      const rawParent = data.parent_relative_path;
+      driveFolderParent =
+        driveFolderPathValue === driveFolderBoundary
+          ? null
+          : (
+              rawParent
+              && (
+                rawParent === driveFolderBoundary
+                || rawParent.startsWith(driveFolderBoundary + "/")
+              )
+                ? rawParent
+                : null
+            );
+
+      const visiblePath =
+        driveFolderPathValue === driveFolderBoundary
+          ? "/"
+          : "/" + driveFolderPathValue.slice(driveFolderBoundary.length + 1);
+      driveFolderPath.textContent = visiblePath;
+      driveFolderUpButton.disabled = driveFolderParent === null;
+      driveFolderList.innerHTML = (data.directories || []).length
+        ? data.directories
+            .filter(item =>
+              item.relative_path === driveFolderBoundary
+              || item.relative_path.startsWith(driveFolderBoundary + "/")
+            )
+            .map(item =>
+              `<button type="button" class="secondary folder-entry" data-drive-folder="${escapeHtml(item.relative_path)}">📁 ${escapeHtml(item.name)}</button>`
+            ).join("")
+        : '<div class="source-detail">Keine Unterordner</div>';
+      driveFolderList.querySelectorAll("[data-drive-folder]").forEach(button => {
+        button.addEventListener("click", () =>
+          loadDriveFolderBrowser(button.dataset.driveFolder).catch(showError)
+        );
+      });
     }
 
     async function loadFolderBrowser(rootKey=currentFolderRoot, relativePath=currentFolderPath) {
@@ -7213,17 +7346,82 @@ def index() -> str:
     });
 
     deviceSelect.addEventListener("change", () => {
-      const device = sourceDevices.find(item => item.device_path === deviceSelect.value);
-      deviceMountButton.disabled = !device || device.mounted;
+      driveFolderBrowser.hidden = true;
+      driveFolderBoundary = null;
+      updateDriveControls();
     });
 
     deviceMountButton.addEventListener("click", async () => {
       if (!deviceSelect.value) return;
+      const selectedPath = deviceSelect.value;
       deviceMountButton.disabled = true;
       try {
-        await mountDevice(deviceSelect.value);
+        await mountDevice(selectedPath);
+        deviceSelect.value = selectedPath;
+        updateDriveControls();
         noticeElement.textContent = "Externes Laufwerk wurde ausschließlich lesend eingebunden.";
       } catch (error) { showError(error); }
+    });
+
+    deviceUnmountButton.addEventListener("click", async () => {
+      const device = currentExternalDevice();
+      if (!device?.mounted) return;
+      deviceUnmountButton.disabled = true;
+      try {
+        await unmountDevice(device.device_path);
+        driveFolderBrowser.hidden = true;
+        driveFolderBoundary = null;
+        noticeElement.textContent = "Externes Laufwerk wurde sicher ausgeworfen.";
+      } catch (error) { showError(error); }
+    });
+
+    deviceImportButton.addEventListener("click", async () => {
+      const device = currentExternalDevice();
+      if (!device?.mounted || !device?.read_only || !device.device_id) {
+        showError(new Error("Bitte das externe Laufwerk zuerst ausschließlich lesend einbinden."));
+        return;
+      }
+      await startFolderImportSelection(
+        "removable",
+        device.device_id,
+        device.label || device.model || "Externes Laufwerk"
+      );
+    });
+
+    deviceFolderButton.addEventListener("click", async () => {
+      const device = currentExternalDevice();
+      if (!device?.mounted || !device?.read_only || !device.device_id) {
+        showError(new Error("Bitte das externe Laufwerk zuerst ausschließlich lesend einbinden."));
+        return;
+      }
+      driveFolderBoundary = device.device_id;
+      driveFolderBrowser.hidden = false;
+      try {
+        await loadDriveFolderBrowser(driveFolderBoundary);
+        driveFolderBrowser.scrollIntoView({behavior:"smooth", block:"nearest"});
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    driveFolderUpButton.addEventListener("click", () => {
+      if (driveFolderParent !== null) {
+        loadDriveFolderBrowser(driveFolderParent).catch(showError);
+      }
+    });
+
+    driveFolderImportButton.addEventListener("click", async () => {
+      const device = currentExternalDevice();
+      if (!device?.mounted || !device?.read_only || !driveFolderPathValue) {
+        showError(new Error("Bitte zuerst einen Ordner im eingebundenen Laufwerk auswählen."));
+        return;
+      }
+      const leaf = driveFolderPathValue.split("/").filter(Boolean).at(-1) || "Ordner";
+      await startFolderImportSelection(
+        "removable",
+        driveFolderPathValue,
+        (device.label || device.model || "Externes Laufwerk") + " · " + leaf
+      );
     });
 
     folderRootSelect.addEventListener("change", () => loadFolderBrowser(folderRootSelect.value, ".").catch(showError));
@@ -7239,16 +7437,16 @@ def index() -> str:
 
     sourceSelect.addEventListener("change", updateSourceDetail);
 
-    async function startFolderImport() {
-      const selected = sourceSelect.value;
-      if (!selected) {
-        noticeElement.textContent =
-          "Bitte zuerst eine Importquelle auswählen.";
+    async function startFolderImportSelection(rootKey, relativePath, displayName="") {
+      if (!rootKey || !relativePath) {
+        noticeElement.textContent = "Bitte zuerst eine Importquelle auswählen.";
         noticeElement.classList.add("error-text");
         return;
       }
 
       importButton.disabled = true;
+      deviceImportButton.disabled = true;
+      driveFolderImportButton.disabled = true;
       noticeElement.classList.remove("error-text");
       noticeElement.textContent = "Ordnerimport wird angelegt …";
 
@@ -7259,8 +7457,9 @@ def index() -> str:
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              source_root_key: selected.split("::", 1)[0],
-              source_relative_path: selected.includes("::") ? selected.slice(selected.indexOf("::") + 2) : selected
+              source_root_key: rootKey,
+              source_relative_path: relativePath,
+              display_name: displayName || undefined
             })
           }
         );
@@ -7276,8 +7475,22 @@ def index() -> str:
         noticeElement.textContent = error.message;
         noticeElement.classList.add("error-text");
       } finally {
-        await loadSources();
+        await Promise.all([loadSources(), loadSourceDevices()]);
+        updateDriveControls();
       }
+    }
+
+    async function startFolderImport() {
+      const selected = sourceSelect.value;
+      if (!selected) {
+        noticeElement.textContent = "Bitte zuerst eine Importquelle auswählen.";
+        noticeElement.classList.add("error-text");
+        return;
+      }
+      const separator = selected.indexOf("::");
+      const rootKey = separator >= 0 ? selected.slice(0, separator) : "saved";
+      const relativePath = separator >= 0 ? selected.slice(separator + 2) : selected;
+      await startFolderImportSelection(rootKey, relativePath);
     }
 
     async function startSimulation() {
