@@ -3620,10 +3620,25 @@ EVENTS_HTML = r"""<!doctype html>
           if (releaseRequired && releaseStage === "copy_to_ssd") {
             html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">Kopiere die unten genannten Dateien aus der Kamerabibliothek in die vorbereiteten Zielordner unter <em>Arbeitsbereich/Freigewordene Archivdateien</em>. Noch nichts im Archiv löschen.</p>`;
             if (releaseSegments.length) {
-              html += `<div style="display:grid;gap:6px;margin-top:10px">`;
+              html += `<div style="display:grid;gap:8px;margin-top:10px">`;
               for (const segment of releaseSegments) {
                 const label = `${String(segment.day_key || "")} · ${String(segment.start_time || "")}–${String(segment.end_time || "")}`;
-                html += `<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;border:1px solid var(--border);border-radius:9px;padding:7px 10px"><strong>${escapeHtml(label)}</strong><span class="muted">${Number(segment.family_count || 0)} Familien · ${Number(segment.release_file_count ?? segment.file_count ?? 0)} Dateien</span></div>`;
+                const families = Array.isArray(segment.families) ? segment.families : [];
+                const targetDirectory = String(segment.workspace_release_directory || "");
+                html += `<details class="card change-operation" style="padding:0"><summary style="display:flex;justify-content:space-between;gap:12px;align-items:center"><strong>${escapeHtml(label)}</strong><span class="muted">${Number(segment.family_count || families.length || 0)} Familien · ${Number(segment.release_file_count ?? segment.file_count ?? 0)} Dateien</span></summary><div class="change-operation-body">`;
+                if (targetDirectory) {
+                  html += `<div><div class="muted">ZIELORDNER AUF DER SSD</div><code style="display:block;white-space:pre-wrap;word-break:break-word">Arbeitsbereich/${escapeHtml(targetDirectory)}</code></div>`;
+                }
+                for (const family of families) {
+                  const familyLabel = String(family.original_stem || family.family_key || `Familie ${family.family_id || ""}`);
+                  const sourcePaths = Array.isArray(family.source_paths) ? family.source_paths : [];
+                  html += `<div class="card" style="padding:9px 10px"><strong>${escapeHtml(familyLabel)}</strong><span class="muted" style="margin-left:8px">${Number(family.file_count || sourcePaths.length || 0)} Dateien</span>`;
+                  if (sourcePaths.length) {
+                    html += `<div class="muted" style="margin-top:7px">IM ARCHIV</div>${sourcePaths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(path)}</code>`).join("")}`;
+                  }
+                  html += `</div>`;
+                }
+                html += `</div></details>`;
               }
               html += `</div>`;
             }
@@ -3632,12 +3647,12 @@ EVENTS_HTML = r"""<!doctype html>
               html += `<div class="card" style="padding:9px 10px"><div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(row.old_path || "")}</code><div class="muted" style="margin-top:5px">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">Arbeitsbereich/${escapeHtml(row.workspace_release_path || row.calculated_workspace_release_path || "")}</code></div>`;
             }
             html += `</div></details></div>`;
-            html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
+            html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div><div id="change-release-errors" class="danger-text" style="display:none"></div></div>`;
             html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-copy-verify>SSD-Kopien prüfen</button></div></section>`;
           } else if (releaseRequired && releaseStage === "remove_archive") {
             html += `<div class="card"><strong>✓ SSD-Kopien vollständig geprüft</strong><p class="success-text" style="margin-top:5px">Alle freigewordenen Dateien stimmen nach Größe und SHA-256 mit dem geplanten Bestand überein.</p></div>`;
             html += `<div class="card"><strong>2. Bestätigte Archivoriginale entfernen</strong><p class="muted" style="margin-top:5px">Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.</p><details style="margin-top:10px"><summary>${releaseRows.length} Archivpfade anzeigen</summary><div style="margin-top:8px">${releaseRows.map(row => `<code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(row.old_path || "")}</code>`).join("")}</div></details></div>`;
-            html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
+            html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div><div id="change-release-errors" class="danger-text" style="display:none"></div></div>`;
             html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-removal-verify>Entfernung aus dem Archiv prüfen</button></div></section>`;
           } else {
             let number = 1;
@@ -3687,41 +3702,83 @@ EVENTS_HTML = r"""<!doctype html>
 
         const releaseCopyButton=changeRequestBody.querySelector("[data-cr-release-copy-verify]");
         releaseCopyButton?.addEventListener("click", async () => {
-          const progress=document.getElementById("change-release-progress");
+          const progress=changeRequestBody.querySelector("#change-release-progress");
+          const bar=progress?.querySelector(".change-progress-bar");
           const label=progress?.querySelector("[data-progress-label]");
+          const errors=progress?.querySelector("#change-release-errors");
           releaseCopyButton.disabled=true;
-          if(progress) progress.classList.add("visible","working");
+          progress?.classList.add("active");
+          if(bar) bar.style.width="25%";
           if(label) label.textContent="SSD-Kopien werden nach Größe und SHA-256 geprüft …";
+          if(errors){errors.style.display="none";errors.innerHTML="";}
           try {
-            const result=await postJson(`/api/change-requests/${encodeURIComponent(crId)}/release-copy/verify`,{});
+            const result=await requestJson(
+              `/api/change-requests/${encodeURIComponent(crId)}/release-copy/verify`,
+              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}
+            );
+            if(bar) bar.style.width="100%";
             if(!result.complete) {
-              throw new Error(`${result.verified_file_count}/${result.file_count} SSD-Kopien sind korrekt. Fehlende oder abweichende Dateien bitte korrigieren.`);
+              const problems=(result.files||[]).filter(row=>String(row.status||"")!=="release_copy_verified");
+              if(label) label.textContent=`${Number(result.verified_file_count||0)}/${Number(result.file_count||0)} SSD-Kopien sind korrekt.`;
+              if(errors){
+                errors.style.display="block";
+                errors.innerHTML=problems.map(row=>`<div style="margin-top:5px"><strong>${escapeHtml(String(row.workspace_release_path||row.old_path||"Datei"))}</strong><br>${escapeHtml(String(row.message||row.status||"Prüfung fehlgeschlagen"))}</div>`).join("");
+              }
+              releaseCopyButton.disabled=false;
+              return;
             }
+            if(label) label.textContent="Alle SSD-Kopien sind vollständig geprüft.";
+            await new Promise(resolve=>setTimeout(resolve,180));
             await showChangeRequestDetail(crId,{phase:"finder"});
           } catch(error) {
             releaseCopyButton.disabled=false;
-            if(progress) progress.classList.remove("working");
-            if(label) label.textContent=error.message;
+            if(bar) bar.style.width="100%";
+            if(label) label.textContent="Prüfung fehlgeschlagen.";
+            if(errors){
+              errors.style.display="block";
+              errors.textContent=error.message;
+            }
           }
         });
 
         const releaseRemovalButton=changeRequestBody.querySelector("[data-cr-release-removal-verify]");
         releaseRemovalButton?.addEventListener("click", async () => {
-          const progress=document.getElementById("change-release-progress");
+          const progress=changeRequestBody.querySelector("#change-release-progress");
+          const bar=progress?.querySelector(".change-progress-bar");
           const label=progress?.querySelector("[data-progress-label]");
+          const errors=progress?.querySelector("#change-release-errors");
           releaseRemovalButton.disabled=true;
-          if(progress) progress.classList.add("visible","working");
+          progress?.classList.add("active");
+          if(bar) bar.style.width="25%";
           if(label) label.textContent="SSD-Kopien und entfernte Archivoriginale werden geprüft …";
+          if(errors){errors.style.display="none";errors.innerHTML="";}
           try {
-            const result=await postJson(`/api/change-requests/${encodeURIComponent(crId)}/release-removal/verify`,{});
+            const result=await requestJson(
+              `/api/change-requests/${encodeURIComponent(crId)}/release-removal/verify`,
+              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}
+            );
+            if(bar) bar.style.width="100%";
             if(!result.complete) {
-              throw new Error(`${result.verified_file_count}/${result.file_count} Dateien sind vollständig freigegeben. Noch vorhandene Archivoriginale bitte entfernen.`);
+              const problems=(result.files||[]).filter(row=>String(row.status||"")!=="verified");
+              if(label) label.textContent=`${Number(result.verified_file_count||0)}/${Number(result.file_count||0)} Dateien sind vollständig freigegeben.`;
+              if(errors){
+                errors.style.display="block";
+                errors.innerHTML=problems.map(row=>`<div style="margin-top:5px"><strong>${escapeHtml(String(row.old_path||"Datei"))}</strong><br>${escapeHtml(String(row.message||row.status||"Prüfung fehlgeschlagen"))}</div>`).join("");
+              }
+              releaseRemovalButton.disabled=false;
+              return;
             }
+            if(label) label.textContent="Archivoriginale sind entfernt und der SSD-Bestand ist bestätigt.";
+            await new Promise(resolve=>setTimeout(resolve,180));
             await showChangeRequestDetail(crId,{phase:"finder"});
           } catch(error) {
             releaseRemovalButton.disabled=false;
-            if(progress) progress.classList.remove("working");
-            if(label) label.textContent=error.message;
+            if(bar) bar.style.width="100%";
+            if(label) label.textContent="Prüfung fehlgeschlagen.";
+            if(errors){
+              errors.style.display="block";
+              errors.textContent=error.message;
+            }
           }
         });
 

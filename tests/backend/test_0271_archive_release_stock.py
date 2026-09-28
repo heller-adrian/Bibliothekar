@@ -169,11 +169,18 @@ def test_0271_release_stock_copy_remove_finish_and_reappear_globally(tmp_path: P
     confirm_event_change(db, cr_id, archive, workspace)
     rows = _copy_release_rows(case)
     assert len(rows) == 2
-    assert all(
-        str(row["workspace_release_path"]).startswith(
-            "Freigewordene Archivdateien/2026/2026-07-22 · 20-01–23-59/"
-        )
-        for row in rows
+    assert sorted(str(row["workspace_release_path"]) for row in rows) == [
+        "Freigewordene Archivdateien/2026/2026-07-22 · 20-01–23-59/late-export.JPG",
+        "Freigewordene Archivdateien/2026/2026-07-22 · 20-01–23-59/late.JPG",
+    ]
+    stock = describe_archive_release_stock(db, cr_id)
+    segment = stock["segments"][0]
+    assert segment["workspace_release_directory"] == (
+        "Freigewordene Archivdateien/2026/2026-07-22 · 20-01–23-59"
+    )
+    assert segment["families"][0]["original_stem"] == "LATE"
+    assert sorted(segment["families"][0]["source_paths"]) == sorted(
+        row["old_path"] for row in rows
     )
 
     copied = verify_archive_release_copies(db, archive, workspace, cr_id)
@@ -254,6 +261,15 @@ def test_0271_release_stock_copy_remove_finish_and_reappear_globally(tmp_path: P
     assert task["title"] == "Freigewordene Archivaufnahmen"
     assert task["family_count"] == 1
     assert task["href"] == "/workspace?job=old&task=free"
+
+
+def test_0271_archive_release_ui_has_working_visible_verification_handler():
+    source = (Path(__file__).resolve().parents[2] / "app" / "events_ui.py").read_text()
+    assert "postJson(" not in source
+    assert 'progress?.classList.add("active")' in source
+    assert "change-release-errors" in source
+    assert "segment.families" in source
+    assert "workspace_release_directory" in source
 
 
 def test_0271_release_copy_requires_correct_sha_before_archive_removal(tmp_path: Path):

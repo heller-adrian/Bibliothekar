@@ -138,6 +138,11 @@ def _release_context(database_path: Path, cr_id: str) -> dict[str, Any]:
             ]
 
     rows = camera_rows + asset_rows
+    family_meta = {
+        int(row["family_id"]): dict(row)
+        for row in pending_rows
+        if row.get("family_id") is not None
+    }
     year_by_family = {
         int(row["family_id"]): str(
             family_segment[int(row["family_id"])]["day_key"]
@@ -154,31 +159,37 @@ def _release_context(database_path: Path, cr_id: str) -> dict[str, Any]:
             raise ArchiveReleaseStockError(
                 f"Familie {family_id} lässt sich keinem freigewordenen Zeitraum zuordnen."
             )
-        branch = _branch_for(
-            str(row.get("old_path") or ""),
-            str(row.get("asset_kind") or ""),
-        )
+
         filename = PurePosixPath(str(row.get("old_path") or "").replace("\\", "/")).name
         if not filename:
             raise ArchiveReleaseStockError("Eine freigewordene Archivdatei besitzt keinen Dateinamen.")
-        relative = PurePosixPath(
+
+        release_directory = PurePosixPath(
             RELEASE_DIRECTORY_NAME,
             year_by_family[family_id],
             _segment_folder(segment),
-            source_event_folder,
-            branch,
-            filename,
-        ).as_posix()
-        if relative in seen_targets:
-            raise ArchiveReleaseStockError(
-                "Zwei freigewordene Archivdateien würden denselben SSD-Zielpfad erhalten: " + relative
-            )
+        )
+        candidate = release_directory / filename
+        suffix_index = 1
+        while candidate.as_posix() in seen_targets:
+            path = PurePosixPath(filename)
+            suffix = path.suffix
+            stem = path.name[:-len(suffix)] if suffix else path.name
+            duplicate_name = f"{stem}_{suffix_index:03d}{suffix}"
+            candidate = release_directory / duplicate_name
+            suffix_index += 1
+        relative = candidate.as_posix()
         seen_targets.add(relative)
+
+        metadata = family_meta.get(family_id, {})
         stored = str(row.get("workspace_release_path") or "").strip()
         enriched.append({
             **row,
             "segment": segment,
-            "branch": branch,
+            "family_key": metadata.get("family_key"),
+            "original_stem": metadata.get("original_stem"),
+            "release_filename": candidate.name,
+            "workspace_release_directory": release_directory.as_posix(),
             "workspace_release_path": stored or relative,
             "calculated_workspace_release_path": relative,
         })
@@ -186,15 +197,45 @@ def _release_context(database_path: Path, cr_id: str) -> dict[str, Any]:
     display_segments = []
     for segment in segments:
         family_ids = {int(value) for value in (segment.get("family_ids") or [])}
-        release_file_count = sum(
-            1
+        segment_rows = [
+            row
             for row in enriched
             if row.get("family_id") is not None
             and int(row["family_id"]) in family_ids
-        )
+        ]
+        release_file_count = len(segment_rows)
+        families = []
+        for family_id in sorted(family_ids):
+            family_rows = [
+                row for row in segment_rows
+                if int(row["family_id"]) == family_id
+            ]
+            metadata = family_meta.get(family_id, {})
+            families.append({
+                "family_id": family_id,
+                "family_key": metadata.get("family_key"),
+                "original_stem": metadata.get("original_stem"),
+                "file_count": len(family_rows),
+                "source_paths": sorted({
+                    str(row.get("old_path") or "")
+                    for row in family_rows
+                    if str(row.get("old_path") or "")
+                }),
+                "release_filenames": [
+                    str(row.get("release_filename") or "")
+                    for row in family_rows
+                ],
+            })
+        release_directories = sorted({
+            str(row.get("workspace_release_directory") or "")
+            for row in segment_rows
+            if str(row.get("workspace_release_directory") or "")
+        })
         display_segments.append({
             **segment,
             "release_file_count": release_file_count,
+            "workspace_release_directory": release_directories[0] if len(release_directories) == 1 else "",
+            "families": families,
         })
 
     return {
