@@ -13,7 +13,7 @@ from app.archive_release_stock import (
     verify_archive_release_copies,
     verify_archive_release_removal,
 )
-from app.database import database_connection
+from app.database import database_connection, list_global_tasks
 from app.event_change_apply import (
     EventChangeApplyError,
     cancel_event_change,
@@ -245,6 +245,15 @@ def test_0271_release_stock_copy_remove_finish_and_reappear_globally(tmp_path: P
     assert group["start_time"] == "20:01"
     assert group["end_time"] == "23:59"
     assert group["file_count"] == 2
+
+    task = next(
+        item for item in list_global_tasks(db)
+        if item.get("kind") == "released_archive_families"
+        and item.get("job_id") == "old"
+    )
+    assert task["title"] == "Freigewordene Archivaufnahmen"
+    assert task["family_count"] == 1
+    assert task["href"] == "/workspace?job=old&task=free"
 
 
 def test_0271_release_copy_requires_correct_sha_before_archive_removal(tmp_path: Path):
