@@ -3103,10 +3103,18 @@ def get_event_edit_context(
             SELECT DISTINCT ea.family_id
             FROM event_assignments ea
             JOIN events assigned ON assigned.id = ea.event_id
+            LEFT JOIN events root ON root.id = assigned.parent_event_id
             WHERE ea.family_id IS NOT NULL
-              AND COALESCE(assigned.parent_event_id, assigned.id) = ?
+              AND (
+                    COALESCE(root.id, assigned.id) = ?
+                    OR (
+                         COALESCE(root.linked_event_id, assigned.linked_event_id) = ?
+                         AND COALESCE(root.linkage_kind, assigned.linkage_kind) = 'archived_manual'
+                         AND COALESCE(root.status, assigned.status) = 'archived'
+                       )
+                  )
             """,
-            (event_id,),
+            (event_id, event_id),
         ).fetchall()
         assigned_ids = {int(row["family_id"]) for row in assigned_rows}
 
@@ -3119,22 +3127,47 @@ def get_event_edit_context(
         family_rows = connection.execute(
             """
             SELECT ff.id AS family_id, ff.family_key, ff.selected_capture_time,
-                   ff.capture_time_confidence, COUNT(f.id) AS file_count,
+                   ff.capture_time_confidence, COUNT(DISTINCT f.id) AS file_count,
                    COALESCE(SUM(f.size_bytes), 0) AS total_size_bytes,
                    COALESCE(SUM(CASE WHEN f.review_status = 'required' THEN 1 ELSE 0 END), 0) AS review_required_count,
-                   GROUP_CONCAT(DISTINCT COALESCE(root.name, assigned.name)) AS assigned_event_names,
-                   MAX(CASE WHEN COALESCE(root.id, assigned.id) = ? THEN 1 ELSE 0 END) AS assigned_here,
-                   MAX(CASE WHEN assigned.id IS NOT NULL AND COALESCE(root.id, assigned.id) != ? THEN 1 ELSE 0 END) AS assigned_elsewhere
+                   GROUP_CONCAT(DISTINCT COALESCE(linked_target.name, root.name, assigned.name)) AS assigned_event_names,
+                   MAX(CASE WHEN (
+                         COALESCE(root.id, assigned.id) = ?
+                         OR (
+                              COALESCE(root.linked_event_id, assigned.linked_event_id) = ?
+                              AND COALESCE(root.linkage_kind, assigned.linkage_kind) = 'archived_manual'
+                              AND COALESCE(root.status, assigned.status) = 'archived'
+                            )
+                       ) THEN 1 ELSE 0 END) AS assigned_here,
+                   MAX(CASE WHEN assigned.id IS NOT NULL AND NOT (
+                         COALESCE(root.id, assigned.id) = ?
+                         OR (
+                              COALESCE(root.linked_event_id, assigned.linked_event_id) = ?
+                              AND COALESCE(root.linkage_kind, assigned.linkage_kind) = 'archived_manual'
+                              AND COALESCE(root.status, assigned.status) = 'archived'
+                            )
+                       ) THEN 1 ELSE 0 END) AS assigned_elsewhere
             FROM file_families ff
             LEFT JOIN files f ON f.family_id = ff.id AND f.job_id = ff.job_id
             LEFT JOIN event_assignments ea ON ea.family_id = ff.id
             LEFT JOIN events assigned ON assigned.id = ea.event_id AND assigned.status IN ('draft','planned','applied','archived')
             LEFT JOIN events root ON root.id = assigned.parent_event_id
+            LEFT JOIN events linked_target ON linked_target.id = COALESCE(root.linked_event_id, assigned.linked_event_id)
             WHERE ff.job_id = ?
+               OR EXISTS (
+                    SELECT 1
+                    FROM event_assignments linked_ea
+                    JOIN events linked_assigned ON linked_assigned.id=linked_ea.event_id
+                    LEFT JOIN events linked_root ON linked_root.id=linked_assigned.parent_event_id
+                    WHERE linked_ea.family_id=ff.id
+                      AND COALESCE(linked_root.linked_event_id, linked_assigned.linked_event_id)=?
+                      AND COALESCE(linked_root.linkage_kind, linked_assigned.linkage_kind)='archived_manual'
+                      AND COALESCE(linked_root.status, linked_assigned.status)='archived'
+               )
             GROUP BY ff.id
             ORDER BY ff.selected_capture_time, ff.id
             """,
-            (event_id, event_id, job_id),
+            (event_id, event_id, event_id, event_id, job_id, event_id),
         ).fetchall()
 
     from app.released_ranges import merge_intervals
