@@ -382,6 +382,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     .create-subevent-remove{white-space:nowrap;align-self:end;min-height:44px;flex:0 0 auto}
     .dialog-inline-error{margin-top:12px;border:1px solid var(--danger,#b42318);border-radius:10px;background:color-mix(in srgb,var(--danger,#b42318) 10%,var(--surface));color:var(--text);padding:10px 12px;font-weight:650}
     .existing-segment-static{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);padding:9px 10px}
+    .existing-parent-state{display:grid;gap:8px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:11px 12px}
+    .existing-parent-state details{border-top:1px solid var(--border);padding-top:8px}
+    .existing-parent-state details:first-of-type{border-top:0}
+    .existing-parent-state summary{cursor:pointer}
     .selection-bar-anchor{height:0}
     @media (min-width:821px){
       main{padding-bottom:18px !important}
@@ -1245,6 +1249,8 @@ WORKSPACE_HTML = r"""<!doctype html>
           <small class="muted">Direkt angrenzende freie Zeit kann ein bestehendes Ereignis erweitern. Gelb markierte, bereits freigegebene Applied-Bereiche sind normaler freier Bestand und erzeugen keine Neu-Zuordnungsaufgabe.</small>
         </label>
 
+        <div id="existing-parent-state" class="existing-parent-state full-width" hidden></div>
+
         <div id="no-event-segment-editor" class="full-width" hidden>
           <label id="existing-no-event-target-row" class="full-width" hidden style="margin-bottom:10px">
             <span>Bestehende „Ohne Ereignis“-Sammlung</span>
@@ -1260,25 +1266,25 @@ WORKSPACE_HTML = r"""<!doctype html>
         <div id="event-boundaries" class="event-boundaries full-width">
           <div class="event-boundary">
             <label><span>Beginn</span><input id="event-start-date" type="date" required></label>
-            <label id="event-start-time-label" hidden><span>Startzeit</span><input id="event-start-time" type="time" value="00:00"></label>
+            <label id="event-start-time-label"><span>Startzeit</span><input id="event-start-time" type="time" value="00:00"></label>
           </div>
           <div class="event-boundary">
             <label><span>Ende</span><input id="event-end-date" type="date" required></label>
-            <label id="event-end-time-label" hidden><span>Endzeit</span><input id="event-end-time" type="time" value="23:59"></label>
+            <label id="event-end-time-label"><span>Endzeit</span><input id="event-end-time" type="time" value="23:59"></label>
           </div>
         </div>
 
-        <label class="full-width check-row"><input id="use-time-range" type="checkbox"><span>Uhrzeiten berücksichtigen</span></label>
+        <input id="use-time-range" type="checkbox" checked hidden aria-hidden="true">
 
         <div id="create-subevents" class="create-subevents full-width">
           <div class="create-subevent-head">
-            <strong>Unterereignisse (optional)</strong>
+            <strong id="create-subevent-heading">Unterereignisse (optional)</strong>
             <button id="add-create-subevent" type="button">＋ Unterereignis hinzufügen</button>
           </div>
           <div id="create-subevent-list" style="display:grid;gap:8px"></div>
         </div>
 
-        <label class="full-width check-row">
+        <label id="preserve-day-folders-row" class="full-width check-row">
           <input
             id="preserve-day-folders"
             type="checkbox"
@@ -1518,6 +1524,8 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     const existingParentRow = document.getElementById("existing-parent-row");
     const existingParentEvent = document.getElementById("existing-parent-event");
+    const existingParentState = document.getElementById("existing-parent-state");
+    let activeExtension = null;
 
     const eventStartDate =
       document.getElementById(
@@ -1544,6 +1552,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     const eventStartTimeLabel=document.getElementById("event-start-time-label");
     const eventEndTimeLabel=document.getElementById("event-end-time-label");
     const createSubevents=document.getElementById("create-subevents");
+    const createSubeventHeading=document.getElementById("create-subevent-heading");
     const createSubeventList=document.getElementById("create-subevent-list");
     const addCreateSubevent=document.getElementById("add-create-subevent");
     const dialogError=document.getElementById("dialog-error");
@@ -1562,6 +1571,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       document.getElementById(
         "preserve-day-folders"
       );
+    const preserveDayFoldersRow =
+      document.getElementById("preserve-day-folders-row");
 
     const dialogPreview =
       document.getElementById(
@@ -2749,8 +2760,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     function applyAutomaticFreeTimeSuggestion(dated) {
       if (!dated.length) return;
       const ordered=[...dated].sort((a,b)=>String(a.start_datetime).localeCompare(String(b.start_datetime)));
-      eventStartTime.value=ordered[0].start_time || "00:00";
-      eventEndTime.value=ordered[ordered.length-1].end_time || "23:59";
+      eventStartTime.value=ordered[0].start_time || String(ordered[0].start_datetime||"").slice(11,16) || "00:00";
+      eventEndTime.value=ordered[ordered.length-1].end_time || String(ordered[ordered.length-1].end_datetime||"").slice(11,16) || "23:59";
       useTimeRange.checked=true;
       setParentTimeFieldsVisible(true);
     }
@@ -2765,6 +2776,40 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     taskReassignClose?.addEventListener("click",()=>taskReassignDialog.close());
 
+    function extensionSelectionForParent(parent, dated) {
+      if (!parent || !dated.length) return null;
+      const ordered=[...dated].sort((a,b)=>String(a.start_datetime).localeCompare(String(b.start_datetime)));
+      for(let index=1;index<ordered.length;index+=1){
+        const previousEnd=Date.parse(String(ordered[index-1].end_datetime||""));
+        const currentStart=Date.parse(String(ordered[index].start_datetime||""));
+        if(!Number.isFinite(previousEnd)||!Number.isFinite(currentStart)||currentStart-previousEnd!==1000) return null;
+      }
+      const extensionStart=String(ordered[0].start_datetime||"").slice(0,19);
+      const extensionEnd=String(ordered[ordered.length-1].end_datetime||"").slice(0,19);
+      const parentStart=String(parent.start_datetime||"").slice(0,19);
+      const parentEnd=String(parent.end_datetime||"").slice(0,19);
+      const extensionStartMs=Date.parse(extensionStart);
+      const extensionEndMs=Date.parse(extensionEnd);
+      const parentStartMs=Date.parse(parentStart);
+      const parentEndMs=Date.parse(parentEnd);
+      if (![extensionStartMs,extensionEndMs,parentStartMs,parentEndMs].every(Number.isFinite)) return null;
+      let direction="";
+      if(extensionStartMs-parentEndMs===1000) direction="after";
+      else if(parentStartMs-extensionEndMs===1000) direction="before";
+      else return null;
+      return {
+        direction,
+        start_datetime:extensionStart,
+        end_datetime:extensionEnd,
+        start_date:extensionStart.slice(0,10),
+        end_date:extensionEnd.slice(0,10),
+        start_time:extensionStart.slice(11,16)||"00:00",
+        end_time:extensionEnd.slice(11,16)||"23:59",
+        parent_start:parentStart,
+        parent_end:parentEnd,
+      };
+    }
+
     function plannedParentCandidates(dated) {
       if (!workspace || !dated.length) return [];
       if (dated.some(group => Boolean(group.reassignment_pending))) return [];
@@ -2774,17 +2819,24 @@ WORKSPACE_HTML = r"""<!doctype html>
         && (dated[0].archive_change_request_id
           ? event.status === "archived"
           : ["planned","applied","archived"].includes(event.status))
-        && dated.some(d =>
-          Math.abs(Date.parse(d.start_datetime) - Date.parse(event.end_datetime) - 1000) < 1
-        )
+        && extensionSelectionForParent(event,dated)
       );
     }
 
-    function nextMinute(value) {
-      const match=String(value||"").match(/(\d{2}):(\d{2})/);
-      if (!match) return "00:00";
-      const minutes=Math.min(23*60+59, Number(match[1])*60+Number(match[2])+1);
-      return `${String(Math.floor(minutes/60)).padStart(2,"0")}:${String(minutes%60).padStart(2,"0")}`;
+    function renderExistingParentState(parent) {
+      if (!existingParentState || !parent) return;
+      const children=(workspace?.events||[])
+        .filter(event=>event.parent_event_id===parent.id)
+        .sort((a,b)=>String(a.start_datetime||"").localeCompare(String(b.start_datetime||"")));
+      const range=`${String(parent.start_datetime||"").slice(0,16).replace("T"," ")} – ${String(parent.end_datetime||"").slice(0,16).replace("T"," ")}`;
+      let html=`<div><strong>Bestehender Stand · schreibgeschützt</strong><div class="muted" style="margin-top:3px">${escapeHtml(range)}</div></div>`;
+      if(children.length){
+        html += children.map(child=>`<details><summary><strong>${escapeHtml(child.name||"Unterereignis")}</strong> <span class="muted">· bestehend</span></summary><div class="muted" style="margin-top:7px">${escapeHtml(String(child.start_datetime||"").slice(0,16).replace("T"," "))} – ${escapeHtml(String(child.end_datetime||"").slice(0,16).replace("T"," "))}</div><code style="display:block;margin-top:4px;white-space:pre-wrap;word-break:break-word">${escapeHtml(child.folder_name||"")}</code></details>`).join("");
+      }else{
+        html += `<div class="muted">Keine bestehenden Unterereignisse.</div>`;
+      }
+      existingParentState.innerHTML=html;
+      existingParentState.hidden=false;
     }
 
     function applyExistingParentChoice() {
@@ -2793,77 +2845,112 @@ WORKSPACE_HTML = r"""<!doctype html>
       const dated=[...selectedDatedGroups()].sort((a,b)=>String(a.start_datetime).localeCompare(String(b.start_datetime)));
 
       if (!parent) {
+        activeExtension=null;
         dialogTitle.textContent="Ereignis erstellen";
         eventName.disabled=false;
+        existingParentState.hidden=true;
+        existingParentState.innerHTML="";
         eventStartDate.disabled=false;
         eventStartTime.disabled=false;
         eventEndDate.disabled=false;
         eventEndTime.disabled=false;
+        eventStartDate.removeAttribute("min");
+        eventStartDate.removeAttribute("max");
         eventEndDate.removeAttribute("min");
         eventEndDate.removeAttribute("max");
-        useTimeRange.disabled=false;
+        useTimeRange.checked=true;
+        useTimeRange.disabled=true;
         preserveDayFolders.disabled=false;
+        preserveDayFoldersRow.hidden=false;
         createSubevents.hidden=false;
+        createSubeventHeading.textContent="Unterereignisse (optional)";
+        createSubeventList.innerHTML="";
         if (dated.length) {
           eventStartDate.value=dated[0].day_key || String(dated[0].start_datetime||"").slice(0,10);
           eventEndDate.value=dated[dated.length-1].day_key || String(dated[dated.length-1].end_datetime||"").slice(0,10);
           applyAutomaticFreeTimeSuggestion(dated);
         }
+        setParentTimeFieldsVisible(true);
         scheduleDialogPreview();
         return;
       }
 
-      const parentStart=String(parent.start_datetime||"");
-      const parentEnd=String(parent.end_datetime||"");
-      const parentStartTime=parentStart.slice(11,16)||"00:00";
-      const parentEndTime=parentEnd.slice(11,16)||"23:59";
-      const usesTimes=Boolean(Number(parent.uses_time_range||0))
-        || parentStartTime!=="00:00"
-        || parentEndTime!=="23:59";
-      const extensionStart=dated[0] || null;
-      const extensionEnd=dated[dated.length-1] || extensionStart;
+      const extension=extensionSelectionForParent(parent,dated);
+      if(!extension){
+        dialogError.hidden=false;
+        dialogError.textContent="Die ausgewählte freie Zeit grenzt nicht zusammenhängend an dieses Ereignis an.";
+        return;
+      }
+      activeExtension=extension;
+      dialogError.hidden=true;
+      dialogError.textContent="";
+      const parentStart=extension.parent_start;
+      const parentEnd=extension.parent_end;
 
       dialogTitle.textContent="Ereignis erweitern";
       eventName.value=parent.display_title || parent.name || "";
       eventName.disabled=true;
+      renderExistingParentState(parent);
 
-      eventStartDate.value=parentStart.slice(0,10);
-      eventStartTime.value=parentStartTime;
-      eventStartDate.disabled=true;
-      eventStartTime.disabled=true;
-
-      if (extensionEnd) {
-        eventEndDate.value=extensionEnd.day_key || String(extensionEnd.end_datetime||"").slice(0,10);
-        eventEndTime.value=extensionEnd.end_time
-          || String(extensionEnd.end_datetime||"").slice(11,16)
-          || "23:59";
-      }
-      eventEndDate.disabled=false;
-      eventEndTime.disabled=!usesTimes;
-      if (extensionStart) {
-        eventEndDate.min=extensionStart.day_key || String(extensionStart.start_datetime||"").slice(0,10);
-      }
-      if (extensionEnd) {
-        eventEndDate.max=extensionEnd.day_key || String(extensionEnd.end_datetime||"").slice(0,10);
-      }
-
-      useTimeRange.checked=usesTimes;
+      useTimeRange.checked=true;
       useTimeRange.disabled=true;
-      setParentTimeFieldsVisible(usesTimes);
+      setParentTimeFieldsVisible(true);
+
+      eventStartDate.removeAttribute("min");
+      eventStartDate.removeAttribute("max");
+      eventEndDate.removeAttribute("min");
+      eventEndDate.removeAttribute("max");
+
+      if(extension.direction==="after"){
+        eventStartDate.value=parentStart.slice(0,10);
+        eventStartTime.value=parentStart.slice(11,16)||"00:00";
+        eventStartDate.disabled=true;
+        eventStartTime.disabled=true;
+
+        eventEndDate.value=extension.end_date;
+        eventEndTime.value=extension.end_time;
+        eventEndDate.disabled=false;
+        eventEndTime.disabled=false;
+        eventEndDate.min=extension.start_date;
+        eventEndDate.max=extension.end_date;
+      }else{
+        eventEndDate.value=parentEnd.slice(0,10);
+        eventEndTime.value=parentEnd.slice(11,16)||"23:59";
+        eventEndDate.disabled=true;
+        eventEndTime.disabled=true;
+
+        eventStartDate.value=extension.start_date;
+        eventStartTime.value=extension.start_time;
+        eventStartDate.disabled=false;
+        eventStartTime.disabled=false;
+        eventStartDate.min=extension.start_date;
+        eventStartDate.max=extension.end_date;
+      }
 
       preserveDayFolders.checked=Boolean(parent.preserve_day_folders);
       preserveDayFolders.disabled=true;
+      preserveDayFoldersRow.hidden=true;
 
-      createSubevents.hidden=true;
+      createSubevents.hidden=false;
+      createSubeventHeading.textContent="Neue Unterereignisse im Erweiterungsbereich";
       createSubeventList.innerHTML="";
       scheduleDialogPreview();
     }
 
-    function setParentTimeFieldsVisible(visible){eventStartTimeLabel.hidden=!visible;eventEndTimeLabel.hidden=!visible;}
+    function setParentTimeFieldsVisible(visible){
+      eventStartTimeLabel.hidden=false;
+      eventEndTimeLabel.hidden=false;
+    }
     function addCreateSubeventCard(value={}){
       const row=document.createElement("details");row.className="create-subevent-card";row.dataset.createSubevent="1";row.open=true;
-      const sd=String(value.start_date||eventStartDate.value||""),ed=String(value.end_date||eventEndDate.value||sd);
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(value.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(value.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(value.start_time||"00:00")}"></label></div><div class="create-subevent-boundary"><label><span>Ende</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(value.end_time||"23:59")}"></label></div></div></div>`;
+      const defaultDay=activeExtension?.start_date || eventStartDate.value || "";
+      const sd=String(value.start_date||defaultDay);
+      const ed=String(value.end_date||sd);
+      const defaultStart=(activeExtension && sd===activeExtension.start_date) ? activeExtension.start_time : "00:00";
+      const defaultEnd=(activeExtension && ed===activeExtension.end_date && activeExtension.start_date===activeExtension.end_date) ? activeExtension.end_time : "23:59";
+      const minDate=activeExtension?.start_date || eventStartDate.value || "";
+      const maxDate=activeExtension?.end_date || eventEndDate.value || "";
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(value.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(value.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}" min="${escapeHtml(minDate)}" max="${escapeHtml(maxDate)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(value.start_time||defaultStart)}"></label></div><div class="create-subevent-boundary"><label><span>Ende</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}" min="${escapeHtml(minDate)}" max="${escapeHtml(maxDate)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(value.end_time||defaultEnd)}"></label></div></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
       row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});
@@ -2877,10 +2964,11 @@ WORKSPACE_HTML = r"""<!doctype html>
       const parentCandidates=noEvent?[]:plannedParentCandidates(dated);existingParentRow.hidden=noEvent||parentCandidates.length===0;
       if(!existingParentRow.hidden){existingParentEvent.innerHTML=`<option value="">Neues Ereignis anlegen</option>`+parentCandidates.map(parent=>`<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");existingParentEvent.value="";}else existingParentEvent.innerHTML="";
       eventName.value=noEvent?"Ohne Ereignis":"";eventName.disabled=noEvent;dialogTitle.textContent=existingNoEvent?"Zu bestehendem „Ohne Ereignis“ hinzufügen":(noEvent?"Als „Ohne Ereignis“ zuordnen":"Ereignis erstellen");
+      activeExtension=null;existingParentState.hidden=true;existingParentState.innerHTML="";
       eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";
-      eventStartDate.disabled=false;eventStartTime.disabled=false;eventEndDate.disabled=false;eventEndTime.disabled=false;eventEndDate.removeAttribute("min");eventEndDate.removeAttribute("max");
-      useTimeRange.checked=false;useTimeRange.disabled=false;setParentTimeFieldsVisible(false);
-      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;eventBoundaries.hidden=noEvent;useTimeRange.closest("label").hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;dialogError.hidden=true;dialogError.textContent="";
+      eventStartDate.disabled=false;eventStartTime.disabled=false;eventEndDate.disabled=false;eventEndTime.disabled=false;eventStartDate.removeAttribute("min");eventStartDate.removeAttribute("max");eventEndDate.removeAttribute("min");eventEndDate.removeAttribute("max");
+      useTimeRange.checked=!noEvent;useTimeRange.disabled=true;setParentTimeFieldsVisible(true);
+      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";
       noEventSegmentEditor.hidden=!noEvent;existingNoEventTargetRow.hidden=!existingNoEvent;
       if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
       else if(noEvent){renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));await autoAttachExistingNoEventCollection();}
@@ -2894,7 +2982,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         event_name: eventName.value.trim(),
         start_date: eventStartDate.value,
         end_date: eventEndDate.value,
-        uses_time_range: useTimeRange.checked,
+        uses_time_range: !["no_event","existing_no_event"].includes(dialogMode),
         subevents: ["no_event","existing_no_event"].includes(dialogMode) ? [] : collectCreateSubevents(),
         selected_intervals: selectedDatedGroups().map(g=>({start_datetime:g.start_datetime,end_datetime:g.end_datetime})),
         start_time: eventStartTime.value,
@@ -2906,14 +2994,18 @@ WORKSPACE_HTML = r"""<!doctype html>
       const parentId = base.existing_parent_event_id;
       const parent = parentId ? (workspace?.events||[]).find(event=>event.id===parentId) : null;
       if (parent) {
-        const selected=[...selectedDatedGroups()].sort((a,b)=>String(a.start_datetime).localeCompare(String(b.start_datetime)));
-        const extensionStart=String(selected[0]?.start_datetime||"");
-        const endClock=base.uses_time_range ? (base.end_time||"23:59") : "23:59";
-        const extensionEnd=base.end_date ? `${base.end_date}T${endClock}:59` : "";
-        base.selected_intervals = extensionStart && extensionEnd
-          ? [{start_datetime:extensionStart,end_datetime:extensionEnd}]
-          : [];
-        base.subevents = [];
+        if(!activeExtension) throw new Error("Der Erweiterungsbereich ist nicht mehr aktuell.");
+        if(activeExtension.direction==="after"){
+          const extensionEnd=base.end_date ? `${base.end_date}T${base.end_time||"23:59"}:59` : "";
+          base.selected_intervals = extensionEnd
+            ? [{start_datetime:activeExtension.start_datetime,end_datetime:extensionEnd}]
+            : [];
+        }else{
+          const extensionStart=base.start_date ? `${base.start_date}T${base.start_time||"00:00"}:00` : "";
+          base.selected_intervals = extensionStart
+            ? [{start_datetime:extensionStart,end_datetime:activeExtension.end_datetime}]
+            : [];
+        }
         base.preserve_day_folders = Boolean(parent.preserve_day_folders);
       }
 
@@ -3187,7 +3279,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       () => openEventDialog("no_event")
     );
 
-    useTimeRange.addEventListener("change",()=>{setParentTimeFieldsVisible(useTimeRange.checked);scheduleDialogPreview();});
+    // Normale Ereignisse besitzen immer exakte Datum-/Uhrzeitgrenzen.
     addCreateSubevent?.addEventListener("click",()=>addCreateSubeventCard());
 
     existingParentEvent?.addEventListener("change", applyExistingParentChoice);

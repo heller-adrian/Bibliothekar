@@ -765,7 +765,8 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 }
 .bk-menu[hidden],
 .bk-task-panel[hidden] { display: none !important; }
-.bk-task-panel.bk-task-panel-portaled {
+.bk-task-panel.bk-task-panel-portaled,
+.bk-menu.bk-menu-portaled {
   position: fixed !important;
   z-index: 10000 !important;
   margin: 0 !important;
@@ -1592,6 +1593,28 @@ BIBLIOTHEKAR_JS = r"""
   const taskPanel = document.getElementById("bk-task-panel");
   const taskPanelHome = taskPanel?.parentNode || null;
   const taskPanelHomeNext = taskPanel?.nextSibling || null;
+  const menuHome = menu?.parentNode || null;
+  const menuHomeNext = menu?.nextSibling || null;
+
+  function restoreMenu() {
+    if (!menu) return;
+    menu.setAttribute("hidden", "");
+    menu.classList.remove("bk-menu-portaled");
+    menu.style.removeProperty("top");
+    menu.style.removeProperty("right");
+    menu.style.removeProperty("left");
+    if (menuHome) menuHome.insertBefore(menu, menuHomeNext);
+  }
+
+  function openMenu() {
+    if (!menu || !menuButton) return;
+    const rect=menuButton.getBoundingClientRect();
+    document.body.appendChild(menu);
+    menu.classList.add("bk-menu-portaled");
+    menu.style.top=Math.round(rect.bottom + 8)+"px";
+    menu.style.right=Math.max(10,Math.round(window.innerWidth - rect.right))+"px";
+    menu.removeAttribute("hidden");
+  }
 
   function restoreTaskPanel() {
     if (!taskPanel) return;
@@ -1614,7 +1637,7 @@ BIBLIOTHEKAR_JS = r"""
   }
 
   function closePopovers(except) {
-    if (except !== menu) menu?.setAttribute("hidden", "");
+    if (except !== menu) restoreMenu();
     if (except !== taskPanel) restoreTaskPanel();
   }
 
@@ -1622,7 +1645,7 @@ BIBLIOTHEKAR_JS = r"""
     event.stopPropagation();
     const willOpen = menu?.hasAttribute("hidden");
     closePopovers(willOpen ? menu : null);
-    if (willOpen) menu?.removeAttribute("hidden"); else menu?.setAttribute("hidden", "");
+    if (willOpen) openMenu(); else restoreMenu();
   });
 
   tasksButton?.addEventListener("click", (event) => {
@@ -1633,7 +1656,7 @@ BIBLIOTHEKAR_JS = r"""
   });
 
   document.addEventListener("click", (event) => {
-    if (!event.target.closest(".bk-shell-actions") && !event.target.closest(".bk-task-panel")) closePopovers(null);
+    if (!event.target.closest(".bk-shell-actions") && !event.target.closest(".bk-task-panel") && !event.target.closest(".bk-menu")) closePopovers(null);
   });
 
   function openDialog(id) {

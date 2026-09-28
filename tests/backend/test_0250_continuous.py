@@ -67,17 +67,20 @@ def test_disjoint_normal_selection_rejected(tmp_path):
         create(db,payload('2026-07-23T00:00','2026-07-23T23:59',selected_intervals=cards))
 
 
-def test_extension_updates_parent_no_child(tmp_path):
+def test_extension_updates_parent_on_either_adjacent_side(tmp_path):
     db=tmp_path/'db';event,cards=split_day(db)
-    # 0.26.8: the quick extension path is deliberately end-only.
     create(db,payload(cards[1]['start_datetime'],cards[1]['end_datetime'],existing_parent_event_id=event['id'],selected_intervals=[cards[1]]))
     context=get_event_edit_context(db,'j',event['id'])
     assert context['event']['start_datetime']=='2026-07-23T13:00:00'
     assert context['event']['end_datetime']=='2026-07-23T23:59:59'
     assert context['child_events']==[]
     assert len(context['assigned_family_ids'])==2
-    with pytest.raises(ValueError,match='unmittelbar nach'):
-        create(db,payload(cards[0]['start_datetime'],cards[0]['end_datetime'],existing_parent_event_id=event['id'],selected_intervals=[cards[0]]))
+
+    create(db,payload(cards[0]['start_datetime'],cards[0]['end_datetime'],existing_parent_event_id=event['id'],selected_intervals=[cards[0]]))
+    context=get_event_edit_context(db,'j',event['id'])
+    assert context['event']['start_datetime']=='2026-07-23T00:00:00'
+    assert context['event']['end_datetime']=='2026-07-23T23:59:59'
+    assert len(context['assigned_family_ids'])==3
 
 
 def test_nonadjacent_extension_rejected(tmp_path):
@@ -85,6 +88,54 @@ def test_nonadjacent_extension_rejected(tmp_path):
     event=create(db,payload())['parent_event']
     with pytest.raises(ValueError,match='unmittelbar'):
         create(db,payload('2026-07-24T00:00','2026-07-24T23:59',existing_parent_event_id=event['id']))
+
+
+def test_extension_appends_new_subevent_without_rewriting_existing_child(tmp_path):
+    db=tmp_path/'db'
+    setup(db,['2026-07-23T14:00:00','2026-07-23T18:00:00'])
+    original=create(db,payload(
+        '2026-07-23T13:00','2026-07-23T15:00',
+        subevents=[{'name':'Teil A','start_datetime':'2026-07-23T13:30','end_datetime':'2026-07-23T14:30'}]
+    ))['parent_event']
+    before=get_event_edit_context(db,'j',original['id'])
+    child_before=before['child_events'][0]
+
+    cards=list_job_planning_overview(db,'j')['available_day_groups']
+    extension=next(card for card in cards if card['start_datetime']=='2026-07-23T15:01:00')
+    create(db,payload(
+        extension['start_datetime'],extension['end_datetime'],
+        existing_parent_event_id=original['id'],
+        selected_intervals=[extension],
+        subevents=[{'name':'Teil B','start_datetime':'2026-07-23T17:00','end_datetime':'2026-07-23T19:00'}],
+    ))
+
+    after=get_event_edit_context(db,'j',original['id'])
+    assert [child['name'] for child in after['child_events']]==['Teil A','Teil B']
+    same=next(child for child in after['child_events'] if child['name']=='Teil A')
+    assert same['id']==child_before['id']
+    assert same['revision']==child_before['revision']
+    with database_connection(db) as c:
+        target=c.execute(
+            """SELECT ea.event_id FROM event_assignments ea
+               JOIN file_families ff ON ff.id=ea.family_id
+               WHERE ff.selected_capture_time='2026-07-23T18:00:00'"""
+        ).fetchone()[0]
+        assert target==next(child['id'] for child in after['child_events'] if child['name']=='Teil B')
+
+
+def test_extension_rejects_new_subevent_inside_existing_period(tmp_path):
+    db=tmp_path/'db';event,cards=split_day(db)
+    extension=cards[1]
+    p=payload(
+        '2026-07-23T13:00','2026-07-23T23:59',
+        existing_parent_event_id=event['id'],
+        selected_intervals=[extension],
+        selected_family_ids=extension['family_ids'],
+        subevents=[{'name':'Altbereich','start_datetime':'2026-07-23T14:00','end_datetime':'2026-07-23T14:30'}],
+    )
+    preview=build_event_preview(p,list_job_available_families(db,'j'))
+    with pytest.raises(ValueError,match='Unterereignisse müssen innerhalb'):
+        create_planned_event(db,'j',preview)
 
 
 @pytest.mark.parametrize('cascade',[False,True])

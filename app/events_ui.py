@@ -259,11 +259,6 @@ EVENTS_HTML = r"""<!doctype html>
       gap:8px;
       padding:12px 14px 14px;
     }
-    .change-arrow {
-      text-align:center;
-      color:var(--muted);
-      font-size:1.15rem;
-    }
     .change-footer {
       display:flex;
       justify-content:flex-end;
@@ -3596,7 +3591,7 @@ EVENTS_HTML = r"""<!doctype html>
           for (const operation of assistant.operations || []) {
             html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
             if (operation.source) html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
-            if (operation.target) html += `<div class="change-arrow">↓</div><div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+            if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
             if ((operation.missing_directories || []).length) {
               html += `<details><summary>Diese Ordner werden dabei neu ergänzt</summary><div style="margin-top:7px">${operation.missing_directories.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
             }

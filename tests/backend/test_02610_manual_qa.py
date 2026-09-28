@@ -13,7 +13,7 @@ from app.workspace_reconcile import (
 )
 from app.events_ui import EVENTS_HTML
 from app.workspace_ui import WORKSPACE_HTML
-from app.ui_shell import BIBLIOTHEKAR_CSS
+from app.ui_shell import BIBLIOTHEKAR_CSS, BIBLIOTHEKAR_JS
 from tests.backend.test_0260_free_stock import _seed_cross_job_shift
 
 
@@ -152,3 +152,14 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert 'html[data-bk-theme="light"] body.bibliothekar-redesign .selection-bar.is-header-docked' in WORKSPACE_HTML
     assert "background:transparent !important;" in WORKSPACE_HTML
     assert ".bk-workspace-subnav.is-stuck {" in BIBLIOTHEKAR_CSS
+    assert "Uhrzeiten berücksichtigen" not in WORKSPACE_HTML
+    assert 'id="event-start-time-label"><span>Startzeit</span>' in WORKSPACE_HTML
+    assert 'id="event-end-time-label"><span>Endzeit</span>' in WORKSPACE_HTML
+    assert 'id="existing-parent-state"' in WORKSPACE_HTML
+    assert "Bestehender Stand · schreibgeschützt" in WORKSPACE_HTML
+    assert "Neue Unterereignisse im Erweiterungsbereich" in WORKSPACE_HTML
+    assert "extensionSelectionForParent" in WORKSPACE_HTML
+    assert 'preserveDayFoldersRow.hidden=true' in WORKSPACE_HTML
+    assert ".bk-menu.bk-menu-portaled" in BIBLIOTHEKAR_CSS
+    assert "function openMenu()" in BIBLIOTHEKAR_JS
+    assert 'document.body.appendChild(menu);' in BIBLIOTHEKAR_JS

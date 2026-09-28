@@ -2132,11 +2132,11 @@ def list_archive_change_reviews(
     ]
 
 
-def _validated_forward_extension(
+def _validated_adjacent_extension(
     existing_range: tuple[str, str],
     selected_intervals: list[dict[str, Any]],
-) -> tuple[str, str]:
-    """Return an end-only extension; backwards or gapped extensions are rejected."""
+) -> dict[str, str]:
+    """Validate one contiguous extension directly before or after an event."""
     from datetime import datetime, timedelta
     from app.released_ranges import merge_intervals
 
@@ -2154,21 +2154,41 @@ def _validated_forward_extension(
             "Die Erweiterung muss aus einem zusammenhängenden freien Zeitraum bestehen."
         )
 
-    current_start, current_end = existing_range
+    current_start, current_end = (str(existing_range[0])[:19], str(existing_range[1])[:19])
     extension_start, extension_end = merged[0]
-    expected_start = (
-        datetime.fromisoformat(current_end)
-        + timedelta(seconds=1)
+    if extension_end < extension_start:
+        raise ValueError("Der Erweiterungszeitraum ist ungültig.")
+
+    expected_after_start = (
+        datetime.fromisoformat(current_end) + timedelta(seconds=1)
+    ).isoformat(timespec="seconds")
+    expected_before_end = (
+        datetime.fromisoformat(current_start) - timedelta(seconds=1)
     ).isoformat(timespec="seconds")
 
-    if extension_start != expected_start:
-        raise ValueError(
-            "Ein bestehendes Ereignis kann hier nur unmittelbar nach seinem bisherigen Ende erweitert werden."
-        )
-    if extension_end < extension_start:
-        raise ValueError("Der neue Endpunkt liegt vor dem Beginn der Erweiterung.")
-
-    return current_start, extension_end
+    if extension_start == expected_after_start:
+        return {
+            "direction": "after",
+            "current_start": current_start,
+            "current_end": current_end,
+            "extension_start": extension_start,
+            "extension_end": extension_end,
+            "new_start": current_start,
+            "new_end": extension_end,
+        }
+    if extension_end == expected_before_end:
+        return {
+            "direction": "before",
+            "current_start": current_start,
+            "current_end": current_end,
+            "extension_start": extension_start,
+            "extension_end": extension_end,
+            "new_start": extension_start,
+            "new_end": current_end,
+        }
+    raise ValueError(
+        "Ein bestehendes Ereignis kann nur durch unmittelbar angrenzende freie Zeit erweitert werden."
+    )
 
 
 def create_planned_event(
@@ -2229,13 +2249,20 @@ def create_planned_event(
             selected = preview.get('selected_intervals') or [{
                 'start_datetime': start_date + 'T' + str(preview.get('start_time') or '00:00') + ':00',
                 'end_datetime': end_date + 'T' + str(preview.get('end_time') or '23:59') + ':59'}]
-            start, end = _validated_forward_extension(current, selected)
+            extension = _validated_adjacent_extension(current, selected)
+            start, end = extension['new_start'], extension['new_end']
+            from app.subevents import normalize_subevents
+            added_subevents = normalize_subevents(
+                preview.get('subevents') or [],
+                extension['extension_start'],
+                extension['extension_end'],
+            )
             expanded = build_event_preview({
                 'event_kind': 'event', 'event_name': existing['name'],
                 'start_date': start[:10], 'end_date': end[:10],
                 'start_time': start[11:16], 'end_time': end[11:16], 'uses_time_range': True,
                 'preserve_day_folders': bool(existing['preserve_day_folders']),
-                'subevents': context['child_events'],
+                'subevents': [*(context['child_events'] or []), *added_subevents],
             }, [f for f in context['families'] if not f['assigned_elsewhere']])
             changed = update_event_definition(database_path, job_id, existing_parent_event_id, expanded,
                 event_name=existing['name'], notes=existing['notes'] or '', expected_revision=existing['revision'])
@@ -2372,6 +2399,7 @@ def create_planned_event(
                 )
 
         existing_parent_row = None
+        extension_details = None
         if existing_parent_event_id:
             existing_parent_row = connection.execute(
                 """SELECT * FROM events WHERE id=? AND job_id=? AND parent_event_id IS NULL""",
@@ -2386,7 +2414,8 @@ def create_planned_event(
             from app.event_timeline import assert_editable_normal
             existing_range = assert_editable_normal(connection, existing_parent_event_id)
             selected = preview.get('selected_intervals') or [{'start_datetime': assignment_start, 'end_datetime': assignment_end}]
-            parent_start, parent_end = _validated_forward_extension(existing_range, selected)
+            extension_details = _validated_adjacent_extension(existing_range, selected)
+            parent_start, parent_end = extension_details['new_start'], extension_details['new_end']
 
         family_rows = connection.execute(
             f"""
@@ -2744,13 +2773,28 @@ def create_planned_event(
             ],
         )
 
-        if preview.get('subevents') and not existing_parent_event_id:
-            from app.subevents import normalize_subevents,store_subevents,assignment_target
-            organizational=normalize_subevents(preview['subevents'],parent_start,parent_end)
-            children=store_subevents(connection,parent_event_id,organizational,now)
-            for row in family_rows:
-                connection.execute('UPDATE event_assignments SET event_id=? WHERE family_id=? AND event_id=?',
-                    (assignment_target(parent_event_id,children,str(row['selected_capture_time'])[:19]),row['id'],assignment_event_id))
+        if preview.get('subevents'):
+            from app.subevents import normalize_subevents,store_subevents,assignment_target,append_extension_subevents
+            if existing_parent_event_id:
+                if extension_details is None:
+                    raise ValueError("Der Erweiterungsbereich konnte nicht bestimmt werden.")
+                children=append_extension_subevents(
+                    connection,
+                    parent_event_id,
+                    preview['subevents'],
+                    extension_details['extension_start'],
+                    extension_details['extension_end'],
+                    now,
+                )
+                for row in family_rows:
+                    connection.execute('UPDATE event_assignments SET event_id=? WHERE family_id=? AND event_id=?',
+                        (assignment_target(parent_event_id,children,str(row['selected_capture_time'])[:19]),row['id'],assignment_event_id))
+            else:
+                organizational=normalize_subevents(preview['subevents'],parent_start,parent_end)
+                children=store_subevents(connection,parent_event_id,organizational,now)
+                for row in family_rows:
+                    connection.execute('UPDATE event_assignments SET event_id=? WHERE family_id=? AND event_id=?',
+                        (assignment_target(parent_event_id,children,str(row['selected_capture_time'])[:19]),row['id'],assignment_event_id))
 
         connection.execute(
             """

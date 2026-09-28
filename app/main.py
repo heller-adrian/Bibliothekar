@@ -4210,7 +4210,6 @@ def api_create_event(
                 ).fetchone()
 
         if archived_target is not None:
-            from datetime import datetime, timedelta
             context = get_event_edit_context(
                 DATABASE_FILE, job_id, existing_parent_event_id
             )
@@ -4224,44 +4223,45 @@ def api_create_event(
                 raise ValueError(
                     "Für die Archiv-Erweiterung fehlt der ausgewählte freie Zeitraum."
                 )
-            selected_intervals.sort(key=lambda item: str(item["start_datetime"]))
-            extension_start = str(selected_intervals[0]["start_datetime"])[:19]
-            extension_end = max(
-                str(item["end_datetime"])[:19] for item in selected_intervals
+            from app.database import _validated_adjacent_extension
+            extension = _validated_adjacent_extension(
+                (current_start, current_end),
+                selected_intervals,
             )
-            expected_start = (
-                datetime.fromisoformat(current_end) + timedelta(seconds=1)
-            ).isoformat(timespec="seconds")
-            if extension_start != expected_start:
-                raise ValueError(
-                    "Ein archiviertes Ereignis kann hier nur unmittelbar nach seinem bisherigen Ende erweitert werden."
-                )
-            if extension_end < extension_start:
-                raise ValueError("Der neue Endpunkt liegt vor dem Beginn der Erweiterung.")
+            extension_start = extension["extension_start"]
+            extension_end = extension["extension_end"]
 
             editable_families = [
                 family
                 for family in (context.get("families") or [])
                 if not family.get("assigned_elsewhere") or family.get("assigned_here")
             ]
-            uses_time = bool(archived_target["uses_time_range"])
+            from app.subevents import normalize_subevents
+            added_subevents = normalize_subevents(
+                payload.get("subevents") or [],
+                extension_start,
+                extension_end,
+            )
             combined_payload = {
                 "event_kind": "event",
                 "event_name": str(archived_target["name"]),
-                "start_date": current_start[:10],
-                "end_date": extension_end[:10],
-                "start_time": current_start[11:16] if uses_time else "00:00",
-                "end_time": extension_end[11:16] if uses_time else "23:59",
-                "uses_time_range": uses_time,
+                "start_date": extension["new_start"][:10],
+                "end_date": extension["new_end"][:10],
+                "start_time": extension["new_start"][11:16],
+                "end_time": extension["new_end"][11:16],
+                "uses_time_range": True,
                 "preserve_day_folders": bool(archived_target["preserve_day_folders"]),
                 "subevents": [
-                    {
-                        "id": child.get("id"),
-                        "name": child.get("name"),
-                        "start_datetime": child.get("start_datetime"),
-                        "end_datetime": child.get("end_datetime"),
-                    }
-                    for child in (context.get("child_events") or [])
+                    *[
+                        {
+                            "id": child.get("id"),
+                            "name": child.get("name"),
+                            "start_datetime": child.get("start_datetime"),
+                            "end_datetime": child.get("end_datetime"),
+                        }
+                        for child in (context.get("child_events") or [])
+                    ],
+                    *added_subevents,
                 ],
             }
             preview = build_event_preview(combined_payload, editable_families)

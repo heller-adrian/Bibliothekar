@@ -77,6 +77,8 @@ def test_0271_archive_change_ui_is_compact_three_step_assistant():
     assert 'id="change-work-progress"' in html
     assert "SSD-Originale und Hilfslinks sicher freigeben" in html
     assert "change_step" in html
+    assert "change-arrow" not in html
+    assert ">↓<" not in html
 
 
 def test_0270_applied_reload_keeps_mandatory_transaction():
