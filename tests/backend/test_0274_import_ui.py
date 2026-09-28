@@ -16,6 +16,8 @@ def test_0274_source_modes_are_exclusive_and_sd_is_its_own_pane():
     assert 'id="sd-source-detail" data-source-pane="sd"' in main
     assert 'pane.hidden = pane.dataset.sourcePane !== mode' in shell
     assert 'document.body.dataset.bkSourceMode = mode' in shell
+    assert 'body[data-bk-area="import"] [data-source-pane][hidden]' in shell
+    assert 'display: none !important' in shell
 
 
 def test_0274_external_drive_supports_full_or_folder_import():
@@ -100,3 +102,11 @@ def test_0274_removable_drive_root_and_subfolder_use_same_safe_import_endpoint(
     assert folder["accepted"] is True
     assert folder["job"]["source_path"] == str(selected.resolve())
     assert folder["job"]["source_device_id"] == "DRIVE-1"
+
+
+
+def test_0274_sd_controls_are_compact_without_changing_import_logic():
+    shell = (ROOT / "app" / "ui_shell.py").read_text()
+    assert 'min-height: 56px !important' in shell
+    assert 'padding: 8px 12px !important' in shell
+    assert 'padding: 7px 11px !important' in shell
