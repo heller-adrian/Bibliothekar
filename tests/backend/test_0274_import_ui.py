@@ -1,5 +1,9 @@
 """0.27.4: Importquellen-UI, Laufwerksimport und Archiv-UI."""
 from pathlib import Path
+import json
+
+from app import main as app_main
+from app.database import initialize_database
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,3 +55,48 @@ def test_0274_reversal_stepper_active_state_is_visible_while_disabled():
     assert 'opacity:1' in events
     assert '.change-step.active .change-step-number' in events
     assert 'border:2px solid var(--accent) !important' in events
+
+
+
+def test_0274_removable_drive_root_and_subfolder_use_same_safe_import_endpoint(
+    tmp_path: Path,
+    monkeypatch,
+):
+    db = tmp_path / "kamera.sqlite3"
+    initialize_database(db)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    removable = tmp_path / "removable"
+    drive = removable / "DRIVE-1"
+    selected = drive / "Auswahl"
+    selected.mkdir(parents=True)
+    (drive / "root.jpg").write_bytes(b"root-camera-file")
+    (selected / "nested.jpg").write_bytes(b"nested-camera-file")
+
+    monkeypatch.setattr(app_main, "DATABASE_FILE", db)
+    monkeypatch.setattr(app_main, "WORKSPACE_PATH", workspace)
+    monkeypatch.setattr(app_main, "REMOVABLE_ROOT", removable)
+
+    listing = app_main.api_source_folders("removable", "DRIVE-1")
+    assert listing["relative_path"] == "DRIVE-1"
+    assert any(item["relative_path"] == "DRIVE-1/Auswahl" for item in listing["directories"])
+
+    whole_response = app_main.api_run_folder_import({
+        "source_root_key": "removable",
+        "source_relative_path": "DRIVE-1",
+        "display_name": "Testlaufwerk",
+    })
+    whole = json.loads(whole_response.body)
+    assert whole["accepted"] is True
+    assert whole["job"]["source_path"] == str(drive.resolve())
+    assert whole["job"]["source_device_id"] == "DRIVE-1"
+
+    folder_response = app_main.api_run_folder_import({
+        "source_root_key": "removable",
+        "source_relative_path": "DRIVE-1/Auswahl",
+        "display_name": "Testlaufwerk · Auswahl",
+    })
+    folder = json.loads(folder_response.body)
+    assert folder["accepted"] is True
+    assert folder["job"]["source_path"] == str(selected.resolve())
+    assert folder["job"]["source_device_id"] == "DRIVE-1"
