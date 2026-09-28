@@ -297,24 +297,53 @@ def required_target_directories_for_request(
     database_path: Path,
     cr_id: str,
 ) -> list[str]:
-    """Directories whose existence is part of this concrete change.
+    """Directories whose existence is part of this concrete event change.
 
-    Only actual move targets are structural obligations. A metadata-only edit
-    therefore requires no new branch folders, while a move into a content
-    container requires its canonical Alle/Sortiert/Export triplet.
+    Reassignment destinations outside the edited event are separate workflows
+    and must not be validated against the source event's SOLL structure.
     """
-    _, preview, plan = _request_preview_and_plan(database_path, cr_id)
-    touched = _desired_directory_plan(preview, plan, moves_only=True)
-    has_moves = any(
-        str(item.get("action") or "") == "move"
-        and str(item.get("new_path") or "").strip()
-        for item in [
-            *(plan.get("families_with_plans") or []),
-            *(plan.get("assets_with_plans") or []),
-        ]
-    )
-    if not has_moves:
+    cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
+    if bool(cr.get("delete_event") or 0):
         return []
+    try:
+        root = _target_root(preview)
+    except ArchiveStagingError:
+        # Legacy/minimal requests without a complete structural target retain
+        # their historical file-only verification semantics.
+        return []
+
+    touched: set[PurePosixPath] = set()
+    items = [
+        *(plan.get("families_with_plans") or []),
+        *(plan.get("assets_with_plans") or []),
+    ]
+    for item in items:
+        if str(item.get("action") or "") != "move":
+            continue
+        value = str(item.get("new_path") or "").strip()
+        if not value:
+            continue
+        try:
+            rel = _safe_relative(value)
+        except ArchiveStagingError:
+            continue
+        if len(rel.parts) < 2 or tuple(rel.parts[:2]) != tuple(root.parts):
+            # E.g. a family released from the edited event and reassigned into
+            # a different archived event.
+            continue
+        touched.add(root)
+        branch_index = next(
+            (index for index, part in enumerate(rel.parts) if part in BRANCHES),
+            None,
+        )
+        if branch_index is None:
+            touched.add(rel.parent)
+            continue
+        container = PurePosixPath(*rel.parts[:branch_index])
+        touched.add(container)
+        for branch in BRANCHES:
+            touched.add(container / branch)
+
     return sorted(path.as_posix() for path in touched)
 
 
