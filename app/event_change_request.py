@@ -360,8 +360,14 @@ def _compute_event_plan(
         })
 
     if inventory is not None:
+        from app.event_document import EVENT_DOCUMENT_FILENAME
         for item in inventory["files"]:
             if item.get("known_file_id") is not None:
+                continue
+            if str(item.get("filename") or "") == EVENT_DOCUMENT_FILENAME:
+                # event.json wird als kanonische Ereignisbeschreibung separat
+                # aus dem neuen SOLL-Zustand erzeugt und darf nicht gleichzeitig
+                # als normales Bestands-Asset geplant werden.
                 continue
 
             old_path = str(item["relative_path"])

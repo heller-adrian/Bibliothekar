@@ -317,24 +317,47 @@ def build_archive_change_assistant(
             ) if covered_rows else True
             copy_state = "done" if directory_done and file_done else "pending"
 
+        helper_sources = [
+            f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{value}"
+            for value in copy_roots
+        ]
+        helper_items = list(names)
+        includes_event_document = False
+        if event_document and copy_roots != [target_root]:
+            document_rel = str(event_document.get("target_relative_path") or "")
+            if document_rel:
+                helper_sources.append(
+                    f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{document_rel}"
+                )
+                helper_items.append("event.json")
+                includes_event_document = True
+                if scan_live:
+                    target_document = _safe_archive_path(archive_root, document_rel)
+                    document_done = (
+                        target_document.is_file()
+                        and not target_document.is_symlink()
+                        and int(target_document.stat().st_size)
+                            == int(event_document.get("size_bytes") or 0)
+                        and _sha256_file(target_document)
+                            == str(event_document.get("sha256") or "")
+                    )
+                    if not document_done:
+                        copy_state = "pending"
+
         operations.append({
             "kind": "copy_helper_folders",
             "title": (
-                f"Ordner {names[0]} ins Archiv übernehmen"
-                if len(names) == 1
-                else f"{len(names)} vorbereitete Ordner ins Archiv übernehmen"
+                f"Vorbereitete Struktur ins Archiv übernehmen"
+                if len(helper_items) == 1
+                else f"{len(helper_items)} vorbereitete Elemente ins Archiv übernehmen"
             ),
-            "sources": [
-                f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{value}"
-                for value in copy_roots
-            ],
-            "items": names,
+            "sources": helper_sources,
+            "items": helper_items,
             "target": f"Kamerabibliothek/{parent}",
             "detail": (
-                f"Den vorbereiteten Ordner „{names[0]}“ vollständig übernehmen."
-                if len(names) == 1
-                else "Diese vorbereiteten Ordner gemeinsam vollständig übernehmen: "
-                + ", ".join(names) + "."
+                "Die vorbereiteten Ordner"
+                + (" und die neue event.json" if includes_event_document else "")
+                + " gemeinsam in einem Arbeitsschritt vollständig übernehmen."
             ),
             "state": copy_state,
         })
@@ -380,7 +403,10 @@ def build_archive_change_assistant(
         })
 
     # The projected event.json is copied with the whole event root on a rename.
-    document_covered_by_root_copy = bool(copy_roots == [target_root])
+    document_covered_by_root_copy = bool(
+        copy_roots == [target_root]
+        or (copy_roots and event_document)
+    )
     if event_document and not document_covered_by_root_copy:
         target_rel = str(event_document.get("target_relative_path") or "")
         target_abs = _safe_archive_path(archive_root, target_rel)

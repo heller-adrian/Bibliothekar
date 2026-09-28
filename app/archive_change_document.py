@@ -137,6 +137,14 @@ def build_projected_archive_event_document(
         ]
 
     no_event_segments = list(_loads(cr.get("no_event_segments"), []))
+    if str(cr.get("event_kind") or "event") == "no_event":
+        from app.event_timeline import normalize_no_event_segments
+        try:
+            no_event_segments = normalize_no_event_segments(no_event_segments)
+        except Exception as exc:
+            raise ArchiveChangeDocumentError(
+                "Die vorbereiteten „Ohne Ereignis“-Zeitsegmente sind ungültig."
+            ) from exc
     children = _normalise_children(list(_loads(cr.get("child_segments_json"), [])))
     start_datetime, end_datetime = _event_bounds(cr, no_event_segments)
     preserve_day_folders = bool(cr.get("preserve_day_folders"))

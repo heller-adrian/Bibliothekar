@@ -319,7 +319,11 @@ def verify_event_change(
         })
 
     event_document_result = None
-    event_document_spec = required_event_document_for_request(database_path, cr_id)
+    event_document_spec = (
+        required_event_document_for_request(database_path, cr_id)
+        if workspace_path is not None
+        else None
+    )
     if event_document_spec is not None:
         relative_document = str(event_document_spec["target_relative_path"])
         target_document = _safe_archive_path(root, relative_document)
