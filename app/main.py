@@ -4195,17 +4195,14 @@ def api_event_structure(job_id: str, event_id: str):
                LIMIT 1""",
             (event_id,),
         ).fetchone()
+        from app.event_structure import assigned_day_keys_by_event
+        assignment_days = assigned_day_keys_by_event(c, event_id)
 
     assigned_families = [
         family
         for family in context["families"]
         if family.get("assigned_here")
     ]
-    days = sorted({
-        str(family["selected_capture_time"])[:10]
-        for family in assigned_families
-        if family.get("selected_capture_time")
-    })
 
     if cr:
         import json
@@ -4220,11 +4217,18 @@ def api_event_structure(job_id: str, event_id: str):
             bool(cr["preserve_day_folders"]),
         )
     else:
+        structure_children = [
+            {
+                **child,
+                "day_keys": assignment_days.get(str(child.get("id") or ""), []),
+            }
+            for child in context.get("child_events", [])
+        ]
         lines = render_structure(
             str(event["start_datetime"])[:4],
             event["folder_name"],
-            days,
-            context["child_events"],
+            assignment_days.get(str(event_id), []),
+            structure_children,
             bool(event["preserve_day_folders"]),
         )
 

@@ -7,6 +7,42 @@ class EventPreviewError(ValueError):
     pass
 
 
+def assigned_day_keys_by_event(connection: Any, event_id: str) -> dict[str, list[str]]:
+    """Return actual capture days per physical event branch.
+
+    Parent and child assignments are deliberately kept separate.  This is the
+    read-only counterpart of the sort planner's branch_days map and prevents
+    inspectors from copying every parent day into every subevent.
+    """
+    rows = connection.execute(
+        """
+        SELECT assigned.id AS assigned_event_id,
+               COALESCE(ff.selected_capture_time, direct_ff.selected_capture_time)
+                   AS selected_capture_time
+        FROM event_assignments AS ea
+        JOIN events AS assigned ON assigned.id = ea.event_id
+        LEFT JOIN file_families AS ff ON ff.id = ea.family_id
+        LEFT JOIN files AS direct_file ON direct_file.id = ea.file_id
+        LEFT JOIN file_families AS direct_ff ON direct_ff.id = direct_file.family_id
+        WHERE COALESCE(assigned.parent_event_id, assigned.id) = ?
+        """,
+        (event_id,),
+    ).fetchall()
+
+    days: dict[str, set[str]] = {}
+    for row in rows:
+        capture = str(row["selected_capture_time"] or "")
+        day_key = capture[:10]
+        if len(day_key) != 10:
+            continue
+        days.setdefault(str(row["assigned_event_id"]), set()).add(day_key)
+
+    return {
+        assigned_event_id: sorted(day_keys)
+        for assigned_event_id, day_keys in days.items()
+    }
+
+
 def _clean_name(
     value: Any,
     field_name: str,
