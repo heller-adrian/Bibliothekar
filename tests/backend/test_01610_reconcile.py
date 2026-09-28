@@ -105,6 +105,10 @@ def test_archived_removed_family_can_become_new_archived_event_with_empty_prep_s
         old=archive/str(r['old_path']); new=archive/str(r['new_path'] or r['old_path'])
         if str(r['action'])=='move' and old!=new:
             new.parent.mkdir(parents=True,exist_ok=True); old.replace(new)
+    # Der neu berührte Unterereignis-Container muss vollständig kanonisch sein.
+    main_child = archive/'2026/07-19 - Alt/18-00 - 18-30 - Alt'
+    (main_child/'Sortiert').mkdir(parents=True,exist_ok=True)
+    (main_child/'Export').mkdir(parents=True,exist_ok=True)
     confirm_event_change(db,crid)
     done=finish_event_change(db,crid,archive)
     assert done['created_reassignment_event_ids']
