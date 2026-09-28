@@ -153,31 +153,79 @@ def cancel_event_change(
             raise EventChangeApplyError(f"Status '{status}' erlaubt keinen Abbruch.")
 
     if status == "aenderbar_bestaetigt":
-        if archive_root is None or workspace_path is None:
+        if archive_root is None:
             raise EventChangeApplyError(
-                "Nach manuellen Änderungen benötigt der sichere Rückweg "
-                "Kamerabibliothek und SSD-Arbeitsbereich."
+                "Ein bestätigter Archivauftrag kann nur nach Prüfung des "
+                "ursprünglichen Archivzustands verworfen werden."
             )
-        from app.archive_reversal import (
-            begin_archive_reversal,
-            original_archive_state_intact,
-        )
-        if not original_archive_state_intact(
-            database_path, archive_root, workspace_path, cr_id
-        ):
-            reversal = begin_archive_reversal(
+
+        if workspace_path is None:
+            # Kompatibler Low-Level-Weg: Ohne SSD-Kontext ist nur der direkte
+            # Abbruch erlaubt, solange das Archiv nachweislich noch im IST
+            # steht. Sobald manuelle Änderungen erkennbar sind, bleibt der
+            # Vorgang blockiert, weil kein sicherer Rückbestand verfügbar ist.
+            from app.event_change_request import get_event_change_files
+            root = archive_root.expanduser().resolve(strict=False)
+            reviews = get_event_change_files(database_path, cr_id)
+            if not reviews:
+                raise EventChangeApplyError(
+                    "Der Änderungsauftrag enthält keine Dateien."
+                )
+            for review in reviews:
+                if str(review.get("source_root_kind") or "camera_archive") == "shared_workspace":
+                    raise EventChangeApplyError(
+                        "Nach manuellen Änderungen benötigt der sichere Rückweg "
+                        "den SSD-Arbeitsbereich."
+                    )
+                old_rel = str(review.get("old_path") or "")
+                new_rel = str(review.get("new_path") or "")
+                expected_size = int(review.get("expected_size_bytes") or 0)
+                expected_sha = str(review.get("expected_sha256") or "").strip()
+                if not expected_sha:
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Für mindestens eine Datei fehlt die "
+                        "gespeicherte SHA-256-Summe."
+                    )
+                old_path = _safe_archive_path(root, old_rel)
+                if (
+                    not old_path.is_file()
+                    or old_path.is_symlink()
+                    or (expected_size and int(old_path.stat().st_size) != expected_size)
+                    or _sha256_file(old_path) != expected_sha
+                ):
+                    raise EventChangeApplyError(
+                        "Abbruch gesperrt: Nach manuellen Änderungen ist der "
+                        "ursprüngliche Archivzustand nicht mehr vollständig vorhanden."
+                    )
+                action = str(review.get("action") or "")
+                if action in {"move", "merge"} and new_rel and new_rel != old_rel:
+                    new_path = _safe_archive_path(root, new_rel)
+                    if new_path.exists() or new_path.is_symlink():
+                        raise EventChangeApplyError(
+                            "Abbruch gesperrt: Am neuen Archivpfad wurden bereits "
+                            "manuelle Änderungen erkannt."
+                        )
+        else:
+            from app.archive_reversal import (
+                begin_archive_reversal,
+                original_archive_state_intact,
+            )
+            if not original_archive_state_intact(
                 database_path, archive_root, workspace_path, cr_id
-            )
-            return {
-                "status": "rueckaenderung_erforderlich",
-                "change_request_id": cr_id,
-                "reversal_required": True,
-                "reversal": reversal,
-                "message": (
-                    "Im Archiv wurden bereits manuelle Änderungen erkannt. "
-                    "Der ursprüngliche Zustand wird über einen Rückänderungsauftrag wiederhergestellt."
-                ),
-            }
+            ):
+                reversal = begin_archive_reversal(
+                    database_path, archive_root, workspace_path, cr_id
+                )
+                return {
+                    "status": "rueckaenderung_erforderlich",
+                    "change_request_id": cr_id,
+                    "reversal_required": True,
+                    "reversal": reversal,
+                    "message": (
+                        "Im Archiv wurden bereits manuelle Änderungen erkannt. "
+                        "Der ursprüngliche Zustand wird über einen Rückänderungsauftrag wiederhergestellt."
+                    ),
+                }
 
     if workspace_path is not None:
         from app.archive_staging import cleanup_archive_change_staging
@@ -198,6 +246,7 @@ def cancel_event_change(
             "cancelled_at=?,updated_at=? WHERE id=?",
             (now, now, cr_id),
         )
+        connection.commit()
     return {
         "status": "abgebrochen",
         "change_request_id": cr_id,
