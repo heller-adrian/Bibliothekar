@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Iterable, Mapping
 import json
 
@@ -101,6 +101,32 @@ def _source_range(connection, change_request: Mapping[str, Any], family_id: int,
     return str(root["start_datetime"]), str(root["end_datetime"])
 
 
+def _split_released_range_by_day(item: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Split one exact released interval at calendar-day boundaries."""
+    start = datetime.fromisoformat(str(item["start_datetime"]))
+    end = datetime.fromisoformat(str(item["end_datetime"]))
+    result: list[dict[str, str]] = []
+    cursor = start
+    while cursor.date() < end.date():
+        piece_end = cursor.replace(hour=23, minute=59, second=59, microsecond=0)
+        result.append({
+            "day_key": cursor.date().isoformat(),
+            "start_time": cursor.strftime("%H:%M"),
+            "end_time": "23:59",
+            "start_datetime": cursor.isoformat(timespec="seconds"),
+            "end_datetime": piece_end.isoformat(timespec="seconds"),
+        })
+        cursor = (piece_end + timedelta(seconds=1)).replace(microsecond=0)
+    result.append({
+        "day_key": cursor.date().isoformat(),
+        "start_time": cursor.strftime("%H:%M"),
+        "end_time": end.strftime("%H:%M"),
+        "start_datetime": cursor.isoformat(timespec="seconds"),
+        "end_datetime": end.isoformat(timespec="seconds"),
+    })
+    return result
+
+
 def build_archive_reassignment_segments(
     connection,
     change_request: Mapping[str, Any],
@@ -121,7 +147,11 @@ def build_archive_reassignment_segments(
         if not capture:
             raise ArchiveSegmentError(f"Familie {fid} besitzt keine belastbare Aufnahmezeit.")
         old_start, old_end = _source_range(connection, change_request, fid, capture)
-        released = free_ranges(old_start, old_end, occupied)
+        released = [
+            piece
+            for raw_range in free_ranges(old_start, old_end, occupied)
+            for piece in _split_released_range_by_day(raw_range)
+        ]
         matching = [r for r in released if r["start_datetime"] <= capture <= r["end_datetime"]]
         if len(matching) != 1:
             raise ArchiveSegmentError(
