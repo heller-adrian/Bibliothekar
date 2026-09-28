@@ -500,6 +500,19 @@ def propose_event_change(
 
     now = datetime.now(timezone.utc).isoformat()
 
+    # 0.27.2: Unterereignis-IDs werden bereits im Vorschlag stabilisiert.
+    # Dadurch kann die vorbereitete event.json exakt denselben SOLL-Zustand
+    # beschreiben, der beim Abschluss in SQLite geschrieben wird.
+    preview = dict(preview)
+    if preview.get("subevents"):
+        stable_subevents = []
+        for item in preview.get("subevents") or []:
+            segment = dict(item)
+            if not str(segment.get("id") or "").strip():
+                segment["id"] = "EVENT_" + uuid.uuid4().hex.upper()
+            stable_subevents.append(segment)
+        preview["subevents"] = stable_subevents
+
     # Fachliche Belegung zuerst prüfen. Eine belegte Familie aus einem anderen
     # archivierten Ereignis darf niemals zuvor als vermeintliche SSD-Zuführung
     # klassifiziert werden.

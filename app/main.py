@@ -144,7 +144,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.27.1"
+APP_VERSION = "0.27.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -7446,11 +7446,18 @@ def api_get_change_request(cr_id: str) -> JSONResponse:
 
 
 @app.get("/api/change-requests/{cr_id}/assistant")
-def api_get_change_request_assistant(cr_id: str) -> JSONResponse:
-    """Kompakter, variabler Arbeitsassistent für eine Archivänderung."""
+def api_get_change_request_assistant(
+    cr_id: str,
+    refresh: bool = False,
+) -> JSONResponse:
+    """Kompakter Archivassistent; refresh scannt den realen Bestand read-only."""
     try:
         return JSONResponse(content=build_archive_change_assistant(
-            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+            DATABASE_FILE,
+            ARCHIVE_ROOT,
+            WORKSPACE_PATH,
+            cr_id,
+            scan_live=bool(refresh),
         ))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))

@@ -257,7 +257,10 @@ def _obsolete_directories_from_plan(
         if container != current_root and container not in desired_directories:
             obsolete.add(container)
             continue
-        for branch in affected_branches.get(container, set()):
+        # Sobald ein alter Container strukturell berührt wird, müssen auch
+        # leere Schwesterzweige berücksichtigt werden. Sonst blieben z.B.
+        # Sortiert/Export nach dem Wechsel auf Tagesordner unsichtbar zurück.
+        for branch in BRANCHES:
             branch_path = container / branch
             if branch_path not in desired_directories:
                 obsolete.add(branch_path)
@@ -301,7 +304,13 @@ def describe_archive_change_staging(
     """Compute Später zuordnen as SOLL minus the real IST archive structure."""
     target_root = _target_root(preview)
     current_root = _current_event_root(database_path, event_id)
-    existing_suffixes = _existing_suffixes(archive_root, current_root)
+    # Für das SOLL zählt die tatsächlich bereits vorhandene Zielstruktur.
+    # Bei einer Umbenennung darf die alte Ereignisstruktur nicht so behandelt
+    # werden, als läge sie schon im neuen Zielordner.
+    try:
+        existing_suffixes = _existing_suffixes(archive_root, target_root)
+    except ArchiveStagingError:
+        existing_suffixes = set()
     desired = _desired_directory_plan(preview, plan)
     touched = _desired_directory_plan(preview, plan, moves_only=True)
 
@@ -401,7 +410,7 @@ def describe_archive_change_staging_for_request(
     cr_id: str,
 ) -> dict[str, Any]:
     cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
-    return describe_archive_change_staging(
+    description = describe_archive_change_staging(
         database_path,
         archive_root,
         str(cr["event_id"]),
@@ -409,6 +418,32 @@ def describe_archive_change_staging_for_request(
         plan,
         delete_event=bool(cr.get("delete_event") or 0),
     )
+    from app.archive_change_document import projected_archive_event_document_spec
+    event_document = projected_archive_event_document_spec(database_path, cr_id)
+    if event_document is not None:
+        description = {
+            **description,
+            "required": True,
+            "event_document": {
+                key: value
+                for key, value in event_document.items()
+                if key != "payload"
+            },
+        }
+    else:
+        description = {**description, "event_document": None}
+    return description
+
+
+def required_event_document_for_request(
+    database_path: Path,
+    cr_id: str,
+) -> dict[str, Any] | None:
+    from app.archive_change_document import projected_archive_event_document_spec
+    spec = projected_archive_event_document_spec(database_path, cr_id)
+    if spec is None:
+        return None
+    return {key: value for key, value in spec.items() if key != "payload"}
 
 
 def required_target_directories_for_request(
@@ -476,6 +511,16 @@ def prepare_archive_change_staging_for_request(
     description = describe_archive_change_staging(
         database_path, archive_root, str(cr["event_id"]), preview, plan
     )
+    from app.archive_change_document import projected_archive_event_document_spec
+    event_document = projected_archive_event_document_spec(database_path, cr_id)
+    description = {
+        **description,
+        "required": bool(description.get("required") or event_document is not None),
+        "event_document": (
+            {key: value for key, value in event_document.items() if key != "payload"}
+            if event_document is not None else None
+        ),
+    }
     if not description["required"]:
         return {
             **description,
@@ -563,11 +608,40 @@ def prepare_archive_change_staging_for_request(
                 raise ArchiveStagingError("Der SSD-Hardlink konnte nicht sicher bestätigt werden: " + str(staged))
             staging_by_file_id[file_id] = staged_rel.as_posix()
 
+        staged_event_document = ""
+        if event_document is not None:
+            document_rel = (
+                PurePosixPath(STAGING_DIRECTORY_NAME)
+                / PurePosixPath(str(event_document["target_relative_path"]))
+            )
+            document_path = work_root.joinpath(*document_rel.parts).resolve(strict=False)
+            if not _inside(document_path, staging_base):
+                raise ArchiveStagingError("Der vorbereitete event.json-Pfad ist unsicher.")
+            document_path.parent.mkdir(parents=True, exist_ok=True)
+            encoded = str(event_document["payload"]).encode("utf-8")
+            if document_path.exists() or document_path.is_symlink():
+                if (
+                    not document_path.is_file()
+                    or document_path.is_symlink()
+                    or int(document_path.stat().st_size) != int(event_document["size_bytes"])
+                    or _sha256_file(document_path) != str(event_document["sha256"])
+                ):
+                    raise ArchiveStagingError(
+                        "Die vorbereitete event.json ist bereits mit abweichendem Inhalt vorhanden."
+                    )
+            else:
+                tmp = document_path.with_name("event.json.tmp")
+                tmp.write_bytes(encoded)
+                os.replace(tmp, document_path)
+                staged_paths.append(document_path)
+            staged_event_document = document_rel.as_posix()
+
         return {
             **description,
             "prepared_structure_path": prepared_rel.as_posix(),
             "staged_file_count": len(staging_by_file_id),
             "staging_by_file_id": staging_by_file_id,
+            "staged_event_document": staged_event_document,
             "created_directories": [
                 path.relative_to(work_root).as_posix() for path in created_dirs
             ],
@@ -662,6 +736,31 @@ def cleanup_archive_change_staging(
                         "Leerer SSD-Quellordner konnte nicht vollständig aufgeräumt werden: "
                         + str(exc)
                     )
+
+    try:
+        from app.archive_change_document import projected_archive_event_document_spec
+        event_document = projected_archive_event_document_spec(database_path, cr_id)
+        if event_document is not None:
+            document_rel = (
+                PurePosixPath(STAGING_DIRECTORY_NAME)
+                / PurePosixPath(str(event_document["target_relative_path"]))
+            )
+            document_path = work_root.joinpath(*document_rel.parts).resolve(strict=False)
+            if document_path.exists():
+                if (
+                    document_path.is_file()
+                    and not document_path.is_symlink()
+                    and int(document_path.stat().st_size) == int(event_document["size_bytes"])
+                    and _sha256_file(document_path) == str(event_document["sha256"])
+                ):
+                    document_path.unlink()
+                else:
+                    warnings.append(
+                        "Vorbereitete event.json wurde wegen abweichendem Inhalt nicht entfernt: "
+                        + document_rel.as_posix()
+                    )
+    except Exception as exc:
+        warnings.append("Vorbereitete event.json konnte nicht aufgeräumt werden: " + str(exc))
 
     prepared = str(cr["prepared_structure_path"] or "") if cr is not None else ""
     if prepared:

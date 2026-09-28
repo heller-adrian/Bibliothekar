@@ -294,6 +294,7 @@ def verify_event_change(
     from app.archive_staging import (
         required_target_directories_for_request,
         required_obsolete_directories_for_request,
+        required_event_document_for_request,
     )
     required_directories = required_target_directories_for_request(
         database_path, cr_id
@@ -316,6 +317,30 @@ def verify_event_change(
             "status": "verified" if gone else "still_exists",
             "message": None if gone else "Alter, nicht mehr benötigter Ordner ist noch vorhanden.",
         })
+
+    event_document_result = None
+    event_document_spec = required_event_document_for_request(database_path, cr_id)
+    if event_document_spec is not None:
+        relative_document = str(event_document_spec["target_relative_path"])
+        target_document = _safe_archive_path(root, relative_document)
+        document_status = "missing"
+        document_message = "Die neue event.json fehlt am SOLL-Pfad."
+        if target_document.is_file() and not target_document.is_symlink():
+            actual_size = int(target_document.stat().st_size)
+            if actual_size != int(event_document_spec["size_bytes"]):
+                document_status = "size_mismatch"
+                document_message = "Die event.json besitzt eine abweichende Dateigröße."
+            elif _sha256_file(target_document) != str(event_document_spec["sha256"]):
+                document_status = "sha256_mismatch"
+                document_message = "Die event.json entspricht nicht dem vorbereiteten SOLL-Zustand."
+            else:
+                document_status = "verified"
+                document_message = None
+        event_document_result = {
+            "path": relative_document,
+            "status": document_status,
+            "message": document_message,
+        }
 
     with database_connection(database_path) as connection:
         for review in reviews:
@@ -432,6 +457,10 @@ def verify_event_change(
         and open_release == 0
         and missing_directory_count == 0
         and remaining_obsolete_directory_count == 0
+        and (
+            event_document_result is None
+            or event_document_result["status"] == "verified"
+        )
     )
     return {
         "change_request_id": cr_id,
@@ -448,6 +477,7 @@ def verify_event_change(
         "files": results,
         "directories": directory_results,
         "obsolete_directories": obsolete_directory_results,
+        "event_document": event_document_result,
     }
 
 
@@ -710,7 +740,7 @@ def finish_event_change(
             created_children=[]
             for segment in child_segments:
                 import uuid
-                child_id="EVENT_"+uuid.uuid4().hex.upper()
+                child_id=str(segment.get("id") or ("EVENT_"+uuid.uuid4().hex.upper()))
                 seg_start=segment.get('start_datetime') or f"{start_date}T{segment['start_time']}:00"; seg_end=segment.get('end_datetime') or f"{end_date}T{segment['end_time']}:59"
                 folder=str(segment.get("folder_name") or segment.get("folder") or f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}")
                 connection.execute(
