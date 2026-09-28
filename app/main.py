@@ -5091,13 +5091,96 @@ def api_no_event_targets(job_id: str, months: str = "") -> dict[str, Any]:
 
 @app.post("/api/jobs/{job_id}/no-event/assign-existing", tags=["Ereignisse"])
 def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
+    target_event_id = str(body.get("target_event_id") or "")
+    segments = list(body.get("segments") or [])
     try:
+        with database_connection(DATABASE_FILE) as connection:
+            target_row = connection.execute(
+                "SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",
+                (target_event_id,),
+            ).fetchone()
+
+        # 0.27.0: Eine archivierte Monatssammlung aus demselben Sicherungsauftrag
+        # wird nicht mehr ueber einen versteckten planned-Nachtrag fortgefuehrt.
+        # Stattdessen entsteht sofort derselbe manuelle, read-only Archivauftrag
+        # wie beim Bearbeiten unter Ereignisse. Neue freie Familien werden im
+        # SSD-Hilfsbereich vorbereitet und erst nach Archiv-SHA-Pruefung gebunden.
+        if (
+            target_row is not None
+            and str(target_row["status"] or "") == "archived"
+            and str(target_row["job_id"] or "") == str(job_id)
+        ):
+            from app.event_timeline import normalize_no_event_segments
+            context = get_event_edit_context(
+                DATABASE_FILE, str(target_row["job_id"]), target_event_id
+            )
+            existing_segments = [
+                {
+                    "day_key": str(item.get("day_key") or str(item.get("start_datetime") or "")[:10]),
+                    "start_time": str(item.get("start_time") or str(item.get("start_datetime") or "")[11:16]),
+                    "end_time": str(item.get("end_time") or str(item.get("end_datetime") or "")[11:16]),
+                }
+                for item in (context.get("time_segments") or [])
+            ]
+            new_segments = normalize_no_event_segments(segments)
+            combined_raw = [
+                *existing_segments,
+                *[
+                    {
+                        "day_key": item["day_key"],
+                        "start_time": item["start_time"],
+                        "end_time": item["end_time"],
+                    }
+                    for item in new_segments
+                ],
+            ]
+            combined_segments = normalize_no_event_segments(combined_raw)
+            editable_families = [
+                family
+                for family in (context.get("families") or [])
+                if not family.get("assigned_elsewhere") or family.get("assigned_here")
+            ]
+            preview = build_event_preview(
+                {
+                    "event_kind": "no_event",
+                    "event_name": "Ohne Ereignis",
+                    "no_event_segments": combined_segments,
+                    "preserve_day_folders": bool(target_row["preserve_day_folders"]),
+                    "uses_time_range": False,
+                    "start_date": combined_segments[0]["day_key"],
+                    "end_date": combined_segments[-1]["day_key"],
+                },
+                editable_families,
+            )
+            result = propose_event_change(
+                DATABASE_FILE,
+                str(target_row["job_id"]),
+                target_event_id,
+                preview,
+                event_name="Ohne Ereignis",
+                notes=str(target_row["notes"] or ""),
+                archive_root=ARCHIVE_ROOT,
+                workspace_path=WORKSPACE_PATH,
+            )
+            added_count = int(result.get("diff_summary", {}).get("added_count") or 0)
+            return {
+                "status": "archive_change_request_created",
+                "event_id": target_event_id,
+                "canonical_target_event_id": target_event_id,
+                "assigned_family_count": added_count,
+                "family_ids": [
+                    int(value) for value in preview.get("selected_family_ids", [])
+                ],
+                "cross_job": False,
+                "linkage_kind": "archive_change_request",
+                "change_request_id": result["change_request_id"],
+                "prepared_structure_path": result.get("prepared_structure_path") or "",
+            }
+
         return assign_free_families_to_existing_no_event(
-            DATABASE_FILE, job_id,
-            str(body.get("target_event_id") or ""),
-            list(body.get("segments") or []),
+            DATABASE_FILE, job_id, target_event_id, segments,
         )
-    except ValueError as exc:
+    except (ValueError, EventPreviewError, EventChangeRequestError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 @app.get("/api/tasks", tags=["Aufgaben"])
