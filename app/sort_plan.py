@@ -853,6 +853,30 @@ def build_event_sort_plan(
             normalized_file_rows.append(record)
         file_rows = normalized_file_rows
 
+        assigned_family_set = set(family_ids)
+        assigned_source_rows = [
+            row for row in file_rows
+            if row.get("family_id") is not None
+            and int(row["family_id"]) in assigned_family_set
+        ]
+        released_workspace_source = bool(assigned_family_set) and not allow_reapply and not direct_file_assignments
+        if released_workspace_source:
+            covered_family_ids = {
+                int(row["family_id"]) for row in assigned_source_rows
+                if row.get("family_id") is not None
+            }
+            released_workspace_source = (
+                covered_family_ids == assigned_family_set
+                and bool(assigned_source_rows)
+                and all(
+                    str(row.get("current_root_kind") or "") == "shared_workspace"
+                    and str(row.get("current_relative_path") or "").replace("\\", "/").startswith(
+                        "Freigewordene Archivdateien/"
+                    )
+                    for row in assigned_source_rows
+                )
+            )
+
     job = dict(job_row)
 
     try:
@@ -865,6 +889,13 @@ def build_event_sort_plan(
         # Arbeitsbereich; Quelle und Ziel sind derselbe Bereich.
         source_root = target_root
         source_root_field = "shared_workspace"
+    elif released_workspace_source:
+        # Freigewordene Archivaufnahmen wurden bereits unabhängig von ihrer
+        # ursprünglichen SD-Sicherung verifiziert in den gemeinsamen
+        # Arbeitsbereich zurückgeholt. Die alte Sicherung ist nur Herkunft,
+        # nicht mehr physische Quelle des nächsten Sortierlaufs.
+        source_root = target_root
+        source_root_field = "released_archive_workspace"
     else:
         source_root, source_root_field = _resolve_job_root(
             job,
@@ -1022,10 +1053,20 @@ def build_event_sort_plan(
                 })
     
     job_ready, job_blocker = job_sort_readiness(job)
-    if not job_ready:
+    if not job_ready and not released_workspace_source:
         blockers.append({
             "code": "job_not_verified",
             "message": job_blocker,
+        })
+    elif released_workspace_source:
+        warnings.append({
+            "code": "released_archive_workspace_source",
+            "message": (
+                "Die ausgewählten Familien stammen aus dem verifizierten "
+                "Rückkehrbestand „Freigewordene Archivdateien“. Die ursprüngliche "
+                "Sicherung bleibt nur als Herkunft erhalten und wird nicht erneut "
+                "als physische Sortierquelle benötigt."
+            ),
         })
 
     if linkage_kind == "planned_extension":
