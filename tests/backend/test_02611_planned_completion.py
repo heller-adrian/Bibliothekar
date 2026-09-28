@@ -72,7 +72,7 @@ def _preview(family_ids, *, end_time: str):
 
 
 def test_02611_version():
-    assert APP_VERSION == "0.27.0"
+    assert APP_VERSION == "0.27.1"
 
 
 def test_02611_planned_shrink_is_complete_and_can_expand_again(tmp_path: Path):

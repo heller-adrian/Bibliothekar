@@ -4,7 +4,7 @@ from app.events_ui import EVENTS_HTML
 
 
 def test_0203_version():
-    assert APP_VERSION == "0.27.0"
+    assert APP_VERSION == "0.27.1"
 
 
 def test_no_event_continuation_uses_only_day_segments_and_locks_existing():

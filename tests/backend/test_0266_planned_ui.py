@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0266_version():
-    assert APP_VERSION == "0.27.0"
+    assert APP_VERSION == "0.27.1"
 
 
 def test_0266_workspace_removes_duplicate_saved_events_and_noevent_range_helper():
