@@ -263,6 +263,20 @@ def verify_event_change(
     results: list[dict[str, Any]] = []
     ok_count = 0
     open_reassignments = 0
+    directory_results: list[dict[str, Any]] = []
+
+    from app.archive_staging import required_target_directories_for_request
+    required_directories = required_target_directories_for_request(
+        database_path, cr_id
+    )
+    for relative_dir in required_directories:
+        target_dir = _safe_archive_path(root, relative_dir)
+        exists = target_dir.is_dir()
+        directory_results.append({
+            "path": relative_dir,
+            "status": "verified" if exists else "missing",
+            "message": None if exists else "Erforderlicher SOLL-Ordner fehlt.",
+        })
 
     with database_connection(database_path) as connection:
         for review in reviews:
@@ -354,7 +368,15 @@ def verify_event_change(
             })
         connection.commit()
 
-    complete = ok_count == len(reviews) and open_reassignments == 0
+    verified_directory_count = sum(
+        1 for item in directory_results if item["status"] == "verified"
+    )
+    missing_directory_count = len(directory_results) - verified_directory_count
+    complete = (
+        ok_count == len(reviews)
+        and open_reassignments == 0
+        and missing_directory_count == 0
+    )
     return {
         "change_request_id": cr_id,
         "status": "verified" if complete else "incomplete",
@@ -362,7 +384,11 @@ def verify_event_change(
         "file_count": len(reviews),
         "verified_file_count": ok_count,
         "open_reassignment_count": open_reassignments,
+        "directory_count": len(directory_results),
+        "verified_directory_count": verified_directory_count,
+        "missing_directory_count": missing_directory_count,
         "files": results,
+        "directories": directory_results,
     }
 
 

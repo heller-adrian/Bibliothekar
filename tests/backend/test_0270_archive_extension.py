@@ -179,6 +179,14 @@ def _move_staged_ssd_files_manually(
 ) -> list[dict]:
     reviews = get_event_change_files(db, change_request_id)
     work_root = workspace / "Arbeitsbereich"
+    staging_root = work_root / "Später zuordnen"
+    if staging_root.exists():
+        for directory in sorted(
+            (path for path in staging_root.rglob("*") if path.is_dir()),
+            key=lambda path: len(path.parts),
+        ):
+            relative = directory.relative_to(staging_root)
+            (archive_root / relative).mkdir(parents=True, exist_ok=True)
     for row in reviews:
         if row["source_root_kind"] != "shared_workspace":
             continue

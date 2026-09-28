@@ -293,6 +293,31 @@ def describe_archive_change_staging_for_request(
     )
 
 
+def required_target_directories_for_request(
+    database_path: Path,
+    cr_id: str,
+) -> list[str]:
+    """Directories whose existence is part of this concrete change.
+
+    Only actual move targets are structural obligations. A metadata-only edit
+    therefore requires no new branch folders, while a move into a content
+    container requires its canonical Alle/Sortiert/Export triplet.
+    """
+    _, preview, plan = _request_preview_and_plan(database_path, cr_id)
+    touched = _desired_directory_plan(preview, plan, moves_only=True)
+    has_moves = any(
+        str(item.get("action") or "") == "move"
+        and str(item.get("new_path") or "").strip()
+        for item in [
+            *(plan.get("families_with_plans") or []),
+            *(plan.get("assets_with_plans") or []),
+        ]
+    )
+    if not has_moves:
+        return []
+    return sorted(path.as_posix() for path in touched)
+
+
 def prepare_archive_change_staging_for_request(
     database_path: Path,
     workspace_path: Path,

@@ -3707,6 +3707,7 @@ EVENTS_HTML = r"""<!doctype html>
             const total = Number(data.file_count || 0);
             const ok = Number(data.verified_file_count || 0);
             const problems = (data.files || []).filter(row => String(row.status || "") !== "verified");
+            const directoryProblems = (data.directories || []).filter(row => String(row.status || "") !== "verified");
             if (data.complete) {
               verifyBtn.classList.add("success");
               verifyBtn.textContent = "✓ Prüfung erfolgreich";
@@ -3716,12 +3717,13 @@ EVENTS_HTML = r"""<!doctype html>
             } else {
               verifyBtn.classList.add("danger");
               verifyBtn.textContent = "✕ Prüfung mit Problemen";
-              if (summary) { summary.className = "danger-text"; summary.textContent = `${ok}/${total} bestätigt · ${problems.length} Problem${problems.length===1?"":"e"}.`; }
+              const problemCount = problems.length + directoryProblems.length;
+              if (summary) { summary.className = "danger-text"; summary.textContent = `${ok}/${total} Dateien bestätigt · ${problemCount} Problem${problemCount===1?"":"e"}.`; }
               if (label) label.textContent = "Bitte die angezeigten Abweichungen im Finder korrigieren und erneut prüfen.";
               if (archiveBtn) archiveBtn.disabled = true;
               if (errors) {
                 errors.style.display = "block";
-                errors.innerHTML = problems.map(row => {
+                const fileHtml = problems.map(row => {
                   const problemLabel =
                     row.status === "missing" ? "Fehlt am Ziel"
                     : row.status === "old_path_still_exists" ? "Liegt noch am alten Ort"
@@ -3731,6 +3733,10 @@ EVENTS_HTML = r"""<!doctype html>
                     : (row.message || row.status || "Problem");
                   return `<div class="card" style="margin-top:8px"><strong>${escapeHtml(problemLabel)}</strong>${row.message ? `<div class="muted">${escapeHtml(row.message)}</div>` : ""}<div class="muted" style="margin-top:5px">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "—")}</code></div>`;
                 }).join("");
+                const directoryHtml = directoryProblems.map(row =>
+                  `<div class="card" style="margin-top:8px"><strong>Erforderlicher Ordner fehlt</strong><div class="muted">SOLL · Kamerabibliothek</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
+                ).join("");
+                errors.innerHTML = fileHtml + directoryHtml;
               }
             }
           } catch (error) {
