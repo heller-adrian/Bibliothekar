@@ -154,6 +154,8 @@ def test_archived_delete_is_manual_move_and_finishes_without_touching_archive(tm
     assert not verify_event_change(db, cr_id, archive)["complete"]
     target.parent.mkdir(parents=True)
     source.rename(target)
+    source.parent.rmdir()
+    source.parent.parent.rmdir()
     assert verify_event_change(db, cr_id, archive)["complete"]
     done = finish_event_change(db, cr_id, archive)
     assert done["event_deleted"] is True

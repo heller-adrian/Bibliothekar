@@ -61,6 +61,8 @@ def test_archive_finish_is_read_only_and_requires_manual_target(tmp_path):
     new=archive/'2026/07-24 - Rom bearbeitet/Alle/IMG.jpg'; new.parent.mkdir(parents=True); old.rename(new)
     (archive/'2026/07-24 - Rom bearbeitet/Sortiert').mkdir()
     (archive/'2026/07-24 - Rom bearbeitet/Export').mkdir()
+    old.parent.rmdir()
+    old.parent.parent.rmdir()
     check=verify_event_change(db,crid,archive)
     assert check['complete'] is True
     result=finish_event_change(db,crid,archive)

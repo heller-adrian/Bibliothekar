@@ -109,6 +109,9 @@ def test_archived_removed_family_can_become_new_archived_event_with_empty_prep_s
     main_child = archive/'2026/07-19 - Alt/18-00 - 18-30 - Alt'
     (main_child/'Sortiert').mkdir(parents=True,exist_ok=True)
     (main_child/'Export').mkdir(parents=True,exist_ok=True)
+    old_child=archive/'2026/07-19 - Alt/18-00 - 19-30 - Alt'
+    (old_child/'Alle').rmdir()
+    old_child.rmdir()
     confirm_event_change(db,crid)
     done=finish_event_change(db,crid,archive)
     assert done['created_reassignment_event_ids']

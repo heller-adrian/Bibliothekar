@@ -243,6 +243,8 @@ def test_0262_finished_archive_change_updates_general_file_path(tmp_path):
     event_root = new_path.parents[1]
     (event_root / "Sortiert").mkdir(exist_ok=True)
     (event_root / "Export").mkdir(exist_ok=True)
+    old_path.parent.rmdir()
+    old_path.parent.parent.rmdir()
 
     with database_connection(db) as connection:
         connection.execute(

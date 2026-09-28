@@ -189,10 +189,11 @@ def _obsolete_directories_from_plan(
     event_id: str,
     preview: dict[str, Any],
     plan: dict[str, Any],
+    *,
+    delete_event: bool = False,
 ) -> list[str]:
     """Old archive directories made obsolete by this concrete move plan."""
     current_root = _current_event_root(database_path, event_id)
-    target_root = _target_root(preview)
     items = [
         *[
             item for item in (plan.get("families_with_plans") or [])
@@ -206,6 +207,12 @@ def _obsolete_directories_from_plan(
         and str(item.get("old_path") or "").strip()
     ]
     if not moves:
+        return []
+    if delete_event:
+        return [current_root.as_posix()]
+    try:
+        target_root = _target_root(preview)
+    except ArchiveStagingError:
         return []
     if current_root != target_root:
         return [current_root.as_posix()]
@@ -261,9 +268,16 @@ def required_obsolete_directories_for_request(
     cr_id: str,
 ) -> list[str]:
     cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
-    return _obsolete_directories_from_plan(
-        database_path, str(cr["event_id"]), preview, plan
-    )
+    try:
+        return _obsolete_directories_from_plan(
+            database_path,
+            str(cr["event_id"]),
+            preview,
+            plan,
+            delete_event=bool(cr.get("delete_event") or 0),
+        )
+    except ArchiveStagingError:
+        return []
 
 
 def describe_archive_change_staging(
@@ -272,6 +286,8 @@ def describe_archive_change_staging(
     event_id: str,
     preview: dict[str, Any],
     plan: dict[str, Any],
+    *,
+    delete_event: bool = False,
 ) -> dict[str, Any]:
     """Compute Später zuordnen as SOLL minus the real IST archive structure."""
     target_root = _target_root(preview)
@@ -300,7 +316,7 @@ def describe_archive_change_staging(
     }
 
     obsolete = _obsolete_directories_from_plan(
-        database_path, event_id, preview, plan
+        database_path, event_id, preview, plan, delete_event=delete_event
     )
 
     required = bool(helper_directories or incoming)
@@ -377,7 +393,12 @@ def describe_archive_change_staging_for_request(
 ) -> dict[str, Any]:
     cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
     return describe_archive_change_staging(
-        database_path, archive_root, str(cr["event_id"]), preview, plan
+        database_path,
+        archive_root,
+        str(cr["event_id"]),
+        preview,
+        plan,
+        delete_event=bool(cr.get("delete_event") or 0),
     )
 
 
