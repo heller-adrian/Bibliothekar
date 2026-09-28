@@ -1895,7 +1895,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           ? "Wird als sichere Ergänzung der offenen Planung angelegt."
           : item.target_status === "applied"
             ? "Wird als verknüpfter Nachtrag angelegt und separat geprüft."
-            : "Wird unter ‚Später zuzuordnen‘ für die manuelle Archiv-Ergänzung bereitgestellt.";
+            : "Wird unter ‚Später zuordnen‘ für die manuelle Archiv-Ergänzung bereitgestellt.";
         const familyRows = (item.families || []).map(family => `
           <li><strong>${escapeHtml(family.original_stem || family.family_key || "Dateifamilie")}</strong>
           · ${escapeHtml(family.capture_time || "")}
@@ -2773,7 +2773,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         && event.event_kind === "event"
         && (dated[0].archive_change_request_id
           ? event.status === "archived"
-          : ["planned","applied"].includes(event.status))
+          : ["planned","applied","archived"].includes(event.status))
         && dated.some(d =>
           Math.abs(Date.parse(d.start_datetime) - Date.parse(event.end_datetime) - 1000) < 1
         )
@@ -3089,6 +3089,14 @@ WORKSPACE_HTML = r"""<!doctype html>
           );
           saveResult.textContent = `Gespeichert: ${result.parent_event.folder_name} · ${result.assigned_family_count} Familien`;
           lastSavedEvent = result.parent_event;
+        }
+
+        if (result?.change_request_id) {
+          selectedDays.clear();
+          await loadWorkspace();
+          eventDialog.close();
+          location.href = `/events?job=${encodeURIComponent(jobId)}&task=change:${encodeURIComponent(result.change_request_id)}`;
+          return;
         }
 
         applySavedEventStatus.textContent = "";
