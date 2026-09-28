@@ -3871,6 +3871,7 @@ def list_no_event_month_targets(database_path: Path, month_keys: list[str], pref
                        substr(start_datetime,1,7) AS month_key
                 FROM events
                 WHERE parent_event_id IS NULL AND event_kind='no_event'
+                  AND COALESCE(linkage_kind,'')=''
                   AND status IN ('planned','applied','archived')
                   {month_filter}
                 ORDER BY CASE WHEN job_id=? THEN 0 ELSE 1 END,
