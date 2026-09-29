@@ -288,9 +288,14 @@ def verify_event_change(
     reviews = get_event_change_files(database_path, cr_id)
     if not reviews:
         raise EventChangeApplyError("Der Änderungsauftrag enthält keine Dateien.")
+    managed_reviews = [
+        review for review in reviews
+        if str(review.get("action") or "") != "advisory"
+    ]
 
     now = _now()
     results: list[dict[str, Any]] = []
+    advisories: list[dict[str, Any]] = []
     ok_count = 0
     open_reassignments = 0
     open_release = 0
@@ -366,7 +371,20 @@ def verify_event_change(
             message = None
 
             release_path = str(review.get("workspace_release_path") or "").strip()
-            if action == "delete" or (action == "unresolved" and release_path):
+            if action == "advisory":
+                advisory_path = _safe_archive_path(root, old_rel)
+                status = "advisory"
+                message = (
+                    "Zusätzliche nicht verwaltete Datei im Archiv. "
+                    "Sie bleibt vollständig unberührt und gehört nicht zum SOLL."
+                )
+                advisories.append({
+                    "path": old_rel,
+                    "exists": advisory_path.is_file(),
+                    "asset_kind": review.get("asset_kind"),
+                    "message": message,
+                })
+            elif action == "delete" or (action == "unresolved" and release_path):
                 stored_status = str(review.get("verification_status") or "pending")
                 if stored_status == "verified":
                     status = "verified"
@@ -472,7 +490,7 @@ def verify_event_change(
         1 for item in obsolete_directory_results if item["status"] != "verified"
     )
     complete = (
-        ok_count == len(reviews)
+        ok_count == len(managed_reviews)
         and open_reassignments == 0
         and open_release == 0
         and missing_directory_count == 0
@@ -486,8 +504,10 @@ def verify_event_change(
         "change_request_id": cr_id,
         "status": "verified" if complete else "incomplete",
         "complete": complete,
-        "file_count": len(reviews),
+        "file_count": len(managed_reviews),
         "verified_file_count": ok_count,
+        "advisory_count": len(advisories),
+        "advisories": advisories,
         "open_reassignment_count": open_reassignments,
         "open_release_count": open_release,
         "directory_count": len(directory_results),

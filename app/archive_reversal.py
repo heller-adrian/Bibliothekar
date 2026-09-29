@@ -118,7 +118,7 @@ def _request_context(database_path: Path, cr_id: str) -> tuple[dict[str, Any], d
         assets = [
             {**dict(row), "review_kind": "asset", "source_root_kind": "camera_archive", "file_id": None}
             for row in connection.execute(
-                "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? ORDER BY id",
+                "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? AND action<>'advisory' ORDER BY id",
                 (cr_id,),
             ).fetchall()
         ]
@@ -544,8 +544,6 @@ def _reversal_state(
             "state": "pending",
         })
 
-    remove_files.extend(_extra_archive_files(archive_root, manifest))
-
     if remove_files:
         operations.append({
             "kind": "remove_new_files",
@@ -554,13 +552,6 @@ def _reversal_state(
             "items": [PurePosixPath(value).name for value in sorted(set(remove_files))],
             "detail": "Diese Dateien gehörten nicht zum ursprünglichen Archivzustand. Die SSD-Originale bleiben erhalten.",
             "state": "pending",
-        })
-
-    for extra_file in _extra_archive_files(archive_root, manifest):
-        problems.append({
-            "kind": "new_file",
-            "path": extra_file,
-            "message": "Diese Datei gehörte nicht zum ursprünglichen Archivzustand.",
         })
 
     target_root = str(manifest.get("target_root") or "")

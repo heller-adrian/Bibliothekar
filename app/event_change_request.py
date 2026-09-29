@@ -405,6 +405,9 @@ def _compute_event_plan(
             if candidate:
                 action = "keep" if candidate == old_path else "move"
                 new_path = candidate
+            elif family_id is None:
+                action = "advisory"
+                new_path = ""
             else:
                 action = "unresolved"
                 new_path = ""
@@ -442,9 +445,14 @@ def _compute_event_plan(
             f"Offen neu zuzuordnen: {len(removed_family_ids)} Familien (werden niemals geloescht)."
         )
     unresolved_assets = sum(1 for item in asset_plans if item["action"] == "unresolved")
+    advisory_assets = sum(1 for item in asset_plans if item["action"] == "advisory")
     if unresolved_assets:
         lines.append(
-            f"Nicht eindeutig zuordenbare aktuelle Dateien: {unresolved_assets}"
+            f"Nicht eindeutig zuordenbare verwaltete Sidecars: {unresolved_assets}"
+        )
+    if advisory_assets:
+        lines.append(
+            f"Zusätzliche nicht verwaltete Dateien (nur Hinweis): {advisory_assets}"
         )
 
     return {
@@ -462,10 +470,15 @@ def _compute_event_plan(
                 sum(1 for item in file_plans if item["action"] != "keep")
                 + sum(1 for item in asset_plans if item["action"] != "keep")
             ),
-            "file_count": len(file_plans) + len(asset_plans),
+            "file_count": len(file_plans) + sum(
+                1 for item in asset_plans if item["action"] != "advisory"
+            ),
             "camera_file_count": len(file_plans),
-            "asset_file_count": len(asset_plans),
+            "asset_file_count": sum(
+                1 for item in asset_plans if item["action"] != "advisory"
+            ),
             "unresolved_asset_count": unresolved_assets,
+            "advisory_asset_count": advisory_assets,
         },
     }
 

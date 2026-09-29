@@ -4147,7 +4147,8 @@ EVENTS_HTML = r"""<!doctype html>
             if (bar) bar.style.width = "100%";
             const total = Number(data.file_count || 0);
             const ok = Number(data.verified_file_count || 0);
-            const problems = (data.files || []).filter(row => String(row.status || "") !== "verified");
+            const advisories = data.advisories || [];
+            const problems = (data.files || []).filter(row => !["verified","advisory"].includes(String(row.status || "")));
             const directoryProblems = (data.directories || []).filter(row => String(row.status || "") !== "verified");
             const obsoleteDirectoryProblems = (data.obsolete_directories || []).filter(row => String(row.status || "") !== "verified");
             const eventDocumentProblem =
@@ -4157,8 +4158,20 @@ EVENTS_HTML = r"""<!doctype html>
             if (data.complete) {
               verifyBtn.classList.add("success");
               verifyBtn.textContent = "✓ Prüfung erfolgreich";
-              if (summary) { summary.className = "success-text"; summary.textContent = `${ok}/${total} Dateien bestätigt. Alles stimmt mit SOLL überein.`; }
+              if (summary) {
+                summary.className = "success-text";
+                summary.textContent = ok + "/" + total + " verwaltete Dateien bestätigt."
+                  + (advisories.length ? " · " + advisories.length + " zusätzliche Datei" + (advisories.length===1?"":"en") + " nur als Hinweis." : "");
+              }
               if (label) label.textContent = "Prüfung abgeschlossen.";
+              if (errors && advisories.length) {
+                errors.style.display = "block";
+                errors.innerHTML = advisories.map(row =>
+                  '<div class="card" style="margin-top:8px"><strong>Zusätzliche nicht verwaltete Datei · nur Hinweis</strong><div class="muted">'
+                  + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
+                  + escapeHtml(row.path || "—") + '</code></div>'
+                ).join("");
+              }
               if (archiveBtn) archiveBtn.disabled = false;
             } else {
               verifyBtn.classList.add("danger");
@@ -4188,7 +4201,12 @@ EVENTS_HTML = r"""<!doctype html>
                 const eventDocumentHtml = eventDocumentProblem
                   ? `<div class="card" style="margin-top:8px"><strong>event.json stimmt noch nicht</strong><div class="muted">${escapeHtml(eventDocumentProblem.message || "")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(eventDocumentProblem.path || "event.json")}</code></div>`
                   : "";
-                errors.innerHTML = fileHtml + directoryHtml + obsoleteHtml + eventDocumentHtml;
+                const advisoryHtml = advisories.map(row =>
+                  '<div class="card" style="margin-top:8px"><strong>Zusätzliche nicht verwaltete Datei · nur Hinweis</strong><div class="muted">'
+                  + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
+                  + escapeHtml(row.path || "—") + '</code></div>'
+                ).join("");
+                errors.innerHTML = fileHtml + directoryHtml + obsoleteHtml + eventDocumentHtml + advisoryHtml;
               }
             }
           } catch (error) {
