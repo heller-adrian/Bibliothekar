@@ -486,12 +486,12 @@ def verify_event_archive(
                     error_message = "SHA-256-Summe weicht ab."
                     mismatched_count += 1
                 elif actual_relative != expected_relative:
-                    status = "path_mismatch"
+                    status = "missing"
                     error_message = (
-                        "Datei liegt nicht am aktuellen SOLL-Pfad. "
+                        "Datei fehlt am aktuellen SOLL-Pfad. "
                         f"IST: {actual_relative} · SOLL: {expected_relative}"
                     )
-                    mismatched_count += 1
+                    missing_count += 1
                 elif not candidate.is_file():
                     status = "missing"
                     error_message = "Datei fehlt in der Kamerabibliothek."
