@@ -1587,72 +1587,96 @@ def update_import_file_paths(
     *,
     working_path: str,
 ) -> dict[str, Any]:
-    """Persist the verified workspace path for every imported media file."""
-    mapping = {
-        str(item["source_relative_path"]):
-            str(item["destination_relative_path"])
+    """Persist the verified workspace path and effective capture state.
+
+    The physical folder-import pipeline has already moved and SHA-verified the
+    files before this callback runs.  SQLite must therefore mirror that exact
+    Arbeitsbereich/Jahr/Tag state at both file and family level.
+    """
+    by_source = {
+        str(item["source_relative_path"]): dict(item)
         for item in plan
     }
-
-    if len(mapping) != len(plan):
-        raise DatabaseError(
-            "Importplan enthält einen Quellpfad mehrfach."
-        )
+    if len(by_source) != len(plan):
+        raise DatabaseError("Importplan enthält einen Quellpfad mehrfach.")
 
     now = utc_now_iso()
-
     with database_connection(database_path) as connection:
         rows = connection.execute(
-            """
-            SELECT id, original_relative_path
-            FROM files
-            WHERE job_id = ?
-            """,
+            """SELECT id,family_id,original_relative_path
+               FROM files WHERE job_id=?""",
             (job_id,),
         ).fetchall()
-
-        stored_paths = {
-            str(row["original_relative_path"])
-            for row in rows
-        }
-
-        if stored_paths != set(mapping):
-            missing = sorted(stored_paths - set(mapping))
-            unexpected = sorted(set(mapping) - stored_paths)
+        stored_paths = {str(row["original_relative_path"]) for row in rows}
+        if stored_paths != set(by_source):
+            missing = sorted(stored_paths - set(by_source))
+            unexpected = sorted(set(by_source) - stored_paths)
             raise DatabaseError(
                 "Importplan und gespeicherte Mediendateien stimmen nicht überein. "
                 f"Ohne Ziel: {missing}; unbekannt: {unexpected}"
             )
 
+        family_effective: dict[int, tuple[str | None, str]] = {}
         for row in rows:
             original = str(row["original_relative_path"])
+            item = by_source[original]
+            capture = (
+                str(item.get("selected_capture_time") or "").strip() or None
+            )
+            confidence = str(
+                item.get("capture_time_confidence") or "missing"
+            )
+            family_id = int(row["family_id"]) if row["family_id"] is not None else None
+            if family_id is not None:
+                existing = family_effective.get(family_id)
+                candidate = (capture, confidence)
+                if existing is None:
+                    family_effective[family_id] = candidate
+                elif existing[0] != capture:
+                    raise DatabaseError(
+                        "Eine importierte Dateifamilie besitzt widersprüchliche "
+                        "wirksame Aufnahmezeiten."
+                    )
+
             connection.execute(
-                """
-                UPDATE files
-                SET
-                    current_relative_path = ?,
-                    sha256_current = sha256_original,
-                    updated_at = ?
-                WHERE id = ?
-                """,
-                (mapping[original], now, int(row["id"])),
+                """UPDATE files
+                   SET current_relative_path=?,
+                       current_root_kind='shared_workspace',
+                       selected_capture_time=?,
+                       capture_time_confidence=?,
+                       sha256_current=sha256_original,
+                       updated_at=?
+                   WHERE id=?""",
+                (
+                    str(item["destination_relative_path"]),
+                    capture,
+                    confidence,
+                    now,
+                    int(row["id"]),
+                ),
+            )
+
+        for family_id, (capture, confidence) in family_effective.items():
+            connection.execute(
+                """UPDATE file_families
+                   SET selected_capture_time=?,
+                       capture_time_confidence=?
+                   WHERE id=? AND job_id=?""",
+                (capture, confidence, family_id, job_id),
             )
 
         connection.execute(
-            """
-            UPDATE jobs
-            SET
-                state = 'organizing',
-                stage = 'workspace_paths_persisted',
-                working_path = ?,
-                progress_current = progress_total,
-                progress_message = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
+            """UPDATE jobs
+               SET state='organizing',
+                   stage='workspace_paths_persisted',
+                   working_path=?,
+                   progress_current=progress_total,
+                   progress_message=?,
+                   updated_at=?
+               WHERE id=?""",
             (
                 working_path,
-                "Geprüfte Zielpfade wurden in SQLite übernommen.",
+                "Geprüfte Zielpfade und Tageszuordnung wurden in SQLite übernommen.",
                 now,
                 job_id,
             ),
@@ -1660,8 +1684,28 @@ def update_import_file_paths(
 
     return {
         "job_id": job_id,
-        "updated_file_count": len(mapping),
+        "updated_file_count": len(by_source),
+        "updated_family_count": len(family_effective),
     }
+
+
+def set_job_source_volume_label(
+    database_path: Path,
+    job_id: str,
+    label: str,
+) -> dict[str, Any]:
+    clean = " ".join(str(label or "").split()).strip()
+    if not clean:
+        raise DatabaseError("Der sichtbare Sicherungsname darf nicht leer sein.")
+    with database_connection(database_path) as connection:
+        connection.execute(
+            "UPDATE jobs SET source_volume_label=?,updated_at=? WHERE id=?",
+            (clean, utc_now_iso(), job_id),
+        )
+    job = get_job(database_path, job_id)
+    if job is None:
+        raise DatabaseError(f"Auftrag fehlt nach Namensaktualisierung: {job_id}")
+    return job
 
 
 def list_job_files(

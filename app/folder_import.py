@@ -280,6 +280,11 @@ def build_folder_import_plan(
         if str(entry["relative_path"]) not in included_paths
     ]
 
+    dated_capture_times = sorted({
+        str(item.get("selected_capture_time") or "")[:19]
+        for item in plan
+        if str(item.get("selected_capture_time") or "").strip()
+    })
     summary = {
         "media_file_count": len(plan),
         "excluded_file_count": len(excluded),
@@ -289,6 +294,12 @@ def build_folder_import_plan(
             {"name": name, "family_count": count}
             for name, count in sorted(device_counts.items())
         ],
+        "capture_start_date": (
+            dated_capture_times[0][:10] if dated_capture_times else None
+        ),
+        "capture_end_date": (
+            dated_capture_times[-1][:10] if dated_capture_times else None
+        ),
     }
 
     return plan, excluded, summary

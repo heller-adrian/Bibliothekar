@@ -50,6 +50,7 @@ from app.database import (
     repair_interrupted_jobs_from_terminal_evidence,
     store_metadata_analysis,
     update_import_file_paths,
+    set_job_source_volume_label,
     update_event_definition,
     update_job_progress,
     database_connection,
@@ -506,6 +507,30 @@ def process_claimed_job(
                 imported_hashes=imported_hashes,
                 import_history_callback=persist_import_history,
             )
+            organization = result.get("organization", {})
+            if str(job.get("trigger_type") or "") in {"approved_sd", "usb_key"}:
+                start_date = str(organization.get("capture_start_date") or "")
+                end_date = str(organization.get("capture_end_date") or "")
+                def _display_date(value: str) -> str:
+                    return value.replace("-", ".") if len(value) == 10 else ""
+                if str(job.get("trigger_type")) == "approved_sd":
+                    devices = list(organization.get("devices") or [])
+                    if len(devices) == 1:
+                        base_label = str(devices[0].get("name") or "SD-Karte")
+                    elif devices:
+                        base_label = "Mehrere Aufnahmegeräte"
+                    else:
+                        base_label = "SD-Karte"
+                else:
+                    base_label = str(job.get("source_volume_label") or "Externes Laufwerk")
+                if start_date and end_date:
+                    set_job_source_volume_label(
+                        DATABASE_FILE,
+                        job_id,
+                        f"{base_label} - {_display_date(start_date)} - {_display_date(end_date)}",
+                    )
+                else:
+                    set_job_source_volume_label(DATABASE_FILE, job_id, base_label)
             completion_prefix = "Ordnerimport erfolgreich abgeschlossen."
         else:
             result = run_simulated_job(
@@ -1384,12 +1409,18 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     now = datetime.now().astimezone()
     job_id = now.strftime("FOLDER_IMPORT_%Y%m%d_%H%M%S_%f")
     label = str(payload.get("display_name") or source.name).strip() or source.name
+    source_mode = str(payload.get("source_mode") or "folder").strip()
+    trigger_type = {
+        "sd_card": "approved_sd",
+        "drive": "usb_key",
+        "folder": "manual",
+    }.get(source_mode, "manual")
     try:
         job = create_job(
             DATABASE_FILE,
             job_id=job_id,
             kind="sd_import",
-            trigger_type="manual",
+            trigger_type=trigger_type,
             source_path=str(source),
             working_path=str(WORKSPACE_PATH / WORK_DIRECTORY_NAME),
             operation="folder_import",
@@ -7342,7 +7373,12 @@ def index() -> str:
       if (!source) { showError(new Error("Auf der eingebundenen SD-Karte wurde noch keine geeignete Kartenwurzel erkannt.")); return; }
       sourceSelect.value = source.root_key + "::" + source.relative_path;
       updateSourceDetail();
-      await startFolderImport();
+      await startFolderImportSelection(
+        source.root_key,
+        source.relative_path,
+        "",
+        "sd_card"
+      );
     });
 
     deviceSelect.addEventListener("change", () => {
@@ -7384,7 +7420,8 @@ def index() -> str:
       await startFolderImportSelection(
         "removable",
         device.device_id,
-        device.label || device.model || "Externes Laufwerk"
+        device.label || device.model || "Externes Laufwerk",
+        "drive"
       );
     });
 
@@ -7420,7 +7457,8 @@ def index() -> str:
       await startFolderImportSelection(
         "removable",
         driveFolderPathValue,
-        (device.label || device.model || "Externes Laufwerk") + " · " + leaf
+        leaf,
+        "folder"
       );
     });
 
@@ -7432,12 +7470,13 @@ def index() -> str:
       const selected = currentFolderRoot + "::" + currentFolderPath;
       sourceSelect.innerHTML += `<option value="${escapeHtml(selected)}">${escapeHtml(currentFolderPath)}</option>`;
       sourceSelect.value = selected;
-      await startFolderImport();
+      const leaf = currentFolderPath.split("/").filter(Boolean).at(-1) || "Sicherungsordner";
+      await startFolderImportSelection(currentFolderRoot, currentFolderPath, leaf, "folder");
     });
 
     sourceSelect.addEventListener("change", updateSourceDetail);
 
-    async function startFolderImportSelection(rootKey, relativePath, displayName="") {
+    async function startFolderImportSelection(rootKey, relativePath, displayName="", sourceMode="folder") {
       if (!rootKey || !relativePath) {
         noticeElement.textContent = "Bitte zuerst eine Importquelle auswählen.";
         noticeElement.classList.add("error-text");
@@ -7459,7 +7498,8 @@ def index() -> str:
             body: JSON.stringify({
               source_root_key: rootKey,
               source_relative_path: relativePath,
-              display_name: displayName || undefined
+              display_name: displayName || undefined,
+              source_mode: sourceMode
             })
           }
         );
