@@ -380,5 +380,5 @@ def test_0277_reapply_family_presentation_includes_assets_and_current_name(
 def test_0277_visible_release_version_is_0277():
     from app import main
     assert main.RELEASE_VERSION == "0.27.7"
-    payload = main.health()
+    payload = main.healthz()
     assert payload["version"] == "0.27.7"
