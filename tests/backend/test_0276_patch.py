@@ -127,7 +127,7 @@ def test_0276_archive_release_provenance_survives_reuse_and_returns_after_delete
                    uses_time_range,folder_name,status,created_at,updated_at,event_kind,
                    preserve_day_folders,revision,timeline_model,time_model_version
                ) VALUES ('reuse','old',NULL,'parent','Wiederverwendung',
-                         '2026-07-22T20:01:00','2026-07-22T23:59:59',1,
+                         '2026-07-22T20:01:00','2026-07-22T23:59:59',0,
                          '07-22 - Wiederverwendung','planned',?,?,'event',0,1,'continuous',2)""",
             (NOW, NOW),
         )

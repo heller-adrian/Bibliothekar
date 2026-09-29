@@ -166,7 +166,7 @@ def test_0275_partial_reuse_renames_remaining_released_segment(tmp_path: Path):
                    uses_time_range,folder_name,status,applied_at,created_at,updated_at,
                    event_kind,preserve_day_folders,revision,timeline_model,time_model_version
                ) VALUES ('occupied','old',NULL,'parent','Belegt',
-                         '2026-07-22T20:01:00','2026-07-22T20:59:59',1,
+                         '2026-07-22T20:01:00','2026-07-22T20:59:59',0,
                          '07-22 - Belegt','applied',?,?,?,'event',0,1,'continuous',2)""",
             (NOW, NOW, NOW),
         )

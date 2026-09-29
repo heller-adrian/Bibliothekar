@@ -382,35 +382,38 @@ def _compute_event_plan(
             if asset_kind == "export":
                 branch = "Export"
 
-            # Sidecars eines herausfallenden Kameraoriginals folgen dessen
-            # Neu-Zuordnung; bis das Ziel gewählt wurde bleibt auch der Sidecar
-            # bewusst offen.
-            if family_id is not None and family_id in removed_family_ids:
+            # Familienlose normale Fremddateien gehören dem Nutzer und
+            # werden grundsätzlich nur als Hinweis inventarisiert. Exporte
+            # bleiben eine verwaltete Produktrolle; familiengebundene XMP/
+            # Sidecars folgen weiterhin ihrer Kamerafamilie.
+            if family_id is None and asset_kind != "export":
                 candidate = None
-            elif asset_kind == "other" and not capture:
-                candidate = target_for(
-                    filename=str(item["filename"]),
-                    capture=None,
-                    branch=branch,
-                    old_event_relative_path=str(item["event_relative_path"]),
-                )
-            else:
-                candidate = target_for(
-                    filename=str(item["filename"]),
-                    capture=capture,
-                    branch=branch,
-                    old_event_relative_path=str(item["event_relative_path"]),
-                )
-
-            if candidate:
-                action = "keep" if candidate == old_path else "move"
-                new_path = candidate
-            elif family_id is None:
                 action = "advisory"
                 new_path = ""
             else:
-                action = "unresolved"
-                new_path = ""
+                if family_id is not None and family_id in removed_family_ids:
+                    candidate = None
+                elif asset_kind == "other" and not capture:
+                    candidate = target_for(
+                        filename=str(item["filename"]),
+                        capture=None,
+                        branch=branch,
+                        old_event_relative_path=str(item["event_relative_path"]),
+                    )
+                else:
+                    candidate = target_for(
+                        filename=str(item["filename"]),
+                        capture=capture,
+                        branch=branch,
+                        old_event_relative_path=str(item["event_relative_path"]),
+                    )
+
+                if candidate:
+                    action = "keep" if candidate == old_path else "move"
+                    new_path = candidate
+                else:
+                    action = "unresolved"
+                    new_path = ""
 
             asset_plans.append({
                 "asset_kind": asset_kind,
