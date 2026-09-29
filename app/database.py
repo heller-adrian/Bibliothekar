@@ -1964,7 +1964,9 @@ def list_job_events(
             ),
 
             inventory_counts AS (
-                SELECT event_id, root_kind, COUNT(*) AS file_count
+                SELECT event_id, root_kind,
+                       COUNT(*) AS file_count,
+                       COUNT(DISTINCT family_id) AS family_count
                 FROM event_inventory_files
                 WHERE job_id = ?
                   AND asset_kind IN ('camera_original','xmp','export','derived_media')
@@ -1992,15 +1994,15 @@ def list_job_events(
                 e.*,
 
                 CASE
+                    WHEN e.event_level = 'parent' AND e.status = 'archived'
+                         AND archive_inventory.file_count IS NOT NULL
+                    THEN archive_inventory.family_count
+                    WHEN e.event_level = 'parent' AND e.status = 'applied'
+                         AND workspace_inventory.file_count IS NOT NULL
+                    THEN workspace_inventory.family_count
                     WHEN e.event_level = 'parent'
-                    THEN COALESCE(
-                        root.family_count,
-                        0
-                    )
-                    ELSE COALESCE(
-                        direct.family_count,
-                        0
-                    )
+                    THEN COALESCE(root.family_count, 0)
+                    ELSE COALESCE(direct.family_count, 0)
                 END AS assigned_family_count,
 
                 CASE
@@ -2101,7 +2103,8 @@ def search_events(
               FROM event_assignments ea JOIN events a ON a.id=ea.event_id
               GROUP BY COALESCE(a.parent_event_id,a.id)
             ), inventory_counts AS (
-              SELECT event_id,root_kind,COUNT(*) AS file_count
+              SELECT event_id,root_kind,COUNT(*) AS file_count,
+                     COUNT(DISTINCT family_id) AS family_count
               FROM event_inventory_files
               WHERE asset_kind IN ('camera_original','xmp','export','derived_media')
               GROUP BY event_id,root_kind
@@ -2121,7 +2124,14 @@ def search_events(
               WHERE target_event_id IS NOT NULL
               GROUP BY target_event_id
             )
-            SELECT e.*, COALESCE(root.family_count,0) AS assigned_family_count,
+            SELECT e.*,
+                   CASE
+                     WHEN e.status='archived' AND archive_inventory.file_count IS NOT NULL
+                       THEN archive_inventory.family_count
+                     WHEN e.status='applied' AND workspace_inventory.file_count IS NOT NULL
+                       THEN workspace_inventory.family_count
+                     ELSE COALESCE(root.family_count,0)
+                   END AS assigned_family_count,
                    CASE
                      WHEN e.status='archived' AND archive_inventory.file_count IS NOT NULL
                        THEN archive_inventory.file_count
@@ -3244,7 +3254,7 @@ def get_event_edit_context(
 
         family_rows = connection.execute(
             """
-            SELECT ff.id AS family_id, ff.family_key, ff.selected_capture_time,
+            SELECT ff.id AS family_id, ff.family_key, ff.original_stem, ff.selected_capture_time,
                    ff.capture_time_confidence, COUNT(DISTINCT f.id) AS file_count,
                    COALESCE(SUM(f.size_bytes), 0) AS total_size_bytes,
                    COALESCE(SUM(CASE WHEN f.review_status = 'required' THEN 1 ELSE 0 END), 0) AS review_required_count,
@@ -3293,6 +3303,25 @@ def get_event_edit_context(
             (event_id, event_id, event_id, event_id, job_id, event_id, event_id),
         ).fetchall()
 
+        live_root_kind = (
+            "camera_archive"
+            if str(event["status"] or "") == "archived"
+            else "shared_workspace"
+            if str(event["status"] or "") == "applied"
+            else None
+        )
+        live_inventory_rows = []
+        if live_root_kind is not None:
+            live_inventory_rows = connection.execute(
+                """SELECT family_id,filename,asset_kind,known_file_id,event_relative_path
+                   FROM event_inventory_files
+                   WHERE event_id=? AND root_kind=?
+                     AND asset_kind IN ('camera_original','xmp','export','derived_media')
+                   ORDER BY CASE WHEN known_file_id IS NOT NULL THEN 0 ELSE 1 END,
+                            event_relative_path""",
+                (event_id, live_root_kind),
+            ).fetchall()
+
     from app.released_ranges import merge_intervals
     legacy = int(event['time_model_version']) < 2 and bool(children) and event['event_kind'] == 'event'
     legacy_ranges = merge_intervals((str(c['start_datetime']),str(c['end_datetime'])) for c in children) if legacy else []
@@ -3305,6 +3334,50 @@ def get_event_edit_context(
     structural_editable = (
         status in {"draft", "planned", "applied"} and event["archived_at"] is None
     ) or archived_change_request
+    live_inventory_available = bool(live_inventory_rows)
+    live_by_family: dict[int, dict[str, Any]] = {}
+    for live_row in live_inventory_rows:
+        if live_row["family_id"] is None:
+            continue
+        family_id = int(live_row["family_id"])
+        stats = live_by_family.setdefault(
+            family_id,
+            {"file_count": 0, "camera_file_count": 0, "asset_kinds": set(), "display_stem": None},
+        )
+        stats["file_count"] += 1
+        asset_kind = str(live_row["asset_kind"] or "")
+        if live_row["known_file_id"] is not None:
+            stats["camera_file_count"] += 1
+        elif asset_kind:
+            stats["asset_kinds"].add(asset_kind)
+        if stats["display_stem"] is None or live_row["known_file_id"] is not None:
+            stats["display_stem"] = Path(str(live_row["filename"] or "")).stem or None
+
+    def _family_payload(row: Any) -> dict[str, Any]:
+        item = dict(row)
+        family_id = int(row["family_id"])
+        assigned_here = bool(row["assigned_here"])
+        database_file_count = int(row["file_count"] or 0)
+        live = live_by_family.get(family_id)
+        item["database_file_count"] = database_file_count
+        item["live_inventory"] = live_inventory_available
+        item["live_file_count"] = int(live["file_count"]) if live is not None else 0
+        item["live_camera_file_count"] = int(live["camera_file_count"]) if live is not None else 0
+        item["live_asset_kinds"] = sorted(live["asset_kinds"]) if live is not None else []
+        item["live_display_stem"] = str(live.get("display_stem") or "") if live is not None else ""
+        item["live_missing_camera_file_count"] = (
+            max(0, database_file_count - item["live_camera_file_count"])
+            if assigned_here and live_inventory_available
+            else 0
+        )
+        if assigned_here and live_inventory_available:
+            item["file_count"] = item["live_file_count"]
+        item["day_key"] = str(row["selected_capture_time"] or "")[:10] or None
+        item["has_date"] = row["selected_capture_time"] is not None
+        item["assigned_here"] = assigned_here
+        item["assigned_elsewhere"] = bool(row["assigned_elsewhere"])
+        return item
+
     return {
         "event": event_dict,
         "legacy_disjoint": legacy_blocked,
@@ -3316,13 +3389,7 @@ def get_event_edit_context(
         "structural_editable": structural_editable,
         "archived_change_request": archived_change_request,
         "families": [
-            {
-                **dict(row),
-                "day_key": str(row["selected_capture_time"] or "")[:10] or None,
-                "has_date": row["selected_capture_time"] is not None,
-                "assigned_here": bool(row["assigned_here"]),
-                "assigned_elsewhere": bool(row["assigned_elsewhere"]),
-            }
+            _family_payload(row)
             for row in family_rows
         ],
     }

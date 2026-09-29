@@ -300,6 +300,7 @@ def scan_event_inventory(
     persist: bool = True,
     update_known_file_locations: bool = False,
     event_prefix_override: str | PurePosixPath | None = None,
+    fast_refresh: bool = False,
 ) -> dict[str, Any]:
     """Scan the *current* event tree.
 
@@ -339,6 +340,26 @@ def scan_event_inventory(
 
     physical_files = _iter_regular_event_files(event_root)
 
+    previous_by_relative: dict[str, dict[str, Any]] = {}
+    known_by_current_relative: dict[str, dict[str, Any]] = {}
+    if fast_refresh:
+        with database_connection(database_path) as connection:
+            previous_rows = connection.execute(
+                """SELECT relative_path,size_bytes,sha256,known_file_id,family_id
+                   FROM event_inventory_files
+                   WHERE event_id=? AND root_kind=?""",
+                (event_id, root_kind),
+            ).fetchall()
+        previous_by_relative = {
+            str(row["relative_path"]): dict(row)
+            for row in previous_rows
+        }
+        known_by_current_relative = {
+            str(item.get("current_relative_path") or ""): item
+            for item in known_files
+            if str(item.get("current_relative_path") or "")
+        }
+
     metadata_by_relative: dict[str, dict[str, Any]] = {}
     try:
         analyzed = analyze_tree(event_root)
@@ -361,17 +382,46 @@ def scan_event_inventory(
         root_rel = path.relative_to(root).as_posix()
         info = os.lstat(path)
         size_bytes = int(info.st_size)
-        digest = _sha256_file(path)
         metadata = metadata_by_relative.get(event_rel, {})
         media_type = str(metadata.get("media_type") or classify_media(path))
 
-        known = _best_known_match(
-            sha256=digest,
-            size_bytes=size_bytes,
-            filename=path.name,
-            known_files=known_files,
-            used_file_ids=used_known_ids,
-        )
+        digest: str | None = None
+        known = None
+        if fast_refresh:
+            direct_known = known_by_current_relative.get(root_rel)
+            if (
+                direct_known is not None
+                and int(direct_known.get("size_bytes") or -1) == size_bytes
+            ):
+                stored = str(
+                    direct_known.get("sha256_current")
+                    or direct_known.get("sha256_original")
+                    or ""
+                ).strip()
+                if stored:
+                    digest = stored
+                    known = direct_known
+
+            if digest is None:
+                previous = previous_by_relative.get(root_rel)
+                if (
+                    previous is not None
+                    and int(previous.get("size_bytes") or -1) == size_bytes
+                    and str(previous.get("sha256") or "").strip()
+                ):
+                    digest = str(previous["sha256"])
+
+        if digest is None:
+            digest = _sha256_file(path)
+
+        if known is None:
+            known = _best_known_match(
+                sha256=digest,
+                size_bytes=size_bytes,
+                filename=path.name,
+                known_files=known_files,
+                used_file_ids=used_known_ids,
+            )
         known_file_id = int(known["file_id"]) if known is not None else None
         family_id = int(known["family_id"]) if known is not None and known.get("family_id") is not None else None
         if known_file_id is not None:
