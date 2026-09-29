@@ -381,12 +381,23 @@ def verify_event_change(
                     )
                     open_release += 1
             elif action == "unresolved":
-                status = "needs_assignment"
-                message = (
-                    "Diese aktuelle XMP-/Export-/Ereignisdatei lässt sich anhand "
-                    "der verfügbaren Aufnahmeinformationen noch keinem eindeutigen Ziel zuordnen."
-                )
-                open_reassignments += 1
+                extra_path = _safe_archive_path(root, old_rel)
+                if not extra_path.exists():
+                    status = "verified"
+                    message = (
+                        "Zusätzliche Datei wurde aus dem Ereignisordner entfernt "
+                        "und besitzt deshalb kein offenes SOLL-Ziel mehr."
+                    )
+                    ok_count += 1
+                else:
+                    status = "needs_assignment"
+                    message = (
+                        "Zusätzliche Datei ohne SOLL-Ziel: "
+                        + old_rel
+                        + ". Datei aus dem Ereignisordner entfernen oder an einen "
+                          "anderen passenden Ort verschieben und anschließend erneut prüfen."
+                    )
+                    open_reassignments += 1
             elif not expected_sha:
                 status = "missing_sha256"
                 message = "Gespeicherte SHA-256-Summe fehlt; die Archivänderung kann nicht verifiziert werden."
@@ -863,6 +874,13 @@ def finish_event_change(
                 [(assignment_event_id, family_id, now) for family_id in selected_ids],
             )
 
+        if selected_ids:
+            connection.execute(
+                "DELETE FROM released_free_families WHERE family_id IN ("
+                + ",".join("?" for _ in selected_ids) + ")",
+                tuple(selected_ids),
+            )
+
         # Die Import-Herkunft bleibt an file_families.job_id/files.job_id erhalten.
         # Auch Familien aus späteren Sicherungen gehören fachlich direkt zum
         # kanonischen Archivereignis; dafür wird kein technisches Zweitereignis
@@ -954,6 +972,28 @@ def finish_event_change(
             event_document_spec=event_document_cleanup_spec,
         )
 
+    released_stock_maintenance = {"updated_family_count": 0, "moved_file_count": 0, "warnings": []}
+    if workspace_path is not None:
+        try:
+            from app.released_archive_maintenance import normalize_released_archive_stock
+            occupied_ranges = (
+                [
+                    (str(segment["start_datetime"])[:19], str(segment["end_datetime"])[:19])
+                    for segment in no_event_segments
+                ]
+                if event_kind == "no_event"
+                else [(parent_start[:19], parent_end[:19])]
+            )
+            released_stock_maintenance = normalize_released_archive_stock(
+                database_path, workspace_path, occupied_ranges
+            )
+        except Exception as exc:
+            released_stock_maintenance = {
+                "updated_family_count": 0,
+                "moved_file_count": 0,
+                "warnings": [str(exc)],
+            }
+
     inventory_refresh_error = None
     inventory_summary = None
     try:
@@ -986,4 +1026,5 @@ def finish_event_change(
         "ssd_files_removed_by_app": int(ssd_cleanup.get("removed_original_file_count") or 0),
         "staging_files_removed_by_app": int(ssd_cleanup.get("removed_staging_file_count") or 0),
         "ssd_cleanup_warnings": list(ssd_cleanup.get("warnings") or []),
+        "released_stock_maintenance": released_stock_maintenance,
     }

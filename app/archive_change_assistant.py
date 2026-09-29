@@ -444,8 +444,9 @@ def build_archive_change_assistant(
                 "items": ["event.json"],
                 "file_count": 1,
                 "detail": (
-                    "Die bisherige event.json ist nach der Strukturänderung veraltet. "
-                    "Durch die vorbereitete neue Ereignisbeschreibung ersetzen."
+                    "Die bestehende event.json im Archiv durch die vorbereitete neue "
+                    "event.json ersetzen. Nicht daneben ablegen und keine zweite "
+                    "event.json im Ereignisordner behalten."
                 ),
                 "state": document_state,
             })
