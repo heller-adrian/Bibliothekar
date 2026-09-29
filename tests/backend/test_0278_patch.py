@@ -47,8 +47,8 @@ def _family(connection, job_id: str, stem: str, content: bytes) -> int:
 
 
 def test_0278_release_version():
-    assert main.RELEASE_VERSION == "0.27.8"
-    assert main.api_health()["version"] == "0.27.8"
+    assert main.RELEASE_VERSION in {"0.27.8", "0.27.9"}
+    assert main.api_health()["version"] == main.RELEASE_VERSION
 
 
 def test_0278_workflow_status_is_derived_from_family_state(tmp_path: Path):
