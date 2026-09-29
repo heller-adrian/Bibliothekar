@@ -461,14 +461,28 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 # into canonical free stock. Persist a lightweight marker that
                 # survives even when the source event itself is deleted.
                 c.execute(
-                    """INSERT OR REPLACE INTO released_free_families(
+                    """INSERT INTO released_free_families(
                            job_id,family_id,released_start_datetime,
-                           released_end_datetime,created_at
+                           released_end_datetime,created_at,archive_origin
                        )
-                       SELECT job_id,family_id,released_start_datetime,
-                              released_end_datetime,?
-                       FROM event_reapply_removed_families
-                       WHERE event_id=? AND job_id=? AND target_event_id IS NULL""",
+                       SELECT r.job_id,r.family_id,r.released_start_datetime,
+                              r.released_end_datetime,?,
+                              COALESCE((
+                                  SELECT marker.archive_origin
+                                  FROM released_free_families marker
+                                  WHERE marker.job_id=r.job_id
+                                    AND marker.family_id=r.family_id
+                              ),0)
+                       FROM event_reapply_removed_families r
+                       WHERE r.event_id=? AND r.job_id=? AND r.target_event_id IS NULL
+                       ON CONFLICT(job_id,family_id) DO UPDATE SET
+                           released_start_datetime=excluded.released_start_datetime,
+                           released_end_datetime=excluded.released_end_datetime,
+                           created_at=excluded.created_at,
+                           archive_origin=MAX(
+                               released_free_families.archive_origin,
+                               excluded.archive_origin
+                           )""",
                     (now,eid,job_id),
                 )
                 c.execute(
