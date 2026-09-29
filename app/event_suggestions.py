@@ -235,6 +235,13 @@ def accept_event_suggestion(
         }[status]
         event_id = "EVENT_" + uuid.uuid4().hex.upper()
         name = f"{prefix}: {target['name']}"
+        target_children = connection.execute(
+            """SELECT id,name,start_datetime,end_datetime,folder_name
+               FROM events
+               WHERE parent_event_id=? AND event_level='child'
+               ORDER BY start_datetime,id""",
+            (target_event_id,),
+        ).fetchall()
         connection.execute(
             """
             INSERT INTO events (
@@ -254,13 +261,62 @@ def accept_event_suggestion(
                 target_event_id, linkage,
             ),
         )
+        linked_children: list[dict[str, Any]] = []
+        for child in target_children:
+            child_id = "EVENT_" + uuid.uuid4().hex.upper()
+            connection.execute(
+                """
+                INSERT INTO events (
+                    id, job_id, parent_event_id, event_level, name,
+                    start_datetime, end_datetime, uses_time_range,
+                    folder_name, status, created_at, updated_at,
+                    event_kind, preserve_day_folders, revision,
+                    applied_at, archived_at
+                ) VALUES (?, ?, ?, 'child', ?, ?, ?, 1, ?, 'planned',
+                          ?, ?, 'event', ?, 1, NULL, NULL)
+                """,
+                (
+                    child_id,
+                    job_id,
+                    event_id,
+                    child["name"],
+                    child["start_datetime"],
+                    child["end_datetime"],
+                    child["folder_name"],
+                    now,
+                    now,
+                    int(target["preserve_day_folders"] or 0),
+                ),
+            )
+            linked_children.append({
+                "id": child_id,
+                "name": str(child["name"]),
+                "start_datetime": str(child["start_datetime"]),
+                "end_datetime": str(child["end_datetime"]),
+                "folder_name": str(child["folder_name"]),
+                "source_child_event_id": str(child["id"]),
+            })
+
+        def assignment_event_for(capture: str) -> str:
+            for child in linked_children:
+                if child["start_datetime"] <= capture <= child["end_datetime"]:
+                    return str(child["id"])
+            return event_id
+
         connection.executemany(
             """
             INSERT INTO event_assignments (
                 event_id, family_id, file_id, assignment_source, created_at
             ) VALUES (?, ?, NULL, 'manual', ?)
             """,
-            [(event_id, int(family["id"]), now) for family in families],
+            [
+                (
+                    assignment_event_for(str(family["selected_capture_time"] or "")),
+                    int(family["id"]),
+                    now,
+                )
+                for family in families
+            ],
         )
     return {
         "event_id": event_id,
@@ -272,4 +328,6 @@ def accept_event_suggestion(
         "name": name,
         "file_count": total_files,
         "status": "planned",
+        "child_event_count": len(linked_children),
+        "child_events": linked_children,
     }

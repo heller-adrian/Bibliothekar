@@ -5,6 +5,7 @@ from pathlib import Path
 import hashlib
 
 from app import main
+from app.event_suggestions import accept_event_suggestion
 from app.database import (
     create_job,
     database_connection,
@@ -128,3 +129,106 @@ def test_0278_import_ui_reports_skipped_duplicates():
     source=Path("app/main.py").read_text(encoding="utf-8")
     assert "Duplikate" in source
     assert "identischer Größe und identischem SHA-256" in source
+
+
+
+def test_0278_cross_backup_extension_mirrors_subevents(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        for job_id in ("anchor","incoming"):
+            connection.execute(
+                """INSERT INTO jobs(
+                       id,kind,trigger_type,state,stage,operation,source_volume_label,
+                       progress_current,progress_total,created_at,updated_at
+                   ) VALUES (?,'sd_import','manual','completed','completed',
+                             'folder_import',?,0,0,?,?)""",
+                (job_id, job_id, NOW, NOW),
+            )
+
+        connection.execute(
+            """INSERT INTO events(
+                   id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                   uses_time_range,folder_name,status,created_at,updated_at,event_kind,
+                   preserve_day_folders,revision
+               ) VALUES ('anchor_event','anchor',NULL,'parent','Reise',
+                         '2026-07-23T00:00:00','2026-07-23T23:59:59',0,
+                         '07-23 - Reise','planned',?,?,'event',0,1)""",
+            (NOW, NOW),
+        )
+        connection.execute(
+            """INSERT INTO events(
+                   id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                   uses_time_range,folder_name,status,created_at,updated_at,event_kind,
+                   preserve_day_folders,revision
+               ) VALUES ('anchor_morning','anchor','anchor_event','child','Morgen',
+                         '2026-07-23T00:00:00','2026-07-23T11:59:59',1,
+                         '00-00–11-59 - Morgen','planned',?,?,'event',0,1)""",
+            (NOW, NOW),
+        )
+        connection.execute(
+            """INSERT INTO events(
+                   id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                   uses_time_range,folder_name,status,created_at,updated_at,event_kind,
+                   preserve_day_folders,revision
+               ) VALUES ('anchor_afternoon','anchor','anchor_event','child','Nachmittag',
+                         '2026-07-23T12:00:00','2026-07-23T23:59:59',1,
+                         '12-00–23-59 - Nachmittag','planned',?,?,'event',0,1)""",
+            (NOW, NOW),
+        )
+
+        first=_family(connection,"incoming","IN_1",b"one")
+        second=_family(connection,"incoming","IN_2",b"two")
+        connection.execute(
+            "UPDATE file_families SET selected_capture_time='2026-07-23T10:00:00' WHERE id=?",
+            (first,),
+        )
+        connection.execute(
+            "UPDATE files SET selected_capture_time='2026-07-23T10:00:00' WHERE family_id=?",
+            (first,),
+        )
+        connection.execute(
+            "UPDATE file_families SET selected_capture_time='2026-07-23T18:00:00' WHERE id=?",
+            (second,),
+        )
+        connection.execute(
+            "UPDATE files SET selected_capture_time='2026-07-23T18:00:00' WHERE family_id=?",
+            (second,),
+        )
+
+    result=accept_event_suggestion(
+        db,
+        "incoming",
+        [first,second],
+        "anchor_event",
+    )
+    assert result["linkage_kind"] == "planned_extension"
+    assert result["child_event_count"] == 2
+
+    with database_connection(db) as connection:
+        linked=connection.execute(
+            "SELECT * FROM events WHERE id=?",
+            (result["event_id"],),
+        ).fetchone()
+        assert linked["linked_event_id"] == "anchor_event"
+        assert linked["linkage_kind"] == "planned_extension"
+
+        children=connection.execute(
+            """SELECT id,name,start_datetime,end_datetime
+               FROM events WHERE parent_event_id=? ORDER BY start_datetime""",
+            (result["event_id"],),
+        ).fetchall()
+        assert [row["name"] for row in children] == ["Morgen","Nachmittag"]
+
+        assigned=connection.execute(
+            """SELECT ff.original_stem,e.name AS event_name
+               FROM event_assignments ea
+               JOIN file_families ff ON ff.id=ea.family_id
+               JOIN events e ON e.id=ea.event_id
+               WHERE ff.job_id='incoming'
+               ORDER BY ff.original_stem"""
+        ).fetchall()
+        assert [(row["original_stem"],row["event_name"]) for row in assigned] == [
+            ("IN_1","Morgen"),
+            ("IN_2","Nachmittag"),
+        ]
