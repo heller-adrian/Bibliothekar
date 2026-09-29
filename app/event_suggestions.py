@@ -23,9 +23,9 @@ def _capture_day(value: str | None) -> str:
 
 def _action_label(status: str) -> str:
     return {
-        "planned": "Offene Planung ergänzen",
-        "applied": "Verknüpften Nachtrag anlegen",
-        "archived": "Manuellen Nachtrag bereitstellen",
+        "planned": "Zum Ereignis hinzufügen",
+        "applied": "Zum Ereignis hinzufügen",
+        "archived": "Zum archivierten Ereignis hinzufügen",
     }[status]
 
 
@@ -230,8 +230,8 @@ def accept_event_suggestion(
         }[status]
         prefix = {
             "planned": "Ergänzung",
-            "applied": "Nachtrag",
-            "archived": "Später zuordnen",
+            "applied": "Ergänzung",
+            "archived": "Archiv-Ergänzung",
         }[status]
         event_id = "EVENT_" + uuid.uuid4().hex.upper()
         name = f"{prefix}: {target['name']}"

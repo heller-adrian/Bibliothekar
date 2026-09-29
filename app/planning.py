@@ -132,7 +132,10 @@ def _load_active_assignments(
                 root.status AS root_status,
                 root.event_kind,
                 root.preserve_day_folders,
-                root.resort_required AS root_resort_required
+                root.resort_required AS root_resort_required,
+                root.job_id AS root_job_id,
+                root.linked_event_id AS root_linked_event_id,
+                root.linkage_kind AS root_linkage_kind
 
             FROM event_assignments AS ea
 
@@ -543,6 +546,17 @@ def list_job_planning_overview(
             {
                 "group_type": "event",
                 "event_id": root_event_id,
+                "job_id": str(row["root_job_id"]),
+                "linked_event_id": (
+                    str(row["root_linked_event_id"])
+                    if row["root_linked_event_id"] is not None
+                    else None
+                ),
+                "linkage_kind": (
+                    str(row["root_linkage_kind"])
+                    if row["root_linkage_kind"] is not None
+                    else None
+                ),
                 "event_name": str(
                     row["root_event_name"]
                 ),
@@ -635,9 +649,14 @@ def list_job_planning_overview(
     available_day_groups = interval_cards(database_path, job_id, available_families, total_by_day)
 
     available_day_groups.sort(key=lambda x:(str(x.get('start_datetime') or ''),str(x.get('card_key') or '')))
-    event_groups = list(
-        event_groups_by_id.values()
-    )
+    # Archivierte Ereignisse belegen ihren Bestand weiterhin, gehören aber
+    # nicht mehr in die aktive Aufnahmenansicht. Dort erscheinen nur freie,
+    # geplante und angewendete Arbeitsbestände.
+    event_groups = [
+        event
+        for event in event_groups_by_id.values()
+        if str(event.get("status") or "") != "archived"
+    ]
 
     for event in event_groups:
         live_root_kind = (
