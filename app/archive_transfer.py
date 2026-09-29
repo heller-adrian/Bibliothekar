@@ -253,6 +253,8 @@ def list_archive_candidates(
                 COALESCE(counts.total_size_bytes, 0) AS total_size_bytes,
                 latest_verification.id AS verification_id,
                 latest_verification.status AS verification_status,
+                latest_verification.file_count AS verification_file_count,
+                latest_verification.total_size_bytes AS verification_total_size_bytes,
                 latest_verification.verified_file_count,
                 latest_verification.missing_file_count,
                 latest_verification.mismatched_file_count,
@@ -304,6 +306,13 @@ def list_archive_candidates(
             and item.get("verification_error_message") == "verification_invalidated_by_edit"
         )
         item["verified"] = item.get("verification_status") == "verified"
+        if item.get("verification_file_count") is not None:
+            item["file_count"] = int(item.get("verification_file_count") or 0)
+            item["total_size_bytes"] = int(
+                item.get("verification_total_size_bytes")
+                or item.get("total_size_bytes")
+                or 0
+            )
         item["released"] = (
             item.get("release_status") == "completed"
             or item.get("status") == "archived"
