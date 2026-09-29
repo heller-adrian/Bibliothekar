@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from app.archive_transfer import list_archive_candidates, verify_event_archive
 from app.database import (
@@ -381,4 +382,4 @@ def test_0277_visible_release_version_is_0277():
     from app import main
     assert main.RELEASE_VERSION == "0.27.7"
     payload = main.healthz()
-    assert payload["version"] == "0.27.7"
+    assert json.loads(payload.body)["version"] == "0.27.7"
