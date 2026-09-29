@@ -3041,29 +3041,14 @@ def delete_planned_event(
                     for r in capture_rows
                 }
                 connection.executemany(
-                    """INSERT INTO released_free_families(
-                           job_id,family_id,released_start_datetime,released_end_datetime,
-                           created_at,archive_origin)
-                       VALUES (?,?,?,?,?,
-                           COALESCE((
-                               SELECT marker.archive_origin
-                               FROM released_free_families marker
-                               WHERE marker.job_id=? AND marker.family_id=?
-                           ),0)
-                       )
-                       ON CONFLICT(job_id,family_id) DO UPDATE SET
-                           released_start_datetime=excluded.released_start_datetime,
-                           released_end_datetime=excluded.released_end_datetime,
-                           created_at=excluded.created_at,
-                           archive_origin=MAX(
-                               released_free_families.archive_origin,
-                               excluded.archive_origin
-                           )""",
+                    """INSERT OR REPLACE INTO released_free_families(
+                           job_id,family_id,released_start_datetime,released_end_datetime,created_at)
+                       VALUES (?,?,?,?,?)""",
                     [(
                         job_id, fid,
                         release_by_family.get(fid)[0] if release_by_family.get(fid) else None,
                         release_by_family.get(fid)[1] if release_by_family.get(fid) else None,
-                        now, job_id, fid,
+                        now,
                     ) for fid in family_ids],
                 )
             connection.execute("DELETE FROM events WHERE id=? AND job_id=?", (event_id, job_id))
@@ -3409,27 +3394,12 @@ def update_event_definition(
         # reconcile evidence until the confirmed workspace transaction finishes.
         if not is_applied:
             connection.execute(
-                """INSERT INTO released_free_families(
-                       job_id,family_id,released_start_datetime,released_end_datetime,
-                       created_at,archive_origin)
-                   SELECT r.job_id,r.family_id,r.released_start_datetime,r.released_end_datetime,?,
-                          COALESCE((
-                              SELECT marker.archive_origin
-                              FROM released_free_families marker
-                              WHERE marker.job_id=r.job_id
-                                AND marker.family_id=r.family_id
-                          ),0)
-                   FROM event_reapply_removed_families r
-                   WHERE r.event_id=? AND r.job_id=? AND r.target_event_id IS NULL
-                     AND COALESCE(r.target_kind,'') <> 'released_free'
-                   ON CONFLICT(job_id,family_id) DO UPDATE SET
-                       released_start_datetime=excluded.released_start_datetime,
-                       released_end_datetime=excluded.released_end_datetime,
-                       created_at=excluded.created_at,
-                       archive_origin=MAX(
-                           released_free_families.archive_origin,
-                           excluded.archive_origin
-                       )""",
+                """INSERT OR REPLACE INTO released_free_families(
+                       job_id,family_id,released_start_datetime,released_end_datetime,created_at)
+                   SELECT job_id,family_id,released_start_datetime,released_end_datetime,?
+                   FROM event_reapply_removed_families
+                   WHERE event_id=? AND job_id=? AND target_event_id IS NULL
+                     AND COALESCE(target_kind,'') <> 'released_free'""",
                 (now, event_id, job_id),
             )
             connection.execute(
@@ -3755,29 +3725,14 @@ def update_event_definition(
                 )
             else:
                 connection.executemany(
-                    """INSERT INTO released_free_families(
-                           job_id,family_id,released_start_datetime,released_end_datetime,
-                           created_at,archive_origin)
-                       VALUES (?,?,?,?,?,
-                           COALESCE((
-                               SELECT marker.archive_origin
-                               FROM released_free_families marker
-                               WHERE marker.job_id=? AND marker.family_id=?
-                           ),0)
-                       )
-                       ON CONFLICT(job_id,family_id) DO UPDATE SET
-                           released_start_datetime=excluded.released_start_datetime,
-                           released_end_datetime=excluded.released_end_datetime,
-                           created_at=excluded.created_at,
-                           archive_origin=MAX(
-                               released_free_families.archive_origin,
-                               excluded.archive_origin
-                           )""",
+                    """INSERT OR REPLACE INTO released_free_families(
+                           job_id,family_id,released_start_datetime,released_end_datetime,created_at)
+                       VALUES (?,?,?,?,?)""",
                     [(
                         job_id, family_id,
                         released_by_family.get(family_id)[0] if released_by_family.get(family_id) else None,
                         released_by_family.get(family_id)[1] if released_by_family.get(family_id) else None,
-                        now, job_id, family_id,
+                        now,
                     ) for family_id in removed_ids],
                 )
 
