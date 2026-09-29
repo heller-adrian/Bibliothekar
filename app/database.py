@@ -2100,6 +2100,11 @@ def search_events(
                      COUNT(DISTINCT ea.file_id) AS file_count
               FROM event_assignments ea JOIN events a ON a.id=ea.event_id
               GROUP BY COALESCE(a.parent_event_id,a.id)
+            ), inventory_counts AS (
+              SELECT event_id,root_kind,COUNT(*) AS file_count
+              FROM event_inventory_files
+              WHERE asset_kind IN ('camera_original','xmp','export','derived_media')
+              GROUP BY event_id,root_kind
             ), pending AS (
               SELECT event_id, COUNT(*) AS pending_count
               FROM event_reapply_removed_families
@@ -2117,7 +2122,13 @@ def search_events(
               GROUP BY target_event_id
             )
             SELECT e.*, COALESCE(root.family_count,0) AS assigned_family_count,
-                   COALESCE(root.file_count,0) AS assigned_file_count,
+                   CASE
+                     WHEN e.status='archived' AND archive_inventory.file_count IS NOT NULL
+                       THEN archive_inventory.file_count
+                     WHEN e.status='applied' AND workspace_inventory.file_count IS NOT NULL
+                       THEN workspace_inventory.file_count
+                     ELSE COALESCE(root.file_count,0)
+                   END AS assigned_file_count,
                    COALESCE(pending.pending_count,0) AS pending_reassignment_count,
                    active_mutation.id AS mutation_id, active_mutation.status AS mutation_status,
                    active_mutation.anchor_event_id AS mutation_anchor_event_id,
@@ -2128,6 +2139,12 @@ def search_events(
             FROM events e
             JOIN jobs j ON j.id=e.job_id
             LEFT JOIN root_counts root ON root.root_event_id=e.id
+            LEFT JOIN inventory_counts workspace_inventory
+              ON workspace_inventory.event_id=e.id
+             AND workspace_inventory.root_kind='shared_workspace'
+            LEFT JOIN inventory_counts archive_inventory
+              ON archive_inventory.event_id=e.id
+             AND archive_inventory.root_kind='camera_archive'
             LEFT JOIN pending ON pending.event_id=e.id
             LEFT JOIN active_mutation ON active_mutation.job_id=e.job_id
             LEFT JOIN reconcile_target ON reconcile_target.target_event_id=e.id
