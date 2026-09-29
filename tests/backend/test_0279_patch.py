@@ -38,6 +38,14 @@ def test_0279_cross_backup_accept_api_returns_after_success(tmp_path: Path, monk
             (NOW, NOW),
         )
         family_id = _family(connection, "incoming", "INCOMING", b"incoming")
+        connection.execute(
+            "UPDATE file_families SET selected_capture_time='2026-07-19T12:00:00' WHERE id=?",
+            (family_id,),
+        )
+        connection.execute(
+            "UPDATE files SET selected_capture_time='2026-07-19T12:00:00' WHERE family_id=?",
+            (family_id,),
+        )
 
     monkeypatch.setattr(main, "DATABASE_FILE", db)
     result = main.api_accept_event_suggestion(
