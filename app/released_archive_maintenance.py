@@ -68,6 +68,7 @@ def normalize_released_archive_stock_for_days(
                     FROM released_free_families marker
                     JOIN file_families ff ON ff.id=marker.family_id
                     WHERE substr(ff.selected_capture_time,1,10) IN ({placeholders})
+                      AND marker.archive_origin=1
                       AND NOT EXISTS (
                         SELECT 1 FROM event_assignments ea
                         JOIN events e ON e.id=ea.event_id
