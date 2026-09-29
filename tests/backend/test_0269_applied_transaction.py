@@ -86,7 +86,8 @@ def test_0269_applied_edit_and_delete_are_mandatory_transactions():
     assert 'status="pending_apply"' in database
     assert '"reassignment_required": False,' in database
     assert '"reassignment_required": False, "removed_family_ids": family_ids' in database
-    assert "INSERT OR REPLACE INTO released_free_families" in reconcile
+    assert "ON CONFLICT(job_id,family_id) DO UPDATE SET" in reconcile
+    assert "archive_origin=MAX(" in reconcile
     assert 'DELETE FROM events WHERE id=? AND job_id=?' in reconcile
 
     assert 'let mandatoryMutationContext = null' in EVENTS_HTML
