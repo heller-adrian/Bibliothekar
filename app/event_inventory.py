@@ -197,7 +197,7 @@ def _asset_kind(event_relative_path: str, media_type: str, known_file_id: int | 
 
 
 _FILENAME_SCHEMA_RE = re.compile(
-    r"(?<!\\d)(?P<date>20\\d{6})[_-](?P<time>\\d{6})(?!\\d)"
+    r"(?<!\d)(?P<date>20\d{6})[_-](?P<time>\d{6})(?!\d)"
 )
 
 

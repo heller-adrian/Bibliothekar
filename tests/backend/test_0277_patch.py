@@ -191,6 +191,12 @@ def test_0277_reapply_plan_keeps_xmp_with_camera_and_export_in_export_branch(
 
     with database_connection(db) as connection:
         seed_job(connection)
+        connection.execute(
+            """UPDATE jobs
+               SET operation='folder_import', stage='event_sort_applied',
+                   source_volume_label='TEST'
+               WHERE id='j'"""
+        )
         seed_event(connection, status="applied")
         connection.execute("UPDATE events SET resort_required=1 WHERE id='e'")
         _seed_family(
