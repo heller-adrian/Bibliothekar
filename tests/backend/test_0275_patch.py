@@ -226,14 +226,20 @@ def test_0275_unknown_extra_can_be_removed_then_verified_and_reversal_has_backup
 
     confirm_event_change(db, cr_id, archive, workspace)
     first = verify_event_change(db, cr_id, archive, workspace)
-    extra_review = next(row for row in first["files"] if row["old_path"] == extra_rel)
+    extra_review = next(
+        row for row in first["files"]
+        if row["old_path"] == extra_rel and row.get("action") == "unresolved"
+    )
     assert extra_review["status"] == "needs_assignment"
     assert "Zusätzliche Datei ohne SOLL-Ziel" in extra_review["message"]
     assert extra_rel in extra_review["message"]
 
     extra_path.unlink()
     second = verify_event_change(db, cr_id, archive, workspace)
-    extra_review = next(row for row in second["files"] if row["old_path"] == extra_rel)
+    extra_review = next(
+        row for row in second["files"]
+        if row["old_path"] == extra_rel and row.get("action") == "unresolved"
+    )
     assert extra_review["status"] == "verified"
     assert "entfernt" in extra_review["message"]
 

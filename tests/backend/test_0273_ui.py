@@ -20,8 +20,8 @@ def test_0273_reversal_is_separate_right_to_left_three_step_workflow():
 
 def test_0273_finder_disclosures_are_left_aligned_and_share_triangle():
     source = (ROOT / "app" / "events_ui.py").read_text()
-    assert ".change-operation > summary," in source
-    assert ".change-disclosure > summary" in source
+    assert "#change-request-dialog details > summary" in source
+    assert "#change-request-dialog details > summary::before" in source
     assert 'content:"▸"' in source
     assert 'content:"▾"' in source
     assert "text-align:left !important" in source
