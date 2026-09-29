@@ -6,7 +6,7 @@ This module writes only below Arbeitsbereich/Freigewordene Archivdateien.
 The camera archive is never touched.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 import os
@@ -35,19 +35,27 @@ def _subtract(
     end: str,
     occupied: list[tuple[str, str]],
 ) -> list[tuple[str, str]]:
-    parts = [(start, end)]
+    def parse(value: str) -> datetime:
+        return datetime.fromisoformat(value[:19])
+    def text(value: datetime) -> str:
+        return value.isoformat(timespec="seconds")
+
+    parts = [(parse(start), parse(end))]
     for occ_start, occ_end in sorted(occupied):
-        next_parts: list[tuple[str, str]] = []
+        occ_left, occ_right = parse(occ_start), parse(occ_end)
+        next_parts: list[tuple[datetime, datetime]] = []
         for left, right in parts:
-            if occ_end < left or occ_start > right:
+            if occ_right < left or occ_left > right:
                 next_parts.append((left, right))
                 continue
-            if occ_start > left:
-                next_parts.append((left, occ_start))
-            if occ_end < right:
-                next_parts.append((occ_end, right))
+            before_end = occ_left - timedelta(seconds=1)
+            after_start = occ_right + timedelta(seconds=1)
+            if left <= before_end:
+                next_parts.append((left, min(right, before_end)))
+            if after_start <= right:
+                next_parts.append((max(left, after_start), right))
         parts = next_parts
-    return parts
+    return [(text(left), text(right)) for left, right in parts]
 
 
 def _safe_work_path(root: Path, relative: str) -> Path:
