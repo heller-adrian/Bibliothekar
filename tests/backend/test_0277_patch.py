@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.archive_transfer import verify_event_archive
-from app.database import database_connection, initialize_database, list_job_events
+from app.archive_transfer import list_archive_candidates, verify_event_archive
+from app.database import database_connection, initialize_database, list_job_events, search_events
 from app.event_inventory import scan_event_inventory
 from app.sort_plan import build_event_sort_plan
 from tests.backend.test_0263_event_inventory import (
@@ -179,6 +179,15 @@ def test_0277_applied_archive_verification_counts_and_journals_xmp_export(
 
     event = next(row for row in list_job_events(db, "j") if row["id"] == "e")
     assert event["assigned_file_count"] == 3
+
+    searched = search_events(db, "Trip")["events"][0]
+    assert searched["assigned_file_count"] == 3
+
+    archive_card = next(
+        row for row in list_archive_candidates(db, archive)["candidates"]
+        if row["event_id"] == "e"
+    )
+    assert archive_card["file_count"] == 3
 
 
 def test_0277_reapply_plan_keeps_xmp_with_camera_and_export_in_export_branch(
