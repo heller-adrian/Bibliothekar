@@ -219,9 +219,9 @@ def test_0277_reapply_plan_keeps_xmp_with_camera_and_export_in_export_branch(
     assert plan["summary"]["asset_count"] == 2
 
     assets = {row["asset_kind"]: row for row in plan["assets"]}
-    assert assets["xmp"]["destination"].endswith(
+    assert assets["xmp"]["destination_relative_path"].endswith(
         "/07-23 - Trip/Alle/IMG_0001.xmp"
     )
-    assert assets["export"]["destination"].endswith(
+    assert assets["export"]["destination_relative_path"].endswith(
         "/07-23 - Trip/Export/20260723_120000_IMG_0001.jpg"
     )
