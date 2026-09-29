@@ -264,38 +264,36 @@ EVENTS_HTML = r"""<!doctype html>
       padding:13px 14px;
       font-weight:750;
     }
-    .change-operation > summary,
-    .change-disclosure > summary {
+    #change-request-dialog details > summary {
       list-style:none !important;
       display:grid !important;
-      grid-template-columns:20px minmax(0,1fr) auto !important;
+      grid-template-columns:22px minmax(0,1fr) auto !important;
       align-items:center !important;
       justify-content:initial !important;
       gap:8px !important;
       text-align:left !important;
+      cursor:pointer;
     }
-    .change-operation > summary::-webkit-details-marker,
-    .change-disclosure > summary::-webkit-details-marker {
-      display:none;
+    #change-request-dialog details > summary::-webkit-details-marker {
+      display:none !important;
     }
-    .change-operation > summary::marker,
-    .change-disclosure > summary::marker {
-      content:"";
+    #change-request-dialog details > summary::marker {
+      content:"" !important;
     }
-    .change-operation > summary::before,
-    .change-disclosure > summary::before {
+    #change-request-dialog details > summary::before {
       content:"▸";
       display:block;
-      width:20px;
-      font-size:18px;
+      width:22px;
+      font-size:19px;
+      font-weight:700;
       line-height:1;
       text-align:center;
       color:currentColor;
     }
-    .change-operation[open] > summary::before,
-    .change-disclosure[open] > summary::before {
+    #change-request-dialog details[open] > summary::before {
       content:"▾";
     }
+
     .change-operation[open] > summary {
       border-bottom:1px solid var(--border);
     }
@@ -3640,6 +3638,18 @@ EVENTS_HTML = r"""<!doctype html>
       }
 
       changeRequestBody.innerHTML = html;
+      const showReversalError = message => {
+        let box=changeRequestBody.querySelector("#reversal-inline-error");
+        if(!box){
+          box=document.createElement("div");
+          box.id="reversal-inline-error";
+          box.className="card danger-text";
+          box.style.marginBottom="12px";
+          changeRequestBody.prepend(box);
+        }
+        box.textContent=String(message||"Unbekannter Fehler");
+        box.hidden=false;
+      };
 
       changeRequestBody.querySelector("[data-reversal-prepare]")?.addEventListener("click", async event => {
         const button=event.currentTarget;
@@ -3652,7 +3662,7 @@ EVENTS_HTML = r"""<!doctype html>
           await showArchiveReversalDetail(crId,{assistant:next});
         } catch(error) {
           button.disabled=false;
-          setStatus(error.message,true);
+          showReversalError(error.message);
         }
       });
 
@@ -3665,7 +3675,7 @@ EVENTS_HTML = r"""<!doctype html>
           await showArchiveReversalDetail(crId,{refreshLive:true});
         } catch(error) {
           button.disabled=false;
-          setStatus(error.message,true);
+          showReversalError(error.message);
         }
       });
 
@@ -3700,7 +3710,7 @@ EVENTS_HTML = r"""<!doctype html>
           }
         } catch(error) {
           verifyButton.disabled=false;
-          setStatus(error.message,true);
+          showReversalError(error.message);
         }
       });
 
@@ -3722,7 +3732,7 @@ EVENTS_HTML = r"""<!doctype html>
           setStatus("Rückänderung abgeschlossen. Die Archivänderung wurde verworfen.",false,true);
         } catch(error) {
           finishButton.disabled=false;
-          setStatus(error.message,true);
+          showReversalError(error.message);
         }
       });
     }

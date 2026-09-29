@@ -60,6 +60,12 @@ TRANSFER_HTML = r'''<!doctype html>
     button { cursor:pointer; }
     button:disabled { cursor:not-allowed; opacity:.5; }
     .primary { border-color:var(--accent); }
+    .archive-verify-button {
+      background:var(--warning) !important;
+      border-color:var(--warning) !important;
+      color:#201a0b !important;
+      font-weight:700;
+    }
     .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
     .card { border:1px solid var(--border); border-radius:16px; background:var(--surface); padding:15px; min-width:0; }
     .summary strong { display:block; font-size:1.35rem; margin-top:5px; }
@@ -194,10 +200,14 @@ TRANSFER_HTML = r'''<!doctype html>
     if(!open.length) archiveList.innerHTML='<div class="empty">Keine offenen Ereignisse zur Archivprüfung.</div>';
     for(const item of open){
       const card=document.createElement('article');card.className='card archive-check-card';
-      const verification=item.released?'SSD freigegeben':(item.verified?'Vollständig geprüft':(item.verification_status||'Noch nicht geprüft'));
+      const verification=item.released
+        ?'SSD freigegeben'
+        :(item.verified
+          ?'Vollständig geprüft'
+          :(item.verification_invalidated?'Erneut prüfen':(item.verification_status||'Noch nicht geprüft')));
       const releaseDisabled=!item.ssd_release_ready;
       const releaseLabel=item.released?'SSD freigegeben':'SSD freigeben';
-      card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge ${(item.verified||item.released)?'success':'warning'}">${escapeHtml(verification)}</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div><div class="actions"><button class="primary verify" ${summary.archive_readable?'':'disabled'}>Archiv prüfen</button><button class="release" ${releaseDisabled?'disabled':''}>${releaseLabel}</button></div><div class="result" hidden></div>`;
+      card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge ${(item.verified||item.released)?'success':'warning'}">${escapeHtml(verification)}</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div><div class="actions"><button class="verify archive-verify-button" ${summary.archive_readable?'':'disabled'}>Archiv prüfen</button><button class="release" ${releaseDisabled?'disabled':''}>${releaseLabel}</button></div><div class="result" hidden></div>`;
       const result=card.querySelector('.result');
       const verifyButton=card.querySelector('.verify');
       const releaseButton=card.querySelector('.release');

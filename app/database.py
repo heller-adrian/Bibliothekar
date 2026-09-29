@@ -3765,6 +3765,46 @@ def update_event_definition(
                 status="pending_apply",
             )
 
+        if is_applied:
+            latest_verification = connection.execute(
+                """SELECT * FROM event_archive_verifications
+                   WHERE job_id=? AND event_id=?
+                   ORDER BY created_at DESC,id DESC LIMIT 1""",
+                (job_id, event_id),
+            ).fetchone()
+            if (
+                latest_verification is not None
+                and str(latest_verification["status"] or "") == "verified"
+            ):
+                invalidation_id = "ARCHIVE_INVALIDATED_" + uuid.uuid4().hex.upper()
+                connection.execute(
+                    """INSERT INTO event_archive_verifications(
+                           id,job_id,event_id,status,archive_root,file_count,
+                           verified_file_count,total_size_bytes,verified_size_bytes,
+                           missing_file_count,mismatched_file_count,details_json,
+                           error_message,created_at,updated_at,completed_at
+                       ) VALUES (?,?,?,'failed',?,?,?,?,?,0,0,?,?,?,?,?)""",
+                    (
+                        invalidation_id, job_id, event_id,
+                        str(latest_verification["archive_root"] or ""),
+                        int(latest_verification["file_count"] or 0),
+                        0,
+                        int(latest_verification["total_size_bytes"] or 0),
+                        0,
+                        json.dumps(
+                            {
+                                "invalidated": True,
+                                "reason": "structural_applied_edit",
+                                "supersedes_verification_id": str(latest_verification["id"]),
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "verification_invalidated_by_edit",
+                        now, now, now,
+                    ),
+                )
+
         connection.execute(
             """INSERT INTO audit_log(job_id, action, entity_type, entity_id, details_json, created_at)
                VALUES (?, 'event_edited', 'event', ?, ?, ?)""",

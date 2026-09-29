@@ -18,7 +18,7 @@ from app.event_document import EVENT_DOCUMENT_FILENAME, EVENT_DOCUMENT_VERSION
 from app.structure_view import render_structure
 
 
-SOURCE_APP_VERSION = "0.27.2"
+SOURCE_APP_VERSION = "0.27.5"
 
 
 class ArchiveChangeDocumentError(RuntimeError):

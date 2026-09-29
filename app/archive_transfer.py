@@ -257,6 +257,7 @@ def list_archive_candidates(
                 latest_verification.missing_file_count,
                 latest_verification.mismatched_file_count,
                 latest_verification.completed_at AS verification_completed_at,
+                latest_verification.error_message AS verification_error_message,
                 latest_release.id AS release_id,
                 latest_release.status AS release_status,
                 latest_release.deleted_file_count AS release_deleted_file_count,
@@ -298,6 +299,10 @@ def list_archive_candidates(
         item = dict(row)
         item["archive_verification_ready"] = bool(readable)
         item["archive_root"] = str(archive_root)
+        item["verification_invalidated"] = (
+            item.get("verification_status") == "failed"
+            and item.get("verification_error_message") == "verification_invalidated_by_edit"
+        )
         item["verified"] = item.get("verification_status") == "verified"
         item["released"] = (
             item.get("release_status") == "completed"
@@ -331,7 +336,11 @@ def list_archive_candidates(
         "candidate_count": sum(1 for item in candidates if not item["released"]),
         "verified_count": sum(1 for item in candidates if item["verified"] and not item["released"]),
         "released_count": sum(1 for item in candidates if item["released"]),
-        "blocked_count": sum(1 for item in candidates if item.get("verification_status") == "failed"),
+        "blocked_count": sum(
+            1 for item in candidates
+            if item.get("verification_status") == "failed"
+            and not item.get("verification_invalidated")
+        ),
         "candidates": candidates,
     }
 
