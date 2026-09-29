@@ -480,6 +480,23 @@ def list_job_planning_overview(
         job_id,
     )
 
+    with database_connection(database_path) as connection:
+        live_rows = connection.execute(
+            """SELECT event_id,root_kind,
+                      COUNT(*) AS file_count,
+                      COUNT(DISTINCT family_id) AS family_count,
+                      COALESCE(SUM(size_bytes),0) AS total_size_bytes
+               FROM event_inventory_files
+               WHERE job_id=?
+                 AND asset_kind IN ('camera_original','xmp','export','derived_media')
+               GROUP BY event_id,root_kind""",
+            (job_id,),
+        ).fetchall()
+    live_counts = {
+        (str(row["event_id"]), str(row["root_kind"])): dict(row)
+        for row in live_rows
+    }
+
     families_by_id = {
         int(family["family_id"]): family
         for family in family_stats
@@ -623,6 +640,23 @@ def list_job_planning_overview(
     )
 
     for event in event_groups:
+        live_root_kind = (
+            "camera_archive"
+            if event["status"] == "archived"
+            else "shared_workspace"
+            if event["status"] == "applied"
+            else None
+        )
+        live = (
+            live_counts.get((str(event["event_id"]), live_root_kind))
+            if live_root_kind is not None
+            else None
+        )
+        if live is not None:
+            event["file_count"] = int(live["file_count"] or 0)
+            event["family_count"] = int(live["family_count"] or 0)
+            event["total_size_bytes"] = int(live["total_size_bytes"] or 0)
+            event["live_inventory"] = True
         if event['event_kind']=='no_event':
             from app.event_timeline import list_event_segments
             segments=list_event_segments(database_path,event['event_id'])

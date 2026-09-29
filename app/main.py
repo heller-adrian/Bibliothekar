@@ -21,6 +21,7 @@ from app.workspace_ui import WORKSPACE_HTML
 from app.events_ui import EVENTS_HTML
 from app.transfer_ui import TRANSFER_HTML
 from app.ui_shell import apply_shell
+from app.live_inventory import refresh_live_event_inventories
 
 from app.database import (
     claim_next_job,
@@ -145,7 +146,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.27.5"
+APP_VERSION = "0.27.7"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4035,6 +4036,13 @@ def api_job_events(
             detail="Auftrag wurde nicht gefunden.",
         )
 
+    refresh_live_event_inventories(
+        DATABASE_FILE,
+        WORKSPACE_PATH,
+        ARCHIVE_ROOT,
+        job_id=job_id,
+    )
+
     events = list_job_events(
         DATABASE_FILE,
         job_id,
@@ -4401,6 +4409,13 @@ def api_event_structure(job_id: str, event_id: str):
     database facts next to the rendered tree prevents the UI from having to
     infer time boundaries from file names or from the folder layout.
     """
+    refresh_live_event_inventories(
+        DATABASE_FILE,
+        WORKSPACE_PATH,
+        ARCHIVE_ROOT,
+        job_id=job_id,
+        event_id=event_id,
+    )
     context = get_event_edit_context(DATABASE_FILE, job_id, event_id)
     event = context["event"]
     from app.structure_view import render_structure
@@ -4506,6 +4521,13 @@ def api_event_structure(job_id: str, event_id: str):
 def api_event_edit_context(job_id: str, event_id: str) -> dict[str, Any]:
     if get_job(DATABASE_FILE, job_id) is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
+    refresh_live_event_inventories(
+        DATABASE_FILE,
+        WORKSPACE_PATH,
+        ARCHIVE_ROOT,
+        job_id=job_id,
+        event_id=event_id,
+    )
     try:
         return get_event_edit_context(DATABASE_FILE, job_id, event_id)
     except ValueError as error:
@@ -5299,6 +5321,11 @@ def api_event_preview(
 
 @app.get("/api/events/search", tags=["Ereignisse"])
 def api_search_events(q: str = "", limit: int = 25, offset: int = 0) -> dict[str, Any]:
+    refresh_live_event_inventories(
+        DATABASE_FILE,
+        WORKSPACE_PATH,
+        ARCHIVE_ROOT,
+    )
     return search_events(DATABASE_FILE, query=q, limit=limit, offset=offset)
 
 
@@ -5482,6 +5509,13 @@ def api_workspace_summary(
             detail="Auftrag wurde nicht gefunden.",
         )
 
+    live_inventory = refresh_live_event_inventories(
+        DATABASE_FILE,
+        WORKSPACE_PATH,
+        ARCHIVE_ROOT,
+        job_id=job_id,
+    )
+
     day_groups = list_job_day_groups(
         DATABASE_FILE,
         job_id,
@@ -5523,6 +5557,7 @@ def api_workspace_summary(
 
     return {
         "job": job,
+        "live_inventory": live_inventory,
         "day_groups": day_groups,
         "event_count": len(events),
         "events": events,
