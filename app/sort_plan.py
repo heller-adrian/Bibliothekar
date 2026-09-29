@@ -1735,7 +1735,8 @@ def build_event_sort_plan(
         for asset in reapply_inventory.get("files", []):
             if asset.get("known_file_id") is not None:
                 continue
-            if str(asset.get("asset_kind") or "") != "xmp":
+            asset_kind = str(asset.get("asset_kind") or "")
+            if asset_kind not in {"xmp", "export"}:
                 continue
 
             source_relative = _safe_relative_path(
@@ -1761,7 +1762,7 @@ def build_event_sort_plan(
                     "code": "xmp_family_unresolved",
                     "path": str(source_relative),
                     "message": (
-                        "Eine XMP-Datei konnte keiner Kamerafamilie eindeutig "
+                        "Eine XMP-/Exportdatei konnte keiner Kamerafamilie eindeutig "
                         "zugeordnet werden: " + str(source_relative)
                     ),
                 })
@@ -1795,14 +1796,24 @@ def build_event_sort_plan(
                     "family_id": family_id,
                     "path": str(source_relative),
                     "message": (
-                        "Das Ziel einer XMP-Datei ist innerhalb ihrer "
+                        "Das Ziel einer XMP-/Exportdatei ist innerhalb ihrer "
                         "Kamerafamilie nicht eindeutig: " + str(source_relative)
                     ),
                 })
                 continue
 
             destination_parent = PurePosixPath(next(iter(target_parents)))
-            filename = _safe_component(source_relative.name, "XMP-Dateiname")
+            if asset_kind == "export":
+                # Export ist eine eigene Schwesterrolle zu Alle/Sortiert und
+                # folgt beim Nachsortieren demselben Ereignis-/Tagescontainer.
+                if destination_parent.name in WORKSPACE_BRANCHES:
+                    destination_parent = destination_parent.parent / "Export"
+                elif destination_parent.name != "Export":
+                    destination_parent = destination_parent / "Export"
+            filename = _safe_component(
+                source_relative.name,
+                "Export-Dateiname" if asset_kind == "export" else "XMP-Dateiname",
+            )
             destination_relative = destination_parent / filename
             destination_absolute = target_root.joinpath(
                 *destination_relative.parts
@@ -1901,7 +1912,7 @@ def build_event_sort_plan(
 
             planned_directories.add(str(destination_relative.parent))
             asset_entry = {
-                "asset_kind": "xmp",
+                "asset_kind": asset_kind,
                 "family_id": family_id,
                 "source_file_id": source_file_id,
                 "source_relative_path": str(source_relative),

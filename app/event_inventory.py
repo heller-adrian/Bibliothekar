@@ -6,6 +6,7 @@ from typing import Any
 import hashlib
 import os
 import stat
+import re
 
 from app.database import database_connection
 from app.metadata import MetadataError, analyze_tree, classify_media
@@ -195,6 +196,68 @@ def _asset_kind(event_relative_path: str, media_type: str, known_file_id: int | 
     return "other"
 
 
+_FILENAME_SCHEMA_RE = re.compile(
+    r"(?<!\\d)(?P<date>20\\d{6})[_-](?P<time>\\d{6})(?!\\d)"
+)
+
+
+def _filename_schema_capture_time(filename: str) -> str | None:
+    """Read the canonical JJJJMMTT_HHMMSS timestamp from an export name."""
+    match = _FILENAME_SCHEMA_RE.search(Path(str(filename or "")).stem)
+    if match is None:
+        return None
+    value = match.group("date") + match.group("time")
+    try:
+        parsed = datetime.strptime(value, "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+    return parsed.isoformat(timespec="seconds")
+
+
+def _filename_family_source(
+    filename: str,
+    known_files: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Conservatively match an export name to exactly one imported family."""
+    export_stem = Path(str(filename or "")).stem.casefold()
+    if not export_stem:
+        return None
+
+    by_family: dict[int, dict[str, Any]] = {}
+    for row in known_files:
+        if row.get("family_id") is None:
+            continue
+        original_stem = str(
+            row.get("original_stem")
+            or Path(str(row.get("original_filename") or "")).stem
+        ).strip().casefold()
+        if len(original_stem) < 3:
+            continue
+
+        token_pattern = re.compile(
+            rf"(^|[ _.-]){re.escape(original_stem)}($|[ _.-])"
+        )
+        if export_stem == original_stem or token_pattern.search(export_stem):
+            by_family.setdefault(int(row["family_id"]), row)
+
+    if len(by_family) != 1:
+        return None
+    return next(iter(by_family.values()))
+
+
+def _capture_seconds_apart(left: str | None, right: str | None) -> float | None:
+    try:
+        a = datetime.fromisoformat(str(left or ""))
+        b = datetime.fromisoformat(str(right or ""))
+        if a.tzinfo is not None:
+            a = a.astimezone(timezone.utc).replace(tzinfo=None)
+        if b.tzinfo is not None:
+            b = b.astimezone(timezone.utc).replace(tzinfo=None)
+        return abs((a - b).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
 def _best_known_match(
     *,
     sha256: str,
@@ -330,34 +393,50 @@ def scan_event_inventory(
         )
         asset_kind = _asset_kind(event_rel, media_type, known_file_id)
 
-        # Bei Exporten ist CreateDate/ModifyDate häufig der Zeitpunkt des
-        # Lightroom-Exports und ausdrücklich NICHT die Aufnahmezeit. Nur echte
-        # DateTimeOriginal-Information (oder später eine eindeutige Beziehung
-        # zum Kameraoriginal) darf die zeitliche Zuordnung steuern.
+        # Export-Zeitpyramide 0.27.7:
+        # 1. echtes DateTimeOriginal, 2. weitere belastbare Medienzeiten,
+        # 3. später eindeutiger Namensabgleich mit der Kamerafamilie,
+        # 4. kanonischer JJJJMMTT_HHMMSS-Dateiname als letzter Fallback.
+        # Reine Dateisystemzeiten bleiben ausdrücklich ungeeignet.
         if known_file_id is None and asset_kind == "export":
-            if not capture_time or "DateTimeOriginal" not in str(capture_source or ""):
+            original_candidates = [
+                str(item.get("normalized_datetime") or "")
+                for item in metadata.get("metadata_candidates", [])
+                if item.get("usable")
+                and "DateTimeOriginal" in str(item.get("tag_name") or "")
+                and item.get("normalized_datetime")
+            ]
+            distinct_originals = set(original_candidates)
+            filename_capture = _filename_schema_capture_time(path.name)
+
+            if len(distinct_originals) == 1:
+                # Ein echtes Aufnahmedatum schlägt widersprechende CreateDate-
+                # oder ModifyDate-Werte des Exportvorgangs.
+                capture_time = next(iter(distinct_originals))
+                capture_source = "export_metadata_datetime_original"
+                confidence = "high"
+            elif len(distinct_originals) > 1:
+                # Mehrere echte, widersprüchliche Aufnahmedaten bleiben offen,
+                # bis der Namensabgleich sie ggf. auf eine Kamerafamilie bindet.
+                capture_time = filename_capture
+                capture_source = "filename_schema" if filename_capture else None
+                confidence = "medium" if filename_capture else "conflict"
+            elif (
+                capture_time
+                and confidence in {"high", "medium"}
+                and "FileModifyDate" not in str(capture_source or "")
+            ):
+                # Zweite Stufe: CreateDate/XMP-Zeit darf verwendet werden,
+                # solange die Metadatenanalyse keinen echten Konflikt meldet.
+                pass
+            elif filename_capture:
+                capture_time = filename_capture
+                capture_source = "filename_schema"
+                confidence = "medium"
+            else:
                 capture_time = None
                 capture_source = None
                 confidence = "missing"
-            else:
-                original_candidates = [
-                    str(item.get("normalized_datetime") or "")
-                    for item in metadata.get("metadata_candidates", [])
-                    if item.get("usable")
-                    and "DateTimeOriginal" in str(item.get("tag_name") or "")
-                    and item.get("normalized_datetime")
-                ]
-                distinct_originals = set(original_candidates)
-                if len(distinct_originals) > 1:
-                    # Zwei widersprüchliche echte Aufnahmezeiten: nicht raten.
-                    capture_time = None
-                    capture_source = None
-                    confidence = "conflict"
-                elif distinct_originals:
-                    # Konflikte mit CreateDate/ModifyDate sind für einen Export
-                    # unerheblich; die echte Aufnahmezeit bleibt maßgeblich.
-                    capture_time = next(iter(distinct_originals))
-                    confidence = "high"
 
         scanned.append({
             "event_id": event_id,
@@ -398,6 +477,20 @@ def scan_event_inventory(
         if not candidates:
             candidates = by_stem.get(rel.stem, [])
 
+        # Exporte behalten häufig den Kameranamen nur als Namensbestandteil
+        # (z. B. mit vorangestelltem Zeitstempel). Wenn der Name genau eine
+        # importierte Familie identifiziert, wird diese Beziehung genutzt.
+        filename_family = None
+        if row["asset_kind"] == "export" and not candidates:
+            filename_family = _filename_family_source(row["filename"], known_files)
+            if filename_family is not None and filename_family.get("family_id") is not None:
+                matched_family_id = int(filename_family["family_id"])
+                candidates = [
+                    item for item in originals
+                    if item.get("family_id") is not None
+                    and int(item["family_id"]) == matched_family_id
+                ]
+
         source = candidates[0] if len(candidates) == 1 else None
         candidate_family_ids = {
             int(item["family_id"])
@@ -427,17 +520,41 @@ def scan_event_inventory(
                 row["family_id"] = source["family_id"]
             family_source = source
 
+        # Ein eindeutiger Namensbezug zum Kameraoriginal korrigiert auch
+        # Exportmetadaten, wenn diese sichtbar eine andere Zeit behaupten.
+        # Dadurch bleibt ein Lightroom-/Finder-Export bei seiner Aufnahme.
+        export_family_correction = False
+        if (
+            row["asset_kind"] == "export"
+            and family_source is not None
+            and family_source.get("selected_capture_time")
+        ):
+            gap = _capture_seconds_apart(
+                row.get("selected_capture_time"),
+                family_source.get("selected_capture_time"),
+            )
+            export_family_correction = (
+                not row.get("selected_capture_time")
+                or row.get("capture_time_confidence") in {"missing", "low", "conflict"}
+                or (gap is not None and gap > 120)
+            )
+
         should_inherit = (
             row["asset_kind"] == "xmp"
+            or export_family_correction
             or not row["selected_capture_time"]
             or row["capture_time_confidence"] in {"missing", "low", "conflict"}
         )
         if family_source is not None and should_inherit:
             row["selected_capture_time"] = family_source["selected_capture_time"]
             row["selected_capture_source"] = (
-                "source_file_inheritance"
-                if source is not None
-                else "family_inheritance"
+                "filename_family_correction"
+                if row["asset_kind"] == "export" and export_family_correction
+                else (
+                    "source_file_inheritance"
+                    if source is not None
+                    else "family_inheritance"
+                )
             )
             row["capture_time_confidence"] = (
                 "high" if family_source["selected_capture_time"] else "missing"
