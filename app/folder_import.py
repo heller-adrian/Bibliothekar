@@ -433,6 +433,7 @@ def run_folder_import_job(
     path_callback: PathCallback | None = None,
     identity_callback: IdentityCallback | None = None,
     imported_hashes: set[tuple[int, str]] | None = None,
+    duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
     import_history_callback: ImportHistoryCallback | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).astimezone()
@@ -520,6 +521,7 @@ def run_folder_import_job(
             identity_callback(source_signature, source_fingerprint)
 
         known_hashes = imported_hashes or set()
+        origin_lookup = duplicate_origins or {}
         already_imported = [
             entry for entry in all_entries
             if (int(entry["size_bytes"]), str(entry["sha256"])) in known_hashes
@@ -528,6 +530,23 @@ def run_folder_import_job(
             entry for entry in all_entries
             if (int(entry["size_bytes"]), str(entry["sha256"])) not in known_hashes
         ]
+        duplicate_details = []
+        for entry in already_imported:
+            key = (int(entry["size_bytes"]), str(entry["sha256"]))
+            origin = dict(origin_lookup.get(key) or {})
+            duplicate_details.append({
+                "relative_path": str(entry["relative_path"]),
+                "size_bytes": int(entry["size_bytes"]),
+                "sha256": str(entry["sha256"]),
+                "existing_job_id": str(origin.get("job_id") or ""),
+                "existing_source_label": str(origin.get("source_volume_label") or ""),
+                "existing_relative_path": str(
+                    origin.get("current_relative_path")
+                    or origin.get("original_relative_path")
+                    or ""
+                ),
+                "existing_filename": str(origin.get("original_filename") or ""),
+            })
         if not entries:
             raise PipelineError(
                 "Auf dieser SD-Karte wurden keine neuen Dateien gefunden. "
@@ -563,14 +582,7 @@ def run_folder_import_job(
             "source_signature": source_signature,
             "source_fingerprint": source_fingerprint,
             "files": entries,
-            "already_imported_files": [
-                {
-                    "relative_path": str(entry["relative_path"]),
-                    "size_bytes": int(entry["size_bytes"]),
-                    "sha256": str(entry["sha256"]),
-                }
-                for entry in already_imported
-            ],
+            "already_imported_files": duplicate_details,
         }
         atomic_json(manifest_path, manifest)
 
@@ -721,6 +733,8 @@ def run_folder_import_job(
                 "file_count": len(entries),
                 "total_source_file_count": len(all_entries),
                 "already_imported_file_count": len(already_imported),
+                "duplicate_file_count": len(already_imported),
+                "duplicate_files": duplicate_details,
                 "new_file_count": len(entries),
                 "signature": source_signature,
                 "fingerprint": source_fingerprint,

@@ -56,6 +56,7 @@ from app.database import (
     update_job_progress,
     database_connection,
     list_imported_source_files,
+    list_imported_media_origins,
     store_imported_source_files,
 )
 from app.metadata import analyze_tree
@@ -506,10 +507,20 @@ def process_claimed_job(
                 if source_device_id
                 else []
             )
+            origin_rows = list_imported_media_origins(
+                DATABASE_FILE,
+                exclude_job_id=job_id,
+            )
             imported_hashes = {
                 (int(row["size_bytes"]), str(row["sha256"]))
-                for row in history_rows
+                for row in origin_rows
             }
+            duplicate_origins: dict[tuple[int, str], dict[str, Any]] = {}
+            for row in origin_rows:
+                duplicate_origins.setdefault(
+                    (int(row["size_bytes"]), str(row["sha256"])),
+                    dict(row),
+                )
 
             def persist_import_history(entries: list[dict[str, Any]]) -> None:
                 if not source_device_id:
@@ -538,6 +549,7 @@ def process_claimed_job(
                 path_callback=persist_paths,
                 identity_callback=persist_identity,
                 imported_hashes=imported_hashes,
+                duplicate_origins=duplicate_origins,
                 import_history_callback=persist_import_history,
             )
             organization = result.get("organization", {})

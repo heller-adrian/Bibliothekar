@@ -471,6 +471,67 @@ def get_job(
     return row_to_job(row)
 
 
+def _job_workflow_states(connection: sqlite3.Connection) -> dict[str, dict[str, int | str]]:
+    rows = connection.execute(
+        """
+        SELECT
+            ff.job_id,
+            COUNT(DISTINCT ff.id) AS total_family_count,
+            COUNT(DISTINCT CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM event_assignments ea
+                    JOIN events assigned ON assigned.id=ea.event_id
+                    JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
+                    WHERE ea.family_id=ff.id AND root.status='archived'
+                ) THEN ff.id END
+            ) AS archived_family_count,
+            COUNT(DISTINCT CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM event_assignments ea
+                    JOIN events assigned ON assigned.id=ea.event_id
+                    JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
+                    WHERE ea.family_id=ff.id AND root.status='applied'
+                ) THEN ff.id END
+            ) AS applied_family_count,
+            COUNT(DISTINCT CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM event_assignments ea
+                    JOIN events assigned ON assigned.id=ea.event_id
+                    JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
+                    WHERE ea.family_id=ff.id AND root.status IN ('draft','planned')
+                ) THEN ff.id END
+            ) AS planned_family_count
+        FROM file_families ff
+        GROUP BY ff.job_id
+        """
+    ).fetchall()
+    result: dict[str, dict[str, int | str]] = {}
+    for row in rows:
+        total = int(row["total_family_count"] or 0)
+        archived = int(row["archived_family_count"] or 0)
+        applied = int(row["applied_family_count"] or 0)
+        planned = int(row["planned_family_count"] or 0)
+        active = max(0, total - archived)
+        if total > 0 and archived == total:
+            status = "archived"
+        elif active > 0 and applied + archived == total and planned == 0:
+            status = "applied"
+        else:
+            status = "planned"
+        result[str(row["job_id"])] = {
+            "workflow_status": status,
+            "total_family_count": total,
+            "active_family_count": active,
+            "planned_family_count": planned,
+            "applied_family_count": applied,
+            "archived_family_count": archived,
+        }
+    return result
+
+
 def list_database_jobs(
     database_path: Path,
     *,
@@ -493,11 +554,70 @@ def list_database_jobs(
             """,
             (safe_limit,),
         ).fetchall()
+        workflow = _job_workflow_states(connection)
 
-    return [
-        row_to_job(row)
-        for row in rows
+    jobs = [row_to_job(row) for row in rows]
+    for job in jobs:
+        stats = workflow.get(str(job["id"]))
+        if stats is None:
+            duplicate_count = int(
+                ((job.get("result") or {}).get("source") or {}).get(
+                    "already_imported_file_count", 0
+                )
+                or 0
+            )
+            stats = {
+                "workflow_status": (
+                    "archived"
+                    if str(job.get("state") or "") == "completed"
+                    and duplicate_count > 0
+                    and int(job.get("file_count") or 0) == 0
+                    else "planned"
+                ),
+                "total_family_count": 0,
+                "active_family_count": 0,
+                "planned_family_count": 0,
+                "applied_family_count": 0,
+                "archived_family_count": 0,
+            }
+        job.update(stats)
+    return jobs
+
+
+def list_imported_media_origins(
+    database_path: Path,
+    *,
+    exclude_job_id: str | None = None,
+) -> list[dict[str, Any]]:
+    conditions = [
+        "j.operation IN ('folder_import','sd_import')",
+        "j.state='completed'",
+        "COALESCE(TRIM(f.sha256_original),'')<>''",
     ]
+    params: list[Any] = []
+    if exclude_job_id:
+        conditions.append("f.job_id<>?")
+        params.append(str(exclude_job_id))
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT
+                f.job_id,
+                f.original_relative_path,
+                f.current_relative_path,
+                f.original_filename,
+                f.size_bytes,
+                f.sha256_original AS sha256,
+                j.source_volume_label,
+                j.created_at
+            FROM files f
+            JOIN jobs j ON j.id=f.job_id
+            WHERE {" AND ".join(conditions)}
+            ORDER BY j.created_at,f.id
+            """,
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def claim_next_job(
