@@ -1762,20 +1762,38 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
-    async function getJson(url) {
-      const response = await fetch(url);
-      const data = await response.json();
-
+    async function decodeApiResponse(response) {
+      const text = await response.text();
+      let data = {};
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (_) {
+          if (!response.ok) {
+            const error = new Error(
+              `Serverfehler ${response.status}: ${text.slice(0, 240) || "keine Antwort"}`
+            );
+            error.data = {detail:text};
+            error.status = response.status;
+            throw error;
+          }
+          throw new Error("Die API hat keine gültige JSON-Antwort geliefert.");
+        }
+      }
       if (!response.ok) {
         const error = new Error(
-          data.detail || "Anfrage fehlgeschlagen."
+          data.detail || `Anfrage fehlgeschlagen (HTTP ${response.status}).`
         );
         error.data = data;
         error.status = response.status;
         throw error;
       }
-
       return data;
+    }
+
+    async function getJson(url) {
+      const response = await fetch(url);
+      return decodeApiResponse(response);
     }
 
 
@@ -1793,17 +1811,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           body: JSON.stringify(payload)
         }
       );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        const error = new Error(data.detail || "Anfrage fehlgeschlagen.");
-        error.data = data;
-        error.status = response.status;
-        throw error;
-      }
-
-      return data;
+      return decodeApiResponse(response);
     }
 
 
@@ -1896,10 +1904,15 @@ WORKSPACE_HTML = r"""<!doctype html>
         .filter(group => group.start_datetime && group.end_datetime)
         .map(group => ({start_datetime:group.start_datetime,end_datetime:group.end_datetime}));
       const dayKeys = [...new Set(groups.map(group => group.day_key).filter(Boolean))].sort();
+      const familyIds = [...bucket.family_ids]
+        .map(Number)
+        .filter(Number.isFinite)
+        .sort((a,b)=>a-b);
       return {
         ...base,
         selected_intervals: intervals,
-        selected_day_keys: dayKeys
+        selected_day_keys: dayKeys,
+        selected_family_ids: familyIds
       };
     }
 

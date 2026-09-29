@@ -124,12 +124,18 @@ def test_0278_workspace_ui_contracts():
     assert "verknüpfter Nachtrag" not in source
     assert "Nachtrag geplant" not in source
     assert "Neue Aufnahmen passen zu bestehenden Ereignissen" in source
+    assert "selected_family_ids: familyIds" in source
+    assert "decodeApiResponse" in source
+    assert "Serverfehler" in source
 
 
 def test_0278_import_ui_reports_skipped_duplicates():
     source=Path("app/main.py").read_text(encoding="utf-8")
     assert "Duplikate" in source
     assert "identischer Größe und identischem SHA-256" in source
+    assert "data-job-detail-key" in source
+    assert "openJobDetailKeys" in source
+    assert "restoreOpenJobDetails" in source
 
 
 

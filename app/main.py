@@ -6861,7 +6861,7 @@ def index() -> str:
       );
       const duplicateNotice = duplicateCount > 0
         ? `
-          <details class="message" style="border:1px solid var(--border);border-radius:10px;padding:9px 11px">
+          <details class="message" data-job-detail-key="${escapeHtml(jobId)}:duplicates" style="border:1px solid var(--border);border-radius:10px;padding:9px 11px">
             <summary><strong>${duplicateCount} ${duplicateCount === 1 ? "Duplikat" : "Duplikate"} übersprungen</strong></summary>
             <p class="muted" style="margin:8px 0">Nur Dateien mit identischer Größe und identischem SHA-256 werden automatisch übersprungen.</p>
             <ul style="margin:0;padding-left:20px">
@@ -6952,7 +6952,7 @@ def index() -> str:
             </span>
           </div>
 
-          <details>
+          <details data-job-detail-key="${escapeHtml(jobId)}:technical">
             <summary>
               Technische Details
             </summary>
@@ -7391,7 +7391,23 @@ def index() -> str:
         + (source.import_status === "already_imported" ? " · Diese unveränderte Quelle wurde bereits importiert." : "");
     }
 
+    function openJobDetailKeys() {
+      return new Set(
+        [...jobsElement.querySelectorAll("details[data-job-detail-key][open]")]
+          .map(node => String(node.dataset.jobDetailKey || ""))
+          .filter(Boolean)
+      );
+    }
+
+    function restoreOpenJobDetails(keys) {
+      for (const node of jobsElement.querySelectorAll("details[data-job-detail-key]")) {
+        node.open = keys.has(String(node.dataset.jobDetailKey || ""));
+      }
+    }
+
     async function loadJobs() {
+      const openDetails = openJobDetailKeys();
+
       const response = await fetch(
         "/api/jobs",
         {
@@ -7419,6 +7435,7 @@ def index() -> str:
 
       jobsElement.innerHTML =
         jobs.map(renderJob).join("");
+      restoreOpenJobDetails(openDetails);
     }
 
     async function refreshAll() {
