@@ -239,6 +239,12 @@ body[data-bk-area="workspace"] span.badge.success.metadata-ok {
 body[data-bk-area="archive"] .archive-check-card {
   border-left: 4px solid var(--bk-yellow) !important;
 }
+body[data-bk-area="archive"] .archive-verify-button {
+  background: var(--bk-yellow) !important;
+  border-color: var(--bk-yellow) !important;
+  color: #201a0b !important;
+  font-weight: 700 !important;
+}
 
 body.bibliothekar-redesign .status-value,
 body.bibliothekar-redesign .success-text,

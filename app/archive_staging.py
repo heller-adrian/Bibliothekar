@@ -824,6 +824,20 @@ def cleanup_archive_change_staging(
 
     try:
         staging_base.mkdir(parents=True, exist_ok=True)
+        empty_candidates = [
+            path for path in staging_base.rglob("*")
+            if path.is_dir() and not path.is_symlink()
+        ]
+        for directory in sorted(
+            empty_candidates,
+            key=lambda path: len(path.parts),
+            reverse=True,
+        ):
+            try:
+                directory.rmdir()
+                removed_empty_source_directories += 1
+            except OSError:
+                pass
     except OSError as exc:
         warnings.append("Stammordner „Später zuordnen“ konnte nicht erhalten werden: " + str(exc))
 

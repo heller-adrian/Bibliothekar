@@ -2733,7 +2733,30 @@ WORKSPACE_HTML = r"""<!doctype html>
       return `<details data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="0" data-new-segment="${isNew?"1":"0"}" data-existing-segment="0" class="card collapse-card" style="padding:8px 10px;${isNew?"border:2px solid currentColor;":""}"><summary style="display:flex;justify-content:space-between;gap:8px;align-items:center;cursor:pointer"><strong>${escapeHtml(dayKey||"Neues Segment")}${isNew?" · NEU":""}</strong><span class="muted">${escapeHtml(start)}–${escapeHtml(end)}${count?` · ${count} freie Familien`:""}</span></summary><div style="display:grid;grid-template-columns:minmax(190px,1.55fr) 118px 118px auto;gap:8px;align-items:end;margin-top:8px">${lockedMonthDayControls(dayKey,false)}<label><span>Von</span><input data-segment-start type="time" value="${escapeHtml(start)}"></label><label><span>Bis</span><input data-segment-end type="time" value="${escapeHtml(end)}"></label><button type="button" class="danger-button" data-remove-no-event-segment>Entfernen</button></div></details>`;
     }
 
-    function syncNoEventRangeDisplayFromSegments(){const segs=selectedNoEventSegments(true);if(segs.length){eventStartDate.value=segs[0].day_key;eventEndDate.value=segs[segs.length-1].day_key;}}
+    function syncNoEventRangeDisplayFromSegments(){
+      const segs=selectedNoEventSegments(true);
+      if(segs.length){
+        eventStartDate.value=segs[0].day_key;
+        eventEndDate.value=segs[segs.length-1].day_key;
+      }
+      if(["no_event","existing_no_event"].includes(dialogMode)){
+        const months=[...new Set(segs.map(seg=>String(seg.day_key||"").slice(0,7)).filter(Boolean))];
+        eventName.value=months.length===1
+          ? String(months[0]).slice(5,7)+" - Ohne Ereignis"
+          : "Ohne Ereignis";
+        if(months.length>1){
+          dialogError.hidden=false;
+          dialogError.textContent="„Ohne Ereignis“ darf nur innerhalb eines Kalendermonats angelegt werden. Bitte die Monate getrennt zuordnen.";
+          saveEventButton.disabled=true;
+        }else{
+          if(String(dialogError.textContent||"").includes("Kalendermonats")){
+            dialogError.hidden=true;
+            dialogError.textContent="";
+          }
+          saveEventButton.disabled=false;
+        }
+      }
+    }
 
 
     function bindNoEventSegmentRows() {

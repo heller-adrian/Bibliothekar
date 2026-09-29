@@ -139,6 +139,14 @@ def _build_no_event_preview(
     except EventTimelineError as exc:
         raise EventPreviewError(str(exc)) from exc
 
+    months = {str(segment["day_key"])[:7] for segment in segments}
+    if len(months) != 1:
+        raise EventPreviewError(
+            "„Ohne Ereignis“ darf nur Tage und Zeitsegmente innerhalb eines Kalendermonats enthalten. "
+            "Bitte für jeden Monat eine eigene Sammlung anlegen."
+        )
+    month_key = next(iter(months))
+
     candidate_families = []
     for family in available_families:
         capture = _capture_second(family.get("selected_capture_time"))
@@ -157,7 +165,7 @@ def _build_no_event_preview(
     selected_file_count = sum(int(f.get("file_count", 0)) for f in candidate_families)
     start_date = segments[0]["day_key"]
     end_date = segments[-1]["day_key"]
-    parent_folder = f"{start_date[5:7]} - Ohne Ereignis"
+    parent_folder = f"{month_key[5:7]} - Ohne Ereignis"
 
     preserve_day_folders = bool(payload.get("preserve_day_folders"))
 
@@ -183,7 +191,7 @@ def _build_no_event_preview(
 
     return {
         "event_kind": "no_event",
-        "event_name": "Ohne Ereignis",
+        "event_name": parent_folder,
         "parent_folder": parent_folder,
         "child_folder": None,
         "child_event_name": None,

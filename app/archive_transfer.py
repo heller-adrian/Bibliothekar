@@ -453,13 +453,14 @@ def verify_event_archive(
             if not expected_sha256:
                 raise ArchiveVerificationError("Gespeicherte SHA-256-Summe fehlt.")
 
+            expected_relative = str(
+                row.get("current_relative_path")
+                or row.get("original_relative_path")
+                or ""
+            ).replace("\\", "/").strip("/")
             observed = observed_by_file_id.get(int(row["file_id"]))
             if observed is None:
-                relative_text = str(
-                    row.get("current_relative_path")
-                    or row.get("original_relative_path")
-                    or ""
-                )
+                relative_text = expected_relative
                 status = "missing"
                 actual_size = None
                 actual_sha256 = None
@@ -468,10 +469,11 @@ def verify_event_archive(
                 )
                 missing_count += 1
             else:
-                relative_text = str(observed["relative_path"])
+                actual_relative = str(observed["relative_path"]).replace("\\", "/").strip("/")
+                relative_text = expected_relative
                 candidate = archive_path_without_symlinks(
                     archive_root,
-                    relative_text,
+                    actual_relative,
                 )
                 actual_size = int(observed["size_bytes"])
                 actual_sha256 = str(observed["sha256"])
@@ -482,6 +484,13 @@ def verify_event_archive(
                 elif actual_sha256 != expected_sha256:
                     status = "sha256_mismatch"
                     error_message = "SHA-256-Summe weicht ab."
+                    mismatched_count += 1
+                elif actual_relative != expected_relative:
+                    status = "path_mismatch"
+                    error_message = (
+                        "Datei liegt nicht am aktuellen SOLL-Pfad. "
+                        f"IST: {actual_relative} · SOLL: {expected_relative}"
+                    )
                     mismatched_count += 1
                 elif not candidate.is_file():
                     status = "missing"

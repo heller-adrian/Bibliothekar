@@ -370,9 +370,13 @@ def build_archive_change_assistant(
                 "items": helper_items,
                 "target": f"Kamerabibliothek/{parent}",
                 "detail": (
-                    "Die vorbereiteten Ordner"
-                    + (" und die neue event.json" if includes_event_document else "")
-                    + " gemeinsam in einem Arbeitsschritt vollständig übernehmen."
+                    (
+                        "Die vorbereitete Struktur vollständig übernehmen. "
+                        "Dabei die vorhandene event.json im Ereignisordner durch die "
+                        "vorbereitete neue event.json ersetzen; keine zweite event.json daneben behalten."
+                    )
+                    if event_document
+                    else "Die vorbereiteten Ordner gemeinsam in einem Arbeitsschritt vollständig übernehmen."
                 ),
                 "state": copy_state,
             })

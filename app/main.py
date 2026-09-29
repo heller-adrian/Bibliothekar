@@ -6666,12 +6666,19 @@ def index() -> str:
       }
 
       if (operation === "folder_import") {
+        const trigger = String(job?.trigger_type || "");
+        const sourceTitle =
+          trigger === "approved_sd"
+            ? "SD-Kartenimport"
+            : trigger === "usb_key"
+              ? "Laufwerksimport"
+              : "Ordnerimport";
         return {
           title:
-            "Ordnerimport · "
+            sourceTitle + " · "
             + (job?.source_volume_label || "Quelle"),
           description:
-            "Echter Ordnerimport mit SHA-256, ExifTool, "
+            sourceTitle + " mit SHA-256, ExifTool, "
             + "Gerätenamen und Tagesgruppierung."
         };
       }
