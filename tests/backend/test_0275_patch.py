@@ -157,17 +157,32 @@ def test_0275_partial_reuse_renames_remaining_released_segment(tmp_path: Path):
     case = _release_case(tmp_path, with_asset=True)
     _finish_release_case(case)
 
+    # Eine reale aktuelle Belegung verkleinert nur den effektiven freien Rest.
+    # Der Archiv-Herkunftsmarker selbst bleibt unverändert erhalten.
+    with database_connection(case["db"]) as connection:
+        connection.execute(
+            """INSERT INTO events(
+                   id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                   uses_time_range,folder_name,status,applied_at,created_at,updated_at,
+                   event_kind,preserve_day_folders,revision,timeline_model,time_model_version
+               ) VALUES ('occupied','old',NULL,'parent','Belegt',
+                         '2026-07-22T20:01:00','2026-07-22T20:59:59',1,
+                         '07-22 - Belegt','applied',?,?,?,'event',0,1,'continuous',2)""",
+            (NOW, NOW, NOW),
+        )
+        connection.commit()
+
     result = normalize_released_archive_stock(
         case["db"],
         case["workspace"],
-        [("2026-07-22T20:01:00", "2026-07-22T21:00:00")],
+        [("2026-07-22T20:01:00", "2026-07-22T20:59:59")],
     )
     assert result["updated_family_count"] == 1
     assert result["moved_file_count"] == 2
 
     with database_connection(case["db"]) as connection:
         marker = connection.execute(
-            """SELECT released_start_datetime,released_end_datetime
+            """SELECT released_start_datetime,released_end_datetime,archive_origin
                FROM released_free_families
                WHERE family_id=?""",
             (case["late_family"],),
@@ -180,8 +195,11 @@ def test_0275_partial_reuse_renames_remaining_released_segment(tmp_path: Path):
             "SELECT current_relative_path FROM released_archive_assets WHERE family_id=?",
             (case["late_family"],),
         ).fetchone()
-    assert marker["released_start_datetime"] == "2026-07-22T21:00:01"
-    assert marker["released_end_datetime"] == "2026-07-22T23:59:59"
+    assert tuple(marker) == (
+        "2026-07-22T20:01:00",
+        "2026-07-22T23:59:59",
+        1,
+    )
     assert "2026-07-22 · 21-00–23-59" in camera["current_relative_path"]
     assert "2026-07-22 · 21-00–23-59" in asset["current_relative_path"]
     assert (case["work"] / camera["current_relative_path"]).is_file()
@@ -193,7 +211,6 @@ def test_0275_partial_reuse_renames_remaining_released_segment(tmp_path: Path):
     )
     assert group["start_time"] == "21:00"
     assert group["end_time"] == "23:59"
-
 
 def test_0275_unknown_extra_can_be_removed_then_verified_and_reversal_has_backup(tmp_path: Path):
     db, workspace, archive, folder, old_family, _, _ = _seed(

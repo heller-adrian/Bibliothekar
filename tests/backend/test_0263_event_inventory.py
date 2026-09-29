@@ -268,8 +268,12 @@ def test_0263_archive_verification_finds_camera_original_anywhere_in_event(tmp_p
     target.write_bytes(camera)
 
     result = verify_event_archive(db, archive, "j", "e")
-    assert result["verified"] is True
-    assert result["files"][0]["expected_relative_path"].endswith("/Sortiert/A.JPG")
+    assert result["verified"] is False
+    assert result["missing_file_count"] == 1
+    assert result["files"][0]["status"] == "missing"
+    assert result["files"][0]["expected_relative_path"].endswith("/Alle/A.JPG")
+    assert "IST:" in result["files"][0]["error_message"]
+    assert "SOLL:" in result["files"][0]["error_message"]
     assert result["files"][0]["file_id"] == file_id
 
 
