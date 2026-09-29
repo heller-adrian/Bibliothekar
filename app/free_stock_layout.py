@@ -141,6 +141,66 @@ def _filesystem_time(value: str, *, end: bool) -> str:
     return parsed.strftime("%H-%M-%S")
 
 
+def effective_released_range(
+    connection: Any,
+    family_id: int,
+    capture_time: str,
+    *,
+    physical: bool,
+) -> tuple[str, str] | None:
+    marker = connection.execute(
+        """SELECT released_start_datetime,released_end_datetime
+           FROM released_free_families
+           WHERE family_id=?
+           ORDER BY created_at DESC LIMIT 1""",
+        (int(family_id),),
+    ).fetchone()
+    if marker is None:
+        return None
+    origin_start = str(marker["released_start_datetime"] or "")[:19]
+    origin_end = str(marker["released_end_datetime"] or "")[:19]
+    capture = str(capture_time or "")[:19]
+    if not origin_start or not origin_end or not capture:
+        return None
+    day_key = capture[:10]
+    from app.free_time import free_ranges_for_day
+    free_ranges = free_ranges_for_day(
+        day_key,
+        occupied_ranges_for_day(connection, day_key, physical=physical),
+    )
+    for item in free_ranges:
+        start = max(origin_start, str(item["start_datetime"])[:19])
+        end = min(origin_end, str(item["end_datetime"])[:19])
+        if start <= capture <= end:
+            return start, end
+    return None
+
+
+def released_origin_directory(
+    connection: Any,
+    family_id: int,
+    capture_time: str,
+    *,
+    physical: bool,
+) -> PurePosixPath | None:
+    bounds = effective_released_range(
+        connection, family_id, capture_time, physical=physical
+    )
+    if bounds is None:
+        return None
+    start, end = bounds
+    day_key = start[:10]
+    if start[11:16] == "00:00" and end[11:16] == "23:59":
+        folder = day_key
+    else:
+        folder = (
+            f"{day_key} · "
+            f"{_filesystem_time(start, end=False)}–"
+            f"{_filesystem_time(end, end=True)}"
+        )
+    return PurePosixPath("Freigewordene Archivdateien", day_key[:4], folder)
+
+
 def canonical_free_directory(
     connection: Any,
     capture_time: str,

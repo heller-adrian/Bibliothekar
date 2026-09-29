@@ -95,32 +95,13 @@ def _effective_target_intervals(connection, target) -> list[tuple[str, str, str]
 
 
 def reconcile_released_free_markers(connection, job_id: str | None = None) -> int:
-    """Drop informational release markers once a family is assigned again."""
-    clauses = []
-    params = []
-    if job_id is not None:
-        clauses.append("marker.job_id=?")
-        params.append(str(job_id))
-    where = (" AND " + " AND ".join(clauses)) if clauses else ""
-    rows = connection.execute(
-        f"""SELECT marker.job_id,marker.family_id
-            FROM released_free_families marker
-            WHERE EXISTS (
-              SELECT 1
-              FROM event_assignments ea
-              JOIN events e ON e.id=ea.event_id
-              WHERE ea.family_id=marker.family_id
-                AND e.job_id=marker.job_id
-                AND e.status IN ('draft','planned','applied','archived')
-            ){where}""",
-        params,
-    ).fetchall()
-    connection.executemany(
-        "DELETE FROM released_free_families WHERE job_id=? AND family_id=?",
-        [(row["job_id"], row["family_id"]) for row in rows],
-    )
-    return len(rows)
+    """Keep release markers as durable provenance.
 
+    Assigned families are hidden by the normal NOT EXISTS assignment filters.
+    The marker is intentionally retained so a later deletion/release can return
+    the files to their verified archive-release stock.
+    """
+    return 0
 
 def reconcile_stale_event_reassignments(connection, job_id: str | None = None, event_id: str | None = None) -> int:
     """Remove pending reassignment rows that are no longer actually unassigned.

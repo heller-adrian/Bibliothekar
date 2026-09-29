@@ -348,11 +348,24 @@ def list_global_released_archive_groups(
         for row in released_asset_rows
     }
 
+    from app.free_stock_layout import effective_released_range
+    effective_by_family: dict[int, tuple[str, str] | None] = {}
+    with database_connection(database_path) as effective_connection:
+        for row in rows:
+            effective_by_family[int(row["family_id"])] = effective_released_range(
+                effective_connection,
+                int(row["family_id"]),
+                str(row["selected_capture_time"] or ""),
+                physical=False,
+            )
+
     grouped: dict[tuple[str,str,str], dict[str, Any]] = {}
     for row in rows:
         job_id = str(row["job_id"])
-        start = str(row["released_start_datetime"] or "")
-        end = str(row["released_end_datetime"] or "")
+        effective = effective_by_family.get(int(row["family_id"]))
+        if effective is None:
+            continue
+        start, end = effective
         key = (job_id, start, end)
         item = grouped.setdefault(key, {
             "group_type": "released_archive",

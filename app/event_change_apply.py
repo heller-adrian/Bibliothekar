@@ -874,12 +874,8 @@ def finish_event_change(
                 [(assignment_event_id, family_id, now) for family_id in selected_ids],
             )
 
-        if selected_ids:
-            connection.execute(
-                "DELETE FROM released_free_families WHERE family_id IN ("
-                + ",".join("?" for _ in selected_ids) + ")",
-                tuple(selected_ids),
-            )
+        # Freigabe-Herkunftsmarker bleiben erhalten. Eine aktive Zuordnung
+        # macht sie unsichtbar, löscht aber nicht die Rückkehrinformation.
 
         # Die Import-Herkunft bleibt an file_families.job_id/files.job_id erhalten.
         # Auch Familien aus späteren Sicherungen gehören fachlich direkt zum

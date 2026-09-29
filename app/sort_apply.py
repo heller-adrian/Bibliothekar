@@ -1614,6 +1614,24 @@ def execute_sort_run(
             created_directories,
             removed_directories,
         )
+        try:
+            from app.released_archive_maintenance import normalize_released_archive_stock_for_days
+            from datetime import date, timedelta
+            start_day = date.fromisoformat(str(plan["event"]["start_datetime"])[:10])
+            end_day = date.fromisoformat(str(plan["event"]["end_datetime"])[:10])
+            release_days = []
+            day = start_day
+            while day <= end_day:
+                release_days.append(day.isoformat())
+                day += timedelta(days=1)
+            normalize_released_archive_stock_for_days(
+                database_path, workspace_path, release_days
+            )
+        except Exception as release_error:
+            raise SortApplyError(
+                "Freigewordener Archivbestand konnte nach dem Sortierlauf nicht konsistent aktualisiert werden: "
+                + str(release_error)
+            ) from release_error
         if str(run.get("run_kind") or "initial") == "reapply":
             try:
                 from app.applied_neutralization import cleanup_empty_neutral_directories

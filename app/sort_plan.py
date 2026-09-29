@@ -813,6 +813,7 @@ def build_event_sort_plan(
             affected_days_for_event,
             canonical_free_directory,
             free_file_rows,
+            released_origin_directory,
         )
         affected_days = affected_days_for_event(connection, event_id)
         known_file_ids = {int(row["id"]) for row in file_rows}
@@ -838,14 +839,26 @@ def build_event_sort_plan(
                 and not removed_target.get("target_event_id")
             ):
                 record["_free_stock"] = True
-                record["_free_directory"] = str(
-                    canonical_free_directory(
+                capture_value = str(
+                    record.get("family_capture_time")
+                    or record.get("selected_capture_time")
+                    or ""
+                )
+                released_directory = (
+                    released_origin_directory(
                         connection,
-                        str(
-                            record.get("family_capture_time")
-                            or record.get("selected_capture_time")
-                            or ""
-                        ),
+                        record_family_id,
+                        capture_value,
+                        physical=True,
+                    )
+                    if record_family_id is not None
+                    else None
+                )
+                record["_free_directory"] = str(
+                    released_directory
+                    or canonical_free_directory(
+                        connection,
+                        capture_value,
                         physical=True,
                         include_event_ids=(event_id,) if not allow_reapply else (),
                     )

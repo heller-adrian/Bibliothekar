@@ -3752,12 +3752,8 @@ def update_event_definition(
                    VALUES (?, ?, NULL, ?, ?)""",
                 [(assignment_event_id, family_id, "date_time_range" if uses_time_range else "date_range", now) for family_id in requested_ids],
             )
-        if requested_ids:
-            rp = ",".join("?" for _ in requested_ids)
-            connection.execute(
-                f"DELETE FROM released_free_families WHERE job_id=? AND family_id IN ({rp})",
-                (job_id, *requested_ids),
-            )
+        # Herkunft aus „Freigewordene Archivdateien“ bleibt dauerhaft erhalten.
+        # Aktive Zuordnungen blenden den Marker lediglich aus; er wird nicht gelöscht.
         if mutation_id is not None:
             target_state = capture_job_event_state(connection, job_id)
             set_mutation_target(
