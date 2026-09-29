@@ -1862,6 +1862,7 @@ EVENTS_HTML = r"""<!doctype html>
         video: "Video",
         mov: "Video",
         mp4: "Video",
+        export: "Export",
         other: "Sonstige"
       };
 
@@ -1937,6 +1938,7 @@ EVENTS_HTML = r"""<!doctype html>
       const targetDirectories =
         family.target_directories || [];
       const files = family.files || [];
+      const assets = family.assets || [];
 
       const targetHtml = targetDirectories.length
         ? targetDirectories.map(
@@ -1958,7 +1960,7 @@ EVENTS_HTML = r"""<!doctype html>
         </div>
 
         <div class="plan-file-list">
-          ${files.map(
+          ${[...files, ...assets].map(
             renderPlanFileCard
           ).join("") || `
             <div class="empty">
@@ -2005,6 +2007,17 @@ EVENTS_HTML = r"""<!doctype html>
           file => [Number(file.file_id), file]
         )
       );
+      const assetsByFamily = new Map();
+      for (const asset of (plan.assets || [])) {
+        const familyId = Number(asset.family_id);
+        if (!Number.isFinite(familyId)) continue;
+        if (!assetsByFamily.has(familyId)) assetsByFamily.set(familyId, []);
+        assetsByFamily.get(familyId).push({
+          ...asset,
+          media_type: asset.asset_kind || "other",
+          size_matches: Number(asset.source_size_bytes) === Number(asset.expected_size_bytes)
+        });
+      }
       const familiesByKey = new Map(
         (plan.families || []).map(
           family => [String(family.group_key), family]
@@ -2064,7 +2077,8 @@ EVENTS_HTML = r"""<!doctype html>
                 ...family,
                 files: (family.file_ids || [])
                   .map(fileId => filesById.get(Number(fileId)))
-                  .filter(Boolean)
+                  .filter(Boolean),
+                assets: assetsByFamily.get(Number(family.family_id)) || []
               };
 
               const index = familyIndex;
@@ -2693,12 +2707,24 @@ EVENTS_HTML = r"""<!doctype html>
 
     function inspectFamilyRows(families) {
       const rows = (families || []).map(family => {
-        const key = String(family.family_key || "Dateifamilie").split("/").pop();
+        const key = String(
+          family.live_display_stem
+          || family.original_stem
+          || family.family_key
+          || "Dateifamilie"
+        ).split("/").pop();
         const capture = String(family.selected_capture_time || "");
         const stamp = capture
           ? `${germanDay(capture.slice(0,10))} ${capture.slice(11,19)}`
           : "Zeit unbekannt";
-        return `<div class="inspect-family-row"><span title="${escapeHtml(key)}">${escapeHtml(key)}</span><span>${escapeHtml(stamp)}</span></div>`;
+        const liveKinds = (family.live_asset_kinds || []).map(mediaTypeLabel);
+        const count = Number(family.file_count || 0);
+        const details = [
+          `${count} ${count === 1 ? "Datei" : "Dateien"}`,
+          ...liveKinds,
+          stamp
+        ].join(" · ");
+        return `<div class="inspect-family-row"><span title="${escapeHtml(key)}">${escapeHtml(key)}</span><span>${escapeHtml(details)}</span></div>`;
       }).join("");
       return rows
         ? `<div class="inspect-family-list">${rows}</div>`

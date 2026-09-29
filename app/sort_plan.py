@@ -229,6 +229,7 @@ def _tree_text(
 
 def _build_family_target_groups(
     entries: list[dict[str, Any]],
+    asset_entries: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Group the complete per-file plan by family and destination directory.
@@ -255,8 +256,8 @@ def _build_family_target_groups(
         else:
             group_key = f"family:{int(family_id)}"
             display_name = str(
-                entry.get("family_key")
-                or source_relative.stem
+                source_relative.stem
+                or entry.get("family_key")
                 or f"Familie {family_id}"
             )
 
@@ -283,6 +284,7 @@ def _build_family_target_groups(
                 "blocked_file_count": 0,
                 "file_ids": [],
                 "source_paths": [],
+                "asset_source_paths": [],
             },
         )
 
@@ -303,6 +305,25 @@ def _build_family_target_groups(
 
         status = str(entry.get("status") or "")
 
+        if status == "move":
+            family["move_count"] += 1
+        elif status == "already_at_target":
+            family["already_at_target_count"] += 1
+        elif status.startswith("blocked_"):
+            family["blocked_file_count"] += 1
+
+    for asset in asset_entries or []:
+        family_id = asset.get("family_id")
+        if family_id is None:
+            continue
+        family = families_by_key.get(f"family:{int(family_id)}")
+        if family is None:
+            continue
+        family["file_count"] += 1
+        family["total_size_bytes"] += int(asset.get("expected_size_bytes") or 0)
+        family["media_types"].add(str(asset.get("asset_kind") or "other"))
+        family["asset_source_paths"].append(str(asset.get("source_relative_path") or ""))
+        status = str(asset.get("status") or "")
         if status == "move":
             family["move_count"] += 1
         elif status == "already_at_target":
@@ -1967,7 +1988,10 @@ def build_event_sort_plan(
                 ),
             })
 
-    families, target_groups = _build_family_target_groups(entries)
+    families, target_groups = _build_family_target_groups(
+        entries,
+        asset_entries,
+    )
 
     for family in families:
         if not family["split_across_targets"] or allow_reapply:

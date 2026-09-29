@@ -4,8 +4,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.archive_transfer import list_archive_candidates, verify_event_archive
-from app.database import database_connection, initialize_database, list_job_events, search_events
+from app.database import (
+    database_connection,
+    get_event_edit_context,
+    initialize_database,
+    list_job_events,
+    search_events,
+)
 from app.event_inventory import scan_event_inventory
+from app.live_inventory import refresh_live_event_inventories
+from app.planning import list_job_planning_overview
 from app.sort_plan import build_event_sort_plan
 from tests.backend.test_0263_event_inventory import (
     NOW,
@@ -234,3 +242,135 @@ def test_0277_reapply_plan_keeps_xmp_with_camera_and_export_in_export_branch(
     assert assets["export"]["destination_relative_path"].endswith(
         "/07-23 - Trip/Export/20260723_120000_IMG_0001.jpg"
     )
+
+
+
+def test_0277_live_refresh_drives_workspace_counts_and_edit_context(tmp_path, monkeypatch):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    workspace = tmp_path / "workspace"
+    work = workspace / "Arbeitsbereich"
+    archive = tmp_path / "archive"
+
+    with database_connection(db) as connection:
+        seed_job(connection)
+        seed_event(connection, status="applied")
+        first_family, _ = _seed_family(
+            connection,
+            current_path="2026/07-23 - Trip/Alle/IMG_0001.JPG",
+            root_kind="shared_workspace",
+        )
+        second_family = int(
+            connection.execute(
+                """INSERT INTO file_families(
+                       job_id,family_key,original_stem,status,selected_capture_time,
+                       capture_time_confidence
+                   ) VALUES (
+                       'j','IMG_0002','IMG_0002','complete',
+                       '2026-07-23T12:05:00','high'
+                   )"""
+            ).lastrowid
+        )
+        second_file = seed_file_for_family(
+            connection,
+            family_id=second_family,
+            content=b"camera-two",
+            current_path="2026/07-23 - Trip/Alle/20260723_120500_Fuji-X-E5.JPG",
+            filename="IMG_0002.JPG",
+        )
+        connection.execute(
+            "UPDATE files SET current_root_kind='shared_workspace' WHERE id=?",
+            (second_file,),
+        )
+        connection.execute(
+            """INSERT INTO event_assignments(
+                   event_id,family_id,file_id,assignment_source,created_at
+               ) VALUES ('e',?,NULL,'date_range',?)""",
+            (second_family, NOW),
+        )
+
+    event = work / "2026" / "07-23 - Trip"
+    (event / "Alle").mkdir(parents=True)
+    (event / "Export").mkdir(parents=True)
+    (event / "Alle" / "IMG_0001.JPG").write_bytes(b"camera-original")
+    (event / "Alle" / "IMG_0001.xmp").write_bytes(b"<xmp/>")
+    (event / "Export" / "20260723_120000_IMG_0001.jpg").write_bytes(b"rendered-export")
+    (event / "Alle" / "20260723_120500_Fuji-X-E5.JPG").write_bytes(b"camera-two")
+
+    monkeypatch.setattr("app.event_inventory.analyze_tree", lambda _root: {"files": []})
+
+    refreshed = refresh_live_event_inventories(
+        db, workspace, archive, job_id="j", event_id="e"
+    )
+    assert refreshed["errors"] == []
+
+    event_row = next(row for row in list_job_events(db, "j") if row["id"] == "e")
+    assert event_row["assigned_file_count"] == 4
+    assert event_row["assigned_family_count"] == 2
+
+    overview = list_job_planning_overview(db, "j")
+    card = next(row for row in overview["event_groups"] if row["event_id"] == "e")
+    assert card["file_count"] == 4
+    assert card["family_count"] == 2
+
+    context = get_event_edit_context(db, "j", "e")
+    first = next(row for row in context["families"] if row["family_id"] == first_family)
+    assert first["file_count"] == 3
+    assert first["live_asset_kinds"] == ["export", "xmp"]
+
+    (event / "Alle" / "20260723_120500_Fuji-X-E5.JPG").unlink()
+    refresh_live_event_inventories(db, workspace, archive, job_id="j", event_id="e")
+
+    event_row = next(row for row in list_job_events(db, "j") if row["id"] == "e")
+    assert event_row["assigned_file_count"] == 3
+    assert event_row["assigned_family_count"] == 1
+
+    overview = list_job_planning_overview(db, "j")
+    card = next(row for row in overview["event_groups"] if row["event_id"] == "e")
+    assert card["file_count"] == 3
+    assert card["family_count"] == 1
+
+    context = get_event_edit_context(db, "j", "e")
+    missing = next(row for row in context["families"] if row["family_id"] == second_family)
+    assert missing["file_count"] == 0
+    assert missing["live_missing_camera_file_count"] == 1
+
+
+def test_0277_reapply_family_presentation_includes_assets_and_current_name(
+    tmp_path, monkeypatch
+):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    workspace = tmp_path / "workspace"
+    work = workspace / "Arbeitsbereich"
+
+    with database_connection(db) as connection:
+        seed_job(connection)
+        connection.execute(
+            """UPDATE jobs
+               SET operation='folder_import', stage='event_sort_applied',
+                   source_volume_label='TEST'
+               WHERE id='j'"""
+        )
+        seed_event(connection, status="applied")
+        connection.execute("UPDATE events SET resort_required=1 WHERE id='e'")
+        _seed_family(
+            connection,
+            current_path="2026/07-23 - Trip/Alle/20260723_120000_Fuji-X-E5.JPG",
+            root_kind="shared_workspace",
+        )
+
+    event = work / "2026" / "07-23 - Trip"
+    (event / "Alle").mkdir(parents=True)
+    (event / "Export").mkdir(parents=True)
+    (event / "Alle" / "20260723_120000_Fuji-X-E5.JPG").write_bytes(b"camera-original")
+    (event / "Alle" / "20260723_120000_Fuji-X-E5.xmp").write_bytes(b"<xmp/>")
+    (event / "Export" / "20260723_120000_Fuji-X-E5.jpg").write_bytes(b"rendered-export")
+
+    monkeypatch.setattr("app.event_inventory.analyze_tree", lambda _root: {"files": []})
+
+    plan = build_event_sort_plan(db, "j", "e", workspace, allow_reapply=True)
+    family = next(row for row in plan["families"] if row["family_id"] is not None)
+    assert family["display_name"] == "20260723_120000_Fuji-X-E5"
+    assert family["file_count"] == 3
+    assert set(family["media_types"]) == {"jpeg", "xmp", "export"}
