@@ -287,6 +287,37 @@ WORKSPACE_LAYOUT_INITIALIZATION: dict[str, Any] | None = None
 WORKSPACE_LAYOUT_ERROR: str | None = None
 
 
+def folder_import_display_label(
+    job: dict[str, Any],
+    organization: dict[str, Any],
+) -> str:
+    """Return the human-facing source name without changing the technical job ID."""
+    trigger = str(job.get("trigger_type") or "")
+    current = str(job.get("source_volume_label") or "").strip()
+    if trigger not in {"approved_sd", "usb_key"}:
+        return current or "Sicherungsordner"
+
+    start_date = str(organization.get("capture_start_date") or "")
+    end_date = str(organization.get("capture_end_date") or "")
+    def display_date(value: str) -> str:
+        return value.replace("-", ".") if len(value) == 10 else ""
+
+    if trigger == "approved_sd":
+        devices = list(organization.get("devices") or [])
+        if len(devices) == 1:
+            base = str(devices[0].get("name") or "SD-Karte")
+        elif devices:
+            base = "Mehrere Aufnahmegeräte"
+        else:
+            base = "SD-Karte"
+    else:
+        base = current or "Externes Laufwerk"
+
+    if start_date and end_date:
+        return f"{base} - {display_date(start_date)} - {display_date(end_date)}"
+    return base
+
+
 def process_claimed_job(
     job: dict[str, Any],
 ) -> None:
@@ -509,28 +540,11 @@ def process_claimed_job(
             )
             organization = result.get("organization", {})
             if str(job.get("trigger_type") or "") in {"approved_sd", "usb_key"}:
-                start_date = str(organization.get("capture_start_date") or "")
-                end_date = str(organization.get("capture_end_date") or "")
-                def _display_date(value: str) -> str:
-                    return value.replace("-", ".") if len(value) == 10 else ""
-                if str(job.get("trigger_type")) == "approved_sd":
-                    devices = list(organization.get("devices") or [])
-                    if len(devices) == 1:
-                        base_label = str(devices[0].get("name") or "SD-Karte")
-                    elif devices:
-                        base_label = "Mehrere Aufnahmegeräte"
-                    else:
-                        base_label = "SD-Karte"
-                else:
-                    base_label = str(job.get("source_volume_label") or "Externes Laufwerk")
-                if start_date and end_date:
-                    set_job_source_volume_label(
-                        DATABASE_FILE,
-                        job_id,
-                        f"{base_label} - {_display_date(start_date)} - {_display_date(end_date)}",
-                    )
-                else:
-                    set_job_source_volume_label(DATABASE_FILE, job_id, base_label)
+                set_job_source_volume_label(
+                    DATABASE_FILE,
+                    job_id,
+                    folder_import_display_label(job, organization),
+                )
             completion_prefix = "Ordnerimport erfolgreich abgeschlossen."
         else:
             result = run_simulated_job(
