@@ -23,7 +23,7 @@ from app.event_change_apply import (
     finish_event_change,
     verify_event_change,
 )
-from app.event_change_request import propose_event_change
+from app.event_change_request import get_event_change_files, propose_event_change
 from app.archive_reversal import prepare_archive_reversal
 from app.archive_release_stock import (
     verify_archive_release_copies,
@@ -318,3 +318,87 @@ def test_0275_ui_rules_for_archive_patch():
 
     assert "Die bestehende event.json im Archiv durch die vorbereitete neue" in assistant
     assert "keine zweite " in assistant
+
+
+
+def test_0275_new_archive_change_rescans_modified_xmp(tmp_path: Path):
+    db, workspace, archive, folder, old_family, _, _ = _seed(
+        tmp_path, full_archive_triplet=True
+    )
+    xmp_rel = f"2026/{folder}/Sortiert/alt.xmp"
+    xmp_path = archive / xmp_rel
+    first_payload = b"<xmp>A001</xmp>"
+    second_payload = b"<xmp>B002</xmp>"
+    xmp_path.write_bytes(first_payload)
+
+    first = propose_event_change(
+        db, "old", "archive", _preview(folder, old_family, None),
+        event_name="Test Archiv 2", notes="XMP erster Stand",
+        archive_root=archive, workspace_path=workspace,
+    )
+    first_row = next(
+        row for row in get_event_change_files(db, first["change_request_id"])
+        if row.get("review_kind") == "asset"
+        and row.get("asset_kind") == "xmp"
+        and row.get("old_path") == xmp_rel
+    )
+    assert first_row["expected_sha256"] == hashlib.sha256(first_payload).hexdigest()
+    cancel_event_change(
+        db, first["change_request_id"], archive, workspace
+    )
+
+    xmp_path.write_bytes(second_payload)
+    second = propose_event_change(
+        db, "old", "archive", _preview(folder, old_family, None),
+        event_name="Test Archiv 2", notes="XMP zweiter Stand",
+        archive_root=archive, workspace_path=workspace,
+    )
+    second_row = next(
+        row for row in get_event_change_files(db, second["change_request_id"])
+        if row.get("review_kind") == "asset"
+        and row.get("asset_kind") == "xmp"
+        and row.get("old_path") == xmp_rel
+    )
+    assert second_row["expected_sha256"] == hashlib.sha256(second_payload).hexdigest()
+    assert second_row["expected_sha256"] != first_row["expected_sha256"]
+
+
+def test_0275_xmp_changed_during_active_archive_change_is_recheckable(tmp_path: Path):
+    db, workspace, archive, folder, old_family, _, _ = _seed(
+        tmp_path, full_archive_triplet=True
+    )
+    xmp_rel = f"2026/{folder}/Sortiert/alt.xmp"
+    xmp_path = archive / xmp_rel
+    original = b"<xmp>A001</xmp>"
+    changed = b"<xmp>B002</xmp>"
+    assert len(original) == len(changed)
+    xmp_path.write_bytes(original)
+
+    proposed = propose_event_change(
+        db, "old", "archive", _preview(folder, old_family, None),
+        event_name="Test Archiv 2", notes="laufender XMP-Test",
+        archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+
+    xmp_path.write_bytes(changed)
+    conflict = verify_event_change(db, cr_id, archive, workspace)
+    xmp_conflict = next(
+        row for row in conflict["files"]
+        if row.get("review_kind") == "asset"
+        and row.get("asset_kind") == "xmp"
+        and row.get("old_path") == xmp_rel
+    )
+    assert xmp_conflict["status"] == "sha256_mismatch"
+    assert conflict["complete"] is False
+
+    xmp_path.write_bytes(original)
+    refreshed = verify_event_change(db, cr_id, archive, workspace)
+    xmp_refreshed = next(
+        row for row in refreshed["files"]
+        if row.get("review_kind") == "asset"
+        and row.get("asset_kind") == "xmp"
+        and row.get("old_path") == xmp_rel
+    )
+    assert xmp_refreshed["status"] == "verified"
