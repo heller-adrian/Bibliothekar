@@ -713,8 +713,8 @@ def finish_event_change(
                 )
             connection.execute(
                 """INSERT OR REPLACE INTO released_free_families(
-                       job_id,family_id,released_start_datetime,released_end_datetime,created_at
-                   ) VALUES (?,?,?,?,?)""",
+                       job_id,family_id,released_start_datetime,released_end_datetime,created_at,archive_origin
+                   ) VALUES (?,?,?,?,?,1)""",
                 (job_id, family_id, bounds[0], bounds[1], now),
             )
 
@@ -894,8 +894,13 @@ def finish_event_change(
                 [(assignment_event_id, family_id, now) for family_id in selected_ids],
             )
 
-        # Freigabe-Herkunftsmarker bleiben erhalten. Eine aktive Zuordnung
-        # macht sie unsichtbar, löscht aber nicht die Rückkehrinformation.
+        if selected_ids:
+            connection.execute(
+                "DELETE FROM released_free_families WHERE archive_origin=0 AND family_id IN ("
+                + ",".join("?" for _ in selected_ids) + ")",
+                tuple(selected_ids),
+            )
+        # archive_origin=1 bleibt als Rückkehrherkunft erhalten.
 
         # Die Import-Herkunft bleibt an file_families.job_id/files.job_id erhalten.
         # Auch Familien aus späteren Sicherungen gehören fachlich direkt zum

@@ -151,7 +151,7 @@ def effective_released_range(
     marker = connection.execute(
         """SELECT released_start_datetime,released_end_datetime
            FROM released_free_families
-           WHERE family_id=?
+           WHERE family_id=? AND archive_origin=1
            ORDER BY created_at DESC LIMIT 1""",
         (int(family_id),),
     ).fetchone()

@@ -315,6 +315,7 @@ def list_global_released_archive_groups(
                JOIN jobs j ON j.id=marker.job_id
                LEFT JOIN files f ON f.family_id=ff.id
                WHERE ff.selected_capture_time IS NOT NULL
+                 AND marker.archive_origin=1
                  AND NOT EXISTS (
                      SELECT 1 FROM event_assignments ea
                      JOIN events e ON e.id=ea.event_id
