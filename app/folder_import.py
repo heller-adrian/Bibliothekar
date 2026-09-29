@@ -713,10 +713,15 @@ def run_folder_import_job(
 
         if import_history_callback is not None:
             imported_paths = {str(item["source_relative_path"]) for item in plan}
-            import_history_callback([
+            # Auch sicher erkannte Duplikate werden für diese konkrete
+            # Quellen-ID als gesehen protokolliert. So ist der nächste
+            # Schnellscan derselben SD-Karte konsistent mit der SHA-Prüfung.
+            history_entries = [
                 entry for entry in entries
                 if str(entry["relative_path"]) in imported_paths
-            ])
+            ]
+            history_entries.extend(already_imported)
+            import_history_callback(history_entries)
 
         progress(
             "organizing",

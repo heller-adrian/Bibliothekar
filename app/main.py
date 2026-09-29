@@ -148,7 +148,7 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = "0.27.5"
-RELEASE_VERSION = "0.27.7"
+RELEASE_VERSION = "0.27.8"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -6850,6 +6850,33 @@ def index() -> str:
         `
         : "";
 
+      const duplicateFiles = Array.isArray(source.duplicate_files)
+        ? source.duplicate_files
+        : [];
+      const duplicateCount = Number(
+        source.duplicate_file_count
+        ?? source.already_imported_file_count
+        ?? 0
+      );
+      const duplicateNotice = duplicateCount > 0
+        ? `
+          <details class="message" style="border:1px solid var(--border);border-radius:10px;padding:9px 11px">
+            <summary><strong>${duplicateCount} ${duplicateCount === 1 ? "Duplikat" : "Duplikate"} übersprungen</strong></summary>
+            <p class="muted" style="margin:8px 0">Nur Dateien mit identischer Größe und identischem SHA-256 werden automatisch übersprungen.</p>
+            <ul style="margin:0;padding-left:20px">
+              ${duplicateFiles.map(file => `
+                <li style="margin:6px 0">
+                  <code>${escapeHtml(file.relative_path || "")}</code>
+                  ${file.existing_source_label || file.existing_job_id
+                    ? `<br><span class="muted">Bereits vorhanden in ${escapeHtml(file.existing_source_label || file.existing_job_id)}${file.existing_relative_path ? " · " + escapeHtml(file.existing_relative_path) : ""}</span>`
+                    : ""}
+                </li>`
+              ).join("") || `<li class="muted">Detaildaten stehen im technischen Importprotokoll.</li>`}
+            </ul>
+          </details>
+        `
+        : "";
+
       const jobId = String(job.job_id || job.id || "");
       const thumbnail = job.operation === "folder_import"
         ? `<div class="bk-job-thumb"><img src="/api/jobs/${encodeURIComponent(jobId)}/thumbnail" alt="" loading="lazy" onerror="this.remove();this.parentElement.textContent='▣'"></div>`
@@ -6889,6 +6916,7 @@ def index() -> str:
           </div>
 
           ${error}
+          ${duplicateNotice}
 
           <div class="progress">
             <div
