@@ -4173,6 +4173,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
             )
             return {
                 "job_id": job_id,
+                "target_job_id": target_job_id,
                 "event_id": target_event_id,
                 "target_event_id": target_event_id,
                 "target_status": "archived",
@@ -4193,7 +4194,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
         )
     except (ValueError, TypeError, EventSuggestionError, EventChangeRequestError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    return {"job_id": job_id, **result}
+    return {"job_id": job_id, "target_job_id": (target.get("job_id") if target is not None else None), **result}
 
 
 @app.get(
