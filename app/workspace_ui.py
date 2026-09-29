@@ -1073,8 +1073,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     </section>
 
     <section id="event-suggestions-panel" class="card suggestions-panel" hidden>
-      <h2>Nachträgliche Aufnahmen erkannt</h2>
-      <p class="muted">Die Aufnahmezeiten passen eindeutig zu bereits vorhandenen Ereignissen. Erst nach deiner Bestätigung wird eine sichere Ergänzung oder ein Nachtrag geplant.</p>
+      <h2>Neue Aufnahmen passen zu bestehenden Ereignissen</h2>
+      <p class="muted">Die Aufnahmezeiten passen eindeutig zu bereits vorhandenen Ereignissen. Erst nach deiner Bestätigung werden die neuen Aufnahmen sicher zum passenden Ereignis hinzugefügt.</p>
       <div id="event-suggestion-list" class="suggestion-list"></div>
       <p id="event-suggestion-status" class="muted" role="status" aria-live="polite"></p>
     </section>
@@ -2168,10 +2168,10 @@ WORKSPACE_HTML = r"""<!doctype html>
             ? "Bereits angewendet"
             : "Bereits archiviert";
         const consequence = item.target_status === "planned"
-          ? "Wird als sichere Ergänzung der offenen Planung angelegt."
+          ? "Die neuen Aufnahmen werden der offenen Planung hinzugefügt."
           : item.target_status === "applied"
-            ? "Wird als verknüpfter Nachtrag angelegt und separat geprüft."
-            : "Wird unter ‚Später zuordnen‘ für die manuelle Archiv-Ergänzung bereitgestellt.";
+            ? "Die neuen Aufnahmen werden als sichere Ergänzung des angewendeten Ereignisses vorbereitet."
+             : "Die neuen Aufnahmen werden über den geprüften Archivänderungsweg unter ‚Später zuordnen‘ vorbereitet.";
         const familyRows = (item.families || []).map(family => `
           <li><strong>${escapeHtml(family.original_stem || family.family_key || "Dateifamilie")}</strong>
           · ${escapeHtml(family.capture_time || "")}
@@ -3887,7 +3887,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           applySavedEventButton.textContent = "Dieses Ereignis anwenden";
           applySavedEventStatus.textContent = "Offene Aufgabe: Dieses geplante Ereignis muss noch angewendet werden.";
         } else {
-          applySavedEventStatus.textContent = "Das verknüpfte geplante Ereignis ist nicht mehr offen.";
+          applySavedEventStatus.textContent = "Das geplante Ereignis ist nicht mehr offen.";
         }
         postSaveAction?.scrollIntoView({behavior:"smooth",block:"center"});
       } else if (task === "free") {

@@ -119,7 +119,9 @@ def test_0278_workspace_ui_contracts():
     assert "Archivierte Sicherungen einblenden" in source
     assert "selectedJobIds" in source
     assert "planned_extension" not in source
-    assert "Zum Ereignis hinzufügen" not in source  # label comes from backend, not hard-coded UI
+    assert "verknüpfter Nachtrag" not in source
+    assert "Nachtrag geplant" not in source
+    assert "Neue Aufnahmen passen zu bestehenden Ereignissen" in source
 
 
 def test_0278_import_ui_reports_skipped_duplicates():
