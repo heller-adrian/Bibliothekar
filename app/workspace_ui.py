@@ -335,6 +335,17 @@ WORKSPACE_HTML = r"""<!doctype html>
     .suggestion-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
     .suggestion-files { margin-top:10px; }
     .suggestion-files code { white-space:normal; overflow-wrap:anywhere; }
+    .backup-filter { min-width:min(620px,100%); }
+    .backup-filter > summary { display:flex;align-items:center;justify-content:space-between;gap:18px;padding:11px 14px;border:1px solid var(--border);border-radius:12px;background:var(--panel-soft);cursor:pointer; }
+    .backup-filter > summary::marker { content:""; }
+    .backup-filter-label { color:var(--muted);font-weight:500; }
+    .backup-filter-value { font-weight:750; }
+    .backup-filter-panel { margin-top:8px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);display:grid;gap:10px; }
+    .backup-filter-list { display:grid;gap:7px; }
+    .backup-filter-choice { display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:8px 9px;border:1px solid var(--border);border-radius:10px;background:var(--panel-soft); }
+    .backup-filter-choice small { color:var(--muted); }
+    .backup-filter-actions { display:flex;gap:8px;flex-wrap:wrap; }
+    .backup-filter-archived > summary { color:var(--muted);font-weight:650;cursor:pointer; }
 
     .selection-bar {
       position: sticky;
@@ -1026,22 +1037,26 @@ WORKSPACE_HTML = r"""<!doctype html>
       </nav>
 
       <div class="bk-workspace-job-picker">
-        <label>
-          <span class="muted">
-            Sicherung auswählen
-          </span>
-
-          <select
-            id="job-select"
-            aria-label="Sicherung auswählen"
-          >
-            <option value="">
-              Sicherungen werden geladen …
-            </option>
-          </select>
-        </label>
-
-
+        <details id="backup-filter" class="backup-filter">
+          <summary>
+            <span class="backup-filter-label">Sicherungsfilter</span>
+            <strong id="backup-filter-value" class="backup-filter-value">Alle aktiven Sicherungen</strong>
+          </summary>
+          <div class="backup-filter-panel">
+            <div class="backup-filter-actions">
+              <button id="backup-filter-all" type="button">Alle aktiven Sicherungen</button>
+              <button id="backup-filter-none" type="button">Auswahl aufheben</button>
+            </div>
+            <div id="backup-filter-active-list" class="backup-filter-list"></div>
+            <details id="backup-filter-archived" class="backup-filter-archived">
+              <summary>Archivierte Sicherungen einblenden</summary>
+              <div id="backup-filter-archived-list" class="backup-filter-list" style="margin-top:8px"></div>
+            </details>
+          </div>
+        </details>
+        <select id="job-select" hidden aria-hidden="true" tabindex="-1">
+          <option value="">Technischer Anker</option>
+        </select>
       </div>
 
     </section>
@@ -1379,6 +1394,13 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     const jobSelect =
       document.getElementById("job-select");
+    const backupFilter = document.getElementById("backup-filter");
+    const backupFilterValue = document.getElementById("backup-filter-value");
+    const backupFilterActiveList = document.getElementById("backup-filter-active-list");
+    const backupFilterArchivedList = document.getElementById("backup-filter-archived-list");
+    const backupFilterArchived = document.getElementById("backup-filter-archived");
+    const backupFilterAll = document.getElementById("backup-filter-all");
+    const backupFilterNone = document.getElementById("backup-filter-none");
 
 
     const newEventButton =
@@ -1612,6 +1634,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     let jobs = [];
     let workspace = null;
+    let selectedJobIds = new Set();
     let selectedDays = new Set();
     let selectedPreviewEventId = null;
     let dialogMode = "event";
@@ -1784,104 +1807,353 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function backupWorkflowLabel(status) {
+      return {
+        planned: "Planned",
+        applied: "Applied",
+        archived: "Archived"
+      }[String(status || "")] || "Planned";
+    }
+
+    function renderBackupFilter() {
+      const active = jobs.filter(job => job.workflow_status !== "archived");
+      const archived = jobs.filter(job => job.workflow_status === "archived");
+
+      const choice = job => `
+        <label class="backup-filter-choice">
+          <input type="checkbox" data-backup-filter-job="${escapeHtml(job.id)}" ${selectedJobIds.has(job.id) ? "checked" : ""}>
+          <span><strong>${escapeHtml(formatJobLabel(job))}</strong><small style="display:block">${Number(job.active_family_count || 0)} aktive Familien</small></span>
+          <span class="badge ${job.workflow_status === "applied" ? "success" : ""}">${escapeHtml(backupWorkflowLabel(job.workflow_status))}</span>
+        </label>`;
+
+      backupFilterActiveList.innerHTML = active.length
+        ? active.map(choice).join("")
+        : '<div class="muted">Keine aktiven Sicherungen.</div>';
+      backupFilterArchivedList.innerHTML = archived.length
+        ? archived.map(choice).join("")
+        : '<div class="muted">Keine archivierten Sicherungen.</div>';
+
+      const selectedArchived = archived.filter(job => selectedJobIds.has(job.id)).length;
+      const selectedActive = active.filter(job => selectedJobIds.has(job.id)).length;
+      if (active.length && selectedActive === active.length && selectedArchived === 0) {
+        backupFilterValue.textContent = "Alle aktiven Sicherungen";
+      } else if (selectedJobIds.size === 0) {
+        backupFilterValue.textContent = "Keine Sicherung";
+      } else {
+        backupFilterValue.textContent = `${selectedJobIds.size} Sicherungen`;
+      }
+      if (selectedArchived) backupFilterArchived.open = true;
+    }
+
+    function updateTechnicalAnchor(preferred = "") {
+      const selected = jobs.filter(job => selectedJobIds.has(job.id));
+      const chosen = selected.find(job => job.id === preferred)
+        || selected.find(job => job.workflow_status !== "archived")
+        || selected[0]
+        || null;
+      jobSelect.innerHTML = jobs.map(job =>
+        `<option value="${escapeHtml(job.id)}">${escapeHtml(formatJobLabel(job))}</option>`
+      ).join("");
+      jobSelect.value = chosen?.id || "";
+    }
+
+    function sourceGroupsForSelection() {
+      const result = new Map();
+      for (const group of selectedDatedGroups()) {
+        const sources = Array.isArray(group.source_groups) && group.source_groups.length
+          ? group.source_groups
+          : [{job_id:group.job_id, group}];
+        for (const source of sources) {
+          const jobId = String(source.job_id || "");
+          if (!jobId) continue;
+          const local = source.group || group;
+          const bucket = result.get(jobId) || {groups:[], family_ids:new Set()};
+          bucket.groups.push(local);
+          for (const id of (local.family_ids || [])) bucket.family_ids.add(Number(id));
+          for (const family of (local.families || [])) {
+            if (Number.isFinite(Number(family.family_id))) bucket.family_ids.add(Number(family.family_id));
+          }
+          result.set(jobId,bucket);
+        }
+      }
+      return result;
+    }
+
+    function anchorJobIdForSelection() {
+      const byJob = sourceGroupsForSelection();
+      if (jobSelect.value && byJob.has(jobSelect.value)) return jobSelect.value;
+      const first = [...byJob.keys()][0];
+      if (first) return first;
+      if (jobSelect.value && selectedJobIds.has(jobSelect.value)) return jobSelect.value;
+      return [...selectedJobIds][0] || "";
+    }
+
+    function payloadForSourceJob(base, jobId) {
+      const bucket = sourceGroupsForSelection().get(jobId);
+      if (!bucket) return {...base};
+      const groups = bucket.groups;
+      const intervals = groups
+        .filter(group => group.start_datetime && group.end_datetime)
+        .map(group => ({start_datetime:group.start_datetime,end_datetime:group.end_datetime}));
+      const dayKeys = [...new Set(groups.map(group => group.day_key).filter(Boolean))].sort();
+      return {
+        ...base,
+        selected_intervals: intervals,
+        selected_day_keys: dayKeys
+      };
+    }
+
+    function mergeWorkspacePayloads(items) {
+      if (!items.length) {
+        return {
+          job:null,jobs:[],selected_job_ids:[],
+          statistics:{day_count:0,file_count:0,family_count:0,review_required_count:0,without_date_file_count:0},
+          events:[],day_groups:[],time_segments:[],
+          planning_overview:{event_groups:[],available_day_groups:[],timeline_groups:[]},
+          released_archive_groups:[],archive_change_reviews:[]
+        };
+      }
+
+      const rawEvents = [];
+      const rawChildren = [];
+      const eventComponents = new Map();
+      const planningEvents = new Map();
+      const dayMap = new Map();
+      const timeSegments = [];
+      const reviews = [];
+
+      for (const item of items) {
+        const jobId = item.jobId;
+        for (const event of (item.data.events || [])) {
+          const enriched = {...event, job_id:event.job_id || jobId};
+          if (enriched.event_level === "parent") rawEvents.push(enriched);
+          else rawChildren.push(enriched);
+        }
+        timeSegments.push(...(item.data.time_segments || []).map(row=>({...row,job_id:row.job_id||jobId})));
+        reviews.push(...(item.data.archive_change_reviews || []).map(row=>({...row,job_id:row.job_id||jobId})));
+
+        for (const group of (item.data.planning_overview?.event_groups || [])) {
+          const enriched={...group,job_id:group.job_id||jobId};
+          const canonical=String(enriched.linked_event_id || enriched.event_id);
+          const current=planningEvents.get(canonical);
+          const component={job_id:jobId,event_id:String(enriched.event_id),status:String(enriched.status||""),linkage_kind:enriched.linkage_kind||null};
+          if(!current){
+            planningEvents.set(canonical,{
+              ...enriched,
+              event_id:canonical,
+              canonical_event_id:canonical,
+              component_events:[component],
+              family_ids:[...(enriched.family_ids||[])],
+              source_job_ids:[jobId],
+              linked_pending_count: enriched.linked_event_id && enriched.status==="planned" ? 1 : 0
+            });
+          }else{
+            current.component_events.push(component);
+            if(!current.source_job_ids.includes(jobId))current.source_job_ids.push(jobId);
+            current.family_ids=[...new Set([...(current.family_ids||[]),...(enriched.family_ids||[])])];
+            current.family_count=Number(current.family_count||0)+Number(enriched.family_count||0);
+            current.file_count=Number(current.file_count||0)+Number(enriched.file_count||0);
+            current.total_size_bytes=Number(current.total_size_bytes||0)+Number(enriched.total_size_bytes||0);
+            current.review_required_count=Number(current.review_required_count||0)+Number(enriched.review_required_count||0);
+            if(enriched.linked_event_id && enriched.status==="planned")current.linked_pending_count=Number(current.linked_pending_count||0)+1;
+            if(!enriched.linked_event_id){
+              const keep={
+                event_name:enriched.event_name,folder_name:enriched.folder_name,
+                start_datetime:enriched.start_datetime,end_datetime:enriched.end_datetime,
+                status:enriched.status,event_kind:enriched.event_kind,
+                preserve_day_folders:enriched.preserve_day_folders,resort_required:enriched.resort_required,
+                job_id:enriched.job_id,linked_event_id:null,linkage_kind:null
+              };
+              Object.assign(current,keep);
+            }
+          }
+        }
+
+        for (const group of (item.data.planning_overview?.available_day_groups || [])) {
+          const start=String(group.start_datetime||"");
+          const end=String(group.end_datetime||"");
+          const key=`${group.has_date ? group.day_key : "__without_date__"}|${start}|${end}`;
+          const sourceGroup={...group,job_id:jobId};
+          const current=dayMap.get(key);
+          if(!current){
+            dayMap.set(key,{
+              ...sourceGroup,
+              card_key:`global:${key}`,
+              family_ids:[...(group.family_ids||[])],
+              families:(group.families||[]).map(f=>({...f,job_id:jobId})),
+              source_job_ids:[jobId],
+              source_groups:[{job_id:jobId,group:sourceGroup}]
+            });
+          }else{
+            current.file_count=Number(current.file_count||0)+Number(group.file_count||0);
+            current.family_count=Number(current.family_count||0)+Number(group.family_count||0);
+            current.total_size_bytes=Number(current.total_size_bytes||0)+Number(group.total_size_bytes||0);
+            current.review_required_count=Number(current.review_required_count||0)+Number(group.review_required_count||0);
+            current.family_ids=[...new Set([...(current.family_ids||[]),...(group.family_ids||[])])];
+            current.families.push(...(group.families||[]).map(f=>({...f,job_id:jobId})));
+            if(!current.source_job_ids.includes(jobId))current.source_job_ids.push(jobId);
+            current.source_groups.push({job_id:jobId,group:sourceGroup});
+            current.partially_assigned=Boolean(current.partially_assigned||group.partially_assigned);
+          }
+        }
+      }
+
+      for (const root of rawEvents.filter(event=>!event.linkage_kind)) {
+        eventComponents.set(String(root.id),{
+          ...root,
+          component_events:[{job_id:String(root.job_id),event_id:String(root.id),status:String(root.status||""),linkage_kind:null}]
+        });
+      }
+      for (const linked of rawEvents.filter(event=>event.linkage_kind)) {
+        const canonical=String(linked.linked_event_id||linked.id);
+        const current=eventComponents.get(canonical) || {
+          ...linked,id:canonical,linked_event_id:null,linkage_kind:null,component_events:[]
+        };
+        current.component_events.push({
+          job_id:String(linked.job_id),event_id:String(linked.id),
+          status:String(linked.status||""),linkage_kind:linked.linkage_kind
+        });
+        current.assigned_family_count=Number(current.assigned_family_count||0)+Number(linked.assigned_family_count||0);
+        current.assigned_file_count=Number(current.assigned_file_count||0)+Number(linked.assigned_file_count||0);
+        eventComponents.set(canonical,current);
+      }
+      for(const event of eventComponents.values()){
+        event.has_planned_component=(event.component_events||[]).some(component=>component.status==="planned");
+      }
+
+      const available=[...dayMap.values()].sort((a,b)=>String(a.start_datetime||a.day_key||"").localeCompare(String(b.start_datetime||b.day_key||"")));
+      const visibleEvents=[...planningEvents.values()].sort((a,b)=>String(a.start_datetime||"").localeCompare(String(b.start_datetime||"")));
+      const timeline=[...visibleEvents,...available].sort((a,b)=>{
+        const aa=String(a.start_datetime||a.day_key||"9999");
+        const bb=String(b.start_datetime||b.day_key||"9999");
+        return aa.localeCompare(bb) || (a.group_type==="event"?-1:1);
+      });
+
+      const releasedMap=new Map();
+      for(const group of (items[0].data.released_archive_groups||[])){
+        releasedMap.set(String(group.card_key||group.id||JSON.stringify(group)),group);
+      }
+      const released=[...releasedMap.values()];
+
+      const dayKeys=new Set();
+      for(const group of timeline){
+        if(group.day_key)dayKeys.add(group.day_key);
+        for(const day of (group.day_keys||[]))if(day)dayKeys.add(day);
+      }
+      let fileCount=0,familyCount=0,reviewCount=0,withoutDate=0;
+      for(const group of [...visibleEvents,...available]){
+        fileCount+=Number(group.file_count||0);
+        familyCount+=Number(group.family_count||0);
+        reviewCount+=Number(group.review_required_count||0);
+        if(!group.has_date && group.group_type!=="event")withoutDate+=Number(group.file_count||0);
+      }
+
+      return {
+        job:items[0].data.job,
+        jobs:items.map(item=>item.data.job),
+        selected_job_ids:items.map(item=>item.jobId),
+        statistics:{
+          day_count:dayKeys.size,
+          file_count:fileCount,
+          family_count:familyCount,
+          review_required_count:reviewCount,
+          without_date_file_count:withoutDate
+        },
+        events:[...eventComponents.values(),...rawChildren],
+        day_groups:available,
+        time_segments:timeSegments,
+        planning_overview:{
+          event_groups:visibleEvents,
+          available_day_groups:available,
+          timeline_groups:timeline
+        },
+        released_archive_groups:released,
+        archive_change_reviews:reviews
+      };
+    }
+
     async function loadJobs() {
       setStatus("Arbeitsbestände werden geladen …");
-
       const data = await getJson("/api/jobs");
+      const previous = new Set(selectedJobIds);
 
       jobs = (data.jobs || [])
-        .filter(
-          job =>
-            [
-              "metadata_fixture_analysis",
-              "folder_import",
-              "sd_import"
-            ].includes(job.operation)
-        )
-        .sort(
-          (a, b) =>
-            String(b.created_at).localeCompare(
-              String(a.created_at)
-            )
-        );
+        .filter(job => ["metadata_fixture_analysis","folder_import","sd_import"].includes(job.operation))
+        .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
 
-      jobSelect.innerHTML = "";
+      const active=jobs.filter(job=>job.workflow_status!=="archived");
+      if(previous.size){
+        selectedJobIds=new Set([...previous].filter(id=>jobs.some(job=>job.id===id)));
+      }else{
+        selectedJobIds=new Set(active.map(job=>job.id));
+      }
 
-      if (!jobs.length) {
-        const option =
-          document.createElement("option");
+      const requestedJob=new URLSearchParams(location.search).get("job");
+      if(requestedJob && jobs.some(job=>job.id===requestedJob)){
+        if(jobs.find(job=>job.id===requestedJob)?.workflow_status==="archived"){
+          selectedJobIds.add(requestedJob);
+        }
+      }
 
-        option.value = "";
-        option.textContent =
-          "Keine Arbeitsbestände vorhanden";
+      updateTechnicalAnchor(requestedJob || "");
+      renderBackupFilter();
 
-        jobSelect.appendChild(option);
-
-        setStatus(
-          "Noch kein analysierter Arbeitsbestand vorhanden."
-        );
-
+      if(!jobs.length){
+        setStatus("Noch kein analysierter Arbeitsbestand vorhanden.");
+        await loadWorkspace();
         return;
       }
-
-      for (const job of jobs) {
-        const option =
-          document.createElement("option");
-
-        option.value = job.id;
-        option.textContent =
-          formatJobLabel(job);
-
-        jobSelect.appendChild(option);
-      }
-
-      const requestedJob =
-        new URLSearchParams(
-          location.search
-        ).get("job");
-
-      if (
-        requestedJob
-        && jobs.some(
-          job => job.id === requestedJob
-        )
-      ) {
-        jobSelect.value = requestedJob;
-      }
-
       await loadWorkspace();
     }
 
-
     async function loadWorkspace() {
-      const jobId = jobSelect.value;
+      const ids=[...selectedJobIds].filter(id=>jobs.some(job=>job.id===id));
+      selectedDays.clear();
 
-      if (!jobId) {
+      if(!ids.length){
+        workspace=mergeWorkspacePayloads([]);
+        eventSuggestions=[];
+        renderSummary();
+        renderEventSuggestions();
+        renderDays();
+        renderPlannedActions();
+        renderSelection();
+        setStatus("Keine Sicherung im Filter ausgewählt.");
         return;
       }
 
-      setStatus("Arbeitsbereich wird geladen …");
+      setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
+      const items=await Promise.all(ids.map(async jobId=>{
+        const [data,suggestionData]=await Promise.all([
+          getJson(`/api/jobs/${encodeURIComponent(jobId)}/workspace-summary`),
+          getJson(`/api/jobs/${encodeURIComponent(jobId)}/event-suggestions`)
+        ]);
+        return {jobId,data,suggestions:suggestionData.suggestions||[]};
+      }));
 
-      const [workspaceData, suggestionData] = await Promise.all([
-        getJson(`/api/jobs/${encodeURIComponent(jobId)}/workspace-summary`),
-        getJson(`/api/jobs/${encodeURIComponent(jobId)}/event-suggestions`)
-      ]);
-      workspace = workspaceData;
-      eventSuggestions = suggestionData.suggestions || [];
+      workspace=mergeWorkspacePayloads(items);
+      eventSuggestions=items.flatMap(item=>
+        item.suggestions.map(suggestion=>({
+          ...suggestion,
+          source_job_id:item.jobId,
+          source_label:jobs.find(job=>job.id===item.jobId)?.source_volume_label || item.jobId
+        }))
+      );
 
-      selectedDays.clear();
-
+      updateTechnicalAnchor(jobSelect.value);
       renderSummary();
       renderEventSuggestions();
       renderDays();
       renderPlannedActions();
       renderSelection();
 
+      const activeCount=ids.filter(id=>jobs.find(job=>job.id===id)?.workflow_status!=="archived").length;
       setStatus(
-        `${workspace.statistics.day_count} Tagesgruppen geladen.`
+        ids.length===1
+          ? `${workspace.statistics.day_count} Tagesgruppen geladen.`
+          : `${workspace.statistics.day_count} Tagesgruppen aus ${ids.length} Sicherungen geladen${activeCount!==ids.length?" · archivierte Sicherung eingeblendet":""}.`
       );
     }
-
 
     function renderEventSuggestions() {
       eventSuggestionsPanel.hidden = eventSuggestions.length === 0;
@@ -1908,8 +2180,8 @@ WORKSPACE_HTML = r"""<!doctype html>
         card.innerHTML = `
           <div class="suggestion-head">
             <div>
-              <div class="suggestion-title">${Number(item.family_count || familyIds.length)} Familien passen zu ${escapeHtml(item.target_name)}</div>
-              <div class="muted">Eindeutige Übereinstimmung mit dem bereits belegten Ereigniszeitraum aus einer anderen Sicherung.</div>
+              <div class="suggestion-title">${Number(item.family_count || familyIds.length)} neue Familien passen zu ${escapeHtml(item.target_name)}</div>
+              <div class="muted">Diese neuen Aufnahmen liegen vollständig im Zeitraum des bestehenden Ereignisses · Herkunft: ${escapeHtml(item.source_label || "Sicherung")}.</div>
             </div>
             <span class="badge ${item.target_status === "archived" ? "warning" : "success"}">${escapeHtml(statusText)}</span>
           </div>
@@ -1924,7 +2196,7 @@ WORKSPACE_HTML = r"""<!doctype html>
             <code>${escapeHtml(item.target_folder_name || "")}</code>
           </details>
           <div class="suggestion-actions">
-            <button type="button" class="primary accept-suggestion" data-family-ids="${escapeHtml(JSON.stringify(familyIds))}" data-target-event-id="${escapeHtml(item.target_event_id)}">${escapeHtml(item.action_label)}</button>
+            <button type="button" class="primary accept-suggestion" data-source-job-id="${escapeHtml(item.source_job_id || "")}" data-family-ids="${escapeHtml(JSON.stringify(familyIds))}" data-target-event-id="${escapeHtml(item.target_event_id)}">${escapeHtml(item.action_label)}</button>
           </div>`;
         eventSuggestionList.appendChild(card);
       }
@@ -1932,7 +2204,8 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     function renderPlannedActions() {
       const allPlanned = (workspace?.events || []).filter(event =>
-        event.event_level === "parent" && event.status === "planned"
+        event.event_level === "parent"
+        && (event.status === "planned" || event.has_planned_component)
       );
       const reconcileTargets = allPlanned.filter(event => Boolean(Number(event.reconcile_target||0)));
       const planned = allPlanned.filter(event => !Boolean(Number(event.reconcile_target||0)));
@@ -1941,8 +2214,11 @@ WORKSPACE_HTML = r"""<!doctype html>
       plannedEventSelection.innerHTML =
         planned.map(event => `
           <label class="planned-choice">
-            <input class="planned-check" type="checkbox" data-planned-event="${escapeHtml(event.id)}" checked>
-            <span>${escapeHtml(event.display_title || event.name)} · ${Number(event.assigned_family_count || 0)} Familien</span>
+            <input class="planned-check" type="checkbox"
+              data-planned-event="${escapeHtml(event.id)}"
+              data-planned-components="${escapeHtml(JSON.stringify((event.component_events || [{job_id:event.job_id,event_id:event.id,status:event.status}]).filter(component=>component.status==="planned")))}"
+              checked>
+            <span>${escapeHtml(event.display_title || event.name)} · ${Number(event.assigned_family_count || 0)} Familien${(event.component_events||[]).length>1?" · mehrere Sicherungen":""}</span>
           </label>`).join("")
         + reconcileTargets.map(event => `
           <div class="planned-choice">
@@ -2079,15 +2355,16 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
-    async function openStoredEventPreview(eventId) {
-      if (!eventId || !jobSelect.value) return;
+    async function openStoredEventPreview(eventId, ownerJobId = "") {
+      const previewJobId=ownerJobId || jobSelect.value;
+      if (!eventId || !previewJobId) return;
       setSelectedPreviewEvent(eventId);
       structurePreview.classList.add("rich-preview");
       structurePreview.innerHTML = '<span class="muted">Ereignisstruktur wird geladen …</span>';
       previewBody.hidden = false;
       try {
         const data = await getJson(
-          `/api/jobs/${encodeURIComponent(jobSelect.value)}/events/${encodeURIComponent(eventId)}/structure`
+          `/api/jobs/${encodeURIComponent(previewJobId)}/events/${encodeURIComponent(eventId)}/structure`
         );
         if (selectedPreviewEventId === eventId) {
           renderStoredEventPreview(data);
@@ -2145,10 +2422,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           .available_day_groups
         || []
       );
-      const releasedForCurrentJob = releasedArchiveGroups().filter(
-        group => String(group.job_id || "") === String(jobSelect.value || "")
-      );
-      return [...regular, ...releasedForCurrentJob];
+      return [...regular, ...releasedArchiveGroups()];
     }
 
 
@@ -2225,8 +2499,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       if (!groups.length) {
         dayList.innerHTML =
           '<div class="empty">'
-          + "Keine freien oder verplanten "
-          + "Tagesbestände vorhanden."
+          + "Alle Aufnahmen sind zugeordnet und archiviert oder durch den Sicherungsfilter ausgeblendet."
           + "</div>";
 
         return;
@@ -2277,9 +2550,10 @@ WORKSPACE_HTML = r"""<!doctype html>
           card.className =
             "timeline-event-card";
           card.dataset.previewEventId = group.event_id;
+          card.dataset.previewJobId = group.job_id || "";
           card.style.cursor="pointer";
           card.addEventListener("click",()=>{
-            openStoredEventPreview(group.event_id);
+            openStoredEventPreview(group.event_id, group.job_id || jobSelect.value);
           });
 
           const range =
@@ -2907,9 +3181,13 @@ WORKSPACE_HTML = r"""<!doctype html>
     function plannedParentCandidates(dated) {
       if (!workspace || !dated.length) return [];
       if (dated.some(group => Boolean(group.reassignment_pending))) return [];
+      const sourceJobs=new Set(dated.flatMap(group=>group.source_job_ids || [group.job_id]).filter(Boolean));
+      if(sourceJobs.size!==1)return [];
+      const sourceJob=[...sourceJobs][0];
       return (workspace.events || []).filter(event =>
         event.event_level === "parent"
         && event.event_kind === "event"
+        && String(event.job_id||"")===String(sourceJob)
         && (dated[0].archive_change_request_id
           ? event.status === "archived"
           : ["planned","applied","archived"].includes(event.status))
@@ -3135,7 +3413,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     async function calculateDialogPreview() {
-      const jobId = jobSelect.value;
+      const jobId = anchorJobIdForSelection();
 
       if (!jobId) {
         dialogPreview.textContent =
@@ -3144,7 +3422,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
 
       const payload =
-        collectEventPayload();
+        payloadForSourceJob(collectEventPayload(), jobId);
 
       if (dialogMode === "existing_no_event" || activeNoEventTarget) {
         const all=payload.display_no_event_segments||payload.no_event_segments||[];
@@ -3227,7 +3505,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     async function saveEvent() {
-      const jobId = jobSelect.value;
+      const jobId = anchorJobIdForSelection();
 
       if (!jobId) {
         saveResult.hidden = false;
@@ -3275,11 +3553,26 @@ WORKSPACE_HTML = r"""<!doctype html>
           saveResult.textContent = `Fortgeführt: ${result.assigned_family_count} Familien`;
         } else {
           const eventPayload=collectEventPayload();
+          const sourceBuckets=sourceGroupsForSelection();
+          const anchorPayload=payloadForSourceJob(eventPayload,jobId);
           result = await createEventWithEmptySubeventConfirmation(
             jobId,
-            eventPayload
+            anchorPayload
           );
-          saveResult.textContent = `Gespeichert: ${result.parent_event.folder_name} · ${result.assigned_family_count} Familien`;
+          const linkedResults=[];
+          if(eventPayload.event_kind==="event" && result?.parent_event?.id){
+            for(const [sourceJobId,bucket] of sourceBuckets.entries()){
+              if(sourceJobId===jobId)continue;
+              const familyIds=[...bucket.family_ids].filter(Number.isFinite);
+              if(!familyIds.length)continue;
+              linkedResults.push(await postJson(
+                `/api/jobs/${encodeURIComponent(sourceJobId)}/event-suggestions/accept`,
+                {family_ids:familyIds,target_event_id:result.parent_event.id}
+              ));
+            }
+          }
+          const totalFamilies=Number(result.assigned_family_count||0)+linkedResults.reduce((sum,item)=>sum+Number(item.family_count||0),0);
+          saveResult.textContent = `Gespeichert: ${result.parent_event.folder_name} · ${totalFamilies} Familien${linkedResults.length?" · sicherungsübergreifend":""}`;
           lastSavedEvent = result.parent_event;
         }
 
@@ -3325,17 +3618,31 @@ WORKSPACE_HTML = r"""<!doctype html>
 
 
 
-    jobSelect.addEventListener(
-      "change",
-      () => {
-        loadWorkspace().catch(
-          error => setStatus(
-            error.message,
-            true
-          )
-        );
-      }
-    );
+    function onBackupFilterChange(event){
+      const checkbox=event.target.closest("input[data-backup-filter-job]");
+      if(!checkbox)return;
+      const id=String(checkbox.dataset.backupFilterJob||"");
+      if(checkbox.checked)selectedJobIds.add(id);
+      else selectedJobIds.delete(id);
+      updateTechnicalAnchor(jobSelect.value);
+      renderBackupFilter();
+      loadWorkspace().catch(error=>setStatus(error.message,true));
+    }
+    backupFilterActiveList.addEventListener("change",onBackupFilterChange);
+    backupFilterArchivedList.addEventListener("change",onBackupFilterChange);
+    backupFilterAll.addEventListener("click",()=>{
+      selectedJobIds=new Set(jobs.filter(job=>job.workflow_status!=="archived").map(job=>job.id));
+      backupFilterArchived.open=false;
+      updateTechnicalAnchor();
+      renderBackupFilter();
+      loadWorkspace().catch(error=>setStatus(error.message,true));
+    });
+    backupFilterNone.addEventListener("click",()=>{
+      selectedJobIds.clear();
+      updateTechnicalAnchor();
+      renderBackupFilter();
+      loadWorkspace().catch(error=>setStatus(error.message,true));
+    });
 
     selectAllButton.addEventListener(
       "click",
@@ -3439,34 +3746,47 @@ WORKSPACE_HTML = r"""<!doctype html>
     });
 
     async function applyPlannedEvents() {
-      const jobId = jobSelect.value;
-      const selectedIds = [...plannedEventSelection.querySelectorAll("input[data-planned-event]:checked")].map(input => input.dataset.plannedEvent);
-      if (!jobId || !selectedIds.length) throw new Error("Keine geplanten Ereignisse ausgewählt.");
-      applySavedEventButton.disabled = true;
-      applySavedEventStatus.textContent = "Alle ausgewählten Pläne werden geprüft …";
-      const plans = [];
-      for (const eventId of selectedIds) {
-        const plan = await getJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/sort-plan`);
-        if (!plan.summary?.ready) throw new Error(`${plan.event?.name || eventId}: ${plan.summary?.blocker_count || 1} Blocker.`);
-        plans.push({eventId, plan});
-      }
-      const familyCount = plans.reduce((sum,item)=>sum+Number(item.plan.summary.family_count||0),0);
-      const fileCount = plans.reduce((sum,item)=>sum+Number(item.plan.summary.file_count||0),0);
-      const ok = window.confirm(`${plans.length} geplante Ereignisse mit ${familyCount} Familien und ${fileCount} Dateien jetzt anwenden?`);
-      if (!ok) { applySavedEventButton.disabled = false; applySavedEventStatus.textContent = "Nicht angewendet."; return; }
-      for (let index=0; index<plans.length; index+=1) {
-        const {eventId, plan} = plans[index];
-        applySavedEventStatus.textContent = `Ereignis ${index+1} von ${plans.length} wird angewendet …`;
-        const response = await postJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/apply-sort`, {plan_token: plan.plan_token, confirmation_phrase: plan.apply_confirmation_phrase});
-        let run = response.run;
-        while (!run.terminal) {
-          applySavedEventStatus.textContent = `Ereignis ${index+1} von ${plans.length} · ${run.progress_percent || 0} %`;
-          await new Promise(resolve => setTimeout(resolve, 800));
-          run = await getJson(`/api/jobs/${encodeURIComponent(jobId)}/sort-runs/${encodeURIComponent(run.id)}`);
+      const selectedInputs=[...plannedEventSelection.querySelectorAll("input[data-planned-event]:checked")];
+      const components=[];
+      const seen=new Set();
+      for(const input of selectedInputs){
+        let rows=[];
+        try{rows=JSON.parse(input.dataset.plannedComponents||"[]");}catch(_){}
+        for(const row of rows){
+          const key=`${row.job_id}:${row.event_id}`;
+          if(!row.job_id||!row.event_id||seen.has(key))continue;
+          seen.add(key);components.push(row);
         }
-        if (run.status !== "applied") throw new Error(run.error_message || `Ereignis ${index+1} wurde nicht abgeschlossen.`);
       }
-      applySavedEventStatus.textContent = "Alle ausgewählten Ereignisse wurden vollständig angewendet und geprüft.";
+      if(!components.length)throw new Error("Keine geplanten Ereignisse ausgewählt.");
+      applySavedEventButton.disabled=true;
+      applySavedEventStatus.textContent="Alle ausgewählten Pläne werden geprüft …";
+      const plans=[];
+      for(const component of components){
+        const plan=await getJson(`/api/jobs/${encodeURIComponent(component.job_id)}/events/${encodeURIComponent(component.event_id)}/sort-plan`);
+        if(!plan.summary?.ready)throw new Error(`${plan.event?.name||component.event_id}: ${plan.summary?.blocker_count||1} Blocker.`);
+        plans.push({component,plan});
+      }
+      const familyCount=plans.reduce((sum,item)=>sum+Number(item.plan.summary.family_count||0),0);
+      const fileCount=plans.reduce((sum,item)=>sum+Number(item.plan.summary.file_count||0),0);
+      const ok=window.confirm(`${selectedInputs.length} Ereignis${selectedInputs.length===1?"":"se"} mit ${familyCount} Familien und ${fileCount} Dateien jetzt anwenden?`);
+      if(!ok){applySavedEventButton.disabled=false;applySavedEventStatus.textContent="Nicht angewendet.";return;}
+      for(let index=0;index<plans.length;index+=1){
+        const {component,plan}=plans[index];
+        applySavedEventStatus.textContent=`Teil ${index+1} von ${plans.length} wird angewendet …`;
+        const response=await postJson(
+          `/api/jobs/${encodeURIComponent(component.job_id)}/events/${encodeURIComponent(component.event_id)}/apply-sort`,
+          {plan_token:plan.plan_token,confirmation_phrase:plan.apply_confirmation_phrase}
+        );
+        let run=response.run;
+        while(!run.terminal){
+          applySavedEventStatus.textContent=`Teil ${index+1} von ${plans.length} · ${run.progress_percent||0} %`;
+          await new Promise(resolve=>setTimeout(resolve,800));
+          run=await getJson(`/api/jobs/${encodeURIComponent(component.job_id)}/sort-runs/${encodeURIComponent(run.id)}`);
+        }
+        if(run.status!=="applied")throw new Error(run.error_message||`Teil ${index+1} wurde nicht abgeschlossen.`);
+      }
+      applySavedEventStatus.textContent="Alle ausgewählten Ereignisbestandteile wurden vollständig angewendet und geprüft.";
       await loadWorkspace();
     }
 
@@ -3529,7 +3849,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventSuggestionStatus.textContent = "Zuordnung wird geprüft und geplant …";
       try {
         const result = await postJson(
-          `/api/jobs/${encodeURIComponent(jobSelect.value)}/event-suggestions/accept`,
+          `/api/jobs/${encodeURIComponent(button.dataset.sourceJobId || jobSelect.value)}/event-suggestions/accept`,
           {
             family_ids: JSON.parse(button.dataset.familyIds || "[]"),
             target_event_id: button.dataset.targetEventId
@@ -3537,7 +3857,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         );
         if (result?.change_request_id) {
           eventSuggestionStatus.textContent = `${result.name} wurde als manueller Archivauftrag vorbereitet.`;
-          location.href = `/events?job=${encodeURIComponent(jobSelect.value)}&task=change:${encodeURIComponent(result.change_request_id)}`;
+          location.href = `/events?job=${encodeURIComponent(result.target_job_id || button.dataset.sourceJobId || jobSelect.value)}&task=change:${encodeURIComponent(result.change_request_id)}`;
           return;
         }
         eventSuggestionStatus.textContent = `${result.name} wurde als geplante Änderung angelegt.`;
