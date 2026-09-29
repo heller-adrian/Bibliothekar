@@ -70,6 +70,41 @@ def manifest_fingerprint(entries: list[dict[str, Any]]) -> str:
     return digest.hexdigest()
 
 
+def partition_import_entries(
+    entries: list[dict[str, Any]],
+    known_hashes: set[tuple[int, str]] | None = None,
+    duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split one source manifest into new files and exact known duplicates."""
+    known = known_hashes or set()
+    origins = duplicate_origins or {}
+    new_entries: list[dict[str, Any]] = []
+    duplicates: list[dict[str, Any]] = []
+    details: list[dict[str, Any]] = []
+    for raw in entries:
+        entry = dict(raw)
+        key = (int(entry["size_bytes"]), str(entry["sha256"]))
+        if key not in known:
+            new_entries.append(entry)
+            continue
+        duplicates.append(entry)
+        origin = dict(origins.get(key) or {})
+        details.append({
+            "relative_path": str(entry["relative_path"]),
+            "size_bytes": int(entry["size_bytes"]),
+            "sha256": str(entry["sha256"]),
+            "existing_job_id": str(origin.get("job_id") or ""),
+            "existing_source_label": str(origin.get("source_volume_label") or ""),
+            "existing_relative_path": str(
+                origin.get("current_relative_path")
+                or origin.get("original_relative_path")
+                or ""
+            ),
+            "existing_filename": str(origin.get("original_filename") or ""),
+        })
+    return new_entries, duplicates, details
+
+
 def normalize_device_name(
     make: str | None,
     model: str | None,
@@ -520,33 +555,11 @@ def run_folder_import_job(
         if identity_callback is not None:
             identity_callback(source_signature, source_fingerprint)
 
-        known_hashes = imported_hashes or set()
-        origin_lookup = duplicate_origins or {}
-        already_imported = [
-            entry for entry in all_entries
-            if (int(entry["size_bytes"]), str(entry["sha256"])) in known_hashes
-        ]
-        entries = [
-            entry for entry in all_entries
-            if (int(entry["size_bytes"]), str(entry["sha256"])) not in known_hashes
-        ]
-        duplicate_details = []
-        for entry in already_imported:
-            key = (int(entry["size_bytes"]), str(entry["sha256"]))
-            origin = dict(origin_lookup.get(key) or {})
-            duplicate_details.append({
-                "relative_path": str(entry["relative_path"]),
-                "size_bytes": int(entry["size_bytes"]),
-                "sha256": str(entry["sha256"]),
-                "existing_job_id": str(origin.get("job_id") or ""),
-                "existing_source_label": str(origin.get("source_volume_label") or ""),
-                "existing_relative_path": str(
-                    origin.get("current_relative_path")
-                    or origin.get("original_relative_path")
-                    or ""
-                ),
-                "existing_filename": str(origin.get("original_filename") or ""),
-            })
+        entries, already_imported, duplicate_details = partition_import_entries(
+            all_entries,
+            imported_hashes,
+            duplicate_origins,
+        )
         if not entries:
             raise PipelineError(
                 "Auf dieser SD-Karte wurden keine neuen Dateien gefunden. "

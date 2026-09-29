@@ -6,6 +6,7 @@ import hashlib
 
 from app import main
 from app.event_suggestions import accept_event_suggestion
+from app.folder_import import partition_import_entries
 from app.database import (
     create_job,
     database_connection,
@@ -232,3 +233,35 @@ def test_0278_cross_backup_extension_mirrors_subevents(tmp_path: Path):
             ("IN_1","Morgen"),
             ("IN_2","Nachmittag"),
         ]
+
+
+
+def test_0278_mixed_import_keeps_new_file_and_skips_only_exact_duplicate():
+    old_digest=hashlib.sha256(b"old-photo").hexdigest()
+    new_digest=hashlib.sha256(b"new-photo").hexdigest()
+    entries=[
+        {"relative_path":"DCIM/OLD.JPG","size_bytes":9,"sha256":old_digest},
+        {"relative_path":"DCIM/NEW.JPG","size_bytes":9,"sha256":new_digest},
+    ]
+    key=(9,old_digest)
+    new,duplicates,details=partition_import_entries(
+        entries,
+        {key},
+        {key:{
+            "job_id":"previous",
+            "source_volume_label":"Frühere Sicherung",
+            "current_relative_path":"2026/07-23/OLD.JPG",
+            "original_filename":"OLD.JPG",
+        }},
+    )
+    assert [row["relative_path"] for row in new] == ["DCIM/NEW.JPG"]
+    assert [row["relative_path"] for row in duplicates] == ["DCIM/OLD.JPG"]
+    assert details == [{
+        "relative_path":"DCIM/OLD.JPG",
+        "size_bytes":9,
+        "sha256":old_digest,
+        "existing_job_id":"previous",
+        "existing_source_label":"Frühere Sicherung",
+        "existing_relative_path":"2026/07-23/OLD.JPG",
+        "existing_filename":"OLD.JPG",
+    }]
