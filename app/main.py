@@ -148,7 +148,7 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = "0.27.5"
-RELEASE_VERSION = "0.27.8"
+RELEASE_VERSION = "0.27.9"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4117,8 +4117,9 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
                 (target_event_id,),
             ).fetchone()
 
+        target_job_id = str(target["job_id"]) if target is not None else None
+
         if target is not None and str(target["status"] or "") == "archived":
-            target_job_id = str(target["job_id"])
             context = get_event_edit_context(
                 DATABASE_FILE, target_job_id, target_event_id
             )
@@ -4194,7 +4195,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
         )
     except (ValueError, TypeError, EventSuggestionError, EventChangeRequestError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    return {"job_id": job_id, "target_job_id": (target.get("job_id") if target is not None else None), **result}
+    return {"job_id": job_id, "target_job_id": target_job_id, **result}
 
 
 @app.get(
@@ -6851,6 +6852,8 @@ def index() -> str:
         `
         : "";
 
+      const jobId = String(job.job_id || job.id || "");
+
       const duplicateFiles = Array.isArray(source.duplicate_files)
         ? source.duplicate_files
         : [];
@@ -6878,7 +6881,6 @@ def index() -> str:
         `
         : "";
 
-      const jobId = String(job.job_id || job.id || "");
       const thumbnail = job.operation === "folder_import"
         ? `<div class="bk-job-thumb"><img src="/api/jobs/${encodeURIComponent(jobId)}/thumbnail" alt="" loading="lazy" onerror="this.remove();this.parentElement.textContent='▣'"></div>`
         : `<div class="bk-job-thumb" aria-hidden="true">▣</div>`;
