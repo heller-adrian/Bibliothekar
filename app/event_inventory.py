@@ -411,9 +411,19 @@ def scan_event_inventory(
 
             if len(distinct_originals) == 1:
                 # Ein echtes Aufnahmedatum schlägt widersprechende CreateDate-
-                # oder ModifyDate-Werte des Exportvorgangs.
+                # oder ModifyDate-Werte des Exportvorgangs. Die originale
+                # Metadatenquelle bleibt sichtbar/auditierbar.
                 capture_time = next(iter(distinct_originals))
-                capture_source = "export_metadata_datetime_original"
+                capture_source = next(
+                    (
+                        str(item.get("tag_name") or "")
+                        for item in metadata.get("metadata_candidates", [])
+                        if item.get("usable")
+                        and "DateTimeOriginal" in str(item.get("tag_name") or "")
+                        and str(item.get("normalized_datetime") or "") == capture_time
+                    ),
+                    str(capture_source or "EXIF:ExifIFD:DateTimeOriginal"),
+                )
                 confidence = "high"
             elif len(distinct_originals) > 1:
                 # Mehrere echte, widersprüchliche Aufnahmedaten bleiben offen,
@@ -425,10 +435,16 @@ def scan_event_inventory(
                 capture_time
                 and confidence in {"high", "medium"}
                 and "FileModifyDate" not in str(capture_source or "")
+                and filename_capture
             ):
-                # Zweite Stufe: CreateDate/XMP-Zeit darf verwendet werden,
-                # solange die Metadatenanalyse keinen echten Konflikt meldet.
-                pass
+                # CreateDate/XMP-Zeit ist bei Exporten nur dann belastbar, wenn
+                # der kanonische Dateiname sie plausibilisiert. Andernfalls
+                # könnte es lediglich der Exportzeitpunkt sein.
+                gap = _capture_seconds_apart(capture_time, filename_capture)
+                if gap is None or gap > 120:
+                    capture_time = filename_capture
+                    capture_source = "filename_schema"
+                    confidence = "medium"
             elif filename_capture:
                 capture_time = filename_capture
                 capture_source = "filename_schema"

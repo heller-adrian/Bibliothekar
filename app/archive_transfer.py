@@ -350,6 +350,8 @@ def verify_event_archive(
     archive_root: Path,
     job_id: str,
     event_id: str,
+    *,
+    workspace_path: Path | None = None,
 ) -> dict[str, Any]:
     archive_root = archive_root.expanduser().resolve(strict=False)
 
@@ -403,9 +405,47 @@ def verify_event_archive(
         if item.get("known_file_id") is not None
     }
 
+    # 0.27.7: XMP und Exporte sind nach dem Anwenden echter Ereignisbestand.
+    # Für die Archivprüfung wird deshalb zusätzlich der aktuelle SSD-Bestand
+    # als SOLL gelesen. Unbekannte Fremddateien bleiben weiterhin nur Hinweis.
+    managed_asset_kinds = {"xmp", "export", "derived_media"}
+    source_assets: list[dict[str, Any]] = []
+    if workspace_path is not None and str(event.get("status") or "") == "applied":
+        try:
+            from app.workspace_layout import shared_work_root
+            workspace_inventory = scan_event_inventory(
+                database_path,
+                shared_work_root(workspace_path),
+                job_id,
+                event_id,
+                root_kind="shared_workspace",
+                persist=True,
+                update_known_file_locations=False,
+            )
+        except (EventInventoryError, Exception) as exc:
+            if isinstance(exc, EventInventoryError):
+                raise ArchiveVerificationError(str(exc)) from exc
+            raise
+        source_assets = [
+            item
+            for item in workspace_inventory["files"]
+            if item.get("known_file_id") is None
+            and str(item.get("asset_kind") or "") in managed_asset_kinds
+        ]
+
+    archive_assets_by_event_path = {
+        str(item.get("event_relative_path") or ""): item
+        for item in inventory["files"]
+        if item.get("known_file_id") is None
+        and str(item.get("asset_kind") or "") in managed_asset_kinds
+    }
+
     verification_id = "ARCHIVE_" + uuid.uuid4().hex.upper()
     created_at = _now()
-    total_size = sum(int(row["size_bytes"]) for row in files)
+    total_size = (
+        sum(int(row["size_bytes"]) for row in files)
+        + sum(int(row["size_bytes"]) for row in source_assets)
+    )
 
     with database_connection(database_path) as connection:
         connection.execute(
@@ -428,7 +468,7 @@ def verify_event_archive(
                 job_id,
                 event_id,
                 str(archive_root),
-                len(files),
+                len(files) + len(source_assets),
                 total_size,
                 created_at,
                 created_at,
@@ -536,9 +576,53 @@ def verify_event_archive(
 
         results.append(result)
 
+    asset_results: list[dict[str, Any]] = []
+    event_prefix = str(inventory.get("event_prefix") or "").strip("/")
+    for asset in source_assets:
+        event_rel = str(asset.get("event_relative_path") or "").strip("/")
+        expected_relative = "/".join(part for part in (event_prefix, event_rel) if part)
+        expected_size = int(asset.get("size_bytes") or 0)
+        expected_sha256 = str(asset.get("sha256") or "")
+        observed = archive_assets_by_event_path.get(event_rel)
+
+        if observed is None:
+            status = "missing"
+            actual_size = None
+            actual_sha256 = None
+            error_message = "Zusatzdatei fehlt am erwarteten SOLL-Pfad der Kamerabibliothek."
+            missing_count += 1
+        else:
+            actual_size = int(observed.get("size_bytes") or 0)
+            actual_sha256 = str(observed.get("sha256") or "")
+            if actual_size != expected_size:
+                status = "size_mismatch"
+                error_message = "Dateigröße der Zusatzdatei weicht ab."
+                mismatched_count += 1
+            elif actual_sha256 != expected_sha256:
+                status = "sha256_mismatch"
+                error_message = "SHA-256-Summe der Zusatzdatei weicht ab."
+                mismatched_count += 1
+            else:
+                status = "verified"
+                error_message = None
+                verified_count += 1
+                verified_bytes += expected_size
+
+        asset_results.append({
+            "asset_kind": str(asset.get("asset_kind") or "other"),
+            "source_event_relative_path": event_rel,
+            "expected_relative_path": expected_relative,
+            "expected_size_bytes": expected_size,
+            "expected_sha256": expected_sha256,
+            "status": status,
+            "actual_size_bytes": actual_size,
+            "actual_sha256": actual_sha256,
+            "error_message": error_message,
+        })
+
     final_status = (
         "verified"
-        if verified_count == len(files)
+        if verified_count == len(files) + len(source_assets)
         and missing_count == 0
         and mismatched_count == 0
         else "failed"
@@ -579,6 +663,30 @@ def verify_event_archive(
                     item["error_message"],
                 )
                 for item in results
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO event_archive_verification_assets (
+                verification_id,asset_kind,source_event_relative_path,
+                expected_relative_path,expected_size_bytes,expected_sha256,status,
+                actual_size_bytes,actual_sha256,error_message
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            [
+                (
+                    verification_id,
+                    item["asset_kind"],
+                    item["source_event_relative_path"],
+                    item["expected_relative_path"],
+                    item["expected_size_bytes"],
+                    item["expected_sha256"],
+                    item["status"],
+                    item["actual_size_bytes"],
+                    item["actual_sha256"],
+                    item["error_message"],
+                )
+                for item in asset_results
             ],
         )
 
@@ -635,13 +743,16 @@ def verify_event_archive(
         "status": final_status,
         "verified": final_status == "verified",
         "archive_root": str(archive_root),
-        "file_count": len(files),
+        "file_count": len(files) + len(source_assets),
+        "camera_file_count": len(files),
+        "asset_file_count": len(source_assets),
         "verified_file_count": verified_count,
         "total_size_bytes": total_size,
         "verified_size_bytes": verified_bytes,
         "missing_file_count": missing_count,
         "mismatched_file_count": mismatched_count,
         "files": results,
+        "assets": asset_results,
         "ssd_release_ready": final_status == "verified",
         "ssd_release_available": True,
         "inventory_summary": inventory.get("summary"),

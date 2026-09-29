@@ -1963,6 +1963,14 @@ def list_job_events(
                 GROUP BY root_event_id
             ),
 
+            inventory_counts AS (
+                SELECT event_id, root_kind, COUNT(*) AS file_count
+                FROM event_inventory_files
+                WHERE job_id = ?
+                  AND asset_kind IN ('camera_original','xmp','export','derived_media')
+                GROUP BY event_id, root_kind
+            ),
+
             pending_reassignments AS (
                 SELECT event_id, COUNT(*) AS pending_count
                 FROM event_reapply_removed_families
@@ -1996,15 +2004,15 @@ def list_job_events(
                 END AS assigned_family_count,
 
                 CASE
+                    WHEN e.event_level = 'parent' AND e.status = 'archived'
+                         AND archive_inventory.file_count IS NOT NULL
+                    THEN archive_inventory.file_count
+                    WHEN e.event_level = 'parent' AND e.status = 'applied'
+                         AND workspace_inventory.file_count IS NOT NULL
+                    THEN workspace_inventory.file_count
                     WHEN e.event_level = 'parent'
-                    THEN COALESCE(
-                        root.file_count,
-                        0
-                    )
-                    ELSE COALESCE(
-                        direct.file_count,
-                        0
-                    )
+                    THEN COALESCE(root.file_count, 0)
+                    ELSE COALESCE(direct.file_count, 0)
                 END AS assigned_file_count,
 
                 CASE
@@ -2026,6 +2034,14 @@ def list_job_events(
             LEFT JOIN root_counts AS root
                 ON root.root_event_id = e.id
 
+            LEFT JOIN inventory_counts AS workspace_inventory
+                ON workspace_inventory.event_id = e.id
+               AND workspace_inventory.root_kind = 'shared_workspace'
+
+            LEFT JOIN inventory_counts AS archive_inventory
+                ON archive_inventory.event_id = e.id
+               AND archive_inventory.root_kind = 'camera_archive'
+
             LEFT JOIN pending_reassignments AS pending
                 ON pending.event_id = e.id
 
@@ -2040,6 +2056,7 @@ def list_job_events(
                 e.name
             """,
             (
+                job_id,
                 job_id,
                 job_id,
                 job_id,

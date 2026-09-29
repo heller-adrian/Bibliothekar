@@ -1548,6 +1548,7 @@ def api_archive_verify(
             ARCHIVE_ROOT,
             job_id,
             event_id,
+            workspace_path=WORKSPACE_PATH,
         )
     except ArchiveVerificationError as error:
         message = str(error)

@@ -720,6 +720,7 @@ def release_event_ssd(
             archive_root,
             job_id,
             event_id,
+            workspace_path=workspace_path,
         )
     except ArchiveVerificationError as exc:
         raise SsdReleaseError(str(exc)) from exc
