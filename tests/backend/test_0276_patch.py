@@ -89,7 +89,8 @@ def test_0276_extra_user_file_is_advisory_and_does_not_block_or_break_reversal(t
         row for row in get_event_change_files(db, cr_id)
         if row.get("old_path") == extra_rel
     )
-    assert advisory["action"] == "advisory"
+    assert advisory["action"] == "keep"
+    assert advisory["advisory"] is True
 
     confirm_event_change(db, cr_id, archive, workspace)
     copy_prepared_event_document(db, workspace, archive, cr_id)
@@ -153,6 +154,14 @@ def test_0276_archive_release_provenance_survives_reuse_and_returns_after_delete
             "SELECT archive_origin FROM released_free_families WHERE family_id=?",
             (case["late_family"],),
         ).fetchone()["archive_origin"] == 1
+
+    with database_connection(case["db"]) as connection:
+        connection.execute(
+            """UPDATE jobs
+               SET state='completed',stage='organized_verified',operation='folder_import'
+               WHERE id='old'"""
+        )
+        connection.commit()
 
     plan = build_event_sort_plan(
         case["db"], "old", "reuse", case["workspace"], verify_sha256=True

@@ -290,7 +290,7 @@ def verify_event_change(
         raise EventChangeApplyError("Der Änderungsauftrag enthält keine Dateien.")
     managed_reviews = [
         review for review in reviews
-        if str(review.get("action") or "") != "advisory"
+        if not bool(review.get("advisory"))
     ]
 
     now = _now()
@@ -371,7 +371,7 @@ def verify_event_change(
             message = None
 
             release_path = str(review.get("workspace_release_path") or "").strip()
-            if action == "advisory":
+            if bool(review.get("advisory")):
                 advisory_path = _safe_archive_path(root, old_rel)
                 status = "advisory"
                 message = (

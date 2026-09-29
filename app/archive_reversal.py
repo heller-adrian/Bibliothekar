@@ -125,6 +125,16 @@ def _request_context(database_path: Path, cr_id: str) -> tuple[dict[str, Any], d
     return cr, event, camera + assets
 
 
+def _is_advisory_row(row: dict[str, Any]) -> bool:
+    return bool(
+        str(row.get("review_kind") or "") == "asset"
+        and row.get("family_id") is None
+        and str(row.get("asset_kind") or "other") != "export"
+        and str(row.get("action") or "") == "keep"
+        and str(row.get("old_path") or "") == str(row.get("new_path") or "")
+    )
+
+
 def prepare_reversal_baseline(
     database_path: Path,
     archive_root: Path,
@@ -189,7 +199,7 @@ def prepare_reversal_baseline(
 
     original_assets: list[dict[str, Any]] = []
     for row in request_rows:
-        if str(row.get("review_kind") or "") != "asset":
+        if str(row.get("review_kind") or "") != "asset" or _is_advisory_row(row):
             continue
         old_rel = str(row.get("old_path") or "").strip()
         if not old_rel:
@@ -352,6 +362,8 @@ def prepare_archive_reversal(
 
     missing_sources: list[str] = []
     for row in rows:
+        if _is_advisory_row(row):
+            continue
         if str(row.get("source_root_kind") or "camera_archive") != "camera_archive":
             continue
         old_path = str(row.get("old_path") or "").strip()
@@ -478,6 +490,8 @@ def _reversal_state(
     remove_files: list[str] = []
 
     for row in rows:
+        if _is_advisory_row(row):
+            continue
         old_path = str(row.get("old_path") or "").strip()
         new_path = str(row.get("new_path") or "").strip()
         size = int(row.get("expected_size_bytes") or 0)
@@ -648,6 +662,8 @@ def verify_archive_reversal(
             problems.append({"kind": "directory", "path": rel, "message": "Ursprünglicher Ordner fehlt."})
 
     for row in rows:
+        if _is_advisory_row(row):
+            continue
         old_path = str(row.get("old_path") or "").strip()
         new_path = str(row.get("new_path") or "").strip()
         size = int(row.get("expected_size_bytes") or 0)

@@ -388,9 +388,11 @@ def _compute_event_plan(
             # Sidecars folgen weiterhin ihrer Kamerafamilie.
             if family_id is None and asset_kind != "export":
                 candidate = None
-                action = "advisory"
-                new_path = ""
+                action = "keep"
+                new_path = old_path
+                advisory = True
             else:
+                advisory = False
                 if family_id is not None and family_id in removed_family_ids:
                     candidate = None
                 elif asset_kind == "other" and not capture:
@@ -426,6 +428,7 @@ def _compute_event_plan(
                 "expected_sha256": str(item["sha256"]),
                 "selected_capture_time": item.get("selected_capture_time"),
                 "capture_time_confidence": item.get("capture_time_confidence"),
+                "advisory": advisory,
             })
 
     lines = [
@@ -448,7 +451,7 @@ def _compute_event_plan(
             f"Offen neu zuzuordnen: {len(removed_family_ids)} Familien (werden niemals geloescht)."
         )
     unresolved_assets = sum(1 for item in asset_plans if item["action"] == "unresolved")
-    advisory_assets = sum(1 for item in asset_plans if item["action"] == "advisory")
+    advisory_assets = sum(1 for item in asset_plans if bool(item.get("advisory")))
     if unresolved_assets:
         lines.append(
             f"Nicht eindeutig zuordenbare verwaltete Sidecars: {unresolved_assets}"
@@ -471,14 +474,18 @@ def _compute_event_plan(
             "kept_count": len(requested_set & current_family_ids),
             "total_changes": (
                 sum(1 for item in file_plans if item["action"] != "keep")
-                + sum(1 for item in asset_plans if item["action"] != "keep")
+                + sum(
+                    1 for item in asset_plans
+                    if not bool(item.get("advisory"))
+                    and item["action"] != "keep"
+                )
             ),
             "file_count": len(file_plans) + sum(
-                1 for item in asset_plans if item["action"] != "advisory"
+                1 for item in asset_plans if not bool(item.get("advisory"))
             ),
             "camera_file_count": len(file_plans),
             "asset_file_count": sum(
-                1 for item in asset_plans if item["action"] != "advisory"
+                1 for item in asset_plans if not bool(item.get("advisory"))
             ),
             "unresolved_asset_count": unresolved_assets,
             "advisory_asset_count": advisory_assets,
@@ -828,18 +835,23 @@ def get_event_change_files(
                 (cr_id,),
             ).fetchall()
         ]
-        asset_rows = [
-            {
-                **dict(row),
-                "review_kind": "asset",
-                "file_id": None,
-                "confirmed": 0,
-            }
-            for row in connection.execute(
-                "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? ORDER BY id",
-                (cr_id,),
-            ).fetchall()
-        ]
+        asset_rows = []
+        for row in connection.execute(
+            "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? ORDER BY id",
+            (cr_id,),
+        ).fetchall():
+            item = dict(row)
+            item["review_kind"] = "asset"
+            item["file_id"] = None
+            item["confirmed"] = 0
+            item["advisory"] = bool(
+                item.get("family_id") is None
+                and str(item.get("asset_kind") or "other") != "export"
+                and str(item.get("action") or "") == "keep"
+                and str(item.get("old_path") or "")
+                    == str(item.get("new_path") or "")
+            )
+            asset_rows.append(item)
     return camera_rows + asset_rows
 
 
