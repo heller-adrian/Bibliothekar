@@ -774,6 +774,35 @@ def finish_event_change(
         )
 
         connection.execute("UPDATE events SET time_model_version=2 WHERE id=?", (cr['event_id'],))
+
+        # 0.28.3: Die im Archivauftrag eingefrorene Ordnerdefinition wird erst
+        # nach erfolgreicher read-only Prüfung kanonisch. Ältere/automatische
+        # Aufträge ohne Layoutfelder verändern den bestehenden Zustand nicht.
+        if cr.get("folder_layout_json") is not None:
+            try:
+                requested_layout = json.loads(str(cr.get("folder_layout_json") or "{}"))
+            except Exception as exc:
+                connection.rollback()
+                raise EventChangeApplyError(
+                    "Die gespeicherte Archiv-Ordnerstruktur ist beschädigt."
+                ) from exc
+            from app.event_layout import update_event_layout
+            try:
+                update_event_layout(
+                    connection,
+                    str(cr["event_id"]),
+                    structure_enabled=bool(cr.get("folder_structure_enabled")),
+                    input_path=str(cr.get("folder_input_path") or ""),
+                    layout=requested_layout,
+                    updated_at=now,
+                )
+            except Exception as exc:
+                connection.rollback()
+                raise EventChangeApplyError(
+                    "Die geprüfte Archiv-Ordnerstruktur konnte nicht übernommen werden: "
+                    + str(exc)
+                ) from exc
+
         children = connection.execute(
             "SELECT * FROM events WHERE parent_event_id = ? ORDER BY start_datetime, id",
             (cr["event_id"],),
