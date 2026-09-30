@@ -5,6 +5,8 @@ from pathlib import Path
 from app.database import database_connection, initialize_database
 from app.event_inventory import scan_event_inventory
 from app.event_layout import ensure_event_layout_snapshot, get_event_layout, layout_paths, update_event_layout
+from app.event_change_request import propose_event_change
+from app.archive_change_document import build_projected_archive_event_document
 from app.event_structure_changes import (
     confirm_applied_structure_change,
     detect_event_structure_change,
@@ -342,3 +344,172 @@ def test_0283_manual_folder_created_while_structure_off_reenables_archived_layou
     assert layout["structure_enabled"] is True
     assert layout["input_path"] == "Auswahl"
     assert set(layout_paths(layout["layout"])) == {"Auswahl"}
+
+
+def _seed_archived_layout_event(
+    db: Path,
+    workspace: Path,
+    archive: Path,
+    *,
+    structure_enabled: bool,
+) -> tuple[Path, int, dict]:
+    initialize_database(db)
+    ensure_workspace_layout(workspace)
+    with database_connection(db) as connection:
+        seed_job(connection)
+        seed_event(connection, status="archived")
+        family_id, file_id = seed_family(
+            connection,
+            content=b"camera-a",
+            current_path=(
+                "2026/07-23 - Trip/Alle/A.JPG"
+                if structure_enabled
+                else "2026/07-23 - Trip/A.JPG"
+            ),
+        )
+        connection.execute(
+            "UPDATE files SET current_root_kind='camera_archive' WHERE id=?",
+            (file_id,),
+        )
+        state = ensure_event_layout_snapshot(connection, "e", now=NOW)
+        if not structure_enabled:
+            update_event_layout(
+                connection,
+                "e",
+                structure_enabled=False,
+                input_path=state["input_path"],
+                layout=state["layout"],
+                updated_at=NOW,
+            )
+            state = get_event_layout(connection, "e")
+
+    event_root = archive / "2026" / "07-23 - Trip"
+    if structure_enabled:
+        (event_root / "Alle").mkdir(parents=True)
+        (event_root / "Sortiert").mkdir()
+        (event_root / "Export").mkdir()
+        (event_root / "Alle" / "A.JPG").write_bytes(b"camera-a")
+        (event_root / "Alle" / "A.xmp").write_bytes(b"xmp-a")
+    else:
+        event_root.mkdir(parents=True)
+        (event_root / "A.JPG").write_bytes(b"camera-a")
+        (event_root / "A.xmp").write_bytes(b"xmp-a")
+
+    return event_root, family_id, state
+
+
+def _archived_layout_preview(family_id: int, state: dict, enabled: bool) -> dict:
+    return {
+        "event_kind": "event",
+        "event_name": "Trip",
+        "parent_folder": "07-23 - Trip",
+        "child_folder": None,
+        "uses_time_range": False,
+        "preserve_day_folders": False,
+        "start_date": "2026-07-23",
+        "end_date": "2026-07-23",
+        "start_time": None,
+        "end_time": None,
+        "selected_day_keys": ["2026-07-23"],
+        "selected_family_ids": [family_id],
+        "selected_file_count": 1,
+        "selected_family_count": 1,
+        "subevents": [],
+        "folder_layout": {
+            "structure_enabled": enabled,
+            "input_path": str(state["input_path"]),
+            "layout": state["layout"],
+        },
+        "create_subfolders": enabled,
+        "_folder_layout_explicit": True,
+    }
+
+
+def test_0283_direct_archived_structure_off_flattens_camera_and_sidecar_plan(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    workspace.mkdir()
+    archive.mkdir()
+    _event_root, family_id, state = _seed_archived_layout_event(
+        db, workspace, archive, structure_enabled=True
+    )
+
+    result = propose_event_change(
+        db,
+        "j",
+        "e",
+        _archived_layout_preview(family_id, state, False),
+        event_name="Trip",
+        archive_root=archive,
+        workspace_path=workspace,
+    )
+    plan = result["plan"]
+    camera_targets = {
+        str(item["new_path"]) for item in plan["families_with_plans"]
+    }
+    xmp_targets = {
+        str(item["new_path"])
+        for item in plan["assets_with_plans"]
+        if str(item.get("asset_kind")) == "xmp"
+    }
+    assert camera_targets == {"2026/07-23 - Trip/A.JPG"}
+    assert xmp_targets == {"2026/07-23 - Trip/A.xmp"}
+
+    with database_connection(db) as connection:
+        cr = dict(connection.execute(
+            "SELECT * FROM event_change_requests WHERE id=?",
+            (result["change_request_id"],),
+        ).fetchone())
+    assert cr["folder_structure_enabled"] == 0
+    assert cr["folder_input_path"] == "Alle"
+    assert cr["folder_layout_json"]
+
+    document = build_projected_archive_event_document(
+        db, result["change_request_id"]
+    )
+    assert document is not None
+    assert document["folder_layout"]["structure_enabled"] is False
+    assert document["folder_layout"]["input_path"] == "Alle"
+
+
+def test_0283_direct_archived_structure_reenabled_routes_everything_to_input(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    workspace.mkdir()
+    archive.mkdir()
+    _event_root, family_id, state = _seed_archived_layout_event(
+        db, workspace, archive, structure_enabled=False
+    )
+
+    result = propose_event_change(
+        db,
+        "j",
+        "e",
+        _archived_layout_preview(family_id, state, True),
+        event_name="Trip",
+        archive_root=archive,
+        workspace_path=workspace,
+    )
+    plan = result["plan"]
+    camera_targets = {
+        str(item["new_path"]) for item in plan["families_with_plans"]
+    }
+    xmp_targets = {
+        str(item["new_path"])
+        for item in plan["assets_with_plans"]
+        if str(item.get("asset_kind")) == "xmp"
+    }
+    assert camera_targets == {"2026/07-23 - Trip/Alle/A.JPG"}
+    assert xmp_targets == {"2026/07-23 - Trip/Alle/A.xmp"}
+
+    document = build_projected_archive_event_document(
+        db, result["change_request_id"]
+    )
+    assert document is not None
+    assert document["folder_layout"]["structure_enabled"] is True
+    assert document["folder_layout"]["input_path"] == "Alle"
+    assert set(layout_paths(document["folder_layout"]["layout"])) == {
+        "Alle", "Sortiert", "Export"
+    }
