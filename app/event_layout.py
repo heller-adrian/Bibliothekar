@@ -97,10 +97,10 @@ def validate_input_path(
     structure_enabled: bool,
 ) -> str:
     raw = str(input_path or "").replace("\\", "/").strip("/")
-    if not structure_enabled:
-        if raw:
-            raise EventLayoutError("Ohne Unterordnerstruktur muss der Input direkt im Ereignis liegen.")
-        return ""
+    # Deaktivieren löscht die konfigurierte Struktur nicht. Der Input-Pfad
+    # bleibt als Teil des Ereignis-/Global-Snapshots gespeichert und wird beim
+    # erneuten Aktivieren wieder benutzt. Ein leerer Pfad bedeutet unabhängig
+    # davon ausdrücklich "direkt im strukturellen Blatt".
     if not raw:
         return ""
     path = PurePosixPath(raw)
