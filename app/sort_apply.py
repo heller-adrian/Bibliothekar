@@ -1145,14 +1145,12 @@ def _finalize_database(
                     sha256_current = ?,
                     updated_at = ?
                 WHERE id = ?
-                  AND job_id = ?
                 """,
                 (
                     str(entry["destination_relative_path"]),
                     str(entry["stored_sha256"]),
                     now,
                     int(entry["file_id"]),
-                    job_id,
                 ),
             )
 
@@ -1160,8 +1158,8 @@ def _finalize_database(
             released_asset_id = asset.get("released_archive_asset_id")
             if released_asset_id is not None:
                 connection.execute(
-                    "DELETE FROM released_archive_assets WHERE id=? AND job_id=?",
-                    (int(released_asset_id), job_id),
+                    "DELETE FROM released_archive_assets WHERE id=?",
+                    (int(released_asset_id),),
                 )
 
         if is_reapply:
