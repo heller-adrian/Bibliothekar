@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import pytest
 from pathlib import Path
 
 from app.archive_transfer import verify_event_archive
