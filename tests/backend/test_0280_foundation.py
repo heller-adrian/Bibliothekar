@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
+from app import main
+
 from app.database import (
     create_planned_event,
     database_connection,
@@ -287,3 +289,34 @@ def test_0280_backup_filter_never_partitions_one_event(tmp_path: Path):
     empty = build_global_workspace_summary(db, [])
     assert empty["planning_overview"]["event_groups"] == []
     assert empty["event_count"] == 0
+
+
+def test_0280_canonical_event_api_uses_event_identity_not_backup_route(tmp_path: Path, monkeypatch):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        _job(connection, "a")
+        _job(connection, "b")
+        fa, _ = _family(connection, "a", "A")
+        fb, _ = _family(connection, "b", "B")
+
+    created = create_planned_event(db, "a", _preview_for_families([fa, fb]))
+    event_id = str(created["parent_event"]["id"])
+    monkeypatch.setattr(main, "DATABASE_FILE", db)
+
+    payload = main.api_canonical_event(event_id)
+    assert payload["event_id"] == event_id
+    assert payload["anchor_job_id"] == "a"
+    assert set(payload["source_job_ids"]) == {"a", "b"}
+
+    route_paths = {getattr(route, "path", "") for route in main.app.routes}
+    assert {
+        "/api/events/{event_id}",
+        "/api/events/{event_id}/structure",
+        "/api/events/{event_id}/sort-plan",
+        "/api/events/{event_id}/apply",
+        "/api/events/{event_id}/reconcile-plan",
+        "/api/events/{event_id}/reconcile",
+        "/api/events/{event_id}/reapply-plan",
+        "/api/events/{event_id}/reapply",
+    }.issubset(route_paths)
