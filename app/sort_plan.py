@@ -9,6 +9,8 @@ import json
 import os
 
 from app.database import database_connection
+from app.event_access import event_file_rows
+from app.event_layout import get_event_layout, leaf_layout_directories
 from app.job_readiness import job_sort_readiness
 from app.workspace_layout import (
     WorkspaceLayoutError,
@@ -30,8 +32,62 @@ ALLOWED_FAMILY_STATUSES = {
     "complete",
 }
 
-WORKSPACE_BRANCHES = {"Alle", "Sortiert", "Export"}
+WORKSPACE_BRANCHES = {"Alle", "Sortiert", "Export"}  # legacy recognition only
 
+
+def _layout_directories_at_leaf(leaf: PurePosixPath, layout_state: dict[str, Any]) -> set[str]:
+    return {
+        str(leaf / PurePosixPath(relative))
+        for relative in leaf_layout_directories(layout_state)
+    }
+
+
+def _observed_organization_path(
+    inventory_file: dict[str, Any],
+    *,
+    child_folder_names: set[str],
+) -> PurePosixPath:
+    """Return the user-controlled path between the structural leaf and filename."""
+    raw = str(inventory_file.get("event_relative_path") or "").replace("\\", "/").strip("/")
+    if not raw:
+        return PurePosixPath()
+    parts = list(PurePosixPath(raw).parts[:-1])
+    if parts and parts[0] in child_folder_names:
+        parts.pop(0)
+    if parts and len(parts[0]) == 10 and parts[0][4:5] == "-" and parts[0][7:8] == "-":
+        parts.pop(0)
+    return PurePosixPath(*parts) if parts else PurePosixPath()
+
+
+def _tree_text_from_directories(
+    year: str,
+    parent_folder: str,
+    directories: set[str],
+) -> str:
+    root = PurePosixPath(year, parent_folder)
+    rels: list[PurePosixPath] = []
+    for value in directories:
+        path = PurePosixPath(value)
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            continue
+        if rel.parts:
+            rels.append(rel)
+    tree: dict[str, Any] = {}
+    for rel in sorted(set(rels), key=lambda p: (len(p.parts), p.as_posix().casefold())):
+        cursor = tree
+        for part in rel.parts:
+            cursor = cursor.setdefault(part, {})
+    lines = [year, f"└── {parent_folder}"]
+    def walk(node: dict[str, Any], prefix: str) -> None:
+        items = list(node.items())
+        for index, (name, children) in enumerate(items):
+            last = index == len(items) - 1
+            lines.append(prefix + ("└── " if last else "├── ") + name)
+            walk(children, prefix + ("    " if last else "│   "))
+    walk(tree, "    ")
+    return "\n".join(lines)
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -692,9 +748,9 @@ def build_event_sort_plan(
         child_definition_rows = connection.execute(
             """SELECT id,folder_name,start_datetime,end_datetime
                FROM events
-               WHERE parent_event_id=? AND job_id=?
+               WHERE parent_event_id=?
                ORDER BY start_datetime,id""",
-            (event_id, job_id),
+            (event_id,),
         ).fetchall()
         child_definitions = [dict(row) for row in child_definition_rows]
 
@@ -720,8 +776,7 @@ def build_event_sort_plan(
             LEFT JOIN file_families AS direct_ff
                 ON direct_ff.id = direct_file.family_id
 
-            WHERE assigned.job_id = ?
-              AND (
+            WHERE (
                     assigned.id = ?
                     OR assigned.parent_event_id = ?
                   )
@@ -732,7 +787,7 @@ def build_event_sort_plan(
                 ea.family_id,
                 ea.file_id
             """,
-            (job_id, event_id, event_id),
+            (event_id, event_id),
         ).fetchall()
 
         family_assignments: dict[int, dict[str, Any]] = {}
@@ -790,15 +845,14 @@ def build_event_sort_plan(
                     JOIN file_families AS ff
                         ON ff.id = f.family_id
 
-                    WHERE f.job_id = ?
-                      AND f.family_id IN ({family_placeholders})
+                    WHERE f.family_id IN ({family_placeholders})
 
                     ORDER BY
                         ff.selected_capture_time,
                         ff.id,
                         f.original_relative_path
                     """,
-                    (job_id, *family_ids),
+                    tuple(family_ids),
                 ).fetchall()
             )
 
@@ -821,12 +875,11 @@ def build_event_sort_plan(
                     LEFT JOIN file_families AS ff
                         ON ff.id = f.family_id
 
-                    WHERE f.job_id = ?
-                      AND f.id IN ({file_placeholders})
+                    WHERE f.id IN ({file_placeholders})
 
                     ORDER BY f.original_relative_path
                     """,
-                    (job_id, *direct_file_assignments),
+                    tuple(direct_file_assignments),
                 ).fetchall()
             )
 
@@ -959,12 +1012,12 @@ def build_event_sort_plan(
             FROM events
             WHERE parent_event_id IS NULL
               AND folder_name = ?
-              AND job_id <> ?
+              AND id <> ?
               AND status IN ('planned', 'applied', 'archived')
             ORDER BY created_at DESC, id DESC
             LIMIT 1
             """,
-            (parent_folder, job_id),
+            (parent_folder, event_id),
         ).fetchone()
 
     collision_redirected = collision_row is not None
@@ -996,6 +1049,17 @@ def build_event_sort_plan(
             if collision_redirected
             else [parent_folder]
         )
+
+    with database_connection(database_path) as connection:
+        try:
+            layout_state = get_event_layout(connection, event_id)
+        except Exception as error:
+            raise SortPlanError("Ereignis-Unterordnerstruktur ist ungültig: " + str(error)) from error
+    layout_input_path = PurePosixPath(str(layout_state.get("input_path") or ""))
+    child_folder_names = {
+        str(child.get("folder_name") or "") for child in child_definitions
+        if str(child.get("folder_name") or "")
+    }
 
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
