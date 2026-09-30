@@ -353,6 +353,7 @@ def verify_event_archive(
     # als SOLL gelesen. Unbekannte Fremddateien bleiben weiterhin nur Hinweis.
     managed_asset_kinds = {"xmp", "export", "derived_media"}
     source_assets: list[dict[str, Any]] = []
+    source_known_by_file_id: dict[int, dict[str, Any]] = {}
     if workspace_path is not None and str(event.get("status") or "") == "applied":
         try:
             from app.workspace_layout import shared_work_root
@@ -364,11 +365,17 @@ def verify_event_archive(
                 root_kind="shared_workspace",
                 persist=True,
                 update_known_file_locations=False,
+                fast_refresh=False,
             )
         except (EventInventoryError, Exception) as exc:
             if isinstance(exc, EventInventoryError):
                 raise ArchiveVerificationError(str(exc)) from exc
             raise
+        source_known_by_file_id = {
+            int(item["known_file_id"]): item
+            for item in workspace_inventory["files"]
+            if item.get("known_file_id") is not None
+        }
         source_assets = [
             item
             for item in workspace_inventory["files"]
@@ -424,24 +431,62 @@ def verify_event_archive(
     missing_count = 0
     mismatched_count = 0
 
+    archive_event_prefix = str(inventory.get("event_prefix") or "").strip("/")
     for row in files:
         try:
-            expected_size = int(row["size_bytes"])
-            expected_sha256 = str(
-                row.get("sha256_current")
-                or row.get("sha256_original")
-                or ""
-            ).strip()
+            file_id = int(row["file_id"])
+            source_observed = source_known_by_file_id.get(file_id)
+            if source_known_by_file_id and source_observed is None:
+                relative_text = str(
+                    row.get("current_relative_path")
+                    or row.get("original_relative_path")
+                    or ""
+                )
+                result = {
+                    "file_id": file_id,
+                    "expected_relative_path": relative_text,
+                    "expected_size_bytes": int(row["size_bytes"]),
+                    "expected_sha256": str(
+                        row.get("sha256_current") or row.get("sha256_original") or ""
+                    ),
+                    "status": "source_missing",
+                    "actual_size_bytes": None,
+                    "actual_sha256": None,
+                    "error_message": (
+                        "Die Datei fehlt bereits im aktuellen SSD-Ereignisbestand. "
+                        "Eine Löschung muss zuerst durch zwei vollständige Scans bestätigt sein."
+                    ),
+                }
+                missing_count += 1
+                results.append(result)
+                continue
+
+            if source_observed is not None:
+                expected_size = int(source_observed.get("size_bytes") or 0)
+                expected_sha256 = str(source_observed.get("sha256") or "").strip()
+                source_event_relative = str(
+                    source_observed.get("event_relative_path") or ""
+                ).replace("\\", "/").strip("/")
+                expected_relative = "/".join(
+                    part for part in (archive_event_prefix, source_event_relative) if part
+                )
+            else:
+                expected_size = int(row["size_bytes"])
+                expected_sha256 = str(
+                    row.get("sha256_current")
+                    or row.get("sha256_original")
+                    or ""
+                ).strip()
+                expected_relative = str(
+                    row.get("current_relative_path")
+                    or row.get("original_relative_path")
+                    or ""
+                ).replace("\\", "/").strip("/")
 
             if not expected_sha256:
                 raise ArchiveVerificationError("Gespeicherte SHA-256-Summe fehlt.")
 
-            expected_relative = str(
-                row.get("current_relative_path")
-                or row.get("original_relative_path")
-                or ""
-            ).replace("\\", "/").strip("/")
-            observed = observed_by_file_id.get(int(row["file_id"]))
+            observed = observed_by_file_id.get(file_id)
             if observed is None:
                 relative_text = expected_relative
                 status = "missing"
@@ -462,19 +507,19 @@ def verify_event_archive(
                 actual_sha256 = str(observed["sha256"])
                 if actual_size != expected_size:
                     status = "size_mismatch"
-                    error_message = "Dateigröße weicht ab."
+                    error_message = "Dateigröße weicht vom aktuellen SSD-Bestand ab."
                     mismatched_count += 1
                 elif actual_sha256 != expected_sha256:
                     status = "sha256_mismatch"
-                    error_message = "SHA-256-Summe weicht ab."
+                    error_message = "SHA-256-Summe weicht vom aktuellen SSD-Bestand ab."
                     mismatched_count += 1
                 elif actual_relative != expected_relative:
-                    status = "missing"
+                    status = "path_mismatch"
                     error_message = (
-                        "Datei fehlt am aktuellen SOLL-Pfad. "
-                        f"IST: {actual_relative} · SOLL: {expected_relative}"
+                        "Die Ordnerlage im Archiv stimmt nicht mit dem aktuellen SSD-Bestand überein. "
+                        f"Archiv: {actual_relative} · SSD-SOLL: {expected_relative}"
                     )
-                    missing_count += 1
+                    mismatched_count += 1
                 elif not candidate.is_file():
                     status = "missing"
                     error_message = "Datei fehlt in der Kamerabibliothek."
@@ -520,7 +565,7 @@ def verify_event_archive(
         results.append(result)
 
     asset_results: list[dict[str, Any]] = []
-    event_prefix = str(inventory.get("event_prefix") or "").strip("/")
+    event_prefix = archive_event_prefix
     for asset in source_assets:
         event_rel = str(asset.get("event_relative_path") or "").strip("/")
         expected_relative = "/".join(part for part in (event_prefix, event_rel) if part)
