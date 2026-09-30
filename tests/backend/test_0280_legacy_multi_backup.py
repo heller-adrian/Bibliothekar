@@ -2,9 +2,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 
-from app.database import database_connection, initialize_database
-from app.legacy_multi_backup import normalize_unapplied_legacy_extensions
+from app.database import database_connection, initialize_database, list_global_tasks
+from app.legacy_multi_backup import (
+    LEGACY_CONFIRMATION_PHRASE,
+    apply_legacy_reconcile,
+    build_legacy_reconcile_plan,
+    normalize_unapplied_legacy_extensions,
+)
+from app.workspace_layout import ensure_workspace_layout
 from tests.backend.test_0263_event_inventory import NOW
 
 
@@ -294,3 +301,177 @@ def test_0280_physical_legacy_extension_is_never_auto_merged(tmp_path: Path):
             (family_id,),
         ).fetchone()
     assert assignment["event_id"] == "legacy"
+
+
+def test_0280_physical_legacy_extension_reconciles_into_one_event(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
+    initialize_database(db)
+
+    camera = b"legacy-camera"
+    camera_sha = hashlib.sha256(camera).hexdigest()
+    export = b"legacy-export"
+    export_sha = hashlib.sha256(export).hexdigest()
+
+    with database_connection(db) as connection:
+        _job(connection, "a")
+        _job(connection, "b")
+        _event(connection, "target", "a", name="Reise", status="applied")
+        _event(
+            connection,
+            "legacy",
+            "b",
+            name="Ergänzung: Reise",
+            status="applied",
+            linked_event_id="target",
+            linkage_kind="planned_extension",
+        )
+        connection.execute(
+            "UPDATE events SET applied_at=? WHERE id IN ('target','legacy')",
+            (NOW,),
+        )
+        family_id = _family(
+            connection,
+            "b",
+            "B",
+            "2026-07-19T10:00:00",
+            "2026/Ergänzungen/07-19 - Ergänzung: Reise - b/Alle/B.JPG",
+        )
+        # The historical extension folder_name is the canonical target folder
+        # in 0.27, even though its display name carried "Ergänzung:".
+        connection.execute(
+            "UPDATE events SET folder_name='07-19 - Reise' WHERE id='legacy'"
+        )
+        source_rel = "2026/Ergänzungen/07-19 - Reise - b/Alle/B.JPG"
+        connection.execute(
+            """UPDATE files
+               SET current_relative_path=?,size_bytes=?,
+                   sha256_original=?,sha256_current=?,
+                   current_root_kind='shared_workspace'
+               WHERE family_id=?""",
+            (source_rel, len(camera), camera_sha, camera_sha, family_id),
+        )
+        connection.execute(
+            """INSERT INTO event_assignments(
+                   event_id,family_id,file_id,assignment_source,created_at
+               ) VALUES ('legacy',?,NULL,'manual',?)""",
+            (family_id, NOW),
+        )
+
+    source_root = (
+        workspace / "Arbeitsbereich" / "2026" / "Ergänzungen"
+        / "07-19 - Reise - b"
+    )
+    (source_root / "Alle").mkdir(parents=True)
+    (source_root / "Export").mkdir(parents=True)
+    (source_root / "Alle" / "B.JPG").write_bytes(camera)
+    (source_root / "Export" / "final.jpg").write_bytes(export)
+
+    tasks = list_global_tasks(db)
+    legacy_task = next(
+        task for task in tasks
+        if task["kind"] == "legacy_multi_backup_structure"
+    )
+    assert legacy_task["legacy_event_id"] == "legacy"
+
+    plan = build_legacy_reconcile_plan(db, workspace, "legacy")
+    assert plan["summary"]["ready"], plan["blockers"]
+    assert plan["summary"]["camera_file_count"] == 1
+    assert plan["summary"]["asset_count"] == 1
+    assert plan["summary"]["move_count"] == 2
+    assert plan["assets"][0]["stored_sha256"] == export_sha
+
+    result = apply_legacy_reconcile(
+        db,
+        workspace,
+        "legacy",
+        expected_plan_token=plan["plan_token"],
+        confirmation_phrase=LEGACY_CONFIRMATION_PHRASE,
+    )
+    assert result["status"] == "completed"
+    assert result["target_event_id"] == "target"
+    assert result["camera_file_count"] == 1
+    assert result["asset_count"] == 1
+
+    target_root = workspace / "Arbeitsbereich" / "2026" / "07-19 - Reise"
+    assert (target_root / "Alle" / "B.JPG").read_bytes() == camera
+    assert (target_root / "Export" / "final.jpg").read_bytes() == export
+    assert not (source_root / "Alle" / "B.JPG").exists()
+
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE id='legacy'"
+        ).fetchone()[0] == 0
+        assignment = connection.execute(
+            "SELECT event_id FROM event_assignments WHERE family_id=?",
+            (family_id,),
+        ).fetchone()
+        file_row = connection.execute(
+            """SELECT current_relative_path,current_root_kind
+               FROM files WHERE family_id=?""",
+            (family_id,),
+        ).fetchone()
+        source_jobs = connection.execute(
+            "SELECT job_id FROM event_source_jobs WHERE event_id='target' ORDER BY job_id"
+        ).fetchall()
+
+    assert assignment["event_id"] == "target"
+    assert tuple(file_row) == (
+        "2026/07-19 - Reise/Alle/B.JPG",
+        "shared_workspace",
+    )
+    assert [row["job_id"] for row in source_jobs] == ["a", "b"]
+    assert not any(
+        task["kind"] == "legacy_multi_backup_structure"
+        for task in list_global_tasks(db)
+    )
+
+
+def test_0280_archived_legacy_target_is_read_only_blocked(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
+    initialize_database(db)
+
+    with database_connection(db) as connection:
+        _job(connection, "a")
+        _job(connection, "b")
+        _event(connection, "target", "a", name="Reise", status="archived")
+        _event(
+            connection,
+            "legacy",
+            "b",
+            name="Nachtrag: Reise",
+            status="applied",
+            linked_event_id="target",
+            linkage_kind="applied_followup",
+        )
+        connection.execute(
+            "UPDATE events SET applied_at=?,archived_at=? WHERE id='target'",
+            (NOW, NOW),
+        )
+        connection.execute(
+            "UPDATE events SET applied_at=? WHERE id='legacy'",
+            (NOW,),
+        )
+
+    plan = build_legacy_reconcile_plan(db, workspace, "legacy")
+    assert plan["summary"]["ready"] is False
+    assert any(
+        blocker["code"] == "legacy_target_archived"
+        for blocker in plan["blockers"]
+    )
+
+
+def test_0280_legacy_maintenance_ui_and_api_are_reachable():
+    from app import main
+    source = Path("app/events_ui.py").read_text(encoding="utf-8")
+    assert 'id="legacy-maintenance-dialog"' in source
+    assert 'task.startsWith("legacy:")' in source
+    assert "showLegacyMaintenance" in source
+    route_paths = {getattr(route, "path", "") for route in main.app.routes}
+    assert "/api/legacy-multi-backup/{legacy_event_id}/plan" in route_paths
+    assert "/api/legacy-multi-backup/{legacy_event_id}/apply" in route_paths
