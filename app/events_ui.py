@@ -4413,10 +4413,16 @@ EVENTS_HTML = r"""<!doctype html>
       const d=change.detected||{};
       structureChangeSubtitle.textContent=(d.status==="archived"?"Archiviert":"Angewendet")+" · "+String(d.event_name||change.event_id||"");
       const added=d.directory_added||[], removed=d.directory_removed||[], moves=d.file_moves||[];
-      const options=(d.input_options||[""]).map(path=>{
-        const current=String(path)===String(d.current_input_path||"");
+      const inputOptions=d.input_options||[""];
+      const currentInput=String(d.current_input_path||"");
+      const currentKnown=inputOptions.some(path=>String(path)===currentInput);
+      const options=(!currentKnown
+        ? ['<option value="__choose__" selected disabled>Bitte Input-Ordner wählen · momentan unbekannt</option>']
+        : []
+      ).concat(inputOptions.map(path=>{
+        const current=String(path)===currentInput;
         return `<option value="${escapeHtml(path)}" ${current?"selected":""}>${escapeHtml(structurePathLabel(path))}${current?" · momentan Input":""}</option>`;
-      }).join("");
+      })).join("");
       const blockers=[
         ...(d.missing_file_ids||[]).map(id=>`Kameraoriginal fehlt · Datei-ID ${id}`),
         ...(d.duplicate_file_ids||[]).map(id=>`Kameraoriginal mehrfach gefunden · Datei-ID ${id}`),
@@ -4444,6 +4450,7 @@ EVENTS_HTML = r"""<!doctype html>
           </div>`;
         document.getElementById("structure-change-confirm")?.addEventListener("click",async()=>{
           const input=document.getElementById("structure-change-input").value;
+          if(input==="__choose__") throw new Error("Bitte einen zukünftigen Input-Ordner wählen.");
           structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">event.json und SQLite werden aktualisiert …</p>');
           await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/confirm-applied`,{
             method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
