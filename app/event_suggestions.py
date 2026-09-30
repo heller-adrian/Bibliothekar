@@ -217,19 +217,26 @@ def accept_event_suggestion(
 
         status = str(target["status"])
         if status == "applied":
+            from app.event_mutation import capture_job_event_state, begin_mutation, get_active_mutation
+            active = get_active_mutation(connection, str(target["job_id"]))
             if int(target["resort_required"] or 0):
-                raise EventSuggestionError("Für dieses Ereignis ist bereits eine Nachsortierung offen.")
-            from app.event_mutation import capture_job_event_state, begin_mutation
-            original_state = capture_job_event_state(connection, str(target["job_id"]))
-            begin_mutation(
-                connection,
-                job_id=str(target["job_id"]),
-                anchor_event_id=target_event_id,
-                mutation_kind="edit",
-                affected_event_ids=[target_event_id],
-                original_state=original_state,
-                status="pending_apply",
-            )
+                if (
+                    active is None
+                    or str(active.get("anchor_event_id") or "") != target_event_id
+                    or str(active.get("status") or "") != "pending_apply"
+                ):
+                    raise EventSuggestionError("Für dieses Ereignis ist bereits eine andere Nachsortierung offen.")
+            else:
+                original_state = capture_job_event_state(connection, str(target["job_id"]))
+                begin_mutation(
+                    connection,
+                    job_id=str(target["job_id"]),
+                    anchor_event_id=target_event_id,
+                    mutation_kind="edit",
+                    affected_event_ids=[target_event_id],
+                    original_state=original_state,
+                    status="pending_apply",
+                )
 
         assignments = []
         for family in families:
