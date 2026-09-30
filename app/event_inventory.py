@@ -709,7 +709,7 @@ def scan_event_inventory(
                     for directory in physical_directories
                 ],
             )
-                        if update_known_file_locations:
+            if update_known_file_locations:
                 for row in scanned:
                     if row["known_file_id"] is None:
                         continue
