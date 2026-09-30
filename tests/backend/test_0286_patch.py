@@ -100,6 +100,7 @@ def test_0286_deleting_planned_event_restores_archive_release_marker(tmp_path: P
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
     initialize_database(db)
+    workspace.mkdir()
     ensure_workspace_layout(workspace)
     work = shared_work_root(workspace)
 
@@ -174,6 +175,7 @@ def test_0286_released_archive_assets_follow_cross_job_family_and_layout_roles(t
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
     initialize_database(db)
+    workspace.mkdir()
     ensure_workspace_layout(workspace)
     work = shared_work_root(workspace)
 
@@ -269,6 +271,7 @@ def test_0286_new_xmp_and_lightroom_export_in_free_day_are_picked_up(tmp_path: P
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
     initialize_database(db)
+    workspace.mkdir()
     ensure_workspace_layout(workspace)
     work = shared_work_root(workspace)
 
