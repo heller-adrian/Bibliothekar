@@ -22,6 +22,7 @@ from app.events_ui import EVENTS_HTML
 from app.transfer_ui import TRANSFER_HTML
 from app.ui_shell import apply_shell
 from app.live_inventory import refresh_live_event_inventories
+from app.global_workspace import build_global_workspace_summary
 
 from app.database import (
     claim_next_job,
@@ -5504,6 +5505,39 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
         return result
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/workspace/summary", tags=["Arbeitsbereich"])
+def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
+    """Canonical 0.28 workspace projection.
+
+    The backup selection is a view filter only. Event identity, occupancy and
+    membership remain library-wide and are never rewritten by this endpoint.
+    """
+    selected = [part.strip() for part in str(jobs or "").split(",") if part.strip()]
+    for job_id in selected:
+        if get_job(DATABASE_FILE, job_id) is None:
+            raise HTTPException(status_code=404, detail="Mindestens eine Sicherung wurde nicht gefunden.")
+
+    refresh_live_event_inventories(
+        DATABASE_FILE,
+        WORKSPACE_PATH,
+        ARCHIVE_ROOT,
+    )
+    payload = build_global_workspace_summary(DATABASE_FILE, selected)
+
+    suggestions: list[dict[str, Any]] = []
+    for job_id in selected:
+        job = get_job(DATABASE_FILE, job_id) or {}
+        label = str(job.get("source_volume_label") or job_id)
+        for suggestion in list_event_suggestions(DATABASE_FILE, job_id):
+            suggestions.append({
+                **suggestion,
+                "source_job_id": job_id,
+                "source_label": label,
+            })
+    payload["event_suggestions"] = suggestions
+    return payload
 
 
 @app.get(
