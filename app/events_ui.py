@@ -4028,10 +4028,13 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         if (phase === "verify") {
+          const managedReviewRows = Array.isArray(reviewRows)
+            ? reviewRows.filter(row => !Boolean(row.advisory))
+            : [];
           const initiallyVerified =
             Array.isArray(reviewRows)
             && reviewRows.length > 0
-            && reviewRows.every(row => String(row.verification_status || "") === "verified");
+            && managedReviewRows.every(row => String(row.verification_status || "") === "verified");
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Abschließen</h3><p class="muted">So soll die Kamerabibliothek jetzt aussehen. Die Prüfung selbst bleibt vollständig read-only.</p></div></div>`;
           if (targetTree) html += `<div class="card"><strong>SOLL-Struktur</strong><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></div>`;
           html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? "✓ Prüfung erfolgreich" : "Prüfen"}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} Dateien bestätigt.` : "Noch nicht geprüft."}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
@@ -4233,11 +4236,14 @@ EVENTS_HTML = r"""<!doctype html>
               if (label) label.textContent = "Prüfung abgeschlossen.";
               if (errors && advisories.length) {
                 errors.style.display = "block";
-                errors.innerHTML = advisories.map(row =>
-                  '<div class="card" style="margin-top:8px"><strong>Zusätzliche nicht verwaltete Datei · nur Hinweis</strong><div class="muted">'
-                  + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
-                  + escapeHtml(row.path || "—") + '</code></div>'
-                ).join("");
+                errors.innerHTML = advisories.map(row => {
+                  const title = row.advisory_reason === "redundant_duplicate"
+                    ? "Byte-identische Zusatzkopie · nur Hinweis"
+                    : "Zusätzliche nicht verwaltete Datei · nur Hinweis";
+                  return '<div class="card" style="margin-top:8px"><strong>'+escapeHtml(title)+'</strong><div class="muted">'
+                    + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
+                    + escapeHtml(row.path || "—") + '</code></div>';
+                }).join("");
               }
               if (archiveBtn) archiveBtn.disabled = false;
             } else {
@@ -4268,11 +4274,14 @@ EVENTS_HTML = r"""<!doctype html>
                 const eventDocumentHtml = eventDocumentProblem
                   ? `<div class="card" style="margin-top:8px"><strong>event.json stimmt noch nicht</strong><div class="muted">${escapeHtml(eventDocumentProblem.message || "")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(eventDocumentProblem.path || "event.json")}</code></div>`
                   : "";
-                const advisoryHtml = advisories.map(row =>
-                  '<div class="card" style="margin-top:8px"><strong>Zusätzliche nicht verwaltete Datei · nur Hinweis</strong><div class="muted">'
-                  + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
-                  + escapeHtml(row.path || "—") + '</code></div>'
-                ).join("");
+                const advisoryHtml = advisories.map(row => {
+                  const title = row.advisory_reason === "redundant_duplicate"
+                    ? "Byte-identische Zusatzkopie · nur Hinweis"
+                    : "Zusätzliche nicht verwaltete Datei · nur Hinweis";
+                  return '<div class="card" style="margin-top:8px"><strong>'+escapeHtml(title)+'</strong><div class="muted">'
+                    + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
+                    + escapeHtml(row.path || "—") + '</code></div>';
+                }).join("");
                 errors.innerHTML = fileHtml + directoryHtml + obsoleteHtml + eventDocumentHtml + advisoryHtml;
               }
             }
