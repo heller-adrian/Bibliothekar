@@ -2708,14 +2708,27 @@ EVENTS_HTML = r"""<!doctype html>
       return m ? m[1] : "";
     }
 
-    function noEventDayControl(monthKey, day, structural) {
-      if (!monthKey) return `<label class="edit-field"><span>Tag</span><input type="date" data-segment-day value="${escapeHtml(day)}" ${structural?"":"disabled"}></label>`;
-      const maxDay=new Date(Number(monthKey.slice(0,4)),Number(monthKey.slice(5,7)),0).getDate();
-      const minDate=`${monthKey}-01`;
-      const maxDate=`${monthKey}-${String(maxDay).padStart(2,"0")}`;
-      return `<label class="edit-field"><span>Tag</span><input type="date" data-segment-day data-locked-month="${escapeHtml(monthKey)}" value="${escapeHtml(day)}" min="${escapeHtml(minDate)}" max="${escapeHtml(maxDate)}" ${structural?"":"disabled"}></label>`;
+    function monthYearForIso(value) {
+      const m=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return m ? `${m[2]}.${m[1]}` : "";
     }
 
+    function noEventDayControl(monthKey, day, structural) {
+      const fixedMonth=/^\d{4}-\d{2}$/.test(String(monthKey||""))
+        ? String(monthKey)
+        : String(day||"").slice(0,7);
+      if (!/^\d{4}-\d{2}$/.test(fixedMonth)) {
+        return `<label class="edit-field"><span>Tag</span><select data-segment-day ${structural?"":"disabled"}><option value="${escapeHtml(day)}">${escapeHtml(String(day||"").slice(8,10)||"—")}</option></select></label>`;
+      }
+      const maxDay=new Date(Number(fixedMonth.slice(0,4)),Number(fixedMonth.slice(5,7)),0).getDate();
+      const current=String(day||"").startsWith(fixedMonth+"-") ? String(day) : `${fixedMonth}-01`;
+      const options=Array.from({length:maxDay},(_,index)=>{
+        const number=String(index+1).padStart(2,"0");
+        const value=`${fixedMonth}-${number}`;
+        return `<option value="${escapeHtml(value)}" ${value===current?"selected":""}>${number}</option>`;
+      }).join("");
+      return `<label class="edit-field"><span>Tag</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select data-segment-day data-locked-month="${escapeHtml(fixedMonth)}" ${structural?"":"disabled"}>${options}</select><input type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+    }
     function contiguousDayRangesFromValues(values) {
       const days=[...new Set(values.filter(Boolean))].sort();
       const ranges=[];
@@ -2969,15 +2982,23 @@ EVENTS_HTML = r"""<!doctype html>
 
       function editSubeventDayOptions(selected){
         const days=editSubeventDays();
-        const sameMonth=days.length>0 && days.every(day=>day.slice(0,7)===days[0].slice(0,7));
         return days.map(day=>{
-          const label=sameMonth
-            ? day.slice(8,10)
-            : `${day.slice(8,10)}.${day.slice(5,7)}.${day.slice(0,4)}`;
+          const label=day.slice(8,10);
           return `<option value="${escapeHtml(day)}" ${day===selected?"selected":""}>${escapeHtml(label)}</option>`;
         }).join("");
       }
 
+      function editSubeventDayControl(attribute, displayAttribute, selected, label, disabled){
+        const days=editSubeventDays();
+        const current=days.includes(selected) ? selected : (days[0]||selected||"");
+        return `<label class="edit-field"><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select ${attribute} ${disabled?"disabled":""}>${editSubeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+      }
+
+      function syncEditSubeventDayDisplay(row, prefix){
+        const control=row.querySelector(`[data-child-${prefix}-date]`);
+        const display=row.querySelector(`[data-child-${prefix}-month-year]`);
+        if(control&&display)display.value=monthYearForIso(control.value);
+      }
       function editMinuteAfter(value){
         const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
         if(!match)return null;
@@ -3027,18 +3048,17 @@ EVENTS_HTML = r"""<!doctype html>
             </div>
             <div class="child-segment-boundaries">
               <div class="child-segment-boundary">
-                <label class="edit-field"><span>Beginn · Tag</span><input data-child-start-date type="date" value="${escapeHtml(startDate)}" min="${escapeHtml(editSubeventBounds().minDate)}" max="${escapeHtml(editSubeventBounds().maxDate)}" ${structural ? "" : "disabled"}></label>
+                ${editSubeventDayControl("data-child-start-date","data-child-start-month-year",startDate,"Beginn",!structural)}
                 <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
               </div>
               <div class="child-segment-boundary">
-                <label class="edit-field"><span>Ende · Tag</span><input data-child-end-date type="date" value="${escapeHtml(endDate)}" min="${escapeHtml(editSubeventBounds().minDate)}" max="${escapeHtml(editSubeventBounds().maxDate)}" ${structural ? "" : "disabled"}></label>
+                ${editSubeventDayControl("data-child-end-date","data-child-end-month-year",endDate,"Ende",!structural)}
                 <label class="edit-field"><span>Endzeit</span><input data-child-end-time type="time" value="${escapeHtml(end)}" ${structural ? "" : "disabled"}></label>
               </div>
             </div>
           </div>
         </details>`;
       }).join("");
-
       eventEditBody.innerHTML = `
         <div id="event-edit-inline-error" class="edit-inline-error" role="alert" hidden></div>
         ${archivedChange ? `<div class="edit-warning">ARCHIVIERTES Ereignis: Die Kamerabibliothek bleibt strikt read-only. Nach dem Speichern erhältst du einen manuellen Änderungsauftrag mit IST- und SOLL-Zustand.</div><br>` : ""}
@@ -3077,36 +3097,46 @@ EVENTS_HTML = r"""<!doctype html>
       if (!noEvent) {
         const normalContainer=document.getElementById('normal-event-segments');
         const bind=()=>{
-          normalContainer.querySelectorAll('[data-child-segment]').forEach(row=>{
-            const remove=row.querySelector('[data-remove-child-segment]');
-            if (remove) remove.onclick=()=>row.remove();
-            const nameInput=row.querySelector('[data-child-name]');
-            const summary=row.querySelector('[data-child-summary]');
-            if (nameInput && summary) {
-              const syncSummary=()=>{ summary.textContent=String(nameInput.value||"").trim() || "Unterereignis"; };
+          normalContainer.querySelectorAll("[data-child-segment]").forEach(row=>{
+            const remove=row.querySelector("[data-remove-child-segment]");
+            if(remove)remove.onclick=()=>row.remove();
+            const nameInput=row.querySelector("[data-child-name]");
+            const summary=row.querySelector("[data-child-summary]");
+            if(nameInput&&summary){
+              const syncSummary=()=>{summary.textContent=String(nameInput.value||"").trim()||"Unterereignis";};
               nameInput.oninput=syncSummary;
               syncSummary();
+            }
+            for(const prefix of ["start","end"]){
+              const control=row.querySelector(`[data-child-${prefix}-date]`);
+              if(control)control.onchange=()=>syncEditSubeventDayDisplay(row,prefix);
+              syncEditSubeventDayDisplay(row,prefix);
             }
           });
         };
         bind();
         const refreshNormalDayControls=()=>{
           const bounds=editSubeventBounds();
-          if(!bounds.minDate||!bounds.maxDate)return;
+          const days=editSubeventDays();
+          if(!bounds.minDate||!bounds.maxDate||!days.length)return;
           normalContainer.querySelectorAll("[data-child-segment]").forEach(row=>{
-            for(const selector of ["[data-child-start-date]","[data-child-end-date]"]){
-              const control=row.querySelector(selector);
+            for(const prefix of ["start","end"]){
+              const control=row.querySelector(`[data-child-${prefix}-date]`);
               if(!control)continue;
-              control.min=bounds.minDate;
-              control.max=bounds.maxDate;
-              if(!control.value || control.value<bounds.minDate) control.value=bounds.minDate;
-              if(control.value>bounds.maxDate) control.value=bounds.maxDate;
+              let value=control.value;
+              if(!days.includes(value)){
+                if(!value||value<bounds.minDate)value=bounds.minDate;
+                else if(value>bounds.maxDate)value=bounds.maxDate;
+                else value=days[0];
+              }
+              control.innerHTML=editSubeventDayOptions(value);
+              control.value=value;
+              syncEditSubeventDayDisplay(row,prefix);
             }
           });
         };
         document.getElementById("edit-start-date")?.addEventListener("change",refreshNormalDayControls);
         document.getElementById("edit-end-date")?.addEventListener("change",refreshNormalDayControls);
-
         document.getElementById('add-normal-segment').onclick=()=>{
           const defaults=nextEditSubeventDefaults(normalContainer);
           if(!defaults){
@@ -3124,11 +3154,11 @@ EVENTS_HTML = r"""<!doctype html>
             </div>
             <div class="child-segment-boundaries">
               <div class="child-segment-boundary">
-                <label class="edit-field"><span>Beginn · Tag</span><input data-child-start-date type="date" value="${escapeHtml(defaults.startDate)}" min="${escapeHtml(editSubeventBounds().minDate)}" max="${escapeHtml(editSubeventBounds().maxDate)}"></label>
+                ${editSubeventDayControl("data-child-start-date","data-child-start-month-year",defaults.startDate,"Beginn",false)}
                 <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${escapeHtml(defaults.startTime)}"></label>
               </div>
               <div class="child-segment-boundary">
-                <label class="edit-field"><span>Ende · Tag</span><input data-child-end-date type="date" value="${escapeHtml(defaults.endDate)}" min="${escapeHtml(editSubeventBounds().minDate)}" max="${escapeHtml(editSubeventBounds().maxDate)}"></label>
+                ${editSubeventDayControl("data-child-end-date","data-child-end-month-year",defaults.endDate,"Ende",false)}
                 <label class="edit-field"><span>Endzeit</span><input data-child-end-time type="time" value="${escapeHtml(defaults.endTime)}"></label>
               </div>
             </div>
@@ -3136,8 +3166,7 @@ EVENTS_HTML = r"""<!doctype html>
           normalContainer.appendChild(row);
           bind();
           row.querySelector("[data-child-name]")?.focus();
-        };
-      } else if (structural) {
+        };      } else if (structural) {
         const container=document.getElementById("no-event-segments");
         const bindNoEventRows=()=>{
           container.querySelectorAll("[data-remove-segment]").forEach(button=>{button.onclick=()=>button.closest("[data-segment-row]")?.remove();});

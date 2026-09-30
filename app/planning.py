@@ -363,14 +363,14 @@ def list_global_released_archive_groups(
                 physical=False,
             )
 
-    grouped: dict[tuple[str,str,str], dict[str, Any]] = {}
+    grouped: dict[tuple[str,str], dict[str, Any]] = {}
     for row in rows:
         job_id = str(row["job_id"])
         effective = effective_by_family.get(int(row["family_id"]))
         if effective is None:
             continue
         start, end = effective
-        key = (job_id, start, end)
+        key = (start, end)
         item = grouped.setdefault(key, {
             "group_type": "released_archive",
             "released_archive": True,
@@ -383,17 +383,20 @@ def list_global_released_archive_groups(
             "end_time": end[11:16] if len(end) >= 16 else "23:59",
             "has_date": bool(start[:10]),
             "family_ids": [],
+            "source_job_ids": [],
+            "source_groups": [],
             "family_count": 0,
             "file_count": 0,
             "total_size_bytes": 0,
             "review_required_count": 0,
             "families": [],
-            "card_key": f"released:{job_id}:{start}:{end}",
+            "card_key": f"released:{start}:{end}",
         })
         family_id = int(row["family_id"])
         extra = released_asset_stats.get((job_id, family_id), {})
         family = {
             "family_id": family_id,
+            "job_id": job_id,
             "family_key": str(row["family_key"]),
             "selected_capture_time": row["selected_capture_time"],
             "capture_time_confidence": row["capture_time_confidence"],
@@ -409,15 +412,39 @@ def list_global_released_archive_groups(
         item["total_size_bytes"] += family["total_size_bytes"]
         item["review_required_count"] += family["review_required_count"]
         item["families"].append(family)
+        if job_id not in item["source_job_ids"]:
+            item["source_job_ids"].append(job_id)
+        item["source_groups"].append({
+            "job_id": job_id,
+            "source_label": str(row["source_label"] or job_id),
+            "start_datetime": start,
+            "end_datetime": end,
+            "day_key": start[:10] if len(start) >= 10 else None,
+            "family_ids": [family_id],
+            "family_count": 1,
+            "file_count": family["file_count"],
+            "total_size_bytes": family["total_size_bytes"],
+            "review_required_count": family["review_required_count"],
+            "families": [family],
+        })
 
     result = list(grouped.values())
     for item in result:
         item["family_ids"].sort()
+        item["source_job_ids"] = sorted(set(item["source_job_ids"]))
+        item["source_groups"].sort(
+            key=lambda group: (
+                str(group.get("source_label") or "").casefold(),
+                str(group.get("job_id") or ""),
+            )
+        )
+        if len(item["source_job_ids"]) > 1:
+            item["source_label"] = f"{len(item['source_job_ids'])} Sicherungen"
         item["total_family_count"] = item["family_count"]
         item["partially_assigned"] = False
     result.sort(key=lambda item: (
         str(item.get("start_datetime") or ""),
-        str(item.get("job_id") or ""),
+        str(item.get("end_datetime") or ""),
     ))
     return result
 

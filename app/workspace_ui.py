@@ -2806,31 +2806,6 @@ WORKSPACE_HTML = r"""<!doctype html>
         checkbox.addEventListener(
           "change",
           async () => {
-            if (
-              checkbox.checked
-              && group.released_archive
-              && String(group.job_id || "") !== String(jobSelect.value || "")
-            ) {
-              const targetJob=String(group.job_id || "");
-              if (![...jobSelect.options].some(option => option.value === targetJob)) {
-                checkbox.checked=false;
-                setStatus("Die Ursprungssicherung dieser freigewordenen Aufnahmen ist nicht mehr verfügbar.", true);
-                return;
-              }
-              selectedDays.clear();
-              jobSelect.value=targetJob;
-              try {
-                await loadWorkspace();
-                selectedDays.add(key);
-                renderDays();
-                renderSelection();
-                setStatus("Freigewordene Archivaufnahmen aus der Ursprungssicherung ausgewählt.");
-              } catch(error) {
-                setStatus(error.message,true);
-              }
-              return;
-            }
-
             if (checkbox.checked) {
               selectedDays.add(key);
             } else {
@@ -2885,7 +2860,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-meta";
 
         metadata.innerHTML = `
-          ${group.released_archive ? `<span>Ursprung: ${escapeHtml(group.source_label || group.job_id || "")}</span>` : ""}
+          ${group.released_archive ? `<span>Herkunft: ${escapeHtml(group.source_label || group.job_id || "")}</span>` : ""}
           <span>
             ${Number(
               group.file_count || 0
@@ -3104,13 +3079,20 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function lockedMonthDayControls(dayKey, locked) {
-      const monthKey=activeNoEventMonthKey(dayKey);
-      if (!monthKey) return `<label><span>Tag</span><input data-segment-day type="date" value="${escapeHtml(dayKey)}" ${locked?"disabled":""}></label>`;
-      const minDate=`${monthKey}-01`;
-      const maxDate=`${monthKey}-${String(daysInMonth(monthKey)).padStart(2,"0")}`;
-      return `<label><span>Tag</span><input data-segment-day data-locked-month="${escapeHtml(monthKey)}" type="date" value="${escapeHtml(dayKey)}" min="${escapeHtml(minDate)}" max="${escapeHtml(maxDate)}" ${locked?"disabled":""}></label>`;
+      const monthKey=activeNoEventMonthKey(dayKey) || String(dayKey||"").slice(0,7);
+      if (!/^\d{4}-\d{2}$/.test(monthKey)) {
+        return `<label><span>Tag</span><select data-segment-day ${locked?"disabled":""}><option value="${escapeHtml(dayKey)}">${escapeHtml(String(dayKey||"").slice(8,10)||"—")}</option></select></label>`;
+      }
+      const maxDay=daysInMonth(monthKey);
+      const fallback=`${monthKey}-01`;
+      const current=String(dayKey||"").startsWith(monthKey+"-") ? String(dayKey) : fallback;
+      const options=Array.from({length:maxDay},(_,index)=>{
+        const day=String(index+1).padStart(2,"0");
+        const value=`${monthKey}-${day}`;
+        return `<option value="${escapeHtml(value)}" ${value===current?"selected":""}>${day}</option>`;
+      }).join("");
+      return `<label><span>Tag</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select data-segment-day data-locked-month="${escapeHtml(monthKey)}" ${locked?"disabled":""}>${options}</select><input type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
     }
-
 
     function segmentRowHtml(day) {
       const dayKey=day.day_key||"",start=day.start_time||"00:00",end=day.end_time||"23:59",count=Number(day.family_count||0);
@@ -3467,17 +3449,24 @@ WORKSPACE_HTML = r"""<!doctype html>
       return result;
     }
 
+    function monthYearForIso(value){
+      const m=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return m ? `${m[2]}.${m[1]}` : "";
+    }
+
     function subeventDayOptions(selected){
       const days=subeventAllowedDays();
-      const sameMonth=days.length>0 && days.every(day=>day.slice(0,7)===days[0].slice(0,7));
       return days.map(day=>{
-        const label=sameMonth
-          ? day.slice(8,10)
-          : `${day.slice(8,10)}.${day.slice(5,7)}.${day.slice(0,4)}`;
+        const label=day.slice(8,10);
         return `<option value="${escapeHtml(day)}" ${day===selected?"selected":""}>${escapeHtml(label)}</option>`;
       }).join("");
     }
 
+    function subeventDayControl(attribute, displayAttribute, selected, label){
+      const days=subeventAllowedDays();
+      const current=days.includes(selected) ? selected : (days[0]||selected||"");
+      return `<label><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select ${attribute}>${subeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+    }
     function minuteAfter(value){
       const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
       if(!match)return null;
@@ -3529,19 +3518,28 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     function refreshCreateSubeventDayControls(){
       const bounds=subeventBounds();
-      if(!bounds.minDate||!bounds.maxDate)return;
+      const allowed=subeventAllowedDays();
+      if(!bounds.minDate||!bounds.maxDate||!allowed.length)return;
       for(const row of createSubeventList.querySelectorAll("[data-create-subevent]")){
-        for(const selector of ["[data-create-child-start-date]","[data-create-child-end-date]"]){
+        for(const [selector,displaySelector] of [
+          ["[data-create-child-start-date]","[data-create-child-start-month-year]"],
+          ["[data-create-child-end-date]","[data-create-child-end-month-year]"],
+        ]){
           const control=row.querySelector(selector);
           if(!control)continue;
-          control.min=bounds.minDate;
-          control.max=bounds.maxDate;
-          if(!control.value || control.value<bounds.minDate) control.value=bounds.minDate;
-          if(control.value>bounds.maxDate) control.value=bounds.maxDate;
+          let value=control.value;
+          if(!allowed.includes(value)){
+            if(!value || value<bounds.minDate)value=bounds.minDate;
+            else if(value>bounds.maxDate)value=bounds.maxDate;
+            else value=allowed[0];
+          }
+          control.innerHTML=subeventDayOptions(value);
+          control.value=value;
+          const display=row.querySelector(displaySelector);
+          if(display)display.value=monthYearForIso(value);
         }
       }
     }
-
     function addCreateSubeventCard(value={}){
       const defaults=Object.keys(value||{}).length ? value : nextSubeventDefaults();
       if(!defaults)return;
@@ -3558,12 +3556,24 @@ WORKSPACE_HTML = r"""<!doctype html>
       const defaultEnd=String(defaults.end_time||(
         ed===bounds.maxDate ? bounds.maxTime : "23:59"
       )||"23:59");
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn · Tag</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}" min="${escapeHtml(bounds.minDate)}" max="${escapeHtml(bounds.maxDate)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary"><label><span>Ende · Tag</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}" min="${escapeHtml(bounds.minDate)}" max="${escapeHtml(bounds.maxDate)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
+      const syncDayDisplays=()=>{
+        for(const [selector,displaySelector] of [
+          ["[data-create-child-start-date]","[data-create-child-start-month-year]"],
+          ["[data-create-child-end-date]","[data-create-child-end-month-year]"],
+        ]){
+          const control=row.querySelector(selector);
+          const display=row.querySelector(displaySelector);
+          if(control&&display)display.value=monthYearForIso(control.value);
+        }
+      };
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
       row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});
-      row.querySelectorAll("input,select").forEach(input=>input.addEventListener("change",scheduleDialogPreview));
-      createSubeventList.appendChild(row);name?.focus();
+      row.querySelectorAll("input,select").forEach(input=>input.addEventListener("change",()=>{syncDayDisplays();scheduleDialogPreview();}));
+      createSubeventList.appendChild(row);
+      syncDayDisplays();
+      name?.focus();
       dialogError.hidden=true;
       dialogError.textContent="";
     }

@@ -470,15 +470,19 @@ def test_0286_released_archive_assets_are_visible_while_target_is_only_planned(t
 
 def test_0286_subevent_day_controls_keep_calendar_but_enforce_valid_range():
     assert "function nextSubeventDefaults()" in WORKSPACE_HTML
-    assert '<input data-create-child-start-date type="date"' in WORKSPACE_HTML
-    assert '<input data-create-child-end-date type="date"' in WORKSPACE_HTML
-    assert "<select data-create-child-start-date>" not in WORKSPACE_HTML
+    assert "<select data-create-child-start-date>" in WORKSPACE_HTML
+    assert "<select data-create-child-end-date>" in WORKSPACE_HTML
+    assert "data-create-child-start-month-year" in WORKSPACE_HTML
+    assert "data-create-child-end-month-year" in WORKSPACE_HTML
+    assert '<input data-create-child-start-date type="date"' not in WORKSPACE_HTML
     assert "data-locked-month=" in WORKSPACE_HTML
-    assert "data-segment-day-number" not in WORKSPACE_HTML
+    assert "<select data-segment-day" in WORKSPACE_HTML
 
     assert "function nextEditSubeventDefaults(container)" in EVENTS_HTML
-    assert '<input data-child-start-date type="date"' in EVENTS_HTML
-    assert '<input data-child-end-date type="date"' in EVENTS_HTML
-    assert "<select data-child-start-date" not in EVENTS_HTML
+    assert "<select data-child-start-date" in EVENTS_HTML
+    assert "<select data-child-end-date" in EVENTS_HTML
+    assert "data-child-start-month-year" in EVENTS_HTML
+    assert "data-child-end-month-year" in EVENTS_HTML
+    assert '<input data-child-start-date type="date"' not in EVENTS_HTML
     assert "data-locked-month=" in EVENTS_HTML
-    assert "data-segment-day-number" not in EVENTS_HTML
+    assert "<select data-segment-day" in EVENTS_HTML

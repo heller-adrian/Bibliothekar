@@ -1556,6 +1556,7 @@ def build_event_sort_plan(
             "source_absolute_path": str(source_absolute),
             "destination_relative_path": str(destination_relative),
             "structural_leaf_relative_path": str(structural_leaf),
+            "free_stock": is_free_stock,
             "destination_absolute_path": str(destination_absolute),
             "expected_size_bytes": expected_size,
             "source_size_bytes": source_size,
@@ -1965,7 +1966,13 @@ def build_event_sort_plan(
                 )
                 structural_leaf = PurePosixPath(next(iter(target_leaves)))
                 destination_container = structural_leaf
-                if bool(layout_state.get("structure_enabled")):
+                target_is_free_stock = all(
+                    bool(candidate.get("free_stock")) for candidate in candidates
+                )
+                if (
+                    not target_is_free_stock
+                    and bool(layout_state.get("structure_enabled"))
+                ):
                     organization = layout_input_path
                     if asset_kind == "export" and layout_export_paths:
                         organization = PurePosixPath(layout_export_paths[0])
@@ -2126,7 +2133,13 @@ def build_event_sort_plan(
                 continue
 
             destination_parent = PurePosixPath(next(iter(target_leaves)))
-            if bool(layout_state.get("structure_enabled")):
+            target_is_free_stock = all(
+                bool(candidate.get("free_stock")) for candidate in candidates
+            )
+            if (
+                not target_is_free_stock
+                and bool(layout_state.get("structure_enabled"))
+            ):
                 observed_organization = _observed_organization_path(
                     asset,
                     child_folder_names=child_folder_names,
