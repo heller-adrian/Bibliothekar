@@ -4127,11 +4127,10 @@ def assign_free_families_to_existing_no_event(
     target_event_id: str,
     segments: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Assign free families to the monthly no-event collection.
+    """Assign free families directly to one canonical monthly collection.
 
-    The canonical collection may originate from another backup job. In that
-    case a job-local extension event is created and linked to the canonical
-    collection while using the same physical monthly folder.
+    Since 0.28.0 the source backup is provenance only. Cross-backup additions
+    never create a linked extension event.
     """
     from app.event_timeline import normalize_no_event_segments, continuous_event_overlaps
     normalized = normalize_no_event_segments(segments or [])
@@ -4180,22 +4179,26 @@ def assign_free_families_to_existing_no_event(
             connection.rollback(); raise ValueError("In den gewählten Zeitsegmenten gibt es keine freien Dateifamilien.")
 
         same_job = str(target["job_id"]) == job_id
-        direct_target = same_job and str(target["status"]) in {"planned","applied"}
+        if str(target["status"]) == "archived":
+            connection.rollback()
+            raise ValueError("Archivierte „Ohne Ereignis“-Sammlungen werden nur über den Archivänderungsworkflow ergänzt.")
         effective_event_id = str(target["id"])
-        effective_linkage = str(target["linkage_kind"] or "")
+        effective_linkage = ""
 
-        if not direct_target:
-            effective_event_id = "EVENT_" + uuid.uuid4().hex.upper()
-            linkage = "archived_manual" if str(target["status"]) == "archived" else "planned_extension"
-            effective_linkage = linkage
-            captures=[cap for _,cap in selected]
-            connection.execute(
-                """INSERT INTO events (
-                    id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,
-                    folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,
-                    applied_at,archived_at,linked_event_id,linkage_kind,timeline_model,resort_required
-                ) VALUES (?,?,NULL,'parent','Ohne Ereignis',?,?,0,?,'planned',?,?,'no_event',?,1,NULL,NULL,?,?, 'segments',0)""",
-                (effective_event_id,job_id,min(captures),max(captures),target["folder_name"],now,now,int(bool(target["preserve_day_folders"])),target["id"],linkage),
+        if str(target["status"]) == "applied":
+            if int(target["resort_required"] or 0):
+                connection.rollback()
+                raise ValueError("Für diese Sammlung ist bereits eine Nachsortierung offen.")
+            from app.event_mutation import capture_job_event_state, begin_mutation
+            original_state = capture_job_event_state(connection, str(target["job_id"]))
+            begin_mutation(
+                connection,
+                job_id=str(target["job_id"]),
+                anchor_event_id=effective_event_id,
+                mutation_kind="edit",
+                affected_event_ids=[effective_event_id],
+                original_state=original_state,
+                status="pending_apply",
             )
 
         connection.executemany(
@@ -4216,12 +4219,19 @@ def assign_free_families_to_existing_no_event(
             connection.execute(
                 """INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (effective_event_id,job_id,seg["day_key"],a[11:16],b[11:16],a,b,'user',now,now),
+                (effective_event_id,str(target["job_id"]),seg["day_key"],a[11:16],b[11:16],a,b,'user',now,now),
             )
         connection.execute("UPDATE events SET start_datetime=(SELECT MIN(start_datetime) FROM event_time_segments WHERE event_id=?),end_datetime=(SELECT MAX(end_datetime) FROM event_time_segments WHERE event_id=?) WHERE id=?",(effective_event_id,effective_event_id,effective_event_id))
         connection.execute(
             "UPDATE events SET timeline_model='segments',revision=revision+1,updated_at=?,resort_required=CASE WHEN status='applied' THEN 1 ELSE resort_required END WHERE id=?",
             (now,effective_event_id),
+        )
+        from app.event_access import register_source_jobs
+        register_source_jobs(
+            connection,
+            effective_event_id,
+            [str(target["job_id"]), str(job_id)],
+            created_at=now,
         )
         connection.execute(
             "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'free_families_added_to_no_event','event',?,?,?)",
