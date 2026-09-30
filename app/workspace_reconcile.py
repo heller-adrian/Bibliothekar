@@ -228,13 +228,14 @@ def _overlap(a: tuple[str,str], b: tuple[str,str]) -> bool:
 
 def _connected_applied_events(connection: Any, job_id: str, anchor_event_id: str) -> tuple[list[str], list[dict[str,Any]]]:
     rows = connection.execute(
-        """SELECT id,name,status,start_datetime,end_datetime,resort_required,archived_at
-           FROM events WHERE job_id=? AND parent_event_id IS NULL
-             AND status IN ('planned','applied','archived')""", (job_id,)
+        """SELECT id,job_id,name,status,start_datetime,end_datetime,resort_required,archived_at
+           FROM events WHERE parent_event_id IS NULL
+             AND COALESCE(TRIM(linkage_kind),'')=''
+             AND status IN ('planned','applied','archived')"""
     ).fetchall()
     by_id={str(r['id']):r for r in rows}
     anchor=by_id.get(anchor_event_id)
-    if anchor is None:
+    if anchor is None or str(anchor['job_id']) != str(job_id):
         raise SortPlanError("Ereignis wurde nicht gefunden.")
     if str(anchor['status']) != 'applied' or int(anchor['resort_required'] or 0) != 1:
         raise SortPlanError("Für dieses Ereignis ist keine gemeinsame Nachsortierung offen.")
@@ -243,7 +244,7 @@ def _connected_applied_events(connection: Any, job_id: str, anchor_event_id: str
     # Durable family transitions are the strongest connection signal.
     qrows=connection.execute(
         """SELECT event_id,target_event_id FROM event_reapply_removed_families
-           WHERE job_id=? AND target_event_id IS NOT NULL""", (job_id,)
+           WHERE target_event_id IS NOT NULL"""
     ).fetchall()
     for q in qrows:
         a,b=str(q['event_id']),str(q['target_event_id'])
@@ -275,8 +276,8 @@ def _connected_applied_events(connection: Any, job_id: str, anchor_event_id: str
     for q in connection.execute(
         """SELECT DISTINCT r.target_event_id,e.name,e.status FROM event_reapply_removed_families r
            JOIN events e ON e.id=r.target_event_id
-           WHERE r.job_id=? AND r.event_id IN (%s) AND e.status='archived'""" % ",".join("?" for _ in applied),
-        (job_id,*applied) if applied else (job_id,),
+           WHERE r.event_id IN (%s) AND e.status='archived'""" % ",".join("?" for _ in applied),
+        tuple(applied),
     ).fetchall() if applied else []:
         item={"event_id":str(q['target_event_id']),"name":str(q['name']),"status":"archived"}
         if item not in archived: archived.append(item)
@@ -286,7 +287,7 @@ def _connected_applied_events(connection: Any, job_id: str, anchor_event_id: str
 def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_event_id: str, workspace_path: Path, *, verify_sha256: bool=False) -> dict[str,Any]:
     with database_connection(database_path) as c:
         from app.event_reassignment import reconcile_stale_event_reassignments
-        reconcile_stale_event_reassignments(c,job_id)
+        reconcile_stale_event_reassignments(c,event_id=anchor_event_id)
         event_ids, archived_impacts = _connected_applied_events(c,job_id,anchor_event_id)
     blockers=[]
 
@@ -294,8 +295,8 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
         owner_rows = c.execute(
             """SELECT ea.family_id, COALESCE(e.parent_event_id,e.id) AS root_event_id
                FROM event_assignments ea JOIN events e ON e.id=ea.event_id
-               WHERE e.job_id=? AND ea.family_id IS NOT NULL
-                 AND e.status IN ('draft','planned','applied','archived')""", (job_id,)
+               WHERE ea.family_id IS NOT NULL
+                 AND e.status IN ('draft','planned','applied','archived')"""
         ).fetchall()
     owner_by_family={int(r['family_id']):str(r['root_event_id']) for r in owner_rows}
 
@@ -305,8 +306,10 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     for eid in event_ids:
         try:
             with database_connection(database_path) as c:
-                event_status=c.execute('SELECT status FROM events WHERE id=?',(eid,)).fetchone()['status']
-            p=build_event_sort_plan(database_path,job_id,eid,workspace_path,verify_sha256=verify_sha256,allow_reapply=event_status=='applied')
+                event_row=c.execute('SELECT status,job_id FROM events WHERE id=?',(eid,)).fetchone()
+                event_status=event_row['status']
+                event_job_id=str(event_row['job_id'])
+            p=build_event_sort_plan(database_path,event_job_id,eid,workspace_path,verify_sha256=verify_sha256,allow_reapply=event_status=='applied')
         except SortPlanError as exc:
             blockers.append({"code":"event_plan_failed","event_id":eid,"message":str(exc)})
             continue
