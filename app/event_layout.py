@@ -112,7 +112,17 @@ def validate_input_path(
     return path.as_posix()
 
 
+def _table_exists(connection: Any, name: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
 def get_global_default(connection: Any) -> dict[str, Any]:
+    if not _table_exists(connection, "app_settings"):
+        return json.loads(json.dumps(DEFAULT_SETTING))
     row = connection.execute(
         "SELECT value_json FROM app_settings WHERE setting_key='event_folder_layout_default'"
     ).fetchone()
@@ -149,6 +159,15 @@ def set_global_default(
 
 
 def ensure_event_layout_snapshot(connection: Any, event_id: str, *, now: str) -> dict[str, Any]:
+    if not _table_exists(connection, "event_folder_layouts"):
+        default = get_global_default(connection)
+        return {
+            "event_id": str(event_id),
+            "structure_enabled": bool(default["structure_enabled"]),
+            "input_path": str(default["input_path"]),
+            "layout": default["layout"],
+            "revision": 1,
+        }
     row = connection.execute(
         "SELECT * FROM event_folder_layouts WHERE event_id=?",
         (event_id,),
