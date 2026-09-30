@@ -40,7 +40,7 @@ def _event(
                uses_time_range,folder_name,status,created_at,updated_at,event_kind,
                preserve_day_folders,revision,linked_event_id,linkage_kind,
                time_model_version,timeline_model
-           ) VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,0,1,?,?,2,?)""",
+           ) VALUES (?,?,?,?,?,?,?, ?,?,?,?,?,?,0,1,?,?,2,?)""",
         (
             event_id,
             job_id,
@@ -49,6 +49,7 @@ def _event(
             name,
             start,
             end,
+            1 if event_level == "child" else 0,
             ("07-19 - " + name) if event_level == "parent" else name,
             status,
             NOW,
