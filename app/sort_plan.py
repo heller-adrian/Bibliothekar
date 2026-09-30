@@ -1575,6 +1575,7 @@ def build_event_sort_plan(
             "source_relative_path": str(source_relative),
             "source_absolute_path": str(source_absolute),
             "destination_relative_path": str(destination_relative),
+            "structural_leaf_relative_path": str(structural_leaf),
             "destination_absolute_path": str(destination_absolute),
             "expected_size_bytes": expected_size,
             "source_size_bytes": source_size,
@@ -1647,7 +1648,7 @@ def build_event_sort_plan(
 
             candidates = camera_entries_by_family.get(family_id, [])
             destination_containers = {
-                PurePosixPath(str(candidate["destination_relative_path"])).parent.parent
+                PurePosixPath(str(candidate["destination_relative_path"])).parent
                 for candidate in candidates
             }
             if not candidates or len(destination_containers) != 1:
@@ -1669,13 +1670,9 @@ def build_event_sort_plan(
             source_absolute = target_root.joinpath(*source_relative.parts).resolve(
                 strict=False
             )
-            branch = next(
-                (part for part in source_relative.parts if part in WORKSPACE_BRANCHES),
-                "Export" if str(asset.get("asset_kind") or "") == "export" else "Alle",
-            )
             destination_container = next(iter(destination_containers))
             filename = _safe_component(source_relative.name, "Zusatzdateiname")
-            destination_relative = destination_container / branch / filename
+            destination_relative = destination_container / filename
             destination_absolute = target_root.joinpath(
                 *destination_relative.parts
             ).resolve(strict=False)
@@ -1865,42 +1862,31 @@ def build_event_sort_plan(
             if not candidates:
                 candidates = list(camera_entries_by_family.get(family_id, []))
 
-            branch = str(asset.get("branch") or "")
-            if len(candidates) > 1 and branch in WORKSPACE_BRANCHES:
-                same_branch = [
-                    candidate
-                    for candidate in candidates
-                    if PurePosixPath(
-                        str(candidate["destination_relative_path"])
-                    ).parent.name == branch
-                ]
-                if same_branch:
-                    candidates = same_branch
-
-            target_parents = {
-                str(PurePosixPath(str(candidate["destination_relative_path"])).parent)
+            target_leaves = {
+                str(candidate.get("structural_leaf_relative_path") or "")
                 for candidate in candidates
+                if str(candidate.get("structural_leaf_relative_path") or "")
             }
-            if not candidates or len(target_parents) != 1:
+            if not candidates or len(target_leaves) != 1:
                 blockers.append({
-                    "code": "xmp_target_ambiguous",
+                    "code": "asset_target_ambiguous",
                     "family_id": family_id,
                     "path": str(source_relative),
                     "message": (
-                        "Das Ziel einer XMP-/Exportdatei ist innerhalb ihrer "
-                        "Kamerafamilie nicht eindeutig: " + str(source_relative)
+                        "Das strukturelle Ziel einer XMP-/Exportdatei ist innerhalb "
+                        "ihrer Kamerafamilie nicht eindeutig: " + str(source_relative)
                     ),
                 })
                 continue
 
-            destination_parent = PurePosixPath(next(iter(target_parents)))
-            if asset_kind == "export":
-                # Export ist eine eigene Schwesterrolle zu Alle/Sortiert und
-                # folgt beim Nachsortieren demselben Ereignis-/Tagescontainer.
-                if destination_parent.name in WORKSPACE_BRANCHES:
-                    destination_parent = destination_parent.parent / "Export"
-                elif destination_parent.name != "Export":
-                    destination_parent = destination_parent / "Export"
+            destination_parent = PurePosixPath(next(iter(target_leaves)))
+            if bool(layout_state.get("structure_enabled")):
+                observed_organization = _observed_organization_path(
+                    asset,
+                    child_folder_names=child_folder_names,
+                )
+                if observed_organization.parts:
+                    destination_parent = destination_parent / observed_organization
             filename = _safe_component(
                 source_relative.name,
                 "Export-Dateiname" if asset_kind == "export" else "XMP-Dateiname",
