@@ -11,9 +11,6 @@ from app.workspace_layout import WorkspaceLayoutError, shared_work_root
 
 
 RELEASE_DIRECTORY_NAME = "Freigewordene Archivdateien"
-BRANCHES = ("Alle", "Sortiert", "Export")
-
-
 class ArchiveReleaseStockError(ValueError):
     pass
 
@@ -56,14 +53,6 @@ def _safe_archive_path(archive_root: Path, relative_value: Any) -> Path:
         return archive_path_without_symlinks(archive_root, str(relative_value or ""))
     except ArchiveLocationError as exc:
         raise ArchiveReleaseStockError(str(exc)) from exc
-
-
-def _branch_for(old_path: str, asset_kind: str = "") -> str:
-    parts = PurePosixPath(str(old_path or "").replace("\\", "/")).parts
-    for part in parts:
-        if part in BRANCHES:
-            return part
-    return "Export" if asset_kind == "export" else "Alle"
 
 
 def _segment_folder(segment: dict[str, Any]) -> str:
