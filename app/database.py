@@ -3893,14 +3893,25 @@ def update_event_definition(
                 affected = connection.execute("SELECT * FROM events WHERE id=?", (affected_event_id,)).fetchone()
                 if affected is None or str(affected["status"]) != "applied":
                     continue
+                family_placeholders = ",".join("?" for _ in removed_family_ids)
+                family_job_rows = connection.execute(
+                    f"""SELECT id,job_id FROM file_families
+                        WHERE id IN ({family_placeholders})""",
+                    tuple(int(fid) for fid in removed_family_ids),
+                ).fetchall()
+                family_job_by_id = {
+                    int(row["id"]): str(row["job_id"])
+                    for row in family_job_rows
+                }
                 connection.executemany(
                     """INSERT OR REPLACE INTO event_reapply_removed_families(
                        event_id,job_id,family_id,created_at,target_event_id,target_status,target_kind,
                        target_name,target_folder_name,target_preserve_day_folders,target_linkage_kind,reassigned_at)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                     [(
-                        affected_event_id, job_id, int(fid), now, event_id, str(event["status"]),
-                        "cascade_event", clean_name, str(preview.get("parent_folder") or event["folder_name"]),
+                        affected_event_id, family_job_by_id[int(fid)], int(fid), now,
+                        event_id, str(event["status"]), "cascade_event", clean_name,
+                        str(preview.get("parent_folder") or event["folder_name"]),
                         int(bool(preview.get("preserve_day_folders"))), "", now,
                     ) for fid in removed_family_ids],
                 )
@@ -4403,25 +4414,26 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
             for eid in details.get('event_ids') or []:
                 active_reconcile_event_ids.add(str(eid))
         for row in connection.execute(
-            """SELECT r.job_id, r.event_id, e.name AS event_name, COUNT(*) AS n
+            """SELECT e.job_id AS anchor_job_id, r.event_id,
+                      e.name AS event_name, COUNT(*) AS n
                FROM event_reapply_removed_families r
                JOIN events e ON e.id=r.event_id
                WHERE r.target_event_id IS NULL
                  AND COALESCE(r.target_kind,'') <> 'released_free'
                  AND NOT EXISTS (
                    SELECT 1 FROM event_mutations m
-                   WHERE m.job_id=r.job_id
-                     AND m.anchor_event_id=r.event_id
+                   WHERE m.anchor_event_id=r.event_id
                      AND m.status IN ('pending_reassignment','pending_apply')
                  )
-               GROUP BY r.job_id, r.event_id, e.name
+               GROUP BY e.job_id, r.event_id, e.name
                ORDER BY MIN(r.created_at)"""
         ).fetchall():
             tasks.append({
-                'kind': 'reassignment', 'job_id': row['job_id'],
+                'kind': 'reassignment', 'job_id': row['anchor_job_id'],
                 'event_id': row['event_id'], 'title': 'Neu-Zuordnung',
                 'detail': f"{row['n']} Familie" + ('' if int(row['n']) == 1 else 'n') + f" · {row['event_name']}",
-                'count': 1, 'family_count': int(row['n']), 'href': f"/events?job={row['job_id']}&task=reassign:{row['event_id']}",
+                'count': 1, 'family_count': int(row['n']),
+                'href': f"/events?job={row['anchor_job_id']}&task=reassign:{row['event_id']}",
             })
         for row in connection.execute(
             """SELECT sc.id,sc.job_id,sc.event_id,sc.status,e.name AS event_name,
@@ -4502,7 +4514,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  AND e.status='applied'
                  AND NOT EXISTS (
                    SELECT 1 FROM event_reapply_removed_families r
-                   WHERE r.event_id=e.id AND r.job_id=e.job_id AND r.target_event_id IS NULL
+                   WHERE r.event_id=e.id AND r.target_event_id IS NULL
                      AND COALESCE(r.target_kind,'') <> 'released_free'
                  )
                  AND NOT EXISTS (
@@ -4513,7 +4525,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  )
                  AND NOT EXISTS (
                    SELECT 1 FROM sort_runs sr
-                   WHERE sr.event_id=e.id AND sr.job_id=e.job_id AND sr.run_kind='reapply'
+                   WHERE sr.event_id=e.id AND sr.run_kind='reapply'
                      AND sr.status IN ('queued','verifying','moving','finalizing','rolling_back')
                  )
                ORDER BY e.updated_at"""
