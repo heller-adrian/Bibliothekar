@@ -23,6 +23,14 @@ from app.transfer_ui import TRANSFER_HTML
 from app.ui_shell import apply_shell
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
+from app.event_layout import (
+    ensure_event_layout_snapshot,
+    get_event_layout,
+    get_global_default as get_global_event_folder_layout,
+    set_global_default as set_global_event_folder_layout,
+    update_event_layout,
+    EventLayoutError,
+)
 
 from app.database import (
     claim_next_job,
@@ -881,6 +889,68 @@ def load_settings() -> dict[str, Any]:
         )
 
     return data
+
+
+def _event_payload_with_folder_layout(
+    payload: dict[str, Any],
+    *,
+    event_id: str | None = None,
+) -> dict[str, Any]:
+    result = dict(payload)
+    with database_connection(DATABASE_FILE) as connection:
+        if event_id:
+            state = ensure_event_layout_snapshot(
+                connection,
+                event_id,
+                now=datetime.now(timezone.utc).isoformat(),
+            )
+        else:
+            state = get_global_event_folder_layout(connection)
+    result.setdefault("folder_layout", {
+        "structure_enabled": bool(state["structure_enabled"]),
+        "input_path": str(state["input_path"]),
+        "layout": state["layout"],
+    })
+    result.setdefault("create_subfolders", bool(state["structure_enabled"]))
+    return result
+
+
+@app.get("/api/settings/event-folder-layout", tags=["Einstellungen"])
+def api_get_event_folder_layout() -> dict[str, Any]:
+    with database_connection(DATABASE_FILE) as connection:
+        return get_global_event_folder_layout(connection)
+
+
+@app.put("/api/settings/event-folder-layout", tags=["Einstellungen"])
+def api_set_event_folder_layout(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        with database_connection(DATABASE_FILE) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            state = set_global_event_folder_layout(
+                connection,
+                payload,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            connection.commit()
+        return state
+    except EventLayoutError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/events/{event_id}/folder-layout", tags=["Ereignisse"])
+def api_event_folder_layout(event_id: str) -> dict[str, Any]:
+    with database_connection(DATABASE_FILE) as connection:
+        event = connection.execute(
+            "SELECT id FROM events WHERE id=? AND parent_event_id IS NULL",
+            (event_id,),
+        ).fetchone()
+        if event is None:
+            raise HTTPException(status_code=404, detail="Ereignis wurde nicht gefunden.")
+        return ensure_event_layout_snapshot(
+            connection,
+            event_id,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
 
 
 def path_status(path: Path) -> dict[str, Any]:
@@ -4261,6 +4331,12 @@ def api_create_event(
             detail="Sicherung wurde nicht gefunden.",
         )
 
+    existing_parent_event_id = str(payload.get("existing_parent_event_id") or "").strip()
+    payload = _event_payload_with_folder_layout(
+        payload,
+        event_id=existing_parent_event_id or None,
+    )
+
     available_families = (
         list_job_available_families(
             DATABASE_FILE,
@@ -4269,7 +4345,6 @@ def api_create_event(
     )
 
     try:
-        existing_parent_event_id = str(payload.get("existing_parent_event_id") or "").strip()
         archived_target = None
         if existing_parent_event_id:
             with database_connection(DATABASE_FILE) as connection:
@@ -5310,6 +5385,10 @@ def api_event_preview(
             detail="Sicherung wurde nicht gefunden.",
         )
 
+    payload = _event_payload_with_folder_layout(
+        payload,
+        event_id=str(payload.get("existing_parent_event_id") or "").strip() or None,
+    )
     available_families = (
         list_job_available_families(
             DATABASE_FILE,
