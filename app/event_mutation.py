@@ -44,10 +44,19 @@ def capture_job_event_state(connection: Any, job_id: str) -> dict[str, Any]:
     else:
         assignments = []
         segments = []
+    layouts = (
+        _rows(
+            connection,
+            f"SELECT * FROM event_folder_layouts WHERE event_id IN ({ph}) ORDER BY event_id",
+            tuple(event_ids),
+        )
+        if event_ids else []
+    )
     return {
         "events": _rows(connection, "SELECT * FROM events WHERE job_id=? ORDER BY CASE event_level WHEN 'parent' THEN 0 ELSE 1 END, id", (job_id,)),
         "event_assignments": assignments,
         "event_time_segments": segments,
+        "event_folder_layouts": layouts,
         "event_reapply_removed_families": (
             _rows(
                 connection,
@@ -267,6 +276,10 @@ def _state_bundle(state: dict[str, Any], root_id: str) -> dict[str, Any]:
             "event_time_segments",
             lambda row: str(row.get("event_id") or "") in graph_ids,
         ),
+        "event_folder_layouts": rows_for(
+            "event_folder_layouts",
+            lambda row: str(row.get("event_id") or "") == root_id,
+        ),
         "event_reapply_removed_families": rows_for(
             "event_reapply_removed_families",
             lambda row: str(row.get("event_id") or "") == root_id,
@@ -393,6 +406,35 @@ def cancel_mutation(connection: Any, mutation_id: str, job_id: str, *, workspace
                 if str(item.get("parent_event_id") or "") == root_id
             ]
             _insert_dict_rows(connection, "events", original_children)
+
+            # 0.28.3: Das pro Ereignis eingefrorene Ordnerlayout gehört zur
+            # Transaktion. Ohne diesen Teil würde „Änderungen verwerfen“ zwar
+            # Dateien/Ordner zurückrollen, SQLite aber auf dem neuen AN/AUS-
+            # Zustand belassen. Der Strukturwächter würde Bibliothekars eigene
+            # Rückänderung anschließend fälschlich als manuell melden.
+            original_layouts = [
+                dict(item) for item in (state.get("event_folder_layouts") or [])
+                if str(item.get("event_id") or "") == root_id
+            ]
+            if original_layouts:
+                current_layout = connection.execute(
+                    "SELECT 1 FROM event_folder_layouts WHERE event_id=?",
+                    (root_id,),
+                ).fetchone()
+                if current_layout is None:
+                    _insert_dict_rows(connection, "event_folder_layouts", original_layouts)
+                else:
+                    _update_dict_row(
+                        connection,
+                        "event_folder_layouts",
+                        original_layouts[0],
+                        key="event_id",
+                    )
+            else:
+                connection.execute(
+                    "DELETE FROM event_folder_layouts WHERE event_id=?",
+                    (root_id,),
+                )
 
             original_graph_ids = {root_id} | {str(item["id"]) for item in original_children}
             _insert_dict_rows(
