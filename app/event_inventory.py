@@ -647,6 +647,7 @@ def scan_event_inventory(
         rel = PurePosixPath(row["event_relative_path"])
         aliases = collision_alias_stems(
             rel.stem,
+            allow_plain_number=row["asset_kind"] == "export",
             include_export_base=row["asset_kind"] == "export",
         )
         candidates: list[dict[str, Any]] = []
