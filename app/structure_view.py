@@ -2,15 +2,22 @@
 from pathlib import PurePosixPath
 
 
-def render_structure(year, folder, day_keys=(), children=(), preserve_days=False):
+def _layout_paths(layout_state=None):
+    if layout_state is None:
+        return ["Alle", "Sortiert", "Export"]
+    if not bool(layout_state.get("structure_enabled", True)):
+        return [""]
+    from app.event_layout import layout_paths
+    paths = layout_paths(layout_state.get("layout") or {"version": 1, "nodes": []})
+    return paths or [""]
+
+
+def render_structure(year, folder, day_keys=(), children=(), preserve_days=False, layout_state=None):
     paths = []
     default_days = sorted(set(day_keys or ()))
     child_list = list(children or ())
     branches = []
     # The parent branch represents files assigned directly to the parent.
-    # If children exist and the parent has no own capture days, rendering an
-    # empty Alle/Sortiert/Export triplet would describe folders that are not
-    # needed. A parent without children still keeps its normal triplet.
     if default_days or not child_list:
         branches.append(("", default_days))
     seen = {""}
@@ -26,17 +33,15 @@ def render_structure(year, folder, day_keys=(), children=(), preserve_days=False
         )
         branches.append((branch, child_days))
 
+    layout = _layout_paths(layout_state)
     for branch, branch_days in branches:
         rendered_days = branch_days if preserve_days and branch_days else [""]
         for day in rendered_days:
-            for leaf in ("Alle", "Sortiert", "Export"):
-                paths.append(
-                    "/".join(
-                        x
-                        for x in [str(year), str(folder), branch, day, leaf]
-                        if x
-                    )
-                )
+            for leaf in layout:
+                parts = [str(year), str(folder), branch, day]
+                if leaf:
+                    parts.extend(PurePosixPath(leaf).parts)
+                paths.append("/".join(x for x in parts if x))
 
     tree = {}
     for path in paths:
