@@ -11,7 +11,7 @@ import re
 from app.database import database_connection
 from app.metadata import MetadataError, analyze_tree, classify_media
 from app.filename_collisions import collision_alias_stems, export_collision_base_stem
-from app.event_layout import get_event_layout, layout_role_paths
+from app.event_layout import ensure_event_layout_snapshot, layout_role_paths
 from app.physical_state import organization_path_for_event_relative
 
 
@@ -417,7 +417,11 @@ def scan_event_inventory(
     previous_kind_by_content: dict[tuple[int, str], str] = {}
     with database_connection(database_path) as connection:
         try:
-            layout_state = get_event_layout(connection, event_id)
+            layout_state = ensure_event_layout_snapshot(
+                connection,
+                event_id,
+                now=_now(),
+            )
         except Exception:
             layout_state = None
         try:
