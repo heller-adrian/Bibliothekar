@@ -15,6 +15,7 @@ from typing import Any
 from app.database import database_connection
 from app.event_timeline import normalize_no_event_segments, replace_event_segments
 from app.event_inventory import EventInventoryError, scan_event_inventory
+from app.filename_collisions import collision_alias_stems
 from app.archive_locations import (
     ArchiveLocationError,
     archive_path_without_symlinks,
@@ -48,6 +49,70 @@ def _safe_archive_path(archive_root: Path, relative_value: Any) -> Path:
         return archive_path_without_symlinks(archive_root, raw)
     except ArchiveLocationError as exc:
         raise EventChangeApplyError(str(exc)) from exc
+
+
+def _collision_verified_archive_target(
+    archive_root: Path,
+    relative_value: str,
+    *,
+    expected_size: int,
+    expected_sha: str,
+    asset_kind: str,
+) -> tuple[Path, str] | None:
+    """Resolve common Finder/Windows collision names by content identity.
+
+    The planned exact path remains preferred. If the filesystem chose a
+    duplicate suffix instead, only candidates in the same target directory
+    with a recognized collision-equivalent stem, matching extension, size and
+    SHA-256 are accepted. For exports, Bibliothekar's planned _Export suffix
+    and the unsuffixed filename are equivalent collision choices.
+    """
+    target = _safe_archive_path(archive_root, relative_value)
+    parent = target.parent
+    if not parent.exists() or not parent.is_dir() or parent.is_symlink():
+        return None
+
+    expected_aliases = collision_alias_stems(
+        target.stem,
+        allow_plain_number=True,
+        include_export_base=asset_kind == "export",
+    )
+    matches: list[Path] = []
+    try:
+        children = list(parent.iterdir())
+    except OSError:
+        return None
+
+    for candidate in children:
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            if candidate.suffix.casefold() != target.suffix.casefold():
+                continue
+            aliases = collision_alias_stems(
+                candidate.stem,
+                allow_plain_number=True,
+                include_export_base=asset_kind == "export",
+            )
+            if not (aliases & expected_aliases):
+                continue
+            if expected_size and int(candidate.stat().st_size) != int(expected_size):
+                continue
+            if _sha256_file(candidate) != expected_sha:
+                continue
+            matches.append(candidate)
+        except OSError:
+            continue
+
+    if len(matches) != 1:
+        return None
+    resolved = matches[0].resolve(strict=False)
+    root = archive_root.expanduser().resolve(strict=False)
+    try:
+        relative = resolved.relative_to(root).as_posix()
+    except ValueError:
+        return None
+    return resolved, relative
 
 
 def confirm_event_change(
@@ -421,33 +486,59 @@ def verify_event_change(
                 message = "Gespeicherte SHA-256-Summe fehlt; die Archivänderung kann nicht verifiziert werden."
             else:
                 target_rel = new_rel if action == "move" else (new_rel or old_rel)
-                target = _safe_archive_path(root, target_rel)
-                if not target.is_file():
-                    status = "missing"
-                    message = "Datei fehlt am erwarteten Zielpfad."
-                else:
-                    actual_size = int(target.stat().st_size)
-                    if expected_size and actual_size != expected_size:
-                        status = "size_mismatch"
-                        message = "Dateigröße weicht ab."
+                resolved_target_rel = target_rel
+                review_kind = str(review.get("review_kind") or "camera")
+                asset_kind = str(
+                    review.get("asset_kind")
+                    or ("camera_original" if review_kind != "asset" else "other")
+                )
+                resolved = _collision_verified_archive_target(
+                    root,
+                    target_rel,
+                    expected_size=expected_size,
+                    expected_sha=expected_sha,
+                    asset_kind=asset_kind,
+                )
+                if resolved is None:
+                    target = _safe_archive_path(root, target_rel)
+                    if not target.is_file():
+                        status = "missing"
+                        message = "Datei fehlt am erwarteten Zielpfad."
                     else:
+                        actual_size = int(target.stat().st_size)
                         actual_sha = _sha256_file(target)
-                        if actual_sha != expected_sha:
+                        if expected_size and actual_size != expected_size:
+                            status = "size_mismatch"
+                            message = "Dateigröße weicht ab."
+                        elif actual_sha != expected_sha:
                             status = "sha256_mismatch"
                             message = "SHA-256-Summe weicht ab."
                         else:
                             status = "verified"
+                else:
+                    target, resolved_target_rel = resolved
+                    actual_size = int(target.stat().st_size)
+                    actual_sha = expected_sha
+                    status = "verified"
+                    if resolved_target_rel != target_rel:
+                        message = (
+                            "Datei wurde unter einem vom Dateisystem erzeugten "
+                            "Kollisionsnamen erkannt und per SHA-256 bestätigt."
+                        )
 
                 if (
                     status == "verified"
                     and action == "move"
                     and source_root_kind == "camera_archive"
-                    and old_rel != new_rel
+                    and old_rel != resolved_target_rel
                 ):
                     old_target = _safe_archive_path(root, old_rel)
                     if old_target.exists():
                         status = "old_path_still_exists"
                         message = "Die Datei liegt zusätzlich noch am alten Archivpfad."
+
+                if status == "verified" and resolved_target_rel != new_rel:
+                    new_rel = resolved_target_rel
 
             if status == "verified" and not (
                 action == "delete" or (action == "unresolved" and str(review.get("workspace_release_path") or "").strip())
@@ -462,11 +553,12 @@ def verify_event_change(
             connection.execute(
                 f"""
                 UPDATE {table}
-                SET verification_status = ?, actual_size_bytes = ?, actual_sha256 = ?,
+                SET new_path = ?, verification_status = ?,
+                    actual_size_bytes = ?, actual_sha256 = ?,
                     verified_at = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (status, actual_size, actual_sha, now, now, review["id"]),
+                (new_rel, status, actual_size, actual_sha, now, now, review["id"]),
             )
             results.append({
                 "id": review["id"],
