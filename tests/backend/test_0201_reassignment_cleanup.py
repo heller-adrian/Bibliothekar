@@ -67,7 +67,8 @@ def test_all_reassignment_windows_use_day_groups_and_locked_month_ui():
     assert 'segment.family_count' in EVENTS_HTML and 'segment.file_count' in EVENTS_HTML
 
 
-def test_existing_no_event_preview_contains_real_folder_structure():
-    assert '├── Alle' in WORKSPACE_HTML
-    assert '├── Sortiert' in WORKSPACE_HTML
-    assert '└── Export' in WORKSPACE_HTML
+def test_existing_no_event_preview_uses_event_folder_layout():
+    assert "/api/settings/event-folder-layout" in WORKSPACE_HTML
+    assert "/folder-layout" in WORKSPACE_HTML
+    assert "state.layout?.nodes" in WORKSPACE_HTML
+    assert "globalFolderLayout" in WORKSPACE_HTML
