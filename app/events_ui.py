@@ -2709,10 +2709,11 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
     function noEventDayControl(monthKey, day, structural) {
-      const dayPart=/^\d{4}-\d{2}-(\d{2})$/.exec(day||"")?.[1] || "";
       if (!monthKey) return `<label class="edit-field"><span>Tag</span><input type="date" data-segment-day value="${escapeHtml(day)}" ${structural?"":"disabled"}></label>`;
       const maxDay=new Date(Number(monthKey.slice(0,4)),Number(monthKey.slice(5,7)),0).getDate();
-      return `<div style="display:grid;grid-template-columns:minmax(118px,.85fr) minmax(86px,.55fr);gap:8px;align-items:end"><label class="edit-field"><span>Monat/Jahr</span><input value="${escapeHtml(monthKey.slice(5,7)+"/"+monthKey.slice(0,4))}" disabled></label><label class="edit-field"><span>Tag</span><input type="number" data-segment-day-number min="1" max="${maxDay}" value="${escapeHtml(dayPart?String(Number(dayPart)):"")}" ${structural?"":"disabled"}></label><input type="hidden" data-segment-day value="${escapeHtml(day)}"></div>`;
+      const minDate=`${monthKey}-01`;
+      const maxDate=`${monthKey}-${String(maxDay).padStart(2,"0")}`;
+      return `<label class="edit-field"><span>Tag</span><input type="date" data-segment-day data-locked-month="${escapeHtml(monthKey)}" value="${escapeHtml(day)}" min="${escapeHtml(minDate)}" max="${escapeHtml(maxDate)}" ${structural?"":"disabled"}></label>`;
     }
 
     function contiguousDayRangesFromValues(values) {
@@ -3026,11 +3027,11 @@ EVENTS_HTML = r"""<!doctype html>
             </div>
             <div class="child-segment-boundaries">
               <div class="child-segment-boundary">
-                <label class="edit-field"><span>Beginn · Tag</span><select data-child-start-date ${structural ? "" : "disabled"}>${editSubeventDayOptions(startDate)}</select></label>
+                <label class="edit-field"><span>Beginn · Tag</span><input data-child-start-date type="date" value="${escapeHtml(startDate)}" min="${escapeHtml(editSubeventBounds().minDate)}" max="${escapeHtml(editSubeventBounds().maxDate)}" ${structural ? "" : "disabled"}></label>
                 <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
               </div>
               <div class="child-segment-boundary">
-                <label class="edit-field"><span>Ende · Tag</span><select data-child-end-date ${structural ? "" : "disabled"}>${editSubeventDayOptions(endDate)}</select></label>
+                <label class="edit-field"><span>Ende · Tag</span><input data-child-end-date type="date" value="${escapeHtml(endDate)}" min="${escapeHtml(editSubeventBounds().minDate)}" max="${escapeHtml(editSubeventBounds().maxDate)}" ${structural ? "" : "disabled"}></label>
                 <label class="edit-field"><span>Endzeit</span><input data-child-end-time type="time" value="${escapeHtml(end)}" ${structural ? "" : "disabled"}></label>
               </div>
             </div>
@@ -3090,18 +3091,16 @@ EVENTS_HTML = r"""<!doctype html>
         };
         bind();
         const refreshNormalDayControls=()=>{
-          const days=editSubeventDays();
-          if(!days.length)return;
-          const allowed=new Set(days);
+          const bounds=editSubeventBounds();
+          if(!bounds.minDate||!bounds.maxDate)return;
           normalContainer.querySelectorAll("[data-child-segment]").forEach(row=>{
             for(const selector of ["[data-child-start-date]","[data-child-end-date]"]){
               const control=row.querySelector(selector);
               if(!control)continue;
-              const oldValue=control.value;
-              const fallback=selector.includes("start")?days[0]:days[days.length-1];
-              const selected=allowed.has(oldValue)?oldValue:fallback;
-              control.innerHTML=editSubeventDayOptions(selected);
-              control.value=selected;
+              control.min=bounds.minDate;
+              control.max=bounds.maxDate;
+              if(!control.value || control.value<bounds.minDate) control.value=bounds.minDate;
+              if(control.value>bounds.maxDate) control.value=bounds.maxDate;
             }
           });
         };
@@ -3125,11 +3124,11 @@ EVENTS_HTML = r"""<!doctype html>
             </div>
             <div class="child-segment-boundaries">
               <div class="child-segment-boundary">
-                <label class="edit-field"><span>Beginn · Tag</span><select data-child-start-date>${editSubeventDayOptions(defaults.startDate)}</select></label>
+                <label class="edit-field"><span>Beginn · Tag</span><input data-child-start-date type="date" value="${escapeHtml(defaults.startDate)}" min="${escapeHtml(editSubeventBounds().minDate)}" max="${escapeHtml(editSubeventBounds().maxDate)}"></label>
                 <label class="edit-field"><span>Startzeit</span><input data-child-start-time type="time" value="${escapeHtml(defaults.startTime)}"></label>
               </div>
               <div class="child-segment-boundary">
-                <label class="edit-field"><span>Ende · Tag</span><select data-child-end-date>${editSubeventDayOptions(defaults.endDate)}</select></label>
+                <label class="edit-field"><span>Ende · Tag</span><input data-child-end-date type="date" value="${escapeHtml(defaults.endDate)}" min="${escapeHtml(editSubeventBounds().minDate)}" max="${escapeHtml(editSubeventBounds().maxDate)}"></label>
                 <label class="edit-field"><span>Endzeit</span><input data-child-end-time type="time" value="${escapeHtml(defaults.endTime)}"></label>
               </div>
             </div>
@@ -3142,13 +3141,27 @@ EVENTS_HTML = r"""<!doctype html>
         const container=document.getElementById("no-event-segments");
         const bindNoEventRows=()=>{
           container.querySelectorAll("[data-remove-segment]").forEach(button=>{button.onclick=()=>button.closest("[data-segment-row]")?.remove();});
-          container.querySelectorAll("[data-segment-day-number]").forEach(input=>{input.oninput=()=>{const hidden=input.closest("[data-segment-row]")?.querySelector("[data-segment-day]");const maxDay=new Date(Number(fixedNoEventMonth.slice(0,4)),Number(fixedNoEventMonth.slice(5,7)),0).getDate();const n=Math.max(1,Math.min(maxDay,Number(input.value||0)));if(hidden&&Number(input.value||0)>0)hidden.value=`${fixedNoEventMonth}-${String(n).padStart(2,"0")}`;};});
+          container.querySelectorAll("[data-segment-day]").forEach(input=>{
+            input.dataset.lastValid=input.value||"";
+            input.onchange=()=>{
+              const month=String(input.dataset.lockedMonth||fixedNoEventMonth||"");
+              if(month&&input.value){
+                const maxDay=new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate();
+                const min=`${month}-01`;
+                const max=`${month}-${String(maxDay).padStart(2,"0")}`;
+                if(input.value<min)input.value=min;
+                if(input.value>max)input.value=max;
+                if(!input.value.startsWith(month+"-"))input.value=input.dataset.lastValid||min;
+              }
+              input.dataset.lastValid=input.value||"";
+            };
+          });
         };
         bindNoEventRows();
         document.getElementById("add-no-event-segment")?.addEventListener("click",()=>{
           const row=document.createElement("details");row.className="no-event-segment card collapse-card";row.dataset.segmentRow="1";row.open=true;row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
           row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>Neues Tagessegment</strong><span class="muted">· 00:00–23:59</span></summary><div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">${noEventDayControl(fixedNoEventMonth,"",true)}<label class="edit-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button></div>`;
-          container.appendChild(row);bindNoEventRows();row.querySelector("[data-segment-day-number]")?.focus();
+          container.appendChild(row);bindNoEventRows();row.querySelector("[data-segment-day]")?.focus();
         });
       }
       document.getElementById("edit-cancel").addEventListener("click", () => eventEditDialog.close());
