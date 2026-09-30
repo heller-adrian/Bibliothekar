@@ -222,3 +222,16 @@ def test_0280_archived_manual_rename_requires_staged_event_json_before_commit(tm
     assert set(layout_paths(layout["layout"])) == {"Originale", "Sortiert", "Export"}
 
     assert detect_event_structure_change(db, "e") is None
+
+
+def test_0280_event_edit_ui_has_one_subfolder_control_per_event_kind():
+    source = Path("app/events_ui.py").read_text(encoding="utf-8")
+    assert source.count('id="edit-subfolders"') == 2
+    assert 'document.getElementById("edit-subfolders").value === "1"' in source
+
+
+def test_0280_structure_task_auto_opens_once_per_page():
+    source = Path("app/ui_shell.py").read_text(encoding="utf-8")
+    assert 'let structureTaskAutoOpened = false;' in source
+    assert 'task.kind === "event_structure_change"' in source
+    assert 'if (taskPanel?.hasAttribute("hidden")) openTaskPanel();' in source
