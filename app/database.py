@@ -1623,9 +1623,19 @@ def store_metadata_analysis(
         )
 
         from app.event_access import register_source_jobs
-        from app.event_layout import ensure_event_layout_snapshot
+        from app.event_layout import ensure_event_layout_snapshot, update_event_layout
         register_source_jobs(connection, parent_event_id, [job_id], created_at=now)
         ensure_event_layout_snapshot(connection, parent_event_id, now=now)
+        preview_layout = preview.get("folder_layout")
+        if isinstance(preview_layout, dict):
+            update_event_layout(
+                connection,
+                parent_event_id,
+                structure_enabled=bool(preview_layout.get("structure_enabled", True)),
+                input_path=str(preview_layout.get("input_path") or ""),
+                layout=preview_layout.get("layout") or {},
+                updated_at=now,
+            )
 
         connection.execute(
             """
