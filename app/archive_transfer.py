@@ -9,6 +9,7 @@ import os
 import uuid
 
 from app.database import database_connection
+from app.event_access import event_file_rows
 from app.event_inventory import EventInventoryError, scan_event_inventory
 from app.archive_locations import (
     ArchiveLocationError,
@@ -70,81 +71,14 @@ def _event_files(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     with database_connection(database_path) as connection:
         event = connection.execute(
-            """
-            SELECT *
-            FROM events
-            WHERE id = ?
-              AND job_id = ?
-              AND parent_event_id IS NULL
-            """,
+            """SELECT * FROM events
+               WHERE id=? AND job_id=? AND parent_event_id IS NULL""",
             (event_id, job_id),
         ).fetchone()
-
         if event is None:
-            raise ArchiveVerificationError(
-                "Ereignis wurde nicht gefunden."
-            )
-
-        rows = connection.execute(
-            """
-            WITH event_tree AS (
-                SELECT id
-                FROM events
-                WHERE id = ?
-
-                UNION ALL
-
-                SELECT child.id
-                FROM events AS child
-                JOIN event_tree AS parent
-                    ON child.parent_event_id = parent.id
-            ),
-            assigned_families AS (
-                SELECT DISTINCT family_id
-                FROM event_assignments
-                WHERE event_id IN (
-                    SELECT id FROM event_tree
-                )
-                  AND family_id IS NOT NULL
-            ),
-            assigned_files AS (
-                SELECT DISTINCT file_id
-                FROM event_assignments
-                WHERE event_id IN (
-                    SELECT id FROM event_tree
-                )
-                  AND file_id IS NOT NULL
-            )
-            SELECT DISTINCT
-                files.id AS file_id,
-                files.family_id,
-                files.current_relative_path,
-                files.original_relative_path,
-                files.original_filename,
-                files.current_root_kind,
-                files.size_bytes,
-                files.sha256_current,
-                files.sha256_original
-            FROM files
-            WHERE files.job_id = ?
-              AND (
-                    files.family_id IN (
-                        SELECT family_id
-                        FROM assigned_families
-                    )
-                    OR files.id IN (
-                        SELECT file_id
-                        FROM assigned_files
-                    )
-                  )
-            ORDER BY
-                files.current_relative_path,
-                files.id
-            """,
-            (event_id, job_id),
-        ).fetchall()
-
-    return dict(event), [dict(row) for row in rows]
+            raise ArchiveVerificationError("Ereignis wurde nicht gefunden.")
+        rows = event_file_rows(connection, event_id)
+    return dict(event), rows
 
 
 def latest_archive_verification(
@@ -265,7 +199,7 @@ def list_archive_candidates(
                 latest_release.deleted_file_count AS release_deleted_file_count,
                 latest_release.completed_at AS release_completed_at,
                 (SELECT COUNT(*) FROM event_reapply_removed_families pr
-                 WHERE pr.job_id=events.job_id AND pr.target_event_id IS NULL) AS pending_reassignment_count,
+                 WHERE pr.event_id=events.id AND pr.target_event_id IS NULL) AS pending_reassignment_count,
                 (SELECT COUNT(*) FROM event_mutations em
                  WHERE em.job_id=events.job_id AND em.status IN ('pending_reassignment','pending_apply','manual_archive')) AS active_mutation_count
             FROM events
