@@ -249,7 +249,7 @@ def test_0263_archived_edit_rescans_sortiert_xmp_export_and_ignores_deleted_db_f
     assert export["action"] == "move"
 
 
-def test_0263_archive_verification_finds_camera_original_anywhere_in_event(tmp_path):
+def test_0263_archive_verification_requires_current_relative_path(tmp_path):
     db = tmp_path / "db.sqlite3"
     initialize_database(db)
     archive = tmp_path / "archive"
@@ -263,9 +263,9 @@ def test_0263_archive_verification_finds_camera_original_anywhere_in_event(tmp_p
             current_path="2026/07-23 - Trip/Alle/A.JPG",
         )
 
-    target = archive / "2026" / "07-23 - Trip" / "Sortiert" / "A.JPG"
-    target.parent.mkdir(parents=True)
-    target.write_bytes(camera)
+    wrong = archive / "2026" / "07-23 - Trip" / "Sortiert" / "A.JPG"
+    wrong.parent.mkdir(parents=True)
+    wrong.write_bytes(camera)
 
     result = verify_event_archive(db, archive, "j", "e")
     assert result["verified"] is False
@@ -275,6 +275,16 @@ def test_0263_archive_verification_finds_camera_original_anywhere_in_event(tmp_p
     assert "IST:" in result["files"][0]["error_message"]
     assert "SOLL:" in result["files"][0]["error_message"]
     assert result["files"][0]["file_id"] == file_id
+
+    wrong.unlink()
+    correct = archive / "2026" / "07-23 - Trip" / "Alle" / "A.JPG"
+    correct.parent.mkdir(parents=True, exist_ok=True)
+    correct.write_bytes(camera)
+
+    verified = verify_event_archive(db, archive, "j", "e")
+    assert verified["verified"] is True
+    assert verified["missing_file_count"] == 0
+    assert verified["mismatched_file_count"] == 0
 
 
 def test_0263_ssd_release_requires_same_current_ssd_and_archive_placement(tmp_path):
