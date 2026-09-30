@@ -3418,21 +3418,140 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventStartTimeLabel.hidden=false;
       eventEndTimeLabel.hidden=false;
     }
-    function addCreateSubeventCard(value={}){
-      const row=document.createElement("details");row.className="create-subevent-card";row.dataset.createSubevent="1";row.open=true;
-      const defaultDay=activeExtension?.start_date || eventStartDate.value || "";
-      const sd=String(value.start_date||defaultDay);
-      const ed=String(value.end_date||sd);
-      const defaultStart=(activeExtension && sd===activeExtension.start_date) ? activeExtension.start_time : "00:00";
-      const defaultEnd=(activeExtension && ed===activeExtension.end_date && activeExtension.start_date===activeExtension.end_date) ? activeExtension.end_time : "23:59";
+
+    function subeventBounds(){
       const minDate=activeExtension?.start_date || eventStartDate.value || "";
-      const maxDate=activeExtension?.end_date || eventEndDate.value || "";
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(value.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(value.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}" min="${escapeHtml(minDate)}" max="${escapeHtml(maxDate)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(value.start_time||defaultStart)}"></label></div><div class="create-subevent-boundary"><label><span>Ende</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}" min="${escapeHtml(minDate)}" max="${escapeHtml(maxDate)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(value.end_time||defaultEnd)}"></label></div></div></div>`;
+      const maxDate=activeExtension?.end_date || eventEndDate.value || minDate;
+      const minTime=activeExtension?.start_time
+        || (minDate===eventStartDate.value ? (eventStartTime.value||"00:00") : "00:00");
+      const maxTime=activeExtension?.end_time
+        || (maxDate===eventEndDate.value ? (eventEndTime.value||"23:59") : "23:59");
+      return {minDate,maxDate,minTime,maxTime};
+    }
+
+    function shiftIsoDay(value,amount){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(String(value||""))) return "";
+      const date=new Date(`${value}T12:00:00`);
+      date.setDate(date.getDate()+amount);
+      const y=date.getFullYear();
+      const m=String(date.getMonth()+1).padStart(2,"0");
+      const d=String(date.getDate()).padStart(2,"0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function subeventAllowedDays(){
+      const {minDate,maxDate}=subeventBounds();
+      if(!minDate||!maxDate||minDate>maxDate) return [];
+      const result=[];
+      let current=minDate;
+      for(let guard=0;guard<3700 && current<=maxDate;guard+=1){
+        result.push(current);
+        current=shiftIsoDay(current,1);
+      }
+      return result;
+    }
+
+    function subeventDayOptions(selected){
+      const days=subeventAllowedDays();
+      const sameMonth=days.length>0 && days.every(day=>day.slice(0,7)===days[0].slice(0,7));
+      return days.map(day=>{
+        const label=sameMonth
+          ? day.slice(8,10)
+          : `${day.slice(8,10)}.${day.slice(5,7)}.${day.slice(0,4)}`;
+        return `<option value="${escapeHtml(day)}" ${day===selected?"selected":""}>${escapeHtml(label)}</option>`;
+      }).join("");
+    }
+
+    function minuteAfter(value){
+      const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
+      if(!match)return null;
+      const total=Number(match[1])*60+Number(match[2])+1;
+      if(total>=24*60)return null;
+      return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;
+    }
+
+    function nextSubeventDefaults(){
+      const bounds=subeventBounds();
+      if(!bounds.minDate||!bounds.maxDate)return null;
+      const rows=[...createSubeventList.querySelectorAll("[data-create-subevent]")];
+      if(!rows.length){
+        return {
+          start_date:bounds.minDate,
+          start_time:bounds.minTime||"00:00",
+          end_date:bounds.minDate,
+          end_time:bounds.minDate===bounds.maxDate ? (bounds.maxTime||"23:59") : "23:59",
+        };
+      }
+
+      const previous=rows[rows.length-1];
+      const previousDay=previous.querySelector("[data-create-child-end-date]")?.value||bounds.minDate;
+      const previousTime=previous.querySelector("[data-create-child-end-time]")?.value||"23:59";
+      let startDate=previousDay;
+      let startTime=minuteAfter(previousTime);
+      if(!startTime){
+        startDate=shiftIsoDay(previousDay,1);
+        startTime="00:00";
+      }
+      if(!startDate || startDate>bounds.maxDate){
+        dialogError.hidden=false;
+        dialogError.textContent="Der bisherige Unterereigniszeitraum reicht bereits bis zum Ende des Oberereignisses. Ändere zuerst die letzte Endzeit.";
+        return null;
+      }
+      const endTime=startDate===bounds.maxDate ? (bounds.maxTime||"23:59") : "23:59";
+      if(startDate===bounds.maxDate && startTime>endTime){
+        dialogError.hidden=false;
+        dialogError.textContent="Im Oberereignis ist hinter dem letzten Unterereignis kein weiterer Zeitraum frei.";
+        return null;
+      }
+      return {
+        start_date:startDate,
+        start_time:startTime,
+        end_date:startDate,
+        end_time:endTime,
+      };
+    }
+
+    function refreshCreateSubeventDayControls(){
+      const days=subeventAllowedDays();
+      if(!days.length)return;
+      const allowed=new Set(days);
+      for(const row of createSubeventList.querySelectorAll("[data-create-subevent]")){
+        for(const selector of ["[data-create-child-start-date]","[data-create-child-end-date]"]){
+          const control=row.querySelector(selector);
+          if(!control)continue;
+          const previous=control.value;
+          const fallback=selector.includes("start") ? days[0] : days[days.length-1];
+          const selected=allowed.has(previous)?previous:fallback;
+          control.innerHTML=subeventDayOptions(selected);
+          control.value=selected;
+        }
+      }
+    }
+
+    function addCreateSubeventCard(value={}){
+      const defaults=Object.keys(value||{}).length ? value : nextSubeventDefaults();
+      if(!defaults)return;
+      const row=document.createElement("details");row.className="create-subevent-card";row.dataset.createSubevent="1";row.open=true;
+      const bounds=subeventBounds();
+      const allowed=subeventAllowedDays();
+      const wantedStart=String(defaults.start_date||bounds.minDate||"");
+      const sd=allowed.includes(wantedStart)?wantedStart:(allowed[0]||wantedStart);
+      const wantedEnd=String(defaults.end_date||sd);
+      const ed=allowed.includes(wantedEnd)?wantedEnd:sd;
+      const defaultStart=String(defaults.start_time||(
+        sd===bounds.minDate ? bounds.minTime : "00:00"
+      )||"00:00");
+      const defaultEnd=String(defaults.end_time||(
+        ed===bounds.maxDate ? bounds.maxTime : "23:59"
+      )||"23:59");
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn · Tag</span><select data-create-child-start-date>${subeventDayOptions(sd)}</select></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary"><label><span>Ende · Tag</span><select data-create-child-end-date>${subeventDayOptions(ed)}</select></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
       row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});
-      row.querySelectorAll("input").forEach(input=>input.addEventListener("change",scheduleDialogPreview));
+      row.querySelectorAll("input,select").forEach(input=>input.addEventListener("change",scheduleDialogPreview));
       createSubeventList.appendChild(row);name?.focus();
+      dialogError.hidden=true;
+      dialogError.textContent="";
     }
     function collectCreateSubevents(){return [...createSubeventList.querySelectorAll("[data-create-subevent]")].map(row=>{const name=row.querySelector("[data-create-child-name]")?.value?.trim()||"",sd=row.querySelector("[data-create-child-start-date]")?.value||"",st=row.querySelector("[data-create-child-start-time]")?.value||"00:00",ed=row.querySelector("[data-create-child-end-date]")?.value||"",et=row.querySelector("[data-create-child-end-time]")?.value||"23:59";return{name,start_datetime:`${sd}T${st}:00`,end_datetime:`${ed}T${et}:59`};});}
 
@@ -3876,8 +3995,14 @@ WORKSPACE_HTML = r"""<!doctype html>
       clearDialogFeedbackForEdit();
       scheduleDialogPreview();
     });
-    eventForm?.addEventListener("change", () => {
+    eventForm?.addEventListener("change", event => {
       clearDialogFeedbackForEdit();
+      if (
+        event?.target === eventStartDate
+        || event?.target === eventEndDate
+      ) {
+        refreshCreateSubeventDayControls();
+      }
       scheduleDialogPreview();
     });
 
