@@ -230,6 +230,10 @@ def _asset_kind(event_relative_path: str, media_type: str, known_file_id: int | 
 _FILENAME_SCHEMA_RE = re.compile(
     r"(?<!\d)(?P<date>20\d{6})[_-](?P<time>\d{6})(?!\d)"
 )
+_EXPORT_COLLISION_SUFFIX_RE = re.compile(
+    r"^(?P<base>.+)_Export(?:_\d{3})?$",
+    re.IGNORECASE,
+)
 
 
 def _filename_schema_capture_time(filename: str) -> str | None:
@@ -574,6 +578,16 @@ def scan_event_inventory(
         candidates = by_same_dir_stem.get((str(rel.parent), rel.stem), [])
         if not candidates:
             candidates = by_stem.get(rel.stem, [])
+
+        # 0.28.3: Auf case-insensitiven NAS-Datasets kann ein Export beim
+        # flachen Layout denselben Namen wie das Kamera-JPEG besitzen. Die
+        # sichere Kollisionsauflösung benennt nur den Export in *_Export.jpg
+        # (bzw. *_Export_001.jpg) um. Dieser transparente Suffix darf die
+        # Familienbeziehung bei einem späteren Re-Sortieren nicht verlieren.
+        if row["asset_kind"] == "export" and not candidates:
+            collision_match = _EXPORT_COLLISION_SUFFIX_RE.match(rel.stem)
+            if collision_match is not None:
+                candidates = by_stem.get(str(collision_match.group("base")), [])
 
         # Exporte behalten häufig den Kameranamen nur als Namensbestandteil
         # (z. B. mit vorangestelltem Zeitstempel). Wenn der Name genau eine
