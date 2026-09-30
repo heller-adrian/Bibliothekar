@@ -116,7 +116,7 @@ def test_event_document_matches_db(test_env):
     # A legacy partial document must be refreshed rather than accepted as complete.
     assert not event_document_matches_db(db, ws, job_id, event_id, {"event": {"id": event_id}})["ok"]
     doc = build_event_document_from_db(db, ws, job_id, event_id)
-    assert doc['document_version'] == 2
+    assert doc['document_version'] == 3
 
     result = event_document_matches_db(db, ws, job_id, event_id, doc)
     assert result["ok"] is True
