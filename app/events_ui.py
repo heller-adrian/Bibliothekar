@@ -2789,6 +2789,8 @@ EVENTS_HTML = r"""<!doctype html>
             ? '<div class="inspect-field"><span>Datenbank-Zeitraum</span><strong>komplex</strong></div>'
             : `<div class="inspect-field"><span>Datenbank-Beginn</span><strong>${escapeHtml(inspectDateTime(event.start_datetime))}</strong></div><div class="inspect-field"><span>Datenbank-Ende</span><strong>${escapeHtml(inspectDateTime(event.end_datetime))}</strong></div>`}
           <div class="inspect-field"><span>Tagesordner</span><strong>${event.preserve_day_folders?"Erhalten":"Nicht erhalten"}</strong></div>
+          <div class="inspect-field"><span>Unterordner</span><strong>${context.folder_layout?.structure_enabled?"Erstellen":"Nicht erstellen"}</strong></div>
+          <div class="inspect-field"><span>Input</span><strong>${escapeHtml(context.folder_layout?.input_path || "Direkt im Ereignis")}</strong></div>
           <div class="inspect-field"><span>Zugeordnet</span><strong>${assigned.length} Familien</strong></div>
         </div>
         ${event.notes?`<div class="inspect-section"><strong>Notizen</strong><p class="muted">${escapeHtml(event.notes)}</p></div>`:""}
@@ -2933,7 +2935,9 @@ EVENTS_HTML = r"""<!doctype html>
               <div id="no-event-segments">${segmentHtml || `<p class="muted">Noch keine Segmente.</p>`}</div>
               <p class="muted">Jeder Tag bzw. Teil eines Tages wird separat gespeichert. Zwischenräume gehören ausdrücklich nicht zu „Ohne Ereignis“.</p>
             </div>
-            <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>` : `
+            <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
+            <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>
+            <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>` : `
           <div class="edit-boundaries">
             <div class="edit-boundary">
               <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
@@ -3063,6 +3067,7 @@ EVENTS_HTML = r"""<!doctype html>
         notes: document.getElementById("edit-notes").value,
       };
       if (structural) {
+        payload.create_subfolders = document.getElementById("edit-subfolders").value === "1";
         if (noEvent) {
           payload.event_kind = "no_event";
           payload.preserve_day_folders = document.getElementById("edit-preserve").value === "1";
