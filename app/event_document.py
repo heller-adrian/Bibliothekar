@@ -100,6 +100,8 @@ def build_event_document_from_db(
     workspace_root: Path,
     job_id: str,
     event_id: str,
+    *,
+    include_archived: bool = False,
 ) -> dict[str, Any] | None:
     """Eines Ereignisses aus dem lebhaften SQLite-Zustand bauen.
 
@@ -117,7 +119,11 @@ def build_event_document_from_db(
         if event is None or str(event["event_level"]) != "parent":
             return None
 
-        if str(event["status"]) != "applied" or event["archived_at"]:
+        status = str(event["status"])
+        if status == "archived":
+            if not include_archived:
+                return None
+        elif status != "applied" or event["archived_at"]:
             return None
 
         children = [dict(r) for r in connection.execute("SELECT * FROM events WHERE parent_event_id=? ORDER BY start_datetime,id", (event_id,))]
@@ -148,6 +154,17 @@ def build_event_document_from_db(
             (event_id, event_id),
         ).fetchall()
 
+        root_kind = "camera_archive" if status == "archived" else "shared_workspace"
+        inventory_rows = [
+            dict(r) for r in connection.execute(
+                """SELECT relative_path,filename,size_bytes,sha256,asset_kind,
+                          known_file_id,family_id,event_relative_path
+                   FROM event_inventory_files
+                   WHERE event_id=? AND root_kind=?
+                   ORDER BY event_relative_path""",
+                (event_id, root_kind),
+            ).fetchall()
+        ]
         file_rows = files
 
     if not families:
@@ -155,19 +172,38 @@ def build_event_document_from_db(
 
     entries: list[dict[str, Any]] = []
 
-    for row in file_rows:
-        relative_path = str(row["current_relative_path"] or "")
-        if not relative_path:
-            continue
-        parts = PurePosixPath(relative_path).parts
-        ordered = bool(parts)
-        entries.append({
-            "relative_path": relative_path,
-            "filename": parts[-1] if ordered else str(row["original_filename"]),
-            "size_bytes": int(row["size_bytes"] or 0),
-            "sha256": str(row["sha256_current"] or row["sha256_original"] or ""),
-            "ordered": ordered,
-        })
+    if inventory_rows:
+        for row in inventory_rows:
+            relative_path = str(row.get("relative_path") or "")
+            if not relative_path:
+                continue
+            entries.append({
+                "relative_path": relative_path,
+                "filename": str(row.get("filename") or PurePosixPath(relative_path).name),
+                "size_bytes": int(row.get("size_bytes") or 0),
+                "sha256": str(row.get("sha256") or ""),
+                "asset_kind": str(row.get("asset_kind") or "other"),
+                "family_id": row.get("family_id"),
+                "known_file_id": row.get("known_file_id"),
+                "ordered": True,
+            })
+    else:
+        for row in file_rows:
+            relative_path = str(row["current_relative_path"] or "")
+            if not relative_path:
+                continue
+            parts = PurePosixPath(relative_path).parts
+            ordered = bool(parts)
+            entries.append({
+                "relative_path": relative_path,
+                "filename": parts[-1] if ordered else str(row["original_filename"]),
+                "size_bytes": int(row["size_bytes"] or 0),
+                "sha256": str(row["sha256_current"] or row["sha256_original"] or ""),
+                "asset_kind": "camera_original",
+                "family_id": row.get("family_id"),
+                "known_file_id": row.get("id"),
+                "ordered": ordered,
+            })
 
     if not entries:
         return None
@@ -204,6 +240,7 @@ def build_event_document_from_db(
         day_keys,
         structure_children,
         preserve_day_folders,
+        layout_state=layout_state,
     )
     return {
         "document_version": EVENT_DOCUMENT_VERSION,
