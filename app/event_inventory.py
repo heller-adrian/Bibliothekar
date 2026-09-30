@@ -10,7 +10,9 @@ import re
 
 from app.database import database_connection
 from app.metadata import MetadataError, analyze_tree, classify_media
-from app.filename_collisions import collision_alias_stems
+from app.filename_collisions import collision_alias_stems, export_collision_base_stem
+from app.event_layout import get_event_layout, layout_role_paths
+from app.physical_state import organization_path_for_event_relative
 
 
 SORT_BRANCHES = {"Alle", "Sortiert", "Export"}
@@ -213,16 +215,31 @@ def _branch_for(event_relative_path: str) -> str:
     return ""
 
 
-def _asset_kind(event_relative_path: str, media_type: str, known_file_id: int | None) -> str:
+def _asset_kind(
+    event_relative_path: str,
+    media_type: str,
+    known_file_id: int | None,
+    *,
+    declared_export: bool = False,
+    previous_asset_kind: str | None = None,
+) -> str:
     if known_file_id is not None:
         return "camera_original"
     if media_type == "xmp":
         return "xmp"
-    # A JPEG/image that is not one of the imported camera originals is a
-    # generated/exported asset. This classification is intentionally content-
-    # based and no longer depends on a folder literally named "Export".
     if media_type in {"jpeg", "image"}:
-        return "export"
+        stem = Path(str(event_relative_path or "")).stem
+        # 0.28.5: A normal image is not automatically an export. Positive
+        # evidence is required: configured export role, explicit _Export
+        # naming or an already observed export identity. A later unique
+        # camera-family match may still promote derived_media to export.
+        if (
+            declared_export
+            or export_collision_base_stem(stem) is not None
+            or str(previous_asset_kind or "") == "export"
+        ):
+            return "export"
+        return "derived_media"
     if media_type in {"raw", "video"}:
         return "derived_media"
     return "other"
@@ -395,6 +412,50 @@ def scan_event_inventory(
         raise EventInventoryError("Ungültige Ereigniswurzel: " + root_kind)
 
     event, known_files = _event_and_known_files(database_path, job_id, event_id)
+
+    layout_state: dict[str, Any] | None = None
+    previous_kind_by_content: dict[tuple[int, str], str] = {}
+    with database_connection(database_path) as connection:
+        try:
+            layout_state = get_event_layout(connection, event_id)
+        except Exception:
+            layout_state = None
+        try:
+            previous_rows = connection.execute(
+                """SELECT size_bytes,sha256,asset_kind
+                   FROM event_inventory_files
+                   WHERE event_id=? AND root_kind=?""",
+                (event_id, root_kind),
+            ).fetchall()
+            grouped_previous: dict[tuple[int, str], set[str]] = {}
+            for row in previous_rows:
+                key = (int(row["size_bytes"] or 0), str(row["sha256"] or ""))
+                if key[1]:
+                    grouped_previous.setdefault(key, set()).add(str(row["asset_kind"] or ""))
+            for key, kinds in grouped_previous.items():
+                if "export" in kinds:
+                    previous_kind_by_content[key] = "export"
+        except Exception:
+            previous_kind_by_content = {}
+
+    export_role_paths = set(
+        layout_role_paths(layout_state["layout"], "export")
+        if layout_state is not None and bool(layout_state.get("structure_enabled"))
+        else []
+    )
+
+    def declared_export_for(relative_path: str) -> bool:
+        if not export_role_paths or layout_state is None:
+            return False
+        organization = organization_path_for_event_relative(
+            relative_path,
+            layout_state,
+        )
+        return any(
+            organization == role_path or organization.startswith(role_path + "/")
+            for role_path in export_role_paths
+        )
+
     root = storage_root.expanduser().resolve(strict=False)
     prefix = (
         _safe_relative(str(event_prefix_override))
@@ -525,7 +586,13 @@ def scan_event_inventory(
             if known is not None and capture_time
             else str(metadata.get("capture_time_confidence") or "missing")
         )
-        asset_kind = _asset_kind(event_rel, media_type, known_file_id)
+        asset_kind = _asset_kind(
+            event_rel,
+            media_type,
+            known_file_id,
+            declared_export=declared_export_for(event_rel),
+            previous_asset_kind=previous_kind_by_content.get((size_bytes, digest)),
+        )
 
         # Export-Zeitpyramide 0.27.7:
         # 1. echtes DateTimeOriginal, 2. weitere belastbare Medienzeiten,
@@ -673,7 +740,11 @@ def scan_event_inventory(
         # (z. B. mit vorangestelltem Zeitstempel). Wenn der Name genau eine
         # importierte Familie identifiziert, wird diese Beziehung genutzt.
         filename_family = None
-        if row["asset_kind"] == "export" and not candidates:
+        if (
+            row["asset_kind"] in {"export", "derived_media"}
+            and row.get("media_type") in {"jpeg", "image"}
+            and not candidates
+        ):
             filename_family = _filename_family_source(row["filename"], known_files)
             if filename_family is not None and filename_family.get("family_id") is not None:
                 matched_family_id = int(filename_family["family_id"])
@@ -712,6 +783,16 @@ def scan_event_inventory(
                 row["family_id"] = source["family_id"]
             family_source = source
 
+        if (
+            row["known_file_id"] is None
+            and row["asset_kind"] == "derived_media"
+            and row["media_type"] in {"jpeg", "image"}
+            and (family_source is not None or filename_family is not None)
+        ):
+            # A unique camera-family relation is positive export evidence even
+            # outside a specifically classified export folder.
+            row["asset_kind"] = "export"
+
         # Ein eindeutiger Namensbezug zum Kameraoriginal korrigiert auch
         # Exportmetadaten, wenn diese sichtbar eine andere Zeit behaupten.
         # Dadurch bleibt ein Lightroom-/Finder-Export bei seiner Aufnahme.
@@ -730,15 +811,6 @@ def scan_event_inventory(
                 or row.get("capture_time_confidence") in {"missing", "low", "conflict"}
                 or (gap is not None and gap > 120)
             )
-
-        if (
-            row["known_file_id"] is None
-            and row["asset_kind"] == "derived_media"
-            and row["media_type"] in {"jpeg", "image"}
-            and (family_source is not None or filename_family is not None)
-        ):
-            # Export is a content/provenance relation, never a folder-name role.
-            row["asset_kind"] = "export"
 
         should_inherit = (
             row["asset_kind"] == "xmp"
