@@ -499,32 +499,71 @@ def confirm_applied_structure_change(
     input_path: str,
     app_version: str | None = None,
 ) -> dict[str, Any]:
+    """Commit observed Applied state, then durably refresh event.json.
+
+    The database transition is intentionally two-phase. If writing event.json
+    fails after SQLite has accepted the already-existing Finder state, the task
+    remains verified and can be retried without applying the structure twice.
+    """
     now = _now()
     with database_connection(database_path) as connection:
-        connection.execute("BEGIN IMMEDIATE")
         raw = connection.execute(
             "SELECT * FROM event_structure_changes WHERE id=?",
             (change_id,),
         ).fetchone()
-        if raw is None or str(raw["status"]) != "pending" or str(raw["root_kind"]) != "shared_workspace":
-            raise EventStructureChangeError("Diese Applied-Strukturänderung ist nicht mehr offen.")
+        if raw is None or str(raw["root_kind"]) != "shared_workspace":
+            raise EventStructureChangeError("Diese Applied-Strukturänderung wurde nicht gefunden.")
         row = dict(raw)
-        layout_state = _apply_confirmed_state(connection, row, input_path=input_path, now=now)
+        state = str(row["status"])
+        if state not in {"pending", "verified"}:
+            raise EventStructureChangeError("Diese Applied-Strukturänderung ist nicht mehr offen.")
+
+        if state == "pending":
+            connection.execute("BEGIN IMMEDIATE")
+            layout_state = _apply_confirmed_state(
+                connection, row, input_path=input_path, now=now
+            )
+            connection.execute(
+                """UPDATE event_structure_changes
+                   SET status='verified',proposed_input_path=?,updated_at=?,error_message=NULL
+                   WHERE id=?""",
+                (_safe_rel(input_path), now, change_id),
+            )
+            connection.commit()
+        else:
+            layout_state = get_event_layout(connection, str(row["event_id"]))
+
+    try:
+        from app.event_document import write_event_document
+        document = build_event_document_from_db(
+            database_path, workspace_path, str(row["job_id"]), str(row["event_id"])
+        )
+        if document is None:
+            raise EventStructureChangeError("Die neue event.json konnte nicht erzeugt werden.")
+        event_json = write_event_document(workspace_path, document, app_version=app_version)
+    except Exception as error:
+        with database_connection(database_path) as connection:
+            connection.execute(
+                """UPDATE event_structure_changes
+                   SET status='verified',error_message=?,updated_at=?
+                   WHERE id=?""",
+                ("event.json konnte noch nicht aktualisiert werden: " + str(error), _now(), change_id),
+            )
+        if isinstance(error, EventStructureChangeError):
+            raise
+        raise EventStructureChangeError(
+            "SQLite wurde sicher aktualisiert, aber event.json konnte noch nicht geschrieben werden. "
+            "Die Aufgabe bleibt offen und kann erneut ausgeführt werden: " + str(error)
+        ) from error
+
+    done = _now()
+    with database_connection(database_path) as connection:
         connection.execute(
             """UPDATE event_structure_changes
-               SET status='completed',proposed_input_path=?,updated_at=?,completed_at=?
+               SET status='completed',updated_at=?,completed_at=?,error_message=NULL
                WHERE id=?""",
-            (_safe_rel(input_path), now, now, change_id),
+            (done, done, change_id),
         )
-        connection.commit()
-
-    from app.event_document import write_event_document
-    document = build_event_document_from_db(
-        database_path, workspace_path, str(row["job_id"]), str(row["event_id"])
-    )
-    if document is None:
-        raise EventStructureChangeError("Die neue event.json konnte nicht erzeugt werden.")
-    event_json = write_event_document(workspace_path, document, app_version=app_version)
     return {
         "status": "completed",
         "change_id": change_id,
