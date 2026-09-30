@@ -7,6 +7,7 @@ from app.event_inventory import scan_event_inventory
 from app.event_layout import ensure_event_layout_snapshot, get_event_layout, layout_paths, update_event_layout
 from app.event_change_request import propose_event_change
 from app.archive_change_document import build_projected_archive_event_document
+from app.event_mutation import capture_job_event_state, begin_mutation, cancel_mutation
 from app.event_structure_changes import (
     confirm_applied_structure_change,
     detect_event_structure_change,
@@ -105,7 +106,7 @@ def test_0283_structure_off_flattens_camera_xmp_and_export_without_manual_task(t
 
     assert (event_root / "A.JPG").read_bytes() == b"camera-a"
     assert (event_root / "A.xmp").read_bytes() == b"xmp-a"
-    assert (event_root / "A.jpg").read_bytes() == b"export-a"
+    assert (event_root / "A_Export.jpg").read_bytes() == b"export-a"
     assert not (event_root / "Alle").exists()
     assert not (event_root / "Sortiert").exists()
     assert not (event_root / "Export").exists()
@@ -182,12 +183,12 @@ def test_0283_structure_reenabled_puts_everything_in_current_input_without_snaps
 
     assert (event_root / "Alle" / "A.JPG").read_bytes() == b"camera-a"
     assert (event_root / "Alle" / "A.xmp").read_bytes() == b"xmp-a"
-    assert (event_root / "Alle" / "A.jpg").read_bytes() == b"export-a"
+    assert (event_root / "Alle" / "A_Export.jpg").read_bytes() == b"export-a"
     assert (event_root / "Sortiert").is_dir()
     assert (event_root / "Export").is_dir()
     assert not (event_root / "A.JPG").exists()
     assert not (event_root / "A.xmp").exists()
-    assert not (event_root / "A.jpg").exists()
+    assert not (event_root / "A_Export.jpg").exists()
 
     scan_event_inventory(
         db,
@@ -390,6 +391,7 @@ def _seed_archived_layout_event(
         (event_root / "Export").mkdir()
         (event_root / "Alle" / "A.JPG").write_bytes(b"camera-a")
         (event_root / "Alle" / "A.xmp").write_bytes(b"xmp-a")
+        (event_root / "Export" / "A.jpg").write_bytes(b"export-a")
     else:
         event_root.mkdir(parents=True)
         (event_root / "A.JPG").write_bytes(b"camera-a")
@@ -453,8 +455,14 @@ def test_0283_direct_archived_structure_off_flattens_camera_and_sidecar_plan(tmp
         for item in plan["assets_with_plans"]
         if str(item.get("asset_kind")) == "xmp"
     }
+    export_targets = {
+        str(item["new_path"])
+        for item in plan["assets_with_plans"]
+        if str(item.get("asset_kind")) == "export"
+    }
     assert camera_targets == {"2026/07-23 - Trip/A.JPG"}
     assert xmp_targets == {"2026/07-23 - Trip/A.xmp"}
+    assert export_targets == {"2026/07-23 - Trip/A_Export.jpg"}
 
     with database_connection(db) as connection:
         cr = dict(connection.execute(
@@ -513,3 +521,63 @@ def test_0283_direct_archived_structure_reenabled_routes_everything_to_input(tmp
     assert set(layout_paths(document["folder_layout"]["layout"])) == {
         "Alle", "Sortiert", "Export"
     }
+
+
+def test_0283_cancel_applied_layout_change_restores_layout_and_creates_no_manual_task(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _event_root, _file_id = _seed_applied_workspace(db, workspace)
+
+    with database_connection(db) as connection:
+        original = capture_job_event_state(connection, "j")
+        mutation_id = begin_mutation(
+            connection,
+            job_id="j",
+            anchor_event_id="e",
+            mutation_kind="edit",
+            affected_event_ids=["e"],
+            original_state=original,
+            status="pending_apply",
+        )
+        current = get_event_layout(connection, "e")
+        update_event_layout(
+            connection,
+            "e",
+            structure_enabled=False,
+            input_path=current["input_path"],
+            layout=current["layout"],
+            updated_at=NOW,
+        )
+        connection.execute(
+            "UPDATE events SET resort_required=1 WHERE id='e'"
+        )
+        cancel_mutation(
+            connection,
+            mutation_id,
+            "j",
+            workspace_path=workspace,
+        )
+        connection.commit()
+
+    with database_connection(db) as connection:
+        restored = get_event_layout(connection, "e")
+        event = connection.execute(
+            "SELECT resort_required FROM events WHERE id='e'"
+        ).fetchone()
+    assert restored["structure_enabled"] is True
+    assert restored["input_path"] == "Alle"
+    assert int(event["resort_required"] or 0) == 0
+
+    work_root = shared_work_root(workspace)
+    scan_event_inventory(
+        db,
+        work_root,
+        "j",
+        "e",
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    assert detect_event_structure_change(db, "e") is None
