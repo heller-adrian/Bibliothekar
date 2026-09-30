@@ -8,7 +8,7 @@ from app.archive_transfer import verify_event_archive
 from app.database import database_connection, initialize_database
 from app.event_change_request import get_event_change_files, propose_event_change
 from app.event_inventory import scan_event_inventory
-from app.ssd_release import release_event_ssd
+from app.ssd_release import SsdReleaseError, release_event_ssd
 
 
 NOW = "2026-09-23T18:00:00+00:00"
