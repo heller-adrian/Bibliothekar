@@ -10,7 +10,7 @@ import os
 
 from app.database import database_connection
 from app.event_access import event_file_rows
-from app.event_layout import ensure_event_layout_snapshot, leaf_layout_directories
+from app.event_layout import ensure_event_layout_snapshot, leaf_layout_directories, layout_paths
 from app.job_readiness import job_sort_readiness
 from app.workspace_layout import (
     WorkspaceLayoutError,
@@ -1023,6 +1023,12 @@ def build_event_sort_plan(
         except Exception as error:
             raise SortPlanError("Ereignis-Unterordnerstruktur ist ungültig: " + str(error)) from error
     layout_input_path = PurePosixPath(str(layout_state.get("input_path") or ""))
+    with database_connection(database_path) as connection:
+        from app.physical_state import placement_snapshot_map
+        pending_placement_restore = placement_snapshot_map(
+            connection, event_id, pending_only=True
+        )
+    valid_organization_paths = set(layout_paths(layout_state.get("layout") or {}))
     child_folder_names = {
         str(child.get("folder_name") or "") for child in child_definitions
         if str(child.get("folder_name") or "")
@@ -1326,6 +1332,20 @@ def build_event_sort_plan(
                         inventory_file,
                         child_folder_names=child_folder_names,
                     )
+                    saved_organization = str(
+                        pending_placement_restore.get(file_id) or ""
+                    )
+                    if (
+                        not organization.parts
+                        and saved_organization
+                        and saved_organization in valid_organization_paths
+                    ):
+                        organization = PurePosixPath(saved_organization)
+                    elif not organization.parts and file_id not in pending_placement_restore:
+                        # Dateien, die erst nach dem alten Snapshot hinzukamen,
+                        # besitzen keine frühere Sortierung und landen deshalb
+                        # im aktuellen Input-Ordner.
+                        organization = layout_input_path
                 else:
                     organization = layout_input_path
             if organization.parts:
