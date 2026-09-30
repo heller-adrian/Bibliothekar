@@ -1093,9 +1093,8 @@ def build_event_sort_plan(
             if preserve_day_folders and assigned_days:
                 for day_key in assigned_days:
                     leaf = child_root / day_key
-                    planned_directories.add(str(leaf / "Alle"))
-                    planned_directories.add(str(leaf / "Sortiert"))
-                    planned_directories.add(str(leaf / "Export"))
+                    layout_dirs = _layout_directories_at_leaf(leaf, layout_state)
+                    planned_directories.update(layout_dirs or {str(leaf)})
                     branch_days[child_folder_name].add(day_key)
 
                 start_day = datetime.fromisoformat(
@@ -1128,9 +1127,8 @@ def build_event_sort_plan(
                         "days": missing_days,
                     })
             else:
-                planned_directories.add(str(child_root / "Alle"))
-                planned_directories.add(str(child_root / "Sortiert"))
-                planned_directories.add(str(child_root / "Export"))
+                layout_dirs = _layout_directories_at_leaf(child_root, layout_state)
+                planned_directories.update(layout_dirs or {str(child_root)})
 
             if child_folder_name not in branch_order:
                 branch_order.append(child_folder_name)
@@ -1356,18 +1354,25 @@ def build_event_sort_plan(
                 destination_parts.append(day_key)
                 branch_days[branch_key].add(day_key)
 
+        structural_leaf = PurePosixPath(*destination_parts)
         if is_free_stock:
             destination_parts.append(filename)
         else:
-            destination_branch = (
-                current_branch
-                if allow_reapply and current_branch in WORKSPACE_BRANCHES
-                else "Alle"
-            )
-            destination_parts.extend([destination_branch, filename])
+            organization = PurePosixPath()
+            if bool(layout_state.get("structure_enabled")):
+                if allow_reapply and inventory_file is not None:
+                    organization = _observed_organization_path(
+                        inventory_file,
+                        child_folder_names=child_folder_names,
+                    )
+                else:
+                    organization = layout_input_path
+            if organization.parts:
+                destination_parts.extend(organization.parts)
+            destination_parts.append(filename)
             # Count only files that remain in this event itself. Families sent
             # to free stock or to another reassignment target do not justify an
-            # empty parent branch in this event's structure.
+            # empty parent structure in this event.
             if child_folder is None and reassignment is None:
                 parent_branch_has_content = True
 
@@ -1540,11 +1545,12 @@ def build_event_sort_plan(
                 ),
             })
 
-        leaf = destination_relative.parent
-        planned_directories.add(str(leaf))
-        if not is_free_stock:
-            planned_directories.add(str(leaf.parent / "Sortiert"))
-            planned_directories.add(str(leaf.parent / "Export"))
+        if is_free_stock:
+            planned_directories.add(str(destination_relative.parent))
+        else:
+            layout_dirs = _layout_directories_at_leaf(structural_leaf, layout_state)
+            planned_directories.update(layout_dirs or {str(structural_leaf)})
+            planned_directories.add(str(destination_relative.parent))
 
         entry_status = "move"
 
@@ -2174,10 +2180,10 @@ def build_event_sort_plan(
             else [],
         })
 
-    structure_text = _tree_text(
+    structure_text = _tree_text_from_directories(
         year,
         parent_folder,
-        branches,
+        planned_directories,
     )
 
     blocker_codes = Counter(
