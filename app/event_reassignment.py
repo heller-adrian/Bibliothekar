@@ -111,7 +111,6 @@ def reconcile_released_free_markers(connection, job_id: str | None = None) -> in
                 FROM event_assignments ea
                 JOIN events e ON e.id=ea.event_id
                 WHERE ea.family_id=marker.family_id
-                  AND e.job_id=marker.job_id
                   AND e.status IN ('draft','planned','applied','archived')
               )""",
         params,
@@ -146,7 +145,6 @@ def reconcile_stale_event_reassignments(connection, job_id: str | None = None, e
             FROM event_assignments ea
             JOIN events e ON e.id=ea.event_id
             WHERE ea.family_id=r.family_id
-              AND e.job_id=r.job_id
               AND e.status IN ('draft','planned','applied','archived')
           )
     """, params).fetchall()
@@ -239,12 +237,12 @@ def list_event_reassignments(database_path: Path, job_id: str, event_id: str) ->
             FROM event_reapply_removed_families r
             JOIN file_families ff ON ff.id = r.family_id AND ff.job_id = r.job_id
             LEFT JOIN files f ON f.family_id = ff.id AND f.job_id = ff.job_id
-            WHERE r.job_id = ? AND r.event_id = ? AND r.target_event_id IS NULL
+            WHERE r.event_id = ? AND r.target_event_id IS NULL
               AND COALESCE(r.target_kind,'') <> 'released_free'
             GROUP BY r.event_id, r.family_id
             ORDER BY ff.selected_capture_time, ff.id
             """,
-            (job_id, event_id),
+            (event_id,),
         ).fetchall()
 
         captures = [str(r["selected_capture_time"] or "")[:19] for r in rows if r["selected_capture_time"]]
@@ -463,8 +461,8 @@ def _create_new_event(
 def _selected_capture_rows(connection, job_id: str, family_ids: list[int]):
     placeholders = ",".join("?" for _ in family_ids)
     rows = connection.execute(
-        f"SELECT id, selected_capture_time FROM file_families WHERE job_id=? AND id IN ({placeholders}) ORDER BY selected_capture_time,id",
-        (job_id, *family_ids),
+        f"SELECT id, job_id, selected_capture_time FROM file_families WHERE id IN ({placeholders}) ORDER BY selected_capture_time,id",
+        tuple(family_ids),
     ).fetchall()
     if len(rows) != len(family_ids) or any(not row["selected_capture_time"] for row in rows):
         raise EventReassignmentError("Für die Neu-Zuordnung fehlen Aufnahmezeiten.")
@@ -662,10 +660,10 @@ def assign_event_reassignments(
         pending = connection.execute(
             f"""SELECT family_id,released_start_datetime,released_end_datetime
                 FROM event_reapply_removed_families
-                WHERE job_id=? AND event_id=? AND target_event_id IS NULL
+                WHERE event_id=? AND target_event_id IS NULL
                   AND COALESCE(target_kind,'') <> 'released_free'
                   AND family_id IN ({placeholders})""",
-            (job_id, event_id, *selected),
+            (event_id, *selected),
         ).fetchall()
         if {int(r["family_id"]) for r in pending} != set(selected):
             raise EventReassignmentError("Mindestens eine Familie ist nicht mehr zur Neu-Zuordnung offen.")
@@ -683,9 +681,9 @@ def assign_event_reassignments(
             all_open = connection.execute(
                 """SELECT family_id,released_start_datetime,released_end_datetime
                    FROM event_reapply_removed_families
-                   WHERE job_id=? AND event_id=? AND target_event_id IS NULL
+                   WHERE event_id=? AND target_event_id IS NULL
                      AND COALESCE(target_kind,'') <> 'released_free'""",
-                (job_id, event_id),
+                (event_id,),
             ).fetchall()
             chosen_ranges = {
                 (segment["start_datetime"], segment["end_datetime"])
