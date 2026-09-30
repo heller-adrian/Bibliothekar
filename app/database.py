@@ -2116,7 +2116,7 @@ def list_job_events(
             pending_reassignments AS (
                 SELECT event_id, COUNT(*) AS pending_count
                 FROM event_reapply_removed_families
-                WHERE job_id = ? AND target_event_id IS NULL
+                WHERE target_event_id IS NULL
                   AND COALESCE(target_kind,'') <> 'released_free'
                 GROUP BY event_id
             ),
@@ -2198,7 +2198,6 @@ def list_job_events(
                 e.name
             """,
             (
-                job_id,
                 job_id,
                 job_id,
                 job_id,
