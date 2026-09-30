@@ -8436,6 +8436,10 @@ def api_propose_event_change(
                 "selected_file_count": sum(int(f.get("file_count") or 0) for f in ctx.get("families", []) if f.get("assigned_here")),
                 "selected_family_count": len(ctx.get("assigned_family_ids", [])),
             }
+        # Nur dieser direkte Archiv-Editor darf das per-event Layout
+        # verändern. Automatische Archiv-Erweiterungen behalten ihren bisherigen
+        # Layoutzustand und setzen dieses Kennzeichen bewusst nicht.
+        preview["_folder_layout_explicit"] = True
         result = propose_event_change(
             DATABASE_FILE, job_id, event_id, preview,
             event_name=body.get("event_name") or preview.get("event_name"),
