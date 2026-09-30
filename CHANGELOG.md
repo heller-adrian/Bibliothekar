@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.28.1-ui1 – Deep-Test UI/Workflow-Zwischenpatch
+
+- Eine aktive Ereignis-Unterordnerstruktur benötigt jetzt serverseitig zwingend einen vorhandenen Input-Ordner; ohne Unterordner ist „Direkt im Ereignis“ der kanonische Input.
+- „Manuelle Ereignisänderung“ bündelt Ordner- und Dateiänderungen in zwei einklappbaren Bereichen, damit große Änderungen kompakt bleiben.
+- Im Archivworkflow bleibt der beim Vorbereiten gewählte Input-Ordner über die Folgeschritte sichtbar und unveränderlich; er wird nicht mehr scheinbar zurückgesetzt.
+- Abgeschlossene Strukturaufgaben verschwinden sofort aus „Aufgaben“; der Struktur-Aufgabenparameter wird aus der URL entfernt und abgeschlossene Aufgaben öffnen sich nach Reload nicht erneut.
+- Die Karte „Neue Aufnahmen passen zu bestehenden Ereignissen“ ist bündig zur übrigen Arbeitsbereichsbreite formatiert.
+
+
 ### 0.28.1 – Deep-Test-Korrekturen für Ereignisordner
 
 - Speichern der globalen Ereignisordner-Vorlage funktioniert wieder; die API verwendet die UTC-Zeit korrekt und die Oberfläche zeigt bei unerwarteten Serverantworten keine rohe JSON-Parse-Meldung mehr.
