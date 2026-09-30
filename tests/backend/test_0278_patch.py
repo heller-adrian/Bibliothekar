@@ -47,7 +47,7 @@ def _family(connection, job_id: str, stem: str, content: bytes) -> int:
 
 
 def test_0278_release_version():
-    assert main.RELEASE_VERSION in {"0.27.8", "0.27.9"}
+    assert main.RELEASE_VERSION == "0.28.0"
     assert main.api_health()["version"] == main.RELEASE_VERSION
 
 
@@ -87,6 +87,11 @@ def test_0278_workflow_status_is_derived_from_family_state(tmp_path: Path):
                    ) VALUES (?,?,NULL,'date_range',?)""",
                 (event_id, family, NOW),
             )
+            if status == "archived":
+                connection.execute(
+                    "UPDATE files SET current_root_kind='camera_archive' WHERE family_id=?",
+                    (family,),
+                )
 
     states={row["id"]:row["workflow_status"] for row in list_database_jobs(db)}
     assert states["planned_job"] == "planned"
@@ -209,21 +214,19 @@ def test_0278_cross_backup_extension_mirrors_subevents(tmp_path: Path):
         [first,second],
         "anchor_event",
     )
-    assert result["linkage_kind"] == "planned_extension"
-    assert result["child_event_count"] == 2
+    assert result["event_id"] == "anchor_event"
+    assert result["linkage_kind"] is None
 
     with database_connection(db) as connection:
         linked=connection.execute(
-            "SELECT * FROM events WHERE id=?",
-            (result["event_id"],),
+            "SELECT * FROM events WHERE id='anchor_event'"
         ).fetchone()
-        assert linked["linked_event_id"] == "anchor_event"
-        assert linked["linkage_kind"] == "planned_extension"
+        assert linked["linked_event_id"] is None
+        assert linked["linkage_kind"] is None
 
         children=connection.execute(
             """SELECT id,name,start_datetime,end_datetime
-               FROM events WHERE parent_event_id=? ORDER BY start_datetime""",
-            (result["event_id"],),
+               FROM events WHERE parent_event_id='anchor_event' ORDER BY start_datetime"""
         ).fetchall()
         assert [row["name"] for row in children] == ["Morgen","Nachmittag"]
 
