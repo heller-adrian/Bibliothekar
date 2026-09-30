@@ -852,6 +852,22 @@ def startup_database() -> None:
                 flush=True,
             )
 
+        # 0.28.0: Rein datenbankseitige 0.27-planned_extension-Ereignisse
+        # dürfen erst nach der Sortierlauf-Wiederherstellung vereinheitlicht
+        # werden. Sobald physische Evidenz existiert, bleibt der Altbestand
+        # unangetastet und wird als Wartungsfall behandelt.
+        from app.legacy_multi_backup import normalize_unapplied_legacy_extensions
+        legacy_normalization = normalize_unapplied_legacy_extensions(
+            DATABASE_FILE
+        )
+        if legacy_normalization["merged_count"]:
+            print(
+                f"{legacy_normalization['merged_count']} rein geplante "
+                "Legacy-Mehrsicherungs-Erweiterungen wurden sicher "
+                "vereinheitlicht.",
+                flush=True,
+            )
+
         DATABASE_INITIALIZATION_ERROR = None
 
         WORKER_STOP.clear()
