@@ -428,4 +428,4 @@ def test_0271_released_stock_can_be_sorted_again_with_released_asset(tmp_path: P
     )
     assert asset["source_root_kind"] == "shared_workspace"
     assert asset["released_archive_asset_id"] is not None
-    assert "/Export/" in "/" + asset["destination_relative_path"]
+    assert "/Alle/" in "/" + asset["destination_relative_path"]
