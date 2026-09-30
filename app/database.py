@@ -4176,19 +4176,21 @@ def assign_free_families_to_existing_no_event(
     *,
     family_ids: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Assign free families directly to one canonical monthly collection.
+    """Assign free families to one canonical monthly collection.
 
-    Since 0.28.0 the source backup is provenance only. Cross-backup additions
-    never create a linked extension event.
+    A non-empty segment list extends the collection. An empty segment list is
+    valid only with explicit family ids and means that later-imported files must
+    fit inside the already existing no-event segments.
     """
     from app.event_timeline import normalize_no_event_segments, continuous_event_overlaps
-    normalized = normalize_no_event_segments(segments or [])
-    if not normalized:
-        raise ValueError("Mindestens ein Zeitsegment muss ausgewählt sein.")
-    months = {seg["day_key"][:7] for seg in normalized}
-    if len(months) != 1:
-        raise ValueError("Eine „Ohne Ereignis“-Sammlung bleibt ein Monatsordner.")
-    month = next(iter(months))
+
+    raw_segments = list(segments or [])
+    normalized = normalize_no_event_segments(raw_segments) if raw_segments else []
+    extend_timeline = bool(normalized)
+    requested_ids = sorted({int(value) for value in (family_ids or []) if int(value) > 0})
+    if not extend_timeline and not requested_ids:
+        raise ValueError("Mindestens ein Zeitsegment oder eine Dateifamilie muss ausgewählt sein.")
+
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     with database_connection(database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -4197,28 +4199,68 @@ def assign_free_families_to_existing_no_event(
             (target_event_id,),
         ).fetchone()
         if target is None or str(target["event_kind"]) != "no_event":
-            connection.rollback(); raise ValueError("Die gewählte „Ohne Ereignis“-Sammlung wurde nicht gefunden.")
+            connection.rollback()
+            raise ValueError("Die gewählte „Ohne Ereignis“-Sammlung wurde nicht gefunden.")
         if str(target["status"]) not in {"planned","applied","archived"}:
-            connection.rollback(); raise ValueError("Die gewählte „Ohne Ereignis“-Sammlung ist nicht mehr aktiv.")
+            connection.rollback()
+            raise ValueError("Die gewählte „Ohne Ereignis“-Sammlung ist nicht mehr aktiv.")
+
+        if not normalized:
+            segment_rows = connection.execute(
+                """SELECT day_key,start_time,end_time,start_datetime,end_datetime
+                   FROM event_time_segments
+                   WHERE event_id=?
+                   ORDER BY start_datetime,id""",
+                (target_event_id,),
+            ).fetchall()
+            normalized = [
+                {
+                    "day_key": str(row["day_key"]),
+                    "start_time": str(row["start_time"]),
+                    "end_time": str(row["end_time"]),
+                    "start_datetime": str(row["start_datetime"])[:19],
+                    "end_datetime": str(row["end_datetime"])[:19],
+                }
+                for row in segment_rows
+            ]
+            if not normalized:
+                connection.rollback()
+                raise ValueError("Die bestehende „Ohne Ereignis“-Sammlung besitzt keine gültigen Zeitsegmente.")
+
+        months = {seg["day_key"][:7] for seg in normalized}
+        if len(months) != 1:
+            connection.rollback()
+            raise ValueError("Eine „Ohne Ereignis“-Sammlung bleibt ein Monatsordner.")
+        month = next(iter(months))
         if str(target["start_datetime"] or "")[:7] != month:
-            connection.rollback(); raise ValueError("Die gewählte „Ohne Ereignis“-Sammlung gehört zu einem anderen Monat.")
+            connection.rollback()
+            raise ValueError("Die gewählte „Ohne Ereignis“-Sammlung gehört zu einem anderen Monat.")
 
-        for seg in normalized:
-            overlaps = continuous_event_overlaps(connection, job_id, seg["start_datetime"], seg["end_datetime"])
-            if overlaps:
-                names=sorted({str(x["name"]) for x in overlaps})
-                connection.rollback(); raise ValueError("Der gewählte Zeitraum überschneidet sich mit einem Ereignis: " + ", ".join(names))
+        if extend_timeline:
+            for seg in normalized:
+                overlaps = continuous_event_overlaps(
+                    connection, job_id, seg["start_datetime"], seg["end_datetime"]
+                )
+                if overlaps:
+                    names = sorted({str(x["name"]) for x in overlaps})
+                    connection.rollback()
+                    raise ValueError(
+                        "Der gewählte Zeitraum überschneidet sich mit einem Ereignis: "
+                        + ", ".join(names)
+                    )
 
-        requested_ids = sorted({int(value) for value in (family_ids or []) if int(value) > 0})
         if requested_ids:
             placeholders = ",".join("?" for _ in requested_ids)
             rows = connection.execute(
-                f"""SELECT ff.id,ff.job_id,ff.selected_capture_time FROM file_families ff
+                f"""SELECT ff.id,ff.job_id,ff.selected_capture_time
+                    FROM file_families ff
                     WHERE ff.id IN ({placeholders}) AND ff.selected_capture_time IS NOT NULL
                       AND NOT EXISTS (
-                        SELECT 1 FROM event_assignments ea JOIN events e ON e.id=ea.event_id
+                        SELECT 1 FROM event_assignments ea
+                        JOIN events assigned ON assigned.id=ea.event_id
+                        JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
                         WHERE ea.family_id=ff.id
-                          AND e.status IN ('draft','planned','applied','archived')
+                          AND root.status IN ('draft','planned','applied','archived')
                       )
                     ORDER BY ff.selected_capture_time,ff.id""",
                 tuple(requested_ids),
@@ -4228,37 +4270,44 @@ def assign_free_families_to_existing_no_event(
                 raise ValueError("Mindestens eine ausgewählte Dateifamilie ist nicht mehr frei.")
         else:
             rows = connection.execute(
-                """SELECT ff.id,ff.job_id,ff.selected_capture_time FROM file_families ff
+                """SELECT ff.id,ff.job_id,ff.selected_capture_time
+                   FROM file_families ff
                    WHERE ff.job_id=? AND ff.selected_capture_time IS NOT NULL
                      AND NOT EXISTS (
-                       SELECT 1 FROM event_assignments ea JOIN events e ON e.id=ea.event_id
+                       SELECT 1 FROM event_assignments ea
+                       JOIN events assigned ON assigned.id=ea.event_id
+                       JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
                        WHERE ea.family_id=ff.id
-                         AND e.status IN ('draft','planned','applied','archived')
+                         AND root.status IN ('draft','planned','applied','archived')
                      )
-                   ORDER BY ff.selected_capture_time,ff.id""", (job_id,)
+                   ORDER BY ff.selected_capture_time,ff.id""",
+                (job_id,),
             ).fetchall()
 
-        selected=[]
+        selected = []
         for row in rows:
-            cap=str(row["selected_capture_time"] or "")[:19]
+            cap = str(row["selected_capture_time"] or "")[:19]
             if any(seg["start_datetime"] <= cap <= seg["end_datetime"] for seg in normalized):
-                selected.append((int(row["id"]),cap,str(row["job_id"])))
+                selected.append((int(row["id"]), cap, str(row["job_id"])))
         if not selected:
-            connection.rollback(); raise ValueError("In den gewählten Zeitsegmenten gibt es keine freien Dateifamilien.")
-        if requested_ids and {fid for fid,_,_ in selected} != set(requested_ids):
             connection.rollback()
-            raise ValueError("Mindestens eine ausgewählte Dateifamilie liegt außerhalb der gewählten Zeitsegmente.")
+            raise ValueError("In den gewählten Zeitsegmenten gibt es keine freien Dateifamilien.")
+        if requested_ids and {fid for fid, _, _ in selected} != set(requested_ids):
+            connection.rollback()
+            raise ValueError("Mindestens eine ausgewählte Dateifamilie liegt außerhalb der gültigen Zeitsegmente.")
 
-        source_job_ids = sorted({source_job_id for _,_,source_job_id in selected})
+        source_job_ids = sorted({source_job_id for _, _, source_job_id in selected})
         same_job = source_job_ids == [str(target["job_id"])]
         if str(target["status"]) == "archived":
             connection.rollback()
-            raise ValueError("Archivierte „Ohne Ereignis“-Sammlungen werden nur über den Archivänderungsworkflow ergänzt.")
-        effective_event_id = str(target["id"])
-        effective_linkage = ""
+            raise ValueError(
+                "Archivierte „Ohne Ereignis“-Sammlungen werden nur über den Archivänderungsworkflow ergänzt."
+            )
 
+        effective_event_id = str(target["id"])
         if str(target["status"]) == "applied":
             from app.event_mutation import capture_job_event_state, begin_mutation, get_active_mutation
+
             active = get_active_mutation(connection, str(target["job_id"]))
             if int(target["resort_required"] or 0):
                 if (
@@ -4281,29 +4330,60 @@ def assign_free_families_to_existing_no_event(
                 )
 
         connection.executemany(
-            "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
-            [(effective_event_id,fid,now) for fid,_,_ in selected],
+            """INSERT INTO event_assignments(
+                   event_id,family_id,file_id,assignment_source,created_at)
+               VALUES (?,?,NULL,'date_time_range',?)""",
+            [(effective_event_id, fid, now) for fid, _, _ in selected],
         )
-        for seg in normalized:
-            existing = connection.execute(
-                "SELECT * FROM event_time_segments WHERE event_id=? AND day_key=? ORDER BY start_datetime",
-                (effective_event_id,seg["day_key"]),
-            ).fetchall()
-            a,b=seg["start_datetime"],seg["end_datetime"]; remove=[]
-            for old in existing:
-                if str(old["end_datetime"]) >= a and str(old["start_datetime"]) <= b:
-                    a=min(a,str(old["start_datetime"])); b=max(b,str(old["end_datetime"])); remove.append(int(old["id"]))
-            if remove:
-                connection.executemany("DELETE FROM event_time_segments WHERE id=?",[(x,) for x in remove])
+
+        if extend_timeline:
+            for seg in normalized:
+                existing = connection.execute(
+                    """SELECT * FROM event_time_segments
+                       WHERE event_id=? AND day_key=?
+                       ORDER BY start_datetime""",
+                    (effective_event_id, seg["day_key"]),
+                ).fetchall()
+                a, b = seg["start_datetime"], seg["end_datetime"]
+                remove = []
+                for old in existing:
+                    if str(old["end_datetime"]) >= a and str(old["start_datetime"]) <= b:
+                        a = min(a, str(old["start_datetime"]))
+                        b = max(b, str(old["end_datetime"]))
+                        remove.append(int(old["id"]))
+                if remove:
+                    connection.executemany(
+                        "DELETE FROM event_time_segments WHERE id=?",
+                        [(value,) for value in remove],
+                    )
+                connection.execute(
+                    """INSERT INTO event_time_segments(
+                           event_id,job_id,day_key,start_time,end_time,start_datetime,
+                           end_datetime,source,created_at,updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        effective_event_id, str(target["job_id"]), seg["day_key"],
+                        a[11:16], b[11:16], a, b, "user", now, now,
+                    ),
+                )
             connection.execute(
-                """INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (effective_event_id,str(target["job_id"]),seg["day_key"],a[11:16],b[11:16],a,b,'user',now,now),
+                """UPDATE events
+                   SET start_datetime=(
+                         SELECT MIN(start_datetime) FROM event_time_segments WHERE event_id=?
+                       ),
+                       end_datetime=(
+                         SELECT MAX(end_datetime) FROM event_time_segments WHERE event_id=?
+                       )
+                   WHERE id=?""",
+                (effective_event_id, effective_event_id, effective_event_id),
             )
-        connection.execute("UPDATE events SET start_datetime=(SELECT MIN(start_datetime) FROM event_time_segments WHERE event_id=?),end_datetime=(SELECT MAX(end_datetime) FROM event_time_segments WHERE event_id=?) WHERE id=?",(effective_event_id,effective_event_id,effective_event_id))
+
         connection.execute(
-            "UPDATE events SET timeline_model='segments',revision=revision+1,updated_at=?,resort_required=CASE WHEN status='applied' THEN 1 ELSE resort_required END WHERE id=?",
-            (now,effective_event_id),
+            """UPDATE events
+               SET timeline_model='segments',revision=revision+1,updated_at=?,
+                   resort_required=CASE WHEN status='applied' THEN 1 ELSE resort_required END
+               WHERE id=?""",
+            (now, effective_event_id),
         )
         from app.event_access import register_source_jobs
         register_source_jobs(
@@ -4313,18 +4393,36 @@ def assign_free_families_to_existing_no_event(
             created_at=now,
         )
         connection.execute(
-            "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'free_families_added_to_no_event','event',?,?,?)",
-            (str(target["job_id"]),effective_event_id,json.dumps({"family_ids":[fid for fid,_,_ in selected],"source_job_ids":source_job_ids,"segments":normalized,"canonical_target_event_id":str(target["id"]),"linkage_kind":effective_linkage},ensure_ascii=False,sort_keys=True),now),
+            """INSERT INTO audit_log(
+                   job_id,action,entity_type,entity_id,details_json,created_at)
+               VALUES (?,'free_families_added_to_no_event','event',?,?,?)""",
+            (
+                str(target["job_id"]),
+                effective_event_id,
+                json.dumps({
+                    "family_ids": [fid for fid, _, _ in selected],
+                    "source_job_ids": source_job_ids,
+                    "segments": normalized if extend_timeline else [],
+                    "existing_segments_only": not extend_timeline,
+                    "canonical_target_event_id": str(target["id"]),
+                }, ensure_ascii=False, sort_keys=True),
+                now,
+            ),
         )
         connection.commit()
-    return {
-        "status":"assigned","event_id":effective_event_id,
-        "canonical_target_event_id":str(target["id"]),
-        "assigned_family_count":len(selected),"family_ids":[fid for fid,_,_ in selected],
-        "source_job_ids":source_job_ids,
-        "cross_job":not same_job,"linkage_kind":effective_linkage,
-    }
 
+    return {
+        "status": "assigned",
+        "event_id": effective_event_id,
+        "canonical_target_event_id": str(target["id"]),
+        "assigned_family_count": len(selected),
+        "family_ids": [fid for fid, _, _ in selected],
+        "source_job_ids": source_job_ids,
+        "cross_job": not same_job,
+        "linkage_kind": "",
+        "target_status": str(target["status"]),
+        "resort_required": str(target["status"]) == "applied",
+    }
 
 def list_no_event_month_targets(database_path: Path, month_keys: list[str], prefer_job_id: str | None = None) -> list[dict[str, Any]]:
     """Return one canonical no-event collection per requested month.
