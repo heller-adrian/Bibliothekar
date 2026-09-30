@@ -4361,6 +4361,32 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 'count': 1, 'family_count': int(row['n']), 'href': f"/events?job={row['job_id']}&task=reassign:{row['event_id']}",
             })
         for row in connection.execute(
+            """SELECT sc.id,sc.job_id,sc.event_id,sc.status,e.name AS event_name,
+                      sc.root_kind,sc.error_message
+               FROM event_structure_changes sc
+               JOIN events e ON e.id=sc.event_id
+               WHERE sc.status IN ('pending','prepared','verified','blocked')
+               ORDER BY sc.created_at"""
+        ).fetchall():
+            state = str(row["status"])
+            detail = (
+                f"{row['event_name']} · "
+                + ("Archiv · event.json ersetzen und prüfen" if state == "prepared"
+                   else "Prüfung erforderlich" if state == "blocked"
+                   else "manuelle Ordner-/Dateiänderung erkannt")
+            )
+            tasks.append({
+                'kind': 'event_structure_change',
+                'job_id': row['job_id'],
+                'event_id': row['event_id'],
+                'structure_change_id': row['id'],
+                'title': 'Manuelle Ereignisänderung',
+                'detail': detail,
+                'count': 1,
+                'href': f"/events?job={row['job_id']}&task=structure:{row['id']}",
+            })
+
+        for row in connection.execute(
             """SELECT id,job_id,event_id,event_name,status FROM event_change_requests
                WHERE status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt')
                ORDER BY created_at"""
