@@ -907,21 +907,21 @@ def assign_event_reassignments(
                 UPDATE event_reapply_removed_families
                 SET target_event_id=?, target_status=?, target_kind=?, target_name=?,
                     target_folder_name=?, target_preserve_day_folders=?, target_linkage_kind=?, reassigned_at=?
-                WHERE job_id=? AND event_id=? AND family_id=?
+                WHERE event_id=? AND family_id=?
                 """,
                 [(
                     target_info["event_id"], target_info["linked_target_status"], target_mode,
                     target_info["name"], target_info["folder_name"],
                     int(bool(target_info["preserve_day_folders"])), target_info["linkage_kind"], now,
-                    job_id, event_id, fid,
+                    event_id, fid,
                 ) for fid in selected],
             )
         else:
             # planned: Es gibt noch keine angewendete SSD-Struktur, daher genügt
             # die neue DB-Zuordnung und die Warteschlange kann sofort verschwinden.
             connection.executemany(
-                "DELETE FROM event_reapply_removed_families WHERE job_id=? AND event_id=? AND family_id=?",
-                [(job_id, event_id, fid) for fid in selected],
+                "DELETE FROM event_reapply_removed_families WHERE event_id=? AND family_id=?",
+                [(event_id, fid) for fid in selected],
             )
         connection.execute(
             "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'event_families_reassigned','event',?,?,?)",
