@@ -393,29 +393,44 @@ def verify_event_change(
             "message": None if gone else "Alter, nicht mehr benötigter Ordner ist noch vorhanden.",
         })
 
-    event_document_result = None
-    event_document_spec = (
+    event_document_spec_before = (
         required_event_document_for_request(database_path, cr_id)
         if workspace_path is not None
         else None
     )
-    if event_document_spec is not None:
-        relative_document = str(event_document_spec["target_relative_path"])
+    event_document_result = None
+    camera_collision_path_changed = False
+    collision_refresh_error = None
+
+    def verify_event_document_spec(
+        spec: dict[str, Any] | None,
+        *,
+        collision_refresh: bool = False,
+    ) -> dict[str, Any] | None:
+        if spec is None:
+            return None
+        relative_document = str(spec["target_relative_path"])
         target_document = _safe_archive_path(root, relative_document)
         document_status = "missing"
         document_message = "Die neue event.json fehlt am SOLL-Pfad."
         if target_document.is_file() and not target_document.is_symlink():
             actual_size = int(target_document.stat().st_size)
-            if actual_size != int(event_document_spec["size_bytes"]):
+            if actual_size != int(spec["size_bytes"]):
                 document_status = "size_mismatch"
                 document_message = "Die event.json besitzt eine abweichende Dateigröße."
-            elif _sha256_file(target_document) != str(event_document_spec["sha256"]):
+            elif _sha256_file(target_document) != str(spec["sha256"]):
                 document_status = "sha256_mismatch"
-                document_message = "Die event.json entspricht nicht dem vorbereiteten SOLL-Zustand."
+                document_message = (
+                    "Durch einen sicher erkannten Dateinamenskonflikt wurde eine "
+                    "aktualisierte event.json unter Später zuordnen vorbereitet. "
+                    "Bitte diese erneut ins Archiv übernehmen."
+                    if collision_refresh
+                    else "Die event.json entspricht nicht dem vorbereiteten SOLL-Zustand."
+                )
             else:
                 document_status = "verified"
                 document_message = None
-        event_document_result = {
+        return {
             "path": relative_document,
             "status": document_status,
             "message": document_message,
@@ -538,6 +553,8 @@ def verify_event_change(
                         message = "Die Datei liegt zusätzlich noch am alten Archivpfad."
 
                 if status == "verified" and resolved_target_rel != new_rel:
+                    if review_kind != "asset":
+                        camera_collision_path_changed = True
                     new_rel = resolved_target_rel
 
             if status == "verified" and not (
@@ -573,6 +590,42 @@ def verify_event_change(
                 "message": message,
             })
         connection.commit()
+
+    if (
+        camera_collision_path_changed
+        and workspace_path is not None
+        and event_document_spec_before is not None
+    ):
+        try:
+            from app.archive_staging import refresh_staged_event_document_after_verified_paths
+            refresh_staged_event_document_after_verified_paths(
+                database_path,
+                workspace_path,
+                cr_id,
+                event_document_spec_before,
+            )
+        except Exception as exc:
+            collision_refresh_error = str(exc)
+
+    event_document_spec_current = (
+        required_event_document_for_request(database_path, cr_id)
+        if workspace_path is not None
+        else None
+    )
+    event_document_result = verify_event_document_spec(
+        event_document_spec_current,
+        collision_refresh=camera_collision_path_changed,
+    )
+    if collision_refresh_error and event_document_result is not None:
+        event_document_result = {
+            **event_document_result,
+            "status": "staging_refresh_failed",
+            "message": (
+                "Die neue event.json konnte nach der erkannten Dateinamensänderung "
+                "nicht sicher im Hilfsbereich aktualisiert werden: "
+                + collision_refresh_error
+            ),
+        }
 
     verified_directory_count = sum(
         1 for item in directory_results if item["status"] == "verified"
