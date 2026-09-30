@@ -4619,7 +4619,7 @@ def api_event_structure(job_id: str, event_id: str):
         job_id=job_id,
         event_id=event_id,
     )
-    context = get_event_edit_context(DATABASE_FILE, job_id, event_id)
+    context = get_event_edit_context(DATABASE_FILE, job_id, event_id, workspace_path=WORKSPACE_PATH)
     event = context["event"]
     from app.structure_view import render_structure
 
@@ -4735,7 +4735,7 @@ def api_event_edit_context(job_id: str, event_id: str) -> dict[str, Any]:
         event_id=event_id,
     )
     try:
-        return get_event_edit_context(DATABASE_FILE, job_id, event_id)
+        return get_event_edit_context(DATABASE_FILE, job_id, event_id, workspace_path=WORKSPACE_PATH)
     except ValueError as error:
         raise HTTPException(status_code=404 if "nicht gefunden" in str(error) else 409, detail=str(error)) from error
 
@@ -4959,7 +4959,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
     if get_job(DATABASE_FILE, job_id) is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
     try:
-        context = get_event_edit_context(DATABASE_FILE, job_id, event_id)
+        context = get_event_edit_context(DATABASE_FILE, job_id, event_id, workspace_path=WORKSPACE_PATH)
         payload = _event_payload_with_folder_layout(payload, event_id=event_id)
         preview = None
         if payload.get("cascade_confirmed") or payload.get("child_segments"):
@@ -5559,7 +5559,7 @@ def _canonical_event_anchor_job_id(event_id: str) -> str:
 @app.get("/api/events/{event_id}", tags=["Ereignisse"])
 def api_canonical_event(event_id: str) -> dict[str, Any]:
     anchor_job_id = _canonical_event_anchor_job_id(event_id)
-    context = get_event_edit_context(DATABASE_FILE, anchor_job_id, event_id)
+    context = get_event_edit_context(DATABASE_FILE, anchor_job_id, event_id, workspace_path=WORKSPACE_PATH)
     with database_connection(DATABASE_FILE) as connection:
         source_job_ids = [
             str(row["job_id"])
@@ -5579,7 +5579,7 @@ def api_canonical_event(event_id: str) -> dict[str, Any]:
 @app.get("/api/events/{event_id}/structure", tags=["Ereignisse"])
 def api_canonical_event_structure(event_id: str) -> dict[str, Any]:
     anchor_job_id = _canonical_event_anchor_job_id(event_id)
-    context = get_event_edit_context(DATABASE_FILE, anchor_job_id, event_id)
+    context = get_event_edit_context(DATABASE_FILE, anchor_job_id, event_id, workspace_path=WORKSPACE_PATH)
     return {
         "event_id": event_id,
         "anchor_job_id": anchor_job_id,
@@ -5958,7 +5958,11 @@ def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
         ARCHIVE_ROOT,
     )
     detect_all_event_structure_changes(DATABASE_FILE)
-    payload = build_global_workspace_summary(DATABASE_FILE, selected)
+    payload = build_global_workspace_summary(
+        DATABASE_FILE,
+        selected,
+        workspace_path=WORKSPACE_PATH,
+    )
 
     suggestions: list[dict[str, Any]] = []
     for job_id in selected:
@@ -6013,6 +6017,7 @@ def api_workspace_summary(
         list_job_planning_overview(
             DATABASE_FILE,
             job_id,
+            workspace_path=WORKSPACE_PATH,
         )
     )
 
@@ -8389,7 +8394,7 @@ def api_propose_event_change(
         if isinstance(preview, dict):
             preview = _event_payload_with_folder_layout(preview, event_id=event_id)
         from app.database import get_event_edit_context
-        ctx = get_event_edit_context(DATABASE_FILE, job_id, event_id)
+        ctx = get_event_edit_context(DATABASE_FILE, job_id, event_id, workspace_path=WORKSPACE_PATH)
         if not preview and body.get("start_date") and body.get("end_date"):
             editable_families = [
                 {
