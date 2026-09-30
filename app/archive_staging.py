@@ -523,6 +523,74 @@ def required_event_document_for_request(
     return {key: value for key, value in spec.items() if key != "payload"}
 
 
+def refresh_staged_event_document_after_verified_paths(
+    database_path: Path,
+    workspace_path: Path,
+    cr_id: str,
+    previous_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Refresh only an app-owned staged event.json after verified path aliases.
+
+    A camera original may acquire a Finder/Windows collision suffix while the
+    user performs the read-only archive work. The portable event.json must then
+    describe that *actual* verified path. We may update the SSD helper, but
+    never the archive itself. An existing helper is replaced only when it still
+    matches the exact previously prepared size and SHA-256.
+    """
+    from app.archive_change_document import projected_archive_event_document_spec
+
+    new_spec = projected_archive_event_document_spec(database_path, cr_id)
+    if new_spec is None:
+        return {"updated": False, "spec": None}
+
+    work_root = shared_work_root(workspace_path).resolve(strict=False)
+    staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
+    target_rel = _safe_relative(str(new_spec["target_relative_path"]))
+    document_path = (
+        staging_base.joinpath(*target_rel.parts).resolve(strict=False)
+    )
+    if not _inside(document_path, staging_base):
+        raise ArchiveStagingError("Der aktualisierte event.json-Pfad ist unsicher.")
+
+    previous_sha = str(previous_spec.get("sha256") or "")
+    previous_size = int(previous_spec.get("size_bytes") or 0)
+    if document_path.exists() or document_path.is_symlink():
+        if (
+            not document_path.is_file()
+            or document_path.is_symlink()
+            or int(document_path.stat().st_size) != previous_size
+            or not previous_sha
+            or _sha256_file(document_path) != previous_sha
+        ):
+            raise ArchiveStagingError(
+                "Die vorbereitete event.json wurde außerhalb des aktuellen "
+                "Archivauftrags verändert und deshalb nicht automatisch ersetzt."
+            )
+
+    document_path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = str(new_spec["payload"]).encode("utf-8")
+    tmp = document_path.with_name("event.json.tmp.refresh")
+    try:
+        with tmp.open("wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, document_path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return {
+        "updated": True,
+        "spec": {key: value for key, value in new_spec.items() if key != "payload"},
+        "staged_event_document": (
+            PurePosixPath(STAGING_DIRECTORY_NAME) / target_rel
+        ).as_posix(),
+    }
+
+
 def required_target_directories_for_request(
     database_path: Path,
     cr_id: str,
