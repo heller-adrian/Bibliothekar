@@ -242,7 +242,7 @@ def accept_event_suggestion(
         connection.executemany(
             """INSERT INTO event_assignments(
                    event_id,family_id,file_id,assignment_source,created_at)
-               VALUES (?,?,NULL,'cross_backup',?)""",
+               VALUES (?,?,NULL,'manual',?)""",
             assignments,
         )
         register_source_jobs(
