@@ -145,7 +145,7 @@ def _layout_state(payload: dict[str, Any]) -> dict[str, Any]:
     )
     input_path = validate_input_path(
         layout,
-        raw.get("input_path", "Alle") if enabled else "",
+        raw.get("input_path", "Alle"),
         structure_enabled=enabled,
     )
     return {
