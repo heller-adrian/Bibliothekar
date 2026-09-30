@@ -10,6 +10,7 @@ import re
 
 from app.database import database_connection
 from app.metadata import MetadataError, analyze_tree, classify_media
+from app.filename_collisions import collision_alias_stems
 
 
 SORT_BRANCHES = {"Alle", "Sortiert", "Export"}
@@ -230,12 +231,6 @@ def _asset_kind(event_relative_path: str, media_type: str, known_file_id: int | 
 _FILENAME_SCHEMA_RE = re.compile(
     r"(?<!\d)(?P<date>20\d{6})[_-](?P<time>\d{6})(?!\d)"
 )
-_EXPORT_COLLISION_SUFFIX_RE = re.compile(
-    r"^(?P<base>.+)_Export(?:_\d{3})?$",
-    re.IGNORECASE,
-)
-
-
 def _filename_schema_capture_time(filename: str) -> str | None:
     """Read the canonical JJJJMMTT_HHMMSS timestamp from an export name."""
     match = _FILENAME_SCHEMA_RE.search(Path(str(filename or "")).stem)
@@ -253,26 +248,52 @@ def _filename_family_source(
     filename: str,
     known_files: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Conservatively match an export name to exactly one imported family."""
-    export_stem = Path(str(filename or "")).stem.casefold()
-    if not export_stem:
+    """Conservatively match an export name to exactly one imported family.
+
+    Besides the imported camera stem, current canonical filenames and common
+    Finder/Windows duplicate suffixes are considered. This matters after a
+    manual archive merge where either the camera JPEG or the export may have
+    been renamed to e.g. "Kopie", "copy 2" or "(1)".
+    """
+    observed_stem = Path(str(filename or "")).stem
+    export_aliases = collision_alias_stems(
+        observed_stem,
+        include_export_base=True,
+    )
+    if not export_aliases:
         return None
 
     by_family: dict[int, dict[str, Any]] = {}
     for row in known_files:
         if row.get("family_id") is None:
             continue
-        original_stem = str(
-            row.get("original_stem")
-            or Path(str(row.get("original_filename") or "")).stem
-        ).strip().casefold()
-        if len(original_stem) < 3:
-            continue
 
-        token_pattern = re.compile(
-            rf"(^|[ _.-]){re.escape(original_stem)}($|[ _.-])"
-        )
-        if export_stem == original_stem or token_pattern.search(export_stem):
+        known_stems: set[str] = set()
+        for value in (
+            row.get("original_stem"),
+            Path(str(row.get("original_filename") or "")).stem,
+            Path(str(row.get("current_relative_path") or "")).stem,
+            Path(str(row.get("original_relative_path") or "")).stem,
+        ):
+            value = str(value or "").strip()
+            if not value:
+                continue
+            known_stems.update(collision_alias_stems(value))
+
+        matched = False
+        for known_stem in known_stems:
+            if len(known_stem) < 3:
+                continue
+            token_pattern = re.compile(
+                rf"(^|[ _.-]){re.escape(known_stem)}($|[ _.-])"
+            )
+            if any(
+                alias == known_stem or token_pattern.search(alias)
+                for alias in export_aliases
+            ):
+                matched = True
+                break
+        if matched:
             by_family.setdefault(int(row["family_id"]), row)
 
     if len(by_family) != 1:
@@ -320,6 +341,32 @@ def _best_known_match(
     ]
     if len(exact_name) == 1:
         return exact_name[0]
+
+    # A filesystem collision may rename the camera original itself. SHA/size
+    # remain authoritative; the copy suffix is only a conservative tie-breaker
+    # if otherwise multiple identical known files are possible.
+    observed_aliases = collision_alias_stems(
+        Path(str(filename or "")).stem,
+        allow_plain_number=True,
+    )
+    collision_name = []
+    for row in candidates:
+        candidate_aliases: set[str] = set()
+        for value in (
+            row.get("original_filename"),
+            Path(str(row.get("current_relative_path") or "")).name,
+            Path(str(row.get("original_relative_path") or "")).name,
+        ):
+            stem = Path(str(value or "")).stem
+            if stem:
+                candidate_aliases.update(
+                    collision_alias_stems(stem, allow_plain_number=True)
+                )
+        if observed_aliases & candidate_aliases:
+            collision_name.append(row)
+    if len(collision_name) == 1:
+        return collision_name[0]
+
     if len(candidates) == 1:
         return candidates[0]
     return None
@@ -567,28 +614,38 @@ def scan_event_inventory(
     by_stem: dict[str, list[dict[str, Any]]] = {}
     for row in originals:
         rel = PurePosixPath(row["event_relative_path"])
-        key = (str(rel.parent), rel.stem)
-        by_same_dir_stem.setdefault(key, []).append(row)
-        by_stem.setdefault(rel.stem, []).append(row)
+        for stem_alias in collision_alias_stems(rel.stem):
+            key = (str(rel.parent), stem_alias)
+            by_same_dir_stem.setdefault(key, []).append(row)
+            by_stem.setdefault(stem_alias, []).append(row)
 
     for row in scanned:
         if row["asset_kind"] not in {"xmp", "export", "derived_media"}:
             continue
         rel = PurePosixPath(row["event_relative_path"])
-        candidates = by_same_dir_stem.get((str(rel.parent), rel.stem), [])
+        aliases = collision_alias_stems(
+            rel.stem,
+            include_export_base=row["asset_kind"] == "export",
+        )
+        candidates: list[dict[str, Any]] = []
+        seen_candidate_ids: set[int] = set()
+        for alias in aliases:
+            for item in by_same_dir_stem.get((str(rel.parent), alias), []):
+                key = int(item["known_file_id"])
+                if key not in seen_candidate_ids:
+                    candidates.append(item)
+                    seen_candidate_ids.add(key)
         if not candidates:
-            candidates = by_stem.get(rel.stem, [])
+            for alias in aliases:
+                for item in by_stem.get(alias, []):
+                    key = int(item["known_file_id"])
+                    if key not in seen_candidate_ids:
+                        candidates.append(item)
+                        seen_candidate_ids.add(key)
 
-        # 0.28.3: Auf case-insensitiven NAS-Datasets kann ein Export beim
-        # flachen Layout denselben Namen wie das Kamera-JPEG besitzen. Die
-        # sichere Kollisionsauflösung benennt nur den Export in *_Export.jpg
-        # (bzw. *_Export_001.jpg) um. Dieser transparente Suffix darf die
-        # Familienbeziehung bei einem späteren Re-Sortieren nicht verlieren.
-        if row["asset_kind"] == "export" and not candidates:
-            collision_match = _EXPORT_COLLISION_SUFFIX_RE.match(rel.stem)
-            if collision_match is not None:
-                candidates = by_stem.get(str(collision_match.group("base")), [])
-
+        # 0.28.4: _Export as well as common Finder/Windows duplicate suffixes
+        # are transparent for family linkage. Content identity still decides
+        # which file is the imported camera original.
         # Exporte behalten häufig den Kameranamen nur als Namensbestandteil
         # (z. B. mit vorangestelltem Zeitstempel). Wenn der Name genau eine
         # importierte Familie identifiziert, wird diese Beziehung genutzt.
