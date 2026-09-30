@@ -1719,6 +1719,115 @@ BIBLIOTHEKAR_JS = r"""
     button.addEventListener("click", () => button.closest("dialog")?.close());
   });
 
+  const folderSettings = document.getElementById("bk-folder-layout-settings");
+  let folderLayoutState = null;
+
+  function bkNodeId() {
+    return (globalThis.crypto?.randomUUID?.() || ("node-" + Date.now() + "-" + Math.random().toString(16).slice(2))).replaceAll("/", "-");
+  }
+
+  function bkFlattenLayout(nodes, prefix="") {
+    const rows=[];
+    for (const node of (nodes||[])) {
+      const path=prefix ? prefix + "/" + node.name : node.name;
+      rows.push({node,path});
+      rows.push(...bkFlattenLayout(node.children||[],path));
+    }
+    return rows;
+  }
+
+  function bkFindParent(nodes, id, parent=null) {
+    for (const node of (nodes||[])) {
+      if (node.id===id) return {node,parent,nodes};
+      const hit=bkFindParent(node.children||[],id,node);
+      if(hit) return hit;
+    }
+    return null;
+  }
+
+  function bkRenderFolderLayout() {
+    if(!folderSettings || !folderLayoutState) return;
+    const host=document.getElementById("bk-folder-layout-tree");
+    const enabled=document.getElementById("bk-folder-layout-enabled");
+    enabled.checked=Boolean(folderLayoutState.structure_enabled);
+    const flattened=bkFlattenLayout(folderLayoutState.layout?.nodes||[]);
+    const rows=[{node:null,path:"",depth:0},...flattened.map(item=>({...item,depth:item.path.split("/").length}))];
+    host.innerHTML=rows.map(item=>{
+      const root=item.node===null;
+      const checked=String(folderLayoutState.input_path||"")===item.path;
+      if(root) return '<label style="display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--bk-border);border-radius:9px"><input type="radio" name="bk-input-folder" value="" '+(checked?'checked':'')+'><strong>Direkt im Ereignis</strong><span style="color:var(--bk-muted)">Input</span></label>';
+      const id=String(item.node.id).replaceAll('"','&quot;');
+      const name=String(item.node.name).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+      const pad=Math.max(0,(item.depth-1)*20);
+      return '<div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:7px;align-items:center;margin-left:'+pad+'px">'
+        +'<input type="radio" name="bk-input-folder" value="'+String(item.path).replaceAll('"','&quot;')+'" '+(checked?'checked':'')+' title="Als Input-Ordner">'
+        +'<input data-bk-layout-name="'+id+'" value="'+name+'" aria-label="Ordnername">'
+        +'<button type="button" data-bk-layout-child="'+id+'" title="Unterordner hinzufügen">＋</button>'
+        +'<button type="button" data-bk-layout-remove="'+id+'" class="danger-button" title="Ordner entfernen">×</button>'
+        +'<span style="color:var(--bk-muted);font-size:.82rem">'+(checked?'Input':'')+'</span></div>';
+    }).join("");
+    host.querySelectorAll("[data-bk-layout-name]").forEach(input=>input.addEventListener("input",()=>{
+      const found=bkFindParent(folderLayoutState.layout.nodes,input.dataset.bkLayoutName);
+      if(found) found.node.name=input.value;
+      const selected=host.querySelector('input[name="bk-input-folder"]:checked');
+      if(selected) folderLayoutState.input_path=selected.value;
+    }));
+    host.querySelectorAll("[data-bk-layout-child]").forEach(button=>button.addEventListener("click",()=>{
+      const found=bkFindParent(folderLayoutState.layout.nodes,button.dataset.bkLayoutChild);
+      if(found){found.node.children=found.node.children||[];found.node.children.push({id:bkNodeId(),name:"Neuer Ordner",children:[]});bkRenderFolderLayout();}
+    }));
+    host.querySelectorAll("[data-bk-layout-remove]").forEach(button=>button.addEventListener("click",()=>{
+      const found=bkFindParent(folderLayoutState.layout.nodes,button.dataset.bkLayoutRemove);
+      if(!found)return;
+      const removedPath=bkFlattenLayout([found.node]).map(x=>x.path);
+      const index=found.nodes.findIndex(n=>n.id===found.node.id);
+      if(index>=0)found.nodes.splice(index,1);
+      if(removedPath.some(p=>String(folderLayoutState.input_path||"").endsWith(p)))folderLayoutState.input_path="";
+      bkRenderFolderLayout();
+    }));
+    host.querySelectorAll('input[name="bk-input-folder"]').forEach(radio=>radio.addEventListener("change",()=>{
+      if(radio.checked){folderLayoutState.input_path=radio.value;bkRenderFolderLayout();}
+    }));
+  }
+
+  async function bkLoadFolderLayout() {
+    if(!folderSettings)return;
+    const status=document.getElementById("bk-folder-layout-status");
+    try{
+      const response=await fetch("/api/settings/event-folder-layout",{cache:"no-store"});
+      if(!response.ok)throw new Error("Ordnerstruktur konnte nicht geladen werden.");
+      folderLayoutState=await response.json();
+      bkRenderFolderLayout();
+      status.textContent="";
+    }catch(error){status.textContent=error.message;}
+  }
+
+  document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadFolderLayout);
+  document.getElementById("bk-folder-layout-enabled")?.addEventListener("change",event=>{
+    if(folderLayoutState)folderLayoutState.structure_enabled=Boolean(event.target.checked);
+  });
+  document.getElementById("bk-folder-add-root")?.addEventListener("click",()=>{
+    if(!folderLayoutState)return;
+    folderLayoutState.layout.nodes.push({id:bkNodeId(),name:"Neuer Ordner",children:[]});
+    bkRenderFolderLayout();
+  });
+  document.getElementById("bk-folder-layout-save")?.addEventListener("click",async()=>{
+    if(!folderLayoutState)return;
+    const status=document.getElementById("bk-folder-layout-status");
+    status.textContent="Wird gespeichert …";
+    try{
+      const response=await fetch("/api/settings/event-folder-layout",{
+        method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(folderLayoutState)
+      });
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.detail||"Speichern fehlgeschlagen.");
+      folderLayoutState=data;
+      bkRenderFolderLayout();
+      status.textContent="Gespeichert. Bestehende Ereignisse bleiben unverändert.";
+    }catch(error){status.textContent=error.message;}
+  });
+
   // Quellenwahl 0.22.1: drei gleichwertige Quellkarten im Importbereich.
   const sourcePicker = document.getElementById("bk-source-picker");
   if (sourcePicker) {
@@ -1967,6 +2076,18 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <button type="button" data-bk-theme-choice="dark">Dunkel</button>
         <button type="button" data-bk-theme-choice="system">System</button>
       </div>
+    </section>
+    <section class="bk-settings-group" id="bk-folder-layout-settings">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><strong>Ereignisordner</strong><div style="color:var(--bk-muted);margin-top:4px">Vorlage nur für neue Ereignisse</div></div>
+        <label style="display:flex;align-items:center;gap:8px"><input id="bk-folder-layout-enabled" type="checkbox"> Unterordner standardmäßig erstellen</label>
+      </div>
+      <div id="bk-folder-layout-tree" style="display:grid;gap:7px;margin-top:12px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button id="bk-folder-add-root" type="button">＋ Ordner</button>
+        <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
+      </div>
+      <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
     </section>
     <section class="bk-settings-group">
       <strong>Sprache</strong>
