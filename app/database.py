@@ -3172,13 +3172,15 @@ def delete_planned_event(
     now = datetime.now(timezone.utc).isoformat()
 
     with database_connection(database_path) as connection:
-        from app.event_mutation import assert_no_active_mutation
-        assert_no_active_mutation(connection, job_id, event_id=event_id)
         event = connection.execute(
-            "SELECT * FROM events WHERE id=? AND job_id=?", (event_id, job_id)
+            "SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",
+            (event_id,),
         ).fetchone()
         if event is None:
             raise ValueError("Ereignis wurde nicht gefunden.")
+        job_id = str(event["job_id"])
+        from app.event_mutation import assert_no_active_mutation
+        assert_no_active_mutation(connection, job_id, event_id=event_id)
         if event["event_level"] != "parent":
             raise ValueError("Unterereignisse können nicht einzeln gelöscht werden. Bitte das Hauptereignis löschen.")
         from app.event_structure_changes import assert_no_open_structure_change
@@ -3211,8 +3213,8 @@ def delete_planned_event(
         if family_ids:
             fp = ",".join("?" for _ in family_ids)
             file_count = int(connection.execute(
-                f"SELECT COUNT(*) FROM files WHERE job_id=? AND family_id IN ({fp})",
-                (job_id, *family_ids),
+                f"SELECT COUNT(*) FROM files WHERE family_id IN ({fp})",
+                tuple(family_ids),
             ).fetchone()[0])
 
         status = str(event["status"])
@@ -3238,8 +3240,8 @@ def delete_planned_event(
                 release_ranges = split_intervals_by_day(release_ranges)
                 fp = ",".join("?" for _ in family_ids)
                 capture_rows = connection.execute(
-                    f"SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN ({fp})",
-                    (job_id, *family_ids),
+                    f"SELECT id,job_id,selected_capture_time FROM file_families WHERE id IN ({fp})",
+                    tuple(family_ids),
                 ).fetchall()
                 release_by_family = {
                     int(r["id"]): range_for_capture(
@@ -3252,7 +3254,8 @@ def delete_planned_event(
                            job_id,family_id,released_start_datetime,released_end_datetime,created_at)
                        VALUES (?,?,?,?,?)""",
                     [(
-                        job_id, fid,
+                        str(next(row["job_id"] for row in capture_rows if int(row["id"]) == fid)),
+                        fid,
                         release_by_family.get(fid)[0] if release_by_family.get(fid) else None,
                         release_by_family.get(fid)[1] if release_by_family.get(fid) else None,
                         now,
@@ -3309,8 +3312,8 @@ def delete_planned_event(
                 delete_ranges = split_intervals_by_day(delete_ranges)
                 fp = ",".join("?" for _ in family_ids)
                 delete_capture_rows = connection.execute(
-                    f"SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN ({fp})",
-                    (job_id,*family_ids),
+                    f"SELECT id,job_id,selected_capture_time FROM file_families WHERE id IN ({fp})",
+                    tuple(family_ids),
                 ).fetchall()
                 delete_range_by_family = {
                     int(r["id"]): range_for_capture(str(r["selected_capture_time"] or "")[:19], delete_ranges)
@@ -3321,7 +3324,10 @@ def delete_planned_event(
                            event_id,job_id,family_id,created_at,released_start_datetime,released_end_datetime)
                        VALUES (?,?,?,?,?,?)""",
                     [(
-                        event_id,job_id,fid,now,
+                        event_id,
+                        str(next(row["job_id"] for row in delete_capture_rows if int(row["id"]) == fid)),
+                        fid,
+                        now,
                         delete_range_by_family.get(fid)[0] if delete_range_by_family.get(fid) else None,
                         delete_range_by_family.get(fid)[1] if delete_range_by_family.get(fid) else None,
                     ) for fid in family_ids],
