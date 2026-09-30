@@ -2954,7 +2954,6 @@ EVENTS_HTML = r"""<!doctype html>
               <p class="muted">Jeder Tag bzw. Teil eines Tages wird separat gespeichert. Zwischenräume gehören ausdrücklich nicht zu „Ohne Ereignis“.</p>
             </div>
             <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-            <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>
             <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>` : `
           <div class="edit-boundaries">
             <div class="edit-boundary">
@@ -2967,6 +2966,7 @@ EVENTS_HTML = r"""<!doctype html>
             </div>
           </div>
           <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
+          <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>
           <input id="edit-time-enabled" type="hidden" value="1">
           <div class="edit-field full"><span>Optionale Unterereignisse</span><div id="normal-event-segments">${normalSegmentHtml}</div><button id="add-normal-segment" type="button">Unterereignis hinzufügen</button></div>`}
 
