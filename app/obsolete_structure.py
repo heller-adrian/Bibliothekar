@@ -6,6 +6,33 @@ from pathlib import Path
 
 WORKSPACE_BRANCHES = {"Alle", "Sortiert", "Export"}
 DAY_DIRECTORY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+IGNORED_METADATA_FILES = {".DS_Store"}
+
+
+def _ignored_metadata_file(path: Path) -> bool:
+    """Only metadata that the event inventory deliberately ignores."""
+    return path.name in IGNORED_METADATA_FILES or path.name.startswith("._")
+
+
+def _remove_ignored_metadata(directory: Path) -> None:
+    """Remove harmless ignored metadata from a proven obsolete managed folder.
+
+    The caller has already established that ``directory`` belongs to
+    Bibliothekar and is no longer required by the target layout. Unknown files,
+    directories and symlinks remain untouched so they continue to block rmdir.
+    """
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if not _ignored_metadata_file(entry) or entry.is_symlink():
+            continue
+        try:
+            if entry.is_file():
+                entry.unlink()
+        except OSError:
+            pass
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -157,6 +184,13 @@ def cleanup_obsolete_structure(
             continue
         if directory.name in WORKSPACE_BRANCHES and directory.parent in active_branch_roots:
             continue
+        # Finder/SMB may leave .DS_Store or AppleDouble files in a folder
+        # whose real event contents were completely moved by Bibliothekar.
+        # event_inventory ignores exactly these files, so letting them block
+        # rmdir would make our own completed restructure look like a later
+        # manual folder change. Remove only that narrow ignored metadata set;
+        # any other entry still protects the directory from deletion.
+        _remove_ignored_metadata(directory)
         try:
             directory.rmdir()
             removed.append(str(directory))
