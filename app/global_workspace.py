@@ -64,7 +64,11 @@ def _event_counts(
     }
 
 
-def _visible_events(database_path: Path, selected_job_ids: set[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _visible_events(
+    database_path: Path,
+    selected_job_ids: set[str],
+    workspace_path: Path | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     events: list[dict[str, Any]] = []
     groups: list[dict[str, Any]] = []
     with database_connection(database_path) as connection:
@@ -84,9 +88,29 @@ def _visible_events(database_path: Path, selected_job_ids: set[str]) -> tuple[li
                 source_ids = {str(event["job_id"])}
             if not selected_job_ids or source_ids.isdisjoint(selected_job_ids):
                 continue
+            family_rows = event_family_rows(connection, event_id)
             counts = _event_counts(
                 connection, event_id, status=str(event.get("status") or "")
             )
+            if (
+                workspace_path is not None
+                and str(event.get("status") or "") in {"draft", "planned"}
+                and family_rows
+            ):
+                from app.workspace_assets import discover_workspace_family_assets
+                physical_assets = discover_workspace_family_assets(
+                    database_path,
+                    workspace_path,
+                    [int(row["id"]) for row in family_rows],
+                )
+                counts["file_count"] += sum(
+                    int(item.get("file_count") or 0)
+                    for item in physical_assets.values()
+                )
+                counts["total_size_bytes"] += sum(
+                    int(item.get("total_size_bytes") or 0)
+                    for item in physical_assets.values()
+                )
             folder_layout = ensure_event_layout_snapshot(
                 connection, event_id, now=str(event.get("updated_at") or event.get("created_at") or "")
             )
@@ -106,7 +130,6 @@ def _visible_events(database_path: Path, selected_job_ids: set[str]) -> tuple[li
             })
             events.append(event)
 
-            family_rows = event_family_rows(connection, event_id)
             day_keys = sorted({
                 str(row.get("selected_capture_time") or "")[:10]
                 for row in family_rows
@@ -181,7 +204,11 @@ def _merge_available(items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, 
     )
 
 
-def build_global_workspace_summary(database_path: Path, selected_job_ids: list[str]) -> dict[str, Any]:
+def build_global_workspace_summary(
+    database_path: Path,
+    selected_job_ids: list[str],
+    workspace_path: Path | None = None,
+) -> dict[str, Any]:
     selected = {str(value) for value in selected_job_ids if str(value)}
     jobs = [get_job(database_path, value) for value in sorted(selected)]
     jobs = [job for job in jobs if job is not None]
@@ -192,7 +219,11 @@ def build_global_workspace_summary(database_path: Path, selected_job_ids: list[s
     reviews: list[dict[str, Any]] = []
     for job in jobs:
         job_id = str(job["id"])
-        overview = list_job_planning_overview(database_path, job_id)
+        overview = list_job_planning_overview(
+            database_path,
+            job_id,
+            workspace_path=workspace_path,
+        )
         available_items.extend(
             (job_id, dict(group))
             for group in (overview.get("available_day_groups") or [])
@@ -201,7 +232,11 @@ def build_global_workspace_summary(database_path: Path, selected_job_ids: list[s
         time_segments.extend({**dict(row), "job_id": job_id} for row in list_job_time_segments(database_path, job_id))
         reviews.extend(dict(row) for row in list_archive_change_reviews(database_path, job_id))
 
-    events, event_groups = _visible_events(database_path, selected)
+    events, event_groups = _visible_events(
+        database_path,
+        selected,
+        workspace_path=workspace_path,
+    )
     available = _merge_available(available_items)
     timeline = sorted(
         [*event_groups, *available],
