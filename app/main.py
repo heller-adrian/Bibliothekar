@@ -8381,7 +8381,13 @@ def api_propose_event_change(
 ) -> JSONResponse:
     """Aenderungsauftrag fuer ein archiviertes Ereignis vorschlagen."""
     try:
+        # 0.28.3: Auch ein archivierter Editor-Auftrag trägt die aktuell
+        # konfigurierte Ordnerdefinition mit. create_subfolders aus dem
+        # Formular darf structure_enabled dabei gezielt übersteuern.
+        body = _event_payload_with_folder_layout(body, event_id=event_id)
         preview = body.get("preview")
+        if isinstance(preview, dict):
+            preview = _event_payload_with_folder_layout(preview, event_id=event_id)
         from app.database import get_event_edit_context
         ctx = get_event_edit_context(DATABASE_FILE, job_id, event_id)
         if not preview and body.get("start_date") and body.get("end_date"):
