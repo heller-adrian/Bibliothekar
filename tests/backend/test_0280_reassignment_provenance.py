@@ -172,3 +172,85 @@ def test_0280_cross_backup_reassignment_can_create_new_event(tmp_path: Path):
     assert tuple(target) == ("a", None, "planned")
     assert assignment["event_id"] == target_id
     assert [row["job_id"] for row in sources] == ["a", "b"]
+
+
+def test_0280_cross_backup_reassignment_can_create_child_in_anchor_event(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        seed_job(connection, "a")
+        seed_job(connection, "b")
+        seed_event(
+            connection,
+            event_id="source",
+            job_id="a",
+            status="applied",
+            start="2026-07-23T00:00:00",
+            end="2026-07-23T11:59:59",
+            folder="07-23 - Source",
+            name="Source",
+        )
+        seed_event(
+            connection,
+            event_id="target",
+            job_id="a",
+            status="applied",
+            start="2026-07-23T12:00:00",
+            end="2026-07-23T23:59:59",
+            folder="07-23 - Target",
+            name="Target",
+        )
+        family_id, _file_id = seed_family_file(
+            connection,
+            job_id="b",
+            family_key="B",
+            capture="2026-07-23T13:00:00",
+            current_path="2026/07-23 - Source/Alle/B.JPG",
+            content=b"camera-b",
+        )
+        connection.execute(
+            """INSERT INTO event_reapply_removed_families(
+                   event_id,job_id,family_id,created_at,
+                   released_start_datetime,released_end_datetime
+               ) VALUES (
+                   'source','b',?,?, '2026-07-23T12:00:00','2026-07-23T23:59:59'
+               )""",
+            (family_id, NOW),
+        )
+
+    result = assign_event_reassignments(
+        db,
+        "a",
+        "source",
+        [family_id],
+        target_mode="new_child",
+        target_event_id="target",
+        new_event_name="Teil",
+        segments=[{
+            "day_key":"2026-07-23",
+            "start_time":"12:00",
+            "end_time":"23:59",
+            "start_datetime":"2026-07-23T12:00:00",
+            "end_datetime":"2026-07-23T23:59:59",
+        }],
+    )
+
+    child_id = result["target"]["child_event_id"]
+    with database_connection(db) as connection:
+        child = connection.execute(
+            """SELECT job_id,parent_event_id,event_level,status
+               FROM events WHERE id=?""",
+            (child_id,),
+        ).fetchone()
+        assignment = connection.execute(
+            "SELECT event_id FROM event_assignments WHERE family_id=?",
+            (family_id,),
+        ).fetchone()
+        source_jobs = connection.execute(
+            """SELECT job_id FROM event_source_jobs
+               WHERE event_id='target' ORDER BY job_id"""
+        ).fetchall()
+
+    assert tuple(child) == ("a", "target", "child", "applied")
+    assert assignment["event_id"] == child_id
+    assert [row["job_id"] for row in source_jobs] == ["a", "b"]
