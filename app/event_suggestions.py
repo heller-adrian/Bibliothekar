@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
-import uuid
+import json
 
 from app.database import database_connection
+from app.event_access import register_source_jobs
 
 
 class EventSuggestionError(RuntimeError):
@@ -30,14 +30,7 @@ def _action_label(status: str) -> str:
 
 
 def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, Any]]:
-    """Return grouped cross-import event matches for unassigned families.
-
-    Normal event occupancy is library-wide. Therefore a later import whose capture
-    time lies inside an existing normal event must also get a reachable target,
-    otherwise it is counted as unassigned while no free interval can be displayed.
-    The suggestion remains explicit/user-confirmed and creates a current-job linked
-    follow-up rather than assigning foreign-job files directly to the target row.
-    """
+    """Return existing events that can absorb still-free families of one import."""
     with database_connection(database_path) as connection:
         family_rows = connection.execute(
             """
@@ -64,10 +57,8 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
         grouped: dict[str, dict[str, Any]] = {}
         for family in family_rows:
             capture = str(family["selected_capture_time"])
-            capture_day = _capture_day(capture)
-            if not capture_day:
+            if not _capture_day(capture):
                 continue
-
             candidates = connection.execute(
                 """
                 SELECT e.id, e.job_id, e.name, e.folder_name, e.status,
@@ -78,52 +69,42 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
                   AND e.job_id <> ?
                   AND e.event_kind = 'event'
                   AND COALESCE(e.linkage_kind,'') = ''
-                  AND e.status IN ('planned', 'applied', 'archived')
+                  AND e.status IN ('planned','applied','archived')
                   AND ? BETWEEN e.start_datetime AND e.end_datetime
                 ORDER BY
-                    CASE e.status
-                        WHEN 'planned' THEN 1
-                        WHEN 'applied' THEN 2
-                        ELSE 3
-                    END,
-                    e.created_at DESC,
-                    e.id DESC
+                    CASE e.status WHEN 'planned' THEN 1 WHEN 'applied' THEN 2 ELSE 3 END,
+                    e.created_at DESC, e.id DESC
                 """,
                 (job_id, capture),
             ).fetchall()
-
-            # Global normal-event occupancy must have one reachable target. If an
-            # old/legacy database contains several best-rank overlaps, keep the case
-            # explicit by withholding an automatic suggestion.
             if not candidates:
                 continue
             best_rank = {"planned": 1, "applied": 2, "archived": 3}[str(candidates[0]["status"])]
-            best = [row for row in candidates if {"planned": 1, "applied": 2, "archived": 3}[str(row["status"])] == best_rank]
+            best = [
+                row for row in candidates
+                if {"planned": 1, "applied": 2, "archived": 3}[str(row["status"])] == best_rank
+            ]
             unique_targets = {str(row["id"]): dict(row) for row in best}
             if len(unique_targets) != 1:
                 continue
 
             target = next(iter(unique_targets.values()))
             target_id = str(target["id"])
-            item = grouped.get(target_id)
-            if item is None:
-                item = {
-                    "id": f"{job_id}:{target_id}",
-                    "target_event_id": target_id,
-                    "target_job_id": target["job_id"],
-                    "target_name": target["name"],
-                    "target_folder_name": target["folder_name"],
-                    "target_status": target["status"],
-                    "target_start_datetime": target["start_datetime"],
-                    "target_end_datetime": target["end_datetime"],
-                    "action_label": _action_label(str(target["status"])),
-                    "families": [],
-                    "family_ids": [],
-                    "family_count": 0,
-                    "file_count": 0,
-                }
-                grouped[target_id] = item
-
+            item = grouped.setdefault(target_id, {
+                "id": f"{job_id}:{target_id}",
+                "target_event_id": target_id,
+                "target_job_id": str(target["job_id"]),
+                "target_name": str(target["name"]),
+                "target_folder_name": str(target["folder_name"]),
+                "target_status": str(target["status"]),
+                "target_start_datetime": str(target["start_datetime"]),
+                "target_end_datetime": str(target["end_datetime"]),
+                "action_label": _action_label(str(target["status"])),
+                "families": [],
+                "family_ids": [],
+                "family_count": 0,
+                "file_count": 0,
+            })
             family_item = {
                 "family_id": int(family["id"]),
                 "family_key": family["family_key"],
@@ -165,39 +146,51 @@ def _normalize_family_ids(values: Iterable[int]) -> list[int]:
     return result
 
 
+def _assignment_event_for(connection: Any, target_event_id: str, capture: str) -> str:
+    children = connection.execute(
+        """SELECT id,start_datetime,end_datetime
+           FROM events WHERE parent_event_id=?
+           ORDER BY start_datetime,id""",
+        (target_event_id,),
+    ).fetchall()
+    for child in children:
+        if str(child["start_datetime"]) <= capture <= str(child["end_datetime"]):
+            return str(child["id"])
+    return target_event_id
+
+
 def accept_event_suggestion(
     database_path: Path,
     job_id: str,
     family_ids: Iterable[int],
     target_event_id: str,
 ) -> dict[str, Any]:
-    """Create one safe current-job follow-up event for all selected families."""
+    """Attach later-imported families directly to one canonical event."""
     selected_ids = _normalize_family_ids(family_ids)
     now = _now()
     with database_connection(database_path) as connection:
         target = connection.execute(
-            """
-            SELECT * FROM events
-            WHERE id = ? AND parent_event_id IS NULL
-              AND job_id <> ?
-              AND event_kind = 'event'
-              AND status IN ('planned', 'applied', 'archived')
-            """,
-            (target_event_id, job_id),
+            """SELECT * FROM events
+               WHERE id=? AND parent_event_id IS NULL
+                 AND event_kind='event'
+                 AND COALESCE(linkage_kind,'')=''
+                 AND status IN ('planned','applied','archived')""",
+            (target_event_id,),
         ).fetchone()
         if target is None:
             raise EventSuggestionError("Das passende Ereignis ist nicht mehr verfügbar.")
+        if str(target["job_id"]) == str(job_id):
+            raise EventSuggestionError("Die ausgewählten Aufnahmen gehören bereits zur Sicherung des Zielereignisses.")
+        if str(target["status"]) == "archived":
+            raise EventSuggestionError("Archivierte Ereignisse werden ausschließlich über den Archivänderungsworkflow ergänzt.")
 
         placeholders = ",".join("?" for _ in selected_ids)
         families = connection.execute(
-            f"""
-            SELECT ff.*, COUNT(f.id) AS file_count
-            FROM file_families AS ff
-            JOIN files AS f ON f.family_id = ff.id AND f.job_id = ff.job_id
-            WHERE ff.job_id = ? AND ff.id IN ({placeholders})
-            GROUP BY ff.id
-            ORDER BY ff.selected_capture_time, ff.id
-            """,
+            f"""SELECT ff.*,COUNT(f.id) AS file_count
+                FROM file_families ff
+                JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
+                WHERE ff.job_id=? AND ff.id IN ({placeholders})
+                GROUP BY ff.id ORDER BY ff.selected_capture_time,ff.id""",
             (job_id, *selected_ids),
         ).fetchall()
         if len(families) != len(selected_ids):
@@ -206,128 +199,95 @@ def accept_event_suggestion(
         total_files = 0
         for family in families:
             assigned = connection.execute(
-                """
-                SELECT 1 FROM event_assignments AS ea
-                JOIN events AS e ON e.id = ea.event_id
-                WHERE ea.family_id = ?
-                  AND e.status IN ('draft','planned','applied','archived')
-                LIMIT 1
-                """,
+                """SELECT 1 FROM event_assignments ea
+                   JOIN events e ON e.id=ea.event_id
+                   WHERE ea.family_id=?
+                     AND e.status IN ('draft','planned','applied','archived')
+                   LIMIT 1""",
                 (family["id"],),
             ).fetchone()
             if assigned is not None:
                 raise EventSuggestionError("Mindestens eine Dateifamilie ist bereits einem Ereignis zugeordnet.")
-            capture = str(family["selected_capture_time"] or "")
-            if not capture or not (str(target["start_datetime"]) <= capture <= str(target["end_datetime"])):
+            capture = str(family["selected_capture_time"] or "")[:19]
+            if not capture or not (
+                str(target["start_datetime"])[:19] <= capture <= str(target["end_datetime"])[:19]
+            ):
                 raise EventSuggestionError("Mindestens ein Aufnahmezeitpunkt passt nicht mehr zum Ereignis.")
             total_files += int(family["file_count"] or 0)
 
         status = str(target["status"])
-        linkage = {
-            "planned": "planned_extension",
-            "applied": "applied_followup",
-            "archived": "archived_manual",
-        }[status]
-        prefix = {
-            "planned": "Ergänzung",
-            "applied": "Ergänzung",
-            "archived": "Archiv-Ergänzung",
-        }[status]
-        event_id = "EVENT_" + uuid.uuid4().hex.upper()
-        name = f"{prefix}: {target['name']}"
-        target_children = connection.execute(
-            """SELECT id,name,start_datetime,end_datetime,folder_name
-               FROM events
-               WHERE parent_event_id=? AND event_level='child'
-               ORDER BY start_datetime,id""",
-            (target_event_id,),
-        ).fetchall()
+        if status == "applied":
+            if int(target["resort_required"] or 0):
+                raise EventSuggestionError("Für dieses Ereignis ist bereits eine Nachsortierung offen.")
+            from app.event_mutation import capture_job_event_state, begin_mutation
+            original_state = capture_job_event_state(connection, str(target["job_id"]))
+            begin_mutation(
+                connection,
+                job_id=str(target["job_id"]),
+                anchor_event_id=target_event_id,
+                mutation_kind="edit",
+                affected_event_ids=[target_event_id],
+                original_state=original_state,
+                status="pending_apply",
+            )
+
+        assignments = []
+        for family in families:
+            capture = str(family["selected_capture_time"] or "")[:19]
+            assignments.append((
+                _assignment_event_for(connection, target_event_id, capture),
+                int(family["id"]),
+                now,
+            ))
+        connection.executemany(
+            """INSERT INTO event_assignments(
+                   event_id,family_id,file_id,assignment_source,created_at)
+               VALUES (?,?,NULL,'cross_backup',?)""",
+            assignments,
+        )
+        register_source_jobs(
+            connection,
+            target_event_id,
+            [str(target["job_id"]), str(job_id)],
+            created_at=now,
+        )
         connection.execute(
-            """
-            INSERT INTO events (
-                id, job_id, parent_event_id, event_level, name,
-                start_datetime, end_datetime, uses_time_range,
-                folder_name, status, created_at, updated_at,
-                event_kind, preserve_day_folders, revision,
-                applied_at, archived_at, linked_event_id, linkage_kind
-            ) VALUES (?, ?, NULL, 'parent', ?, ?, ?, 0, ?, 'planned',
-                      ?, ?, 'event', ?, 1, NULL, NULL, ?, ?)
-            """,
+            """UPDATE events
+               SET revision=revision+1,
+                   resort_required=CASE WHEN status='applied' THEN 1 ELSE resort_required END,
+                   updated_at=?
+               WHERE id=?""",
+            (now, target_event_id),
+        )
+        connection.execute(
+            """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
+               VALUES (?,'cross_backup_families_attached','event',?,?,?)""",
             (
-                event_id, job_id, name,
-                target["start_datetime"], target["end_datetime"],
-                target["folder_name"], now, now,
-                int(target["preserve_day_folders"] or 0),
-                target_event_id, linkage,
+                str(target["job_id"]),
+                target_event_id,
+                json.dumps({
+                    "source_job_id": str(job_id),
+                    "family_ids": selected_ids,
+                    "target_status": status,
+                }, ensure_ascii=False, sort_keys=True),
+                now,
             ),
         )
-        linked_children: list[dict[str, Any]] = []
-        for child in target_children:
-            child_id = "EVENT_" + uuid.uuid4().hex.upper()
-            connection.execute(
-                """
-                INSERT INTO events (
-                    id, job_id, parent_event_id, event_level, name,
-                    start_datetime, end_datetime, uses_time_range,
-                    folder_name, status, created_at, updated_at,
-                    event_kind, preserve_day_folders, revision,
-                    applied_at, archived_at
-                ) VALUES (?, ?, ?, 'child', ?, ?, ?, 1, ?, 'planned',
-                          ?, ?, 'event', ?, 1, NULL, NULL)
-                """,
-                (
-                    child_id,
-                    job_id,
-                    event_id,
-                    child["name"],
-                    child["start_datetime"],
-                    child["end_datetime"],
-                    child["folder_name"],
-                    now,
-                    now,
-                    int(target["preserve_day_folders"] or 0),
-                ),
-            )
-            linked_children.append({
-                "id": child_id,
-                "name": str(child["name"]),
-                "start_datetime": str(child["start_datetime"]),
-                "end_datetime": str(child["end_datetime"]),
-                "folder_name": str(child["folder_name"]),
-                "source_child_event_id": str(child["id"]),
-            })
 
-        def assignment_event_for(capture: str) -> str:
-            for child in linked_children:
-                if child["start_datetime"] <= capture <= child["end_datetime"]:
-                    return str(child["id"])
-            return event_id
-
-        connection.executemany(
-            """
-            INSERT INTO event_assignments (
-                event_id, family_id, file_id, assignment_source, created_at
-            ) VALUES (?, ?, NULL, 'manual', ?)
-            """,
-            [
-                (
-                    assignment_event_for(str(family["selected_capture_time"] or "")),
-                    int(family["id"]),
-                    now,
-                )
-                for family in families
-            ],
-        )
     return {
-        "event_id": event_id,
+        "event_id": target_event_id,
+        "canonical_target_event_id": target_event_id,
+        "target_event_id": target_event_id,
+        "target_job_id": str(target["job_id"]),
+        "source_job_id": str(job_id),
         "family_ids": selected_ids,
         "family_count": len(selected_ids),
-        "target_event_id": target_event_id,
-        "target_status": status,
-        "linkage_kind": linkage,
-        "name": name,
         "file_count": total_files,
-        "status": "planned",
-        "child_event_count": len(linked_children),
-        "child_events": linked_children,
+        "target_status": status,
+        "status": status,
+        "linkage_kind": None,
+        "name": str(target["name"]),
+        "resort_required": status == "applied",
+        "child_event_count": 0,
+        "child_events": [],
     }
