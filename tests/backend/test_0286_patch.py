@@ -6,10 +6,11 @@ import hashlib
 from app.database import (
     database_connection,
     delete_planned_event,
+    get_event_edit_context,
     initialize_database,
 )
 from app.event_layout import ensure_event_layout_snapshot, update_event_layout
-from app.planning import list_global_released_archive_groups
+from app.planning import list_global_released_archive_groups, list_job_planning_overview
 from app.sort_plan import build_event_sort_plan
 from app.workspace_layout import ensure_workspace_layout, shared_work_root
 from app.workspace_ui import WORKSPACE_HTML
@@ -328,12 +329,156 @@ def test_0286_new_xmp_and_lightroom_export_in_free_day_are_picked_up(tmp_path: P
     )
 
 
-def test_0286_subevent_day_controls_are_parent_bounded_and_sequential():
-    assert "function subeventAllowedDays()" in WORKSPACE_HTML
+def test_0286_planning_and_inspector_show_loose_assets_before_apply(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    initialize_database(db)
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
+    work = shared_work_root(workspace)
+
+    source_dir = Path("2026") / "07-21"
+    stem = "20260721_152629_Fuji-X-E5"
+    camera_rel = (source_dir / (stem + ".JPG")).as_posix()
+
+    with database_connection(db) as connection:
+        seed_job(connection, "j")
+        family_id, _file_id = _seed_family_file(
+            connection,
+            job_id="j",
+            stem=stem,
+            capture="2026-07-21T15:26:29",
+            current_path=camera_rel,
+            content=b"camera",
+        )
+
+    physical = work / source_dir
+    physical.mkdir(parents=True, exist_ok=True)
+    (physical / (stem + ".JPG")).write_bytes(b"camera")
+    (physical / (stem + ".xmp")).write_bytes(b"xmp")
+    (physical / (stem + "_Export.jpg")).write_bytes(b"export")
+
+    # Noch vor jeder Ereignisplanung muss die freie Tageskarte den realen
+    # physischen Bestand zeigen: 1 Kamera + XMP + Export.
+    overview = list_job_planning_overview(db, "j", workspace_path=workspace)
+    day = next(group for group in overview["available_day_groups"] if group["day_key"] == "2026-07-21")
+    assert day["family_count"] == 1
+    assert day["file_count"] == 3
+
+    with database_connection(db) as connection:
+        seed_event(
+            connection,
+            status="planned",
+            event_id="e",
+            job_id="j",
+            folder="07-21 - Test",
+        )
+        connection.execute(
+            """UPDATE events
+               SET start_datetime='2026-07-21T00:00:00',
+                   end_datetime='2026-07-21T23:59:59'
+               WHERE id='e'"""
+        )
+        connection.execute(
+            """INSERT INTO event_assignments(
+                   event_id,family_id,file_id,assignment_source,created_at
+               ) VALUES ('e',?,NULL,'date_range',?)""",
+            (family_id, NOW),
+        )
+
+    overview = list_job_planning_overview(db, "j", workspace_path=workspace)
+    planned = next(group for group in overview["event_groups"] if group["event_id"] == "e")
+    assert planned["file_count"] == 3
+
+    context = get_event_edit_context(db, "j", "e", workspace_path=workspace)
+    family = next(item for item in context["families"] if item["assigned_here"])
+    assert family["file_count"] == 3
+    assert family["workspace_asset_count"] == 2
+    assert family["live_asset_kinds"] == ["export", "xmp"]
+
+
+def test_0286_released_archive_assets_are_visible_while_target_is_only_planned(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    initialize_database(db)
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
+    work = shared_work_root(workspace)
+
+    stem = "20260723_180000_Fuji-X-E5"
+    release_dir = "Freigewordene Archivdateien/2026/2026-07-23"
+    camera_rel = release_dir + "/" + stem + ".JPG"
+    xmp_rel = release_dir + "/" + stem + ".xmp"
+    export_rel = release_dir + "/" + stem + "_Export.jpg"
+
+    with database_connection(db) as connection:
+        seed_job(connection, "j")
+        seed_event(
+            connection,
+            status="planned",
+            event_id="e",
+            job_id="j",
+            folder="07-23 - Wiederverwendet",
+        )
+        family_id, file_id = _seed_family_file(
+            connection,
+            job_id="j",
+            stem=stem,
+            capture="2026-07-23T18:00:00",
+            current_path=camera_rel,
+            content=b"camera",
+        )
+        connection.execute(
+            """INSERT INTO event_assignments(
+                   event_id,family_id,file_id,assignment_source,created_at
+               ) VALUES ('e',?,NULL,'date_range',?)""",
+            (family_id, NOW),
+        )
+        _insert_released_asset(
+            connection,
+            job_id="j",
+            family_id=family_id,
+            source_file_id=file_id,
+            asset_kind="xmp",
+            current_path=xmp_rel,
+            content=b"xmp",
+        )
+        _insert_released_asset(
+            connection,
+            job_id="j",
+            family_id=family_id,
+            source_file_id=file_id,
+            asset_kind="export",
+            current_path=export_rel,
+            content=b"export",
+        )
+
+    for rel, payload in ((camera_rel,b"camera"),(xmp_rel,b"xmp"),(export_rel,b"export")):
+        path = work / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    context = get_event_edit_context(db, "j", "e", workspace_path=workspace)
+    family = next(item for item in context["families"] if item["assigned_here"])
+    assert family["file_count"] == 3
+    assert family["live_asset_kinds"] == ["export", "xmp"]
+
+    overview = list_job_planning_overview(db, "j", workspace_path=workspace)
+    planned = next(group for group in overview["event_groups"] if group["event_id"] == "e")
+    assert planned["file_count"] == 3
+
+
+def test_0286_subevent_day_controls_keep_calendar_but_enforce_valid_range():
     assert "function nextSubeventDefaults()" in WORKSPACE_HTML
-    assert "<select data-create-child-start-date>" in WORKSPACE_HTML
-    assert "<select data-create-child-end-date>" in WORKSPACE_HTML
-    assert "function editSubeventDays()" in EVENTS_HTML
+    assert '<input data-create-child-start-date type="date"' in WORKSPACE_HTML
+    assert '<input data-create-child-end-date type="date"' in WORKSPACE_HTML
+    assert "<select data-create-child-start-date>" not in WORKSPACE_HTML
+    assert "data-locked-month=" in WORKSPACE_HTML
+    assert "data-segment-day-number" not in WORKSPACE_HTML
+
     assert "function nextEditSubeventDefaults(container)" in EVENTS_HTML
-    assert "<select data-child-start-date" in EVENTS_HTML
-    assert "<select data-child-end-date" in EVENTS_HTML
+    assert '<input data-child-start-date type="date"' in EVENTS_HTML
+    assert '<input data-child-end-date type="date"' in EVENTS_HTML
+    assert "<select data-child-start-date" not in EVENTS_HTML
+    assert "data-locked-month=" in EVENTS_HTML
+    assert "data-segment-day-number" not in EVENTS_HTML
