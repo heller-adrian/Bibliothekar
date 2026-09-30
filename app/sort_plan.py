@@ -10,7 +10,14 @@ import os
 
 from app.database import database_connection
 from app.event_access import event_file_rows
-from app.event_layout import ensure_event_layout_snapshot, leaf_layout_directories
+from app.event_layout import (
+    ensure_event_layout_snapshot,
+    leaf_layout_directories,
+    layout_role_paths,
+)
+from app.event_inventory import _filename_family_source
+from app.filename_collisions import export_collision_base_stem
+from app.metadata import classify_media
 from app.job_readiness import job_sort_readiness
 from app.workspace_layout import (
     WorkspaceLayoutError,
@@ -894,6 +901,10 @@ def build_event_sort_plan(
                 )
             normalized_file_rows.append(record)
         file_rows = normalized_file_rows
+        file_rows_by_id = {
+            int(row["id"]): dict(row)
+            for row in file_rows
+        }
 
         assigned_family_set = set(family_ids)
         assigned_source_rows = [
@@ -1023,6 +1034,11 @@ def build_event_sort_plan(
         except Exception as error:
             raise SortPlanError("Ereignis-Unterordnerstruktur ist ungültig: " + str(error)) from error
     layout_input_path = PurePosixPath(str(layout_state.get("input_path") or ""))
+    layout_export_paths = (
+        layout_role_paths(layout_state["layout"], "export")
+        if bool(layout_state.get("structure_enabled"))
+        else []
+    )
     child_folder_names = {
         str(child.get("folder_name") or "") for child in child_definitions
         if str(child.get("folder_name") or "")
@@ -1628,10 +1644,9 @@ def build_event_sort_plan(
                 for row in connection.execute(
                     f"""SELECT *
                         FROM released_archive_assets
-                        WHERE job_id=?
-                          AND family_id IN ({family_placeholders})
+                        WHERE family_id IN ({family_placeholders})
                         ORDER BY family_id,current_relative_path,id""",
-                    (job_id, *family_ids),
+                    tuple(family_ids),
                 ).fetchall()
             ]
 
@@ -1655,18 +1670,19 @@ def build_event_sort_plan(
                 continue
 
             candidates = camera_entries_by_family.get(family_id, [])
-            destination_containers = {
-                PurePosixPath(str(candidate["destination_relative_path"])).parent
+            target_leaves = {
+                str(candidate.get("structural_leaf_relative_path") or "")
                 for candidate in candidates
+                if str(candidate.get("structural_leaf_relative_path") or "")
             }
-            if not candidates or len(destination_containers) != 1:
+            if not candidates or len(target_leaves) != 1:
                 blockers.append({
                     "code": "released_asset_target_ambiguous",
                     "family_id": family_id,
                     "path": str(asset.get("current_relative_path") or ""),
                     "message": (
-                        "Das Ziel einer freigewordenen Zusatzdatei ist innerhalb "
-                        "ihrer Kamerafamilie nicht eindeutig."
+                        "Das strukturelle Ziel einer freigewordenen Zusatzdatei "
+                        "ist innerhalb ihrer Kamerafamilie nicht eindeutig."
                     ),
                 })
                 continue
@@ -1678,9 +1694,16 @@ def build_event_sort_plan(
             source_absolute = target_root.joinpath(*source_relative.parts).resolve(
                 strict=False
             )
-            destination_container = next(iter(destination_containers))
+            structural_leaf = PurePosixPath(next(iter(target_leaves)))
             filename = _safe_component(source_relative.name, "Zusatzdateiname")
             released_asset_kind = str(asset.get("asset_kind") or "other")
+            destination_container = structural_leaf
+            if bool(layout_state.get("structure_enabled")):
+                organization = layout_input_path
+                if released_asset_kind == "export" and layout_export_paths:
+                    organization = PurePosixPath(layout_export_paths[0])
+                if organization.parts:
+                    destination_container = destination_container / organization
             destination_relative = reserve_asset_destination(
                 destination_container / filename,
                 asset_kind=released_asset_kind,
@@ -1824,6 +1847,214 @@ def build_event_sort_plan(
             reserved_destination_keys.add(
                 str(destination_relative).casefold()
             )
+
+    # XMP-/Exportdateien können auch erst nach dem SD-Import im freien
+    # Tagesbestand entstehen (z. B. durch Lightroom). Solche Dateien stehen
+    # noch nicht in SQLite. Vor dem ersten Anwenden werden deshalb ausschließlich
+    # eindeutig zuordenbare Sidecars/Exports direkt neben bekannten
+    # Kameradateien konservativ erkannt und in denselben sicheren Sortierlauf
+    # aufgenommen. Beliebige Fremddateien bleiben unangetastet.
+    if family_ids and not allow_reapply:
+        camera_entries_by_family = defaultdict(list)
+        for entry in entries:
+            if entry.get("family_id") is not None:
+                camera_entries_by_family[int(entry["family_id"])].append(entry)
+
+        known_match_rows = []
+        for row in file_rows:
+            record = dict(row)
+            if record.get("family_id") is None:
+                continue
+            if int(record["family_id"]) not in set(family_ids):
+                continue
+            known_match_rows.append({
+                **record,
+                "file_id": int(record["id"]),
+            })
+
+        known_source_files = {
+            Path(str(entry["source_absolute_path"])).resolve(strict=False)
+            for entry in entries
+        }
+        tracked_asset_sources = {
+            Path(str(entry["source_absolute_path"])).resolve(strict=False)
+            for entry in asset_entries
+        }
+        scan_directories = {
+            Path(str(entry["source_absolute_path"])).parent.resolve(strict=False)
+            for entry in entries
+            if entry.get("family_id") is not None
+            and int(entry["family_id"]) in set(family_ids)
+            and not bool(file_rows_by_id.get(int(entry["file_id"]), {}).get("_free_stock"))
+        }
+        # Auch normaler freier Tagesbestand ist zulässig; die obige
+        # _free_stock-Markierung wird nur für Zielberechnung benutzt. Daher
+        # zusätzlich alle physischen Quellordner der zugeordneten Familien
+        # einbeziehen.
+        scan_directories.update(
+            Path(str(entry["source_absolute_path"])).parent.resolve(strict=False)
+            for entry in entries
+            if entry.get("family_id") is not None
+            and int(entry["family_id"]) in set(family_ids)
+        )
+
+        for source_directory in sorted(scan_directories, key=lambda p: str(p)):
+            if not source_directory.is_dir():
+                continue
+            for loose_path in sorted(source_directory.iterdir(), key=lambda p: p.name.casefold()):
+                loose_path = loose_path.resolve(strict=False)
+                if (
+                    loose_path in known_source_files
+                    or loose_path in tracked_asset_sources
+                    or not loose_path.is_file()
+                    or loose_path.is_symlink()
+                ):
+                    continue
+
+                media_type = classify_media(loose_path)
+                if media_type == "xmp":
+                    asset_kind = "xmp"
+                elif (
+                    media_type in {"jpeg", "image"}
+                    and export_collision_base_stem(loose_path.stem) is not None
+                ):
+                    asset_kind = "export"
+                else:
+                    continue
+
+                family_source = _filename_family_source(
+                    loose_path.name,
+                    known_match_rows,
+                )
+                if family_source is None or family_source.get("family_id") is None:
+                    continue
+                loose_family_id = int(family_source["family_id"])
+                if loose_family_id not in set(family_ids):
+                    continue
+
+                candidates = camera_entries_by_family.get(loose_family_id, [])
+                same_source_candidates = [
+                    candidate
+                    for candidate in candidates
+                    if Path(str(candidate["source_absolute_path"])).parent.resolve(strict=False)
+                    == source_directory
+                ]
+                if same_source_candidates:
+                    candidates = same_source_candidates
+                target_leaves = {
+                    str(candidate.get("structural_leaf_relative_path") or "")
+                    for candidate in candidates
+                    if str(candidate.get("structural_leaf_relative_path") or "")
+                }
+                if not candidates or len(target_leaves) != 1:
+                    blockers.append({
+                        "code": "loose_asset_target_ambiguous",
+                        "family_id": loose_family_id,
+                        "path": str(loose_path),
+                        "message": (
+                            "Eine neu entstandene XMP-/Exportdatei konnte keinem "
+                            "eindeutigen Ziel innerhalb ihrer Kamerafamilie zugeordnet werden."
+                        ),
+                    })
+                    continue
+
+                source_candidate = candidates[0]
+                source_relative = (
+                    PurePosixPath(str(source_candidate["source_relative_path"])).parent
+                    / loose_path.name
+                )
+                structural_leaf = PurePosixPath(next(iter(target_leaves)))
+                destination_container = structural_leaf
+                if bool(layout_state.get("structure_enabled")):
+                    organization = layout_input_path
+                    if asset_kind == "export" and layout_export_paths:
+                        organization = PurePosixPath(layout_export_paths[0])
+                    if organization.parts:
+                        destination_container = destination_container / organization
+                destination_relative = reserve_asset_destination(
+                    destination_container / loose_path.name,
+                    asset_kind=asset_kind,
+                )
+                destination_absolute = target_root.joinpath(
+                    *destination_relative.parts
+                ).resolve(strict=False)
+
+                source_stat = loose_path.stat(follow_symlinks=False)
+                expected_size = int(source_stat.st_size)
+                expected_sha256 = _sha256_file(loose_path)
+                same_path = loose_path == destination_absolute
+                target_exists = destination_absolute.exists()
+                target_conflict = target_exists and not same_path
+                checksum_actual = expected_sha256 if verify_sha256 else None
+                checksum_matches = True if verify_sha256 else None
+
+                if target_conflict:
+                    blockers.append({
+                        "code": "loose_asset_target_exists",
+                        "family_id": loose_family_id,
+                        "path": str(destination_relative),
+                        "message": (
+                            "Am Ziel einer neu erkannten XMP-/Exportdatei existiert "
+                            "bereits ein anderer Eintrag."
+                        ),
+                    })
+                if _path_has_symlink(
+                    destination_absolute.parent,
+                    target_root,
+                ):
+                    blockers.append({
+                        "code": "loose_asset_target_symlink_component",
+                        "family_id": loose_family_id,
+                        "path": str(destination_relative),
+                        "message": (
+                            "Der Zielpfad einer neu erkannten XMP-/Exportdatei "
+                            "enthält einen symbolischen Link."
+                        ),
+                    })
+
+                status = "already_at_target" if same_path else (
+                    "blocked_target_exists" if target_conflict else "move"
+                )
+                planned_directories.add(str(destination_relative.parent))
+                asset_entries.append({
+                    "asset_kind": asset_kind,
+                    "family_id": loose_family_id,
+                    "source_file_id": int(source_candidate["file_id"]),
+                    "source_root_kind": str(
+                        source_candidate.get("current_root_kind") or "shared_workspace"
+                    ),
+                    "current_root_kind": str(
+                        source_candidate.get("current_root_kind") or "shared_workspace"
+                    ),
+                    "source_relative_path": str(source_relative),
+                    "source_absolute_path": str(loose_path),
+                    "destination_relative_path": str(destination_relative),
+                    "destination_absolute_path": str(destination_absolute),
+                    "expected_size_bytes": expected_size,
+                    "source_size_bytes": expected_size,
+                    "source_device": int(source_stat.st_dev),
+                    "source_inode": int(source_stat.st_ino),
+                    "source_mtime_ns": int(source_stat.st_mtime_ns),
+                    "stored_sha256": expected_sha256,
+                    "sha256_verified_now": verify_sha256,
+                    "calculated_sha256": checksum_actual,
+                    "sha256_matches": checksum_matches,
+                    "source_exists": True,
+                    "source_readable": os.access(loose_path, os.R_OK),
+                    "source_is_regular_file": True,
+                    "target_exists": target_exists,
+                    "same_path": same_path,
+                    "status": status,
+                })
+                tracked_asset_sources.add(loose_path)
+                if (
+                    verify_sha256
+                    and asset_verification_callback is not None
+                ):
+                    asset_verification_callback(
+                        str(source_relative),
+                        expected_size,
+                    )
 
     if allow_reapply and reapply_inventory is not None:
         camera_entries_by_file = {
