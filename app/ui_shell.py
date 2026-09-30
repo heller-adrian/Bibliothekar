@@ -1864,6 +1864,8 @@ BIBLIOTHEKAR_JS = r"""
     setSourceMode("sd");
   }
 
+  let structureTaskAutoOpened = false;
+
   async function refreshTasks() {
     const countNode = document.getElementById("bk-task-count");
     const panel = document.getElementById("bk-task-panel");
@@ -1885,6 +1887,11 @@ BIBLIOTHEKAR_JS = r"""
               String(task.detail || "").replaceAll("<", "&lt;") +
               '</span></a>').join("")
           : '<div style="padding:10px"><strong>Keine offenen Aufgaben</strong><div style="color:var(--bk-muted);margin-top:5px">Alles erledigt.</div></div>';
+      }
+      const hasStructureTask = tasks.some(task => task.kind === "event_structure_change");
+      if (hasStructureTask && !structureTaskAutoOpened) {
+        structureTaskAutoOpened = true;
+        if (taskPanel?.hasAttribute("hidden")) openTaskPanel();
       }
     } catch (_) {
       if (countNode) countNode.textContent = "–";
