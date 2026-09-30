@@ -155,16 +155,23 @@ def build_event_document_from_db(
         ).fetchall()
 
         root_kind = "camera_archive" if status == "archived" else "shared_workspace"
-        inventory_rows = [
-            dict(r) for r in connection.execute(
-                """SELECT relative_path,filename,size_bytes,sha256,asset_kind,
-                          known_file_id,family_id,event_relative_path
-                   FROM event_inventory_files
-                   WHERE event_id=? AND root_kind=?
-                   ORDER BY event_relative_path""",
-                (event_id, root_kind),
-            ).fetchall()
-        ]
+        inventory_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_inventory_files'"
+        ).fetchone()
+        inventory_rows = (
+            [
+                dict(r) for r in connection.execute(
+                    """SELECT relative_path,filename,size_bytes,sha256,asset_kind,
+                              known_file_id,family_id,event_relative_path
+                       FROM event_inventory_files
+                       WHERE event_id=? AND root_kind=?
+                       ORDER BY event_relative_path""",
+                    (event_id, root_kind),
+                ).fetchall()
+            ]
+            if inventory_table is not None
+            else []
+        )
         file_rows = files
 
     if not families:
