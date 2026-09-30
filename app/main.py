@@ -4765,6 +4765,11 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
 
     if str(payload.get("event_kind") or "event") != "event":
         return False
+    current_layout = context.get("folder_layout") or {}
+    if bool(payload.get("create_subfolders", current_layout.get("structure_enabled", True))) != bool(
+        current_layout.get("structure_enabled", True)
+    ):
+        return False
     if bool(payload.get("preserve_day_folders")) != bool(event.get("preserve_day_folders")):
         return False
 
@@ -4840,6 +4845,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
     try:
         context = get_event_edit_context(DATABASE_FILE, job_id, event_id)
+        payload = _event_payload_with_folder_layout(payload, event_id=event_id)
         preview = None
         if payload.get("cascade_confirmed") or payload.get("child_segments"):
             raise ValueError("Getrennte Belegungssegmente und automatische gemeinsame Anpassungen werden nicht mehr unterstützt.")
