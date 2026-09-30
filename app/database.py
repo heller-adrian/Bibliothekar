@@ -3155,6 +3155,8 @@ def delete_planned_event(
             raise ValueError("Ereignis wurde nicht gefunden.")
         if event["event_level"] != "parent":
             raise ValueError("Unterereignisse können nicht einzeln gelöscht werden. Bitte das Hauptereignis löschen.")
+        from app.event_structure_changes import assert_no_open_structure_change
+        assert_no_open_structure_change(connection, event_id)
         if int(event["pending_delete"] or 0):
             raise ValueError("Für dieses Ereignis läuft bereits ein Löschvorgang.")
 
@@ -3605,6 +3607,9 @@ def update_event_definition(
         if event["archived_at"] is not None:
             connection.rollback()
             raise ValueError("Archivierte Ereignisse können nicht mehr bearbeitet werden.")
+
+        from app.event_structure_changes import assert_no_open_structure_change
+        assert_no_open_structure_change(connection, event_id)
 
         status = str(event["status"])
         is_applied = status == "applied" and event["applied_at"] is not None
