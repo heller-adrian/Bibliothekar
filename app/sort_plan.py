@@ -10,7 +10,7 @@ import os
 
 from app.database import database_connection
 from app.event_access import event_file_rows
-from app.event_layout import get_event_layout, leaf_layout_directories
+from app.event_layout import ensure_event_layout_snapshot, leaf_layout_directories
 from app.job_readiness import job_sort_readiness
 from app.workspace_layout import (
     WorkspaceLayoutError,
@@ -1052,7 +1052,9 @@ def build_event_sort_plan(
 
     with database_connection(database_path) as connection:
         try:
-            layout_state = get_event_layout(connection, event_id)
+            layout_state = ensure_event_layout_snapshot(
+                connection, event_id, now=datetime.now(timezone.utc).isoformat()
+            )
         except Exception as error:
             raise SortPlanError("Ereignis-Unterordnerstruktur ist ungültig: " + str(error)) from error
     layout_input_path = PurePosixPath(str(layout_state.get("input_path") or ""))
