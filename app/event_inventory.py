@@ -218,7 +218,12 @@ def _asset_kind(event_relative_path: str, media_type: str, known_file_id: int | 
         return "camera_original"
     if media_type == "xmp":
         return "xmp"
-    if media_type in {"raw", "jpeg", "image", "video"}:
+    # A JPEG/image that is not one of the imported camera originals is a
+    # generated/exported asset. This classification is intentionally content-
+    # based and no longer depends on a folder literally named "Export".
+    if media_type in {"jpeg", "image"}:
+        return "export"
+    if media_type in {"raw", "video"}:
         return "derived_media"
     return "other"
 
