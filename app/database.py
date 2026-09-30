@@ -3417,6 +3417,7 @@ def get_event_edit_context(
     database_path: Path,
     job_id: str,
     event_id: str,
+    workspace_path: Path | None = None,
 ) -> dict[str, Any]:
     """Return one parent event plus all same-job families for safe editing."""
     with database_connection(database_path) as connection:
@@ -3552,6 +3553,20 @@ def get_event_edit_context(
         status in {"draft", "planned", "applied"} and event["archived_at"] is None
     ) or archived_change_request
     live_inventory_available = bool(live_inventory_rows)
+
+    planned_physical_assets: dict[int, dict[str, Any]] = {}
+    if (
+        workspace_path is not None
+        and str(event["status"] or "") in {"draft", "planned"}
+        and assigned_ids
+    ):
+        from app.workspace_assets import discover_workspace_family_assets
+        planned_physical_assets = discover_workspace_family_assets(
+            database_path,
+            workspace_path,
+            assigned_ids,
+        )
+
     live_by_family: dict[int, dict[str, Any]] = {}
     for live_row in live_inventory_rows:
         if live_row["family_id"] is None:
@@ -3589,6 +3604,25 @@ def get_event_edit_context(
         )
         if assigned_here and live_inventory_available:
             item["file_count"] = item["live_file_count"]
+
+        # Planned Ereignisse besitzen noch kein Event-Inventar. XMP/Exporte,
+        # die bereits physisch neben der Kamerafamilie liegen, sollen im
+        # Nur-Lesen-Inspector trotzdem sofort sichtbar sein.
+        physical = planned_physical_assets.get(family_id) if assigned_here else None
+        if physical:
+            item["file_count"] = database_file_count + int(
+                physical.get("file_count") or 0
+            )
+            item["workspace_asset_count"] = int(
+                physical.get("file_count") or 0
+            )
+            item["workspace_asset_kinds"] = list(
+                physical.get("asset_kinds") or []
+            )
+            item["live_asset_kinds"] = sorted(set([
+                *item.get("live_asset_kinds", []),
+                *item["workspace_asset_kinds"],
+            ]))
         item["day_key"] = str(row["selected_capture_time"] or "")[:10] or None
         item["has_date"] = row["selected_capture_time"] is not None
         item["assigned_here"] = assigned_here
