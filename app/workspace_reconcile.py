@@ -636,8 +636,25 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
     except Exception as exc:
         # Roll back physical moves in reverse order. Database paths are only finalized after all moves succeed.
         for src,dst,_,_ in reversed(moved):
-            try: _rollback_one(src,dst)
-            except Exception: pass
+            try:
+                _rollback_one(src,dst)
+            except Exception:
+                pass
+
+        # Auch Ordner, die ausschließlich dieser fehlgeschlagene Lauf erzeugt
+        # hat, gehören zur App-Transaktion. Bleiben sie leer zurück, würde der
+        # Strukturwächter sie nach einem späteren Verwerfen fälschlich als
+        # manuell angelegte Ordner sehen.
+        for directory in sorted(set(created), key=lambda path: len(path.parts), reverse=True):
+            try:
+                directory.rmdir()
+                if directory.parent.exists():
+                    _fsync_directory(directory.parent)
+            except OSError:
+                # Nur leere, von diesem Lauf erzeugte Verzeichnisse entfernen.
+                # Fremde oder inzwischen belegte Inhalte bleiben unangetastet.
+                pass
+
         with database_connection(database_path) as c:
             c.execute("UPDATE sort_runs SET status='failed',phase='Arbeitsbereich-Abgleich fehlgeschlagen',error_message=?,updated_at=?,completed_at=? WHERE id=?",(str(exc),_now(),_now(),run_id))
         raise
