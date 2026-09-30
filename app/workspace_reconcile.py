@@ -477,7 +477,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                                     AND marker.family_id=r.family_id
                               ),0)
                        FROM event_reapply_removed_families r
-                       WHERE r.event_id=? AND r.job_id=? AND r.target_event_id IS NULL
+                       WHERE r.event_id=? AND r.target_event_id IS NULL
                        ON CONFLICT(job_id,family_id) DO UPDATE SET
                            released_start_datetime=excluded.released_start_datetime,
                            released_end_datetime=excluded.released_end_datetime,
@@ -486,11 +486,11 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                                released_free_families.archive_origin,
                                excluded.archive_origin
                            )""",
-                    (now,eid,job_id),
+                    (now,eid),
                 )
                 c.execute(
-                    "DELETE FROM event_reapply_removed_families WHERE event_id=? AND job_id=?",
-                    (eid,job_id),
+                    "DELETE FROM event_reapply_removed_families WHERE event_id=?",
+                    (eid,),
                 )
                 is_pending_delete = row is not None and int(row['pending_delete'] or 0)
                 if is_pending_delete:
