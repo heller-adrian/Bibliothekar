@@ -1622,6 +1622,11 @@ def store_metadata_analysis(
             ),
         )
 
+        from app.event_access import register_source_jobs
+        from app.event_layout import ensure_event_layout_snapshot
+        register_source_jobs(connection, parent_event_id, [job_id], created_at=now)
+        ensure_event_layout_snapshot(connection, parent_event_id, now=now)
+
         connection.execute(
             """
             INSERT INTO audit_log (
