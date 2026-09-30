@@ -1343,6 +1343,19 @@ EVENTS_HTML = r"""<!doctype html>
     </div>
   </dialog>
 
+  <dialog id="legacy-maintenance-dialog" class="sort-plan-dialog">
+    <div class="sort-plan-content">
+      <div class="sort-plan-header">
+        <div>
+          <h2>Legacy-Mehrsicherungsstruktur vereinheitlichen</h2>
+          <p id="legacy-maintenance-subtitle" class="muted">Alter 0.27-Nachtrag wird rein lesend geprüft.</p>
+        </div>
+        <button id="legacy-maintenance-close" type="button">Schließen</button>
+      </div>
+      <div id="legacy-maintenance-body">Wartungsplan wird geladen …</div>
+    </div>
+  </dialog>
+
   <dialog id="change-request-dialog" class="sort-plan-dialog">
     <div class="sort-plan-content">
       <div class="sort-plan-header">
@@ -1437,6 +1450,11 @@ EVENTS_HTML = r"""<!doctype html>
     const structureChangeBody = document.getElementById("structure-change-body");
     const structureChangeSubtitle = document.getElementById("structure-change-subtitle");
     document.getElementById("structure-change-close")?.addEventListener("click",()=>structureChangeDialog.close());
+
+    const legacyMaintenanceDialog = document.getElementById("legacy-maintenance-dialog");
+    const legacyMaintenanceBody = document.getElementById("legacy-maintenance-body");
+    const legacyMaintenanceSubtitle = document.getElementById("legacy-maintenance-subtitle");
+    document.getElementById("legacy-maintenance-close")?.addEventListener("click",()=>legacyMaintenanceDialog.close());
 
     const changeRequestDialog =
       document.getElementById("change-request-dialog");
@@ -4494,12 +4512,106 @@ EVENTS_HTML = r"""<!doctype html>
       }
     }
 
+    async function showLegacyMaintenance(legacyEventId) {
+      if (!legacyMaintenanceDialog.open) legacyMaintenanceDialog.showModal();
+      legacyMaintenanceBody.textContent = "Wartungsplan wird geladen …";
+      const plan = await requestJson(
+        `/api/legacy-multi-backup/${encodeURIComponent(legacyEventId)}/plan`
+      );
+      const summary = plan.summary || {};
+      const blockers = plan.blockers || [];
+      const warnings = plan.warnings || [];
+      const target = plan.target_event || {};
+      const legacy = plan.legacy_event || {};
+      legacyMaintenanceSubtitle.textContent =
+        `${legacy.name || legacyEventId} → ${target.name || plan.target_event_id || ""}`;
+
+      const operationRows = [...(plan.files || []), ...(plan.assets || [])]
+        .filter(item => item.status === "move")
+        .map(item => `
+          <div style="margin-top:7px">
+            <code>${escapeHtml(item.source_relative_path || "")}</code>
+            <br><span class="muted">→</span>
+            <code>${escapeHtml(item.destination_relative_path || "")}</code>
+          </div>`)
+        .join("");
+
+      legacyMaintenanceBody.innerHTML = `
+        <div class="card">
+          <strong>Geprüfter Wartungsplan</strong>
+          <div style="margin-top:8px">${Number(summary.camera_file_count || 0)} Kameradateien ·
+            ${Number(summary.asset_count || 0)} Zusatzdateien ·
+            ${Number(summary.move_count || 0)} Verschiebungen</div>
+          <div class="muted" style="margin-top:8px">
+            Die 0.27-Zweitstruktur wird erst nach erneuter SHA-256-Prüfung in das kanonische Ereignis übernommen.
+            Kein bestehender Zielpfad wird überschrieben.
+          </div>
+        </div>
+        ${blockers.length ? `
+          <div class="error-box" style="margin-top:12px">
+            <strong>Vereinheitlichung blockiert</strong>
+            ${blockers.map(item=>`<div style="margin-top:6px">${escapeHtml(item.message || item.code || "Blocker")}</div>`).join("")}
+          </div>` : ""}
+        ${warnings.length ? `
+          <div class="card" style="margin-top:12px">
+            <strong>Hinweise</strong>
+            ${warnings.map(item=>`<div style="margin-top:6px">${escapeHtml(item.message || "")}</div>`).join("")}
+          </div>` : ""}
+        ${operationRows ? `<details class="card" style="margin-top:12px"><summary>Dateipfade anzeigen</summary>${operationRows}</details>` : ""}
+        ${summary.ready ? `
+          <label style="display:flex;gap:9px;align-items:flex-start;margin-top:15px">
+            <input id="legacy-maintenance-confirm" type="checkbox">
+            <span>Ich möchte diese geprüfte Legacy-Struktur jetzt in das kanonische Ereignis vereinheitlichen.</span>
+          </label>
+          <div class="edit-actions">
+            <button id="legacy-maintenance-apply" type="button" class="plan-button bk-positive-action" disabled>
+              Vereinheitlichung anwenden
+            </button>
+          </div>` : ""}
+      `;
+
+      if (!summary.ready) return;
+      const checkbox = document.getElementById("legacy-maintenance-confirm");
+      const applyButton = document.getElementById("legacy-maintenance-apply");
+      checkbox?.addEventListener("change",()=>{
+        applyButton.disabled = !checkbox.checked;
+      });
+      applyButton?.addEventListener("click", async()=>{
+        applyButton.disabled = true;
+        legacyMaintenanceBody.insertAdjacentHTML(
+          "beforeend",
+          '<p class="muted">Quellen werden erneut per SHA-256 geprüft und sicher verschoben …</p>'
+        );
+        const result = await requestJson(
+          `/api/legacy-multi-backup/${encodeURIComponent(legacyEventId)}/apply`,
+          {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({
+              plan_token:plan.plan_token,
+              confirmation_phrase:plan.apply_confirmation_phrase
+            })
+          }
+        );
+        legacyMaintenanceDialog.close();
+        await loadEvents({reset:true});
+        refreshGlobalTasks();
+        setStatus(
+          `Legacy-Mehrsicherungsstruktur vereinheitlicht · ${Number(result.moved_file_count || 0)} Dateien verschoben.`,
+          false,
+          true
+        );
+      });
+    }
+
     loadJobs().then(async () => {
       const params = new URLSearchParams(location.search);
       const task = params.get("task") || "";
       const jobId = params.get("job") || "";
       if (task.startsWith("structure:")) {
         await showStructureChange(task.slice("structure:".length));
+      } else if (task.startsWith("legacy:")) {
+        await showLegacyMaintenance(task.slice("legacy:".length));
       } else if (task.startsWith("change:")) {
         const crId = task.slice("change:".length);
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
