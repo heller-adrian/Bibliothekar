@@ -22,10 +22,12 @@ import json
 import os
 
 from app.database import database_connection
+from app.event_access import event_family_rows, event_file_rows, event_source_jobs
+from app.event_layout import ensure_event_layout_snapshot
 
 from app.workspace_layout import WORK_DIRECTORY_NAME
 
-EVENT_DOCUMENT_VERSION = 2
+EVENT_DOCUMENT_VERSION = 3
 EVENT_DOCUMENT_FILENAME = "event.json"
 
 
@@ -108,8 +110,8 @@ def build_event_document_from_db(
 
     with database_connection(database_path) as connection:
         event = connection.execute(
-            "SELECT * FROM events WHERE id = ? AND job_id = ?",
-            (event_id, job_id),
+            "SELECT * FROM events WHERE id = ? AND parent_event_id IS NULL",
+            (event_id,),
         ).fetchone()
 
         if event is None or str(event["event_level"]) != "parent":
@@ -124,7 +126,12 @@ def build_event_document_from_db(
         from app.event_timeline import normal_event_ranges
         occupancy = normal_event_ranges(connection,event_id) if event['event_kind']=='event' else [(x['start_datetime'],x['end_datetime']) for x in segments]
 
-        families = _families_of_event(connection, job_id, event_id)
+        families = event_family_rows(connection, event_id)
+        files = event_file_rows(connection, event_id)
+        sources = event_source_jobs(connection, event_id)
+        layout_state = ensure_event_layout_snapshot(
+            connection, event_id, now=datetime.now(timezone.utc).isoformat()
+        )
 
         assignment_day_rows = connection.execute(
             """
@@ -136,30 +143,12 @@ def build_event_document_from_db(
             LEFT JOIN file_families AS ff ON ff.id = ea.family_id
             LEFT JOIN files AS direct_file ON direct_file.id = ea.file_id
             LEFT JOIN file_families AS direct_ff ON direct_ff.id = direct_file.family_id
-            WHERE assigned.job_id = ?
-              AND (assigned.id = ? OR assigned.parent_event_id = ?)
+            WHERE (assigned.id = ? OR assigned.parent_event_id = ?)
             """,
-            (job_id, event_id, event_id),
+            (event_id, event_id),
         ).fetchall()
 
-        file_rows = connection.execute(
-            """
-            SELECT f.current_relative_path, f.original_filename, f.size_bytes,
-                   f.sha256_current, f.sha256_original
-            FROM files AS f
-            JOIN file_families AS ff ON ff.id = f.family_id
-            WHERE f.job_id = ?
-              AND ff.id IN (
-                  SELECT family_id
-                  FROM event_assignments AS ea
-                  JOIN events AS assigned ON assigned.id = ea.event_id
-                  WHERE assigned.job_id = ?
-                    AND (assigned.id = ? OR assigned.parent_event_id = ?)
-              )
-            ORDER BY f.current_relative_path
-            """,
-            (job_id, job_id, event_id, event_id),
-        ).fetchall()
+        file_rows = files
 
     if not families:
         return None
@@ -171,7 +160,7 @@ def build_event_document_from_db(
         if not relative_path:
             continue
         parts = PurePosixPath(relative_path).parts
-        ordered = bool(parts) and "Alle" in parts
+        ordered = bool(parts)
         entries.append({
             "relative_path": relative_path,
             "filename": parts[-1] if ordered else str(row["original_filename"]),
@@ -240,6 +229,19 @@ def build_event_document_from_db(
             "edited_at": event["edited_at"],
             "revision": int(event["revision"] or 1),
             "notes": str(event["notes"] or ""),
+        },
+        "source_jobs": [
+            {
+                "job_id": str(row["job_id"]),
+                "source_label": str(row.get("source_label") or row["job_id"]),
+            }
+            for row in sources
+        ],
+        "folder_layout": {
+            "structure_enabled": bool(layout_state["structure_enabled"]),
+            "input_path": str(layout_state["input_path"]),
+            "layout": layout_state["layout"],
+            "revision": int(layout_state["revision"]),
         },
         "child_events": children,
         "no_event_segments": segments,
@@ -382,7 +384,7 @@ def event_document_matches_db(
         if str(doc_event.get(key)) != str(fresh_event.get(key)):
             drift.append(str(key))
 
-    for key in ("document_version", "child_events", "no_event_segments", "structure", "files"):
+    for key in ("document_version", "source_jobs", "folder_layout", "child_events", "no_event_segments", "structure", "files"):
         if document.get(key) != fresh.get(key):
             drift.append(key)
 
