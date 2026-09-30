@@ -338,7 +338,8 @@ def test_0283_manual_folder_created_while_structure_off_reenables_archived_layou
         input_path="Auswahl",
         app_version="0.28.3",
     )
-    (event_root / "event.json").write_bytes(Path(prepared["prepared_event_json_path"]).read_bytes())
+    prepared_path = Path(prepared["prepared_event_json_path"])
+    (event_root / "event.json").write_bytes(prepared_path.read_bytes())
 
     verified = verify_archived_structure_change(
         db,
@@ -347,11 +348,117 @@ def test_0283_manual_folder_created_while_structure_off_reenables_archived_layou
         change["id"],
     )
     assert verified["status"] == "completed"
+    assert verified["helper_cleanup"]["removed_file_count"] == 1
+    assert not prepared_path.exists()
+    assert not prepared_path.parent.exists()
+    assert not prepared_path.parent.parent.exists()
     with database_connection(db) as connection:
         layout = get_event_layout(connection, "e")
     assert layout["structure_enabled"] is True
     assert layout["input_path"] == "Auswahl"
     assert set(layout_paths(layout["layout"])) == {"Auswahl"}
+
+
+def test_0283_legacy_manual_archive_helper_does_not_block_next_archive_change(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    workspace.mkdir()
+    archive.mkdir()
+    ensure_workspace_layout(workspace)
+
+    initialize_database(db)
+    with database_connection(db) as connection:
+        seed_job(connection)
+        seed_event(connection, status="archived")
+        family_id, file_id = seed_family(
+            connection,
+            content=b"camera-a",
+            current_path="2026/07-23 - Trip/A.JPG",
+        )
+        connection.execute(
+            "UPDATE files SET current_root_kind='camera_archive' WHERE id=?",
+            (file_id,),
+        )
+        ensure_event_layout_snapshot(connection, "e", now=NOW)
+        current = get_event_layout(connection, "e")
+        update_event_layout(
+            connection,
+            "e",
+            structure_enabled=False,
+            input_path=current["input_path"],
+            layout=current["layout"],
+            updated_at=NOW,
+        )
+
+    event_root = archive / "2026" / "07-23 - Trip"
+    event_root.mkdir(parents=True)
+    (event_root / "A.JPG").write_bytes(b"camera-a")
+
+    scan_event_inventory(
+        db,
+        archive,
+        "j",
+        "e",
+        root_kind="camera_archive",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    manual = event_root / "Auswahl"
+    manual.mkdir()
+    (event_root / "A.JPG").replace(manual / "A.JPG")
+    scan_event_inventory(
+        db,
+        archive,
+        "j",
+        "e",
+        root_kind="camera_archive",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    change = detect_event_structure_change(db, "e")
+    assert change is not None
+
+    prepared = prepare_archived_structure_change(
+        db,
+        workspace,
+        change["id"],
+        input_path="Auswahl",
+        app_version="0.28.3",
+    )
+    prepared_path = Path(prepared["prepared_event_json_path"])
+    legacy_payload = prepared_path.read_bytes()
+    (event_root / "event.json").write_bytes(legacy_payload)
+    verify_archived_structure_change(db, archive, workspace, change["id"])
+    assert not prepared_path.exists()
+
+    # Simuliere genau den Altbestand eines früheren 0.28.3-Builds, der die
+    # bereits abgeschlossene Hilfs-event.json nicht entfernt hatte.
+    prepared_path.parent.mkdir(parents=True, exist_ok=True)
+    prepared_path.write_bytes(legacy_payload)
+
+    with database_connection(db) as connection:
+        state = get_event_layout(connection, "e")
+    proposed = propose_event_change(
+        db,
+        "j",
+        "e",
+        _archived_layout_preview(family_id, state, False),
+        event_name="Trip",
+        archive_root=archive,
+        workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    confirmed = confirm_event_change(db, cr_id, archive, workspace)
+    assert confirmed["status"] == "bestaetigt"
+
+    spec = required_event_document_for_request(db, cr_id)
+    assert spec is not None
+    staged = workspace / "Arbeitsbereich" / "Später zuordnen" / spec["target_relative_path"]
+    assert staged.is_file()
+    assert staged.read_bytes() != legacy_payload
 
 
 def _seed_archived_layout_event(
