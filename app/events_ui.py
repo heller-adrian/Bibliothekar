@@ -3103,7 +3103,7 @@ EVENTS_HTML = r"""<!doctype html>
             const nameInput=row.querySelector("[data-child-name]");
             const summary=row.querySelector("[data-child-summary]");
             if(nameInput&&summary){
-              const syncSummary=()=>{summary.textContent=String(nameInput.value||"").trim()||"Unterereignis";};
+              const syncSummary=()=>{ summary.textContent=String(nameInput.value||"").trim() || "Unterereignis"; };
               nameInput.oninput=syncSummary;
               syncSummary();
             }
@@ -3166,7 +3166,8 @@ EVENTS_HTML = r"""<!doctype html>
           normalContainer.appendChild(row);
           bind();
           row.querySelector("[data-child-name]")?.focus();
-        };      } else if (structural) {
+        };
+      } else if (structural) {
         const container=document.getElementById("no-event-segments");
         const bindNoEventRows=()=>{
           container.querySelectorAll("[data-remove-segment]").forEach(button=>{button.onclick=()=>button.closest("[data-segment-row]")?.remove();});

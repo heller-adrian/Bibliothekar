@@ -129,14 +129,14 @@ def test_0287_released_archive_groups_merge_same_interval_across_backups(tmp_pat
 
 def test_0287_day_controls_lock_month_and_year_and_archive_selection_stays_global():
     assert main.RELEASE_VERSION == "0.28.7"
-    assert "<select data-create-child-start-date>" in WORKSPACE_HTML
+    assert 'subeventDayControl("data-create-child-start-date"' in WORKSPACE_HTML
     assert "data-create-child-start-month-year" in WORKSPACE_HTML
     assert "data-create-child-end-month-year" in WORKSPACE_HTML
     assert "<select data-segment-day" in WORKSPACE_HTML
     assert "Freigewordene Archivaufnahmen aus der Ursprungssicherung ausgewählt." not in WORKSPACE_HTML
     assert "&& group.released_archive" not in WORKSPACE_HTML
 
-    assert "<select data-child-start-date" in EVENTS_HTML
+    assert 'editSubeventDayControl("data-child-start-date"' in EVENTS_HTML
     assert "data-child-start-month-year" in EVENTS_HTML
     assert "data-child-end-month-year" in EVENTS_HTML
     assert "<select data-segment-day" in EVENTS_HTML
