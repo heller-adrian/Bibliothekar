@@ -5485,6 +5485,120 @@ def api_search_events(q: str = "", limit: int = 25, offset: int = 0) -> dict[str
     return search_events(DATABASE_FILE, query=q, limit=limit, offset=offset)
 
 
+
+def _canonical_event_anchor_job_id(event_id: str) -> str:
+    with database_connection(DATABASE_FILE) as connection:
+        row = connection.execute(
+            "SELECT job_id FROM events WHERE id=? AND parent_event_id IS NULL",
+            (event_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Ereignis wurde nicht gefunden.")
+    return str(row["job_id"])
+
+
+@app.get("/api/events/{event_id}", tags=["Ereignisse"])
+def api_canonical_event(event_id: str) -> dict[str, Any]:
+    anchor_job_id = _canonical_event_anchor_job_id(event_id)
+    context = get_event_edit_context(DATABASE_FILE, anchor_job_id, event_id)
+    with database_connection(DATABASE_FILE) as connection:
+        source_job_ids = [
+            str(row["job_id"])
+            for row in connection.execute(
+                "SELECT job_id FROM event_source_jobs WHERE event_id=? ORDER BY job_id",
+                (event_id,),
+            ).fetchall()
+        ]
+    return {
+        **context,
+        "event_id": event_id,
+        "anchor_job_id": anchor_job_id,
+        "source_job_ids": source_job_ids or [anchor_job_id],
+    }
+
+
+@app.get("/api/events/{event_id}/structure", tags=["Ereignisse"])
+def api_canonical_event_structure(event_id: str) -> dict[str, Any]:
+    anchor_job_id = _canonical_event_anchor_job_id(event_id)
+    context = get_event_edit_context(DATABASE_FILE, anchor_job_id, event_id)
+    return {
+        "event_id": event_id,
+        "anchor_job_id": anchor_job_id,
+        "folder_layout": context.get("folder_layout"),
+        "child_events": context.get("child_events") or [],
+        "time_segments": context.get("time_segments") or [],
+    }
+
+
+@app.get("/api/events/{event_id}/sort-plan", tags=["Sortierplanung"])
+def api_canonical_event_sort_plan(
+    event_id: str,
+    verify_sha256: bool = False,
+) -> dict[str, Any]:
+    return api_event_sort_plan(
+        _canonical_event_anchor_job_id(event_id),
+        event_id,
+        verify_sha256,
+    )
+
+
+@app.post("/api/events/{event_id}/apply", tags=["Sortierung"], status_code=202)
+def api_canonical_event_apply(event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return api_apply_event_sort(
+        _canonical_event_anchor_job_id(event_id),
+        event_id,
+        payload,
+    )
+
+
+@app.get("/api/events/{event_id}/reconcile-plan", tags=["Sortierung"])
+def api_canonical_event_reconcile_plan(
+    event_id: str,
+    verify_sha256: bool = False,
+) -> dict[str, Any]:
+    return api_event_reconcile_plan(
+        _canonical_event_anchor_job_id(event_id),
+        event_id,
+        verify_sha256,
+    )
+
+
+@app.post("/api/events/{event_id}/reconcile", tags=["Sortierung"], status_code=202)
+def api_canonical_event_reconcile(
+    event_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return api_event_reconcile_sort(
+        _canonical_event_anchor_job_id(event_id),
+        event_id,
+        payload,
+    )
+
+
+@app.get("/api/events/{event_id}/reapply-plan", tags=["Sortierung"])
+def api_canonical_event_reapply_plan(
+    event_id: str,
+    verify_sha256: bool = False,
+) -> dict[str, Any]:
+    return api_event_reapply_plan(
+        _canonical_event_anchor_job_id(event_id),
+        event_id,
+        verify_sha256,
+    )
+
+
+@app.post("/api/events/{event_id}/reapply", tags=["Sortierung"], status_code=202)
+def api_canonical_event_reapply(
+    event_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return api_event_reapply(
+        _canonical_event_anchor_job_id(event_id),
+        event_id,
+        payload,
+    )
+
+
 @app.get("/api/jobs/{job_id}/no-event/targets", tags=["Ereignisse"])
 def api_no_event_targets(job_id: str, months: str = "") -> dict[str, Any]:
     month_keys = [part.strip() for part in str(months or "").split(",") if part.strip()]
