@@ -6,7 +6,9 @@ from app.database import database_connection, initialize_database
 from app.event_inventory import scan_event_inventory
 from app.event_layout import ensure_event_layout_snapshot, get_event_layout, layout_paths, update_event_layout
 from app.event_change_request import propose_event_change
+from app.event_change_apply import confirm_event_change, verify_event_change, finish_event_change
 from app.archive_change_document import build_projected_archive_event_document
+from app.archive_staging import required_event_document_for_request
 from app.event_mutation import capture_job_event_state, begin_mutation, cancel_mutation
 from app.event_structure_changes import (
     confirm_applied_structure_change,
@@ -87,6 +89,11 @@ def test_0283_structure_off_flattens_camera_xmp_and_export_without_manual_task(t
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     event_root, file_id = _seed_applied_workspace(db, workspace)
+
+    # Finder/SMB-Metadaten dürfen einen von Bibliothekar selbst obsolet
+    # gemachten verwalteten Ordner nicht künstlich am Leben halten.
+    (event_root / "Alle" / ".DS_Store").write_bytes(b"finder")
+    (event_root / "Alle" / "._A.JPG").write_bytes(b"appledouble")
 
     with database_connection(db) as connection:
         current = get_event_layout(connection, "e")
@@ -581,3 +588,63 @@ def test_0283_cancel_applied_layout_change_restores_layout_and_creates_no_manual
         fast_refresh=False,
     )
     assert detect_event_structure_change(db, "e") is None
+
+
+def test_0283_archived_structure_off_finishes_without_followup_manual_task(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    workspace.mkdir()
+    archive.mkdir()
+    event_root, family_id, state = _seed_archived_layout_event(
+        db, workspace, archive, structure_enabled=True
+    )
+
+    proposed = propose_event_change(
+        db,
+        "j",
+        "e",
+        _archived_layout_preview(family_id, state, False),
+        event_name="Trip",
+        archive_root=archive,
+        workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+
+    # Emuliere genau den von der App geführten manuellen Archivschritt.
+    (event_root / "Alle" / "A.JPG").replace(event_root / "A.JPG")
+    (event_root / "Alle" / "A.xmp").replace(event_root / "A.xmp")
+    (event_root / "Export" / "A.jpg").replace(event_root / "A_Export.jpg")
+    (event_root / "Alle").rmdir()
+    (event_root / "Sortiert").rmdir()
+    (event_root / "Export").rmdir()
+
+    spec = required_event_document_for_request(db, cr_id)
+    assert spec is not None
+    staged_document = workspace / "Arbeitsbereich" / "Später zuordnen" / spec["target_relative_path"]
+    assert staged_document.is_file()
+    (archive / spec["target_relative_path"]).write_bytes(staged_document.read_bytes())
+
+    verified = verify_event_change(db, cr_id, archive, workspace)
+    assert verified["complete"] is True
+    finished = finish_event_change(db, cr_id, archive, workspace)
+    assert finished["status"] == "archiviert"
+
+    # Nach dem vollständig app-geführten Auftrag ist der neue Zustand kanonisch;
+    # derselbe Umbau darf nicht noch einmal als manuelle Ereignisänderung auftauchen.
+    scan_event_inventory(
+        db,
+        archive,
+        "j",
+        "e",
+        root_kind="camera_archive",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    assert detect_event_structure_change(db, "e") is None
+
+    with database_connection(db) as connection:
+        layout = get_event_layout(connection, "e")
+    assert layout["structure_enabled"] is False
