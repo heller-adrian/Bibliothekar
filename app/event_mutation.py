@@ -48,10 +48,15 @@ def capture_job_event_state(connection: Any, job_id: str) -> dict[str, Any]:
         "events": _rows(connection, "SELECT * FROM events WHERE job_id=? ORDER BY CASE event_level WHEN 'parent' THEN 0 ELSE 1 END, id", (job_id,)),
         "event_assignments": assignments,
         "event_time_segments": segments,
-        "event_reapply_removed_families": _rows(
-            connection,
-            "SELECT * FROM event_reapply_removed_families WHERE job_id=? ORDER BY event_id,family_id",
-            (job_id,),
+        "event_reapply_removed_families": (
+            _rows(
+                connection,
+                f"""SELECT * FROM event_reapply_removed_families
+                    WHERE event_id IN ({ph}) OR target_event_id IN ({ph})
+                    ORDER BY event_id,family_id""",
+                tuple(event_ids) + tuple(event_ids),
+            )
+            if event_ids else []
         ),
     }
 
@@ -195,8 +200,8 @@ def advance_job_mutation_after_reassignment(connection: Any, job_id: str) -> Non
         return
     missing = connection.execute(
         """SELECT COUNT(*) FROM event_reapply_removed_families
-           WHERE job_id=? AND target_event_id IS NULL""",
-        (job_id,),
+           WHERE event_id=? AND target_event_id IS NULL""",
+        (str(active.get("anchor_event_id") or ""),),
     ).fetchone()[0]
     if int(missing or 0) == 0:
         connection.execute(
@@ -334,9 +339,8 @@ def cancel_mutation(connection: Any, mutation_id: str, job_id: str, *, workspace
         # newly created target root that will disappear below.
         connection.execute(
             f"""DELETE FROM event_reapply_removed_families
-                WHERE job_id=?
-                  AND (event_id IN ({placeholders}) OR target_event_id IN ({placeholders}))""",
-            (job_id, *sorted(changed_roots), *sorted(changed_roots)),
+                WHERE event_id IN ({placeholders}) OR target_event_id IN ({placeholders})""",
+            (*sorted(changed_roots), *sorted(changed_roots)),
         )
 
         for root_id in sorted(changed_roots):
