@@ -3082,10 +3082,19 @@ WORKSPACE_HTML = r"""<!doctype html>
         .sort((a,b) => a.day_key.localeCompare(b.day_key) || a.start_time.localeCompare(b.start_time));
     }
 
-    function activeNoEventMonthKey() {
-      const raw=String(activeNoEventTarget?.month_key || activeNoEventTarget?.start_datetime || "");
-      const m=raw.match(/^(\d{4}-\d{2})/);
-      return m ? m[1] : "";
+    function activeNoEventMonthKey(fallbackDay="") {
+      const candidates=[
+        activeNoEventTarget?.month_key,
+        activeNoEventTarget?.start_datetime,
+        fallbackDay,
+        eventStartDate?.value,
+        eventEndDate?.value,
+      ];
+      for(const value of candidates){
+        const m=String(value||"").match(/^(\d{4}-\d{2})/);
+        if(m)return m[1];
+      }
+      return "";
     }
 
     function daysInMonth(monthKey) {
@@ -3095,14 +3104,11 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function lockedMonthDayControls(dayKey, locked) {
-      const monthKey=activeNoEventMonthKey();
+      const monthKey=activeNoEventMonthKey(dayKey);
       if (!monthKey) return `<label><span>Tag</span><input data-segment-day type="date" value="${escapeHtml(dayKey)}" ${locked?"disabled":""}></label>`;
-      const dayPart=/^\d{4}-\d{2}-(\d{2})$/.exec(dayKey||"")?.[1] || "";
-      return `<div style="display:grid;grid-template-columns:minmax(118px,.8fr) minmax(86px,.55fr);gap:8px;align-items:end">
-        <label><span>Monat/Jahr</span><input type="text" value="${escapeHtml(monthKey.slice(5,7)+"/"+monthKey.slice(0,4))}" disabled></label>
-        <label><span>Tag</span><input data-segment-day-number type="number" min="1" max="${daysInMonth(monthKey)}" value="${escapeHtml(dayPart ? String(Number(dayPart)) : "")}" ${locked?"disabled":""}></label>
-        <input data-segment-day type="hidden" value="${escapeHtml(dayKey)}">
-      </div>`;
+      const minDate=`${monthKey}-01`;
+      const maxDate=`${monthKey}-${String(daysInMonth(monthKey)).padStart(2,"0")}`;
+      return `<label><span>Tag</span><input data-segment-day data-locked-month="${escapeHtml(monthKey)}" type="date" value="${escapeHtml(dayKey)}" min="${escapeHtml(minDate)}" max="${escapeHtml(maxDate)}" ${locked?"disabled":""}></label>`;
     }
 
 
@@ -3147,16 +3153,26 @@ WORKSPACE_HTML = r"""<!doctype html>
           syncNoEventRangeDisplayFromSegments();
         };
       });
-      noEventSegmentList.querySelectorAll("[data-segment-day-number]").forEach(input => {
-        input.oninput = () => {
-          const month=activeNoEventMonthKey();
-          const hidden=input.closest("[data-no-event-segment]")?.querySelector("[data-segment-day]");
-          const n=Math.max(1,Math.min(daysInMonth(month),Number(input.value||0)));
-          if (month && hidden && Number(input.value||0)>0) hidden.value=`${month}-${String(n).padStart(2,"0")}`;
+      noEventSegmentList.querySelectorAll("[data-segment-day]").forEach(input => {
+        input.dataset.lastValid=input.value||"";
+        input.onchange = () => {
+          const month=String(input.dataset.lockedMonth||"");
+          if(month && input.value){
+            const min=`${month}-01`;
+            const max=`${month}-${String(daysInMonth(month)).padStart(2,"0")}`;
+            if(input.value < min) input.value=min;
+            if(input.value > max) input.value=max;
+            if(!input.value.startsWith(month+"-")){
+              input.value=input.dataset.lastValid||min;
+            }
+          }
+          input.dataset.lastValid=input.value||"";
+          const row=input.closest("[data-no-event-segment]");
+          if(row && input.value) row.dataset.dayKey=input.value;
+          syncNoEventRangeDisplayFromSegments();
         };
-        input.onchange = () => syncNoEventRangeDisplayFromSegments();
       });
-      noEventSegmentList.querySelectorAll("[data-segment-day],[data-segment-start],[data-segment-end]").forEach(input => {
+      noEventSegmentList.querySelectorAll("[data-segment-start],[data-segment-end]").forEach(input => {
         input.onchange = () => syncNoEventRangeDisplayFromSegments();
       });
     }
@@ -3512,18 +3528,16 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function refreshCreateSubeventDayControls(){
-      const days=subeventAllowedDays();
-      if(!days.length)return;
-      const allowed=new Set(days);
+      const bounds=subeventBounds();
+      if(!bounds.minDate||!bounds.maxDate)return;
       for(const row of createSubeventList.querySelectorAll("[data-create-subevent]")){
         for(const selector of ["[data-create-child-start-date]","[data-create-child-end-date]"]){
           const control=row.querySelector(selector);
           if(!control)continue;
-          const previous=control.value;
-          const fallback=selector.includes("start") ? days[0] : days[days.length-1];
-          const selected=allowed.has(previous)?previous:fallback;
-          control.innerHTML=subeventDayOptions(selected);
-          control.value=selected;
+          control.min=bounds.minDate;
+          control.max=bounds.maxDate;
+          if(!control.value || control.value<bounds.minDate) control.value=bounds.minDate;
+          if(control.value>bounds.maxDate) control.value=bounds.maxDate;
         }
       }
     }
@@ -3544,7 +3558,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const defaultEnd=String(defaults.end_time||(
         ed===bounds.maxDate ? bounds.maxTime : "23:59"
       )||"23:59");
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn · Tag</span><select data-create-child-start-date>${subeventDayOptions(sd)}</select></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary"><label><span>Ende · Tag</span><select data-create-child-end-date>${subeventDayOptions(ed)}</select></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary"><label><span>Beginn · Tag</span><input data-create-child-start-date type="date" value="${escapeHtml(sd)}" min="${escapeHtml(bounds.minDate)}" max="${escapeHtml(bounds.maxDate)}"></label><label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary"><label><span>Ende · Tag</span><input data-create-child-end-date type="date" value="${escapeHtml(ed)}" min="${escapeHtml(bounds.minDate)}" max="${escapeHtml(bounds.maxDate)}"></label><label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
       row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});
