@@ -522,6 +522,7 @@ def _compute_event_plan(
         "families_with_plans": file_plans,
         "assets_with_plans": asset_plans,
         "selected_family_ids": sorted(requested_set),
+        "folder_layout_state": requested_layout_state,
         "structure_lines": lines,
         "structure_text": "\n".join(lines),
         "inventory_summary": inventory.get("summary") if inventory is not None else None,
@@ -632,6 +633,7 @@ def propose_event_change(
     # Erst nach der fachlichen Konfliktprüfung wird zwischen bestehendem
     # Archivbestand und wirklich freien SSD-Zuführungen unterschieden.
     plan = _compute_event_plan(database_path, job_id, event_id, preview, archive_root=archive_root)
+    requested_layout_state = plan.get("folder_layout_state")
     preview = dict(preview)
     # Die aktuelle Archiv-Inventur ist für den neuen Zustand maßgeblich.
     # Manuell seit der letzten Archivierung gelöschte Dateien/Familien werden
