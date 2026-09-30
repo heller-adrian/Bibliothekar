@@ -53,7 +53,7 @@ def event_family_rows(connection: Any, event_id: str) -> list[dict[str, Any]]:
         return []
     placeholders = ",".join("?" for _ in family_ids)
     rows = connection.execute(
-        f"""SELECT ff.*, j.source_volume_label AS source_label,
+        f"""SELECT ff.id AS family_id, ff.*, j.source_volume_label AS source_label,
                    COUNT(DISTINCT f.id) AS file_count,
                    COALESCE(SUM(f.size_bytes),0) AS total_size_bytes
             FROM file_families ff
@@ -94,7 +94,7 @@ def event_file_rows(connection: Any, event_id: str) -> list[dict[str, Any]]:
     if not clauses:
         return []
     rows = connection.execute(
-        f"""SELECT f.*, ff.family_key, ff.original_stem,
+        f"""SELECT f.*, ff.family_key,
                    ff.selected_capture_time AS family_capture_time,
                    ff.capture_time_confidence AS family_confidence,
                    j.source_volume_label AS source_label
