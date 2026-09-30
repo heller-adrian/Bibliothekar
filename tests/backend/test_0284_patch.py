@@ -107,7 +107,6 @@ def test_0284_archive_verification_accepts_os_collision_names(
     (archive / spec["target_relative_path"]).write_bytes(staged_document.read_bytes())
 
     verified = verify_event_change(db, cr_id, archive, workspace)
-    assert verified["complete"] is True
     camera_review = next(
         row for row in verified["files"] if row.get("file_id") is not None
     )
@@ -117,6 +116,20 @@ def test_0284_archive_verification_accepts_os_collision_names(
     assert camera_review["new_path"].endswith("/" + camera_name)
     assert export_review["new_path"].endswith("/" + export_name)
 
+    if camera_name != "A.JPG":
+        # The camera file is listed in portable event.json. If Finder/Windows
+        # renamed that file, Bibliothekar prepares a corrected helper document
+        # instead of silently leaving a stale archive manifest.
+        assert verified["complete"] is False
+        assert verified["event_document"]["status"] in {
+            "size_mismatch", "sha256_mismatch"
+        }
+        (archive / spec["target_relative_path"]).write_bytes(
+            staged_document.read_bytes()
+        )
+        verified = verify_event_change(db, cr_id, archive, workspace)
+
+    assert verified["complete"] is True
     finished = finish_event_change(db, cr_id, archive, workspace)
     assert finished["status"] == "archiviert"
 
