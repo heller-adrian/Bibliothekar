@@ -94,7 +94,7 @@ def event_file_rows(connection: Any, event_id: str) -> list[dict[str, Any]]:
     if not clauses:
         return []
     rows = connection.execute(
-        f"""SELECT f.*, ff.family_key,
+        f"""SELECT f.id AS file_id, f.*, ff.family_key,
                    ff.selected_capture_time AS family_capture_time,
                    ff.capture_time_confidence AS family_confidence,
                    j.source_volume_label AS source_label
