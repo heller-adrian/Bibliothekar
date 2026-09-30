@@ -25,7 +25,7 @@ def test_0210_version_and_schema(tmp_path: Path):
     assert main.RELEASE_VERSION == "0.28.1-ui1"
     db = tmp_path / "kamera.sqlite3"
     status = initialize_database(db)
-    assert max(status["applied_versions"]) == 35
+    assert max(status["applied_versions"]) == 36
     assert "imported_source_files" in status["tables"]
 
 
