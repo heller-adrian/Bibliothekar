@@ -364,16 +364,21 @@ def test_0262_later_import_gets_reachable_cross_job_normal_target(tmp_path):
 
     accepted = accept_event_suggestion(db, "new", [family_id], "target")
     with database_connection(db) as connection:
-        followup = connection.execute(
-            "SELECT job_id,linked_event_id,linkage_kind,status FROM events WHERE id=?",
-            (accepted["event_id"],),
+        canonical = connection.execute(
+            "SELECT job_id,linked_event_id,linkage_kind,status,resort_required FROM events WHERE id=?",
+            ("target",),
         ).fetchone()
         assignment = connection.execute(
             "SELECT event_id FROM event_assignments WHERE family_id=?",
             (family_id,),
         ).fetchone()
-    assert tuple(followup) == ("new", "target", "applied_followup", "planned")
-    assert assignment["event_id"] == accepted["event_id"]
+        event_count = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE parent_event_id IS NULL"
+        ).fetchone()[0]
+    assert accepted["event_id"] == "target"
+    assert tuple(canonical) == ("old", None, None, "applied", 1)
+    assert assignment["event_id"] == "target"
+    assert event_count == 1
 
 
 def seed_interrupted_run(tmp_path: Path, *, ambiguous: bool = False):
@@ -577,20 +582,22 @@ def test_0262_reassignment_to_cross_job_normal_event_creates_local_followup(tmp_
         target_mode="existing_event",
         target_event_id="target",
     )
-    followup_id = result["target"]["event_id"]
-    assert followup_id != "target"
+    assert result["target"]["event_id"] == "target"
     with database_connection(db) as connection:
         event = connection.execute(
             """SELECT job_id,linked_event_id,linkage_kind,status,preserve_day_folders
-               FROM events WHERE id=?""",
-            (followup_id,),
+               FROM events WHERE id='target'"""
         ).fetchone()
         assignment = connection.execute(
             "SELECT event_id FROM event_assignments WHERE family_id=?",
             (family_id,),
         ).fetchone()
-    assert tuple(event) == ("new", "target", "planned_extension", "planned", 1)
-    assert assignment["event_id"] == followup_id
+        event_count = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE parent_event_id IS NULL"
+        ).fetchone()[0]
+    assert tuple(event) == ("old", None, None, "planned", 1)
+    assert assignment["event_id"] == "target"
+    assert event_count == 2
 
 
 def test_0262_cross_job_no_event_extension_inherits_day_folder_choice(tmp_path):
@@ -648,11 +655,15 @@ def test_0262_cross_job_no_event_extension_inherits_day_folder_choice(tmp_path):
         target_mode="existing_no_event",
         target_event_id="target",
     )
-    followup_id = result["target"]["event_id"]
+    assert result["target"]["event_id"] == "target"
     with database_connection(db) as connection:
         event = connection.execute(
             """SELECT event_kind,preserve_day_folders,linked_event_id,linkage_kind
-               FROM events WHERE id=?""",
-            (followup_id,),
+               FROM events WHERE id='target'"""
         ).fetchone()
-    assert tuple(event) == ("no_event", 1, "target", "planned_extension")
+        assignment = connection.execute(
+            "SELECT event_id FROM event_assignments WHERE family_id=?",
+            (family_id,),
+        ).fetchone()
+    assert tuple(event) == ("no_event", 1, None, None)
+    assert assignment["event_id"] == "target"
