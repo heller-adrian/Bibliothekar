@@ -10,8 +10,8 @@ from tests.backend.test_0263_event_inventory import NOW
 
 
 def test_0279_release_version():
-    assert main.RELEASE_VERSION == "0.28.0"
-    assert main.api_health()["version"] == "0.28.0"
+    assert main.RELEASE_VERSION == "0.28.1"
+    assert main.api_health()["version"] == "0.28.1"
 
 
 def test_0279_cross_backup_accept_api_returns_after_success(tmp_path: Path, monkeypatch):
