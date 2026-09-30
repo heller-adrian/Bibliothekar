@@ -326,7 +326,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       flex: 0 0 auto;
     }
 
-    .suggestions-panel { margin:0 20px 18px; border-color:#6ea8ff; }
+    .suggestions-panel { margin:0 0 18px; width:100%; box-sizing:border-box; border-color:#6ea8ff; }
     .suggestion-list { display:grid; gap:10px; margin-top:12px; }
     .suggestion-card { border:1px solid var(--border); border-radius:14px; padding:14px; background:var(--panel-soft); }
     .suggestion-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }

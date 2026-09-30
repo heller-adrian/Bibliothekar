@@ -4424,15 +4424,36 @@ EVENTS_HTML = r"""<!doctype html>
       return value ? value : "Direkt im Ereignis";
     }
 
+    function clearStructureTaskFromUrl(changeId) {
+      const url=new URL(window.location.href);
+      if(url.searchParams.get("task")===`structure:${changeId}`){
+        url.searchParams.delete("task");
+        history.replaceState(null,"",url.pathname+(url.search||"")+url.hash);
+      }
+    }
+
     async function showStructureChange(changeId) {
+      const change=await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}`);
+      if(change.status==="completed"){
+        if(structureChangeDialog.open) structureChangeDialog.close();
+        clearStructureTaskFromUrl(changeId);
+        await refreshGlobalTasks();
+        return false;
+      }
       if (!structureChangeDialog.open) structureChangeDialog.showModal();
       structureChangeBody.textContent="Änderung wird geladen …";
-      const change=await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}`);
       const d=change.detected||{};
       structureChangeSubtitle.textContent=(d.status==="archived"?"Archiviert":"Angewendet")+" · "+String(d.event_name||change.event_id||"");
       const added=d.directory_added||[], removed=d.directory_removed||[], moves=d.file_moves||[];
-      const inputOptions=d.input_options||[""];
-      const currentInput=String(d.current_input_path||"");
+      const structureEnabled=Boolean(d.proposed_structure_enabled);
+      const rawInputOptions=d.input_options||[""];
+      const inputOptions=structureEnabled
+        ? rawInputOptions.filter(path=>String(path)!=="")
+        : [""];
+      const preparedInput=String(d.selected_input_path||change.proposed_input_path||"");
+      const currentInput=change.status==="prepared"
+        ? preparedInput
+        : String(d.current_input_path||"");
       const currentKnown=inputOptions.some(path=>String(path)===currentInput);
       const options=(!currentKnown
         ? ['<option value="__choose__" selected disabled>Bitte Input-Ordner wählen · momentan unbekannt</option>']
@@ -4447,20 +4468,40 @@ EVENTS_HTML = r"""<!doctype html>
         ...(d.unclassified_directories||[]).map(path=>`Strukturpfad nicht eindeutig · ${path}`),
         ...(d.inconsistent_leaf_layouts?["Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen."]:[])
       ];
+      const folderChangeCount=added.length+removed.length;
+      const folderChanges=[
+        ...added.map(path=>`<div>＋ Ordner: <code>${escapeHtml(path)}</code></div>`),
+        ...removed.map(path=>`<div>− Ordner: <code>${escapeHtml(path)}</code></div>`)
+      ].join("");
+      const fileChanges=moves.map(row=>`<div>→ Datei: <code>${escapeHtml(row.old_path||"")}</code><br><span class="muted">nach</span> <code>${escapeHtml(row.new_path||"")}</code></div>`).join("");
+      const changeDetails=(folderChangeCount||moves.length)
+        ? `
+          ${folderChangeCount?`<details class="card" style="margin:9px 0 0;padding:9px 11px">
+            <summary><strong>Ordneränderungen · ${folderChangeCount}</strong></summary>
+            <div style="display:grid;gap:6px;margin-top:9px">${folderChanges}</div>
+          </details>`:""}
+          ${moves.length?`<details class="card" style="margin:9px 0 0;padding:9px 11px">
+            <summary><strong>Dateiänderungen · ${moves.length}</strong></summary>
+            <div style="display:grid;gap:6px;margin-top:9px">${fileChanges}</div>
+          </details>`:""}`
+        : '<div class="muted" style="margin-top:9px">Keine Pfadänderungen.</div>';
+      const inputControl=change.status==="prepared"
+        ? `<div class="card" style="margin-top:14px">
+            <strong>Input-Ordner</strong>
+            <div style="margin-top:6px">${escapeHtml(structurePathLabel(preparedInput))}</div>
+            <div class="muted" style="margin-top:4px">Bereits in der vorbereiteten event.json gespeichert.</div>
+          </div>`
+        : `<label class="edit-field" style="margin-top:14px"><span>Welcher Ordner soll zukünftig der Input-Ordner sein?</span>
+            <select id="structure-change-input" ${blockers.length?"disabled":""}>${options}</select>
+          </label>
+          <div id="structure-change-input-error" class="error-box" hidden style="margin-top:10px"></div>`;
       const preview=`
         <div class="card">
           <strong>Erkannte Änderungen</strong>
-          <div style="display:grid;gap:6px;margin-top:9px">
-            ${added.map(path=>`<div>＋ Ordner: <code>${escapeHtml(path)}</code></div>`).join("")}
-            ${removed.map(path=>`<div>− Ordner: <code>${escapeHtml(path)}</code></div>`).join("")}
-            ${moves.map(row=>`<div>→ Datei: <code>${escapeHtml(row.old_path||"")}</code><br><span class="muted">nach</span> <code>${escapeHtml(row.new_path||"")}</code></div>`).join("")}
-            ${!added.length&&!removed.length&&!moves.length?'<span class="muted">Keine Pfadänderungen.</span>':""}
-          </div>
+          ${changeDetails}
         </div>
         ${blockers.length?`<div class="error-box" style="margin-top:12px"><strong>Diese Änderung kann noch nicht übernommen werden.</strong>${blockers.map(x=>`<div style="margin-top:6px">${escapeHtml(x)}</div>`).join("")}</div>`:""}
-        <label class="edit-field" style="margin-top:14px"><span>Welcher Ordner soll zukünftig der Input-Ordner sein?</span>
-          <select id="structure-change-input" ${blockers.length?"disabled":""}>${options}</select>
-        </label>`;
+        ${inputControl}`;
       if(change.root_kind==="shared_workspace"){
         structureChangeBody.innerHTML=preview+`
           <div class="edit-actions">
@@ -4468,15 +4509,25 @@ EVENTS_HTML = r"""<!doctype html>
           </div>`;
         document.getElementById("structure-change-confirm")?.addEventListener("click",async()=>{
           const input=document.getElementById("structure-change-input").value;
-          if(input==="__choose__") throw new Error("Bitte einen zukünftigen Input-Ordner wählen.");
-          structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">event.json und SQLite werden aktualisiert …</p>');
-          await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/confirm-applied`,{
-            method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
-          });
-          structureChangeDialog.close();
-          await loadEvents({reset:true});
-          refreshGlobalTasks();
-          setStatus("Manuelle Ereignisänderung übernommen. event.json und SQLite sind aktuell.",false,true);
+          const inlineError=document.getElementById("structure-change-input-error");
+          if(input==="__choose__"){
+            if(inlineError){inlineError.textContent="Bitte einen zukünftigen Input-Ordner wählen.";inlineError.hidden=false;}
+            return;
+          }
+          if(inlineError) inlineError.hidden=true;
+          try{
+            structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">event.json und SQLite werden aktualisiert …</p>');
+            await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/confirm-applied`,{
+              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
+            });
+            clearStructureTaskFromUrl(changeId);
+            structureChangeDialog.close();
+            await loadEvents({reset:true});
+            await refreshGlobalTasks();
+            setStatus("Manuelle Ereignisänderung übernommen. event.json und SQLite sind aktuell.",false,true);
+          }catch(error){
+            if(inlineError){inlineError.textContent=error.message;inlineError.hidden=false;}
+          }
         });
         return;
       }
@@ -4492,9 +4543,10 @@ EVENTS_HTML = r"""<!doctype html>
         document.getElementById("structure-change-verify")?.addEventListener("click",async()=>{
           structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">Archivbestand und event.json werden geprüft …</p>');
           await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/verify-archive`,{method:"POST"});
+          clearStructureTaskFromUrl(changeId);
           structureChangeDialog.close();
           await loadEvents({reset:true});
-          refreshGlobalTasks();
+          await refreshGlobalTasks();
           setStatus("Archivänderung geprüft und in SQLite übernommen.",false,true);
         });
       }else{
@@ -4503,11 +4555,21 @@ EVENTS_HTML = r"""<!doctype html>
           <div class="edit-actions"><button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>event.json vorbereiten</button></div>`;
         document.getElementById("structure-change-prepare")?.addEventListener("click",async()=>{
           const input=document.getElementById("structure-change-input").value;
-          await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/prepare-archive`,{
-            method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
-          });
-          await showStructureChange(changeId);
-          refreshGlobalTasks();
+          const inlineError=document.getElementById("structure-change-input-error");
+          if(input==="__choose__"){
+            if(inlineError){inlineError.textContent="Bitte einen zukünftigen Input-Ordner wählen.";inlineError.hidden=false;}
+            return;
+          }
+          if(inlineError) inlineError.hidden=true;
+          try{
+            await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/prepare-archive`,{
+              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
+            });
+            await showStructureChange(changeId);
+            await refreshGlobalTasks();
+          }catch(error){
+            if(inlineError){inlineError.textContent=error.message;inlineError.hidden=false;}
+          }
         });
       }
     }

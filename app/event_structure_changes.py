@@ -445,6 +445,30 @@ def get_structure_change(database_path: Path, change_id: str) -> dict[str, Any]:
         return result
 
 
+def _validated_structure_input(
+    detected: dict[str, Any],
+    layout: dict[str, Any],
+    input_path: str,
+) -> tuple[bool, str]:
+    """Kanonischen Input liefern oder eine ungültige Struktur sicher ablehnen."""
+    structure_enabled = bool(detected.get("proposed_structure_enabled"))
+    clean_input = _safe_rel(input_path)
+    valid_paths = set(layout_paths(layout))
+    if structure_enabled:
+        if not clean_input:
+            raise EventStructureChangeError(
+                "Bitte einen Input-Ordner wählen. Bei aktiver Unterordnerstruktur "
+                "muss immer genau ein vorhandener Ordner als Input festgelegt sein."
+            )
+        if clean_input not in valid_paths:
+            raise EventStructureChangeError(
+                "Der gewählte Input-Ordner gehört nicht zur erkannten Struktur."
+            )
+    else:
+        clean_input = ""
+    return structure_enabled, clean_input
+
+
 def _apply_confirmed_state(
     connection: Any,
     row: dict[str, Any],
@@ -456,11 +480,9 @@ def _apply_confirmed_state(
     if detected.get("blocked"):
         raise EventStructureChangeError("Die erkannte Struktur besitzt Blocker und kann nicht übernommen werden.")
     layout = json.loads(str(row["proposed_layout_json"] or "{}"))
-    structure_enabled = bool(detected.get("proposed_structure_enabled"))
-    valid_options = {"", *layout_paths(layout)}
-    clean_input = _safe_rel(input_path)
-    if clean_input not in valid_options:
-        raise EventStructureChangeError("Der gewählte Input-Ordner gehört nicht zur erkannten Struktur.")
+    structure_enabled, clean_input = _validated_structure_input(
+        detected, layout, input_path
+    )
 
     inventory = connection.execute(
         """SELECT known_file_id,relative_path FROM event_inventory_files
@@ -613,9 +635,9 @@ def prepare_archived_structure_change(
         if detected.get("blocked"):
             raise EventStructureChangeError("Die erkannte Archivstruktur besitzt Blocker.")
         layout = json.loads(str(row["proposed_layout_json"] or "{}"))
-        clean_input = _safe_rel(input_path)
-        if clean_input not in {"", *layout_paths(layout)}:
-            raise EventStructureChangeError("Der gewählte Input-Ordner gehört nicht zur erkannten Struktur.")
+        _structure_enabled, clean_input = _validated_structure_input(
+            detected, layout, input_path
+        )
         event = connection.execute(
             "SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",
             (row["event_id"],),
