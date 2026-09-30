@@ -47,7 +47,7 @@ def _family(connection, job_id: str, stem: str, content: bytes) -> int:
 
 
 def test_0278_release_version():
-    assert main.RELEASE_VERSION == "0.28.1-ui1"
+    assert main.RELEASE_VERSION == "0.28.2"
     assert main.api_health()["version"] == main.RELEASE_VERSION
 
 
