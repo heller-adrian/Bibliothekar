@@ -226,60 +226,6 @@ def _path_has_symlink(path: Path, stop_at: Path) -> bool:
 
 
 
-def _tree_text(
-    year: str,
-    parent_folder: str,
-    branches: list[dict[str, Any]],
-) -> str:
-    lines = [
-        year,
-        f"└── {parent_folder}",
-    ]
-
-    if not branches:
-        return "\n".join(lines)
-
-    for branch_index, branch in enumerate(branches):
-        branch_name = branch.get("name")
-        days = list(branch.get("days") or [])
-        branch_is_last = branch_index == len(branches) - 1
-
-        branch_indent = "    "
-
-        if branch_name:
-            branch_connector = "└──" if branch_is_last else "├──"
-            lines.append(
-                f"{branch_indent}{branch_connector} {branch_name}"
-            )
-            branch_indent += "    " if branch_is_last else "│   "
-
-        if days:
-            for day_index, day_key in enumerate(days):
-                day_is_last = day_index == len(days) - 1
-                day_connector = "└──" if day_is_last else "├──"
-                lines.append(
-                    f"{branch_indent}{day_connector} {day_key}"
-                )
-                leaf_indent = branch_indent + (
-                    "    " if day_is_last else "│   "
-                )
-                lines.extend([
-                    f"{leaf_indent}├── Alle",
-                    f"{leaf_indent}├── Sortiert",
-                    f"{leaf_indent}└── Export",
-                ])
-        else:
-            lines.extend([
-                f"{branch_indent}├── Alle",
-                f"{branch_indent}├── Sortiert",
-                f"{branch_indent}└── Export",
-            ])
-
-    return "\n".join(lines)
-
-
-
-
 def _build_family_target_groups(
     entries: list[dict[str, Any]],
     asset_entries: list[dict[str, Any]] | None = None,
@@ -1086,9 +1032,6 @@ def build_event_sort_plan(
     warnings: list[dict[str, Any]] = []
     entries: list[dict[str, Any]] = []
     planned_directories: set[str] = set()
-    branch_days: dict[str | None, set[str]] = defaultdict(set)
-    branch_order: list[str | None] = [None]
-    parent_branch_has_content = False
     family_statuses: dict[int, str] = {}
     pending_delete = bool(int(event.get("pending_delete") or 0))
 
@@ -1099,8 +1042,8 @@ def build_event_sort_plan(
         # Organizational subevents always keep their own structure. With
         # "Tagesordner erhalten", however, a day directory represents actual
         # content and is created only for capture days that really land in this
-        # subevent. An entirely empty subevent keeps the explicitly confirmed
-        # empty Alle/Sortiert/Export triplet directly below its folder.
+        # subevent. An entirely empty subevent keeps the configured event
+        # folder structure directly below its folder.
         for child in child_definitions:
             child_folder_name = _safe_component(
                 child.get("folder_name"),
@@ -1116,7 +1059,6 @@ def build_event_sort_plan(
                     leaf = child_root / day_key
                     layout_dirs = _layout_directories_at_leaf(leaf, layout_state)
                     planned_directories.update(layout_dirs or {str(leaf)})
-                    branch_days[child_folder_name].add(day_key)
 
                 start_day = datetime.fromisoformat(
                     str(child["start_datetime"])[:19]
@@ -1151,8 +1093,6 @@ def build_event_sort_plan(
                 layout_dirs = _layout_directories_at_leaf(child_root, layout_state)
                 planned_directories.update(layout_dirs or {str(child_root)})
 
-            if child_folder_name not in branch_order:
-                branch_order.append(child_folder_name)
         assigned_child_ids = {
             str(row["assigned_event_id"])
             for row in assignment_rows
@@ -1278,8 +1218,6 @@ def build_event_sort_plan(
 
         branch_key = child_folder
 
-        if branch_key not in branch_order:
-            branch_order.append(branch_key)
 
         family_status = str(
             file_record.get("family_status") or "detected"
@@ -1376,7 +1314,6 @@ def build_event_sort_plan(
                 })
             else:
                 destination_parts.append(day_key)
-                branch_days[branch_key].add(day_key)
 
         structural_leaf = PurePosixPath(*destination_parts)
         if is_free_stock:
@@ -1397,8 +1334,6 @@ def build_event_sort_plan(
             # Count only files that remain in this event itself. Families sent
             # to free stock or to another reassignment target do not justify an
             # empty parent structure in this event.
-            if child_folder is None and reassignment is None:
-                parent_branch_has_content = True
 
         destination_relative = PurePosixPath(*destination_parts)
         source_base = target_root if current_root_kind == "shared_workspace" else source_root
@@ -2173,22 +2108,6 @@ def build_event_sort_plan(
                     + str(relative_path)
                 ),
             })
-
-    branches: list[dict[str, Any]] = []
-
-    for branch_key in branch_order:
-        if (
-            branch_key is None
-            and child_definitions
-            and not parent_branch_has_content
-        ):
-            continue
-        branches.append({
-            "name": branch_key,
-            "days": sorted(branch_days.get(branch_key, set()))
-            if preserve_day_folders
-            else [],
-        })
 
     structure_text = _tree_text_from_directories(
         year,
