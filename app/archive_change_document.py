@@ -106,6 +106,40 @@ def build_projected_archive_event_document(
             raise ArchiveChangeDocumentError("Archiviertes Ereignis wurde nicht gefunden.")
         event = dict(event_row)
 
+        from app.event_layout import (
+            ensure_event_layout_snapshot,
+            normalize_layout,
+            validate_input_path,
+        )
+        current_layout = ensure_event_layout_snapshot(
+            connection,
+            str(cr["event_id"]),
+            now=str(cr.get("proposed_at") or cr.get("created_at") or ""),
+        )
+        if cr.get("folder_layout_json") is not None:
+            requested_layout = normalize_layout(
+                _loads(cr.get("folder_layout_json"), current_layout["layout"])
+            )
+            requested_enabled = bool(cr.get("folder_structure_enabled"))
+            requested_input = validate_input_path(
+                requested_layout,
+                cr.get("folder_input_path") or "",
+                structure_enabled=requested_enabled,
+            )
+            projected_layout_state = {
+                "structure_enabled": requested_enabled,
+                "input_path": requested_input,
+                "layout": requested_layout,
+                "revision": int(current_layout.get("revision") or 1) + 1,
+            }
+        else:
+            projected_layout_state = {
+                "structure_enabled": bool(current_layout["structure_enabled"]),
+                "input_path": str(current_layout["input_path"]),
+                "layout": current_layout["layout"],
+                "revision": int(current_layout.get("revision") or 1),
+            }
+
         selected_ids = sorted({
             int(value)
             for value in _loads(cr.get("selected_family_ids"), [])
@@ -218,6 +252,7 @@ def build_projected_archive_event_document(
         sorted(parent_days),
         structure_children,
         preserve_day_folders,
+        layout_state=projected_layout_state,
     )
 
     occupied_intervals = (
@@ -259,6 +294,7 @@ def build_projected_archive_event_document(
             "revision": int(event.get("revision") or 1) + 1,
             "notes": str(cr.get("notes") or ""),
         },
+        "folder_layout": projected_layout_state,
         "child_events": structure_children,
         "no_event_segments": no_event_segments,
         "child_event": structure_children[0] if len(structure_children) == 1 else None,
