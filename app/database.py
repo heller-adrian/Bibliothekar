@@ -472,56 +472,76 @@ def get_job(
 
 
 def _job_workflow_states(connection: sqlite3.Connection) -> dict[str, dict[str, int | str]]:
-    rows = connection.execute(
-        """
-        SELECT
-            ff.job_id,
-            COUNT(DISTINCT ff.id) AS total_family_count,
-            COUNT(DISTINCT CASE
-                WHEN EXISTS (
-                    SELECT 1
-                    FROM event_assignments ea
-                    JOIN events assigned ON assigned.id=ea.event_id
-                    JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
-                    WHERE ea.family_id=ff.id AND root.status='archived'
-                ) THEN ff.id END
-            ) AS archived_family_count,
-            COUNT(DISTINCT CASE
-                WHEN EXISTS (
-                    SELECT 1
-                    FROM event_assignments ea
-                    JOIN events assigned ON assigned.id=ea.event_id
-                    JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
-                    WHERE ea.family_id=ff.id AND root.status='applied'
-                ) THEN ff.id END
-            ) AS applied_family_count,
-            COUNT(DISTINCT CASE
-                WHEN EXISTS (
-                    SELECT 1
-                    FROM event_assignments ea
-                    JOIN events assigned ON assigned.id=ea.event_id
-                    JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
-                    WHERE ea.family_id=ff.id AND root.status IN ('draft','planned')
-                ) THEN ff.id END
-            ) AS planned_family_count
-        FROM file_families ff
-        GROUP BY ff.job_id
-        """
+    """Derive backup state from its real remaining active workspace stock.
+
+    Source jobs are provenance, not event containers.  Files released from an
+    archive edit deliberately do not reactivate the historical backup in the
+    normal backup filter.
+    """
+    jobs = connection.execute(
+        "SELECT id FROM jobs WHERE operation IN ('folder_import','sd_import') OR kind='sd_import'"
     ).fetchall()
     result: dict[str, dict[str, int | str]] = {}
-    for row in rows:
-        total = int(row["total_family_count"] or 0)
-        archived = int(row["archived_family_count"] or 0)
-        applied = int(row["applied_family_count"] or 0)
-        planned = int(row["planned_family_count"] or 0)
-        active = max(0, total - archived)
-        if total > 0 and archived == total:
+    for job in jobs:
+        job_id = str(job["id"])
+        families = connection.execute(
+            "SELECT id FROM file_families WHERE job_id=? ORDER BY id",
+            (job_id,),
+        ).fetchall()
+        family_ids = [int(row["id"]) for row in families]
+        total = len(family_ids)
+        if not family_ids:
+            result[job_id] = {
+                "workflow_status": "planned",
+                "total_family_count": 0,
+                "active_family_count": 0,
+                "planned_family_count": 0,
+                "applied_family_count": 0,
+                "archived_family_count": 0,
+            }
+            continue
+
+        ph = ",".join("?" for _ in family_ids)
+        active_rows = connection.execute(
+            f"""SELECT DISTINCT f.family_id
+                FROM files f
+                WHERE f.family_id IN ({ph})
+                  AND f.current_root_kind='shared_workspace'
+                  AND COALESCE(f.current_relative_path,'') NOT LIKE 'Freigewordene Archivdateien/%'""",
+            tuple(family_ids),
+        ).fetchall()
+        active_ids = {int(row["family_id"]) for row in active_rows if row["family_id"] is not None}
+
+        assignments = connection.execute(
+            f"""SELECT DISTINCT ea.family_id,
+                       root.status AS root_status
+                FROM event_assignments ea
+                JOIN events assigned ON assigned.id=ea.event_id
+                JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
+                WHERE ea.family_id IN ({ph})
+                  AND root.status IN ('draft','planned','applied','archived')""",
+            tuple(family_ids),
+        ).fetchall()
+        statuses: dict[int, set[str]] = {}
+        for row in assignments:
+            statuses.setdefault(int(row["family_id"]), set()).add(str(row["root_status"]))
+
+        archived = sum(1 for fid in family_ids if "archived" in statuses.get(fid, set()))
+        applied = sum(1 for fid in active_ids if statuses.get(fid, set()) & {"applied","archived"})
+        planned = sum(
+            1 for fid in active_ids
+            if not statuses.get(fid) or bool(statuses.get(fid, set()) & {"draft","planned"})
+        )
+        active = len(active_ids)
+
+        if total > 0 and active == 0:
             status = "archived"
-        elif active > 0 and applied + archived == total and planned == 0:
+        elif active > 0 and planned == 0 and applied == active:
             status = "applied"
         else:
             status = "planned"
-        result[str(row["job_id"])] = {
+
+        result[job_id] = {
             "workflow_status": status,
             "total_family_count": total,
             "active_family_count": active,
