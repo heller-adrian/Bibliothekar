@@ -84,13 +84,12 @@ def _families_of_event(
         JOIN event_assignments AS ea ON ea.family_id = ff.id
         JOIN events AS assigned ON assigned.id = ea.event_id
         JOIN files AS f ON f.family_id = ff.id AND f.job_id = ff.job_id
-        WHERE assigned.job_id = ?
-          AND (assigned.id = ? OR assigned.parent_event_id = ?)
+        WHERE COALESCE(assigned.parent_event_id,assigned.id) = ?
           AND ea.family_id IS NOT NULL
         GROUP BY ff.id
         ORDER BY ff.selected_capture_time, ff.id
         """,
-        (job_id, event_id, event_id),
+        (event_id,),
     ).fetchall()
     return [dict(row) for row in rows]
 
