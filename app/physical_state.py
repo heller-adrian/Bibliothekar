@@ -62,13 +62,50 @@ def capture_placement_snapshot(
     if not bool(layout_state.get("structure_enabled")):
         return 0
     timestamp = now or _now()
-    rows = connection.execute(
-        """SELECT known_file_id,event_relative_path
-           FROM event_inventory_files
-           WHERE event_id=? AND root_kind=? AND known_file_id IS NOT NULL
-           ORDER BY known_file_id""",
-        (event_id, root_kind),
-    ).fetchall()
+    rows = [
+        {
+            "known_file_id": int(row["known_file_id"]),
+            "event_relative_path": str(row["event_relative_path"] or ""),
+        }
+        for row in connection.execute(
+            """SELECT known_file_id,event_relative_path
+               FROM event_inventory_files
+               WHERE event_id=? AND root_kind=? AND known_file_id IS NOT NULL
+               ORDER BY known_file_id""",
+            (event_id, root_kind),
+        ).fetchall()
+    ]
+    if not rows:
+        event = connection.execute(
+            "SELECT start_datetime,folder_name FROM events WHERE id=?",
+            (event_id,),
+        ).fetchone()
+        if event is not None:
+            prefix = PurePosixPath(
+                str(event["start_datetime"] or "")[:4],
+                str(event["folder_name"] or ""),
+            )
+            fallback = connection.execute(
+                """SELECT DISTINCT f.id,f.current_relative_path
+                   FROM files f
+                   JOIN event_assignments ea ON ea.family_id=f.family_id OR ea.file_id=f.id
+                   JOIN events assigned ON assigned.id=ea.event_id
+                   WHERE COALESCE(assigned.parent_event_id,assigned.id)=?
+                     AND f.current_relative_path IS NOT NULL
+                   ORDER BY f.id""",
+                (event_id,),
+            ).fetchall()
+            for row in fallback:
+                path = PurePosixPath(str(row["current_relative_path"] or ""))
+                try:
+                    rel = path.relative_to(prefix)
+                except ValueError:
+                    continue
+                rows.append({
+                    "known_file_id": int(row["id"]),
+                    "event_relative_path": rel.as_posix(),
+                })
+
     captured = 0
     for row in rows:
         file_id = int(row["known_file_id"])
