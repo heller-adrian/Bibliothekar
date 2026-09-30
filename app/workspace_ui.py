@@ -3589,17 +3589,16 @@ WORKSPACE_HTML = r"""<!doctype html>
           const targetId=activeNoEventTarget?.id || existingNoEventTarget.value;
           if (!targetId) throw new Error("Für diesen Monat wurde keine bestehende „Ohne Ereignis“-Sammlung gefunden.");
           if (!(payload.no_event_segments||[]).length) throw new Error("Es gibt keine neuen Tagessegmente zum Hinzufügen.");
-          const buckets=sourceGroupsForSelection();
-          const results=[];
-          for(const sourceJobId of buckets.keys()){
-            results.push(await postJson(`/api/jobs/${encodeURIComponent(sourceJobId)}/no-event/assign-existing`, {
-              target_event_id: targetId,
-              segments: payload.no_event_segments || []
-            }));
-          }
-          result=results[0] || null;
-          const total=results.reduce((sum,item)=>sum+Number(item.assigned_family_count||0),0);
-          saveResult.textContent = `Fortgeführt: ${total} Familien${results.length>1?" · sicherungsübergreifend":""}`;
+          const globalPayload=payloadForAllSources(payload);
+          const target=(workspace?.events||[]).find(event=>String(event.id)===String(targetId));
+          const requestJobId=String(target?.job_id || jobId);
+          result=await postJson(`/api/jobs/${encodeURIComponent(requestJobId)}/no-event/assign-existing`, {
+            target_event_id: targetId,
+            segments: payload.no_event_segments || [],
+            family_ids: globalPayload.selected_family_ids || []
+          });
+          const total=Number(result?.assigned_family_count||0);
+          saveResult.textContent = `Fortgeführt: ${total} Familien${(result?.source_job_ids||[]).length>1?" · sicherungsübergreifend":""}`;
         } else {
           const eventPayload=collectEventPayload();
           const selectedParent=eventPayload.existing_parent_event_id
