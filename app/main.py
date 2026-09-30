@@ -5671,6 +5671,26 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
     selected_family_ids = sorted({
         int(value) for value in (body.get("family_ids") or []) if int(value) > 0
     })
+
+    if segments:
+        membership_payload = {
+            "event_kind": "no_event",
+            "no_event_segments": segments,
+            "selected_family_ids": selected_family_ids,
+            "confirm_cross_backup_membership": bool(
+                body.get("confirm_cross_backup_membership")
+            ),
+        }
+        try:
+            membership_payload, membership, confirmation = _canonical_membership_preflight(
+                membership_payload
+            )
+        except (ValueError, EventPreviewError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if confirmation is not None:
+            return confirmation
+        selected_family_ids = list(membership_payload["selected_family_ids"])
+
     try:
         with database_connection(DATABASE_FILE) as connection:
             target_row = connection.execute(
@@ -5685,7 +5705,7 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
         if target_row is not None and str(target_row["status"] or "") == "archived":
             from app.event_timeline import normalize_no_event_segments
 
-            normalized_new = normalize_no_event_segments(segments)
+            normalized_new = normalize_no_event_segments(segments) if segments else []
             target_job_id = str(target_row["job_id"])
             context = get_event_edit_context(
                 DATABASE_FILE, target_job_id, target_event_id
@@ -5718,18 +5738,25 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                     for item in normalized_new
                 ],
             ])
+            scope_segments = normalized_new or normalize_no_event_segments(existing_segments)
 
-            incoming_available = list_job_available_families(
-                DATABASE_FILE, job_id
+            incoming_available = (
+                _available_families_for_event_payload(
+                    job_id, {"selected_family_ids": selected_family_ids}
+                )
+                if selected_family_ids
+                else list_job_available_families(DATABASE_FILE, job_id)
             )
+            requested_set = set(selected_family_ids)
             incoming_ids = {
                 int(family["family_id"])
                 for family in incoming_available
-                if any(
+                if (not requested_set or int(family["family_id"]) in requested_set)
+                and any(
                     segment["start_datetime"]
                     <= str(family.get("selected_capture_time") or "")[:19]
                     <= segment["end_datetime"]
-                    for segment in normalized_new
+                    for segment in scope_segments
                 )
             }
             if not incoming_ids:
@@ -5789,7 +5816,7 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
             family_ids=selected_family_ids or None,
         )
     except (ValueError, EventPreviewError, EventChangeRequestError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/legacy-multi-backup/{legacy_event_id}/plan", tags=["Ereignisse"])
