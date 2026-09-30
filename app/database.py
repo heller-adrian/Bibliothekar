@@ -4112,32 +4112,14 @@ def update_event_definition(
         preview_layout = preview.get("folder_layout")
         if isinstance(preview_layout, dict):
             from app.event_layout import update_event_layout
-            new_structure_enabled = bool(preview_layout.get("structure_enabled", True))
-            old_structure_enabled = bool(old_layout_state.get("structure_enabled"))
-
-            if is_applied and old_structure_enabled and not new_structure_enabled:
-                from app.physical_state import capture_placement_snapshot
-                capture_placement_snapshot(
-                    connection,
-                    event_id,
-                    old_layout_state,
-                    root_kind="shared_workspace",
-                    restore_pending=False,
-                    now=now,
-                )
-
             update_event_layout(
                 connection,
                 event_id,
-                structure_enabled=new_structure_enabled,
+                structure_enabled=bool(preview_layout.get("structure_enabled", True)),
                 input_path=str(preview_layout.get("input_path") or ""),
                 layout=preview_layout.get("layout") or {},
                 updated_at=now,
             )
-
-            if is_applied and not old_structure_enabled and new_structure_enabled:
-                from app.physical_state import mark_placement_restore_pending
-                mark_placement_restore_pending(connection, event_id, True)
 
         connection.execute(
             """INSERT INTO audit_log(job_id, action, entity_type, entity_id, details_json, created_at)
