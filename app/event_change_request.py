@@ -501,8 +501,8 @@ def _get_day_key_for_family(
     """Ermittle den day_key einer Familie."""
     with database_connection(database_path) as connection:
         row = connection.execute(
-            "SELECT day_key FROM file_families WHERE id = ? AND job_id = ?",
-            (family_id, job_id),
+            "SELECT day_key FROM file_families WHERE id = ?",
+            (family_id,),
         ).fetchone()
         return row["day_key"] if row else None
 
@@ -885,9 +885,9 @@ def propose_archived_event_deletion(
         assigned = connection.execute(
             """SELECT DISTINCT ea.family_id
                FROM event_assignments ea JOIN events e ON e.id=ea.event_id
-               WHERE e.job_id=? AND COALESCE(e.parent_event_id,e.id)=?
+               WHERE COALESCE(e.parent_event_id,e.id)=?
                  AND ea.family_id IS NOT NULL ORDER BY ea.family_id""",
-            (job_id, event_id),
+            (event_id,),
         ).fetchall()
         family_ids = [int(r["family_id"]) for r in assigned]
         if not family_ids:
@@ -897,9 +897,9 @@ def propose_archived_event_deletion(
             f"""SELECT f.id AS file_id,f.family_id,f.current_relative_path,f.original_relative_path,
                        f.size_bytes,f.sha256_current,f.sha256_original,ff.selected_capture_time,ff.family_key
                 FROM files f JOIN file_families ff ON ff.id=f.family_id AND ff.job_id=f.job_id
-                WHERE f.job_id=? AND f.family_id IN ({placeholders})
+                WHERE f.family_id IN ({placeholders})
                 ORDER BY ff.selected_capture_time,ff.id,f.id""",
-            (job_id, *family_ids),
+            tuple(family_ids),
         ).fetchall()
         version_row = connection.execute(
             "SELECT COALESCE(MAX(version),0) AS v FROM event_change_requests WHERE event_id=?", (event_id,)
