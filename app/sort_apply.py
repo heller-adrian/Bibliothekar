@@ -452,6 +452,10 @@ def prepare_sort_run(
             "Der Sortierplan besitzt Blocker und darf nicht angewendet werden."
         )
 
+    # 0.28.0: Der Aufrufer darf über eine Herkunftssicherung kommen.
+    # Ab hier gehört der Lauf ausschließlich zum technischen Event-Anchor.
+    job_id = str((plan.get("job") or {}).get("id") or job_id)
+
     if str(plan["plan_token"]) != str(expected_plan_token):
         raise SortApplyError(
             "Der Sortierplan ist nicht mehr aktuell. Bitte erneut prüfen."
