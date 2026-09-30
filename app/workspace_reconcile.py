@@ -463,7 +463,6 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
             if run is None: raise SortApplyError("Abgleichslauf wurde nicht gefunden.")
             details=json.loads(str(run['details_json'] or '{}')); job_id=str(run['job_id']); anchor=str(run['event_id'])
         plan=build_workspace_reconcile_plan(database_path,job_id,anchor,workspace_path)
-        if str(plan['plan_token'])!=str(run['plan_token']): raise SortApplyError("Der Änderungsplan hat sich seit der Bestätigung verändert.")
         if not bool(plan['summary']['ready']):
             messages='; '.join(
                 str(item.get('message') or item.get('code'))
@@ -473,6 +472,8 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 "Die erneute Prüfung des Änderungsplans erkannte Blocker"
                 + (": " + messages if messages else ".")
             )
+        if str(plan['plan_token'])!=str(run['plan_token']):
+            raise SortApplyError("Der Änderungsplan hat sich seit der Bestätigung verändert.")
         root=Path(plan['files'][0]['source_absolute_path']).parents[0] if False else Path(run['source_root']).resolve(strict=False)
         # Create all required directories safely.
         for d in sorted({Path(x['absolute_path']).resolve(strict=False) for x in plan['directories']},key=lambda p:len(p.parts)):
