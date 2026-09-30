@@ -3546,11 +3546,17 @@ WORKSPACE_HTML = r"""<!doctype html>
           const targetId=activeNoEventTarget?.id || existingNoEventTarget.value;
           if (!targetId) throw new Error("Für diesen Monat wurde keine bestehende „Ohne Ereignis“-Sammlung gefunden.");
           if (!(payload.no_event_segments||[]).length) throw new Error("Es gibt keine neuen Tagessegmente zum Hinzufügen.");
-          result = await postJson(`/api/jobs/${encodeURIComponent(jobId)}/no-event/assign-existing`, {
-            target_event_id: targetId,
-            segments: payload.no_event_segments || []
-          });
-          saveResult.textContent = `Fortgeführt: ${result.assigned_family_count} Familien`;
+          const buckets=sourceGroupsForSelection();
+          const results=[];
+          for(const sourceJobId of buckets.keys()){
+            results.push(await postJson(`/api/jobs/${encodeURIComponent(sourceJobId)}/no-event/assign-existing`, {
+              target_event_id: targetId,
+              segments: payload.no_event_segments || []
+            }));
+          }
+          result=results[0] || null;
+          const total=results.reduce((sum,item)=>sum+Number(item.assigned_family_count||0),0);
+          saveResult.textContent = `Fortgeführt: ${total} Familien${results.length>1?" · sicherungsübergreifend":""}`;
         } else {
           const eventPayload=collectEventPayload();
           const sourceBuckets=sourceGroupsForSelection();
@@ -3560,15 +3566,22 @@ WORKSPACE_HTML = r"""<!doctype html>
             anchorPayload
           );
           const linkedResults=[];
-          if(eventPayload.event_kind==="event" && result?.parent_event?.id){
+          if(result?.parent_event?.id){
             for(const [sourceJobId,bucket] of sourceBuckets.entries()){
               if(sourceJobId===jobId)continue;
               const familyIds=[...bucket.family_ids].filter(Number.isFinite);
               if(!familyIds.length)continue;
-              linkedResults.push(await postJson(
-                `/api/jobs/${encodeURIComponent(sourceJobId)}/event-suggestions/accept`,
-                {family_ids:familyIds,target_event_id:result.parent_event.id}
-              ));
+              if(eventPayload.event_kind==="event"){
+                linkedResults.push(await postJson(
+                  `/api/jobs/${encodeURIComponent(sourceJobId)}/event-suggestions/accept`,
+                  {family_ids:familyIds,target_event_id:result.parent_event.id}
+                ));
+              }else{
+                linkedResults.push(await postJson(
+                  `/api/jobs/${encodeURIComponent(sourceJobId)}/no-event/assign-existing`,
+                  {target_event_id:result.parent_event.id,segments:eventPayload.no_event_segments||[]}
+                ));
+              }
             }
           }
           const totalFamilies=Number(result.assigned_family_count||0)+linkedResults.reduce((sum,item)=>sum+Number(item.family_count||0),0);
