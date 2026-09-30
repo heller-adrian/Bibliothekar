@@ -3248,17 +3248,59 @@ def delete_planned_event(
                     )
                     for r in capture_rows
                 }
+                existing_release_markers = {
+                    int(row["family_id"]): dict(row)
+                    for row in connection.execute(
+                        f"""SELECT job_id,family_id,released_start_datetime,
+                                   released_end_datetime,created_at,archive_origin
+                            FROM released_free_families
+                            WHERE family_id IN ({fp})""",
+                        tuple(family_ids),
+                    ).fetchall()
+                }
+                release_marker_rows = []
+                for fid in family_ids:
+                    capture_row = next(
+                        row for row in capture_rows if int(row["id"]) == fid
+                    )
+                    existing_marker = existing_release_markers.get(fid)
+                    archive_origin = bool(
+                        existing_marker
+                        and int(existing_marker.get("archive_origin") or 0)
+                    )
+                    fresh_range = release_by_family.get(fid)
+                    if archive_origin:
+                        # Familien aus einer bestätigten Archivänderung behalten
+                        # ihre ursprüngliche Freigabe-Provenienz auch dann, wenn
+                        # eine zwischenzeitliche Planung wieder gelöscht wird.
+                        # Sonst würde INSERT OR REPLACE archive_origin auf 0
+                        # zurücksetzen und der Bestand aus „Freigewordene
+                        # Archivdateien“ aus der UI verschwinden.
+                        released_start = existing_marker.get(
+                            "released_start_datetime"
+                        )
+                        released_end = existing_marker.get(
+                            "released_end_datetime"
+                        )
+                        created_at = str(existing_marker.get("created_at") or now)
+                    else:
+                        released_start = fresh_range[0] if fresh_range else None
+                        released_end = fresh_range[1] if fresh_range else None
+                        created_at = now
+                    release_marker_rows.append((
+                        str(capture_row["job_id"]),
+                        fid,
+                        released_start,
+                        released_end,
+                        created_at,
+                        1 if archive_origin else 0,
+                    ))
                 connection.executemany(
                     """INSERT OR REPLACE INTO released_free_families(
-                           job_id,family_id,released_start_datetime,released_end_datetime,created_at)
-                       VALUES (?,?,?,?,?)""",
-                    [(
-                        str(next(row["job_id"] for row in capture_rows if int(row["id"]) == fid)),
-                        fid,
-                        release_by_family.get(fid)[0] if release_by_family.get(fid) else None,
-                        release_by_family.get(fid)[1] if release_by_family.get(fid) else None,
-                        now,
-                    ) for fid in family_ids],
+                           job_id,family_id,released_start_datetime,released_end_datetime,
+                           created_at,archive_origin)
+                       VALUES (?,?,?,?,?,?)""",
+                    release_marker_rows,
                 )
             connection.execute("DELETE FROM events WHERE id=? AND job_id=?", (event_id, job_id))
             connection.execute(
