@@ -333,6 +333,64 @@ def detect_event_structure_change(
             (event_id, root_kind),
         ).fetchone()
 
+        # 0.28.2: Ein fehlendes Original ist keine Strukturänderung. Erst zwei
+        # aufeinanderfolgende vollständige Scans bestätigen eine manuelle
+        # Löschung. Bis dahin wird kein Benutzerauftrag erzeugt.
+        if snapshot.get("missing_file_ids"):
+            from app.physical_state import reconcile_missing_files
+            missing_state = reconcile_missing_files(
+                connection,
+                event,
+                root_kind,
+                list(snapshot.get("missing_file_ids") or []),
+                now=now,
+            )
+            if missing_state["pending"]:
+                if current is not None and str(current["status"]) in {"pending", "blocked"}:
+                    connection.execute(
+                        """UPDATE event_structure_changes
+                           SET status='cancelled',updated_at=?,completed_at=?
+                           WHERE id=?""",
+                        (now, now, current["id"]),
+                    )
+                return None
+            if missing_state["confirmed_deleted"]:
+                snapshot = _snapshot_from_inventory(connection, event, layout_state, root_kind)
+        else:
+            from app.physical_state import reconcile_missing_files
+            reconcile_missing_files(connection, event, root_kind, [], now=now)
+
+        # Reine Dateibewegungen innerhalb der bereits bekannten Ordnerstruktur
+        # sind normaler Benutzer-IST-Zustand. Sie werden ohne Aufgabe in SQLite
+        # nachgeführt; nur echte Ordner-/Strukturänderungen benötigen den
+        # manuellen Strukturworkflow.
+        placement_only = bool(snapshot.get("file_moves")) and not any((
+            snapshot.get("directory_added"),
+            snapshot.get("directory_removed"),
+            snapshot.get("missing_file_ids"),
+            snapshot.get("duplicate_file_ids"),
+            snapshot.get("unclassified_directories"),
+            snapshot.get("inconsistent_leaf_layouts"),
+        ))
+        if placement_only:
+            from app.physical_state import sync_placement_moves
+            sync_placement_moves(
+                connection,
+                event,
+                layout_state,
+                root_kind,
+                list(snapshot.get("file_moves") or []),
+                now=now,
+            )
+            if current is not None and str(current["status"]) in {"pending", "blocked"}:
+                connection.execute(
+                    """UPDATE event_structure_changes
+                       SET status='cancelled',updated_at=?,completed_at=?
+                       WHERE id=?""",
+                    (now, now, current["id"]),
+                )
+            return None
+
         if not snapshot["changed"]:
             if current is not None and str(current["status"]) in {"pending", "blocked"}:
                 connection.execute(
@@ -508,6 +566,20 @@ def _apply_confirmed_state(
         layout=layout,
         updated_at=now,
     )
+    if structure_enabled:
+        from app.physical_state import capture_placement_snapshot
+        capture_placement_snapshot(
+            connection,
+            str(row["event_id"]),
+            {
+                "structure_enabled": True,
+                "input_path": clean_input,
+                "layout": layout,
+            },
+            root_kind=str(row["root_kind"]),
+            restore_pending=False,
+            now=now,
+        )
     connection.execute(
         "UPDATE events SET revision=revision+1,updated_at=?,edited_at=? WHERE id=?",
         (now, now, row["event_id"]),
