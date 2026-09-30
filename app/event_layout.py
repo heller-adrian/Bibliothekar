@@ -6,7 +6,7 @@ from typing import Any
 import json
 
 DEFAULT_LAYOUT = {
-    "version": 1,
+    "version": 2,
     "nodes": [
         {"id": "legacy-alle", "name": "Alle", "children": []},
         {"id": "legacy-sortiert", "name": "Sortiert", "children": []},
@@ -42,6 +42,7 @@ def _safe_name(value: Any) -> str:
 def normalize_layout(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise EventLayoutError("Die Ordnerstruktur ist ungültig.")
+    raw_version = int(value.get("version") or 1)
     raw_nodes = value.get("nodes")
     if not isinstance(raw_nodes, list):
         raise EventLayoutError("Die Ordnerstruktur enthält keine gültige Ordnerliste.")
@@ -61,6 +62,7 @@ def normalize_layout(value: Any) -> dict[str, Any]:
         return False
 
     explicit_export_role = has_explicit_export_role(raw_nodes)
+    infer_legacy_export = raw_version < 2 and not explicit_export_role
 
     def normalize_nodes(nodes: list[Any]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
@@ -81,7 +83,7 @@ def normalize_layout(value: Any) -> dict[str, Any]:
             # Alte 0.28.x-Snapshots besitzen noch keine Rollenangabe. Der
             # historische Exportknoten bleibt deshalb semantisch ein
             # Exportordner, auch wenn er später umbenannt wird.
-            if not role and node_id == "legacy-export" and not explicit_export_role:
+            if not role and node_id == "legacy-export" and infer_legacy_export:
                 role = "export"
             if role and role != "export":
                 raise EventLayoutError("Unbekannte Ordnerrolle: " + role)
@@ -103,7 +105,7 @@ def normalize_layout(value: Any) -> dict[str, Any]:
             result.append(normalized_node)
         return result
 
-    return {"version": 1, "nodes": normalize_nodes(raw_nodes)}
+    return {"version": 2, "nodes": normalize_nodes(raw_nodes)}
 
 
 def layout_paths(layout: dict[str, Any]) -> list[str]:
