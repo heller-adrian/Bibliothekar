@@ -3656,10 +3656,10 @@ def update_event_definition(
 
         pending_reassignment = connection.execute(
             """SELECT COUNT(*) AS n FROM event_reapply_removed_families
-               WHERE event_id = ? AND job_id = ?
+               WHERE event_id = ?
                  AND target_event_id IS NULL
                  AND COALESCE(target_kind,'') <> 'released_free'""",
-            (event_id, job_id),
+            (event_id,),
         ).fetchone()
         if is_applied and pending_reassignment is not None and int(pending_reassignment["n"] or 0) > 0:
             connection.rollback()
@@ -3757,8 +3757,8 @@ def update_event_definition(
 
         placeholders = ",".join("?" for _ in requested_ids)
         rows = connection.execute(
-            f"SELECT id, selected_capture_time FROM file_families WHERE job_id = ? AND id IN ({placeholders})",
-            (job_id, *requested_ids),
+            f"SELECT id, job_id, selected_capture_time FROM file_families WHERE id IN ({placeholders})",
+            tuple(requested_ids),
         ).fetchall()
         if len(rows) != len(requested_ids):
             connection.rollback()
@@ -3949,8 +3949,8 @@ def update_event_definition(
         if removed_ids:
             rp = ",".join("?" for _ in removed_ids)
             removed_capture_rows = connection.execute(
-                f"SELECT id,selected_capture_time FROM file_families WHERE job_id=? AND id IN ({rp})",
-                (job_id,*removed_ids),
+                f"SELECT id,job_id,selected_capture_time FROM file_families WHERE id IN ({rp})",
+                tuple(removed_ids),
             ).fetchall()
             from app.released_ranges import range_for_capture
             released_by_family = {
@@ -3963,7 +3963,9 @@ def update_event_definition(
                        (event_id, job_id, family_id, created_at, released_start_datetime, released_end_datetime)
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     [(
-                        event_id, job_id, family_id, now,
+                        event_id,
+                        str(next(r["job_id"] for r in removed_capture_rows if int(r["id"]) == family_id)),
+                        family_id, now,
                         released_by_family.get(family_id)[0] if released_by_family.get(family_id) else None,
                         released_by_family.get(family_id)[1] if released_by_family.get(family_id) else None,
                     ) for family_id in removed_ids],
@@ -3974,7 +3976,8 @@ def update_event_definition(
                            job_id,family_id,released_start_datetime,released_end_datetime,created_at)
                        VALUES (?,?,?,?,?)""",
                     [(
-                        job_id, family_id,
+                        str(next(r["job_id"] for r in removed_capture_rows if int(r["id"]) == family_id)),
+                        family_id,
                         released_by_family.get(family_id)[0] if released_by_family.get(family_id) else None,
                         released_by_family.get(family_id)[1] if released_by_family.get(family_id) else None,
                         now,
@@ -4001,9 +4004,9 @@ def update_event_definition(
             rp = ",".join("?" for _ in requested_ids)
             connection.execute(
                 f"""DELETE FROM released_free_families
-                    WHERE job_id=? AND archive_origin=0
+                    WHERE archive_origin=0
                       AND family_id IN ({rp})""",
-                (job_id, *requested_ids),
+                tuple(requested_ids),
             )
         # archive_origin=1 bleibt als Rückkehrherkunft erhalten.
         if mutation_id is not None:
@@ -4052,6 +4055,18 @@ def update_event_definition(
                         now, now, now,
                     ),
                 )
+
+        preview_layout = preview.get("folder_layout")
+        if isinstance(preview_layout, dict):
+            from app.event_layout import update_event_layout
+            update_event_layout(
+                connection,
+                event_id,
+                structure_enabled=bool(preview_layout.get("structure_enabled", True)),
+                input_path=str(preview_layout.get("input_path") or ""),
+                layout=preview_layout.get("layout") or {},
+                updated_at=now,
+            )
 
         connection.execute(
             """INSERT INTO audit_log(job_id, action, entity_type, entity_id, details_json, created_at)
