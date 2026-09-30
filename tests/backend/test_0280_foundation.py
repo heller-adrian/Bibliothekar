@@ -11,6 +11,7 @@ from app.database import (
     database_connection,
     delete_planned_event,
     initialize_database,
+    list_database_jobs,
 )
 from app.event_structure import build_event_preview
 from app.global_workspace import build_global_workspace_summary
@@ -320,3 +321,22 @@ def test_0280_canonical_event_api_uses_event_identity_not_backup_route(tmp_path:
         "/api/events/{event_id}/reapply-plan",
         "/api/events/{event_id}/reapply",
     }.issubset(route_paths)
+
+
+def test_0280_released_archive_stock_does_not_reactivate_backup(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        _job(connection, "a")
+        family_id, file_id = _family(connection, "a", "A")
+        connection.execute(
+            """UPDATE files
+               SET current_root_kind='shared_workspace',
+                   current_relative_path='Freigewordene Archivdateien/2026/2026-07-19/A.JPG'
+               WHERE id=?""",
+            (file_id,),
+        )
+
+    jobs = {row["id"]: row for row in list_database_jobs(db)}
+    assert jobs["a"]["workflow_status"] == "archived"
+    assert jobs["a"]["active_family_count"] == 0
