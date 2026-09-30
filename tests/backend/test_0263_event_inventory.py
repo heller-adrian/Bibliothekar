@@ -277,7 +277,7 @@ def test_0263_archive_verification_finds_camera_original_anywhere_in_event(tmp_p
     assert result["files"][0]["file_id"] == file_id
 
 
-def test_0263_ssd_release_protects_camera_xmp_and_export_independent_of_subfolder(tmp_path):
+def test_0263_ssd_release_requires_same_current_ssd_and_archive_placement(tmp_path):
     db = tmp_path / "db.sqlite3"
     initialize_database(db)
     workspace = tmp_path / "workspace"
@@ -310,10 +310,16 @@ def test_0263_ssd_release_protects_camera_xmp_and_export_independent_of_subfolde
     (archive_event / "Alle").mkdir(parents=True)
     (archive_event / "Sortiert").mkdir(parents=True)
     (archive_event / "Export").mkdir(parents=True)
-    # Der Ort des Kameraoriginals darf zwischen SSD und Archiv verschieden sein.
+    # 0.28.2: Archiv-IST muss der aktuellen ereignisrelativen SSD-Lage entsprechen.
     (archive_event / "Alle" / "A.JPG").write_bytes(camera)
     (archive_event / "Sortiert" / "A.xmp").write_bytes(xmp)
     (archive_event / "Export" / "final.jpg").write_bytes(export)
+
+    with pytest.raises(SsdReleaseError):
+        release_event_ssd(db, workspace, archive, "j", "e")
+
+    (archive_event / "Alle" / "A.JPG").unlink()
+    (archive_event / "Sortiert" / "A.JPG").write_bytes(camera)
 
     result = release_event_ssd(db, workspace, archive, "j", "e")
     assert result["released"] is True
