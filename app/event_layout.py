@@ -10,7 +10,7 @@ DEFAULT_LAYOUT = {
     "nodes": [
         {"id": "legacy-alle", "name": "Alle", "children": []},
         {"id": "legacy-sortiert", "name": "Sortiert", "children": []},
-        {"id": "legacy-export", "name": "Export", "children": []},
+        {"id": "legacy-export", "name": "Export", "role": "export", "children": []},
     ],
 }
 DEFAULT_SETTING = {
@@ -47,6 +47,7 @@ def normalize_layout(value: Any) -> dict[str, Any]:
         raise EventLayoutError("Die Ordnerstruktur enthält keine gültige Ordnerliste.")
 
     seen_ids: set[str] = set()
+    seen_roles: set[str] = set()
 
     def normalize_nodes(nodes: list[Any]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
@@ -63,14 +64,30 @@ def normalize_layout(value: Any) -> dict[str, Any]:
             if folded in sibling_names:
                 raise EventLayoutError("Ordnernamen derselben Ebene müssen eindeutig sein.")
             sibling_names.add(folded)
+            role = str(item.get("role") or "").strip().casefold()
+            # Alte 0.28.x-Snapshots besitzen noch keine Rollenangabe. Der
+            # historische Exportknoten bleibt deshalb semantisch ein
+            # Exportordner, auch wenn er später umbenannt wird.
+            if not role and node_id == "legacy-export":
+                role = "export"
+            if role and role != "export":
+                raise EventLayoutError("Unbekannte Ordnerrolle: " + role)
+            if role:
+                if role in seen_roles:
+                    raise EventLayoutError("Die Rolle „Exportordner“ darf nur einmal vergeben werden.")
+                seen_roles.add(role)
+
             children = item.get("children") or []
             if not isinstance(children, list):
                 raise EventLayoutError("Unterordner sind ungültig.")
-            result.append({
+            normalized_node = {
                 "id": node_id,
                 "name": name,
                 "children": normalize_nodes(children),
-            })
+            }
+            if role:
+                normalized_node["role"] = role
+            result.append(normalized_node)
         return result
 
     return {"version": 1, "nodes": normalize_nodes(raw_nodes)}
@@ -84,6 +101,23 @@ def layout_paths(layout: dict[str, Any]) -> list[str]:
         for node in nodes:
             parts = (*prefix, str(node["name"]))
             result.append(PurePosixPath(*parts).as_posix())
+            walk(node.get("children") or [], parts)
+
+    walk(normalized["nodes"])
+    return result
+
+
+def layout_role_paths(layout: dict[str, Any], role: str) -> list[str]:
+    """Return configured organization paths carrying one semantic role."""
+    normalized = normalize_layout(layout)
+    wanted = str(role or "").strip().casefold()
+    result: list[str] = []
+
+    def walk(nodes: list[dict[str, Any]], prefix: tuple[str, ...] = ()) -> None:
+        for node in nodes:
+            parts = (*prefix, str(node["name"]))
+            if str(node.get("role") or "").casefold() == wanted:
+                result.append(PurePosixPath(*parts).as_posix())
             walk(node.get("children") or [], parts)
 
     walk(normalized["nodes"])
