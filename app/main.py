@@ -5749,6 +5749,43 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/api/legacy-multi-backup/{legacy_event_id}/plan", tags=["Ereignisse"])
+def api_legacy_multi_backup_plan(legacy_event_id: str) -> dict[str, Any]:
+    from app.legacy_multi_backup import (
+        LegacyMultiBackupError,
+        build_legacy_reconcile_plan,
+    )
+    try:
+        return build_legacy_reconcile_plan(
+            DATABASE_FILE,
+            WORKSPACE_PATH,
+            legacy_event_id,
+        )
+    except LegacyMultiBackupError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/legacy-multi-backup/{legacy_event_id}/apply", tags=["Ereignisse"])
+def api_legacy_multi_backup_apply(
+    legacy_event_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    from app.legacy_multi_backup import (
+        LegacyMultiBackupError,
+        apply_legacy_reconcile,
+    )
+    try:
+        return apply_legacy_reconcile(
+            DATABASE_FILE,
+            WORKSPACE_PATH,
+            legacy_event_id,
+            expected_plan_token=str(payload.get("plan_token") or ""),
+            confirmation_phrase=str(payload.get("confirmation_phrase") or ""),
+        )
+    except (LegacyMultiBackupError, OSError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.get("/api/event-structure-changes/{change_id}", tags=["Ereignisse"])
 def api_event_structure_change(change_id: str) -> dict[str, Any]:
     try:
