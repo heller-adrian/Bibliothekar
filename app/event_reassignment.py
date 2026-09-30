@@ -415,10 +415,10 @@ def _create_new_event(
                    COALESCE(SUM(f.size_bytes),0) AS total_size_bytes
             FROM file_families ff
             LEFT JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
-            WHERE ff.job_id=? AND ff.id IN ({placeholders})
+            WHERE ff.id IN ({placeholders})
             GROUP BY ff.id ORDER BY ff.selected_capture_time, ff.id
             """,
-            (job_id, *family_ids),
+            tuple(family_ids),
         ).fetchall()
     if len(rows) != len(family_ids):
         raise EventReassignmentError("Mindestens eine Familie wurde nicht gefunden.")
@@ -517,9 +517,9 @@ def _create_new_no_event(
                        ff.capture_time_confidence, COUNT(f.id) AS file_count,
                        COALESCE(SUM(f.size_bytes),0) AS total_size_bytes
                 FROM file_families ff LEFT JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
-                WHERE ff.job_id=? AND ff.id IN ({placeholders})
+                WHERE ff.id IN ({placeholders})
                 GROUP BY ff.id ORDER BY ff.selected_capture_time,ff.id""",
-            (job_id,*family_ids),
+            tuple(family_ids),
         ).fetchall()
     available = [{
         "family_id": int(r["family_id"]), "family_key": r["family_key"],
