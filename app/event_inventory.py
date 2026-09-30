@@ -66,8 +66,8 @@ def _event_and_known_files(
     with database_connection(database_path) as connection:
         event = connection.execute(
             """SELECT * FROM events
-               WHERE id=? AND job_id=? AND parent_event_id IS NULL""",
-            (event_id, job_id),
+               WHERE id=? AND parent_event_id IS NULL""",
+            (event_id,),
         ).fetchone()
         if event is None:
             raise EventInventoryError("Ereignis wurde nicht gefunden.")
@@ -94,7 +94,6 @@ def _event_and_known_files(
                 SELECT DISTINCT family_id
                 FROM event_reapply_removed_families
                 WHERE event_id=?
-                  AND job_id=?
             ),
             assigned_files AS (
                 SELECT DISTINCT file_id
@@ -123,7 +122,7 @@ def _event_and_known_files(
                   )
             ORDER BY f.id
             """,
-            (event_id, event_id, event_id, job_id),
+            (event_id, event_id, event_id),
         ).fetchall()
     return dict(event), [dict(row) for row in rows]
 
