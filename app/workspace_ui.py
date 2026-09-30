@@ -3465,7 +3465,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     function subeventDayControl(attribute, displayAttribute, selected, label){
       const days=subeventAllowedDays();
       const current=days.includes(selected) ? selected : (days[0]||selected||"");
-      return `<label><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select ${attribute}>${subeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+      return `<label><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:58px minmax(82px,1fr);gap:6px"><select ${attribute}>${subeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
     }
     function minuteAfter(value){
       const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
