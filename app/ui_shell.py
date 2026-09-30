@@ -941,6 +941,29 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 }
 .bk-settings-group:first-of-type { border-top: 0; }
 .bk-choice-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+.bk-folder-layout-heading {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: nowrap;
+}
+.bk-folder-layout-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  white-space: nowrap; line-height: 1.2; margin-left: auto;
+}
+#bk-folder-layout-settings input[type="checkbox"],
+#bk-folder-layout-settings input[type="radio"] {
+  width: 18px !important; min-width: 18px !important;
+  height: 18px !important; min-height: 18px !important;
+  padding: 0 !important; margin: 0 !important;
+  flex: 0 0 18px;
+}
+#bk-folder-layout-settings input[type="checkbox"] { border-radius: 4px !important; }
+#bk-folder-layout-settings input[type="radio"] { border-radius: 50% !important; }
+.bk-folder-input-root {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center; gap: 8px; padding: 7px 9px;
+  border: 1px solid var(--bk-line); border-radius: 9px;
+}
+.bk-folder-input-root strong { white-space: nowrap; }
 .bk-choice-row button.active {
   background: var(--bk-ink) !important;
   color: var(--bk-paper) !important;
@@ -1755,22 +1778,28 @@ BIBLIOTHEKAR_JS = r"""
     host.innerHTML=rows.map(item=>{
       const root=item.node===null;
       const checked=String(folderLayoutState.input_path||"")===item.path;
-      if(root) return '<label style="display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--bk-border);border-radius:9px"><input type="radio" name="bk-input-folder" value="" '+(checked?'checked':'')+'><strong>Direkt im Ereignis</strong><span style="color:var(--bk-muted)">Input</span></label>';
+      if(root) return '<label class="bk-folder-input-root"><input class="bk-folder-input-radio" data-bk-input-node="" type="radio" name="bk-input-folder" value="" '+(checked?'checked':'')+'><strong>Direkt im Ereignis</strong><span style="color:var(--bk-muted)">Input</span></label>';
       const id=String(item.node.id).replaceAll('"','&quot;');
       const name=String(item.node.name).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
       const pad=Math.max(0,(item.depth-1)*20);
       return '<div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:7px;align-items:center;margin-left:'+pad+'px">'
-        +'<input type="radio" name="bk-input-folder" value="'+String(item.path).replaceAll('"','&quot;')+'" '+(checked?'checked':'')+' title="Als Input-Ordner">'
+        +'<input class="bk-folder-input-radio" data-bk-input-node="'+id+'" type="radio" name="bk-input-folder" value="'+String(item.path).replaceAll('"','&quot;')+'" '+(checked?'checked':'')+' title="Als Input-Ordner">'
         +'<input data-bk-layout-name="'+id+'" value="'+name+'" aria-label="Ordnername">'
         +'<button type="button" data-bk-layout-child="'+id+'" title="Unterordner hinzufügen">＋</button>'
         +'<button type="button" data-bk-layout-remove="'+id+'" class="danger-button" title="Ordner entfernen">×</button>'
         +'<span style="color:var(--bk-muted);font-size:.82rem">'+(checked?'Input':'')+'</span></div>';
     }).join("");
     host.querySelectorAll("[data-bk-layout-name]").forEach(input=>input.addEventListener("input",()=>{
+      const selected=host.querySelector('input[name="bk-input-folder"]:checked');
+      const selectedNodeId=String(selected?.dataset?.bkInputNode||"");
       const found=bkFindParent(folderLayoutState.layout.nodes,input.dataset.bkLayoutName);
       if(found) found.node.name=input.value;
-      const selected=host.querySelector('input[name="bk-input-folder"]:checked');
-      if(selected) folderLayoutState.input_path=selected.value;
+      if(selectedNodeId){
+        const selectedRow=bkFlattenLayout(folderLayoutState.layout.nodes).find(item=>String(item.node?.id||"")===selectedNodeId);
+        folderLayoutState.input_path=selectedRow?.path||"";
+      }else if(selected){
+        folderLayoutState.input_path=selected.value;
+      }
     }));
     host.querySelectorAll("[data-bk-layout-child]").forEach(button=>button.addEventListener("click",()=>{
       const found=bkFindParent(folderLayoutState.layout.nodes,button.dataset.bkLayoutChild);
@@ -1820,10 +1849,14 @@ BIBLIOTHEKAR_JS = r"""
         method:"PUT",headers:{"Content-Type":"application/json"},
         body:JSON.stringify(folderLayoutState)
       });
-      const data=await response.json();
+      const raw=await response.text();
+      let data={};
+      try{data=raw?JSON.parse(raw):{};}
+      catch(_){throw new Error(response.ok?"Ungültige Serverantwort beim Speichern.":`Speichern fehlgeschlagen (HTTP ${response.status}).`);}
       if(!response.ok)throw new Error(data.detail||"Speichern fehlgeschlagen.");
       folderLayoutState=data;
       bkRenderFolderLayout();
+      document.dispatchEvent(new CustomEvent("bibliothekar:folder-layout-updated",{detail:data}));
       status.textContent="Gespeichert. Bestehende Ereignisse bleiben unverändert.";
     }catch(error){status.textContent=error.message;}
   });
@@ -2085,9 +2118,9 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       </div>
     </section>
     <section class="bk-settings-group" id="bk-folder-layout-settings">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div class="bk-folder-layout-heading">
         <div><strong>Ereignisordner</strong><div style="color:var(--bk-muted);margin-top:4px">Vorlage nur für neue Ereignisse</div></div>
-        <label style="display:flex;align-items:center;gap:8px"><input id="bk-folder-layout-enabled" type="checkbox"> Unterordner standardmäßig erstellen</label>
+        <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
       </div>
       <div id="bk-folder-layout-tree" style="display:grid;gap:7px;margin-top:12px"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
@@ -2127,7 +2160,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.28.0</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.28.1</span></p>
   </div>
 </dialog>
 

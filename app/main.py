@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
@@ -165,7 +165,7 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = "0.27.5"
-RELEASE_VERSION = "0.28.0"
+RELEASE_VERSION = "0.28.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4612,6 +4612,7 @@ def api_event_structure(job_id: str, event_id: str):
             json.loads(cr["selected_day_keys"] or "[]"),
             children,
             bool(cr["preserve_day_folders"]),
+            layout_state=context.get("folder_layout"),
         )
     else:
         structure_children = [
@@ -4627,6 +4628,7 @@ def api_event_structure(job_id: str, event_id: str):
             assignment_days.get(str(event_id), []),
             structure_children,
             bool(event["preserve_day_folders"]),
+            layout_state=context.get("folder_layout"),
         )
 
     event_facts = {
@@ -4637,6 +4639,7 @@ def api_event_structure(job_id: str, event_id: str):
         "start_datetime": str(event.get("start_datetime") or ""),
         "end_datetime": str(event.get("end_datetime") or ""),
         "preserve_day_folders": bool(event.get("preserve_day_folders")),
+        "folder_layout": context.get("folder_layout") or {},
         "assigned_family_count": len(assigned_families),
         "child_events": [
             {

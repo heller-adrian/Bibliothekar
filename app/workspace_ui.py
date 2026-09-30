@@ -2356,6 +2356,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const end = String(event.end_datetime || "");
       const status = workspaceStatusLabel(event.status || "");
       const kind = event.event_kind === "no_event" ? "Ohne Ereignis" : "Ereignis";
+      const subfolders = event.folder_layout?.structure_enabled === false ? "Direkt im Ereignis" : "Unterordnerstruktur aktiv";
       const dayFolders = event.preserve_day_folders
         ? "Tagesordner bleiben erhalten"
         : "Ohne Tagesunterordner";
@@ -2366,7 +2367,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           ? `<div><strong>Datenbank-Zeitraum:</strong> mehrere gespeicherte Zeitsegmente</div>`
           : `<div><strong>Datenbank-Zeitraum:</strong> von ${escapeHtml(formatStoredDateTime(start))} bis ${escapeHtml(formatStoredDateTime(end))}</div>`,
         `<div><strong>Status:</strong> ${escapeHtml(status)} · ${escapeHtml(kind)}</div>`,
-        `<div><strong>Ordnerlogik:</strong> ${escapeHtml(dayFolders)}</div>`,
+        `<div><strong>Ordnerlogik:</strong> ${escapeHtml(dayFolders)} · ${escapeHtml(subfolders)}</div>`,
         `<div><strong>Zugeordnet:</strong> ${Number(event.assigned_family_count || 0)} Familien</div>`
       ];
       if (childCount) {
@@ -3829,6 +3830,10 @@ WORKSPACE_HTML = r"""<!doctype html>
       applySavedEventStatus.textContent="Alle ausgewählten Ereignisbestandteile wurden vollständig angewendet und geprüft.";
       await loadWorkspace();
     }
+
+    document.addEventListener("bibliothekar:folder-layout-updated", event => {
+      if(event?.detail) globalFolderLayout=event.detail;
+    });
 
     applySavedEventButton.addEventListener("click", () => {
       if (applySavedEventButton.dataset.action === "reconcile") {

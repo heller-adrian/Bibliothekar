@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.28.1 – Deep-Test-Korrekturen für Ereignisordner
+
+- Speichern der globalen Ereignisordner-Vorlage funktioniert wieder; die API verwendet die UTC-Zeit korrekt und die Oberfläche zeigt bei unerwarteten Serverantworten keine rohe JSON-Parse-Meldung mehr.
+- Umbenennen des aktuell gewählten Input-Ordners hält dessen Pfad in der noch nicht gespeicherten Vorlage synchron.
+- Änderungen der globalen Vorlage gelten weiterhin ausschließlich für künftig erzeugte Ereignisse; bestehende Ereignis-Snapshots und deren `event.json` werden nicht rückwirkend verändert.
+- Zielstruktur-Vorschauen gespeicherter, geplanter und angewendeter Ereignisse verwenden jetzt deren konkreten Ordner-Snapshot. Bei „Unterordner erstellen“ AUS werden `Alle / Sortiert / Export` nicht mehr fälschlich angezeigt.
+- Der Einstellungsdialog stellt „Unterordner standardmäßig erstellen“ und „Direkt im Ereignis“ kompakt einzeilig mit normal großen Checkbox-/Radio-Steuerelementen dar.
+- Eine im Einstellungsdialog gespeicherte neue Standardvorlage wird auf der geöffneten Arbeitsbereich-Seite sofort für den nächsten Ereignisdialog übernommen.
+
+
 ### 0.26.9 – verbindliche Applied-Transaktionen und statischer Arbeitsbereich
 
 - Bearbeiten und Löschen bereits angewendeter Ereignisse sind jetzt verbindliche Transaktionen: Nach der Definition öffnet sich unmittelbar der vorhandene SHA-geprüfte Arbeitsbereich-Abgleich. Dieser Zustand kann nicht auf später vertagt werden; oben steht nur „Änderungen verwerfen“, unten wird der Zielplan bestätigt und angewendet.
