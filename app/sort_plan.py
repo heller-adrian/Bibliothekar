@@ -1173,7 +1173,7 @@ def build_event_sort_plan(
                 })
     
     job_ready, job_blocker = job_sort_readiness(job)
-    if not job_ready and not released_workspace_source:
+    if not job_ready and not released_workspace_source and not shared_workspace_source:
         blockers.append({
             "code": "job_not_verified",
             "message": job_blocker,
@@ -1186,6 +1186,15 @@ def build_event_sort_plan(
                 "Rückkehrbestand „Freigewordene Archivdateien“. Die ursprüngliche "
                 "Sicherung bleibt nur als Herkunft erhalten und wird nicht erneut "
                 "als physische Sortierquelle benötigt."
+            ),
+        })
+    elif shared_workspace_source and not job_ready:
+        warnings.append({
+            "code": "shared_workspace_source",
+            "message": (
+                "Die Dateien liegen bereits im gemeinsamen verifizierten "
+                "Arbeitsbereich. Der technische Anchor-Job bleibt nur Workflow-"
+                "Eigentümer und ist keine physische Sortierquelle."
             ),
         })
 
