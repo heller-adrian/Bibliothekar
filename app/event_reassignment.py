@@ -544,6 +544,15 @@ def _create_child_in_existing_event(connection, job_id: str, target, family_ids:
         "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
         [(child_id,fid,now) for fid in family_ids],
     )
+    from app.event_access import register_source_jobs
+    register_source_jobs(
+        connection,
+        str(target["id"]),
+        [str(target["job_id"]), *sorted({
+            str(row["job_id"]) for row in rows if row["job_id"] is not None
+        })],
+        created_at=now,
+    )
     if str(target["status"]) == "applied":
         connection.execute("UPDATE events SET resort_required=1,updated_at=? WHERE id=?",(now,target["id"]))
     return {"event_id":str(target["id"]),"child_event_id":child_id,"name":str(target["name"]),"status":str(target["status"]),
