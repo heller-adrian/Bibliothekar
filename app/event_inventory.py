@@ -258,6 +258,7 @@ def _filename_family_source(
     observed_stem = Path(str(filename or "")).stem
     export_aliases = collision_alias_stems(
         observed_stem,
+        allow_plain_number=True,
         include_export_base=True,
     )
     if not export_aliases:
@@ -612,9 +613,30 @@ def scan_event_inventory(
     originals = [row for row in scanned if row["known_file_id"] is not None]
     by_same_dir_stem: dict[tuple[str, str], list[dict[str, Any]]] = {}
     by_stem: dict[str, list[dict[str, Any]]] = {}
+    known_by_id = {
+        int(item["file_id"]): item
+        for item in known_files
+    }
     for row in originals:
         rel = PurePosixPath(row["event_relative_path"])
-        for stem_alias in collision_alias_stems(rel.stem):
+        known_row = known_by_id.get(int(row["known_file_id"]), {})
+        stored_original_stem = str(
+            known_row.get("original_stem")
+            or Path(str(known_row.get("original_filename") or "")).stem
+        ).strip()
+        numeric_aliases = collision_alias_stems(
+            rel.stem,
+            allow_plain_number=True,
+        )
+        allow_plain_number = bool(
+            stored_original_stem
+            and rel.stem.casefold() != stored_original_stem.casefold()
+            and stored_original_stem.casefold() in numeric_aliases
+        )
+        for stem_alias in collision_alias_stems(
+            rel.stem,
+            allow_plain_number=allow_plain_number,
+        ):
             key = (str(rel.parent), stem_alias)
             by_same_dir_stem.setdefault(key, []).append(row)
             by_stem.setdefault(stem_alias, []).append(row)
