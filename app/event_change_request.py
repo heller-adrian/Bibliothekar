@@ -480,8 +480,10 @@ def _compute_event_plan(
                 action = "keep"
                 new_path = old_path
                 advisory = True
+                advisory_reason = "unmanaged_user_file"
             else:
                 advisory = False
+                advisory_reason = ""
                 if family_id is not None and family_id in removed_family_ids:
                     candidate = None
                 elif asset_kind == "other" and not capture:
@@ -519,7 +521,50 @@ def _compute_event_plan(
                 "selected_capture_time": item.get("selected_capture_time"),
                 "capture_time_confidence": item.get("capture_time_confidence"),
                 "advisory": advisory,
+                "advisory_reason": advisory_reason,
             })
+
+    # 0.28.5: Byte-identische XMP-/Exportdateien derselben Familie und Rolle
+    # sind keine zusätzlichen Pflichtobjekte. Eine kanonische Repräsentation
+    # bleibt verwaltet; weitere identische Kopien werden sichtbar als Hinweis
+    # geführt und dürfen liegen bleiben, umbenannt oder gelöscht werden.
+    duplicate_groups: dict[tuple[int, str, int, str], list[dict[str, Any]]] = {}
+    for asset in asset_plans:
+        family_id = asset.get("family_id")
+        kind = str(asset.get("asset_kind") or "")
+        digest = str(asset.get("expected_sha256") or "")
+        if (
+            family_id is None
+            or kind not in {"xmp", "export"}
+            or not digest
+            or bool(asset.get("advisory"))
+        ):
+            continue
+        key = (
+            int(family_id),
+            kind,
+            int(asset.get("expected_size_bytes") or 0),
+            digest,
+        )
+        duplicate_groups.setdefault(key, []).append(asset)
+
+    for group in duplicate_groups.values():
+        if len(group) < 2:
+            continue
+        canonical = min(
+            group,
+            key=lambda item: (
+                len(Path(str(item.get("old_path") or "")).stem),
+                str(item.get("old_path") or "").casefold(),
+            ),
+        )
+        for asset in group:
+            if asset is canonical:
+                continue
+            asset["advisory"] = True
+            asset["advisory_reason"] = "redundant_duplicate"
+            asset["action"] = "keep"
+            asset["new_path"] = str(asset.get("old_path") or "")
 
     lines = [
         f"{year} — Archiv-Aenderungsplan (manuell)",
@@ -540,7 +585,10 @@ def _compute_event_plan(
         lines.append(
             f"Offen neu zuzuordnen: {len(removed_family_ids)} Familien (werden niemals geloescht)."
         )
-    unresolved_assets = sum(1 for item in asset_plans if item["action"] == "unresolved")
+    unresolved_assets = sum(
+        1 for item in asset_plans
+        if not bool(item.get("advisory")) and item["action"] == "unresolved"
+    )
     advisory_assets = sum(1 for item in asset_plans if bool(item.get("advisory")))
     if unresolved_assets:
         lines.append(
@@ -835,8 +883,8 @@ def propose_event_change(
                 INSERT INTO event_change_asset_reviews(
                     change_request_id,asset_kind,source_file_id,family_id,
                     old_path,new_path,action,expected_size_bytes,expected_sha256,
-                    created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    advisory,advisory_reason,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     cr_id,
@@ -848,6 +896,8 @@ def propose_event_change(
                     str(asset.get("action") or "unresolved"),
                     int(asset.get("expected_size_bytes") or 0),
                     str(asset.get("expected_sha256") or ""),
+                    int(bool(asset.get("advisory"))),
+                    str(asset.get("advisory_reason") or ""),
                     now,
                     now,
                 ),
@@ -949,13 +999,16 @@ def get_event_change_files(
             item["review_kind"] = "asset"
             item["file_id"] = None
             item["confirmed"] = 0
-            item["advisory"] = bool(
+            legacy_advisory = bool(
                 item.get("family_id") is None
                 and str(item.get("asset_kind") or "other") != "export"
                 and str(item.get("action") or "") == "keep"
                 and str(item.get("old_path") or "")
                     == str(item.get("new_path") or "")
             )
+            item["advisory"] = bool(item.get("advisory")) or legacy_advisory
+            if item["advisory"] and not str(item.get("advisory_reason") or ""):
+                item["advisory_reason"] = "unmanaged_user_file"
             asset_rows.append(item)
     return camera_rows + asset_rows
 
