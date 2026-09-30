@@ -462,14 +462,18 @@ def test_cross_job_no_event_workspace_target_finishes_applied_reassignment(tmp_p
 
     with database_connection(db) as connection:
         target = connection.execute(
-            "SELECT status,event_kind,linked_event_id FROM events WHERE id=?", (target_id,)
+            "SELECT status,event_kind,linked_event_id,job_id FROM events WHERE id=?", (target_id,)
         ).fetchone()
-        assert tuple(target) == ("applied", "no_event", other_target["id"])
+        assert target_id == other_target["id"]
+        assert tuple(target) == ("applied", "no_event", None, "other")
         segments = connection.execute(
-            "SELECT day_key,start_time,end_time FROM event_time_segments WHERE event_id=?",
+            "SELECT day_key,start_time,end_time FROM event_time_segments WHERE event_id=? ORDER BY day_key,start_time",
             (target_id,),
         ).fetchall()
-        assert [tuple(row) for row in segments] == [("2026-07-23", "00:00", "23:59")]
+        assert [tuple(row) for row in segments] == [
+            ("2026-07-15", "08:00", "12:00"),
+            ("2026-07-23", "00:00", "23:59"),
+        ]
         file_row = connection.execute(
             "SELECT current_relative_path,sha256_current FROM files WHERE job_id='j'"
         ).fetchone()
