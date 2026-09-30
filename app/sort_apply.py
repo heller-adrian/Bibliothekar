@@ -1195,12 +1195,6 @@ def _finalize_database(
                     "DELETE FROM event_reapply_removed_families WHERE event_id = ?",
                     (event_id,),
                 )
-                connection.execute(
-                    """UPDATE event_file_placement_snapshots
-                       SET restore_pending=0
-                       WHERE event_id=?""",
-                    (event_id,),
-                )
                 action = "event_sort_reapplied"
                 phase = "Nachsortierung vollständig angewendet und geprüft"
         else:
