@@ -23,6 +23,7 @@ from app.transfer_ui import TRANSFER_HTML
 from app.ui_shell import apply_shell
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
+from app.canonical_membership import resolve_payload_membership
 from app.event_layout import (
     ensure_event_layout_snapshot,
     get_event_layout,
@@ -937,6 +938,35 @@ def _event_payload_with_folder_layout(
     })
     result.setdefault("create_subfolders", bool(state["structure_enabled"]))
     return result
+
+def _canonical_membership_preflight(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], JSONResponse | None]:
+    """Expand a visible UI selection to the complete active time membership."""
+    with database_connection(DATABASE_FILE) as connection:
+        membership = resolve_payload_membership(connection, payload)
+    expanded = {
+        **payload,
+        "selected_family_ids": membership["canonical_family_ids"],
+    }
+    if (
+        membership["additional_family_count"]
+        and not bool(payload.get("confirm_cross_backup_membership"))
+    ):
+        response = JSONResponse(
+            status_code=409,
+            content={
+                "detail": (
+                    "Weitere bereits vorhandene Aufnahmen liegen im gewählten "
+                    "Zeitraum und gehören deshalb zum selben Ereignis."
+                ),
+                "confirmation_required": "cross_backup_membership",
+                "membership": membership,
+            },
+        )
+        return expanded, membership, response
+    return expanded, membership, None
+
 
 def _available_families_for_event_payload(
     job_id: str,
@@ -4412,8 +4442,11 @@ def api_create_event(
     )
 
     try:
+        payload, canonical_membership, confirmation = _canonical_membership_preflight(payload)
+        if confirmation is not None:
+            return confirmation
         available_families = _available_families_for_event_payload(job_id, payload)
-    except ValueError as error:
+    except (ValueError, EventPreviewError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
     try:
@@ -4561,6 +4594,13 @@ def api_create_event(
         "job_id": job_id,
         "status": "planned",
         "preview": preview,
+        "source_job_ids": sorted({
+            str(family.get("job_id") or "")
+            for family in available_families
+            if int(family.get("family_id") or 0) in set(result.get("assigned_family_ids") or [])
+            and str(family.get("job_id") or "")
+        }),
+        "canonical_membership": canonical_membership,
         **result,
     }
 
