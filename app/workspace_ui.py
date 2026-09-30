@@ -1293,6 +1293,11 @@ WORKSPACE_HTML = r"""<!doctype html>
           <div id="create-subevent-list" style="display:grid;gap:8px"></div>
         </div>
 
+        <label id="create-subfolders-row" class="full-width check-row">
+          <input id="create-subfolders" type="checkbox">
+          <span>Unterordner erstellen</span>
+        </label>
+
         <label id="preserve-day-folders-row" class="full-width check-row">
           <input
             id="preserve-day-folders"
@@ -1588,6 +1593,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       );
     const preserveDayFoldersRow =
       document.getElementById("preserve-day-folders-row");
+    const createSubfolders = document.getElementById("create-subfolders");
+    const createSubfoldersRow = document.getElementById("create-subfolders-row");
+    let globalFolderLayout = null;
 
     const dialogPreview =
       document.getElementById(
@@ -2120,6 +2128,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     async function loadWorkspace() {
+      if (!globalFolderLayout) {
+        try { globalFolderLayout = await getJson("/api/settings/event-folder-layout"); }
+        catch (_) { globalFolderLayout = {structure_enabled:true,input_path:"Alle",layout:{version:1,nodes:[]}}; }
+      }
       const ids=[...selectedJobIds].filter(id=>jobs.some(job=>job.id===id));
       selectedDays.clear();
 
@@ -3339,7 +3351,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";
       eventStartDate.disabled=false;eventStartTime.disabled=false;eventEndDate.disabled=false;eventEndTime.disabled=false;eventStartDate.removeAttribute("min");eventStartDate.removeAttribute("max");eventEndDate.removeAttribute("min");eventEndDate.removeAttribute("max");
       useTimeRange.checked=!noEvent;useTimeRange.disabled=true;setParentTimeFieldsVisible(true);
-      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";
+      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;createSubfolders.checked=Boolean(globalFolderLayout?.structure_enabled ?? true);createSubfolders.disabled=false;createSubfoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";
       noEventSegmentEditor.hidden=!noEvent;existingNoEventTargetRow.hidden=!existingNoEvent;
       if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
       else if(noEvent){renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));await autoAttachExistingNoEventCollection();}
@@ -3359,6 +3371,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         start_time: eventStartTime.value,
         end_time: eventEndTime.value,
         preserve_day_folders: preserveDayFolders.checked,
+        create_subfolders: createSubfolders.checked,
         selected_day_keys: selectedDatedGroups().map(group => group.day_key),
         existing_parent_event_id: (!["no_event","existing_no_event"].includes(dialogMode) ? (existingParentEvent?.value || null) : null)
       };
@@ -3378,6 +3391,7 @@ WORKSPACE_HTML = r"""<!doctype html>
             : [];
         }
         base.preserve_day_folders = Boolean(parent.preserve_day_folders);
+        base.create_subfolders = Boolean(parent.folder_layout?.structure_enabled ?? createSubfolders.checked);
         for(const segment of base.subevents || []){
           const a=String(segment.start_datetime||"").slice(0,19);
           const b=String(segment.end_datetime||"").slice(0,19);
@@ -3430,13 +3444,20 @@ WORKSPACE_HTML = r"""<!doctype html>
         const folder=String(activeNoEventTarget?.folder_name||`${String(all[0]?.day_key||"").slice(5,7)} - Ohne Ereignis`);
         const year=String(all[0]?.day_key||activeNoEventTarget?.month_key||"").slice(0,4)||"Jahr";
         const preserve=Boolean(payload.preserve_day_folders || activeNoEventTarget?.preserve_day_folders);
+        const state=activeNoEventTarget?.id
+          ? await getJson(`/api/events/${encodeURIComponent(activeNoEventTarget.id)}/folder-layout`)
+          : (globalFolderLayout || {structure_enabled:true,input_path:"Alle",layout:{nodes:[{name:"Alle",children:[]},{name:"Sortiert",children:[]},{name:"Export",children:[]}]}});
+        const flatten=(nodes,prefix="")=>(nodes||[]).flatMap(node=>{
+          const path=prefix?`${prefix}/${node.name}`:String(node.name||"");
+          return [path,...flatten(node.children||[],path)];
+        });
+        const layoutPaths=state.structure_enabled?flatten(state.layout?.nodes||[]):[""];
         const lines=[year,`└── ${folder}`];
-        if (preserve) {
-          for (const day of [...new Set(all.map(s=>s.day_key))].sort()) {
-            lines.push(`    ├── ${day}`,`    │   ├── Alle`,`    │   ├── Sortiert`,`    │   └── Export`);
-          }
-        } else {
-          lines.push(`    ├── Alle`,`    ├── Sortiert`,`    └── Export`);
+        const leaves=preserve?[...new Set(all.map(s=>s.day_key))].sort():[""];
+        for(const leaf of leaves){
+          if(leaf) lines.push(`    ├── ${leaf}`);
+          const indent=leaf?"    │   ":"    ";
+          for(const p of layoutPaths) if(p) lines.push(`${indent}├── ${p}`);
         }
         lines.push("",`Fortführung · ${String(activeNoEventTarget?.status||"")}`);
         for (const segment of all) lines.push(`${segment.day_key} · ${segment.start_time}–${segment.end_time}${newKeys.has(`${segment.day_key}|${segment.start_time}|${segment.end_time}`)?" · NEU":" · bestehend"}`);
