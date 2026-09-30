@@ -458,7 +458,8 @@ def prepare_sort_run(
         )
 
     job_ready, job_blocker = job_sort_readiness(plan["job"])
-    if not job_ready:
+    source_mode = str((plan.get("job") or {}).get("source_root_field") or "")
+    if not job_ready and source_mode not in {"shared_workspace", "released_archive_workspace"}:
         raise SortApplyError(job_blocker)
 
     run_id = "SORT_" + uuid.uuid4().hex.upper()
