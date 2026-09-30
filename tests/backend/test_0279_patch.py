@@ -10,8 +10,8 @@ from tests.backend.test_0263_event_inventory import NOW
 
 
 def test_0279_release_version():
-    assert main.RELEASE_VERSION == "0.27.9"
-    assert main.api_health()["version"] == "0.27.9"
+    assert main.RELEASE_VERSION == "0.28.0"
+    assert main.api_health()["version"] == "0.28.0"
 
 
 def test_0279_cross_backup_accept_api_returns_after_success(tmp_path: Path, monkeypatch):
@@ -55,19 +55,18 @@ def test_0279_cross_backup_accept_api_returns_after_success(tmp_path: Path, monk
     assert result["job_id"] == "incoming"
     assert result["target_job_id"] == "anchor"
     assert result["target_event_id"] == "anchor_event"
-    assert result["linkage_kind"] == "planned_extension"
+    assert result["linkage_kind"] is None
 
     with database_connection(db) as connection:
         linked = connection.execute(
-            """SELECT linked_event_id,linkage_kind,status
-               FROM events
-               WHERE job_id="incoming" AND parent_event_id IS NULL
-               ORDER BY created_at DESC LIMIT 1"""
+            """SELECT job_id,linked_event_id,linkage_kind,status
+               FROM events WHERE id='anchor_event'"""
         ).fetchone()
-    assert linked is not None
-    assert linked["linked_event_id"] == "anchor_event"
-    assert linked["linkage_kind"] == "planned_extension"
-    assert linked["status"] == "planned"
+        count = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE parent_event_id IS NULL"
+        ).fetchone()[0]
+    assert tuple(linked) == ("anchor", None, None, "planned")
+    assert count == 1
 
 
 def test_0279_import_job_id_declared_before_duplicate_notice():
