@@ -189,6 +189,35 @@ def list_job_available_families(
         job_id,
     )
 
+    # Vor dem ersten Anwenden existieren Lightroom-XMP/Exporte unter
+    # Umständen bereits physisch im freien SSD-Bestand, aber noch nicht als
+    # files-Zeilen. Für die sichtbare Planung werden sie read-only zur
+    # jeweiligen Familie hinzugerechnet. Applied-Bestände werden weiter unten
+    # unverändert vom persistierten Live-Inventar überstimmt.
+    if workspace_path is not None and family_stats:
+        from app.workspace_assets import discover_workspace_family_assets
+        physical_assets = discover_workspace_family_assets(
+            database_path,
+            workspace_path,
+            [int(family["family_id"]) for family in family_stats],
+        )
+        for family in family_stats:
+            extra = physical_assets.get(int(family["family_id"]))
+            if not extra:
+                continue
+            family["file_count"] = int(family["file_count"]) + int(
+                extra.get("file_count") or 0
+            )
+            family["total_size_bytes"] = int(family["total_size_bytes"]) + int(
+                extra.get("total_size_bytes") or 0
+            )
+            family["workspace_asset_kinds"] = list(
+                extra.get("asset_kinds") or []
+            )
+            family["workspace_asset_count"] = int(
+                extra.get("file_count") or 0
+            )
+
     active_assignments = _load_active_assignments(
         database_path,
         job_id,
@@ -465,6 +494,7 @@ def interval_cards(database_path, job_id, available_families, total_by_day):
 def list_job_planning_overview(
     database_path: Path,
     job_id: str,
+    workspace_path: Path | None = None,
 ) -> dict[str, Any]:
     """
     Return existing event groups and only the still-free day stock.
