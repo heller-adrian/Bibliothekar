@@ -1574,6 +1574,50 @@ def build_event_sort_plan(
 
     asset_entries: list[dict[str, Any]] = []
 
+    # TrueNAS-/SMB-sicher: Zielnamen werden für Kollisionen grundsätzlich
+    # case-insensitiv betrachtet. Besonders beim Abschalten der Unterordner
+    # können Kamera-JPEG und Export-JPEG denselben Stamm besitzen und sich nur
+    # durch .JPG/.jpg unterscheiden. Auf case-insensitiven Datasets ist das
+    # derselbe Pfad. Kameraoriginale behalten immer ihren Namen; nur ein Export
+    # erhält bei Bedarf einen transparenten Suffix.
+    reserved_destination_keys: set[str] = {
+        str(PurePosixPath(entry["destination_relative_path"])).casefold()
+        for entry in entries
+    }
+
+    def reserve_asset_destination(
+        candidate: PurePosixPath,
+        *,
+        asset_kind: str,
+    ) -> PurePosixPath:
+        key = candidate.as_posix().casefold()
+        if key not in reserved_destination_keys:
+            reserved_destination_keys.add(key)
+            return candidate
+        if asset_kind != "export":
+            # Für XMP/sonstige Sidecars ist eine Namensänderung fachlich nicht
+            # automatisch sicher. Die spätere Duplikatprüfung blockiert diesen
+            # seltenen Sonderfall weiterhin.
+            return candidate
+
+        parent = candidate.parent
+        suffix = candidate.suffix
+        stem = candidate.name[:-len(suffix)] if suffix else candidate.name
+        base = f"{stem}_Export"
+        index = 0
+        while True:
+            name = (
+                f"{base}{suffix}"
+                if index == 0
+                else f"{base}_{index:03d}{suffix}"
+            )
+            proposed = parent / name
+            proposed_key = proposed.as_posix().casefold()
+            if proposed_key not in reserved_destination_keys:
+                reserved_destination_keys.add(proposed_key)
+                return proposed
+            index += 1
+
     # Zusatzdateien, die mit einer archivierten Familie in den Rückkehrbestand
     # gelangt sind, werden beim nächsten normalen Anwenden wieder über dieselbe
     # sichere Asset-Pipeline mitgeführt.
@@ -1636,7 +1680,11 @@ def build_event_sort_plan(
             )
             destination_container = next(iter(destination_containers))
             filename = _safe_component(source_relative.name, "Zusatzdateiname")
-            destination_relative = destination_container / filename
+            released_asset_kind = str(asset.get("asset_kind") or "other")
+            destination_relative = reserve_asset_destination(
+                destination_container / filename,
+                asset_kind=released_asset_kind,
+            )
             destination_absolute = target_root.joinpath(
                 *destination_relative.parts
             ).resolve(strict=False)
@@ -1748,7 +1796,7 @@ def build_event_sort_plan(
             planned_directories.add(str(destination_relative.parent))
             asset_entries.append({
                 "released_archive_asset_id": int(asset["id"]),
-                "asset_kind": str(asset.get("asset_kind") or "other"),
+                "asset_kind": released_asset_kind,
                 "family_id": family_id,
                 "source_file_id": asset.get("source_file_id"),
                 "source_root_kind": "shared_workspace",
@@ -1773,6 +1821,9 @@ def build_event_sort_plan(
                 "same_path": same_path,
                 "status": status,
             })
+            reserved_destination_keys.add(
+                str(destination_relative).casefold()
+            )
 
     if allow_reapply and reapply_inventory is not None:
         camera_entries_by_file = {
@@ -1860,7 +1911,10 @@ def build_event_sort_plan(
                 source_relative.name,
                 "Export-Dateiname" if asset_kind == "export" else "XMP-Dateiname",
             )
-            destination_relative = destination_parent / filename
+            destination_relative = reserve_asset_destination(
+                destination_parent / filename,
+                asset_kind=asset_kind,
+            )
             destination_absolute = target_root.joinpath(
                 *destination_relative.parts
             ).resolve(strict=False)
@@ -1985,6 +2039,9 @@ def build_event_sort_plan(
                 "status": status,
             }
             asset_entries.append(asset_entry)
+            reserved_destination_keys.add(
+                str(destination_relative).casefold()
+            )
 
             if (
                 verify_sha256
@@ -2035,22 +2092,25 @@ def build_event_sort_plan(
             ),
         })
 
-    destination_counts = Counter(
-        entry["destination_relative_path"]
-        for entry in [*entries, *asset_entries]
-    )
-    duplicate_destinations = sorted(
-        destination
-        for destination, count in destination_counts.items()
-        if count > 1
-    )
+    destinations_by_casefold: dict[str, list[str]] = defaultdict(list)
+    for entry in [*entries, *asset_entries]:
+        destination = str(entry["destination_relative_path"])
+        destinations_by_casefold[destination.casefold()].append(destination)
 
-    for destination in duplicate_destinations:
+    duplicate_destinations = [
+        sorted(set(paths))
+        for paths in destinations_by_casefold.values()
+        if len(paths) > 1
+    ]
+    duplicate_destinations.sort(key=lambda paths: paths[0].casefold())
+
+    for paths in duplicate_destinations:
         blockers.append({
             "code": "duplicate_destination",
             "message": (
-                "Mehrere Quelldateien würden denselben Zielpfad verwenden: "
-                + destination
+                "Mehrere Quelldateien würden denselben Zielpfad verwenden "
+                "(Groß-/Kleinschreibung zählt auf dem NAS nicht als Unterschied): "
+                + " / ".join(paths)
             ),
         })
 
