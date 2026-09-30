@@ -1924,6 +1924,24 @@ WORKSPACE_HTML = r"""<!doctype html>
       };
     }
 
+    function payloadForAllSources(base) {
+      const groups = selectedDatedGroups();
+      const familyIds = [...new Set(
+        [...sourceGroupsForSelection().values()]
+          .flatMap(bucket => [...bucket.family_ids])
+          .map(Number)
+          .filter(Number.isFinite)
+      )].sort((a,b)=>a-b);
+      return {
+        ...base,
+        selected_intervals: groups
+          .filter(group => group.start_datetime && group.end_datetime)
+          .map(group => ({start_datetime:group.start_datetime,end_datetime:group.end_datetime})),
+        selected_day_keys: [...new Set(groups.map(group=>group.day_key).filter(Boolean))].sort(),
+        selected_family_ids: familyIds
+      };
+    }
+
     function mergeWorkspacePayloads(items) {
       if (!items.length) {
         return {
@@ -3435,8 +3453,12 @@ WORKSPACE_HTML = r"""<!doctype html>
         return;
       }
 
-      const payload =
-        payloadForSourceJob(collectEventPayload(), jobId);
+      const basePayload = collectEventPayload();
+      const selectedParent = basePayload.existing_parent_event_id
+        ? (workspace?.events || []).find(event=>String(event.id)===String(basePayload.existing_parent_event_id))
+        : null;
+      if (selectedParent?.job_id) jobId = String(selectedParent.job_id);
+      const payload = payloadForAllSources(basePayload);
 
       if (dialogMode === "existing_no_event" || activeNoEventTarget) {
         const all=payload.display_no_event_segments||payload.no_event_segments||[];
@@ -3580,33 +3602,18 @@ WORKSPACE_HTML = r"""<!doctype html>
           saveResult.textContent = `Fortgeführt: ${total} Familien${results.length>1?" · sicherungsübergreifend":""}`;
         } else {
           const eventPayload=collectEventPayload();
-          const sourceBuckets=sourceGroupsForSelection();
-          const anchorPayload=payloadForSourceJob(eventPayload,jobId);
+          const selectedParent=eventPayload.existing_parent_event_id
+            ? (workspace?.events||[]).find(event=>String(event.id)===String(eventPayload.existing_parent_event_id))
+            : null;
+          const requestJobId=String(selectedParent?.job_id || jobId);
+          const globalPayload=payloadForAllSources(eventPayload);
           result = await createEventWithEmptySubeventConfirmation(
-            jobId,
-            anchorPayload
+            requestJobId,
+            globalPayload
           );
-          const linkedResults=[];
-          if(result?.parent_event?.id){
-            for(const [sourceJobId,bucket] of sourceBuckets.entries()){
-              if(sourceJobId===jobId)continue;
-              const familyIds=[...bucket.family_ids].filter(Number.isFinite);
-              if(!familyIds.length)continue;
-              if(eventPayload.event_kind==="event"){
-                linkedResults.push(await postJson(
-                  `/api/jobs/${encodeURIComponent(sourceJobId)}/event-suggestions/accept`,
-                  {family_ids:familyIds,target_event_id:result.parent_event.id}
-                ));
-              }else{
-                linkedResults.push(await postJson(
-                  `/api/jobs/${encodeURIComponent(sourceJobId)}/no-event/assign-existing`,
-                  {target_event_id:result.parent_event.id,segments:eventPayload.no_event_segments||[]}
-                ));
-              }
-            }
-          }
-          const totalFamilies=Number(result.assigned_family_count||0)+linkedResults.reduce((sum,item)=>sum+Number(item.family_count||0),0);
-          saveResult.textContent = `Gespeichert: ${result.parent_event.folder_name} · ${totalFamilies} Familien${linkedResults.length?" · sicherungsübergreifend":""}`;
+          const sourceCount=sourceGroupsForSelection().size;
+          const totalFamilies=Number(result.assigned_family_count||0);
+          saveResult.textContent = `Gespeichert: ${result.parent_event.folder_name} · ${totalFamilies} Familien${sourceCount>1?" · sicherungsübergreifend":""}`;
           lastSavedEvent = result.parent_event;
         }
 
