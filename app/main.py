@@ -31,6 +31,14 @@ from app.event_layout import (
     update_event_layout,
     EventLayoutError,
 )
+from app.event_structure_changes import (
+    detect_all_event_structure_changes,
+    get_structure_change,
+    confirm_applied_structure_change,
+    prepare_archived_structure_change,
+    verify_archived_structure_change,
+    EventStructureChangeError,
+)
 
 from app.database import (
     claim_next_job,
@@ -5427,6 +5435,7 @@ def api_search_events(q: str = "", limit: int = 25, offset: int = 0) -> dict[str
         WORKSPACE_PATH,
         ARCHIVE_ROOT,
     )
+    detect_all_event_structure_changes(DATABASE_FILE)
     return search_events(DATABASE_FILE, query=q, limit=limit, offset=offset)
 
 
@@ -5557,6 +5566,55 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/api/event-structure-changes/{change_id}", tags=["Ereignisse"])
+def api_event_structure_change(change_id: str) -> dict[str, Any]:
+    try:
+        return get_structure_change(DATABASE_FILE, change_id)
+    except EventStructureChangeError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.post("/api/event-structure-changes/{change_id}/confirm-applied", tags=["Ereignisse"])
+def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return confirm_applied_structure_change(
+            DATABASE_FILE,
+            WORKSPACE_PATH,
+            change_id,
+            input_path=str(payload.get("input_path") or ""),
+            app_version=RELEASE_VERSION,
+        )
+    except EventStructureChangeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/event-structure-changes/{change_id}/prepare-archive", tags=["Ereignisse"])
+def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return prepare_archived_structure_change(
+            DATABASE_FILE,
+            WORKSPACE_PATH,
+            change_id,
+            input_path=str(payload.get("input_path") or ""),
+            app_version=RELEASE_VERSION,
+        )
+    except EventStructureChangeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/event-structure-changes/{change_id}/verify-archive", tags=["Ereignisse"])
+def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
+    try:
+        return verify_archived_structure_change(
+            DATABASE_FILE,
+            ARCHIVE_ROOT,
+            WORKSPACE_PATH,
+            change_id,
+        )
+    except EventStructureChangeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.get("/api/tasks", tags=["Aufgaben"])
 def api_global_tasks() -> dict[str, Any]:
     tasks = list_global_tasks(DATABASE_FILE)
@@ -5609,6 +5667,7 @@ def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
         WORKSPACE_PATH,
         ARCHIVE_ROOT,
     )
+    detect_all_event_structure_changes(DATABASE_FILE)
     payload = build_global_workspace_summary(DATABASE_FILE, selected)
 
     suggestions: list[dict[str, Any]] = []
