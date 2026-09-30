@@ -127,6 +127,32 @@ def _capture_second(value: Any) -> str:
     return str(value or "")[:19]
 
 
+def _layout_state(payload: dict[str, Any]) -> dict[str, Any]:
+    from app.event_layout import DEFAULT_LAYOUT, normalize_layout, validate_input_path
+    raw = payload.get("folder_layout")
+    if not isinstance(raw, dict):
+        raw = {
+            "structure_enabled": True,
+            "input_path": "Alle",
+            "layout": DEFAULT_LAYOUT,
+        }
+    layout = normalize_layout(raw.get("layout") or DEFAULT_LAYOUT)
+    enabled = bool(
+        payload.get(
+            "create_subfolders",
+            raw.get("structure_enabled", True),
+        )
+    )
+    input_path = validate_input_path(
+        layout,
+        raw.get("input_path", "Alle") if enabled else "",
+        structure_enabled=enabled,
+    )
+    return {
+        "structure_enabled": enabled,
+        "input_path": input_path,
+        "layout": layout,
+    }
 
 
 def _build_no_event_preview(
@@ -168,22 +194,22 @@ def _build_no_event_preview(
     parent_folder = f"{month_key[5:7]} - Ohne Ereignis"
 
     preserve_day_folders = bool(payload.get("preserve_day_folders"))
+    folder_layout = _layout_state(payload)
 
-    lines = [start_date[:4], f"└── {parent_folder}"]
-    if preserve_day_folders:
-        segment_days = []
-        for segment in segments:
-            day = segment["day_key"]
-            if day not in segment_days:
-                segment_days.append(day)
-        for index, day in enumerate(segment_days):
-            connector = "└──" if index == len(segment_days) - 1 else "├──"
-            lines.append(f"    {connector} {day}")
-            indent = "        " if index == len(segment_days) - 1 else "    │   "
-            lines.extend(_folder_triplet(indent))
-    else:
-        lines.extend(["    ├── Alle", "    ├── Sortiert", "    └── Export"])
-
+    from app.structure_view import render_structure
+    segment_days = []
+    for segment in segments:
+        day = segment["day_key"]
+        if day not in segment_days:
+            segment_days.append(day)
+    lines = render_structure(
+        start_date[:4],
+        parent_folder,
+        segment_days,
+        (),
+        preserve_day_folders,
+        layout_state=folder_layout,
+    )
     lines.extend(["", "Zeitsegmente:"])
     for segment in segments:
         lines.append(f"{segment['day_key']} · {segment['start_time']}–{segment['end_time']}")
@@ -197,6 +223,8 @@ def _build_no_event_preview(
         "child_event_name": None,
         "uses_time_range": False,
         "preserve_day_folders": preserve_day_folders,
+        "folder_layout": folder_layout,
+        "create_subfolders": bool(folder_layout["structure_enabled"]),
         # Legacy bounding values: canonical no-event time data is no_event_segments.
         "start_date": start_date,
         "end_date": end_date,
@@ -263,6 +291,7 @@ def build_event_preview(
     preserve_day_folders = bool(
         payload.get("preserve_day_folders")
     )
+    folder_layout = _layout_state(payload)
 
     if event_kind == "no_event":
         preserve_day_folders = False
@@ -553,6 +582,7 @@ def build_event_preview(
         structure_subevents
         or ([{"folder_name": child_folder, "day_keys": selected_day_keys}] if child_folder else []),
         preserve_day_folders,
+        layout_state=folder_layout,
     )
     lines.extend([
         "",
@@ -587,6 +617,8 @@ def build_event_preview(
         "preserve_day_folders": (
             preserve_day_folders
         ),
+        "folder_layout": folder_layout,
+        "create_subfolders": bool(folder_layout["structure_enabled"]),
         "start_date": start_date,
         "end_date": end_date,
         "start_time": start_time,
