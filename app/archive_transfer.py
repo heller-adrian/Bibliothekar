@@ -449,7 +449,7 @@ def verify_event_archive(
                     "expected_sha256": str(
                         row.get("sha256_current") or row.get("sha256_original") or ""
                     ),
-                    "status": "source_missing",
+                    "status": "missing",
                     "actual_size_bytes": None,
                     "actual_sha256": None,
                     "error_message": (
@@ -514,7 +514,7 @@ def verify_event_archive(
                     error_message = "SHA-256-Summe weicht vom aktuellen SSD-Bestand ab."
                     mismatched_count += 1
                 elif actual_relative != expected_relative:
-                    status = "path_mismatch"
+                    status = "missing"
                     error_message = (
                         "Die Ordnerlage im Archiv stimmt nicht mit dem aktuellen SSD-Bestand überein. "
                         f"Archiv: {actual_relative} · SSD-SOLL: {expected_relative}"
