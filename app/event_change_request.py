@@ -416,6 +416,38 @@ def _compute_event_plan(
             "workspace_original_path": old_path if incoming_workspace else "",
         })
 
+    reserved_archive_targets: set[str] = {
+        str(item.get("new_path") or "").casefold()
+        for item in file_plans
+        if str(item.get("new_path") or "")
+    }
+
+    def reserve_archive_asset_target(candidate: str, asset_kind: str) -> str:
+        key = str(candidate).casefold()
+        if key not in reserved_archive_targets:
+            reserved_archive_targets.add(key)
+            return str(candidate)
+        if asset_kind != "export":
+            return str(candidate)
+
+        path = PurePosixPath(str(candidate))
+        suffix = path.suffix
+        stem = path.name[:-len(suffix)] if suffix else path.name
+        base = f"{stem}_Export"
+        index = 0
+        while True:
+            name = (
+                f"{base}{suffix}"
+                if index == 0
+                else f"{base}_{index:03d}{suffix}"
+            )
+            proposed = path.parent / name
+            proposed_key = proposed.as_posix().casefold()
+            if proposed_key not in reserved_archive_targets:
+                reserved_archive_targets.add(proposed_key)
+                return proposed.as_posix()
+            index += 1
+
     if inventory is not None:
         from app.event_document import EVENT_DOCUMENT_FILENAME
         for item in inventory["files"]:
@@ -468,6 +500,7 @@ def _compute_event_plan(
                     )
 
                 if candidate:
+                    candidate = reserve_archive_asset_target(candidate, asset_kind)
                     action = "keep" if candidate == old_path else "move"
                     new_path = candidate
                 else:
