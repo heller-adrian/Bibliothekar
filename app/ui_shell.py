@@ -1774,6 +1774,15 @@ BIBLIOTHEKAR_JS = r"""
     const enabled=document.getElementById("bk-folder-layout-enabled");
     enabled.checked=Boolean(folderLayoutState.structure_enabled);
     const flattened=bkFlattenLayout(folderLayoutState.layout?.nodes||[]);
+    const exportSelect=document.getElementById("bk-folder-export-node");
+    if(exportSelect){
+      const selectedExport=flattened.find(item=>String(item.node?.role||"").toLowerCase()==="export");
+      exportSelect.innerHTML='<option value="">Kein Ordner fest als Exportordner klassifiziert</option>'
+        + flattened.map(item=>'<option value="'+String(item.node.id).replaceAll('"','&quot;')+'">'
+          +String(item.path).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;')
+          +'</option>').join('');
+      exportSelect.value=selectedExport ? String(selectedExport.node.id) : "";
+    }
     const rows=[{node:null,path:"",depth:0},...flattened.map(item=>({...item,depth:item.path.split("/").length}))];
     host.innerHTML=rows.map(item=>{
       const root=item.node===null;
@@ -1834,6 +1843,14 @@ BIBLIOTHEKAR_JS = r"""
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadFolderLayout);
   document.getElementById("bk-folder-layout-enabled")?.addEventListener("change",event=>{
     if(folderLayoutState)folderLayoutState.structure_enabled=Boolean(event.target.checked);
+  });
+  document.getElementById("bk-folder-export-node")?.addEventListener("change",event=>{
+    if(!folderLayoutState)return;
+    const selected=String(event.target.value||"");
+    for(const item of bkFlattenLayout(folderLayoutState.layout?.nodes||[])){
+      if(String(item.node?.role||"").toLowerCase()==="export")delete item.node.role;
+      if(selected && String(item.node?.id||"")===selected)item.node.role="export";
+    }
   });
   document.getElementById("bk-folder-add-root")?.addEventListener("click",()=>{
     if(!folderLayoutState)return;
@@ -2123,6 +2140,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
       </div>
       <div id="bk-folder-layout-tree" style="display:grid;gap:7px;margin-top:12px"></div>
+      <label style="display:grid;gap:6px;margin-top:11px">
+        <span><strong>Exportordner</strong> <span style="color:var(--bk-muted)">· optional</span></span>
+        <select id="bk-folder-export-node">
+          <option value="">Kein Ordner fest als Exportordner klassifiziert</option>
+        </select>
+        <span style="color:var(--bk-muted);font-size:.86rem;line-height:1.35">Dateien in diesem Ordner gelten als Exporte, auch wenn der Ordner z. B. „Master“ heißt. Die Einstellung wird wie die Ordnerstruktur für neue Ereignisse eingefroren.</span>
+      </label>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
         <button id="bk-folder-add-root" type="button">＋ Ordner</button>
         <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
