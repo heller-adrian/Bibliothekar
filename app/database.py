@@ -2649,13 +2649,13 @@ def create_planned_event(
             f"""
             SELECT
                 id,
+                job_id,
                 family_key,
                 selected_capture_time
 
             FROM file_families
 
-            WHERE job_id = ?
-              AND id IN (
+            WHERE id IN (
                     {placeholders}
                   )
 
@@ -2663,10 +2663,7 @@ def create_planned_event(
                 selected_capture_time,
                 id
             """,
-            (
-                job_id,
-                *requested_family_ids,
-            ),
+            tuple(requested_family_ids),
         ).fetchall()
 
         found_family_ids = {
@@ -3026,7 +3023,16 @@ def create_planned_event(
 
         from app.event_access import register_source_jobs
         from app.event_layout import ensure_event_layout_snapshot, update_event_layout
-        register_source_jobs(connection, parent_event_id, [job_id], created_at=now)
+        source_job_ids = sorted({
+            str(row["job_id"]) for row in family_rows
+            if row["job_id"] is not None
+        })
+        register_source_jobs(
+            connection,
+            parent_event_id,
+            [job_id, *source_job_ids],
+            created_at=now,
+        )
         ensure_event_layout_snapshot(connection, parent_event_id, now=now)
         preview_layout = preview.get("folder_layout")
         if isinstance(preview_layout, dict):
@@ -4151,6 +4157,8 @@ def assign_free_families_to_existing_no_event(
     job_id: str,
     target_event_id: str,
     segments: list[dict[str, Any]],
+    *,
+    family_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     """Assign free families directly to one canonical monthly collection.
 
@@ -4185,25 +4193,48 @@ def assign_free_families_to_existing_no_event(
                 names=sorted({str(x["name"]) for x in overlaps})
                 connection.rollback(); raise ValueError("Der gewählte Zeitraum überschneidet sich mit einem Ereignis: " + ", ".join(names))
 
-        rows = connection.execute(
-            """SELECT ff.id,ff.selected_capture_time FROM file_families ff
-               WHERE ff.job_id=? AND ff.selected_capture_time IS NOT NULL
-                 AND NOT EXISTS (
-                   SELECT 1 FROM event_assignments ea JOIN events e ON e.id=ea.event_id
-                   WHERE ea.family_id=ff.id
-                     AND e.status IN ('draft','planned','applied','archived')
-                 )
-               ORDER BY ff.selected_capture_time,ff.id""", (job_id,)
-        ).fetchall()
+        requested_ids = sorted({int(value) for value in (family_ids or []) if int(value) > 0})
+        if requested_ids:
+            placeholders = ",".join("?" for _ in requested_ids)
+            rows = connection.execute(
+                f"""SELECT ff.id,ff.job_id,ff.selected_capture_time FROM file_families ff
+                    WHERE ff.id IN ({placeholders}) AND ff.selected_capture_time IS NOT NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM event_assignments ea JOIN events e ON e.id=ea.event_id
+                        WHERE ea.family_id=ff.id
+                          AND e.status IN ('draft','planned','applied','archived')
+                      )
+                    ORDER BY ff.selected_capture_time,ff.id""",
+                tuple(requested_ids),
+            ).fetchall()
+            if len(rows) != len(requested_ids):
+                connection.rollback()
+                raise ValueError("Mindestens eine ausgewählte Dateifamilie ist nicht mehr frei.")
+        else:
+            rows = connection.execute(
+                """SELECT ff.id,ff.job_id,ff.selected_capture_time FROM file_families ff
+                   WHERE ff.job_id=? AND ff.selected_capture_time IS NOT NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM event_assignments ea JOIN events e ON e.id=ea.event_id
+                       WHERE ea.family_id=ff.id
+                         AND e.status IN ('draft','planned','applied','archived')
+                     )
+                   ORDER BY ff.selected_capture_time,ff.id""", (job_id,)
+            ).fetchall()
+
         selected=[]
         for row in rows:
             cap=str(row["selected_capture_time"] or "")[:19]
             if any(seg["start_datetime"] <= cap <= seg["end_datetime"] for seg in normalized):
-                selected.append((int(row["id"]),cap))
+                selected.append((int(row["id"]),cap,str(row["job_id"])))
         if not selected:
             connection.rollback(); raise ValueError("In den gewählten Zeitsegmenten gibt es keine freien Dateifamilien.")
+        if requested_ids and {fid for fid,_,_ in selected} != set(requested_ids):
+            connection.rollback()
+            raise ValueError("Mindestens eine ausgewählte Dateifamilie liegt außerhalb der gewählten Zeitsegmente.")
 
-        same_job = str(target["job_id"]) == job_id
+        source_job_ids = sorted({source_job_id for _,_,source_job_id in selected})
+        same_job = source_job_ids == [str(target["job_id"])]
         if str(target["status"]) == "archived":
             connection.rollback()
             raise ValueError("Archivierte „Ohne Ereignis“-Sammlungen werden nur über den Archivänderungsworkflow ergänzt.")
@@ -4235,7 +4266,7 @@ def assign_free_families_to_existing_no_event(
 
         connection.executemany(
             "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
-            [(effective_event_id,fid,now) for fid,_ in selected],
+            [(effective_event_id,fid,now) for fid,_,_ in selected],
         )
         for seg in normalized:
             existing = connection.execute(
@@ -4262,18 +4293,19 @@ def assign_free_families_to_existing_no_event(
         register_source_jobs(
             connection,
             effective_event_id,
-            [str(target["job_id"]), str(job_id)],
+            [str(target["job_id"]), *source_job_ids],
             created_at=now,
         )
         connection.execute(
             "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'free_families_added_to_no_event','event',?,?,?)",
-            (job_id,effective_event_id,json.dumps({"family_ids":[fid for fid,_ in selected],"segments":normalized,"canonical_target_event_id":str(target["id"]),"linkage_kind":effective_linkage},ensure_ascii=False,sort_keys=True),now),
+            (str(target["job_id"]),effective_event_id,json.dumps({"family_ids":[fid for fid,_,_ in selected],"source_job_ids":source_job_ids,"segments":normalized,"canonical_target_event_id":str(target["id"]),"linkage_kind":effective_linkage},ensure_ascii=False,sort_keys=True),now),
         )
         connection.commit()
     return {
         "status":"assigned","event_id":effective_event_id,
         "canonical_target_event_id":str(target["id"]),
-        "assigned_family_count":len(selected),"family_ids":[fid for fid,_ in selected],
+        "assigned_family_count":len(selected),"family_ids":[fid for fid,_,_ in selected],
+        "source_job_ids":source_job_ids,
         "cross_job":not same_job,"linkage_kind":effective_linkage,
     }
 
