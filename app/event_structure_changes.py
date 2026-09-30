@@ -672,6 +672,105 @@ def _write_prepared_document(path: Path, document: dict[str, Any]) -> str:
     return digest
 
 
+def cleanup_completed_archived_structure_helpers(
+    database_path: Path,
+    workspace_path: Path,
+    *,
+    event_id: str | None = None,
+    change_id: str | None = None,
+) -> dict[str, Any]:
+    """Remove only verified helper event.json files from completed archive tasks.
+
+    Older 0.28.3 builds left the prepared event.json below Später zuordnen.
+    That stale, app-owned helper could later collide with a newly projected
+    archive event.json. Removal is deliberately narrow: only a completed
+    camera-archive structure task, its recorded exact helper path and its
+    recorded SHA-256 are accepted. Empty parent folders are then pruned up to,
+    but never including, Später zuordnen.
+    """
+    staging_root = (
+        Path(workspace_path)
+        / WORK_DIRECTORY_NAME
+        / "Später zuordnen"
+    ).resolve(strict=False)
+    removed_files = 0
+    removed_directories = 0
+    warnings: list[str] = []
+
+    query = """SELECT id,event_id,detected_json
+               FROM event_structure_changes
+               WHERE root_kind='camera_archive' AND status='completed'"""
+    params: list[Any] = []
+    if change_id is not None:
+        query += " AND id=?"
+        params.append(str(change_id))
+    if event_id is not None:
+        query += " AND event_id=?"
+        params.append(str(event_id))
+    query += " ORDER BY completed_at,id"
+
+    with database_connection(database_path) as connection:
+        rows = [dict(row) for row in connection.execute(query, tuple(params)).fetchall()]
+
+    for row in rows:
+        try:
+            detected = json.loads(str(row.get("detected_json") or "{}"))
+        except Exception:
+            warnings.append(
+                f"{row.get('id')}: gespeicherte Hilfsdatei-Information ist beschädigt."
+            )
+            continue
+        raw_path = str(detected.get("prepared_event_json_path") or "").strip()
+        expected_sha = str(detected.get("prepared_event_json_sha256") or "").strip()
+        if not raw_path or not expected_sha:
+            continue
+
+        helper_path = Path(raw_path).expanduser().resolve(strict=False)
+        if helper_path == staging_root or staging_root not in helper_path.parents:
+            warnings.append(
+                f"{row.get('id')}: gespeicherter Hilfsdateipfad liegt außerhalb von Später zuordnen."
+            )
+            continue
+
+        if helper_path.exists() or helper_path.is_symlink():
+            if not helper_path.is_file() or helper_path.is_symlink():
+                warnings.append(
+                    f"{row.get('id')}: Hilfsdateipfad ist keine reguläre Datei."
+                )
+                continue
+            try:
+                actual_sha = hashlib.sha256(helper_path.read_bytes()).hexdigest()
+            except OSError as exc:
+                warnings.append(f"{row.get('id')}: Hilfsdatei konnte nicht geprüft werden: {exc}")
+                continue
+            if actual_sha != expected_sha:
+                warnings.append(
+                    f"{row.get('id')}: Hilfsdatei wurde nicht entfernt, weil ihr Inhalt vom bestätigten Stand abweicht."
+                )
+                continue
+            try:
+                helper_path.unlink()
+                removed_files += 1
+            except OSError as exc:
+                warnings.append(f"{row.get('id')}: Hilfsdatei konnte nicht entfernt werden: {exc}")
+                continue
+
+        current = helper_path.parent
+        while current != staging_root and staging_root in current.parents:
+            try:
+                current.rmdir()
+                removed_directories += 1
+            except OSError:
+                break
+            current = current.parent
+
+    return {
+        "removed_file_count": removed_files,
+        "removed_directory_count": removed_directories,
+        "warnings": warnings,
+    }
+
+
 def prepare_archived_structure_change(
     database_path: Path,
     workspace_path: Path,
@@ -817,6 +916,12 @@ def verify_archived_structure_change(
             (now, now, change_id),
         )
         connection.commit()
+
+    helper_cleanup = cleanup_completed_archived_structure_helpers(
+        database_path,
+        workspace_path,
+        change_id=change_id,
+    )
     return {
         "status": "completed",
         "change_id": change_id,
@@ -824,4 +929,5 @@ def verify_archived_structure_change(
         "folder_layout": layout_state,
         "verified_event_json_sha256": actual_sha,
         "archive_read_only": True,
+        "helper_cleanup": helper_cleanup,
     }
