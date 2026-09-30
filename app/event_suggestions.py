@@ -7,6 +7,7 @@ import json
 
 from app.database import database_connection
 from app.event_access import register_source_jobs
+from app.canonical_membership import event_contains_capture
 
 
 class EventSuggestionError(RuntimeError):
@@ -21,7 +22,9 @@ def _capture_day(value: str | None) -> str:
     return str(value or "")[:10]
 
 
-def _action_label(status: str) -> str:
+def _action_label(status: str, event_kind: str = "event") -> str:
+    if event_kind == "no_event":
+        return "Zu „Ohne Ereignis“ hinzufügen"
     return {
         "planned": "Zum Ereignis hinzufügen",
         "applied": "Zum Ereignis hinzufügen",
@@ -29,9 +32,29 @@ def _action_label(status: str) -> str:
     }[status]
 
 
+def _is_older(left: str, right: str) -> bool:
+    try:
+        return datetime.fromisoformat(str(left)) < datetime.fromisoformat(str(right))
+    except (TypeError, ValueError):
+        return str(left or "") < str(right or "")
+
+
 def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, Any]]:
-    """Return existing events that can absorb still-free families of one import."""
+    """Later-imported free families whose canonical target already existed.
+
+    This card is deliberately *not* a repair mechanism for an old backup that
+    was merely hidden by the view filter.  Such families are handled during
+    event creation by the 0.28.2 canonical membership preflight.
+    """
     with database_connection(database_path) as connection:
+        source_job = connection.execute(
+            "SELECT id,created_at,source_volume_label FROM jobs WHERE id=?",
+            (job_id,),
+        ).fetchone()
+        if source_job is None:
+            return []
+        source_created_at = str(source_job["created_at"] or "")
+
         family_rows = connection.execute(
             """
             SELECT ff.id, ff.family_key, ff.original_stem,
@@ -41,12 +64,21 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
             JOIN files AS f ON f.family_id = ff.id AND f.job_id = ff.job_id
             WHERE ff.job_id = ?
               AND ff.selected_capture_time IS NOT NULL
+              AND EXISTS (
+                    SELECT 1 FROM files active
+                    WHERE active.family_id=ff.id
+                      AND active.job_id=ff.job_id
+                      AND active.current_root_kind='shared_workspace'
+                      AND COALESCE(active.current_relative_path,'')
+                          NOT LIKE 'Freigewordene Archivdateien/%'
+              )
               AND NOT EXISTS (
                     SELECT 1
                     FROM event_assignments AS ea
                     JOIN events AS assigned ON assigned.id = ea.event_id
+                    JOIN events AS root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
                     WHERE ea.family_id = ff.id
-                      AND assigned.status IN ('draft','planned','applied','archived')
+                      AND root.status IN ('draft','planned','applied','archived')
               )
             GROUP BY ff.id
             ORDER BY ff.selected_capture_time, ff.id
@@ -54,38 +86,36 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
             (job_id,),
         ).fetchall()
 
+        roots = [
+            dict(row) for row in connection.execute(
+                """
+                SELECT e.id,e.job_id,e.name,e.folder_name,e.status,e.event_kind,
+                       e.start_datetime,e.end_datetime,e.created_at,
+                       e.preserve_day_folders
+                FROM events e
+                WHERE e.parent_event_id IS NULL
+                  AND COALESCE(e.linkage_kind,'')=''
+                  AND e.status IN ('planned','applied','archived')
+                  AND e.event_kind IN ('event','no_event')
+                ORDER BY e.start_datetime,e.id
+                """
+            ).fetchall()
+            if _is_older(str(row["created_at"] or ""), source_created_at)
+        ]
+
         grouped: dict[str, dict[str, Any]] = {}
         for family in family_rows:
-            capture = str(family["selected_capture_time"])
+            capture = str(family["selected_capture_time"] or "")[:19]
             if not _capture_day(capture):
                 continue
-            candidates = connection.execute(
-                """
-                SELECT e.id, e.job_id, e.name, e.folder_name, e.status,
-                       e.event_kind, e.start_datetime, e.end_datetime,
-                       e.created_at, e.preserve_day_folders
-                FROM events AS e
-                WHERE e.parent_event_id IS NULL
-                  AND e.job_id <> ?
-                  AND e.event_kind = 'event'
-                  AND COALESCE(e.linkage_kind,'') = ''
-                  AND e.status IN ('planned','applied','archived')
-                  AND ? BETWEEN e.start_datetime AND e.end_datetime
-                ORDER BY
-                    CASE e.status WHEN 'planned' THEN 1 WHEN 'applied' THEN 2 ELSE 3 END,
-                    e.created_at DESC, e.id DESC
-                """,
-                (job_id, capture),
-            ).fetchall()
-            if not candidates:
-                continue
-            best_rank = {"planned": 1, "applied": 2, "archived": 3}[str(candidates[0]["status"])]
-            best = [
-                row for row in candidates
-                if {"planned": 1, "applied": 2, "archived": 3}[str(row["status"])] == best_rank
+            matching = [
+                event for event in roots
+                if event_contains_capture(connection, event, capture)
             ]
-            unique_targets = {str(row["id"]): dict(row) for row in best}
+            unique_targets = {str(row["id"]): row for row in matching}
             if len(unique_targets) != 1:
+                # Canonical timelines should yield exactly one target. Legacy
+                # overlaps stay visible as a conflict instead of being guessed.
                 continue
 
             target = next(iter(unique_targets.values()))
@@ -97,9 +127,12 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
                 "target_name": str(target["name"]),
                 "target_folder_name": str(target["folder_name"]),
                 "target_status": str(target["status"]),
+                "target_event_kind": str(target["event_kind"]),
                 "target_start_datetime": str(target["start_datetime"]),
                 "target_end_datetime": str(target["end_datetime"]),
-                "action_label": _action_label(str(target["status"])),
+                "action_label": _action_label(
+                    str(target["status"]), str(target["event_kind"])
+                ),
                 "families": [],
                 "family_ids": [],
                 "family_count": 0,
@@ -130,7 +163,6 @@ def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, A
             )
         )
     return suggestions
-
 
 def _normalize_family_ids(values: Iterable[int]) -> list[int]:
     result: list[int] = []
