@@ -301,6 +301,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     owner_by_family={int(r['family_id']):str(r['root_event_id']) for r in owner_rows}
 
     plans=[]; by_file: dict[int,dict[str,Any]]={}; by_file_source: dict[int,str]={}; directories: dict[str,dict[str,Any]]={}
+    by_asset: dict[str,dict[str,Any]] = {}
     managed_event_roots: set[str] = set()
     warnings=[]
     for eid in event_ids:
@@ -349,11 +350,31 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
                 blockers.append({"code":"conflicting_destination","file_id":fid,"message":"Eine Datei erhält innerhalb der gemeinsamen Änderung zwei verschiedene SOLL-Pfade, ohne eindeutige Zielzuordnung."})
                 continue
             by_file[fid]=f; by_file_source[fid]=eid
+        for asset in p.get('assets',[]) or []:
+            key=str(asset.get('source_relative_path') or '')
+            if not key:
+                blockers.append({
+                    "code":"asset_source_missing_path",
+                    "event_id":eid,
+                    "message":"Eine Zusatzdatei besitzt keinen eindeutigen Quellpfad."
+                })
+                continue
+            prior_asset=by_asset.get(key)
+            if prior_asset is not None and str(prior_asset.get('destination_relative_path')) != str(asset.get('destination_relative_path')):
+                blockers.append({
+                    "code":"conflicting_asset_destination",
+                    "event_id":eid,
+                    "path":key,
+                    "message":"Eine Zusatzdatei erhält innerhalb der gemeinsamen Änderung zwei verschiedene SOLL-Pfade."
+                })
+                continue
+            by_asset[key]=asset
 
     files=sorted(by_file.values(),key=lambda x:(str(x['destination_relative_path']),int(x['file_id'])))
-    families, target_groups = _build_family_target_groups(files)
-    total=sum(int(f.get('expected_size_bytes') or 0) for f in files)
-    move_count=sum(1 for f in files if f.get('status')=='move')
+    assets=sorted(by_asset.values(),key=lambda x:(str(x['destination_relative_path']),str(x['source_relative_path'])))
+    families, target_groups = _build_family_target_groups(files, assets)
+    total=sum(int(f.get('expected_size_bytes') or 0) for f in [*files,*assets])
+    move_count=sum(1 for f in [*files,*assets] if f.get('status')=='move')
     anchor_plan = next((p for p in plans if str(p.get("event",{}).get("id")) == anchor_event_id), plans[0] if plans else None)
     event_obj = dict(anchor_plan.get("event") or {}) if anchor_plan else {"id":anchor_event_id,"name":"Gemeinsame Änderung"}
     job_obj = dict(anchor_plan.get("job") or {}) if anchor_plan else {"id":job_id}
@@ -366,11 +387,12 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
         "archived_impacts":archived_impacts,
         "managed_event_roots":sorted(managed_event_roots),
         "files":[[int(f['file_id']),str(f['source_relative_path']),str(f['destination_relative_path']),str(f.get('stored_sha256') or '')] for f in files],
+        "assets":[[str(a.get('asset_kind') or 'other'),str(a['source_relative_path']),str(a['destination_relative_path']),str(a.get('stored_sha256') or '')] for a in assets],
     }
     token=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return {
         "kind":"workspace_reconciliation","job_id":job_id,"anchor_event_id":anchor_event_id,
-        "event_ids":event_ids,"archived_impacts":archived_impacts,"files":files,
+        "event_ids":event_ids,"archived_impacts":archived_impacts,"files":files,"assets":assets,
         "managed_event_roots":sorted(managed_event_roots),
         "event":event_obj,"job":job_obj,"families":families,"target_groups":target_groups,
         "workspace_root":str(anchor_plan.get("workspace_root") or "") if anchor_plan else "",
@@ -379,7 +401,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
         "directories":list(directories.values()),"blockers":blockers,"warnings":warnings,
         "structure_text":structure_text,
         "plan_token":token,"apply_confirmation_phrase":CONFIRMATION_PHRASE,
-        "summary":{"ready":not blockers and not archived_impacts,"event_count":len(event_ids),"file_count":len(files),"family_count":len(families),"target_group_count":len(target_groups),"move_count":move_count,"directory_count":len(directories),"directory_create_count":sum(1 for d in directories.values() if not d.get('exists')),"total_size_bytes":total,"available_bytes":int((anchor_plan.get("summary") or {}).get("available_bytes") or 0) if anchor_plan else 0,"required_extra_bytes":0,"same_filesystem":True if anchor_plan else False,"archived_event_count":len(archived_impacts),"blocker_count":len(blockers)},
+        "summary":{"ready":not blockers and not archived_impacts,"event_count":len(event_ids),"file_count":len(files)+len(assets),"camera_file_count":len(files),"asset_count":len(assets),"family_count":len(families),"target_group_count":len(target_groups),"move_count":move_count,"directory_count":len(directories),"directory_create_count":sum(1 for d in directories.values() if not d.get('exists')),"total_size_bytes":total,"available_bytes":int((anchor_plan.get("summary") or {}).get("available_bytes") or 0) if anchor_plan else 0,"required_extra_bytes":0,"same_filesystem":True if anchor_plan else False,"archived_event_count":len(archived_impacts),"blocker_count":len(blockers)},
         "manual_archive_required":bool(archived_impacts),
         "message":("Archivierte Ereignisse sind betroffen. Zuerst Neu-Zuordnungen abschließen und den manuellen Archivauftrag bestätigen." if archived_impacts else "Gemeinsamer Arbeitsbereich-Abgleich bereit."),
     }
@@ -408,6 +430,25 @@ def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_
         for seq,f in enumerate(plan['files'],1):
             ops.append((run_id,seq,int(f['file_id']),str(f['source_relative_path']),str(f['destination_relative_path']),int(f['expected_size_bytes']),str(f['stored_sha256']), 'already_at_target' if f['status']=='already_at_target' else 'planned'))
         c.executemany("""INSERT INTO sort_operations(sort_run_id,sequence_number,file_id,source_relative_path,destination_relative_path,expected_size_bytes,expected_sha256,status) VALUES (?,?,?,?,?,?,?,?)""",ops)
+        asset_ops=[]
+        offset=len(plan['files'])
+        for index,a in enumerate(plan.get('assets') or [],1):
+            asset_ops.append((
+                run_id,offset+index,str(a.get('asset_kind') or 'other'),
+                a.get('family_id'),a.get('source_file_id'),
+                str(a['source_relative_path']),str(a['destination_relative_path']),
+                int(a['expected_size_bytes']),str(a.get('stored_sha256') or ''),
+                str(a.get('source_root_kind') or a.get('current_root_kind') or 'shared_workspace'),
+                'already_at_target' if a.get('status')=='already_at_target' else 'planned'
+            ))
+        c.executemany(
+            """INSERT INTO sort_asset_operations(
+                   sort_run_id,sequence_number,asset_kind,family_id,source_file_id,
+                   source_relative_path,destination_relative_path,expected_size_bytes,
+                   expected_sha256,source_root_kind,status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            asset_ops,
+        )
         c.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_queued','sort_run',?,?,?)",(job_id,run_id,_json_details(details),now))
         c.commit()
     from app.sort_apply import get_sort_run
@@ -444,6 +485,13 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
             with database_connection(database_path) as c:
                 c.execute("UPDATE sort_operations SET status=CASE WHEN status='planned' THEN 'verified' ELSE status END,verified_at=? WHERE sort_run_id=? AND file_id=?",(_now(),run_id,int(f['file_id'])))
                 c.execute("UPDATE sort_runs SET verified_file_count=verified_file_count+1,verified_bytes=verified_bytes+?,updated_at=? WHERE id=?",(int(f['expected_size_bytes']),_now(),run_id))
+        for a in plan.get('assets') or []:
+            src=Path(a['source_absolute_path']); _assert_source_identity(src,a)
+            digest=_sha256_file(src)
+            if digest != str(a.get('stored_sha256') or ''): raise SortApplyError("SHA-256-Prüfung der Zusatzdatei fehlgeschlagen: "+str(src))
+            with database_connection(database_path) as c:
+                c.execute("UPDATE sort_asset_operations SET status=CASE WHEN status='planned' THEN 'verified' ELSE status END,verified_at=? WHERE sort_run_id=? AND source_relative_path=?",(_now(),run_id,str(a['source_relative_path'])))
+                c.execute("UPDATE sort_runs SET verified_file_count=verified_file_count+1,verified_bytes=verified_bytes+?,updated_at=? WHERE id=?",(int(a['expected_size_bytes']),_now(),run_id))
         with database_connection(database_path) as c: c.execute("UPDATE sort_runs SET status='moving',phase='Direkter IST→SOLL-Abgleich im SSD-Arbeitsbereich',updated_at=? WHERE id=?",(_now(),run_id))
         for f in plan['files']:
             if f['status']!='move': continue
@@ -453,6 +501,16 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
             with database_connection(database_path) as c:
                 c.execute("UPDATE sort_operations SET status='destination_verified',moved_at=?,destination_verified_at=? WHERE sort_run_id=? AND file_id=?",(_now(),_now(),run_id,int(f['file_id'])))
                 c.execute("UPDATE sort_runs SET moved_file_count=moved_file_count+1,moved_bytes=moved_bytes+?,updated_at=? WHERE id=?",(int(f['expected_size_bytes']),_now(),run_id))
+        for a in plan.get('assets') or []:
+            if a.get('status')!='move': continue
+            src=Path(a['source_absolute_path']); dst=Path(a['destination_absolute_path']); dst.parent.mkdir(parents=True,exist_ok=True)
+            _move_without_overwrite(src,dst,a); moved.append((src,dst,None,int(a['expected_size_bytes'])))
+            if _sha256_file(dst)!=str(a.get('stored_sha256') or ''): raise SortApplyError("Zielprüfung der Zusatzdatei fehlgeschlagen: "+str(dst))
+            with database_connection(database_path) as c:
+                c.execute("UPDATE sort_asset_operations SET status='destination_verified',moved_at=?,destination_verified_at=? WHERE sort_run_id=? AND source_relative_path=?",(_now(),_now(),run_id,str(a['source_relative_path'])))
+                c.execute("UPDATE sort_runs SET moved_file_count=moved_file_count+1,moved_bytes=moved_bytes+?,updated_at=? WHERE id=?",(int(a['expected_size_bytes']),_now(),run_id))
+        with database_connection(database_path) as c:
+            c.execute("UPDATE sort_runs SET status='finalizing',phase='Ordnerstruktur und Ereignisdokument werden abgeschlossen',updated_at=? WHERE id=?",(_now(),run_id))
         with database_connection(database_path) as c:
             c.execute('BEGIN IMMEDIATE'); now=_now()
             for f in plan['files']:
@@ -501,11 +559,17 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                     c.execute("DELETE FROM events WHERE id=? AND job_id=?", (eid,job_id))
                 else:
                     c.execute("UPDATE events SET resort_required=0,status='applied',applied_at=COALESCE(applied_at,?),updated_at=? WHERE id=?",(now,now,eid))
+            for a in plan.get('assets') or []:
+                released_asset_id=a.get('released_archive_asset_id')
+                if released_asset_id is not None:
+                    c.execute("DELETE FROM released_archive_assets WHERE id=?",(int(released_asset_id),))
             receipt = {
                 'anchor_event_id': anchor,
                 'event_ids': plan['event_ids'],
-                'file_count': len(plan['files']),
-                'verified_file_count': len(plan['files']),
+                'file_count': len(plan['files']) + len(plan.get('assets') or []),
+                'camera_file_count': len(plan['files']),
+                'asset_count': len(plan.get('assets') or []),
+                'verified_file_count': len(plan['files']) + len(plan.get('assets') or []),
                 'move_count': int(plan['summary'].get('move_count') or 0),
                 'moved_file_count': int(plan['summary'].get('move_count') or 0),
                 'directory_count': len(plan['directories']),
@@ -514,23 +578,18 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 'verified_bytes': int(plan['summary'].get('total_size_bytes') or 0),
                 'moved_bytes': sum(
                     int(f.get('expected_size_bytes') or 0)
-                    for f in plan['files'] if f.get('status') == 'move'
+                    for f in [*plan['files'],*(plan.get('assets') or [])] if f.get('status') == 'move'
                 ),
                 'source_root': str(run['source_root']),
                 'target_root': str(run['target_root']),
                 'plan_token': str(run['plan_token']),
                 'run_kind': str(run['run_kind'] or 'reapply'),
             }
-            c.execute("UPDATE sort_runs SET status='applied',phase='Gemeinsamer Arbeitsbereich-Abgleich abgeschlossen',completed_at=?,updated_at=? WHERE id=?",(now,now,run_id))
-            # The source event may be deleted above. sort_runs.event_id still has
-            # the historical ON DELETE CASCADE FK, so the run row can vanish in
-            # the same transaction. This audit receipt is intentionally event-
-            # independent and lets polling report the verified success.
-            c.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_applied','sort_run',?,?,?)",(job_id,run_id,_json_details(receipt),now))
-            from app.event_mutation import mark_job_mutation_completed
-            mark_job_mutation_completed(c, job_id)
             c.commit()
-        # Post-commit metadata/cleanup cannot roll back an already committed move.
+        # Solange diese Nacharbeiten laufen, bleibt der Run absichtlich
+        # "finalizing". Dadurch ignoriert der Strukturwächter Bibliothekars
+        # eigene, noch nicht vollständig abgeschlossene Dateisystemänderung.
+        metadata_error=None
         try:
             from app.event_document import build_event_document_from_db, write_event_document
             from app.obsolete_structure import cleanup_obsolete_structure
@@ -539,7 +598,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
             cleanup_obsolete_structure(
                 root,
                 [src for src,_,_,_ in moved],
-                [f['destination_absolute_path'] for f in plan['files']],
+                [f['destination_absolute_path'] for f in [*plan['files'],*(plan.get('assets') or [])]],
                 set(plan['event_ids']),
                 managed_event_roots=plan.get('managed_event_roots') or [],
                 desired_directories=[d['absolute_path'] for d in plan['directories']],
@@ -548,9 +607,31 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 document=build_event_document_from_db(database_path,workspace_path,job_id,eid)
                 if document:
                     write_event_document(workspace_path,document)
-        except Exception as metadata_error:
-            with database_connection(database_path) as c:
-                c.execute("UPDATE sort_runs SET phase=?,error_message=? WHERE id=?",('Abgleich abgeschlossen; Strukturmetadaten prüfen',str(metadata_error),run_id))
+        except Exception as exc:
+            metadata_error=exc
+
+        done=_now()
+        with database_connection(database_path) as c:
+            phase=(
+                'Gemeinsamer Arbeitsbereich-Abgleich abgeschlossen'
+                if metadata_error is None
+                else 'Abgleich abgeschlossen; Strukturmetadaten prüfen'
+            )
+            c.execute(
+                "UPDATE sort_runs SET status='applied',phase=?,error_message=?,completed_at=?,updated_at=? WHERE id=?",
+                (phase,str(metadata_error) if metadata_error is not None else None,done,done,run_id),
+            )
+            # The source event may be deleted above. sort_runs.event_id still has
+            # the historical ON DELETE CASCADE FK, so the run row can vanish in
+            # the same transaction. This audit receipt is intentionally event-
+            # independent and lets polling report the verified success.
+            c.execute(
+                "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_applied','sort_run',?,?,?)",
+                (job_id,run_id,_json_details({**receipt,'metadata_error':str(metadata_error) if metadata_error is not None else None}),done),
+            )
+            from app.event_mutation import mark_job_mutation_completed
+            mark_job_mutation_completed(c, job_id)
+            c.commit()
     except Exception as exc:
         # Roll back physical moves in reverse order. Database paths are only finalized after all moves succeed.
         for src,dst,_,_ in reversed(moved):
