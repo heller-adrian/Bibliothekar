@@ -99,6 +99,9 @@ def prepare_reapply_sort_run(
             "angewendet werden."
         )
 
+    # 0.28.0: Herkunftssicherung und Workflow-Anchor sind getrennt.
+    job_id = str((plan.get("job") or {}).get("id") or job_id)
+
     if str(plan["plan_token"]) != str(expected_plan_token):
         raise SortApplyError(
             "Der Nachsortierplan ist nicht mehr aktuell. Bitte erneut prüfen."
