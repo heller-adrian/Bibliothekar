@@ -176,6 +176,36 @@ def _iter_regular_event_files(event_root: Path) -> list[Path]:
     return result
 
 
+def _iter_regular_event_directories(event_root: Path) -> list[Path]:
+    """Return the actual directory tree, including empty directories."""
+    if not event_root.exists() or not event_root.is_dir():
+        raise EventInventoryError(
+            "Ereignisordner wurde nicht gefunden: " + str(event_root)
+        )
+    result: list[Path] = []
+    for current, directories, _files in os.walk(event_root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        safe: list[str] = []
+        for name in directories:
+            child = current_path / name
+            info = os.lstat(child)
+            if stat.S_ISLNK(info.st_mode):
+                raise EventInventoryError(
+                    "Symlinks sind innerhalb eines Ereignisses nicht zulässig: "
+                    + str(child.relative_to(event_root))
+                )
+            if not stat.S_ISDIR(info.st_mode):
+                raise EventInventoryError(
+                    "Unerwarteter Verzeichniseintrag im Ereignis: "
+                    + str(child.relative_to(event_root))
+                )
+            safe.append(name)
+            result.append(child)
+        directories[:] = safe
+    result.sort(key=lambda p: p.relative_to(event_root).as_posix())
+    return result
+
+
 def _branch_for(event_relative_path: str) -> str:
     for part in PurePosixPath(event_relative_path).parts[:-1]:
         if part in SORT_BRANCHES:
@@ -186,11 +216,8 @@ def _branch_for(event_relative_path: str) -> str:
 def _asset_kind(event_relative_path: str, media_type: str, known_file_id: int | None) -> str:
     if known_file_id is not None:
         return "camera_original"
-    branch = _branch_for(event_relative_path)
     if media_type == "xmp":
         return "xmp"
-    if branch == "Export":
-        return "export"
     if media_type in {"raw", "jpeg", "image", "video"}:
         return "derived_media"
     return "other"
@@ -339,6 +366,7 @@ def scan_event_inventory(
             )
 
     physical_files = _iter_regular_event_files(event_root)
+    physical_directories = _iter_regular_event_directories(event_root)
 
     previous_by_relative: dict[str, dict[str, Any]] = {}
     known_by_current_relative: dict[str, dict[str, Any]] = {}
@@ -605,6 +633,15 @@ def scan_event_inventory(
                 or (gap is not None and gap > 120)
             )
 
+        if (
+            row["known_file_id"] is None
+            and row["asset_kind"] == "derived_media"
+            and row["media_type"] in {"jpeg", "image"}
+            and (family_source is not None or filename_family is not None)
+        ):
+            # Export is a content/provenance relation, never a folder-name role.
+            row["asset_kind"] = "export"
+
         should_inherit = (
             row["asset_kind"] == "xmp"
             or export_family_correction
@@ -653,7 +690,26 @@ def scan_event_inventory(
                     for row in scanned
                 ],
             )
-            if update_known_file_locations:
+            connection.execute(
+                "DELETE FROM event_inventory_directories WHERE event_id=? AND root_kind=?",
+                (event_id, root_kind),
+            )
+            connection.executemany(
+                """INSERT INTO event_inventory_directories(
+                       event_id,job_id,root_kind,event_relative_path,scanned_at)
+                   VALUES (?,?,?,?,?)""",
+                [
+                    (
+                        event_id,
+                        str(event.get("job_id") or job_id),
+                        root_kind,
+                        directory.relative_to(event_root).as_posix(),
+                        scanned_at,
+                    )
+                    for directory in physical_directories
+                ],
+            )
+                        if update_known_file_locations:
                 for row in scanned:
                     if row["known_file_id"] is None:
                         continue
@@ -675,12 +731,17 @@ def scan_event_inventory(
     return {
         "event": event,
         "event_root": str(event_root),
+        "directories": [
+            directory.relative_to(event_root).as_posix()
+            for directory in physical_directories
+        ],
         "event_prefix": prefix.as_posix(),
         "root_kind": root_kind,
         "scanned_at": scanned_at,
         "files": scanned,
         "summary": {
             "file_count": len(scanned),
+            "directory_count": len(physical_directories),
             "camera_original_count": sum(row["asset_kind"] == "camera_original" for row in scanned),
             "xmp_count": sum(row["asset_kind"] == "xmp" for row in scanned),
             "export_count": sum(row["asset_kind"] == "export" for row in scanned),
