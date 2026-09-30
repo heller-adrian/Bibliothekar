@@ -466,6 +466,18 @@ def describe_archive_change_staging_for_request(
     cr_id: str,
 ) -> dict[str, Any]:
     cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
+
+    # 0.28.3: Frühere manuelle Archiv-Strukturaufgaben hinterließen ihre
+    # verifizierte event.json unter Später zuordnen. Vor einer neuen
+    # Archivänderung räumen wir ausschließlich solche nachweislich abgeschlossenen
+    # und SHA-256-identischen Alt-Hilfen desselben Ereignisses weg.
+    from app.event_structure_changes import cleanup_completed_archived_structure_helpers
+    cleanup_completed_archived_structure_helpers(
+        database_path,
+        workspace_path,
+        event_id=str(cr["event_id"]),
+    )
+
     description = describe_archive_change_staging(
         database_path,
         archive_root,
