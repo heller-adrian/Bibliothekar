@@ -22,7 +22,7 @@ def _sha(data: bytes) -> str:
 
 def test_0210_version_and_schema(tmp_path: Path):
     assert main.APP_VERSION == "0.27.5"
-    assert main.RELEASE_VERSION == "0.28.5"
+    assert main.RELEASE_VERSION == "0.28.6"
     db = tmp_path / "kamera.sqlite3"
     status = initialize_database(db)
     assert max(status["applied_versions"]) == 38
