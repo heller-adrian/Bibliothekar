@@ -165,7 +165,7 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = "0.27.5"
-RELEASE_VERSION = "0.27.9"
+RELEASE_VERSION = "0.28.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -921,6 +921,56 @@ def _event_payload_with_folder_layout(
     })
     result.setdefault("create_subfolders", bool(state["structure_enabled"]))
     return result
+
+def _available_families_for_event_payload(
+    job_id: str,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Resolve the explicit UI selection across backup provenance."""
+    requested = sorted({
+        int(value)
+        for value in (payload.get("selected_family_ids") or [])
+        if int(value) > 0
+    })
+    if not requested:
+        return list_job_available_families(DATABASE_FILE, job_id)
+
+    placeholders = ",".join("?" for _ in requested)
+    with database_connection(DATABASE_FILE) as connection:
+        rows = connection.execute(
+            f"""SELECT ff.id AS family_id,ff.job_id,ff.family_key,ff.original_stem,
+                       ff.selected_capture_time,ff.capture_time_confidence,
+                       COUNT(f.id) AS file_count,
+                       COALESCE(SUM(f.size_bytes),0) AS total_size_bytes,
+                       COALESCE(SUM(CASE WHEN f.review_status='required' THEN 1 ELSE 0 END),0)
+                         AS review_required_count
+                FROM file_families ff
+                LEFT JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
+                WHERE ff.id IN ({placeholders})
+                  AND ff.selected_capture_time IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM event_assignments ea
+                    JOIN events e ON e.id=ea.event_id
+                    WHERE ea.family_id=ff.id
+                      AND e.status IN ('draft','planned','applied','archived')
+                  )
+                GROUP BY ff.id
+                ORDER BY ff.selected_capture_time,ff.id""",
+            tuple(requested),
+        ).fetchall()
+    if len(rows) != len(requested):
+        raise ValueError(
+            "Die Auswahl ist nicht mehr aktuell. Mindestens eine Dateifamilie ist nicht mehr frei."
+        )
+    return [
+        {
+            **dict(row),
+            "day_key": str(row["selected_capture_time"] or "")[:10] or None,
+            "has_date": row["selected_capture_time"] is not None,
+        }
+        for row in rows
+    ]
+
 
 
 @app.get("/api/settings/event-folder-layout", tags=["Einstellungen"])
@@ -4345,12 +4395,10 @@ def api_create_event(
         event_id=existing_parent_event_id or None,
     )
 
-    available_families = (
-        list_job_available_families(
-            DATABASE_FILE,
-            job_id,
-        )
-    )
+    try:
+        available_families = _available_families_for_event_payload(job_id, payload)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
     try:
         archived_target = None
@@ -5403,12 +5451,10 @@ def api_event_preview(
         payload,
         event_id=str(payload.get("existing_parent_event_id") or "").strip() or None,
     )
-    available_families = (
-        list_job_available_families(
-            DATABASE_FILE,
-            job_id,
-        )
-    )
+    try:
+        available_families = _available_families_for_event_payload(job_id, payload)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
     try:
         preview = build_event_preview(
@@ -5449,6 +5495,9 @@ def api_no_event_targets(job_id: str, months: str = "") -> dict[str, Any]:
 def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
     target_event_id = str(body.get("target_event_id") or "")
     segments = list(body.get("segments") or [])
+    selected_family_ids = sorted({
+        int(value) for value in (body.get("family_ids") or []) if int(value) > 0
+    })
     try:
         with database_connection(DATABASE_FILE) as connection:
             target_row = connection.execute(
@@ -5560,7 +5609,11 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
             }
 
         return assign_free_families_to_existing_no_event(
-            DATABASE_FILE, job_id, target_event_id, segments,
+            DATABASE_FILE,
+            job_id,
+            target_event_id,
+            segments,
+            family_ids=selected_family_ids or None,
         )
     except (ValueError, EventPreviewError, EventChangeRequestError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
