@@ -663,6 +663,18 @@ def build_event_sort_plan(
 
     workspace_root = _resolve_workspace_root(workspace_path)
 
+    # 0.28.0: Sicherung ist Herkunft, nicht Ereignisidentität. Alte
+    # /api/jobs/...-Routen bleiben als Kompatibilität erhalten, aber der
+    # technische Anchor wird immer aus dem Ereignis selbst abgeleitet.
+    with database_connection(database_path) as anchor_connection:
+        anchor_row = anchor_connection.execute(
+            "SELECT job_id FROM events WHERE id=? AND parent_event_id IS NULL",
+            (event_id,),
+        ).fetchone()
+    if anchor_row is None:
+        raise SortPlanError("Ereignis wurde nicht gefunden.")
+    job_id = str(anchor_row["job_id"])
+
     reapply_inventory: dict[str, Any] | None = None
     if allow_reapply:
         try:
@@ -812,9 +824,9 @@ def build_event_sort_plan(
                           target_name, target_folder_name, target_preserve_day_folders,
                           target_linkage_kind
                    FROM event_reapply_removed_families
-                   WHERE event_id = ? AND job_id = ?
+                   WHERE event_id = ?
                      AND COALESCE(target_kind,'') <> 'released_free'""",
-                (event_id, job_id),
+                (event_id,),
             ).fetchall()
             removed_family_ids = {int(row["family_id"]) for row in removed_rows}
             removed_targets = {int(row["family_id"]): dict(row) for row in removed_rows}
