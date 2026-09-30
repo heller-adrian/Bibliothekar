@@ -49,6 +49,19 @@ def normalize_layout(value: Any) -> dict[str, Any]:
     seen_ids: set[str] = set()
     seen_roles: set[str] = set()
 
+    def has_explicit_export_role(nodes: list[Any]) -> bool:
+        for item in nodes:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role") or "").strip().casefold() == "export":
+                return True
+            children = item.get("children") or []
+            if isinstance(children, list) and has_explicit_export_role(children):
+                return True
+        return False
+
+    explicit_export_role = has_explicit_export_role(raw_nodes)
+
     def normalize_nodes(nodes: list[Any]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         sibling_names: set[str] = set()
@@ -68,7 +81,7 @@ def normalize_layout(value: Any) -> dict[str, Any]:
             # Alte 0.28.x-Snapshots besitzen noch keine Rollenangabe. Der
             # historische Exportknoten bleibt deshalb semantisch ein
             # Exportordner, auch wenn er später umbenannt wird.
-            if not role and node_id == "legacy-export":
+            if not role and node_id == "legacy-export" and not explicit_export_role:
                 role = "export"
             if role and role != "export":
                 raise EventLayoutError("Unbekannte Ordnerrolle: " + role)
