@@ -11,7 +11,33 @@ from app.event_layout import ensure_event_layout_snapshot
 from app.planning import list_job_planning_overview, list_global_released_archive_groups
 
 
-def _event_counts(connection: Any, event_id: str) -> dict[str, int]:
+def _event_counts(
+    connection: Any,
+    event_id: str,
+    *,
+    status: str | None = None,
+) -> dict[str, int]:
+    # Applied Ereignisse zeigen den tatsächlichen SSD-IST-Bestand. Dadurch
+    # werden manuelle Verschiebungen/Löschungen nicht durch alte DB-Pfade oder
+    # Dateizahlen überlagert.
+    if str(status or "") == "applied":
+        live = connection.execute(
+            """SELECT COUNT(*) AS file_count,
+                      COUNT(DISTINCT family_id) AS family_count,
+                      COALESCE(SUM(size_bytes),0) AS total_size_bytes
+               FROM event_inventory_files
+               WHERE event_id=? AND root_kind='shared_workspace'
+                 AND asset_kind IN ('camera_original','xmp','export','derived_media')""",
+            (event_id,),
+        ).fetchone()
+        if live is not None and int(live["file_count"] or 0) > 0:
+            return {
+                "family_count": int(live["family_count"] or 0),
+                "file_count": int(live["file_count"] or 0),
+                "total_size_bytes": int(live["total_size_bytes"] or 0),
+                "review_required_count": 0,
+            }
+
     rows = event_family_rows(connection, event_id)
     family_ids = [int(row["id"]) for row in rows]
     if not family_ids:
@@ -58,7 +84,9 @@ def _visible_events(database_path: Path, selected_job_ids: set[str]) -> tuple[li
                 source_ids = {str(event["job_id"])}
             if not selected_job_ids or source_ids.isdisjoint(selected_job_ids):
                 continue
-            counts = _event_counts(connection, event_id)
+            counts = _event_counts(
+                connection, event_id, status=str(event.get("status") or "")
+            )
             folder_layout = ensure_event_layout_snapshot(
                 connection, event_id, now=str(event.get("updated_at") or event.get("created_at") or "")
             )
