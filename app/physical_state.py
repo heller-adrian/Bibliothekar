@@ -173,34 +173,6 @@ def sync_placement_moves(
         )
         count += 1
 
-    if bool(layout_state.get("structure_enabled")):
-        inventory = connection.execute(
-            """SELECT known_file_id,event_relative_path
-               FROM event_inventory_files
-               WHERE event_id=? AND root_kind=? AND known_file_id IS NOT NULL""",
-            (str(event["id"]), root_kind),
-        ).fetchall()
-        by_id = {int(row["known_file_id"]): str(row["event_relative_path"] or "") for row in inventory}
-        for move in file_moves:
-            file_id = int(move["file_id"])
-            event_relative = by_id.get(file_id)
-            if event_relative is None:
-                continue
-            organization = organization_path_for_event_relative(event_relative, layout_state)
-            # A pending app-controlled restore remains authoritative until the
-            # verified reapply finishes; ordinary user moves update the snapshot.
-            connection.execute(
-                """INSERT INTO event_file_placement_snapshots(
-                       event_id,file_id,organization_path,restore_pending,captured_at)
-                   VALUES (?,?,?,?,?)
-                   ON CONFLICT(event_id,file_id) DO UPDATE SET
-                       organization_path=CASE
-                           WHEN event_file_placement_snapshots.restore_pending=1
-                           THEN event_file_placement_snapshots.organization_path
-                           ELSE excluded.organization_path END,
-                       captured_at=excluded.captured_at""",
-                (str(event["id"]), file_id, organization, 0, timestamp),
-            )
 
     if count:
         connection.execute(
