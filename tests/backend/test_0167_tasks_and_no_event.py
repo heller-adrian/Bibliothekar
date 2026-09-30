@@ -77,13 +77,15 @@ def test_reassignment_offers_monthly_no_event_from_other_job_and_new_no_event(tm
     )
     assert result["pending_family_count"] == 0
     assert result["target"]["folder_name"] == "07 - Ohne Ereignis"
-    assert result["target"]["linkage_kind"] == "planned_extension"
+    assert result["target"]["event_id"] == existing["id"]
+    assert result["target"]["linkage_kind"] == ""
     with database_connection(db) as c:
-        row = c.execute("SELECT job_id,event_kind,linked_event_id,folder_name FROM events WHERE id=?", (result["target"]["event_id"],)).fetchone()
-        assert row["job_id"] == "new"
+        row = c.execute("SELECT job_id,event_kind,linked_event_id,folder_name FROM events WHERE id=?", (existing["id"],)).fetchone()
+        assert row["job_id"] == "old"
         assert row["event_kind"] == "no_event"
-        assert row["linked_event_id"] == existing["id"]
+        assert row["linked_event_id"] is None
         assert row["folder_name"] == "07 - Ohne Ereignis"
+        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id=? AND family_id=?", (existing["id"], new_fid)).fetchone()[0] == 1
 
 
 def test_normal_sort_can_extend_cross_job_month_collection(tmp_path):
@@ -104,10 +106,11 @@ def test_normal_sort_can_extend_cross_job_month_collection(tmp_path):
     assert result["cross_job"] is True
     with database_connection(db) as c:
         e = c.execute("SELECT job_id,folder_name,linkage_kind FROM events WHERE id=?", (result["event_id"],)).fetchone()
-        assert e["job_id"] == "b"
+        assert result["event_id"] == existing["id"]
+        assert e["job_id"] == "a"
         assert e["folder_name"] == "07 - Ohne Ereignis"
-        assert e["linkage_kind"] == "planned_extension"
-        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id=? AND family_id=?", (result["event_id"], fb)).fetchone()[0] == 1
+        assert not e["linkage_kind"]
+        assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id=? AND family_id=?", (existing["id"], fb)).fetchone()[0] == 1
 
 
 def test_global_task_button_stays_visible_and_planned_and_free_tasks_exist(tmp_path):
