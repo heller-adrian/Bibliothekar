@@ -86,12 +86,13 @@ def test_0283_structure_off_flattens_camera_xmp_and_export_without_manual_task(t
     event_root, file_id = _seed_applied_workspace(db, workspace)
 
     with database_connection(db) as connection:
+        current = get_event_layout(connection, "e")
         update_event_layout(
             connection,
             "e",
             structure_enabled=False,
-            input_path="",
-            layout={},
+            input_path=current["input_path"],
+            layout=current["layout"],
             updated_at=NOW,
         )
         connection.execute("UPDATE events SET resort_required=1 WHERE id='e'")
@@ -138,8 +139,14 @@ def test_0283_structure_reenabled_puts_everything_in_current_input_without_snaps
 
     # First flatten the event completely.
     with database_connection(db) as connection:
+        current = get_event_layout(connection, "e")
         update_event_layout(
-            connection, "e", structure_enabled=False, input_path="", layout={}, updated_at=NOW
+            connection,
+            "e",
+            structure_enabled=False,
+            input_path=current["input_path"],
+            layout=current["layout"],
+            updated_at=NOW,
         )
         connection.execute("UPDATE events SET resort_required=1 WHERE id='e'")
     _reconcile(db, workspace)
@@ -147,20 +154,13 @@ def test_0283_structure_reenabled_puts_everything_in_current_input_without_snaps
     # Re-enable the standard structure. No historic placement is restored:
     # every existing file goes into the selected input folder.
     with database_connection(db) as connection:
-        legacy = {
-            "version": 1,
-            "nodes": [
-                {"id": "all", "name": "Alle", "children": []},
-                {"id": "sorted", "name": "Sortiert", "children": []},
-                {"id": "export", "name": "Export", "children": []},
-            ],
-        }
+        current = get_event_layout(connection, "e")
         update_event_layout(
             connection,
             "e",
             structure_enabled=True,
-            input_path="Alle",
-            layout=legacy,
+            input_path=current["input_path"],
+            layout=current["layout"],
             updated_at=NOW,
         )
         connection.execute("UPDATE events SET resort_required=1 WHERE id='e'")
@@ -207,8 +207,14 @@ def test_0283_manual_folder_created_while_structure_off_reenables_applied_layout
     event_root, _file_id = _seed_applied_workspace(db, workspace)
 
     with database_connection(db) as connection:
+        current = get_event_layout(connection, "e")
         update_event_layout(
-            connection, "e", structure_enabled=False, input_path="", layout={}, updated_at=NOW
+            connection,
+            "e",
+            structure_enabled=False,
+            input_path=current["input_path"],
+            layout=current["layout"],
+            updated_at=NOW,
         )
         connection.execute("UPDATE events SET resort_required=1 WHERE id='e'")
     _reconcile(db, workspace)
@@ -271,8 +277,14 @@ def test_0283_manual_folder_created_while_structure_off_reenables_archived_layou
             (file_id,),
         )
         ensure_event_layout_snapshot(connection, "e", now=NOW)
+        current = get_event_layout(connection, "e")
         update_event_layout(
-            connection, "e", structure_enabled=False, input_path="", layout={}, updated_at=NOW
+            connection,
+            "e",
+            structure_enabled=False,
+            input_path=current["input_path"],
+            layout=current["layout"],
+            updated_at=NOW,
         )
 
     event_root = archive / "2026" / "07-23 - Trip"
