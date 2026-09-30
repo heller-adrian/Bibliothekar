@@ -4450,6 +4450,41 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
             })
 
         for row in connection.execute(
+            """SELECT legacy.id AS legacy_event_id,
+                      legacy.job_id AS legacy_job_id,
+                      legacy.name AS legacy_name,
+                      legacy.status AS legacy_status,
+                      legacy.linkage_kind,
+                      target.id AS target_event_id,
+                      target.job_id AS target_job_id,
+                      target.name AS target_name,
+                      target.status AS target_status
+               FROM events legacy
+               JOIN events target ON target.id=legacy.linked_event_id
+               WHERE legacy.parent_event_id IS NULL
+                 AND legacy.linkage_kind IN ('planned_extension','applied_followup')
+               ORDER BY legacy.created_at,legacy.id"""
+        ).fetchall():
+            archived = str(row["target_status"] or "") == "archived"
+            tasks.append({
+                'kind': 'legacy_multi_backup_structure',
+                'job_id': row['target_job_id'],
+                'event_id': row['target_event_id'],
+                'legacy_event_id': row['legacy_event_id'],
+                'title': 'Legacy-Mehrsicherungsstruktur muss vereinheitlicht werden',
+                'detail': (
+                    f"{row['target_name']} · "
+                    + ("Archiv · manueller Archivweg erforderlich" if archived
+                       else f"alter {row['linkage_kind']}-Bestand")
+                ),
+                'count': 1,
+                'href': (
+                    f"/events?job={row['target_job_id']}"
+                    f"&task=legacy:{row['legacy_event_id']}"
+                ),
+            })
+
+        for row in connection.execute(
             """SELECT id,job_id,event_id,event_name,status FROM event_change_requests
                WHERE status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt')
                ORDER BY created_at"""
