@@ -4,7 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
-from app.database import database_connection, initialize_database
+from app.database import (
+    create_planned_event,
+    database_connection,
+    delete_planned_event,
+    initialize_database,
+)
+from app.event_structure import build_event_preview
+from app.global_workspace import build_global_workspace_summary
 from app.event_access import (
     event_anchor_job,
     event_family_ids,
@@ -68,6 +75,36 @@ def _event(connection) -> None:
         (NOW, NOW),
     )
 
+
+
+def _preview_for_families(family_ids: list[int]) -> dict:
+    available = [
+        {
+            "family_id": family_id,
+            "family_key": f"F{family_id}",
+            "selected_capture_time": "2026-07-19T12:00:00",
+            "capture_time_confidence": "high",
+            "day_key": "2026-07-19",
+            "has_date": True,
+            "file_count": 1,
+            "total_size_bytes": 1,
+            "review_required_count": 0,
+        }
+        for family_id in family_ids
+    ]
+    return build_event_preview(
+        {
+            "event_kind": "event",
+            "event_name": "Gemeinsam",
+            "start_date": "2026-07-19",
+            "end_date": "2026-07-19",
+            "uses_time_range": False,
+            "preserve_day_folders": False,
+            "selected_day_keys": ["2026-07-19"],
+            "selected_family_ids": family_ids,
+        },
+        available,
+    )
 
 def test_0280_migrations_backfill_anchor_and_legacy_layout(tmp_path: Path):
     db = tmp_path / "db.sqlite3"
@@ -163,3 +200,90 @@ def test_0280_event_layout_can_use_direct_leaf_as_input(tmp_path: Path):
         )
         assert changed["input_path"] == ""
         assert layout_paths(changed["layout"]) == ["Favoriten"]
+
+
+def test_0280_create_one_planned_event_from_two_backups(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        _job(connection, "a")
+        _job(connection, "b")
+        fa, _ = _family(connection, "a", "A")
+        fb, _ = _family(connection, "b", "B")
+
+    created = create_planned_event(db, "a", _preview_for_families([fa, fb]))
+    event_id = str(created["parent_event"]["id"])
+
+    with database_connection(db) as connection:
+        roots = connection.execute(
+            "SELECT id,job_id,linked_event_id,linkage_kind,status FROM events WHERE parent_event_id IS NULL"
+        ).fetchall()
+        assignments = connection.execute(
+            "SELECT family_id FROM event_assignments ORDER BY family_id"
+        ).fetchall()
+        sources = event_source_jobs(connection, event_id)
+
+    assert len(roots) == 1
+    assert tuple(roots[0]) == (event_id, "a", None, None, "planned")
+    assert [int(row["family_id"]) for row in assignments] == sorted([fa, fb])
+    assert {row["job_id"] for row in sources} == {"a", "b"}
+
+
+def test_0280_delete_cross_backup_planned_event_releases_original_provenance(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        _job(connection, "a")
+        _job(connection, "b")
+        fa, _ = _family(connection, "a", "A")
+        fb, _ = _family(connection, "b", "B")
+
+    created = create_planned_event(db, "a", _preview_for_families([fa, fb]))
+    event_id = str(created["parent_event"]["id"])
+
+    # Compatibility routes may arrive through any provenance backup. Event
+    # identity decides the technical anchor internally.
+    result = delete_planned_event(db, "b", event_id)
+    assert result["released_family_count"] == 2
+    assert result["released_file_count"] == 2
+
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE id=?", (event_id,)
+        ).fetchone()[0] == 0
+        released = connection.execute(
+            """SELECT job_id,family_id FROM released_free_families
+               WHERE family_id IN (?,?) ORDER BY family_id""",
+            (fa, fb),
+        ).fetchall()
+
+    assert {(str(row["job_id"]), int(row["family_id"])) for row in released} == {
+        ("a", fa),
+        ("b", fb),
+    }
+
+
+def test_0280_backup_filter_never_partitions_one_event(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        _job(connection, "a")
+        _job(connection, "b")
+        fa, _ = _family(connection, "a", "A")
+        fb, _ = _family(connection, "b", "B")
+
+    created = create_planned_event(db, "a", _preview_for_families([fa, fb]))
+    event_id = str(created["parent_event"]["id"])
+
+    for selected in (["a"], ["b"]):
+        summary = build_global_workspace_summary(db, selected)
+        groups = summary["planning_overview"]["event_groups"]
+        assert len(groups) == 1
+        assert groups[0]["event_id"] == event_id
+        assert groups[0]["family_count"] == 2
+        assert set(groups[0]["family_ids"]) == {fa, fb}
+        assert set(groups[0]["source_job_ids"]) == {"a", "b"}
+
+    empty = build_global_workspace_summary(db, [])
+    assert empty["planning_overview"]["event_groups"] == []
+    assert empty["event_count"] == 0
