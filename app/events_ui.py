@@ -2991,7 +2991,7 @@ EVENTS_HTML = r"""<!doctype html>
       function editSubeventDayControl(attribute, displayAttribute, selected, label, disabled){
         const days=editSubeventDays();
         const current=days.includes(selected) ? selected : (days[0]||selected||"");
-        return `<label class="edit-field"><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select ${attribute} ${disabled?"disabled":""}>${editSubeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+        return `<label class="edit-field"><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:58px minmax(82px,1fr);gap:6px"><select ${attribute} ${disabled?"disabled":""}>${editSubeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
       }
 
       function syncEditSubeventDayDisplay(row, prefix){
