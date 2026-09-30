@@ -1330,6 +1330,19 @@ EVENTS_HTML = r"""<!doctype html>
     </div>
   </dialog>
 
+  <dialog id="structure-change-dialog" class="sort-plan-dialog">
+    <div class="sort-plan-content">
+      <div class="sort-plan-header">
+        <div>
+          <h2>Manuelle Ereignisänderung</h2>
+          <p id="structure-change-subtitle" class="muted">Der reale Dateisystemzustand wird mit Bibliothekar abgeglichen.</p>
+        </div>
+        <button id="structure-change-close" type="button">Schließen</button>
+      </div>
+      <div id="structure-change-body">Änderung wird geladen …</div>
+    </div>
+  </dialog>
+
   <dialog id="change-request-dialog" class="sort-plan-dialog">
     <div class="sort-plan-content">
       <div class="sort-plan-header">
@@ -1419,6 +1432,11 @@ EVENTS_HTML = r"""<!doctype html>
     const reassignmentSubtitle = document.getElementById("reassignment-subtitle");
     const reassignmentClose = document.getElementById("reassignment-close");
     let reassignmentContext = null;
+
+    const structureChangeDialog = document.getElementById("structure-change-dialog");
+    const structureChangeBody = document.getElementById("structure-change-body");
+    const structureChangeSubtitle = document.getElementById("structure-change-subtitle");
+    document.getElementById("structure-change-close")?.addEventListener("click",()=>structureChangeDialog.close());
 
     const changeRequestDialog =
       document.getElementById("change-request-dialog");
@@ -4384,11 +4402,98 @@ EVENTS_HTML = r"""<!doctype html>
     });
     eventLoadMore?.addEventListener("click", () => loadEvents({reset:false}).catch(error=>setStatus(error.message,true)));
 
+    function structurePathLabel(value) {
+      return value ? value : "Direkt im Ereignis";
+    }
+
+    async function showStructureChange(changeId) {
+      if (!structureChangeDialog.open) structureChangeDialog.showModal();
+      structureChangeBody.textContent="Änderung wird geladen …";
+      const change=await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}`);
+      const d=change.detected||{};
+      structureChangeSubtitle.textContent=(d.status==="archived"?"Archiviert":"Angewendet")+" · "+String(d.event_name||change.event_id||"");
+      const added=d.directory_added||[], removed=d.directory_removed||[], moves=d.file_moves||[];
+      const options=(d.input_options||[""]).map(path=>{
+        const current=String(path)===String(d.current_input_path||"");
+        return `<option value="${escapeHtml(path)}" ${current?"selected":""}>${escapeHtml(structurePathLabel(path))}${current?" · momentan Input":""}</option>`;
+      }).join("");
+      const blockers=[
+        ...(d.missing_file_ids||[]).map(id=>`Kameraoriginal fehlt · Datei-ID ${id}`),
+        ...(d.duplicate_file_ids||[]).map(id=>`Kameraoriginal mehrfach gefunden · Datei-ID ${id}`),
+        ...(d.unclassified_directories||[]).map(path=>`Strukturpfad nicht eindeutig · ${path}`),
+        ...(d.inconsistent_leaf_layouts?["Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen."]:[])
+      ];
+      const preview=`
+        <div class="card">
+          <strong>Erkannte Änderungen</strong>
+          <div style="display:grid;gap:6px;margin-top:9px">
+            ${added.map(path=>`<div>＋ Ordner: <code>${escapeHtml(path)}</code></div>`).join("")}
+            ${removed.map(path=>`<div>− Ordner: <code>${escapeHtml(path)}</code></div>`).join("")}
+            ${moves.map(row=>`<div>→ Datei: <code>${escapeHtml(row.old_path||"")}</code><br><span class="muted">nach</span> <code>${escapeHtml(row.new_path||"")}</code></div>`).join("")}
+            ${!added.length&&!removed.length&&!moves.length?'<span class="muted">Keine Pfadänderungen.</span>':""}
+          </div>
+        </div>
+        ${blockers.length?`<div class="error-box" style="margin-top:12px"><strong>Diese Änderung kann noch nicht übernommen werden.</strong>${blockers.map(x=>`<div style="margin-top:6px">${escapeHtml(x)}</div>`).join("")}</div>`:""}
+        <label class="edit-field" style="margin-top:14px"><span>Welcher Ordner soll zukünftig der Input-Ordner sein?</span>
+          <select id="structure-change-input" ${blockers.length?"disabled":""}>${options}</select>
+        </label>`;
+      if(change.root_kind==="shared_workspace"){
+        structureChangeBody.innerHTML=preview+`
+          <div class="edit-actions">
+            <button type="button" id="structure-change-confirm" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>Änderungen übernehmen</button>
+          </div>`;
+        document.getElementById("structure-change-confirm")?.addEventListener("click",async()=>{
+          const input=document.getElementById("structure-change-input").value;
+          structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">event.json und SQLite werden aktualisiert …</p>');
+          await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/confirm-applied`,{
+            method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
+          });
+          structureChangeDialog.close();
+          await loadEvents({reset:true});
+          refreshGlobalTasks();
+          setStatus("Manuelle Ereignisänderung übernommen. event.json und SQLite sind aktuell.",false,true);
+        });
+        return;
+      }
+      if(change.status==="prepared"){
+        const prepared=String(d.prepared_event_json_path||"");
+        const target=(String(d.event_name||"") && String(d.status||"")==="archived") ? "im Ereignisordner des Archivs" : "im Archiv";
+        structureChangeBody.innerHTML=preview+`
+          <div class="card" style="margin-top:14px"><strong>Schritt 2 von 3 · event.json ersetzen</strong>
+            <p>Vorbereitet:</p><code style="display:block;white-space:pre-wrap;word-break:break-all">${escapeHtml(prepared)}</code>
+            <p>Ersetze damit die vorhandene <code>event.json</code> ${target}. Andere Archivdateien werden von Bibliothekar nicht verändert.</p>
+          </div>
+          <div class="edit-actions"><button type="button" id="structure-change-verify" class="plan-button bk-positive-action">Prüfen</button></div>`;
+        document.getElementById("structure-change-verify")?.addEventListener("click",async()=>{
+          structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">Archivbestand und event.json werden geprüft …</p>');
+          await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/verify-archive`,{method:"POST"});
+          structureChangeDialog.close();
+          await loadEvents({reset:true});
+          refreshGlobalTasks();
+          setStatus("Archivänderung geprüft und in SQLite übernommen.",false,true);
+        });
+      }else{
+        structureChangeBody.innerHTML=preview+`
+          <div class="card" style="margin-top:14px"><strong>Archiv · Schritt 1 von 3</strong><p>Bibliothekar erzeugt eine neue event.json unter „Später zuordnen“. Die Kamerabibliothek bleibt read-only.</p></div>
+          <div class="edit-actions"><button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>event.json vorbereiten</button></div>`;
+        document.getElementById("structure-change-prepare")?.addEventListener("click",async()=>{
+          const input=document.getElementById("structure-change-input").value;
+          await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/prepare-archive`,{
+            method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
+          });
+          await showStructureChange(changeId);
+          refreshGlobalTasks();
+        });
+      }
+    }
+
     loadJobs().then(async () => {
       const params = new URLSearchParams(location.search);
       const task = params.get("task") || "";
       const jobId = params.get("job") || "";
-      if (task.startsWith("change:")) {
+      if (task.startsWith("structure:")) {
+        await showStructureChange(task.slice("structure:".length));
+      } else if (task.startsWith("change:")) {
         const crId = task.slice("change:".length);
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
         await showChangeRequestDetail(crId, {resume:true});
