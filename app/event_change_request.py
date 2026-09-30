@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from app.database import database_connection
@@ -67,6 +67,12 @@ def _compute_event_plan(
             raise EventChangeRequestError(
                 "Nur archivierte Ereignisse koennen ueber einen manuellen Aenderungsauftrag geaendert werden."
             )
+        from app.event_layout import ensure_event_layout_snapshot
+        current_layout_state = ensure_event_layout_snapshot(
+            connection,
+            event_id,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
 
         assigned_rows = connection.execute(
             """
@@ -158,6 +164,30 @@ def _compute_event_plan(
         else:
             rows = []
 
+    layout_explicit = bool(preview.get("_folder_layout_explicit"))
+    requested_layout_state: dict[str, Any] | None = None
+    requested_layout_paths: set[str] = set()
+    if layout_explicit:
+        raw_layout = preview.get("folder_layout")
+        if not isinstance(raw_layout, dict):
+            raise EventChangeRequestError("Die gewünschte Ereignisstruktur fehlt.")
+        from app.event_layout import normalize_layout, validate_input_path, layout_paths
+        normalized_layout = normalize_layout(
+            raw_layout.get("layout") or current_layout_state["layout"]
+        )
+        requested_enabled = bool(raw_layout.get("structure_enabled", True))
+        requested_input = validate_input_path(
+            normalized_layout,
+            raw_layout.get("input_path", current_layout_state["input_path"]),
+            structure_enabled=requested_enabled,
+        )
+        requested_layout_state = {
+            "structure_enabled": requested_enabled,
+            "input_path": requested_input,
+            "layout": normalized_layout,
+        }
+        requested_layout_paths = set(layout_paths(normalized_layout))
+
     parent_folder = str(preview.get("parent_folder") or "").strip()
     child_folder = str(preview.get("child_folder") or "").strip()
     child_segments = list(preview.get("child_segments") or [])
@@ -234,6 +264,25 @@ def _compute_event_plan(
     ) -> str | None:
         value = str(capture or "")[:19]
         safe_branch = branch if branch in {"Alle", "Sortiert", "Export"} else ""
+
+        def organization_path() -> str:
+            if requested_layout_state is None:
+                return safe_branch
+            if not bool(requested_layout_state["structure_enabled"]):
+                return ""
+            # OFF -> ON is intentionally simple in 0.28.3: no historical
+            # placement restoration; everything enters the chosen input.
+            if not bool(current_layout_state.get("structure_enabled")):
+                return str(requested_layout_state["input_path"] or "")
+            from app.physical_state import organization_path_for_event_relative
+            observed = organization_path_for_event_relative(
+                old_event_relative_path,
+                current_layout_state,
+            )
+            if observed and observed in requested_layout_paths:
+                return observed
+            return str(requested_layout_state["input_path"] or "")
+
         parts = [year, parent_folder]
 
         if value and capture_belongs(value):
@@ -261,15 +310,23 @@ def _compute_event_plan(
                     return None
                 parts.append(day_key)
 
-            if safe_branch:
-                parts.append(safe_branch)
+            organization = organization_path()
+            if organization:
+                parts.extend(PurePosixPath(organization).parts)
             parts.append(filename)
             return "/".join(parts)
 
         # Ohne belastbare Aufnahmezeit darf nichts in neue Tages-/Unterereignis-
-        # Strukturen geraten. Bei einer reinen Ereignisordner-Umbenennung bleibt
-        # jedoch die interne relative Lage vollständig erhalten.
+        # Strukturen geraten. Bei einer reinen Ereignisordner-Änderung ist die
+        # Lage dennoch eindeutig: Layout-Edits verwenden Organisation/Input,
+        # Legacy-Aufträge behalten weiterhin ihre vollständige interne Lage.
         if not normalized_child_segments and not child_folder and not preserve_day_folders:
+            if requested_layout_state is not None:
+                organization = organization_path()
+                if organization:
+                    parts.extend(PurePosixPath(organization).parts)
+                parts.append(filename)
+                return "/".join(parts)
             suffix = str(old_event_relative_path or "").replace("\\", "/").strip("/")
             if suffix:
                 return "/".join([year, parent_folder, suffix])
@@ -657,9 +714,10 @@ def propose_event_change(
                 selected_day_keys, selected_family_ids,
                 selected_file_count, selected_family_count,
                 no_event_segments, child_segments_json,
+                folder_structure_enabled, folder_input_path, folder_layout_json,
                 status, version, proposed_at,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cr_id,
@@ -683,6 +741,18 @@ def propose_event_change(
                 preview.get("selected_family_count", 0),
                 json.dumps(preview.get("no_event_segments", []), ensure_ascii=False),
                 json.dumps(preview.get("subevents") or preview.get("child_segments", []), ensure_ascii=False),
+                (
+                    int(bool(requested_layout_state["structure_enabled"]))
+                    if requested_layout_state is not None else None
+                ),
+                (
+                    str(requested_layout_state["input_path"])
+                    if requested_layout_state is not None else None
+                ),
+                (
+                    json.dumps(requested_layout_state["layout"], ensure_ascii=False, sort_keys=True)
+                    if requested_layout_state is not None else None
+                ),
                 initial_status,
                 version,
                 now,
