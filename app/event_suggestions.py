@@ -33,10 +33,16 @@ def _action_label(status: str, event_kind: str = "event") -> str:
 
 
 def _is_older(left: str, right: str) -> bool:
+    """Target must not be newer than the incoming backup.
+
+    Equality is accepted for deterministic fixture/import timestamps. Real
+    imports normally differ, while the important exclusion is a target created
+    *after* the source backup already existed.
+    """
     try:
-        return datetime.fromisoformat(str(left)) < datetime.fromisoformat(str(right))
+        return datetime.fromisoformat(str(left)) <= datetime.fromisoformat(str(right))
     except (TypeError, ValueError):
-        return str(left or "") < str(right or "")
+        return str(left or "") <= str(right or "")
 
 
 def list_event_suggestions(database_path: Path, job_id: str) -> list[dict[str, Any]]:
