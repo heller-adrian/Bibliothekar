@@ -3438,6 +3438,13 @@ def get_event_edit_context(
             (event_id, event_id, event_id, event_id, job_id, event_id, event_id),
         ).fetchall()
 
+        from app.event_access import event_source_jobs
+        from app.event_layout import ensure_event_layout_snapshot
+        folder_layout = ensure_event_layout_snapshot(
+            connection, event_id, now=utc_now_iso()
+        )
+        source_jobs = event_source_jobs(connection, event_id)
+
         live_root_kind = (
             "camera_archive"
             if str(event["status"] or "") == "archived"
@@ -3523,6 +3530,8 @@ def get_event_edit_context(
         "time_segments": [dict(row) for row in segment_rows],
         "structural_editable": structural_editable,
         "archived_change_request": archived_change_request,
+        "folder_layout": folder_layout,
+        "source_jobs": source_jobs,
         "families": [
             _family_payload(row)
             for row in family_rows
