@@ -56,7 +56,7 @@ def _visible_events(database_path: Path, selected_job_ids: set[str]) -> tuple[li
             source_ids = {str(row["job_id"]) for row in source_rows}
             if not source_ids:
                 source_ids = {str(event["job_id"])}
-            if selected_job_ids and source_ids.isdisjoint(selected_job_ids):
+            if not selected_job_ids or source_ids.isdisjoint(selected_job_ids):
                 continue
             counts = _event_counts(connection, event_id)
             folder_layout = ensure_event_layout_snapshot(
