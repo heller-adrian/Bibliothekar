@@ -1361,6 +1361,23 @@ WORKSPACE_HTML = r"""<!doctype html>
   </dialog>
 
   
+  <dialog id="cross-backup-membership-dialog">
+    <div class="dialog-content">
+      <h2 style="margin-top:0">Weitere Aufnahmen im gewählten Zeitraum</h2>
+      <p id="cross-backup-membership-summary" class="muted"></p>
+      <div id="cross-backup-membership-sources" style="display:grid;gap:9px;margin-top:12px"></div>
+      <p class="muted" style="margin-top:14px">
+        Der Sicherungsfilter ist nur eine Ansicht. Wenn du fortfährst, werden
+        alle bereits vorhandenen freien Aufnahmen dieses Zeitraums Bestandteil
+        desselben Ereignisses.
+      </p>
+      <div class="dialog-actions">
+        <button id="cross-backup-membership-cancel" type="button">Abbrechen</button>
+        <button id="cross-backup-membership-confirm" class="primary bk-positive-action" type="button">OK · vollständig übernehmen</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="task-reassign-dialog">
     <div class="dialog-content">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:start">
@@ -1820,6 +1837,64 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       );
       return decodeApiResponse(response);
+    }
+
+
+    const crossBackupMembershipDialog = document.getElementById("cross-backup-membership-dialog");
+    const crossBackupMembershipSummary = document.getElementById("cross-backup-membership-summary");
+    const crossBackupMembershipSources = document.getElementById("cross-backup-membership-sources");
+    const crossBackupMembershipCancel = document.getElementById("cross-backup-membership-cancel");
+    const crossBackupMembershipConfirm = document.getElementById("cross-backup-membership-confirm");
+
+    function confirmCrossBackupMembership(error) {
+      const membership=error?.data?.membership || {};
+      const sources=membership.sources || [];
+      crossBackupMembershipSummary.textContent =
+        `${Number(membership.additional_family_count||0)} weitere Familien · `
+        + `${Number(membership.additional_file_count||0)} Dateien liegen bereits in aktiven Sicherungen und gehören ebenfalls zu diesem Zeitraum.`;
+
+      crossBackupMembershipSources.innerHTML=sources.map(source=>{
+        const familyRows=(source.families||[]).map(family=>{
+          const files=(family.file_names||[]).map(name=>`<li><code>${escapeHtml(name)}</code></li>`).join("");
+          return `<details class="card" style="margin:7px 0 0;padding:8px 10px">
+            <summary><strong>${escapeHtml(family.original_stem||"Dateifamilie")}</strong>
+              · ${escapeHtml(family.capture_time||"")}
+              · ${Number(family.file_count||0)} Dateien</summary>
+            <ul style="margin:8px 0 0">${files||"<li class='muted'>Keine Dateinamen verfügbar.</li>"}</ul>
+          </details>`;
+        }).join("");
+        return `<details class="card" style="margin:0;padding:10px 12px">
+          <summary><strong>${escapeHtml(source.source_label||source.job_id||"Sicherung")}</strong>
+            · ${Number(source.family_count||0)} Familien
+            · ${Number(source.file_count||0)} Dateien</summary>
+          <div style="margin-top:8px">${familyRows}</div>
+        </details>`;
+      }).join("");
+
+      return new Promise(resolve=>{
+        let settled=false;
+        const finish=value=>{
+          if(settled)return;
+          settled=true;
+          crossBackupMembershipDialog.close();
+          resolve(value);
+        };
+        crossBackupMembershipConfirm.onclick=()=>finish(true);
+        crossBackupMembershipCancel.onclick=()=>finish(false);
+        crossBackupMembershipDialog.oncancel=event=>{event.preventDefault();finish(false);};
+        crossBackupMembershipDialog.showModal();
+      });
+    }
+
+    async function postWithCanonicalMembership(url,payload) {
+      try {
+        return await postJson(url,payload);
+      } catch(error) {
+        if(error?.data?.confirmation_required!=="cross_backup_membership") throw error;
+        const confirmed=await confirmCrossBackupMembership(error);
+        if(!confirmed)return null;
+        return postJson(url,{...payload,confirm_cross_backup_membership:true});
+      }
     }
 
 
@@ -3534,17 +3609,26 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     async function createEventWithEmptySubeventConfirmation(jobId, payload) {
-      try {
-        return await postJson(
-          `/api/jobs/${encodeURIComponent(jobId)}/events`,
-          payload
-        );
-      } catch (error) {
-        if (!confirmEmptySubevents(error)) throw error;
-        return postJson(
-          `/api/jobs/${encodeURIComponent(jobId)}/events`,
-          {...payload,confirm_empty_subevents:true}
-        );
+      let current={...payload};
+      while(true){
+        try {
+          return await postJson(
+            `/api/jobs/${encodeURIComponent(jobId)}/events`,
+            current
+          );
+        } catch (error) {
+          if(error?.data?.confirmation_required==="cross_backup_membership"){
+            const confirmed=await confirmCrossBackupMembership(error);
+            if(!confirmed)return null;
+            current={...current,confirm_cross_backup_membership:true};
+            continue;
+          }
+          if(confirmEmptySubevents(error)){
+            current={...current,confirm_empty_subevents:true};
+            continue;
+          }
+          throw error;
+        }
       }
     }
 
@@ -3593,11 +3677,18 @@ WORKSPACE_HTML = r"""<!doctype html>
           const globalPayload=payloadForAllSources(payload);
           const target=(workspace?.events||[]).find(event=>String(event.id)===String(targetId));
           const requestJobId=String(target?.job_id || jobId);
-          result=await postJson(`/api/jobs/${encodeURIComponent(requestJobId)}/no-event/assign-existing`, {
-            target_event_id: targetId,
-            segments: payload.no_event_segments || [],
-            family_ids: globalPayload.selected_family_ids || []
-          });
+          result=await postWithCanonicalMembership(
+            `/api/jobs/${encodeURIComponent(requestJobId)}/no-event/assign-existing`,
+            {
+              target_event_id: targetId,
+              segments: payload.no_event_segments || [],
+              family_ids: globalPayload.selected_family_ids || []
+            }
+          );
+          if(!result){
+            saveResult.hidden=true;
+            return;
+          }
           const total=Number(result?.assigned_family_count||0);
           saveResult.textContent = `Fortgeführt: ${total} Familien${(result?.source_job_ids||[]).length>1?" · sicherungsübergreifend":""}`;
         } else {
@@ -3611,7 +3702,11 @@ WORKSPACE_HTML = r"""<!doctype html>
             requestJobId,
             globalPayload
           );
-          const sourceCount=sourceGroupsForSelection().size;
+          if(!result){
+            saveResult.hidden=true;
+            return;
+          }
+          const sourceCount=Number((result.source_job_ids||[]).length) || sourceGroupsForSelection().size;
           const totalFamilies=Number(result.assigned_family_count||0);
           saveResult.textContent = `Gespeichert: ${result.parent_event.folder_name} · ${totalFamilies} Familien${sourceCount>1?" · sicherungsübergreifend":""}`;
           lastSavedEvent = result.parent_event;
@@ -3905,7 +4000,12 @@ WORKSPACE_HTML = r"""<!doctype html>
           location.href = `/events?job=${encodeURIComponent(result.target_job_id || button.dataset.sourceJobId || jobSelect.value)}&task=change:${encodeURIComponent(result.change_request_id)}`;
           return;
         }
-        eventSuggestionStatus.textContent = `${result.name} wurde als geplante Änderung angelegt.`;
+        if(result?.resort_required || result?.target_status==="applied"){
+          eventSuggestionStatus.textContent = `${result.name} wurde logisch ergänzt. Die physische Übernahme wird jetzt geprüft.`;
+          location.href = `/events?job=${encodeURIComponent(result.target_job_id || button.dataset.sourceJobId || jobSelect.value)}&task=resort:${encodeURIComponent(result.target_event_id || button.dataset.targetEventId)}`;
+          return;
+        }
+        eventSuggestionStatus.textContent = `${result.name} wurde der offenen Planung hinzugefügt.`;
         await loadWorkspace();
       } catch (error) {
         eventSuggestionStatus.textContent = error.message;
