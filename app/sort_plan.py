@@ -32,9 +32,6 @@ ALLOWED_FAMILY_STATUSES = {
     "complete",
 }
 
-WORKSPACE_BRANCHES = {"Alle", "Sortiert", "Export"}  # legacy recognition only
-
-
 def _layout_directories_at_leaf(leaf: PurePosixPath, layout_state: dict[str, Any]) -> set[str]:
     return {
         str(leaf / PurePosixPath(relative))
@@ -1314,12 +1311,6 @@ def build_event_sort_plan(
             if inventory_file is not None
             else str(file_record.get("current_root_kind") or "job_root")
         )
-        current_branch = (
-            str(inventory_file.get("branch") or "")
-            if inventory_file is not None
-            else ""
-        )
-
         if current_root_kind not in {"job_root", "shared_workspace"}:
             blockers.append({
                 "code": "source_root_kind_not_supported",
