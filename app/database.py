@@ -4186,20 +4186,27 @@ def assign_free_families_to_existing_no_event(
         effective_linkage = ""
 
         if str(target["status"]) == "applied":
+            from app.event_mutation import capture_job_event_state, begin_mutation, get_active_mutation
+            active = get_active_mutation(connection, str(target["job_id"]))
             if int(target["resort_required"] or 0):
-                connection.rollback()
-                raise ValueError("Für diese Sammlung ist bereits eine Nachsortierung offen.")
-            from app.event_mutation import capture_job_event_state, begin_mutation
-            original_state = capture_job_event_state(connection, str(target["job_id"]))
-            begin_mutation(
-                connection,
-                job_id=str(target["job_id"]),
-                anchor_event_id=effective_event_id,
-                mutation_kind="edit",
-                affected_event_ids=[effective_event_id],
-                original_state=original_state,
-                status="pending_apply",
-            )
+                if (
+                    active is None
+                    or str(active.get("anchor_event_id") or "") != effective_event_id
+                    or str(active.get("status") or "") != "pending_apply"
+                ):
+                    connection.rollback()
+                    raise ValueError("Für diese Sammlung ist bereits eine andere Nachsortierung offen.")
+            else:
+                original_state = capture_job_event_state(connection, str(target["job_id"]))
+                begin_mutation(
+                    connection,
+                    job_id=str(target["job_id"]),
+                    anchor_event_id=effective_event_id,
+                    mutation_kind="edit",
+                    affected_event_ids=[effective_event_id],
+                    original_state=original_state,
+                    status="pending_apply",
+                )
 
         connection.executemany(
             "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
