@@ -276,7 +276,8 @@ def test_0286_new_xmp_and_lightroom_export_in_free_day_are_picked_up(tmp_path: P
     work = shared_work_root(workspace)
 
     source_dir = Path("2026") / "07-24"
-    camera_rel = (source_dir / "A.JPG").as_posix()
+    stem = "20260724_120000_Fuji-X-E5"
+    camera_rel = (source_dir / (stem + ".JPG")).as_posix()
 
     with database_connection(db) as connection:
         seed_job(connection, "j")
@@ -296,7 +297,7 @@ def test_0286_new_xmp_and_lightroom_export_in_free_day_are_picked_up(tmp_path: P
         family_id, _file_id = _seed_family_file(
             connection,
             job_id="j",
-            stem="A",
+            stem=stem,
             capture="2026-07-24T12:00:00",
             current_path=camera_rel,
             content=b"camera",
@@ -310,20 +311,20 @@ def test_0286_new_xmp_and_lightroom_export_in_free_day_are_picked_up(tmp_path: P
 
     physical = work / source_dir
     physical.mkdir(parents=True, exist_ok=True)
-    (physical / "A.JPG").write_bytes(b"camera")
-    (physical / "A.xmp").write_bytes(b"xmp-new")
-    (physical / "A_Export_2.jpg").write_bytes(b"export-new")
+    (physical / (stem + ".JPG")).write_bytes(b"camera")
+    (physical / (stem + ".xmp")).write_bytes(b"xmp-new")
+    (physical / (stem + "_Export_2.jpg")).write_bytes(b"export-new")
 
     plan = build_event_sort_plan(db, "j", "e", workspace, verify_sha256=True)
     assert plan["summary"]["ready"] is True
     assets = {(row["asset_kind"], Path(row["source_relative_path"]).name): row for row in plan["assets"]}
-    assert ("xmp", "A.xmp") in assets
-    assert ("export", "A_Export_2.jpg") in assets
-    assert assets[("xmp", "A.xmp")]["destination_relative_path"] == (
-        "2026/07-24 - Freier Bestand/Alle/A.xmp"
+    assert ("xmp", stem + ".xmp") in assets
+    assert ("export", stem + "_Export_2.jpg") in assets
+    assert assets[("xmp", stem + ".xmp")]["destination_relative_path"] == (
+        "2026/07-24 - Freier Bestand/Alle/" + stem + ".xmp"
     )
-    assert assets[("export", "A_Export_2.jpg")]["destination_relative_path"] == (
-        "2026/07-24 - Freier Bestand/Export/A_Export_2.jpg"
+    assert assets[("export", stem + "_Export_2.jpg")]["destination_relative_path"] == (
+        "2026/07-24 - Freier Bestand/Export/" + stem + "_Export_2.jpg"
     )
 
 
