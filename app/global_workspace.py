@@ -7,6 +7,7 @@ from typing import Any
 
 from app.database import database_connection, get_job, list_job_day_groups, list_job_time_segments, list_archive_change_reviews
 from app.event_access import event_family_rows, event_source_jobs
+from app.event_layout import ensure_event_layout_snapshot
 from app.planning import list_job_planning_overview, list_global_released_archive_groups
 
 
@@ -58,7 +59,11 @@ def _visible_events(database_path: Path, selected_job_ids: set[str]) -> tuple[li
             if selected_job_ids and source_ids.isdisjoint(selected_job_ids):
                 continue
             counts = _event_counts(connection, event_id)
+            folder_layout = ensure_event_layout_snapshot(
+                connection, event_id, now=str(event.get("updated_at") or event.get("created_at") or "")
+            )
             event.update({
+                "folder_layout": folder_layout,
                 "assigned_family_count": counts["family_count"],
                 "assigned_file_count": counts["file_count"],
                 "source_job_ids": sorted(source_ids),
@@ -98,6 +103,7 @@ def _visible_events(database_path: Path, selected_job_ids: set[str]) -> tuple[li
                 "status": str(event["status"]),
                 "event_kind": str(event["event_kind"]),
                 "preserve_day_folders": bool(event["preserve_day_folders"]),
+                "folder_layout": folder_layout,
                 "resort_required": bool(event["resort_required"]),
                 "day_keys": day_keys,
                 "child_events": children,
