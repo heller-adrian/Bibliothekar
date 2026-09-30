@@ -358,46 +358,6 @@ def list_event_reassignments(database_path: Path, job_id: str, event_id: str) ->
     }
 
 
-def _create_linked_followup(connection, job_id: str, target, family_ids: list[int], now: str) -> dict[str, Any]:
-    status = str(target["status"])
-    linkage = {
-        "planned": "planned_extension",
-        "applied": "applied_followup",
-        "archived": "archived_manual",
-    }[status]
-    prefix = {
-        "planned": "Ergänzung",
-        "applied": "Nachtrag",
-        "archived": "Später zuzuordnen",
-    }[status]
-    event_id = "EVENT_" + uuid.uuid4().hex.upper()
-    name = f"{prefix}: {target['name']}"
-    connection.execute(
-        """
-        INSERT INTO events (
-            id, job_id, parent_event_id, event_level, name,
-            start_datetime, end_datetime, uses_time_range, folder_name,
-            status, created_at, updated_at, event_kind, preserve_day_folders,
-            revision, applied_at, archived_at, linked_event_id, linkage_kind
-        ) VALUES (?, ?, NULL, 'parent', ?, ?, ?, 0, ?, 'planned', ?, ?,
-                  'event', ?, 1, NULL, NULL, ?, ?)
-        """,
-        (event_id, job_id, name, target["start_datetime"], target["end_datetime"],
-         target["folder_name"], now, now, int(target["preserve_day_folders"] or 0),
-         target["id"], linkage),
-    )
-    connection.executemany(
-        "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'manual',?)",
-        [(event_id, fid, now) for fid in family_ids],
-    )
-    return {
-        "event_id": event_id, "name": name, "status": "planned",
-        "folder_name": str(target["folder_name"]),
-        "preserve_day_folders": bool(target["preserve_day_folders"]),
-        "linkage_kind": linkage, "linked_target_status": status,
-    }
-
-
 def _create_new_event(
     database_path: Path, job_id: str, family_ids: list[int], name: str,
     *, ignore_event_ids: set[str] | None = None, segment: dict[str,str] | None = None,
@@ -543,51 +503,6 @@ def _create_new_no_event(
         "status": "planned", "folder_name": str(event["folder_name"]),
         "preserve_day_folders": bool(event["preserve_day_folders"]), "linkage_kind": "",
         "linked_target_status": "planned",
-    }
-
-
-def _create_cross_job_no_event_extension(connection, job_id: str, target, family_ids: list[int], now: str, segments: list[dict[str,str]] | None = None) -> dict[str, Any]:
-    rows = _selected_capture_rows(connection, job_id, family_ids)
-    month = _capture_month(rows)
-    target_month = str(target["start_datetime"] or "")[:7]
-    if month != target_month:
-        raise EventReassignmentError("Die ausgewählten Familien passen nicht zum Monat dieser „Ohne Ereignis“-Sammlung.")
-    if str(target["status"]) == "archived":
-        info = _create_linked_followup(connection, job_id, target, family_ids, now)
-        # Semantisch bleibt der Nachtrag Teil der Ohne-Ereignis-Sammlung.
-        connection.execute("UPDATE events SET event_kind='no_event' WHERE id=?", (info["event_id"],))
-        return info
-
-    event_id = "EVENT_" + uuid.uuid4().hex.upper()
-    captures = [str(row["selected_capture_time"])[:19] for row in rows]
-    connection.execute(
-        """INSERT INTO events (
-            id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,
-            folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,
-            applied_at,archived_at,linked_event_id,linkage_kind,timeline_model,resort_required
-        ) VALUES (?,?,NULL,'parent','Ohne Ereignis',?,?,0,?,'planned',?,?,'no_event',?,1,NULL,NULL,?,
-                  'planned_extension','segments',0)""",
-        (event_id,job_id,min(captures),max(captures),target["folder_name"],now,now,
-         int(bool(target["preserve_day_folders"])),target["id"]),
-    )
-    connection.executemany(
-        "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES (?,?,NULL,'date_time_range',?)",
-        [(event_id,fid,now) for fid in family_ids],
-    )
-    for seg in (segments or _no_event_segments_for_rows(rows)):
-        day=seg["day_key"]
-        start=seg.get("start_datetime") or f"{day}T{seg['start_time']}:00"
-        end=seg.get("end_datetime") or f"{day}T{seg['end_time']}:59"
-        connection.execute(
-            """INSERT INTO event_time_segments(event_id,job_id,day_key,start_time,end_time,start_datetime,end_datetime,source,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (event_id,job_id,day,seg["start_time"],seg["end_time"],start,end,'reassignment',now,now),
-        )
-    return {
-        "event_id": event_id, "name": "Ohne Ereignis", "status": "planned",
-        "folder_name": str(target["folder_name"]),
-        "preserve_day_folders": bool(target["preserve_day_folders"]),
-        "linkage_kind": "planned_extension", "linked_target_status": str(target["status"]),
     }
 
 
