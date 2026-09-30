@@ -971,6 +971,10 @@ def build_event_sort_plan(
     except WorkspaceLayoutError as error:
         raise SortPlanError(str(error)) from error
 
+    shared_workspace_source = bool(file_rows) and all(
+        str(dict(row).get("current_root_kind") or "") == "shared_workspace"
+        for row in file_rows
+    )
     if allow_reapply:
         # In der Nachsortierung liegen die Dateien bereits im gemeinsamen
         # Arbeitsbereich; Quelle und Ziel sind derselbe Bereich.
@@ -983,6 +987,12 @@ def build_event_sort_plan(
         # nicht mehr physische Quelle des nächsten Sortierlaufs.
         source_root = target_root
         source_root_field = "released_archive_workspace"
+    elif shared_workspace_source:
+        # Seit dem verifizierten Import liegen Dateien aller Sicherungen im
+        # selben Arbeitsbereich. Der Anchor-Job ist nur Workflow-Eigentümer und
+        # darf nicht als physische Quellgrenze missverstanden werden.
+        source_root = target_root
+        source_root_field = "shared_workspace"
     else:
         source_root, source_root_field = _resolve_job_root(
             job,
