@@ -566,20 +566,6 @@ def _apply_confirmed_state(
         layout=layout,
         updated_at=now,
     )
-    if structure_enabled:
-        from app.physical_state import capture_placement_snapshot
-        capture_placement_snapshot(
-            connection,
-            str(row["event_id"]),
-            {
-                "structure_enabled": True,
-                "input_path": clean_input,
-                "layout": layout,
-            },
-            root_kind=str(row["root_kind"]),
-            restore_pending=False,
-            now=now,
-        )
     connection.execute(
         "UPDATE events SET revision=revision+1,updated_at=?,edited_at=? WHERE id=?",
         (now, now, row["event_id"]),
