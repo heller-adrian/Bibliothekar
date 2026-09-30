@@ -110,6 +110,14 @@ def _desired_directory_plan(
     """Canonical SOLL directories implied by the final target files."""
     root = _target_root(preview)
     directories: set[PurePosixPath] = {root}
+    layout_state = preview.get("folder_layout")
+    configured_layout_paths: list[PurePosixPath] = []
+    if isinstance(layout_state, dict) and bool(layout_state.get("structure_enabled")):
+        from app.event_layout import layout_paths
+        configured_layout_paths = [
+            PurePosixPath(value)
+            for value in layout_paths(layout_state.get("layout") or {})
+        ]
     items = [
         *(plan.get("families_with_plans") or []),
         *(plan.get("assets_with_plans") or []),
@@ -128,6 +136,31 @@ def _desired_directory_plan(
             raise ArchiveStagingError(
                 "Ein SOLL-Pfad liegt außerhalb des neuen Ereignisordners."
             )
+        if configured_layout_paths:
+            parent = rel.parent
+            matched = next(
+                (
+                    layout_path
+                    for layout_path in sorted(
+                        configured_layout_paths,
+                        key=lambda value: len(value.parts),
+                        reverse=True,
+                    )
+                    if len(parent.parts) >= len(layout_path.parts)
+                    and tuple(parent.parts[-len(layout_path.parts):]) == layout_path.parts
+                ),
+                None,
+            )
+            container = (
+                PurePosixPath(*parent.parts[:-len(matched.parts)])
+                if matched is not None and matched.parts
+                else parent
+            )
+            directories.add(container)
+            for layout_path in configured_layout_paths:
+                directories.add(container / layout_path)
+            continue
+
         branch_index = next(
             (index for index, part in enumerate(rel.parts) if part in BRANCHES),
             None,
@@ -403,6 +436,17 @@ def _request_preview_and_plan(
         "end_time": cr.get("end_time"),
         "subevents": subevents,
     }
+    if cr.get("folder_layout_json") is not None:
+        try:
+            stored_layout = json.loads(str(cr.get("folder_layout_json") or "{}"))
+        except Exception as exc:
+            raise ArchiveStagingError("Die gespeicherte Archiv-Ordnerstruktur ist beschädigt.") from exc
+        preview["folder_layout"] = {
+            "structure_enabled": bool(cr.get("folder_structure_enabled")),
+            "input_path": str(cr.get("folder_input_path") or ""),
+            "layout": stored_layout,
+        }
+        preview["create_subfolders"] = bool(cr.get("folder_structure_enabled"))
     plan = {
         "families_with_plans": [
             {**row, "source_root_kind": str(row.get("source_root_kind") or "camera_archive")}
