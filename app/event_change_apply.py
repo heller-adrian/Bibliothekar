@@ -454,14 +454,24 @@ def verify_event_change(
             if bool(review.get("advisory")):
                 advisory_path = _safe_archive_path(root, old_rel)
                 status = "advisory"
-                message = (
-                    "Zusätzliche nicht verwaltete Datei im Archiv. "
-                    "Sie bleibt vollständig unberührt und gehört nicht zum SOLL."
-                )
+                reason = str(review.get("advisory_reason") or "")
+                if reason == "redundant_duplicate":
+                    message = (
+                        "Byte-identische zusätzliche "
+                        + str(review.get("asset_kind") or "Datei").upper()
+                        + "-Kopie. Sie ist nicht erforderlich und darf liegen bleiben, "
+                          "umbenannt oder gelöscht werden."
+                    )
+                else:
+                    message = (
+                        "Zusätzliche nicht verwaltete Datei im Archiv. "
+                        "Sie bleibt vollständig unberührt und gehört nicht zum SOLL."
+                    )
                 advisories.append({
                     "path": old_rel,
                     "exists": advisory_path.is_file(),
                     "asset_kind": review.get("asset_kind"),
+                    "advisory_reason": reason,
                     "message": message,
                 })
             elif action == "delete" or (action == "unresolved" and release_path):
@@ -486,7 +496,6 @@ def verify_event_change(
                         "Zusätzliche Datei wurde aus dem Ereignisordner entfernt "
                         "und besitzt deshalb kein offenes SOLL-Ziel mehr."
                     )
-                    ok_count += 1
                 else:
                     status = "needs_assignment"
                     message = (
