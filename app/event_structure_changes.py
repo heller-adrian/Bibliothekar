@@ -19,7 +19,7 @@ import uuid
 from app.database import database_connection
 from app.event_access import event_file_rows
 from app.event_inventory import scan_event_inventory, EventInventoryError
-from app.event_layout import get_event_layout, layout_paths, update_event_layout
+from app.event_layout import get_event_layout, layout_paths, layout_role_paths, update_event_layout
 from app.event_document import build_event_document_from_db, EVENT_DOCUMENT_FILENAME
 from app.workspace_layout import WORK_DIRECTORY_NAME
 
@@ -42,7 +42,11 @@ def _safe_rel(value: Any) -> str:
     return path.as_posix()
 
 
-def _layout_from_paths(paths: list[str]) -> dict[str, Any]:
+def _layout_from_paths(
+    paths: list[str],
+    *,
+    role_paths: dict[str, set[str]] | None = None,
+) -> dict[str, Any]:
     tree: dict[str, Any] = {}
     for raw in sorted({_safe_rel(value) for value in paths if _safe_rel(value)}):
         cursor = tree
@@ -53,11 +57,15 @@ def _layout_from_paths(paths: list[str]) -> dict[str, Any]:
         for name, children in sorted(node.items(), key=lambda item: item[0].casefold()):
             path = PurePosixPath(*prefix, name).as_posix()
             node_id = "fs-" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
-            result.append({
+            item = {
                 "id": node_id,
                 "name": name,
                 "children": nodes(children, (*prefix, name)),
-            })
+            }
+            for role, configured_paths in (role_paths or {}).items():
+                if path in configured_paths:
+                    item["role"] = role
+            result.append(item)
         return result
     return {"version": 1, "nodes": nodes(tree)}
 
@@ -262,7 +270,13 @@ def _snapshot_from_inventory(
     canonical_sets = {tuple(sorted(paths)) for paths in nonempty_sets}
     inconsistent = len(canonical_sets) > 1
     proposed_paths = sorted(next(iter(canonical_sets), ())) if not inconsistent else []
-    proposed_layout = _layout_from_paths(proposed_paths)
+    preserved_roles = {
+        "export": set(layout_role_paths(layout_state["layout"], "export")),
+    }
+    proposed_layout = _layout_from_paths(
+        proposed_paths,
+        role_paths=preserved_roles,
+    )
 
     expected_org = set(layout_paths(layout_state["layout"])) if layout_state.get("structure_enabled") else set()
     expected_dirs: set[str] = set()
