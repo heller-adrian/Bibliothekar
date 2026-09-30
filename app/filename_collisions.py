@@ -11,18 +11,18 @@ import re
 
 
 _COPY_WORD_SUFFIX_RE = re.compile(
-    r"^(?P<base>.+?)(?:\\s*-\\s*|\\s+|_)(?:copy|kopie)(?:[\\s_-]*\\d+)?$",
+    r"^(?P<base>.+?)(?:\s*-\s*|\s+|_)(?:copy|kopie)(?:[\s_-]*\d+)?$",
     re.IGNORECASE,
 )
 _COPY_PAREN_SUFFIX_RE = re.compile(
-    r"^(?P<base>.+?)\\s*\\((?:copy\\s*|kopie\\s*)?\\d+\\)$",
+    r"^(?P<base>.+?)\s*\((?:copy\s*|kopie\s*)?\d+\)$",
     re.IGNORECASE,
 )
 _PLAIN_NUMBER_SUFFIX_RE = re.compile(
-    r"^(?P<base>.+?)(?:\\s+|_)(?P<number>\\d+)$"
+    r"^(?P<base>.+?)(?:\s+|_)(?P<number>\d+)$"
 )
 _EXPORT_SUFFIX_RE = re.compile(
-    r"^(?P<base>.+?)_Export(?:_\\d{3})?$",
+    r"^(?P<base>.+?)_Export(?:_\d{3})?$",
     re.IGNORECASE,
 )
 
