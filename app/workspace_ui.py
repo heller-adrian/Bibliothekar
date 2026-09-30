@@ -2136,22 +2136,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
 
       setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
-      const items=await Promise.all(ids.map(async jobId=>{
-        const [data,suggestionData]=await Promise.all([
-          getJson(`/api/jobs/${encodeURIComponent(jobId)}/workspace-summary`),
-          getJson(`/api/jobs/${encodeURIComponent(jobId)}/event-suggestions`)
-        ]);
-        return {jobId,data,suggestions:suggestionData.suggestions||[]};
-      }));
-
-      workspace=mergeWorkspacePayloads(items);
-      eventSuggestions=items.flatMap(item=>
-        item.suggestions.map(suggestion=>({
-          ...suggestion,
-          source_job_id:item.jobId,
-          source_label:jobs.find(job=>job.id===item.jobId)?.source_volume_label || item.jobId
-        }))
-      );
+      const query=ids.map(encodeURIComponent).join(",");
+      workspace=await getJson(`/api/workspace/summary?jobs=${query}`);
+      eventSuggestions=workspace.event_suggestions || [];
 
       updateTechnicalAnchor(jobSelect.value);
       renderSummary();
