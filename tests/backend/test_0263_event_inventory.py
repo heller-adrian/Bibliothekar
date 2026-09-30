@@ -352,7 +352,7 @@ def test_0263_ssd_release_requires_same_current_ssd_and_archive_placement(tmp_pa
             (result["id"],),
         ).fetchall()
     assert tuple(file_row) == (
-        "2026/07-23 - Trip/Alle/A.JPG",
+        "2026/07-23 - Trip/Sortiert/A.JPG",
         "camera_archive",
     )
     assert {tuple(row) for row in asset_rows} == {
