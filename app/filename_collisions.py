@@ -22,7 +22,7 @@ _PLAIN_NUMBER_SUFFIX_RE = re.compile(
     r"^(?P<base>.+?)(?:\s+|_)(?P<number>\d+)$"
 )
 _EXPORT_SUFFIX_RE = re.compile(
-    r"^(?P<base>.+?)_Export(?:_\d{3})?$",
+    r"^(?P<base>.+?)_Export(?:_\d+)?$",
     re.IGNORECASE,
 )
 
