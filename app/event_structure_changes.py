@@ -238,7 +238,13 @@ def _snapshot_from_inventory(
                 "sha256": str(observed.get("sha256") or ""),
             })
 
-    structural_leaf_dirs = set(leaves) - {""}
+    structural_leaf_dirs: set[str] = set()
+    for leaf in leaves:
+        if not leaf:
+            continue
+        parts = PurePosixPath(leaf).parts
+        for index in range(1, len(parts) + 1):
+            structural_leaf_dirs.add(PurePosixPath(*parts[:index]).as_posix())
     by_leaf: dict[str, set[str]] = {leaf: set() for leaf in leaves}
     unclassified: list[str] = []
     for directory in observed_dirs:
