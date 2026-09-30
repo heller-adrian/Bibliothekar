@@ -3649,8 +3649,12 @@ def update_event_definition(
             or is_applied
         )
         old_snapshot = dict(event)
-        from app.event_layout import get_event_layout
-        old_layout_state = get_event_layout(connection, event_id)
+        from app.event_layout import ensure_event_layout_snapshot
+        old_layout_state = ensure_event_layout_snapshot(
+            connection,
+            event_id,
+            now=now,
+        )
         # A coordinated planned edit must be cancellable until all affected
         # plans are first applied. Capture the complete graph before cascade.
         original_mutation_state = capture_job_event_state(connection, job_id) if (is_applied or cascade_confirmed) else None
