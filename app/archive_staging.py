@@ -67,6 +67,26 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _remove_ignored_helper_metadata(directory: Path) -> int:
+    """Remove only harmless OS metadata from app-owned helper directories."""
+    removed = 0
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return removed
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_file():
+            continue
+        if entry.name != ".DS_Store" and not entry.name.startswith("._"):
+            continue
+        try:
+            entry.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def _suffix_after_event_root(value: Any) -> tuple[str, ...]:
     parts = PurePosixPath(str(value or "").replace("\\", "/").strip("/")).parts
     return tuple(parts[2:]) if len(parts) >= 2 else tuple(parts)
@@ -848,12 +868,14 @@ def cleanup_archive_change_staging(
                 directories = [p for p in prepared_root.rglob("*") if p.is_dir()]
                 directories.append(prepared_root)
                 for directory in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+                    _remove_ignored_helper_metadata(directory)
                     try:
                         directory.rmdir()
                     except OSError:
                         pass
                 current = prepared_root.parent
                 while _inside(current, staging_base) and current != work_root and current != staging_base:
+                    _remove_ignored_helper_metadata(current)
                     try:
                         current.rmdir()
                     except OSError:
@@ -889,6 +911,7 @@ def cleanup_archive_change_staging(
             key=lambda path: len(path.parts),
             reverse=True,
         ):
+            _remove_ignored_helper_metadata(directory)
             try:
                 directory.rmdir()
                 removed_empty_source_directories += 1
