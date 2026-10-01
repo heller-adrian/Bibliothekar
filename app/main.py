@@ -786,6 +786,14 @@ def claim_next_library_job(
     contexts: list[LibraryContext],
 ) -> tuple[LibraryContext, dict[str, Any]] | None:
     for context in contexts:
+        if not context.database_path.is_file():
+            print(
+                "Bibliotheks-Datenbank fehlt; Queue wird übersprungen "
+                f"({context.library_id}): {context.database_path}",
+                flush=True,
+            )
+            continue
+
         try:
             job = claim_next_job(
                 context.database_path
