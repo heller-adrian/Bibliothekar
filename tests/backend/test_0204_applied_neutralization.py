@@ -146,7 +146,7 @@ def test_0260_applied_no_event_shrink_reconciles_removed_family_to_free_stock(tm
         expected_plan_token=plan['plan_token'], confirmation_phrase=CONFIRMATION_PHRASE,
     )
     execute_workspace_reconcile_run(db, run['id'], workspace)
-    root = workspace / 'Arbeitsbereich'
+    root = workspace / 'SD-Kartensicherungen'
     assert all((root / item['destination_relative_path']).is_file() for item in removed)
     assert all(path.startswith('2026/2026-09-08/') for path in _current_paths(db, ids[1]))
     with database_connection(db) as connection:
