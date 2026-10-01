@@ -13,6 +13,7 @@ import tempfile
 
 from app.workspace_layout import (
     backup_root as workspace_backup_root,
+    resolve_library_work_root,
     shared_work_root,
 )
 
@@ -819,6 +820,7 @@ def run_simulated_job(
         [str, str, int, int, str],
         None,
     ] | None = None,
+    work_root: Path | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).astimezone()
 
@@ -853,7 +855,10 @@ def run_simulated_job(
     )
 
     backups_root = workspace_backup_root(workspace)
-    work_root = shared_work_root(workspace)
+    work_root = resolve_library_work_root(
+        workspace,
+        work_root,
+    )
     temporary_job_root = backups_root / job_id
     temporary_original = temporary_job_root / "Original"
     temporary_protocol = temporary_job_root / "Protokoll"
