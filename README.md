@@ -2,7 +2,8 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.29.0**
+Aktuelle TrueNAS-/Container-Ausgabe: **0.29.0**  
+Stabiler fachlicher Kamerakern: **0.28.7**
 
 ## Ziel
 
@@ -30,7 +31,7 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 
 ## TrueNAS Custom App 0.29.0
 
-0.29.0 ist die erste portable TrueNAS-Custom-App-Stufe auf Basis des stabilen 0.28.7-Kerns.
+0.29.0 ist die erste portable TrueNAS-Custom-App-Stufe auf Basis des stabilen 0.28.7-Kerns. Die Deployment-Version wird getrennt vom fachlichen Kern geführt, damit der eingefrorene 0.28.7-Regressionsvertrag unverändert bleibt.
 
 Die fachliche Ereignis-, Archiv-, Reassignment-, XMP-, Export- und Unterereignislogik bleibt in diesem Schritt unverändert.
 
