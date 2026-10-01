@@ -279,19 +279,36 @@ WORKER_STOP = Event()
 WORKER_THREAD: Thread | None = None
 
 
-def _thumbnail_path(job_id: str) -> Path:
-    digest = hashlib.sha256(job_id.encode("utf-8")).hexdigest()[:24]
+def _thumbnail_path(
+    job_id: str,
+    *,
+    library_id: str = MAIN_LIBRARY_ID,
+) -> Path:
+    identity = (
+        job_id
+        if library_id == MAIN_LIBRARY_ID
+        else f"{library_id}:{job_id}"
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
     return LOG_PATH / "thumbnails" / f"{digest}.jpg"
 
 
-def ensure_job_thumbnail(job_id: str) -> Path | None:
-    target = _thumbnail_path(job_id)
+def ensure_job_thumbnail(
+    job_id: str,
+    *,
+    library_context: LibraryContext | None = None,
+) -> Path | None:
+    context = library_context or build_main_library_context()
+    target = _thumbnail_path(
+        job_id,
+        library_id=context.library_id,
+    )
     if target.is_file():
         return target
 
     candidates = [
         row
-        for row in list_job_files(DATABASE_FILE, job_id)
+        for row in list_job_files(context.database_path, job_id)
         if str(row.get("media_type") or "") == "jpeg"
         and row.get("current_relative_path")
     ]
@@ -302,7 +319,7 @@ def ensure_job_thumbnail(job_id: str) -> Path | None:
         )
     )
 
-    work_root = WORKSPACE_PATH / WORK_DIRECTORY_NAME
+    work_root = context.work_root
     for row in candidates:
         relative = Path(str(row["current_relative_path"]))
         source = (work_root / relative).resolve()
@@ -694,7 +711,10 @@ def process_claimed_job(
 
         if operation == "folder_import":
             try:
-                ensure_job_thumbnail(job_id)
+                ensure_job_thumbnail(
+                    job_id,
+                    library_context=context,
+                )
             except Exception as thumbnail_error:
                 print(
                     "Vorschaubild konnte nicht erstellt werden:",
@@ -744,11 +764,32 @@ def process_claimed_job(
             )
 
 
+def ordered_worker_contexts(
+    contexts: list[LibraryContext],
+    last_library_id: str | None,
+) -> list[LibraryContext]:
+    if len(contexts) < 2 or not last_library_id:
+        return list(contexts)
+
+    for index, context in enumerate(contexts):
+        if context.library_id != last_library_id:
+            continue
+        start = (index + 1) % len(contexts)
+        return contexts[start:] + contexts[:start]
+
+    return list(contexts)
+
+
 def worker_loop() -> None:
+    last_library_id: str | None = None
+
     while not WORKER_STOP.is_set():
         try:
-            contexts = list_active_library_contexts(
-                REGISTRY_DATABASE_FILE
+            contexts = ordered_worker_contexts(
+                list_active_library_contexts(
+                    REGISTRY_DATABASE_FILE
+                ),
+                last_library_id,
             )
             claimed = False
 
@@ -763,6 +804,7 @@ def worker_loop() -> None:
                     job,
                     library_context=context,
                 )
+                last_library_id = context.library_id
                 claimed = True
                 break
 
