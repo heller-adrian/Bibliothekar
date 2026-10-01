@@ -84,6 +84,10 @@ def test_0300_library_identity_is_additive_migration_39(tmp_path):
     assert 39 in state["initialized"]["applied_versions"]
     assert "library_identity" in state["initialized"]["tables"]
 
+    registry_status = initialize_library_registry(state["registry_file"])
+    assert registry_status["schema_versions"] == [1]
+    assert registry_status["newly_applied_versions"] == []
+
 
 def test_0300_main_adoption_is_idempotent(tmp_path):
     state = _foundation(tmp_path)
@@ -157,36 +161,69 @@ def test_0300_registry_rejects_archive_nested_in_workspace(tmp_path):
         )
 
 
-def test_0300_global_reservation_blocks_second_library(tmp_path):
+def test_0300_global_reservation_blocks_duplicate_family_from_second_backup(tmp_path):
     state = _foundation(tmp_path)
-    second_work = state["workspace"] / "Bibliotheken" / "business"
-    second_archive = tmp_path / "business-archive"
-    second_work.mkdir(parents=True)
-    second_archive.mkdir()
+
+    main_root = state["work_root"] / "main"
+    business_root = state["work_root"] / "business"
+    business_archive = tmp_path / "business-archive"
+    business_database = tmp_path / "database" / "business.sqlite3"
+    main_root.mkdir()
+    business_root.mkdir()
+    business_archive.mkdir()
+
+    register_library(
+        state["registry_file"],
+        library_id=MAIN_LIBRARY_ID,
+        display_name="Main Library",
+        database_path=state["database_file"],
+        workspace_root=state["workspace"],
+        work_root=main_root,
+        archive_root=state["archive"],
+        is_main=True,
+        is_active=True,
+        settings={"adopted_existing_database": True},
+    )
+    initialize_database(business_database)
+    ensure_library_identity(business_database, "business")
     register_library(
         state["registry_file"],
         library_id="business",
         display_name="Business",
-        database_path=tmp_path / "database" / "business.sqlite3",
+        database_path=business_database,
         workspace_root=state["workspace"],
-        work_root=second_work,
-        archive_root=second_archive,
-        is_active=False,
+        work_root=business_root,
+        archive_root=business_archive,
+        is_active=True,
     )
 
-    register_source_backup(
-        state["registry_file"],
-        backup_id="backup-1",
-        source_kind="sd_backup",
-        source_identity="sd-001",
-        backup_path="/workspace/SD-Kartensicherungen/SD01",
-    )
-    register_source_family(
+    for backup_id, source_identity in (
+        ("backup-1", "sd-001"),
+        ("backup-2", "sd-002"),
+    ):
+        register_source_backup(
+            state["registry_file"],
+            backup_id=backup_id,
+            source_kind="sd_backup",
+            source_identity=source_identity,
+            backup_path=f"/workspace/SD-Kartensicherungen/{backup_id}",
+        )
+
+    first = register_source_family(
         state["registry_file"],
         source_family_key="backup-1:family-1",
         backup_id="backup-1",
         family_key="family-1",
+        content_fingerprint="family-content-sha256:abc123",
     )
+    second = register_source_family(
+        state["registry_file"],
+        source_family_key="backup-2:family-9",
+        backup_id="backup-2",
+        family_key="family-9",
+        content_fingerprint="family-content-sha256:abc123",
+    )
+    assert first["canonical_family_id"] == second["canonical_family_id"]
 
     claim_source_family(
         state["registry_file"],
@@ -195,16 +232,24 @@ def test_0300_global_reservation_blocks_second_library(tmp_path):
         event_id="event-main",
         claim_state="reserved",
     )
+    duplicate_claim = get_source_family_claim(
+        state["registry_file"],
+        "backup-2:family-9",
+    )
+    assert duplicate_claim is not None
+    assert duplicate_claim["library_id"] == MAIN_LIBRARY_ID
 
-    with pytest.raises(LibraryRegistryError):
+    with pytest.raises(
+        LibraryRegistryError,
+        match="anderen Bibliothek",
+    ):
         claim_source_family(
             state["registry_file"],
-            source_family_key="backup-1:family-1",
+            source_family_key="backup-2:family-9",
             library_id="business",
             event_id="event-business",
             claim_state="reserved",
         )
-
 
 def test_0300_planned_reservation_can_be_released(tmp_path):
     state = _foundation(tmp_path)
@@ -220,6 +265,7 @@ def test_0300_planned_reservation_can_be_released(tmp_path):
         source_family_key="backup-1:family-1",
         backup_id="backup-1",
         family_key="family-1",
+        content_fingerprint="family-content-sha256:release",
     )
     claim_source_family(
         state["registry_file"],
@@ -254,6 +300,7 @@ def test_0300_owned_family_is_not_released_by_event_cancellation(tmp_path):
         source_family_key="backup-1:family-1",
         backup_id="backup-1",
         family_key="family-1",
+        content_fingerprint="family-content-sha256:owned",
     )
     claim_source_family(
         state["registry_file"],
@@ -334,6 +381,7 @@ def test_0300_inactive_library_cannot_claim_unowned_family(tmp_path):
         source_family_key="backup-inactive:family-1",
         backup_id="backup-inactive",
         family_key="family-1",
+        content_fingerprint="family-content-sha256:inactive",
     )
 
     with pytest.raises(
@@ -736,3 +784,33 @@ def test_0300_worker_skips_broken_queue_and_uses_next_library(
     context, job = claimed
     assert context.library_id == "healthy"
     assert job["id"] == "job-healthy"
+
+
+def test_0300_source_family_identity_cannot_be_rebound(tmp_path):
+    state = _foundation(tmp_path)
+    register_source_backup(
+        state["registry_file"],
+        backup_id="backup-stable",
+        source_kind="sd_backup",
+        source_identity="sd-stable",
+        backup_path="/workspace/SD-Kartensicherungen/stable",
+    )
+    register_source_family(
+        state["registry_file"],
+        source_family_key="backup-stable:family-1",
+        backup_id="backup-stable",
+        family_key="family-1",
+        content_fingerprint="family-content-sha256:stable-a",
+    )
+
+    with pytest.raises(
+        LibraryRegistryError,
+        match="darf nicht",
+    ):
+        register_source_family(
+            state["registry_file"],
+            source_family_key="backup-stable:family-1",
+            backup_id="backup-stable",
+            family_key="family-1",
+            content_fingerprint="family-content-sha256:changed",
+        )
