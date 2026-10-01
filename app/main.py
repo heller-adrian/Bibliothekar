@@ -2082,12 +2082,39 @@ def api_deactivate_library(library_id: str) -> dict[str, Any]:
 )
 def api_activate_library(library_id: str) -> dict[str, Any]:
     try:
+        existing = get_library(
+            REGISTRY_DATABASE_FILE,
+            library_id,
+            active_only=False,
+        )
+        if existing is None or not existing.get("is_registered", True):
+            raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+
+        database_path = Path(str(existing["database_path"]))
+        initialize_database(database_path)
+        ensure_library_identity(database_path, library_id)
+        project_all_imports(
+            DATABASE_FILE,
+            database_path,
+        )
+        backfill_library_inventory(
+            REGISTRY_DATABASE_FILE,
+            database_path=database_path,
+            library_id=library_id,
+            claim_all_owned=False,
+        )
+        backfill_library_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=database_path,
+            library_id=library_id,
+        )
         row = set_library_active(
             REGISTRY_DATABASE_FILE,
             library_id,
             True,
         )
-    except LibraryRegistryError as error:
+        synchronize_global_central_stock()
+    except Exception as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return {"library": _public_library_row(row)}
 
