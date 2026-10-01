@@ -144,7 +144,9 @@ def test_0260_first_partial_day_apply_moves_event_and_free_stock(tmp_path: Path)
     execute_sort_run(db, run["id"], workspace)
     assert not (incoming / "IMG.JPG").exists()
     assert not (incoming / "EVENT.JPG").exists()
-    assert (work / by_id[free_file_id]["destination_relative_path"]).read_bytes() == free_payload
+    assert (
+        workspace / "SD-Kartensicherungen" / by_id[free_file_id]["destination_relative_path"]
+    ).read_bytes() == free_payload
     assert (work / by_id[event_file_id]["destination_relative_path"]).read_bytes() == event_payload
     with database_connection(db) as c:
         assert c.execute("SELECT status FROM events WHERE id='e'").fetchone()[0] == "applied"
