@@ -775,23 +775,38 @@ def _created_directory_candidates(
     plan: dict[str, Any],
 ) -> list[Path]:
     target_root = Path(plan["target_root"]).resolve(strict=False)
+    central_root = Path(
+        str(plan.get("central_stock_root") or plan["target_root"])
+    ).resolve(strict=False)
+    roots = [target_root]
+    if central_root != target_root:
+        roots.append(central_root)
+
     candidates: set[Path] = set()
 
-    for row in plan["directories"]:
-        directory = Path(row["absolute_path"]).resolve(strict=False)
-
-        if not _is_relative_to(directory, target_root):
+    def add_chain(directory: Path) -> None:
+        directory = directory.resolve(strict=False)
+        containing = next(
+            (root for root in roots if _is_relative_to(directory, root)),
+            None,
+        )
+        if containing is None:
             raise SortApplyError(
-                "Ein geplanter Ordner verlässt den Arbeitsbestand."
+                "Ein geplanter Ordner verlässt alle erlaubten Arbeitsbereiche."
             )
-
         current = directory
-
-        while current != target_root:
+        while current != containing:
             if not current.exists():
                 candidates.add(current)
-
             current = current.parent
+
+    for row in plan["directories"]:
+        add_chain(Path(row["absolute_path"]))
+
+    for entry in [*plan.get("files", []), *plan.get("assets", [])]:
+        if str(entry.get("status") or "") != "move":
+            continue
+        add_chain(Path(str(entry["destination_absolute_path"])).parent)
 
     return sorted(candidates, key=lambda path: len(path.parts))
 
