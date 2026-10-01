@@ -274,6 +274,86 @@ def backfill_library_inventory(
     }
 
 
+def backfill_library_claims(
+    registry_path: Path,
+    *,
+    database_path: Path,
+    library_id: str,
+) -> dict[str, int]:
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT
+                COALESCE(ff_direct.job_id, ff_file.job_id) AS job_id,
+                COALESCE(ff_direct.family_key, ff_file.family_key) AS family_key,
+                root.id AS event_id,
+                root.status AS event_status
+            FROM event_assignments ea
+            JOIN events assigned ON assigned.id = ea.event_id
+            JOIN events root
+              ON root.id = COALESCE(assigned.parent_event_id, assigned.id)
+            LEFT JOIN file_families ff_direct
+              ON ff_direct.id = ea.family_id
+            LEFT JOIN files file_row
+              ON file_row.id = ea.file_id
+            LEFT JOIN file_families ff_file
+              ON ff_file.id = file_row.family_id
+            WHERE root.status IN ('draft', 'planned', 'applied', 'archived')
+              AND COALESCE(ff_direct.id, ff_file.id) IS NOT NULL
+            ORDER BY job_id, family_key, event_id
+            """
+        ).fetchall()
+
+    # Falls historische Sonderfälle dieselbe Familie mehrfach referenzieren,
+    # gewinnt der stärkere Zustand: owned vor reserved.
+    selected: dict[tuple[str, str], dict[str, Any]] = {}
+    for raw in rows:
+        row = dict(raw)
+        key = (str(row["job_id"]), str(row["family_key"]))
+        state = (
+            "owned"
+            if str(row["event_status"]) in {"applied", "archived"}
+            else "reserved"
+        )
+        previous = selected.get(key)
+        if (
+            previous is None
+            or (
+                state == "owned"
+                and str(previous["claim_state"]) != "owned"
+            )
+        ):
+            selected[key] = {
+                "event_id": str(row["event_id"]),
+                "claim_state": state,
+            }
+
+    reserved = 0
+    owned = 0
+    for (job_id, family_key), row in selected.items():
+        claim_source_family(
+            registry_path,
+            source_family_key=occurrence_key(
+                library_id,
+                job_id,
+                family_key,
+            ),
+            library_id=library_id,
+            event_id=str(row["event_id"]),
+            claim_state=str(row["claim_state"]),
+        )
+        if row["claim_state"] == "owned":
+            owned += 1
+        else:
+            reserved += 1
+
+    return {
+        "reserved_count": reserved,
+        "owned_count": owned,
+        "claim_count": reserved + owned,
+    }
+
+
 def blocked_family_ids(
     registry_path: Path,
     *,
