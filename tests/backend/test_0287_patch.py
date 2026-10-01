@@ -24,7 +24,7 @@ def _apply_delete_reconcile(db: Path, workspace: Path) -> dict:
     deleted = delete_planned_event(db, "j", "e")
     assert deleted["pending_delete"] is True
     plan = build_workspace_reconcile_plan(db, "j", "e", workspace)
-    assert plan["summary"]["ready"] is True
+    assert plan["summary"]["ready"] is True, plan["blockers"]
     run = prepare_workspace_reconcile_run(
         db,
         "j",
