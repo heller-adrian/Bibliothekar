@@ -1,3 +1,8 @@
+import shutil
+import subprocess
+
+import pytest
+
 from app import main, source_helper, ui_shell
 
 
@@ -28,6 +33,22 @@ def test_0301_shell_javascript_version_block_is_real_javascript():
         : deployment;
     });"""
     assert expected in ui_shell.BIBLIOTHEKAR_JS
+
+
+def test_0301_complete_shell_javascript_has_valid_syntax(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node ist in dieser Testumgebung nicht verfügbar")
+
+    script_path = tmp_path / "bibliothekar-shell.js"
+    script_path.write_text(ui_shell.BIBLIOTHEKAR_JS, encoding="utf-8")
+    result = subprocess.run(
+        [node, "--check", str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_0301_critical_shell_initializers_are_present():
