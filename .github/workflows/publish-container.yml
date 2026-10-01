@@ -105,6 +105,7 @@ jobs:
             : > /tmp/release-body.md
           fi
 
+          export VERSION
           python - <<'PY'
           import os
           import re
