@@ -1559,7 +1559,9 @@ def build_event_sort_plan(
             })
 
         if is_free_stock:
-            planned_directories.add(str(destination_relative.parent))
+            # Zentrale Tagesordner werden von der Transferphase aus dem
+            # absoluten Zielpfad erzeugt und gehören nicht zur Ereignisstruktur.
+            pass
         else:
             layout_dirs = _layout_directories_at_leaf(structural_leaf, layout_state)
             planned_directories.update(layout_dirs or {str(structural_leaf)})
@@ -2065,7 +2067,8 @@ def build_event_sort_plan(
                 status = "already_at_target" if same_path else (
                     "blocked_target_exists" if target_conflict else "move"
                 )
-                planned_directories.add(str(destination_relative.parent))
+                if destination_root_kind == "target_root":
+                    planned_directories.add(str(destination_relative.parent))
                 asset_entries.append({
                     "asset_kind": asset_kind,
                     "family_id": loose_family_id,
@@ -2306,7 +2309,8 @@ def build_event_sort_plan(
             elif source_is_file and source_size != expected_size:
                 status = "blocked_size_mismatch"
 
-            planned_directories.add(str(destination_relative.parent))
+            if destination_root_kind == "target_root":
+                planned_directories.add(str(destination_relative.parent))
             asset_entry = {
                 "asset_kind": asset_kind,
                 "family_id": family_id,
