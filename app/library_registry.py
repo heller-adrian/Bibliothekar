@@ -566,43 +566,166 @@ def register_source_backup(
         connection.close()
 
 
+def _canonical_family_id(content_fingerprint: str) -> str:
+    clean = str(content_fingerprint or "").strip()
+    if not clean:
+        raise LibraryRegistryError(
+            "Eine globale Dateifamilie benötigt einen Inhaltsfingerprint."
+        )
+    digest = hashlib.sha256(
+        clean.encode("utf-8", "surrogateescape")
+    ).hexdigest()
+    return "family-" + digest
+
+
+def _canonical_for_source_family(
+    connection: sqlite3.Connection,
+    source_family_key: str,
+) -> str | None:
+    row = connection.execute(
+        """
+        SELECT canonical_family_id
+        FROM source_families
+        WHERE source_family_key = ?
+        """,
+        (str(source_family_key),),
+    ).fetchone()
+    return str(row["canonical_family_id"]) if row else None
+
+
 def register_source_family(
     registry_path: Path,
     *,
     source_family_key: str,
     backup_id: str,
     family_key: str,
-    content_fingerprint: str | None = None,
+    content_fingerprint: str,
     metadata: dict[str, Any] | None = None,
-) -> None:
+) -> dict[str, Any]:
+    clean_source_key = str(source_family_key or "").strip()
+    clean_backup_id = str(backup_id or "").strip()
+    clean_family_key = str(family_key or "").strip()
+    clean_fingerprint = str(content_fingerprint or "").strip()
+    if not clean_source_key or not clean_backup_id or not clean_family_key:
+        raise LibraryRegistryError(
+            "Quellfamilien-ID, Backup-ID und Familien-ID sind erforderlich."
+        )
+    canonical_id = _canonical_family_id(clean_fingerprint)
     now = _now()
+    serialized = json.dumps(
+        metadata or {},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
     connection = _connect(registry_path)
     try:
+        connection.execute("BEGIN IMMEDIATE")
+
+        backup = connection.execute(
+            "SELECT backup_id FROM source_backups WHERE backup_id = ?",
+            (clean_backup_id,),
+        ).fetchone()
+        if backup is None:
+            raise LibraryRegistryError(
+                "Die Quellfamilie verweist auf eine unbekannte Sicherung."
+            )
+
+        existing = connection.execute(
+            """
+            SELECT backup_id, family_key, canonical_family_id, created_at
+            FROM source_families
+            WHERE source_family_key = ?
+            """,
+            (clean_source_key,),
+        ).fetchone()
+        if existing is not None and (
+            str(existing["backup_id"]) != clean_backup_id
+            or str(existing["family_key"]) != clean_family_key
+            or str(existing["canonical_family_id"]) != canonical_id
+        ):
+            raise LibraryRegistryError(
+                "Eine bestehende Quellfamilien-ID darf nicht auf eine andere "
+                "Herkunft oder einen anderen Inhalt umgebunden werden."
+            )
+
+        canonical = connection.execute(
+            """
+            SELECT canonical_family_id
+            FROM canonical_families
+            WHERE content_fingerprint = ?
+            """,
+            (clean_fingerprint,),
+        ).fetchone()
+        if canonical is not None:
+            canonical_id = str(canonical["canonical_family_id"])
+
         connection.execute(
             """
-            INSERT INTO source_families(
-                source_family_key, backup_id, family_key,
-                content_fingerprint, metadata_json, created_at, updated_at
+            INSERT INTO canonical_families(
+                canonical_family_id, content_fingerprint,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(source_family_key) DO UPDATE SET
-                backup_id = excluded.backup_id,
-                family_key = excluded.family_key,
-                content_fingerprint = excluded.content_fingerprint,
-                metadata_json = excluded.metadata_json,
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(content_fingerprint) DO UPDATE SET
                 updated_at = excluded.updated_at
             """,
             (
-                str(source_family_key),
-                str(backup_id),
-                str(family_key),
-                str(content_fingerprint) if content_fingerprint else None,
-                json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+                canonical_id,
+                clean_fingerprint,
                 now,
                 now,
             ),
         )
+
+        connection.execute(
+            """
+            INSERT INTO source_families(
+                source_family_key, backup_id, family_key,
+                canonical_family_id, metadata_json,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_family_key) DO UPDATE SET
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                clean_source_key,
+                clean_backup_id,
+                clean_family_key,
+                canonical_id,
+                serialized,
+                str(existing["created_at"]) if existing else now,
+                now,
+            ),
+        )
+
+        row = connection.execute(
+            """
+            SELECT
+                source_family_key,
+                backup_id,
+                family_key,
+                canonical_family_id,
+                metadata_json,
+                created_at,
+                updated_at
+            FROM source_families
+            WHERE source_family_key = ?
+            """,
+            (clean_source_key,),
+        ).fetchone()
         connection.commit()
+        result = dict(row)
+        result["content_fingerprint"] = clean_fingerprint
+        return result
+    except sqlite3.IntegrityError as error:
+        connection.rollback()
+        raise LibraryRegistryError(str(error)) from error
+    except Exception:
+        connection.rollback()
+        raise
     finally:
         connection.close()
 
@@ -636,9 +759,22 @@ def claim_source_family(
                 "Dateifamilien können nur einer aktiven Bibliothek zugeordnet werden."
             )
 
+        canonical_id = _canonical_for_source_family(
+            connection,
+            source_family_key,
+        )
+        if canonical_id is None:
+            raise LibraryRegistryError(
+                "Die Dateifamilie ist nicht in der globalen Quellen-Registry registriert."
+            )
+
         existing = connection.execute(
-            "SELECT * FROM family_claims WHERE source_family_key = ?",
-            (str(source_family_key),),
+            """
+            SELECT *
+            FROM family_claims
+            WHERE canonical_family_id = ?
+            """,
+            (canonical_id,),
         ).fetchone()
 
         if existing and str(existing["library_id"]) != str(library_id):
@@ -646,7 +782,11 @@ def claim_source_family(
                 "Diese Dateifamilie ist bereits einer anderen Bibliothek vorbehalten."
             )
 
-        if existing and str(existing["claim_state"]) == "owned" and claim_state == "reserved":
+        if (
+            existing
+            and str(existing["claim_state"]) == "owned"
+            and claim_state == "reserved"
+        ):
             raise LibraryRegistryError(
                 "Eine bereits übernommene Dateifamilie kann nicht auf reserviert zurückgesetzt werden."
             )
@@ -654,18 +794,18 @@ def claim_source_family(
         connection.execute(
             """
             INSERT INTO family_claims(
-                source_family_key, library_id, claim_state,
+                canonical_family_id, library_id, claim_state,
                 event_id, created_at, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(source_family_key) DO UPDATE SET
+            ON CONFLICT(canonical_family_id) DO UPDATE SET
                 library_id = excluded.library_id,
                 claim_state = excluded.claim_state,
                 event_id = excluded.event_id,
                 updated_at = excluded.updated_at
             """,
             (
-                str(source_family_key),
+                canonical_id,
                 str(library_id),
                 claim_state,
                 str(event_id) if event_id else None,
@@ -674,11 +814,17 @@ def claim_source_family(
             ),
         )
         row = connection.execute(
-            "SELECT * FROM family_claims WHERE source_family_key = ?",
-            (str(source_family_key),),
+            """
+            SELECT *
+            FROM family_claims
+            WHERE canonical_family_id = ?
+            """,
+            (canonical_id,),
         ).fetchone()
         connection.commit()
-        return dict(row)
+        result = dict(row)
+        result["source_family_key"] = str(source_family_key)
+        return result
     except Exception:
         connection.rollback()
         raise
@@ -695,9 +841,21 @@ def release_source_family_reservation(
     connection = _connect(registry_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
+        canonical_id = _canonical_for_source_family(
+            connection,
+            source_family_key,
+        )
+        if canonical_id is None:
+            connection.commit()
+            return False
+
         row = connection.execute(
-            "SELECT claim_state, library_id FROM family_claims WHERE source_family_key = ?",
-            (str(source_family_key),),
+            """
+            SELECT claim_state, library_id
+            FROM family_claims
+            WHERE canonical_family_id = ?
+            """,
+            (canonical_id,),
         ).fetchone()
 
         if row is None:
@@ -714,8 +872,8 @@ def release_source_family_reservation(
             )
 
         connection.execute(
-            "DELETE FROM family_claims WHERE source_family_key = ?",
-            (str(source_family_key),),
+            "DELETE FROM family_claims WHERE canonical_family_id = ?",
+            (canonical_id,),
         )
         connection.commit()
         return True
@@ -732,10 +890,25 @@ def get_source_family_claim(
 ) -> dict[str, Any] | None:
     connection = _connect(registry_path)
     try:
+        canonical_id = _canonical_for_source_family(
+            connection,
+            source_family_key,
+        )
+        if canonical_id is None:
+            return None
         row = connection.execute(
-            "SELECT * FROM family_claims WHERE source_family_key = ?",
-            (str(source_family_key),),
+            """
+            SELECT *
+            FROM family_claims
+            WHERE canonical_family_id = ?
+            """,
+            (canonical_id,),
         ).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        result = dict(row)
+        result["source_family_key"] = str(source_family_key)
+        return result
     finally:
         connection.close()
+
