@@ -96,6 +96,11 @@ def test_0280_later_backup_extends_archived_event_via_change_request(
         "_release_new_global_reservations",
         lambda reservation: None,
     )
+    monkeypatch.setattr(
+        main,
+        "blocked_family_ids",
+        lambda *args, **kwargs: set(),
+    )
     monkeypatch.setattr(main, "WORKSPACE_PATH", workspace)
     monkeypatch.setattr(main, "ARCHIVE_ROOT", archive)
 
