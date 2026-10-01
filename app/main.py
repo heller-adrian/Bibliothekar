@@ -1699,7 +1699,7 @@ def get_health() -> dict[str, Any]:
 
 def list_jobs() -> list[dict[str, Any]]:
     return list_database_jobs(
-        current_database_file(),
+        DATABASE_FILE,
         limit=50,
     )
 
@@ -1918,6 +1918,10 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         initialize_database(database_path)
         ensure_library_identity(database_path, library_id)
+        projection = project_all_imports(
+            DATABASE_FILE,
+            database_path,
+        )
         row = register_library(
             REGISTRY_DATABASE_FILE,
             library_id=library_id,
@@ -1928,7 +1932,16 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             archive_root=Path(str(checked["archive_root"])),
             is_main=False,
             is_active=True,
-            settings={"created_by": "bibliothekar-0.31.0"},
+            settings={
+                "created_by": "bibliothekar-0.31.1",
+                "projected_imports": projection,
+            },
+        )
+        backfill_library_inventory(
+            REGISTRY_DATABASE_FILE,
+            database_path=database_path,
+            library_id=library_id,
+            claim_all_owned=False,
         )
     except Exception as error:
         if created_database:
@@ -2130,7 +2143,7 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
     total_size = 0
     source_device_id = source_device_id_for_path(path, root_key, root)
     history_rows = (
-        list_imported_source_files(current_database_file(), source_device_id)
+        list_imported_source_files(DATABASE_FILE, source_device_id)
         if source_device_id
         else []
     )
@@ -2166,7 +2179,7 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
             new_fast += 1
     signature = quick_source_signature(path)
     duplicate = find_folder_import_by_identity(
-        current_database_file(),
+        DATABASE_FILE,
         source_signature=signature,
         include_active=True,
     )
@@ -2318,7 +2331,7 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     source_device_id = source_device_id_for_path(source, root_key, root)
     source_signature = quick_source_signature(source)
     duplicate = find_folder_import_by_identity(
-        current_database_file(),
+        DATABASE_FILE,
         source_signature=source_signature,
         include_active=True,
     )
@@ -2342,12 +2355,12 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     }.get(source_mode, "manual")
     try:
         job = create_job(
-            current_database_file(),
+            DATABASE_FILE,
             job_id=job_id,
             kind="sd_import",
             trigger_type=trigger_type,
             source_path=str(source),
-            working_path=str(current_work_root()),
+            working_path=str(workspace_backup_root(WORKSPACE_PATH)),
             operation="folder_import",
             source_volume_label=label,
             source_signature=source_signature,
@@ -2383,7 +2396,7 @@ def api_jobs() -> dict[str, Any]:
     tags=["Aufträge"],
 )
 def api_job_thumbnail(job_id: str):
-    job = get_job(current_database_file(), job_id)
+    job = get_job(DATABASE_FILE, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Auftrag wurde nicht gefunden.")
     path = ensure_job_thumbnail(job_id)
@@ -2405,7 +2418,7 @@ def api_job_detail(
     job_id: str,
 ) -> dict[str, Any]:
     job = get_job(
-        current_database_file(),
+        DATABASE_FILE,
         job_id,
     )
 
@@ -2424,7 +2437,7 @@ def api_job_detail(
 )
 def api_backups() -> dict[str, Any]:
     backups = list_backup_lifecycles(
-        current_database_file(),
+        DATABASE_FILE,
         limit=100,
     )
 
