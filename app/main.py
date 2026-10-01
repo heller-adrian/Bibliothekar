@@ -15,7 +15,7 @@ import urllib.request
 
 from PIL import Image, ImageOps
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from app.workspace_ui import WORKSPACE_HTML
 from app.events_ui import EVENTS_HTML
@@ -135,6 +135,19 @@ from app.workspace_layout import (
     migrate_legacy_applied_files,
 )
 
+from app.library_registry import (
+    MAIN_LIBRARY_ID,
+    LibraryRegistryError,
+    initialize_library_registry,
+    adopt_main_library,
+    list_libraries,
+)
+from app.library_context import (
+    LibraryContext,
+    resolve_library_context,
+    list_active_library_contexts,
+)
+
 # ── Change-Request-Workflow (0.16.0) ────────────────────────────
 from app.event_change_request import (
     propose_event_change,
@@ -167,7 +180,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.29.1"
+DEPLOYMENT_VERSION = "0.30.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -191,6 +204,13 @@ DATABASE_DIRECTORY = Path(
 )
 
 DATABASE_FILE = DATABASE_DIRECTORY / "kamera.sqlite3"
+
+REGISTRY_DATABASE_FILE = Path(
+    os.environ.get(
+        "KAMERA_REGISTRY_DATABASE",
+        str(DATABASE_DIRECTORY / "bibliothekar-global.sqlite3"),
+    )
+)
 
 LOG_PATH = Path(
     os.environ.get(
@@ -238,6 +258,22 @@ SOURCE_HELPER_URL = os.environ.get(
     "KAMERA_SOURCE_HELPER_URL",
     "http://source-helper:8090",
 ).rstrip("/")
+
+
+def build_main_library_context() -> LibraryContext:
+    return LibraryContext(
+        library_id=MAIN_LIBRARY_ID,
+        display_name="Main Library",
+        database_path=DATABASE_FILE,
+        workspace_root=WORKSPACE_PATH,
+        work_root=WORKSPACE_PATH / WORK_DIRECTORY_NAME,
+        archive_root=ARCHIVE_ROOT,
+        is_main=True,
+        settings={"bootstrap": True},
+    )
+
+
+MAIN_LIBRARY_CONTEXT = build_main_library_context()
 
 WORKER_STOP = Event()
 WORKER_THREAD: Thread | None = None
@@ -307,6 +343,8 @@ DATABASE_INITIALIZATION: dict[str, Any] | None = None
 DATABASE_INITIALIZATION_ERROR: str | None = None
 WORKSPACE_LAYOUT_INITIALIZATION: dict[str, Any] | None = None
 WORKSPACE_LAYOUT_ERROR: str | None = None
+LIBRARY_REGISTRY_INITIALIZATION: dict[str, Any] | None = None
+LIBRARY_REGISTRY_ERROR: str | None = None
 
 
 def folder_import_display_label(
@@ -342,7 +380,15 @@ def folder_import_display_label(
 
 def process_claimed_job(
     job: dict[str, Any],
+    *,
+    library_context: LibraryContext | None = None,
 ) -> None:
+    context = library_context or build_main_library_context()
+    database_file = context.database_path
+    workspace_path = context.workspace_root
+    work_root = context.work_root
+    pool_probe_path = context.workspace_root
+
     job_id = str(job["id"])
     operation = str(
         job.get(
@@ -371,7 +417,7 @@ def process_claimed_job(
                 )
 
             update_job_progress(
-                DATABASE_FILE,
+                database_file,
                 job_id,
                 state="backup_verified",
                 stage="backup_verified",
@@ -383,7 +429,7 @@ def process_claimed_job(
             )
 
             update_job_progress(
-                DATABASE_FILE,
+                database_file,
                 job_id,
                 state="analyzing_metadata",
                 stage="metadata_analysis",
@@ -403,7 +449,7 @@ def process_claimed_job(
                 for path in source_files
             }
             store_metadata_analysis(
-                DATABASE_FILE,
+                database_file,
                 job_id,
                 analysis,
                 checksums,
@@ -424,7 +470,7 @@ def process_claimed_job(
             message: str,
         ) -> None:
             update_job_progress(
-                DATABASE_FILE,
+                database_file,
                 job_id,
                 state=state,
                 stage=stage,
@@ -446,18 +492,18 @@ def process_claimed_job(
             }.get(stage, "copying")
 
             upsert_backup_lifecycle(
-                DATABASE_FILE,
+                database_file,
                 job_id=job_id,
                 status=lifecycle_status,
                 source_path=str(job.get("source_path") or ""),
                 temporary_backup_path=str(
-                    WORKSPACE_PATH
+                    workspace_path
                     / BACKUP_DIRECTORY_NAME
                     / job_id
                     / "Original"
                 ),
                 workspace_path=str(
-                    WORKSPACE_PATH / WORK_DIRECTORY_NAME
+                    work_root
                 ),
                 protocol_path=str(
                     LOG_PATH / "backups" / job_id
@@ -493,7 +539,7 @@ def process_claimed_job(
                 checksums: dict[str, str],
             ) -> None:
                 store_metadata_analysis(
-                    DATABASE_FILE,
+                    database_file,
                     job_id,
                     analysis,
                     checksums,
@@ -504,17 +550,17 @@ def process_claimed_job(
                 plan: list[dict[str, Any]],
             ) -> None:
                 update_import_file_paths(
-                    DATABASE_FILE,
+                    database_file,
                     job_id,
                     plan,
                     working_path=str(
-                        WORKSPACE_PATH / WORK_DIRECTORY_NAME
+                        work_root
                     ),
                 )
 
             def persist_identity(signature: str, fingerprint: str) -> None:
                 set_job_source_identity(
-                    DATABASE_FILE,
+                    database_file,
                     job_id,
                     source_signature=signature,
                     source_fingerprint=fingerprint,
@@ -522,12 +568,12 @@ def process_claimed_job(
 
             source_device_id = str(job.get("source_device_id") or "").strip()
             history_rows = (
-                list_imported_source_files(DATABASE_FILE, source_device_id)
+                list_imported_source_files(database_file, source_device_id)
                 if source_device_id
                 else []
             )
             origin_rows = list_imported_media_origins(
-                DATABASE_FILE,
+                database_file,
                 exclude_job_id=job_id,
             )
             imported_hashes = {
@@ -545,7 +591,7 @@ def process_claimed_job(
                 if not source_device_id:
                     return
                 store_imported_source_files(
-                    DATABASE_FILE,
+                    database_file,
                     source_device_id=source_device_id,
                     job_id=job_id,
                     entries=entries,
@@ -553,8 +599,8 @@ def process_claimed_job(
 
             result = run_folder_import_job(
                 source=source,
-                workspace=WORKSPACE_PATH,
-                pool_probe_path=POOL_PROBE_PATH,
+                workspace=workspace_path,
+                pool_probe_path=pool_probe_path,
                 log_dir=LOG_PATH,
                 processing_buffer_percent=int(
                     storage.get("processing_buffer_percent", 10)
@@ -574,15 +620,15 @@ def process_claimed_job(
             organization = result.get("organization", {})
             if str(job.get("trigger_type") or "") in {"approved_sd", "usb_key"}:
                 set_job_source_volume_label(
-                    DATABASE_FILE,
+                    database_file,
                     job_id,
                     folder_import_display_label(job, organization),
                 )
             completion_prefix = "Ordnerimport erfolgreich abgeschlossen."
         else:
             result = run_simulated_job(
-                workspace=WORKSPACE_PATH,
-                pool_probe_path=POOL_PROBE_PATH,
+                workspace=workspace_path,
+                pool_probe_path=pool_probe_path,
                 log_dir=LOG_PATH,
                 processing_buffer_percent=int(
                     storage.get("processing_buffer_percent", 10)
@@ -600,12 +646,12 @@ def process_claimed_job(
         outputs = result.get("outputs", {})
 
         upsert_backup_lifecycle(
-            DATABASE_FILE,
+            database_file,
             job_id=job_id,
             status="completed",
             source_path=str(job.get("source_path") or ""),
             temporary_backup_path=str(
-                WORKSPACE_PATH
+                workspace_path
                 / BACKUP_DIRECTORY_NAME
                 / job_id
                 / "Original"
@@ -613,7 +659,7 @@ def process_claimed_job(
             workspace_path=str(
                 organization.get(
                     "working_root",
-                    WORKSPACE_PATH / WORK_DIRECTORY_NAME,
+                    work_root,
                 )
             ),
             protocol_path=str(outputs.get("protocol") or ""),
@@ -634,7 +680,7 @@ def process_claimed_job(
         )
 
         complete_job(
-            DATABASE_FILE,
+            database_file,
             job_id,
             stage="organized_verified",
             result=result,
@@ -660,18 +706,18 @@ def process_claimed_job(
         try:
             if operation != "metadata_fixture_analysis":
                 upsert_backup_lifecycle(
-                    DATABASE_FILE,
+                    database_file,
                     job_id=job_id,
                     status="failed",
                     source_path=str(job.get("source_path") or ""),
                     temporary_backup_path=str(
-                        WORKSPACE_PATH
+                        workspace_path
                         / BACKUP_DIRECTORY_NAME
                         / job_id
                         / "Original"
                     ),
                     workspace_path=str(
-                        WORKSPACE_PATH / WORK_DIRECTORY_NAME
+                        work_root
                     ),
                     protocol_path=str(
                         LOG_PATH / "backups" / job_id
@@ -686,7 +732,7 @@ def process_claimed_job(
                 )
 
             fail_job(
-                DATABASE_FILE,
+                database_file,
                 job_id,
                 error_message=str(error),
             )
@@ -701,19 +747,31 @@ def process_claimed_job(
 def worker_loop() -> None:
     while not WORKER_STOP.is_set():
         try:
-            job = claim_next_job(
-                DATABASE_FILE
+            contexts = list_active_library_contexts(
+                REGISTRY_DATABASE_FILE
             )
+            claimed = False
 
-            if job is None:
+            for context in contexts:
+                job = claim_next_job(
+                    context.database_path
+                )
+                if job is None:
+                    continue
+
+                process_claimed_job(
+                    job,
+                    library_context=context,
+                )
+                claimed = True
+                break
+
+            if not claimed:
                 WORKER_STOP.wait(1.0)
-                continue
-
-            process_claimed_job(job)
 
         except Exception as error:
             print(
-                "Fehler im Hintergrund-Worker:",
+                "Fehler im bibliotheksbewussten Hintergrund-Worker:",
                 error,
                 flush=True,
             )
@@ -726,6 +784,9 @@ def startup_database() -> None:
     global DATABASE_INITIALIZATION_ERROR
     global WORKSPACE_LAYOUT_INITIALIZATION
     global WORKSPACE_LAYOUT_ERROR
+    global LIBRARY_REGISTRY_INITIALIZATION
+    global LIBRARY_REGISTRY_ERROR
+    global MAIN_LIBRARY_CONTEXT
     global WORKER_THREAD
 
     try:
@@ -733,9 +794,25 @@ def startup_database() -> None:
             DATABASE_FILE
         )
 
-        ensure_workspace_layout(
+        workspace_layout = ensure_workspace_layout(
             WORKSPACE_PATH
         )
+
+        LIBRARY_REGISTRY_INITIALIZATION = initialize_library_registry(
+            REGISTRY_DATABASE_FILE
+        )
+        adopt_main_library(
+            REGISTRY_DATABASE_FILE,
+            database_path=DATABASE_FILE,
+            workspace_root=WORKSPACE_PATH,
+            work_root=Path(workspace_layout["work_root"]),
+            archive_root=ARCHIVE_ROOT,
+        )
+        MAIN_LIBRARY_CONTEXT = resolve_library_context(
+            REGISTRY_DATABASE_FILE,
+            MAIN_LIBRARY_ID,
+        )
+        LIBRARY_REGISTRY_ERROR = None
 
         WORKSPACE_LAYOUT_INITIALIZATION = (
             migrate_legacy_applied_files(
@@ -890,6 +967,8 @@ def startup_database() -> None:
         DATABASE_INITIALIZATION_ERROR = str(error)
         WORKSPACE_LAYOUT_INITIALIZATION = None
         WORKSPACE_LAYOUT_ERROR = str(error)
+        LIBRARY_REGISTRY_INITIALIZATION = None
+        LIBRARY_REGISTRY_ERROR = str(error)
 
 
 @app.on_event("shutdown")
@@ -1210,6 +1289,12 @@ def get_health() -> dict[str, Any]:
             + WORKSPACE_LAYOUT_ERROR
         )
 
+    if LIBRARY_REGISTRY_ERROR:
+        errors.append(
+            "Bibliotheks-Registry fehlgeschlagen: "
+            + LIBRARY_REGISTRY_ERROR
+        )
+
     trigger = settings.get("trigger", {})
 
     return {
@@ -1256,6 +1341,16 @@ def get_health() -> dict[str, Any]:
                 else None
             ),
         },
+        "library_registry": {
+            "path": str(REGISTRY_DATABASE_FILE),
+            "initialized": (
+                LIBRARY_REGISTRY_ERROR is None
+                and LIBRARY_REGISTRY_INITIALIZATION is not None
+            ),
+            "error": LIBRARY_REGISTRY_ERROR,
+            "details": LIBRARY_REGISTRY_INITIALIZATION,
+        },
+        "library": MAIN_LIBRARY_CONTEXT.public_dict(),
         "workspace_layout": {
             "initialized": (
                 WORKSPACE_LAYOUT_ERROR is None
@@ -1302,6 +1397,53 @@ def list_jobs() -> list[dict[str, Any]]:
 )
 def api_health() -> dict[str, Any]:
     return get_health()
+
+
+def request_library_context(request: Request) -> LibraryContext:
+    requested = (
+        request.headers.get("X-Bibliothekar-Library")
+        or request.query_params.get("library_id")
+        or MAIN_LIBRARY_ID
+    )
+    try:
+        return resolve_library_context(
+            REGISTRY_DATABASE_FILE,
+            str(requested),
+        )
+    except LibraryRegistryError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        ) from error
+
+
+@app.get(
+    "/api/libraries",
+    tags=["Bibliotheken"],
+)
+def api_libraries() -> dict[str, Any]:
+    rows = list_libraries(
+        REGISTRY_DATABASE_FILE,
+        active_only=True,
+    )
+    return {
+        "libraries": [
+            {
+                "library_id": str(row["library_id"]),
+                "display_name": str(row["display_name"]),
+                "is_main": bool(row["is_main"]),
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.get(
+    "/api/libraries/current",
+    tags=["Bibliotheken"],
+)
+def api_current_library(request: Request) -> dict[str, Any]:
+    return request_library_context(request).public_dict()
 
 
 @app.get(
