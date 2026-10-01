@@ -99,8 +99,7 @@ jobs:
           fi
 
           if [ "$(printf '%s' "$RELEASE_JSON" | jq -r '.prerelease')" != "true" ]; then
-            echo "Release ${TAG} is not a prerelease; leaving it unchanged."
-            exit 0
+            echo "Release ${TAG} exists as a regular release; converting it to the active patch prerelease."
           fi
 
           RELEASE_ID="$(printf '%s' "$RELEASE_JSON" | jq -r '.id')"
@@ -122,23 +121,25 @@ jobs:
               body,
               count=1,
           )
+          if digest_count == 0:
+              body = body.rstrip() + "\n\nDigest:\n" + digest + "\n"
+
           body, commit_count = re.subn(
               r"(Source commit:\s*\n)(?:`?[0-9a-f]{40}`?)",
               lambda m: m.group(1) + sha,
               body,
               count=1,
           )
-
-          if digest_count != 1 or commit_count != 1:
-              raise SystemExit(
-                  "Prerelease body does not contain the expected Digest/Source commit fields."
-              )
+          if commit_count == 0:
+              body = body.rstrip() + "\n\nSource commit:\n" + sha + "\n"
 
           path.write_text(body)
           PY
 
-          gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}"             -f sha="${GITHUB_SHA}"             -F force=true >/dev/null
+          if ! gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}"             -f sha="${GITHUB_SHA}"             -F force=true >/dev/null; then
+            gh api               --method POST               "repos/${GITHUB_REPOSITORY}/git/refs"               -f ref="refs/tags/${TAG}"               -f sha="${GITHUB_SHA}" >/dev/null
+          fi
 
-          gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"             -f target_commitish="${GITHUB_SHA}"             -F prerelease=true             --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
+          gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"             -f target_commitish="${GITHUB_SHA}"             -F prerelease=true             --raw-field make_latest=false             --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
 
-          echo "Synchronized ${TAG} to ${GITHUB_SHA} with digest ${IMAGE_DIGEST}."
+          echo "Synchronized prerelease ${TAG} to ${GITHUB_SHA} with digest ${IMAGE_DIGEST}."
