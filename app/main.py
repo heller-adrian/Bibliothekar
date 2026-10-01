@@ -782,6 +782,28 @@ def ordered_worker_contexts(
     return list(contexts)
 
 
+def claim_next_library_job(
+    contexts: list[LibraryContext],
+) -> tuple[LibraryContext, dict[str, Any]] | None:
+    for context in contexts:
+        try:
+            job = claim_next_job(
+                context.database_path
+            )
+        except Exception as error:
+            print(
+                "Bibliotheks-Queue konnte nicht gelesen werden "
+                f"({context.library_id}): {error}",
+                flush=True,
+            )
+            continue
+
+        if job is not None:
+            return context, job
+
+    return None
+
+
 def worker_loop() -> None:
     last_library_id: str | None = None
 
@@ -793,25 +815,18 @@ def worker_loop() -> None:
                 ),
                 last_library_id,
             )
-            claimed = False
+            claimed = claim_next_library_job(contexts)
 
-            for context in contexts:
-                job = claim_next_job(
-                    context.database_path
-                )
-                if job is None:
-                    continue
-
-                process_claimed_job(
-                    job,
-                    library_context=context,
-                )
-                last_library_id = context.library_id
-                claimed = True
-                break
-
-            if not claimed:
+            if claimed is None:
                 WORKER_STOP.wait(1.0)
+                continue
+
+            context, job = claimed
+            process_claimed_job(
+                job,
+                library_context=context,
+            )
+            last_library_id = context.library_id
 
         except Exception as error:
             print(
