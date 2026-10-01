@@ -1988,7 +1988,7 @@ BIBLIOTHEKAR_JS = r"""
 
   fetch("/api/health", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(data => {
     if (!data) return;
-    document.querySelectorAll("[data-bk-version]").forEach(node => node.textContent = data.version || "");
+    document.querySelectorAll("[data-bk-version]").forEach(node => {\n      const deployment = data.deployment_version || data.version || "";\n      const core = data.version || "";\n      node.textContent = deployment && core && deployment !== core\n        ? `${deployment} · Kern ${core}`\n        : deployment;\n    });
   }).catch(() => {});
 })();
 """
@@ -2184,7 +2184,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.28.1-ui1</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.30.0 · Kern 0.28.7</span></p>
   </div>
 </dialog>
 
