@@ -386,8 +386,8 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
         "job_id":job_id,"anchor_event_id":anchor_event_id,"event_ids":event_ids,
         "archived_impacts":archived_impacts,
         "managed_event_roots":sorted(managed_event_roots),
-        "files":[[int(f['file_id']),str(f['source_relative_path']),str(f['destination_relative_path']),str(f.get('stored_sha256') or '')] for f in files],
-        "assets":[[str(a.get('asset_kind') or 'other'),str(a['source_relative_path']),str(a['destination_relative_path']),str(a.get('stored_sha256') or '')] for a in assets],
+        "files":[[int(f['file_id']),str(f['source_relative_path']),str(f['destination_relative_path']),str(f.get('destination_root_kind') or 'target_root'),str(f.get('stored_sha256') or '')] for f in files],
+        "assets":[[str(a.get('asset_kind') or 'other'),str(a['source_relative_path']),str(a['destination_relative_path']),str(a.get('destination_root_kind') or 'target_root'),str(a.get('stored_sha256') or '')] for a in assets],
     }
     token=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return {
@@ -398,6 +398,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
         "workspace_root":str(anchor_plan.get("workspace_root") or "") if anchor_plan else "",
         "source_root":str(anchor_plan.get("target_root") or "") if anchor_plan else "",
         "target_root":str(anchor_plan.get("target_root") or "") if anchor_plan else "",
+        "central_stock_root":str(anchor_plan.get("central_stock_root") or "") if anchor_plan else "",
         "directories":list(directories.values()),"blockers":blockers,"warnings":warnings,
         "structure_text":structure_text,
         "plan_token":token,"apply_confirmation_phrase":CONFIRMATION_PHRASE,
@@ -412,24 +413,24 @@ def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_
     plan=build_workspace_reconcile_plan(database_path,job_id,anchor_event_id,workspace_path)
     if not plan['summary']['ready']: raise SortApplyError("Der gemeinsame Änderungsplan besitzt Blocker und darf nicht angewendet werden.")
     if str(expected_plan_token)!=str(plan['plan_token']): raise SortApplyError("Der gemeinsame Änderungsplan ist nicht mehr aktuell. Bitte erneut prüfen.")
-    run_id='RECON_'+uuid.uuid4().hex.upper(); now=_now(); root=str(Path(workspace_path).joinpath('Arbeitsbereich').resolve(strict=False))
+    run_id='RECON_'+uuid.uuid4().hex.upper(); now=_now(); root=str(Path(plan['target_root']).resolve(strict=False)); central=str(Path(plan['central_stock_root']).resolve(strict=False))
     with database_connection(database_path) as c:
         c.execute('BEGIN IMMEDIATE')
         for eid in plan['event_ids']:
             active=c.execute("SELECT id FROM sort_runs WHERE event_id=? AND status IN (?,?,?,?,?,?) LIMIT 1",(eid,*ACTIVE)).fetchone()
             if active: raise SortApplyError("Für mindestens ein betroffenes Ereignis läuft bereits eine Sortierung.")
         details={"event_ids":plan['event_ids'],"archived_impacts":plan['archived_impacts'],"planned_directories":[str(d['relative_path']) for d in plan['directories']],"managed_event_roots":plan.get('managed_event_roots',[])}
-        c.execute("""INSERT INTO sort_runs(id,job_id,event_id,plan_token,status,phase,source_root,target_root,file_count,verified_file_count,move_count,moved_file_count,directory_count,created_directory_count,total_size_bytes,verified_bytes,moved_bytes,error_message,details_json,created_at,started_at,updated_at,completed_at,run_kind)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        c.execute("""INSERT INTO sort_runs(id,job_id,event_id,plan_token,status,phase,source_root,target_root,central_root,file_count,verified_file_count,move_count,moved_file_count,directory_count,created_directory_count,total_size_bytes,verified_bytes,moved_bytes,error_message,details_json,created_at,started_at,updated_at,completed_at,run_kind)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                   (run_id,job_id,anchor_event_id,plan['plan_token'],'queued',
-                   'Gemeinsamer Arbeitsbereich-Abgleich wartet auf SHA-256-Prüfung',root,root,
+                   'Gemeinsamer Arbeitsbereich-Abgleich wartet auf SHA-256-Prüfung',root,root,central,
                    plan['summary']['file_count'],0,plan['summary']['move_count'],0,
                    plan['summary']['directory_count'],0,plan['summary']['total_size_bytes'],0,0,None,
                    _json_details(details),now,None,now,None,'reapply'))
         ops=[]
         for seq,f in enumerate(plan['files'],1):
-            ops.append((run_id,seq,int(f['file_id']),str(f['source_relative_path']),str(f['destination_relative_path']),int(f['expected_size_bytes']),str(f['stored_sha256']), 'already_at_target' if f['status']=='already_at_target' else 'planned'))
-        c.executemany("""INSERT INTO sort_operations(sort_run_id,sequence_number,file_id,source_relative_path,destination_relative_path,expected_size_bytes,expected_sha256,status) VALUES (?,?,?,?,?,?,?,?)""",ops)
+            ops.append((run_id,seq,int(f['file_id']),str(f['source_relative_path']),str(f['destination_relative_path']),int(f['expected_size_bytes']),str(f['stored_sha256']),str(f.get('current_root_kind') or 'shared_workspace'),str(f.get('destination_root_kind') or 'target_root'),'already_at_target' if f['status']=='already_at_target' else 'planned'))
+        c.executemany("""INSERT INTO sort_operations(sort_run_id,sequence_number,file_id,source_relative_path,destination_relative_path,expected_size_bytes,expected_sha256,source_root_kind,destination_root_kind,status) VALUES (?,?,?,?,?,?,?,?,?,?)""",ops)
         asset_ops=[]
         offset=len(plan['files'])
         for index,a in enumerate(plan.get('assets') or [],1):
@@ -439,14 +440,15 @@ def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_
                 str(a['source_relative_path']),str(a['destination_relative_path']),
                 int(a['expected_size_bytes']),str(a.get('stored_sha256') or ''),
                 str(a.get('source_root_kind') or a.get('current_root_kind') or 'shared_workspace'),
+                str(a.get('destination_root_kind') or 'target_root'),
                 'already_at_target' if a.get('status')=='already_at_target' else 'planned'
             ))
         c.executemany(
             """INSERT INTO sort_asset_operations(
                    sort_run_id,sequence_number,asset_kind,family_id,source_file_id,
                    source_relative_path,destination_relative_path,expected_size_bytes,
-                   expected_sha256,source_root_kind,status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   expected_sha256,source_root_kind,destination_root_kind,status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             asset_ops,
         )
         c.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_queued','sort_run',?,?,?)",(job_id,run_id,_json_details(details),now))
@@ -497,7 +499,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         for f in plan['files']:
             if f['status']!='move': continue
             src=Path(f['source_absolute_path']); dst=Path(f['destination_absolute_path']); dst.parent.mkdir(parents=True,exist_ok=True)
-            _move_without_overwrite(src,dst,f); moved.append((src,dst,int(f['file_id']),int(f['expected_size_bytes'])))
+            _move_without_overwrite(src,dst,f); moved.append((src,dst,int(f['file_id']),int(f['expected_size_bytes']),str(f['stored_sha256'])))
             if _sha256_file(dst)!=str(f['stored_sha256']): raise SortApplyError("Zielprüfung fehlgeschlagen: "+str(dst))
             with database_connection(database_path) as c:
                 c.execute("UPDATE sort_operations SET status='destination_verified',moved_at=?,destination_verified_at=? WHERE sort_run_id=? AND file_id=?",(_now(),_now(),run_id,int(f['file_id'])))
@@ -505,7 +507,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         for a in plan.get('assets') or []:
             if a.get('status')!='move': continue
             src=Path(a['source_absolute_path']); dst=Path(a['destination_absolute_path']); dst.parent.mkdir(parents=True,exist_ok=True)
-            _move_without_overwrite(src,dst,a); moved.append((src,dst,None,int(a['expected_size_bytes'])))
+            _move_without_overwrite(src,dst,a); moved.append((src,dst,None,int(a['expected_size_bytes']),str(a.get('stored_sha256') or '')))
             if _sha256_file(dst)!=str(a.get('stored_sha256') or ''): raise SortApplyError("Zielprüfung der Zusatzdatei fehlgeschlagen: "+str(dst))
             with database_connection(database_path) as c:
                 c.execute("UPDATE sort_asset_operations SET status='destination_verified',moved_at=?,destination_verified_at=? WHERE sort_run_id=? AND source_relative_path=?",(_now(),_now(),run_id,str(a['source_relative_path'])))
@@ -635,9 +637,14 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
             c.commit()
     except Exception as exc:
         # Roll back physical moves in reverse order. Database paths are only finalized after all moves succeed.
-        for src,dst,_,_ in reversed(moved):
+        for src,dst,_,expected_size,expected_sha in reversed(moved):
             try:
-                _rollback_one(src,dst)
+                _rollback_one(
+                    src,
+                    dst,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha,
+                )
             except Exception:
                 pass
 
