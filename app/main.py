@@ -7,11 +7,13 @@ from typing import Any
 import json
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 from PIL import Image, ImageOps
 
@@ -131,8 +133,11 @@ from app.ssd_release import (
 from app.workspace_layout import (
     BACKUP_DIRECTORY_NAME,
     WORK_DIRECTORY_NAME,
+    WorkspaceLayoutError,
+    backup_root as workspace_backup_root,
     ensure_workspace_layout,
     migrate_legacy_applied_files,
+    resolve_library_work_root,
 )
 
 from app.library_registry import (
@@ -141,11 +146,22 @@ from app.library_registry import (
     initialize_library_registry,
     adopt_main_library,
     list_libraries,
+    get_library,
+    register_library,
+    ensure_library_identity,
+    update_library_display_name,
+    set_library_active,
+    unregister_library,
 )
 from app.library_context import (
     LibraryContext,
     resolve_library_context,
     list_active_library_contexts,
+)
+from app.library_runtime import (
+    get_current_library,
+    reset_current_library,
+    set_current_library,
 )
 
 # ── Change-Request-Workflow (0.16.0) ────────────────────────────
@@ -180,7 +196,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.30.1"
+DEPLOYMENT_VERSION = "0.31.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -275,6 +291,36 @@ def build_main_library_context() -> LibraryContext:
 
 MAIN_LIBRARY_CONTEXT = build_main_library_context()
 
+
+def current_library_context() -> LibraryContext:
+    return get_current_library() or MAIN_LIBRARY_CONTEXT
+
+
+def current_database_file() -> Path:
+    return current_library_context().database_path
+
+
+def current_workspace_root() -> Path:
+    return current_library_context().workspace_root
+
+
+def current_work_root() -> Path:
+    return current_library_context().work_root
+
+
+def current_archive_root() -> Path:
+    return current_library_context().archive_root
+
+
+def _requested_library_id(request: Request) -> str:
+    return str(
+        request.headers.get("X-Bibliothekar-Library")
+        or request.query_params.get("library")
+        or request.query_params.get("library_id")
+        or MAIN_LIBRARY_ID
+    ).strip() or MAIN_LIBRARY_ID
+
+
 WORKER_STOP = Event()
 WORKER_THREAD: Thread | None = None
 
@@ -355,6 +401,35 @@ app = FastAPI(
     title="Kamera-Automatisierung",
     version=APP_VERSION,
 )
+
+
+@app.middleware("http")
+async def library_context_middleware(request: Request, call_next):
+    requested = _requested_library_id(request)
+    try:
+        context = resolve_library_context(
+            REGISTRY_DATABASE_FILE,
+            requested,
+        )
+    except Exception as error:
+        if request.url.path.startswith("/api/libraries"):
+            context = MAIN_LIBRARY_CONTEXT
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": "Bibliothekskontext ist nicht verfügbar: " + str(error),
+                    "library_id": requested,
+                },
+            )
+
+    token = set_current_library(context)
+    try:
+        response = await call_next(request)
+    finally:
+        reset_current_library(token)
+    return response
+
 
 DATABASE_INITIALIZATION: dict[str, Any] | None = None
 DATABASE_INITIALIZATION_ERROR: str | None = None
@@ -1467,15 +1542,14 @@ def api_health() -> dict[str, Any]:
 
 
 def request_library_context(request: Request) -> LibraryContext:
-    requested = (
-        request.headers.get("X-Bibliothekar-Library")
-        or request.query_params.get("library_id")
-        or MAIN_LIBRARY_ID
-    )
+    requested = _requested_library_id(request)
+    current = get_current_library()
+    if current is not None and current.library_id == requested:
+        return current
     try:
         return resolve_library_context(
             REGISTRY_DATABASE_FILE,
-            str(requested),
+            requested,
         )
     except LibraryRegistryError as error:
         raise HTTPException(
@@ -1484,25 +1558,291 @@ def request_library_context(request: Request) -> LibraryContext:
         ) from error
 
 
+def _public_library_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "library_id": str(row["library_id"]),
+        "display_name": str(row["display_name"]),
+        "is_main": bool(row["is_main"]),
+        "is_active": bool(row["is_active"]),
+        "is_registered": bool(row.get("is_registered", True)),
+        "work_root": str(row["work_root"]),
+        "archive_root": str(row["archive_root"]),
+    }
+
+
+def _library_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug[:32] or "bibliothek"
+
+
+def _mount_read_only(path: Path) -> bool:
+    result = subprocess.run(
+        [
+            "findmnt",
+            "--json",
+            "--target",
+            str(path),
+            "--output",
+            "TARGET,OPTIONS",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    try:
+        rows = json.loads(result.stdout).get("filesystems") or []
+        options = str(rows[0].get("options") or "") if rows else ""
+    except (ValueError, TypeError, IndexError):
+        return False
+    return "ro" in {part.strip() for part in options.split(",")}
+
+
+def inspect_library_paths(
+    work_root_value: str,
+    archive_root_value: str,
+    *,
+    exclude_library_id: str | None = None,
+) -> dict[str, Any]:
+    work_root = Path(str(work_root_value or "").strip()).expanduser()
+    archive_root = Path(str(archive_root_value or "").strip()).expanduser()
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not work_root.is_absolute():
+        errors.append("Der Arbeitsbereich-Mount muss ein absoluter Containerpfad sein.")
+    if not archive_root.is_absolute():
+        errors.append("Der Archiv-Mount muss ein absoluter Containerpfad sein.")
+
+    resolved_work = work_root.resolve(strict=False)
+    resolved_archive = archive_root.resolve(strict=False)
+
+    if not errors:
+        try:
+            resolve_library_work_root(WORKSPACE_PATH, resolved_work)
+        except WorkspaceLayoutError as error:
+            errors.append(str(error))
+
+        if not resolved_archive.exists() or not resolved_archive.is_dir():
+            errors.append("Der Archiv-Mount ist nicht verfügbar: " + str(resolved_archive))
+        elif not os.access(resolved_archive, os.R_OK | os.X_OK):
+            errors.append("Der Archiv-Mount ist nicht lesbar: " + str(resolved_archive))
+        elif not _mount_read_only(resolved_archive):
+            errors.append(
+                "Der Archiv-Mount ist nicht nachweislich read-only. "
+                "Bitte den Host Path in TrueNAS als Read Only einbinden."
+            )
+
+        if (
+            resolved_work == resolved_archive
+            or resolved_work in resolved_archive.parents
+            or resolved_archive in resolved_work.parents
+        ):
+            errors.append("Arbeitsbereich und Archiv dürfen nicht ineinander liegen.")
+
+        for row in list_libraries(
+            REGISTRY_DATABASE_FILE,
+            active_only=False,
+            registered_only=True,
+        ):
+            if exclude_library_id and str(row["library_id"]) == exclude_library_id:
+                continue
+            other_work = Path(str(row["work_root"])).resolve(strict=False)
+            other_archive = Path(str(row["archive_root"])).resolve(strict=False)
+            if (
+                resolved_work == other_work
+                or resolved_work in other_work.parents
+                or other_work in resolved_work.parents
+            ):
+                errors.append(
+                    "Der Arbeitsbereich überschneidet sich mit "
+                    + str(row["display_name"])
+                    + "."
+                )
+            if (
+                resolved_archive == other_archive
+                or resolved_archive in other_archive.parents
+                or other_archive in resolved_archive.parents
+            ):
+                errors.append(
+                    "Das Archiv überschneidet sich mit "
+                    + str(row["display_name"])
+                    + "."
+                )
+
+    return {
+        "valid": not errors,
+        "work_root": str(resolved_work),
+        "archive_root": str(resolved_archive),
+        "archive_read_only": (
+            bool(resolved_archive.exists())
+            and _mount_read_only(resolved_archive)
+        ),
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
 @app.get(
     "/api/libraries",
     tags=["Bibliotheken"],
 )
-def api_libraries() -> dict[str, Any]:
+def api_libraries(include_inactive: bool = False) -> dict[str, Any]:
     rows = list_libraries(
         REGISTRY_DATABASE_FILE,
-        active_only=True,
+        active_only=not include_inactive,
+        registered_only=True,
     )
     return {
-        "libraries": [
-            {
-                "library_id": str(row["library_id"]),
-                "display_name": str(row["display_name"]),
-                "is_main": bool(row["is_main"]),
-            }
-            for row in rows
-        ]
+        "libraries": [_public_library_row(row) for row in rows],
     }
+
+
+@app.post(
+    "/api/libraries/check",
+    tags=["Bibliotheken"],
+)
+def api_check_library(payload: dict[str, Any]) -> dict[str, Any]:
+    return inspect_library_paths(
+        str(payload.get("work_root") or ""),
+        str(payload.get("archive_root") or ""),
+        exclude_library_id=(
+            str(payload.get("library_id") or "").strip() or None
+        ),
+    )
+
+
+@app.post(
+    "/api/libraries",
+    tags=["Bibliotheken"],
+    status_code=201,
+)
+def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
+    display_name = " ".join(
+        str(payload.get("display_name") or "").split()
+    ).strip()
+    if not display_name:
+        raise HTTPException(status_code=422, detail="Anzeigename fehlt.")
+
+    checked = inspect_library_paths(
+        str(payload.get("work_root") or ""),
+        str(payload.get("archive_root") or ""),
+    )
+    if not checked["valid"]:
+        raise HTTPException(status_code=422, detail=checked)
+
+    library_id = (
+        _library_slug(display_name)
+        + "-"
+        + uuid.uuid4().hex[:8]
+    )
+    database_path = (
+        DATABASE_DIRECTORY
+        / "libraries"
+        / f"{library_id}.sqlite3"
+    )
+    created_database = not database_path.exists()
+
+    try:
+        initialize_database(database_path)
+        ensure_library_identity(database_path, library_id)
+        row = register_library(
+            REGISTRY_DATABASE_FILE,
+            library_id=library_id,
+            display_name=display_name,
+            database_path=database_path,
+            workspace_root=WORKSPACE_PATH,
+            work_root=Path(str(checked["work_root"])),
+            archive_root=Path(str(checked["archive_root"])),
+            is_main=False,
+            is_active=True,
+            settings={"created_by": "bibliothekar-0.31.0"},
+        )
+    except Exception as error:
+        if created_database:
+            for candidate in (
+                database_path,
+                Path(str(database_path) + "-wal"),
+                Path(str(database_path) + "-shm"),
+            ):
+                candidate.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return {"library": _public_library_row(row)}
+
+
+@app.patch(
+    "/api/libraries/{library_id}",
+    tags=["Bibliotheken"],
+)
+def api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    row = get_library(
+        REGISTRY_DATABASE_FILE,
+        library_id,
+        active_only=False,
+    )
+    if row is None or not row.get("is_registered", True):
+        raise HTTPException(status_code=404, detail="Bibliothek wurde nicht gefunden.")
+
+    if "display_name" in payload:
+        try:
+            row = update_library_display_name(
+                REGISTRY_DATABASE_FILE,
+                library_id,
+                str(payload.get("display_name") or ""),
+            )
+        except LibraryRegistryError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return {"library": _public_library_row(row)}
+
+
+@app.post(
+    "/api/libraries/{library_id}/deactivate",
+    tags=["Bibliotheken"],
+)
+def api_deactivate_library(library_id: str) -> dict[str, Any]:
+    try:
+        row = set_library_active(
+            REGISTRY_DATABASE_FILE,
+            library_id,
+            False,
+        )
+    except LibraryRegistryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"library": _public_library_row(row)}
+
+
+@app.post(
+    "/api/libraries/{library_id}/activate",
+    tags=["Bibliotheken"],
+)
+def api_activate_library(library_id: str) -> dict[str, Any]:
+    try:
+        row = set_library_active(
+            REGISTRY_DATABASE_FILE,
+            library_id,
+            True,
+        )
+    except LibraryRegistryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"library": _public_library_row(row)}
+
+
+@app.post(
+    "/api/libraries/{library_id}/unregister",
+    tags=["Bibliotheken"],
+)
+def api_unregister_library(library_id: str) -> dict[str, Any]:
+    try:
+        row = unregister_library(
+            REGISTRY_DATABASE_FILE,
+            library_id,
+        )
+    except LibraryRegistryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"library": _public_library_row(row)}
 
 
 @app.get(
