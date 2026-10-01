@@ -534,9 +534,41 @@ def register_source_backup(
     backup_path: str,
     metadata: dict[str, Any] | None = None,
 ) -> None:
+    clean_backup_id = str(backup_id or "").strip()
+    clean_kind = str(source_kind or "").strip()
+    clean_identity = str(source_identity or "").strip()
+    clean_path = str(backup_path or "").strip()
+    if not all((clean_backup_id, clean_kind, clean_identity, clean_path)):
+        raise LibraryRegistryError(
+            "Backup-ID, Quellentyp, Quellenidentität und Sicherungspfad sind erforderlich."
+        )
+
     now = _now()
+    serialized = json.dumps(
+        metadata or {},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     connection = _connect(registry_path)
     try:
+        connection.execute("BEGIN IMMEDIATE")
+        existing = connection.execute(
+            """
+            SELECT source_kind, source_identity, created_at
+            FROM source_backups
+            WHERE backup_id = ?
+            """,
+            (clean_backup_id,),
+        ).fetchone()
+        if existing is not None and (
+            str(existing["source_kind"]) != clean_kind
+            or str(existing["source_identity"]) != clean_identity
+        ):
+            raise LibraryRegistryError(
+                "Eine bestehende Backup-ID darf nicht auf eine andere Quelle "
+                "umgebunden werden."
+            )
+
         connection.execute(
             """
             INSERT INTO source_backups(
@@ -545,26 +577,29 @@ def register_source_backup(
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(backup_id) DO UPDATE SET
-                source_kind = excluded.source_kind,
-                source_identity = excluded.source_identity,
                 backup_path = excluded.backup_path,
                 metadata_json = excluded.metadata_json,
                 updated_at = excluded.updated_at
             """,
             (
-                str(backup_id),
-                str(source_kind),
-                str(source_identity),
-                str(backup_path),
-                json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
-                now,
+                clean_backup_id,
+                clean_kind,
+                clean_identity,
+                clean_path,
+                serialized,
+                str(existing["created_at"]) if existing else now,
                 now,
             ),
         )
         connection.commit()
+    except sqlite3.IntegrityError as error:
+        connection.rollback()
+        raise LibraryRegistryError(str(error)) from error
+    except Exception:
+        connection.rollback()
+        raise
     finally:
         connection.close()
-
 
 def _canonical_family_id(content_fingerprint: str) -> str:
     clean = str(content_fingerprint or "").strip()
