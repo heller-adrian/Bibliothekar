@@ -655,3 +655,84 @@ def test_0300_active_work_roots_must_not_overlap(tmp_path):
             archive_root=business_archive,
             is_active=True,
         )
+
+
+def test_0300_active_archive_roots_must_not_overlap(tmp_path):
+    state = _foundation(tmp_path)
+
+    migrated_main_root = state["work_root"] / "main"
+    migrated_main_root.mkdir()
+    register_library(
+        state["registry_file"],
+        library_id=MAIN_LIBRARY_ID,
+        display_name="Main Library",
+        database_path=state["database_file"],
+        workspace_root=state["workspace"],
+        work_root=migrated_main_root,
+        archive_root=state["archive"],
+        is_main=True,
+        is_active=True,
+        settings={"adopted_existing_database": True},
+    )
+
+    business_database = tmp_path / "database" / "business.sqlite3"
+    business_root = state["work_root"] / "business"
+    nested_archive = state["archive"] / "business"
+    business_root.mkdir()
+    nested_archive.mkdir()
+    initialize_database(business_database)
+    ensure_library_identity(business_database, "business")
+
+    with pytest.raises(
+        LibraryRegistryError,
+        match="Bibliotheks-Archive dürfen sich nicht",
+    ):
+        register_library(
+            state["registry_file"],
+            library_id="business",
+            display_name="Business",
+            database_path=business_database,
+            workspace_root=state["workspace"],
+            work_root=business_root,
+            archive_root=nested_archive,
+            is_active=True,
+        )
+
+
+def test_0300_worker_skips_broken_queue_and_uses_next_library(
+    tmp_path,
+    monkeypatch,
+):
+    broken = LibraryContext(
+        library_id="broken",
+        display_name="Broken",
+        database_path=tmp_path / "broken.sqlite3",
+        workspace_root=tmp_path / "workspace",
+        work_root=tmp_path / "workspace" / "broken",
+        archive_root=tmp_path / "archive-broken",
+        is_main=False,
+        settings={},
+    )
+    healthy = LibraryContext(
+        library_id="healthy",
+        display_name="Healthy",
+        database_path=tmp_path / "healthy.sqlite3",
+        workspace_root=tmp_path / "workspace",
+        work_root=tmp_path / "workspace" / "healthy",
+        archive_root=tmp_path / "archive-healthy",
+        is_main=False,
+        settings={},
+    )
+
+    def fake_claim(database_path):
+        if database_path == broken.database_path:
+            raise RuntimeError("DB offline")
+        return {"id": "job-healthy"}
+
+    monkeypatch.setattr(main, "claim_next_job", fake_claim)
+
+    claimed = main.claim_next_library_job([broken, healthy])
+    assert claimed is not None
+    context, job = claimed
+    assert context.library_id == "healthy"
+    assert job["id"] == "job-healthy"
