@@ -315,17 +315,31 @@ def adopt_main_library(
     archive_root: Path,
 ) -> dict[str, Any]:
     ensure_library_identity(database_path, MAIN_LIBRARY_ID)
+
+    existing = get_library(
+        registry_path,
+        MAIN_LIBRARY_ID,
+        active_only=False,
+    )
+    display_name = (
+        str(existing["display_name"])
+        if existing
+        else "Main Library"
+    )
+    settings = dict(existing.get("settings") or {}) if existing else {}
+    settings["adopted_existing_database"] = True
+
     return register_library(
         registry_path,
         library_id=MAIN_LIBRARY_ID,
-        display_name="Main Library",
+        display_name=display_name,
         database_path=database_path,
         workspace_root=workspace_root,
         work_root=work_root,
         archive_root=archive_root,
         is_main=True,
         is_active=True,
-        settings={"adopted_existing_database": True},
+        settings=settings,
     )
 
 
