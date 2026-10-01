@@ -244,6 +244,24 @@ def register_library(
             "Archiv und Workspace dürfen nicht ineinander verschachtelt sein."
         )
 
+    if is_active:
+        database_file = Path(database_value)
+        if not database_file.is_file():
+            raise LibraryRegistryError(
+                "Eine aktive Bibliothek benötigt eine vorhandene SQLite-Datenbank."
+            )
+        try:
+            database_identity = read_library_identity(database_file)
+        except sqlite3.DatabaseError as error:
+            raise LibraryRegistryError(
+                "Die Bibliotheks-Datenbank ist nicht initialisiert oder nicht lesbar."
+            ) from error
+        if database_identity != clean_id:
+            raise LibraryRegistryError(
+                "Die interne Bibliotheks-ID der Datenbank stimmt nicht mit "
+                f"{clean_id!r} überein."
+            )
+
     now = _now()
     serialized = json.dumps(settings or {}, ensure_ascii=False, sort_keys=True)
 
