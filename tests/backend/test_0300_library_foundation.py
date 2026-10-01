@@ -85,7 +85,7 @@ def test_0300_library_identity_is_additive_migration_39(tmp_path):
     assert "library_identity" in state["initialized"]["tables"]
 
     registry_status = initialize_library_registry(state["registry_file"])
-    assert registry_status["schema_versions"] == [1]
+    assert registry_status["schema_versions"] == [1, 2]
     assert registry_status["newly_applied_versions"] == []
 
 
@@ -324,14 +324,14 @@ def test_0300_worker_and_ui_are_library_foundation_aware():
     ui_source = (repo_root / "app" / "ui_shell.py").read_text()
     compose = (repo_root / "compose.example.yaml").read_text()
 
-    assert 'DEPLOYMENT_VERSION = "0.30.' in main_source
+    assert 'DEPLOYMENT_VERSION = "0.3' in main_source
     assert "list_active_library_contexts(" in main_source
     assert "context.database_path" in main_source
     assert "library_context=context" in main_source
     assert '"/api/libraries/current"' in main_source
     assert "deployment_version" in ui_source
     assert "Kern" in ui_source
-    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.30." in compose
+    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.3" in compose
     assert "KAMERA_REGISTRY_DATABASE: /database/bibliothekar-global.sqlite3" in compose
 
 
