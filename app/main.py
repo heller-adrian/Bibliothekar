@@ -5775,12 +5775,13 @@ def api_delete_event(
 
 def _sort_run_thread_target(
     run_id: str,
+    library_context: LibraryContext,
 ) -> None:
     try:
         execute_sort_run(
-            DATABASE_FILE,
+            library_context.database_path,
             run_id,
-            WORKSPACE_PATH,
+            compatibility_workspace_root(library_context),
         )
 
     except Exception as error:
@@ -5790,9 +5791,16 @@ def _sort_run_thread_target(
         )
 
 
-def _reconcile_run_thread_target(run_id: str) -> None:
+def _reconcile_run_thread_target(
+    run_id: str,
+    library_context: LibraryContext,
+) -> None:
     try:
-        execute_workspace_reconcile_run(DATABASE_FILE, run_id, WORKSPACE_PATH)
+        execute_workspace_reconcile_run(
+            library_context.database_path,
+            run_id,
+            compatibility_workspace_root(library_context),
+        )
     except Exception as error:
         print(f"Arbeitsbereich-Abgleich {run_id} beendet mit Fehler: {error}", flush=True)
 
@@ -5890,7 +5898,7 @@ def api_apply_event_sort(
 
     thread = Thread(
         target=_sort_run_thread_target,
-        args=(str(run["id"]),),
+        args=(str(run["id"]), current_library_context()),
         name=f"kamera-sort-{run['id']}",
         daemon=True,
     )
@@ -5942,7 +5950,8 @@ def api_event_reconcile_sort(job_id: str, event_id: str, payload: dict[str, Any]
     except (SortApplyError, SortPlanError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     thread = Thread(
-        target=_reconcile_run_thread_target, args=(str(run["id"]),),
+        target=_reconcile_run_thread_target,
+        args=(str(run["id"]), current_library_context()),
         name=f"kamera-reconcile-{run['id']}", daemon=True,
     )
     thread.start()
@@ -6019,7 +6028,7 @@ def api_event_reapply(
 
     thread = Thread(
         target=_sort_run_thread_target,
-        args=(str(run["id"]),),
+        args=(str(run["id"]), current_library_context()),
         name=f"kamera-reapply-{run['id']}",
         daemon=True,
     )
