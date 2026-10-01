@@ -2,7 +2,7 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.28.1-ui1**\n\nAktuelle TrueNAS-/Container-Ausgabe: **0.30.1**  
+Aktueller Entwicklungsstand: **0.31.0**\n\nAktuelle TrueNAS-/Container-Ausgabe: **0.31.0**  
 Stabiler fachlicher Kamerakern: **0.28.7**
 
 ## Ziel
@@ -29,47 +29,73 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.30.1
+## TrueNAS Custom App 0.31.0
 
-0.30.1 ist der UI-Regressionsfix auf Basis des Bibliotheksfundaments 0.30.0. 0.30.0 baut auf der formularbasierten Ein-Container-TrueNAS-Custom-App 0.29.1 auf und ergänzt das Bibliotheksfundament. Die Deployment-Version wird weiterhin getrennt vom stabilen fachlichen Kern 0.28.7 geführt.
+0.31.0 baut auf dem Bibliotheksfundament 0.30.0/0.30.1 auf und aktiviert die
+Mehrbibliotheks-Nutzung. Der stabile fachliche Kamerakern bleibt **0.28.7**:
+Ereignis-, Archiv-, Reassignment-, XMP-, Export- und Unterereignislogik werden
+nicht neu definiert, sondern über einen request-lokalen `LibraryContext` auf
+die jeweils ausgewählte Bibliothek geroutet.
 
-Die fachliche Ereignis-, Archiv-, Reassignment-, XMP-, Export- und Unterereignislogik bleibt in diesem Schritt unverändert.
+Neu in 0.31.0:
 
-Fix in 0.30.1:
+- Bibliotheksumschalter; verschiedene Browser-Tabs können unabhängig in
+  verschiedenen Bibliotheken arbeiten
+- Bibliotheksverwaltung unter **Einstellungen → Konfiguration**:
+  prüfen, hinzufügen, Anzeigename ändern, deaktivieren, reaktivieren und
+  abmelden
+- jede zusätzliche Bibliothek erhält automatisch eine eigene SQLite-Datenbank
+  unter `/database/libraries/<interne-id>.sqlite3`
+- globale Registry v2 mit Datei-/Familieninventar sowie bibliotheksübergreifenden
+  Reservierungen und Besitzständen
+- eine freie Familie kann in einer Bibliothek geplant werden und verschwindet
+  dann unmittelbar aus dem freien Bestand der anderen Bibliotheken
+- freie Altbestände der Main Library bleiben beim Registry-Backfill frei;
+  nur geplante Bestände werden `reserved`, angewendete/archivierte Bestände
+  werden `owned`
+- direkte SD-/USB-Medien können bei fehlendem Host-Geräte-Node über einen eng
+  begrenzten temporären Block-Node unter `/dev/bibliothekar` eingebunden
+  werden; das Medium wird weiterhin ausschließlich read-only gemountet
+- der eingefrorene 0.28.7-CSS-Grundstand bleibt bytegenau erhalten; neue
+  0.31-Komponenten liegen in einem getrennten Zusatz-CSS
 
-- gemeinsames Shell-JavaScript wieder syntaktisch gültig
-- gespeichertes Hell-/Dunkel-Theme wird wieder angewendet
-- Hamburger-Menü und Dialoge reagieren wieder
-- Aufgaben-Zähler lädt wieder aus `/api/tasks`
-- CSS/Designstand bleibt identisch zu 0.28.7
-
-Neu in 0.30.0:
-
-- die bestehende `/database/kamera.sqlite3` wird ohne Kopie als **Main Library** adoptiert
-- eine kleine globale Registry liegt unter `/database/bibliothekar-global.sqlite3`
-- jede Bibliothek besitzt einen stabilen `LibraryContext`
-- der Hintergrund-Worker löst den Datenbankpfad über den Bibliothekskontext auf
-- gemeinsame Quellen und spätere bibliotheksübergreifende Reservierungen haben eine eigene globale Datenbasis
-- bestehende Arbeits- und Archivpfade bleiben unverändert
-- für das TrueNAS-Upgrade ist **kein zusätzlicher Storage-Mount** erforderlich
-
-Containerpfade:
+Basis-Containerpfade:
 
 - `/config` – Anwendungskonfiguration
-- `/database` – SQLite-Datenbank
+- `/database` – Main-SQLite, globale Registry und Datenbanken weiterer Bibliotheken
 - `/logs` – Protokolle
-- `/workspace` – gemeinsamer Arbeitsbestand einschließlich `SD-Kartensicherungen` und `Arbeitsbereich`
-- `/main-library` – erste bzw. Hauptbibliothek, nur lesend eingebunden
+- `/workspace` – gemeinsamer globaler Bestand, insbesondere `SD-Kartensicherungen`
+- `/main-library` – Hauptbibliothek, nur lesend eingebunden
 - `/sources/import` – zusätzliche allgemeine Importquelle, nur lesend
 - `/sources/nas` – NAS-Quellen, nur lesend
-- `/sources/removable` – direkt bereitgestellte Wechselmedien, nur lesend
+- `/sources/removable` – beschreibbarer Mountpunkt für direkt bereitgestellte
+  Wechselmedien; das eigentliche Medium wird read-only eingebunden
 - `/tmp` – flüchtiges tmpfs
 
-Der tatsächliche Hostpfad auf TrueNAS ist frei wählbar. Workspace und Archiv dürfen auf unterschiedlichen Datasets liegen. Nur die intern vom Workspace verwendeten Arbeits- und Sicherungsbereiche müssen gemeinsam unter demselben `/workspace`-Mount liegen, weil Bibliothekar dort atomare Dateisystemoperationen verwendet.
+Für zusätzliche Bibliotheken werden in TrueNAS zwei weitere Host-Path-Mounts
+angelegt, zum Beispiel:
 
-`compose.example.yaml` ist die Vorlage für die TrueNAS-Custom-App-Installation.
+- `/libraries/business/workspace` – Arbeitsbereich, read-write
+- `/libraries/business/archive` – Archiv, read-only
 
-Seit 0.29.1 laufen Web-App und Quellen-Helper im selben Container. Der Geräte-Helper bleibt für direkt angeschlossene SD-/USB-Medien privilegiert; die eigentliche Web-App läuft intern als UID/GID 568. Die weitere Discover-Härtung ist für 0.32 vorgesehen.
+Die Containerpfade sind frei wählbar und werden anschließend in Bibliothekar
+unter **Einstellungen → Konfiguration → Bibliotheken** eingetragen. Bibliothekar
+löscht beim Deaktivieren oder Abmelden weder Dateien noch Datenbanken noch
+Archive.
+
+Der Arbeitsbereich einer Bibliothek muss auf demselben Dateisystem wie die
+gemeinsamen `SD-Kartensicherungen` liegen, wenn Bibliothekar Hardlinks zwischen
+beiden Bereichen verwenden soll. Das Archiv darf auf einem anderen Dataset
+liegen und wird read-only erwartet.
+
+`compose.example.yaml` enthält die aktuelle Ein-Container-Vorlage. Web-App und
+Quellen-Helper laufen weiterhin im selben Container; nur der lokale
+Geräte-Helper benötigt die privilegierten Mount-/Geräterechte, während die
+Web-App intern als UID/GID `568:568` läuft. Die weitere Discover-Härtung bleibt
+für 0.32 vorgesehen.
+
+Die vollständige formularbasierte TrueNAS-Konfiguration ist in
+`docs/truenas-guided-custom-app-0.31.0.md` dokumentiert.
 
 ## Projektstruktur
 
@@ -96,7 +122,7 @@ Drei Ebenen:
 Bibliotheksfundament mit globaler Registry und getrennten Bibliothekskontexten.
 
 ### 0.31
-Mehrere Bibliotheken mit eigener SQLite-Datenbank und eigener Archivzuordnung.
+Mehrere Bibliotheken mit eigener SQLite-Datenbank, eigener Archivzuordnung, globalen Familien-Claims und tab-sicherem Bibliothekskontext.
 
 ### 0.32
 TrueNAS-Discover-Härtung und Katalogstruktur.
