@@ -122,16 +122,20 @@ def test_applied_expansion_moves_new_family_and_renormalizes_remaining_free_stoc
         )}
     assert other_after == other_before
     assert assigned == {families["inside"], families["event"]}
-    assert len(rows) == len(files) == len(list(root.rglob("*.JPG"))) == 3
+    central = workspace / "SD-Kartensicherungen"
+    assert len(rows) == len(files) == (
+        len(list(root.rglob("*.JPG"))) + len(list(central.rglob("*.JPG")))
+    ) == 3
     for row in rows:
         payload = files[int(row["id"])]
-        path = root / row["current_relative_path"]
-        assert path.read_bytes() == payload
-        assert row["sha256_current"] == hashlib.sha256(payload).hexdigest()
         if int(row["family_id"]) == families["outside"]:
+            path = central / row["current_relative_path"]
             assert row["current_relative_path"] == "2026/2026-07-19 · 18-01–23-59/OUTSIDE.JPG"
         else:
+            path = root / row["current_relative_path"]
             assert row["current_relative_path"].startswith("2026/07-19 - Test/Alle/")
+        assert path.read_bytes() == payload
+        assert row["sha256_current"] == hashlib.sha256(payload).hexdigest()
     assert not old_outside.exists()
     document = json.loads(document_path.read_text())
     assert document["event"]["start_datetime"] == "2026-07-19T09:00:00"
