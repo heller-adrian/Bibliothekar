@@ -21,7 +21,7 @@ from app.pipeline import (
 )
 from app.workspace_layout import (
     backup_root as workspace_backup_root,
-    shared_work_root,
+    resolve_library_work_root,
 )
 
 
@@ -470,6 +470,7 @@ def run_folder_import_job(
     imported_hashes: set[tuple[int, str]] | None = None,
     duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
     import_history_callback: ImportHistoryCallback | None = None,
+    work_root: Path | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).astimezone()
 
@@ -497,7 +498,10 @@ def run_folder_import_job(
         )
 
     backups_root = workspace_backup_root(workspace)
-    work_root = shared_work_root(workspace)
+    work_root = resolve_library_work_root(
+        workspace,
+        work_root,
+    )
     temporary_job_root = backups_root / job_id
     temporary_original = temporary_job_root / "Original"
     temporary_protocol = temporary_job_root / "Protokoll"
