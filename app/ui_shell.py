@@ -1686,6 +1686,62 @@ BIBLIOTHEKAR_0310_CSS = r"""
 """
 
 
+
+BIBLIOTHEKAR_0311_CSS = r"""
+/* 0.31.1: Einstellungsdialog auf jeder Seite identisch und sicher scrollbar. */
+.bk-dialog {
+  max-height: calc(100dvh - 28px) !important;
+  overflow: hidden !important;
+}
+.bk-dialog-body {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 30px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+#bk-settings-dialog {
+  width: min(620px, calc(100vw - 28px));
+}
+#bk-settings-dialog .bk-settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#bk-settings-dialog .bk-settings-tabs button {
+  min-width: 0 !important;
+  border-radius: 11px !important;
+}
+#bk-settings-dialog input:not([type="checkbox"]):not([type="radio"]),
+#bk-settings-dialog select,
+#bk-settings-dialog textarea,
+#bk-library-dialog input,
+#bk-library-dialog select,
+#bk-library-dialog textarea {
+  border-radius: 11px !important;
+  border: 1px solid var(--bk-line) !important;
+  background: var(--bk-surface-2) !important;
+  box-shadow: none !important;
+}
+#bk-settings-dialog .bk-library-card,
+#bk-settings-dialog .bk-library-form,
+#bk-library-dialog .bk-library-switch {
+  border-radius: 12px !important;
+}
+#bk-library-management-list {
+  min-width: 0;
+}
+.bk-settings-panel {
+  min-width: 0;
+}
+@media (max-width: 620px) {
+  #bk-settings-dialog .bk-settings-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+"""
+
+
 BIBLIOTHEKAR_JS = r"""
 (() => {
   const root = document.documentElement;
@@ -2483,13 +2539,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 <dialog id="bk-settings-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
-      <div><h2>Einstellungen</h2><div style="color:var(--bk-muted);margin-top:5px">Darstellung, Sprache und Konfiguration</div></div>
+      <div><h2>Einstellungen</h2><div style="color:var(--bk-muted);margin-top:5px">Darstellung, Sprache, Ereignisordner und Bibliotheken</div></div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <div class="bk-settings-tabs" role="tablist" aria-label="Einstellungsbereiche">
       <button type="button" class="active" data-bk-settings-area="appearance">Erscheinungsbild</button>
       <button type="button" data-bk-settings-area="general">Allgemein</button>
-      <button type="button" data-bk-settings-area="configuration">Konfiguration</button>
+      <button type="button" data-bk-settings-area="folders">Ereignisordner</button>
+      <button type="button" data-bk-settings-area="libraries">Bibliotheken</button>
     </div>
 
     <div class="bk-settings-panel" data-bk-settings-panel="appearance">
@@ -2514,7 +2571,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       </section>
     </div>
 
-    <div class="bk-settings-panel" data-bk-settings-panel="configuration" hidden>
+    <div class="bk-settings-panel" data-bk-settings-panel="folders" hidden>
       <section class="bk-settings-group" id="bk-folder-layout-settings">
         <div class="bk-folder-layout-heading">
           <div><strong>Ereignisordner</strong><div style="color:var(--bk-muted);margin-top:4px">Vorlage nur für neue Ereignisse</div></div>
@@ -2534,7 +2591,9 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         </div>
         <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
       </section>
+    </div>
 
+    <div class="bk-settings-panel" data-bk-settings-panel="libraries" hidden>
       <section class="bk-settings-group" id="bk-library-settings">
         <div><strong>Bibliotheken</strong><div style="color:var(--bk-muted);margin-top:4px">Anzeigenamen und registrierte Mountpfade verwalten</div></div>
         <div id="bk-library-management-list" class="bk-library-list"></div>
@@ -2574,7 +2633,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.31.0 · Kern 0.28.7</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.31.1 · Kern 0.28.7</span></p>
   </div>
 </dialog>
 
@@ -2587,7 +2646,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     result = result.replace(
         "</head>",
         f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
