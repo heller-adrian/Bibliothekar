@@ -207,7 +207,7 @@ def test_0276_archive_release_provenance_survives_reuse_and_returns_after_delete
         assert connection.execute(
             "SELECT COUNT(*) FROM events WHERE id='reuse'"
         ).fetchone()[0] == 0
-    assert (case["work"] / returned_path).is_file()
+    assert (case["central"] / returned_path).is_file()
     group = next(
         item for item in list_global_released_archive_groups(case["db"])
         if case["late_family"] in item["family_ids"]
