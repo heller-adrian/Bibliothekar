@@ -11,6 +11,8 @@ from app.library_registry import (
     claim_source_family,
     get_source_family_claim,
     get_source_family_claims,
+    get_source_family_local_claim,
+    get_source_family_local_claims,
     register_source_backup,
     register_source_family,
     register_source_family_members,
@@ -352,9 +354,10 @@ def backfill_library_claims(
         )
         for row in all_family_rows
     ]
-    existing = get_source_family_claims(
+    existing = get_source_family_local_claims(
         registry_path,
         all_source_keys,
+        library_id,
     )
 
     # Remove claims that still point at this library although its database no
@@ -563,9 +566,10 @@ def release_family_ids_claims(
         library_id,
         family_ids,
     )
-    claims = get_source_family_claims(
+    claims = get_source_family_local_claims(
         registry_path,
         list(mapping.values()),
+        library_id,
     )
     released = 0
     for source_key in mapping.values():
@@ -689,10 +693,13 @@ def release_event_reservations(
 ) -> int:
     released = 0
     for source_key in _event_occurrences(database_path, library_id, event_id):
-        claim = get_source_family_claim(registry_path, source_key)
+        claim = get_source_family_local_claim(
+            registry_path,
+            source_key,
+            library_id,
+        )
         if (
             claim
-            and str(claim.get("library_id") or "") == library_id
             and str(claim.get("claim_state") or "") == "reserved"
             and str(claim.get("event_id") or "") == event_id
         ):
