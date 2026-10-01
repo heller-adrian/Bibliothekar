@@ -1612,7 +1612,7 @@ def get_health() -> dict[str, Any]:
             "error": LIBRARY_REGISTRY_ERROR,
             "details": LIBRARY_REGISTRY_INITIALIZATION,
         },
-        "library": MAIN_LIBRARY_CONTEXT.public_dict(),
+        "library": current_library_context().public_dict(),
         "workspace_layout": {
             "initialized": (
                 WORKSPACE_LAYOUT_ERROR is None
