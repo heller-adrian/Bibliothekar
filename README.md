@@ -2,13 +2,13 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.28.1-ui1**
+Aktueller Entwicklungsstand: **0.29.0**
 
 ## Ziel
 
-Die App soll den Workflow von einer SD-Karte bis zur langfristigen Kamerabibliothek unterstützen:
+Die App unterstützt den Workflow von einer SD-Karte bis zur langfristigen Kamerabibliothek:
 
-1. SD-Karte nur lesend erkennen und sichern
+1. SD-Karte oder andere Quelle nur lesend erkennen und sichern
 2. Metadaten prüfen
 3. JPG/RAF-Dateien als Familien zusammenhalten
 4. Aufnahmen Ereignissen oder `Ohne Ereignis` zuordnen
@@ -28,6 +28,30 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
+## TrueNAS Custom App 0.29.0
+
+0.29.0 ist die erste portable TrueNAS-Custom-App-Stufe auf Basis des stabilen 0.28.7-Kerns.
+
+Die fachliche Ereignis-, Archiv-, Reassignment-, XMP-, Export- und Unterereignislogik bleibt in diesem Schritt unverändert.
+
+Containerpfade:
+
+- `/config` – Anwendungskonfiguration
+- `/database` – SQLite-Datenbank
+- `/logs` – Protokolle
+- `/workspace` – gemeinsamer Arbeitsbestand einschließlich `SD-Kartensicherungen` und `Arbeitsbereich`
+- `/main-library` – erste bzw. Hauptbibliothek, nur lesend eingebunden
+- `/sources/import` – zusätzliche allgemeine Importquelle, nur lesend
+- `/sources/nas` – NAS-Quellen, nur lesend
+- `/sources/removable` – direkt bereitgestellte Wechselmedien, nur lesend
+- `/tmp` – flüchtiges tmpfs
+
+Der tatsächliche Hostpfad auf TrueNAS ist frei wählbar. Workspace und Archiv dürfen auf unterschiedlichen Datasets liegen. Nur die intern vom Workspace verwendeten Arbeits- und Sicherungsbereiche müssen gemeinsam unter demselben `/workspace`-Mount liegen, weil Bibliothekar dort atomare Dateisystemoperationen verwendet.
+
+`compose.example.yaml` ist die Vorlage für die TrueNAS-Custom-App-Installation.
+
+Der aktuelle `source-helper` für direkt angeschlossene SD-Karten/USB-Datenträger bleibt in 0.29.0 als optionaler, privilegierter Begleitdienst erhalten. Er ist ausdrücklich noch nicht die endgültige Discover-/Katalog-Lösung.
+
 ## Projektstruktur
 
 - `app/` – Anwendung
@@ -35,7 +59,7 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - `tools/` – allgemeine Diagnose- und Hilfswerkzeuge
 - `docs/` – Architektur- und Projektdokumentation
 - `qa/` – Testmatrix, Fixtures und Testlaufberichte
-- `.github/` – spätere CI-/Release-Automation
+- `.github/` – CI- und Container-Publishing
 
 ## Entwicklungsmodell
 
@@ -47,15 +71,16 @@ Drei Ebenen:
 2. automatisierte Integrations- und QA-Tests
 3. manuelle UI-/UX-Endabnahme
 
-## Installation
-
-Die derzeitige TrueNAS-Installation ist noch entwicklungsnah.
-
-Eine portable, konfigurierbare Installation für TrueNAS ist vor Version 1.0.0 vorgesehen.
-
-Siehe `compose.example.yaml`.
-
 ## Roadmap
+
+### 0.30
+Bibliotheksfundament mit globaler Registry und getrennten Bibliothekskontexten.
+
+### 0.31
+Mehrere Bibliotheken mit eigener SQLite-Datenbank und eigener Archivzuordnung.
+
+### 0.32
+TrueNAS-Discover-Härtung und Katalogstruktur.
 
 ### 1.0.0
 Stabiler Kamera-Kern ohne Immich, Problembilder und KI-Vorsortierung.
