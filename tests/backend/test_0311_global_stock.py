@@ -13,9 +13,23 @@ from app.database import (
 from app.global_stock import (
     migrate_main_free_stock_to_central,
     project_import_job,
+    synchronize_central_stock_projections,
 )
 from app.safe_transfer import move_verified_no_overwrite
 from app.workspace_layout import ensure_workspace_layout
+from app.library_registry import (
+    MAIN_LIBRARY_ID,
+    adopt_main_library,
+    claim_source_family,
+    get_source_family_claim,
+    initialize_library_registry,
+    register_library,
+)
+from app.global_library_inventory import (
+    backfill_library_claims,
+    backfill_library_inventory,
+    occurrence_key,
+)
 
 
 NOW = "2026-10-01T20:00:00+00:00"
@@ -240,3 +254,208 @@ def test_0311_settings_contract_has_four_tabs_scroll_and_rounding():
     assert "#bk-settings-dialog input" in css
     assert "border-radius: 11px" in css
     assert main.DEPLOYMENT_VERSION == "0.31.1"
+
+
+
+def test_0311_released_family_refreshes_stale_projection_from_central_stock(tmp_path):
+    main_db = tmp_path / "database" / "kamera.sqlite3"
+    other_db = tmp_path / "database" / "business.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    layout = ensure_workspace_layout(workspace)
+    initialize_database(main_db)
+    initialize_database(other_db)
+
+    create_job(
+        main_db,
+        job_id="GLOBAL_RELEASE",
+        kind="sd_import",
+        trigger_type="approved_sd",
+        source_path="/source",
+        working_path=str(workspace / "SD-Kartensicherungen"),
+        operation="folder_import",
+    )
+    data = b"released-to-central"
+    family_id = _insert_family_file(
+        main_db,
+        job_id="GLOBAL_RELEASE",
+        family_key="release-me",
+        relative_path="2026/10.01 - Main/Alle/A.JPG",
+        capture_time="2026-10-01T12:00:00",
+        data=data,
+    )
+    project_import_job(main_db, other_db, "GLOBAL_RELEASE")
+
+    with database_connection(other_db) as connection:
+        before = connection.execute(
+            "SELECT current_relative_path FROM files WHERE job_id='GLOBAL_RELEASE'"
+        ).fetchone()
+    assert str(before["current_relative_path"]) == "2026/10.01 - Main/Alle/A.JPG"
+
+    central_relative = "2026/2026-10-01/A.JPG"
+    central_file = workspace / "SD-Kartensicherungen" / central_relative
+    central_file.parent.mkdir(parents=True, exist_ok=True)
+    central_file.write_bytes(data)
+    with database_connection(main_db) as connection:
+        connection.execute(
+            """UPDATE files
+               SET current_relative_path=?,current_root_kind='shared_workspace'
+               WHERE family_id=?""",
+            (central_relative, family_id),
+        )
+
+    result = synchronize_central_stock_projections(
+        [main_db, other_db],
+        workspace,
+    )
+    assert result["updated_file_count"] == 1
+    with database_connection(other_db) as connection:
+        after = connection.execute(
+            "SELECT current_relative_path FROM files WHERE job_id='GLOBAL_RELEASE'"
+        ).fetchone()
+    assert str(after["current_relative_path"]) == central_relative
+
+
+def test_0311_claim_reconcile_releases_stale_owned_claim_after_event_delete(tmp_path):
+    database = tmp_path / "database" / "kamera.sqlite3"
+    registry = tmp_path / "database" / "registry.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    workspace.mkdir()
+    archive.mkdir()
+    layout = ensure_workspace_layout(workspace)
+    initialize_database(database)
+    initialize_library_registry(registry)
+    adopt_main_library(
+        registry,
+        database_path=database,
+        workspace_root=workspace,
+        work_root=Path(layout["work_root"]),
+        archive_root=archive,
+    )
+
+    create_job(
+        database,
+        job_id="CLAIM_RELEASE",
+        kind="sd_import",
+        trigger_type="approved_sd",
+        source_path="/source",
+        working_path=str(workspace / "SD-Kartensicherungen"),
+        operation="folder_import",
+    )
+    family_id = _insert_family_file(
+        database,
+        job_id="CLAIM_RELEASE",
+        family_key="claimed",
+        relative_path="2026/2026-10-01/A.JPG",
+        capture_time="2026-10-01T10:00:00",
+        data=b"claim-release",
+    )
+    event = create_planned_event(
+        database,
+        "CLAIM_RELEASE",
+        _preview(family_id, "2026-10-01", "Claim"),
+    )
+    event_id = str(event["parent_event"]["id"])
+    with database_connection(database) as connection:
+        connection.execute(
+            "UPDATE events SET status='applied',applied_at=?,updated_at=? WHERE id=?",
+            (NOW, NOW, event_id),
+        )
+
+    backfill_library_inventory(
+        registry,
+        database_path=database,
+        library_id=MAIN_LIBRARY_ID,
+        claim_all_owned=False,
+    )
+    backfill_library_claims(
+        registry,
+        database_path=database,
+        library_id=MAIN_LIBRARY_ID,
+    )
+    source_key = occurrence_key(MAIN_LIBRARY_ID, "CLAIM_RELEASE", "claimed")
+    claim = get_source_family_claim(registry, source_key)
+    assert claim is not None and claim["claim_state"] == "owned"
+
+    with database_connection(database) as connection:
+        connection.execute("DELETE FROM events WHERE id=?", (event_id,))
+
+    state = backfill_library_claims(
+        registry,
+        database_path=database,
+        library_id=MAIN_LIBRARY_ID,
+    )
+    assert state == {
+        "reserved_count": 0,
+        "owned_count": 0,
+        "claim_count": 0,
+    }
+    assert get_source_family_claim(registry, source_key) is None
+
+
+def test_0311_central_sync_does_not_overwrite_locally_applied_path(tmp_path):
+    main_db = tmp_path / "database" / "kamera.sqlite3"
+    other_db = tmp_path / "database" / "business.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
+    initialize_database(main_db)
+    initialize_database(other_db)
+
+    create_job(
+        main_db,
+        job_id="OWNED_LOCAL",
+        kind="sd_import",
+        trigger_type="approved_sd",
+        source_path="/source",
+        working_path=str(workspace / "SD-Kartensicherungen"),
+        operation="folder_import",
+    )
+    data = b"owned-local"
+    _insert_family_file(
+        main_db,
+        job_id="OWNED_LOCAL",
+        family_key="owned",
+        relative_path="2026/2026-10-01/A.JPG",
+        capture_time="2026-10-01T10:00:00",
+        data=data,
+    )
+    project_import_job(main_db, other_db, "OWNED_LOCAL")
+
+    with database_connection(other_db) as connection:
+        family_id = int(connection.execute(
+            "SELECT id FROM file_families WHERE job_id='OWNED_LOCAL'"
+        ).fetchone()["id"])
+    event = create_planned_event(
+        other_db,
+        "OWNED_LOCAL",
+        _preview(family_id, "2026-10-01", "Business"),
+    )
+    event_id = str(event["parent_event"]["id"])
+    local_path = "2026/10.01 - Business/Alle/A.JPG"
+    with database_connection(other_db) as connection:
+        connection.execute(
+            "UPDATE events SET status='applied',applied_at=?,updated_at=? WHERE id=?",
+            (NOW, NOW, event_id),
+        )
+        connection.execute(
+            "UPDATE files SET current_relative_path=? WHERE family_id=?",
+            (local_path, family_id),
+        )
+
+    central_relative = "2026/2026-10-01/A.JPG"
+    central_file = workspace / "SD-Kartensicherungen" / central_relative
+    central_file.parent.mkdir(parents=True, exist_ok=True)
+    central_file.write_bytes(data)
+
+    result = synchronize_central_stock_projections(
+        [main_db, other_db],
+        workspace,
+    )
+    with database_connection(other_db) as connection:
+        after = connection.execute(
+            "SELECT current_relative_path FROM files WHERE family_id=?",
+            (family_id,),
+        ).fetchone()
+    assert str(after["current_relative_path"]) == local_path
