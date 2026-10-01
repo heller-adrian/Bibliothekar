@@ -21,6 +21,7 @@ from app.metadata import classify_media
 from app.job_readiness import job_sort_readiness
 from app.workspace_layout import (
     WorkspaceLayoutError,
+    backup_root as workspace_backup_root,
     shared_work_root,
 )
 
@@ -941,22 +942,39 @@ def build_event_sort_plan(
         str(dict(row).get("current_root_kind") or "") == "shared_workspace"
         for row in file_rows
     )
+    try:
+        central_stock_root = workspace_backup_root(workspace_root)
+    except WorkspaceLayoutError as error:
+        raise SortPlanError(str(error)) from error
+
+    central_stock_source = bool(file_rows) and all(
+        (
+            central_stock_root
+            / str(
+                dict(row).get("current_relative_path")
+                or dict(row).get("original_relative_path")
+                or ""
+            )
+        ).is_file()
+        for row in file_rows
+    )
+
     if allow_reapply:
-        # In der Nachsortierung liegen die Dateien bereits im gemeinsamen
-        # Arbeitsbereich; Quelle und Ziel sind derselbe Bereich.
+        # Applied/Reapply bleibt vollständig innerhalb des Arbeitsbereichs
+        # der aktuell gewählten Bibliothek.
         source_root = target_root
         source_root_field = "shared_workspace"
+    elif central_stock_source:
+        # 0.31.1: Freie und nur geplante Aufnahmen liegen physisch im
+        # zentralen Tagesbestand. Erst Anwenden überführt sie in die Bibliothek.
+        source_root = central_stock_root
+        source_root_field = "central_stock"
     elif released_workspace_source:
-        # Freigewordene Archivaufnahmen wurden bereits unabhängig von ihrer
-        # ursprünglichen SD-Sicherung verifiziert in den gemeinsamen
-        # Arbeitsbereich zurückgeholt. Die alte Sicherung ist nur Herkunft,
-        # nicht mehr physische Quelle des nächsten Sortierlaufs.
+        # Kompatibilitätsweg für einen noch nicht migrierten Altbestand.
         source_root = target_root
         source_root_field = "released_archive_workspace"
     elif shared_workspace_source:
-        # Seit dem verifizierten Import liegen Dateien aller Sicherungen im
-        # selben Arbeitsbereich. Der Anchor-Job ist nur Workflow-Eigentümer und
-        # darf nicht als physische Quellgrenze missverstanden werden.
+        # Kompatibilitätsweg für den Main-Bestand vor der 0.31.1-Migration.
         source_root = target_root
         source_root_field = "shared_workspace"
     else:
@@ -1357,7 +1375,11 @@ def build_event_sort_plan(
             # empty parent structure in this event.
 
         destination_relative = PurePosixPath(*destination_parts)
-        source_base = target_root if current_root_kind == "shared_workspace" else source_root
+        source_base = (
+            target_root
+            if allow_reapply and current_root_kind == "shared_workspace"
+            else source_root
+        )
         source_absolute = (
             source_base.joinpath(*source_relative.parts).resolve(
                 strict=False
