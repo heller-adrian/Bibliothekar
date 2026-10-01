@@ -300,8 +300,46 @@ def current_database_file() -> Path:
     return current_library_context().database_path
 
 
+def _ensure_compatibility_link(link: Path, target: Path) -> None:
+    resolved_target = target.resolve(strict=False)
+    if link.is_symlink():
+        try:
+            if link.resolve(strict=False) == resolved_target:
+                return
+        except OSError:
+            pass
+        link.unlink(missing_ok=True)
+    elif link.exists():
+        raise RuntimeError(
+            "Interner Bibliotheks-Kompatibilitätspfad ist bereits belegt: "
+            + str(link)
+        )
+    link.symlink_to(resolved_target, target_is_directory=True)
+
+
+def compatibility_workspace_root(context: LibraryContext) -> Path:
+    if context.is_main:
+        return context.workspace_root
+
+    root = Path("/tmp/bibliothekar-library-workspaces") / re.sub(
+        r"[^A-Za-z0-9._-]+",
+        "-",
+        context.library_id,
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    _ensure_compatibility_link(
+        root / WORK_DIRECTORY_NAME,
+        context.work_root,
+    )
+    _ensure_compatibility_link(
+        root / BACKUP_DIRECTORY_NAME,
+        workspace_backup_root(WORKSPACE_PATH),
+    )
+    return root
+
+
 def current_workspace_root() -> Path:
-    return current_library_context().workspace_root
+    return compatibility_workspace_root(current_library_context())
 
 
 def current_work_root() -> Path:
