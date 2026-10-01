@@ -163,6 +163,13 @@ from app.library_runtime import (
     reset_current_library,
     set_current_library,
 )
+from app.global_library_inventory import (
+    admitted_family_keys,
+    backfill_library_inventory,
+    claim_event_families,
+    register_analysis_inventory,
+    release_event_reservations,
+)
 
 # ── Change-Request-Workflow (0.16.0) ────────────────────────────
 from app.event_change_request import (
@@ -696,6 +703,34 @@ def process_claimed_job(
                     source_fingerprint=fingerprint,
                 )
 
+            def admit_families(
+                analysis: dict[str, Any],
+                checksums: dict[str, str],
+                sizes: dict[str, int],
+            ) -> dict[str, Any]:
+                inventory = register_analysis_inventory(
+                    REGISTRY_DATABASE_FILE,
+                    library_id=context.library_id,
+                    job_id=job_id,
+                    source_identity=str(
+                        job.get("source_signature")
+                        or job.get("source_device_id")
+                        or source
+                    ),
+                    source_path=str(source),
+                    analysis=analysis,
+                    checksums=checksums,
+                    sizes=sizes,
+                )
+                allowed, blocked = admitted_family_keys(
+                    inventory,
+                    context.library_id,
+                )
+                return {
+                    "allowed_family_keys": sorted(allowed),
+                    "blocked_families": blocked,
+                }
+
             source_device_id = str(job.get("source_device_id") or "").strip()
             history_rows = (
                 list_imported_source_files(database_file, source_device_id)
@@ -746,6 +781,7 @@ def process_claimed_job(
                 imported_hashes=imported_hashes,
                 duplicate_origins=duplicate_origins,
                 import_history_callback=persist_import_history,
+                family_admission_callback=admit_families,
                 work_root=work_root,
             )
             organization = result.get("organization", {})
@@ -992,6 +1028,17 @@ def startup_database() -> None:
             REGISTRY_DATABASE_FILE,
             MAIN_LIBRARY_ID,
         )
+
+        main_inventory = backfill_library_inventory(
+            REGISTRY_DATABASE_FILE,
+            database_path=DATABASE_FILE,
+            library_id=MAIN_LIBRARY_ID,
+            claim_all_owned=True,
+        )
+        LIBRARY_REGISTRY_INITIALIZATION = {
+            **(LIBRARY_REGISTRY_INITIALIZATION or {}),
+            "main_inventory": main_inventory,
+        }
         LIBRARY_REGISTRY_ERROR = None
 
         WORKSPACE_LAYOUT_INITIALIZATION = (
