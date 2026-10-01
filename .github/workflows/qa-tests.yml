@@ -25,6 +25,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest httpx
+      - name: Validate TrueNAS Custom App compose
+        env:
+          BIBLIOTHEKAR_CONFIG_DIR: /tmp/bibliothekar/config
+          BIBLIOTHEKAR_DATABASE_DIR: /tmp/bibliothekar/database
+          BIBLIOTHEKAR_LOG_DIR: /tmp/bibliothekar/logs
+          BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/bibliothekar/workspace
+          BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/bibliothekar/main-library
+          BIBLIOTHEKAR_IMPORT_SOURCE_DIR: /tmp/bibliothekar/import-source
+          BIBLIOTHEKAR_NAS_SOURCE_DIR: /tmp/bibliothekar/nas-source
+          BIBLIOTHEKAR_REMOVABLE_DIR: /tmp/bibliothekar/removable
+        run: docker compose -f compose.example.yaml config -q
       - name: Compile application and QA helpers
         run: python -m compileall -q app qa
       - name: Validate archive QA shell syntax
