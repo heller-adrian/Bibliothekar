@@ -165,8 +165,8 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.27.5"
-RELEASE_VERSION = "0.28.7"
+APP_VERSION = "0.29.0"
+RELEASE_VERSION = "0.29.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -201,35 +201,35 @@ LOG_PATH = Path(
 POOL_PROBE_PATH = Path(
     os.environ.get(
         "KAMERA_POOL_PROBE",
-        "/pool-probe",
+        "/workspace",
     )
 )
 
 ARCHIVE_ROOT = Path(
     os.environ.get(
         "KAMERA_ARCHIVE_ROOT",
-        "/camera-library",
+        "/main-library",
     )
 )
 
 IMPORT_ROOT = Path(
     os.environ.get(
         "KAMERA_IMPORT_ROOT",
-        "/import-sources",
+        "/sources/import",
     )
 )
 
 REMOVABLE_ROOT = Path(
     os.environ.get(
         "KAMERA_REMOVABLE_ROOT",
-        "/removable-sources",
+        "/sources/removable",
     )
 )
 
 NAS_SOURCE_ROOT = Path(
     os.environ.get(
         "KAMERA_NAS_SOURCE_ROOT",
-        "/nas-sources",
+        "/sources/nas",
     )
 )
 
