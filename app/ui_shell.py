@@ -972,6 +972,57 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 .bk-language-note {
   margin-top: 9px; color: var(--bk-muted); font-size: .9rem;
 }
+.bk-settings-tabs {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 0 0 12px; border-bottom: 1px solid var(--bk-line);
+}
+.bk-settings-tabs button.active {
+  background: var(--bk-ink) !important;
+  color: var(--bk-paper) !important;
+  border-color: var(--bk-ink) !important;
+}
+.bk-settings-panel[hidden] { display: none !important; }
+.bk-library-list { display: grid; gap: 10px; margin-top: 10px; }
+.bk-library-card {
+  border: 1px solid var(--bk-line); border-radius: 12px;
+  padding: 12px; background: var(--bk-surface);
+  display: grid; gap: 9px;
+}
+.bk-library-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.bk-library-meta {
+  display: grid; gap: 3px; color: var(--bk-muted);
+  font-size: .84rem; overflow-wrap: anywhere;
+}
+.bk-library-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+.bk-library-form {
+  display: grid; gap: 9px; margin-top: 10px;
+  padding: 12px; border: 1px solid var(--bk-line);
+  border-radius: 12px; background: var(--bk-surface);
+}
+.bk-library-form label { display: grid; gap: 5px; }
+.bk-library-form input { width: 100%; box-sizing: border-box; }
+.bk-library-status {
+  color: var(--bk-muted); font-size: .88rem; line-height: 1.35;
+  white-space: pre-wrap;
+}
+.bk-library-status.is-error { color: var(--bk-danger); }
+.bk-library-status.is-ok { color: var(--bk-green); }
+.bk-library-switch-list { display: grid; gap: 9px; }
+.bk-library-switch {
+  width: 100%; display: flex !important; align-items: center;
+  justify-content: space-between; gap: 12px; text-align: left;
+  padding: 12px !important; border: 1px solid var(--bk-line) !important;
+  background: var(--bk-surface) !important;
+}
+.bk-library-switch.active {
+  border-color: var(--bk-green) !important;
+}
+.bk-library-switch small {
+  color: var(--bk-muted); display: block; margin-top: 3px;
+}
 
 body[data-bk-area="assistant"] main,
 body[data-bk-area="metadata"] main {
@@ -1633,6 +1684,53 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
 BIBLIOTHEKAR_JS = r"""
 (() => {
   const root = document.documentElement;
+  const pageUrl = new URL(window.location.href);
+  const bkLibraryId = pageUrl.searchParams.get("library") || "main";
+  const bkOriginalFetch = window.fetch.bind(window);
+
+  function bkLibraryHref(href, libraryId=bkLibraryId) {
+    try {
+      const url = new URL(String(href || "/"), window.location.href);
+      if (url.origin !== window.location.origin) return String(href || "/");
+      if (!url.pathname.startsWith("/api/")) {
+        url.searchParams.set("library", libraryId || "main");
+      }
+      return url.pathname + url.search + url.hash;
+    } catch (_) {
+      return String(href || "/");
+    }
+  }
+
+  window.fetch = (input, init={}) => {
+    let url;
+    try {
+      url = new URL(
+        input instanceof Request ? input.url : String(input),
+        window.location.href,
+      );
+    } catch (_) {
+      return bkOriginalFetch(input, init);
+    }
+    if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) {
+      return bkOriginalFetch(input, init);
+    }
+
+    const headers = new Headers(
+      input instanceof Request ? input.headers : undefined
+    );
+    new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value));
+    headers.set("X-Bibliothekar-Library", bkLibraryId);
+
+    if (input instanceof Request) {
+      return bkOriginalFetch(new Request(input, {...init, headers}));
+    }
+    return bkOriginalFetch(input, {...init, headers});
+  };
+
+  document.querySelectorAll('a[href^="/"]').forEach(link => {
+    link.setAttribute("href", bkLibraryHref(link.getAttribute("href")));
+  });
+
   const stored = localStorage.getItem("bibliothekar-theme") || "light";
 
   function applyTheme(choice) {
@@ -1735,11 +1833,262 @@ BIBLIOTHEKAR_JS = r"""
     closePopovers(null);
     document.getElementById(id)?.showModal?.();
   }
-  document.querySelector("[data-bk-open-settings]")?.addEventListener("click", () => openDialog("bk-settings-dialog"));
-  document.querySelector("[data-bk-open-library]")?.addEventListener("click", () => openDialog("bk-library-dialog"));
+
+  function setSettingsArea(area) {
+    document.querySelectorAll("[data-bk-settings-area]").forEach(button => {
+      button.classList.toggle("active", button.dataset.bkSettingsArea === area);
+    });
+    document.querySelectorAll("[data-bk-settings-panel]").forEach(panel => {
+      panel.hidden = panel.dataset.bkSettingsPanel !== area;
+    });
+  }
+  document.querySelectorAll("[data-bk-settings-area]").forEach(button => {
+    button.addEventListener("click", () => setSettingsArea(button.dataset.bkSettingsArea));
+  });
+  setSettingsArea("appearance");
+
+  document.querySelector("[data-bk-open-settings]")?.addEventListener("click", () => {
+    openDialog("bk-settings-dialog");
+    bkRefreshLibraryManagement();
+  });
+  document.querySelector("[data-bk-open-library]")?.addEventListener("click", () => {
+    openDialog("bk-library-dialog");
+    bkRefreshLibrarySwitcher();
+  });
   document.querySelector("[data-bk-open-about]")?.addEventListener("click", () => openDialog("bk-about-dialog"));
   document.querySelectorAll("[data-bk-dialog-close]").forEach(button => {
     button.addEventListener("click", () => button.closest("dialog")?.close());
+  });
+
+  function bkEscape(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  async function bkJson(url, options={}) {
+    const response = await fetch(url, options);
+    const raw = await response.text();
+    let data = {};
+    try { data = raw ? JSON.parse(raw) : {}; }
+    catch (_) { throw new Error("Ungültige Serverantwort."); }
+    if (!response.ok) {
+      const detail = data.detail;
+      if (detail && typeof detail === "object") {
+        throw new Error((detail.errors || []).join("\n") || "Prüfung fehlgeschlagen.");
+      }
+      throw new Error(String(detail || "Anfrage fehlgeschlagen."));
+    }
+    return data;
+  }
+
+  async function bkRefreshLibrarySwitcher() {
+    const host = document.getElementById("bk-library-switch-list");
+    if (!host) return;
+    host.innerHTML = '<div style="color:var(--bk-muted)">Bibliotheken werden geladen …</div>';
+    try {
+      const [listData, currentData] = await Promise.all([
+        bkJson("/api/libraries"),
+        bkJson("/api/libraries/current"),
+      ]);
+      const current = String(currentData.library_id || bkLibraryId);
+      const libraries = listData.libraries || [];
+      host.innerHTML = libraries.map(row => {
+        const id = String(row.library_id || "");
+        const active = id === current;
+        return '<button type="button" class="bk-library-switch '+(active?'active':'')+'" data-bk-library-switch="'+bkEscape(id)+'">'
+          +'<span><strong>'+bkEscape(row.display_name || id)+'</strong><small>'
+          +(row.is_main?'Hauptbibliothek':'Bibliothek')
+          +(active?' · aktuell':'')
+          +'</small></span>'
+          +'<span class="badge '+(active?'success':'')+'">'+(active?'Aktiv':'Öffnen')+'</span>'
+          +'</button>';
+      }).join("") || '<div style="color:var(--bk-muted)">Keine aktive Bibliothek gefunden.</div>';
+      host.querySelectorAll("[data-bk-library-switch]").forEach(button => {
+        button.addEventListener("click", () => {
+          const target = String(button.dataset.bkLibrarySwitch || "main");
+          const next = new URL(window.location.href);
+          next.searchParams.set("library", target);
+          window.location.assign(next.pathname + next.search + next.hash);
+        });
+      });
+    } catch (error) {
+      host.innerHTML = '<div style="color:var(--bk-danger)">'+bkEscape(error.message)+'</div>';
+    }
+  }
+
+  function bkLibraryCard(row) {
+    const id = String(row.library_id || "");
+    const inactive = !row.is_active;
+    return '<div class="bk-library-card" data-bk-library-card="'+bkEscape(id)+'">'
+      +'<div class="bk-library-card-head"><div><strong>'+bkEscape(row.display_name || id)+'</strong>'
+      +'<div style="color:var(--bk-muted);font-size:.84rem;margin-top:3px">'+(row.is_main?'Hauptbibliothek':'Bibliothek')
+      +(inactive?' · deaktiviert':' · aktiv')+'</div></div>'
+      +'<span class="badge '+(!inactive?'success':'')+'">'+(!inactive?'Aktiv':'Inaktiv')+'</span></div>'
+      +'<label style="display:grid;gap:5px"><span>Anzeigename</span>'
+      +'<input data-bk-library-name value="'+bkEscape(row.display_name || id)+'"></label>'
+      +'<div class="bk-library-meta"><span>Arbeitsbereich: '+bkEscape(row.work_root || "")+'</span>'
+      +'<span>Archiv: '+bkEscape(row.archive_root || "")+'</span>'
+      +'<span>Technische ID: '+bkEscape(id)+'</span></div>'
+      +'<div class="bk-library-actions">'
+      +'<button type="button" data-bk-library-save>Anzeige speichern</button>'
+      +'<button type="button" data-bk-library-check>Prüfen</button>'
+      +(row.is_main?'':(
+        inactive
+          ? '<button type="button" data-bk-library-activate class="bk-positive-action">Aktivieren</button>'
+          : '<button type="button" data-bk-library-deactivate>Deaktivieren</button>'
+      ))
+      +(row.is_main?'':'<button type="button" data-bk-library-unregister class="danger-button">Abmelden</button>')
+      +'</div><div class="bk-library-status" data-bk-library-status></div></div>';
+  }
+
+  async function bkRefreshLibraryManagement() {
+    const host = document.getElementById("bk-library-management-list");
+    if (!host) return;
+    host.innerHTML = '<div style="color:var(--bk-muted)">Bibliotheken werden geladen …</div>';
+    try {
+      const data = await bkJson("/api/libraries?include_inactive=true");
+      host.innerHTML = (data.libraries || []).map(bkLibraryCard).join("");
+      bindLibraryManagementActions(host);
+    } catch (error) {
+      host.innerHTML = '<div style="color:var(--bk-danger)">'+bkEscape(error.message)+'</div>';
+    }
+  }
+
+  function setLibraryCardStatus(card, message, ok=false) {
+    const node = card?.querySelector("[data-bk-library-status]");
+    if (!node) return;
+    node.textContent = message || "";
+    node.classList.toggle("is-ok", Boolean(ok));
+    node.classList.toggle("is-error", Boolean(message) && !ok);
+  }
+
+  function bindLibraryManagementActions(host) {
+    host.querySelectorAll("[data-bk-library-card]").forEach(card => {
+      const id = String(card.dataset.bkLibraryCard || "");
+      const name = card.querySelector("[data-bk-library-name]");
+      card.querySelector("[data-bk-library-save]")?.addEventListener("click", async () => {
+        try {
+          await bkJson("/api/libraries/"+encodeURIComponent(id), {
+            method:"PATCH", headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({display_name:name?.value || ""}),
+          });
+          setLibraryCardStatus(card, "Anzeigename gespeichert. Ordner und Mountpfade bleiben unverändert.", true);
+          await bkRefreshLibrarySwitcher();
+        } catch (error) { setLibraryCardStatus(card, error.message); }
+      });
+      card.querySelector("[data-bk-library-check]")?.addEventListener("click", async () => {
+        const work = card.querySelector(".bk-library-meta span:nth-child(1)")?.textContent?.replace(/^Arbeitsbereich:\s*/, "") || "";
+        const archive = card.querySelector(".bk-library-meta span:nth-child(2)")?.textContent?.replace(/^Archiv:\s*/, "") || "";
+        try {
+          const result = await bkJson("/api/libraries/check", {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({library_id:id, work_root:work, archive_root:archive}),
+          });
+          setLibraryCardStatus(card, result.valid ? "Prüfung PASS." : (result.errors || []).join("\n"), result.valid);
+        } catch (error) { setLibraryCardStatus(card, error.message); }
+      });
+      card.querySelector("[data-bk-library-deactivate]")?.addEventListener("click", async () => {
+        if (!confirm("Bibliothek deaktivieren? Dateien, Datenbank und Archiv bleiben erhalten.")) return;
+        try {
+          await bkJson("/api/libraries/"+encodeURIComponent(id)+"/deactivate", {method:"POST"});
+          if (id === bkLibraryId) {
+            window.location.assign(bkLibraryHref(window.location.pathname, "main"));
+            return;
+          }
+          await bkRefreshLibraryManagement();
+        } catch (error) { setLibraryCardStatus(card, error.message); }
+      });
+      card.querySelector("[data-bk-library-activate]")?.addEventListener("click", async () => {
+        try {
+          await bkJson("/api/libraries/"+encodeURIComponent(id)+"/activate", {method:"POST"});
+          await bkRefreshLibraryManagement();
+        } catch (error) { setLibraryCardStatus(card, error.message); }
+      });
+      card.querySelector("[data-bk-library-unregister]")?.addEventListener("click", async () => {
+        if (!confirm("Bibliothek abmelden? Es werden keine Dateien, keine Datenbank und kein Archiv gelöscht.")) return;
+        try {
+          await bkJson("/api/libraries/"+encodeURIComponent(id)+"/unregister", {method:"POST"});
+          if (id === bkLibraryId) {
+            window.location.assign(bkLibraryHref(window.location.pathname, "main"));
+            return;
+          }
+          await bkRefreshLibraryManagement();
+        } catch (error) { setLibraryCardStatus(card, error.message); }
+      });
+    });
+  }
+
+  const newLibraryName = document.getElementById("bk-new-library-name");
+  const newLibraryWork = document.getElementById("bk-new-library-work");
+  const newLibraryArchive = document.getElementById("bk-new-library-archive");
+  const newLibraryCreate = document.getElementById("bk-new-library-create");
+  const newLibraryStatus = document.getElementById("bk-new-library-status");
+  let newLibraryChecked = false;
+
+  function resetNewLibraryCheck() {
+    newLibraryChecked = false;
+    if (newLibraryCreate) newLibraryCreate.disabled = true;
+    if (newLibraryStatus) {
+      newLibraryStatus.textContent = "";
+      newLibraryStatus.className = "bk-library-status";
+    }
+  }
+  [newLibraryName,newLibraryWork,newLibraryArchive].forEach(input => input?.addEventListener("input", resetNewLibraryCheck));
+
+  document.getElementById("bk-new-library-check")?.addEventListener("click", async () => {
+    if (!newLibraryStatus) return;
+    newLibraryStatus.textContent = "Mountpfade werden geprüft …";
+    newLibraryStatus.className = "bk-library-status";
+    try {
+      const result = await bkJson("/api/libraries/check", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          work_root:newLibraryWork?.value || "",
+          archive_root:newLibraryArchive?.value || "",
+        }),
+      });
+      newLibraryChecked = Boolean(result.valid);
+      newLibraryCreate.disabled = !newLibraryChecked;
+      newLibraryStatus.textContent = result.valid
+        ? "Prüfung PASS. Die Bibliothek kann erstellt werden."
+        : (result.errors || []).join("\n");
+      newLibraryStatus.className = "bk-library-status "+(result.valid?"is-ok":"is-error");
+    } catch (error) {
+      newLibraryChecked = false;
+      newLibraryCreate.disabled = true;
+      newLibraryStatus.textContent = error.message;
+      newLibraryStatus.className = "bk-library-status is-error";
+    }
+  });
+
+  newLibraryCreate?.addEventListener("click", async () => {
+    if (!newLibraryChecked) return;
+    newLibraryCreate.disabled = true;
+    try {
+      const result = await bkJson("/api/libraries", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          display_name:newLibraryName?.value || "",
+          work_root:newLibraryWork?.value || "",
+          archive_root:newLibraryArchive?.value || "",
+        }),
+      });
+      const created = result.library || {};
+      newLibraryStatus.textContent = "Bibliothek „"+String(created.display_name || "")+"“ wurde erstellt.";
+      newLibraryStatus.className = "bk-library-status is-ok";
+      newLibraryName.value = "";
+      newLibraryWork.value = "";
+      newLibraryArchive.value = "";
+      newLibraryChecked = false;
+      await bkRefreshLibraryManagement();
+      await bkRefreshLibrarySwitcher();
+    } catch (error) {
+      newLibraryStatus.textContent = error.message;
+      newLibraryStatus.className = "bk-library-status is-error";
+    }
   });
 
   const folderSettings = document.getElementById("bk-folder-layout-settings");
@@ -1930,7 +2279,7 @@ BIBLIOTHEKAR_JS = r"""
         panel.innerHTML = count
           ? '<strong style="display:block;padding:7px 9px">Offene Aufgaben · ' + count + '</strong>' +
             tasks.map(task => '<a class="bk-task-entry" href="' +
-              String(task.href || "/events").replaceAll("&", "&amp;").replaceAll('"', "&quot;") +
+              bkLibraryHref(task.href || "/events").replaceAll("&", "&amp;").replaceAll('"', "&quot;") +
               '" style="display:block;padding:10px;border-radius:10px;color:inherit;text-decoration:none"><strong style="display:block">' +
               String(task.title || "Aufgabe").replaceAll("<", "&lt;") +
               '</strong><span style="color:var(--bk-muted);font-size:.9rem">' +
@@ -2129,56 +2478,86 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 <dialog id="bk-settings-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
-      <div><h2>Einstellungen</h2><div style="color:var(--bk-muted);margin-top:5px">Darstellung und allgemeines Verhalten</div></div>
+      <div><h2>Einstellungen</h2><div style="color:var(--bk-muted);margin-top:5px">Darstellung, Sprache und Konfiguration</div></div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
-    <section class="bk-settings-group">
-      <strong>Erscheinungsbild</strong>
-      <div class="bk-choice-row">
-        <button type="button" data-bk-theme-choice="light">Hell</button>
-        <button type="button" data-bk-theme-choice="dark">Dunkel</button>
-        <button type="button" data-bk-theme-choice="system">System</button>
-      </div>
-    </section>
-    <section class="bk-settings-group" id="bk-folder-layout-settings">
-      <div class="bk-folder-layout-heading">
-        <div><strong>Ereignisordner</strong><div style="color:var(--bk-muted);margin-top:4px">Vorlage nur für neue Ereignisse</div></div>
-        <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
-      </div>
-      <div id="bk-folder-layout-tree" style="display:grid;gap:7px;margin-top:12px"></div>
-      <label style="display:grid;gap:6px;margin-top:11px">
-        <span><strong>Exportordner</strong> <span style="color:var(--bk-muted)">· optional</span></span>
-        <select id="bk-folder-export-node">
-          <option value="">Kein Ordner fest als Exportordner klassifiziert</option>
-        </select>
-        <span style="color:var(--bk-muted);font-size:.86rem;line-height:1.35">Dateien in diesem Ordner gelten als Exporte, auch wenn der Ordner z. B. „Master“ heißt. Die Einstellung wird wie die Ordnerstruktur für neue Ereignisse eingefroren.</span>
-      </label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        <button id="bk-folder-add-root" type="button">＋ Ordner</button>
-        <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
-      </div>
-      <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
-    </section>
-    <section class="bk-settings-group">
-      <strong>Sprache</strong>
-      <div class="bk-choice-row">
-        <button type="button" class="active">Deutsch</button>
-        <button type="button" disabled title="Die vollständige englische Oberfläche folgt in einem eigenen Lokalisierungsschritt.">English</button>
-      </div>
-      <div class="bk-language-note">Die Oberfläche ist in 0.22.1 vollständig deutsch. Englisch ist im Design bereits vorgesehen und wird erst aktiviert, wenn alle dynamischen Texte mitübersetzt sind.</div>
-    </section>
+    <div class="bk-settings-tabs" role="tablist" aria-label="Einstellungsbereiche">
+      <button type="button" class="active" data-bk-settings-area="appearance">Erscheinungsbild</button>
+      <button type="button" data-bk-settings-area="general">Allgemein</button>
+      <button type="button" data-bk-settings-area="configuration">Konfiguration</button>
+    </div>
+
+    <div class="bk-settings-panel" data-bk-settings-panel="appearance">
+      <section class="bk-settings-group">
+        <strong>Erscheinungsbild</strong>
+        <div class="bk-choice-row">
+          <button type="button" data-bk-theme-choice="light">Hell</button>
+          <button type="button" data-bk-theme-choice="dark">Dunkel</button>
+          <button type="button" data-bk-theme-choice="system">System</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="bk-settings-panel" data-bk-settings-panel="general" hidden>
+      <section class="bk-settings-group">
+        <strong>Sprache</strong>
+        <div class="bk-choice-row">
+          <button type="button" class="active">Deutsch</button>
+          <button type="button" disabled title="Die vollständige englische Oberfläche folgt in einem eigenen Lokalisierungsschritt.">English</button>
+        </div>
+        <div class="bk-language-note">Die Oberfläche ist vollständig deutsch. Englisch bleibt vorbereitet und wird erst aktiviert, wenn alle dynamischen Texte mitübersetzt sind.</div>
+      </section>
+    </div>
+
+    <div class="bk-settings-panel" data-bk-settings-panel="configuration" hidden>
+      <section class="bk-settings-group" id="bk-folder-layout-settings">
+        <div class="bk-folder-layout-heading">
+          <div><strong>Ereignisordner</strong><div style="color:var(--bk-muted);margin-top:4px">Vorlage nur für neue Ereignisse</div></div>
+          <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
+        </div>
+        <div id="bk-folder-layout-tree" style="display:grid;gap:7px;margin-top:12px"></div>
+        <label style="display:grid;gap:6px;margin-top:11px">
+          <span><strong>Exportordner</strong> <span style="color:var(--bk-muted)">· optional</span></span>
+          <select id="bk-folder-export-node">
+            <option value="">Kein Ordner fest als Exportordner klassifiziert</option>
+          </select>
+          <span style="color:var(--bk-muted);font-size:.86rem;line-height:1.35">Dateien in diesem Ordner gelten als Exporte, auch wenn der Ordner z. B. „Master“ heißt. Die Einstellung wird wie die Ordnerstruktur für neue Ereignisse eingefroren.</span>
+        </label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <button id="bk-folder-add-root" type="button">＋ Ordner</button>
+          <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
+        </div>
+        <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
+      </section>
+
+      <section class="bk-settings-group" id="bk-library-settings">
+        <div><strong>Bibliotheken</strong><div style="color:var(--bk-muted);margin-top:4px">Anzeigenamen und registrierte Mountpfade verwalten</div></div>
+        <div id="bk-library-management-list" class="bk-library-list"></div>
+        <div class="bk-library-form">
+          <strong>Bibliothek hinzufügen</strong>
+          <div style="color:var(--bk-muted);font-size:.88rem">Die Host Paths werden zuerst in TrueNAS eingebunden. Hier werden ausschließlich die Container-Mountpfade eingetragen.</div>
+          <label><span>Anzeigename</span><input id="bk-new-library-name" placeholder="z. B. Business"></label>
+          <label><span>Arbeitsbereich · RW</span><input id="bk-new-library-work" placeholder="/libraries/business/workspace"></label>
+          <label><span>Archiv · RO</span><input id="bk-new-library-archive" placeholder="/libraries/business/archive"></label>
+          <div class="bk-library-actions">
+            <button id="bk-new-library-check" type="button">Prüfen</button>
+            <button id="bk-new-library-create" type="button" class="bk-positive-action" disabled>Bibliothek hinzufügen</button>
+          </div>
+          <div id="bk-new-library-status" class="bk-library-status"></div>
+        </div>
+      </section>
+    </div>
   </div>
 </dialog>
 
 <dialog id="bk-library-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
-      <div><h2>Bibliothek wechseln</h2><div style="color:var(--bk-muted);margin-top:5px">Bibliotheken werden später vollständig voneinander getrennt verwaltet.</div></div>
+      <div><h2>Bibliothek wechseln</h2><div style="color:var(--bk-muted);margin-top:5px">Jeder Tab kann unabhängig in einer anderen Bibliothek arbeiten.</div></div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
-    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <div><strong>Hauptbibliothek</strong><div style="color:var(--bk-muted);margin-top:4px">Aktuelle Bibliothek</div></div>
-      <span class="badge success">Aktiv</span>
+    <div id="bk-library-switch-list" class="bk-library-switch-list">
+      <div style="color:var(--bk-muted)">Bibliotheken werden geladen …</div>
     </div>
   </div>
 </dialog>
@@ -2190,7 +2569,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.30.1 · Kern 0.28.7</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.31.0 · Kern 0.28.7</span></p>
   </div>
 </dialog>
 
