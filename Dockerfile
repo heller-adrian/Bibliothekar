@@ -3,7 +3,11 @@ FROM python:3.12-slim-bookworm
 ENV \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=Europe/Berlin
+    TZ=Europe/Berlin \
+    KAMERA_SOURCE_HELPER_ENABLED=true \
+    KAMERA_REMOVABLE_MOUNT_ROOT=/sources/removable \
+    KAMERA_WEB_UID=568 \
+    KAMERA_WEB_GID=568
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -45,7 +49,10 @@ RUN mkdir -p \
         /workspace \
         /sources
 
-USER 568:568
+# 0.29.1 startet absichtlich als root: nur der interne Quellen-Helper
+# benoetigt Mount-/Geraeterechte. Der Supervisor startet die eigentliche
+# Bibliothekar-Web-App explizit als UID/GID 568.
+USER 0:0
 
 EXPOSE 8080
 
@@ -59,4 +66,4 @@ HEALTHCHECK \
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "app.container_supervisor"]
