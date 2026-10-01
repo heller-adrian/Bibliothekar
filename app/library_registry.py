@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import hashlib
 import json
 import os
 import sqlite3
@@ -11,6 +12,83 @@ import sqlite3
 
 REGISTRY_SCHEMA_VERSION = 1
 MAIN_LIBRARY_ID = "main"
+
+
+REGISTRY_MIGRATIONS: dict[int, str] = {
+    1: """
+        CREATE TABLE libraries (
+            library_id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            database_path TEXT NOT NULL UNIQUE,
+            workspace_root TEXT NOT NULL,
+            work_root TEXT NOT NULL,
+            archive_root TEXT NOT NULL,
+            settings_json TEXT NOT NULL DEFAULT '{}',
+            is_main INTEGER NOT NULL DEFAULT 0 CHECK (is_main IN (0,1)),
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX idx_libraries_single_main
+        ON libraries(is_main)
+        WHERE is_main = 1;
+
+        CREATE TABLE source_backups (
+            backup_id TEXT PRIMARY KEY,
+            source_kind TEXT NOT NULL,
+            source_identity TEXT NOT NULL,
+            backup_path TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source_kind, source_identity, backup_path)
+        );
+
+        CREATE TABLE canonical_families (
+            canonical_family_id TEXT PRIMARY KEY,
+            content_fingerprint TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE source_families (
+            source_family_key TEXT PRIMARY KEY,
+            backup_id TEXT NOT NULL,
+            family_key TEXT NOT NULL,
+            canonical_family_id TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(backup_id, family_key),
+            FOREIGN KEY(backup_id)
+                REFERENCES source_backups(backup_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(canonical_family_id)
+                REFERENCES canonical_families(canonical_family_id)
+                ON DELETE RESTRICT
+        );
+
+        CREATE INDEX idx_source_families_canonical
+        ON source_families(canonical_family_id);
+
+        CREATE TABLE family_claims (
+            canonical_family_id TEXT PRIMARY KEY,
+            library_id TEXT NOT NULL,
+            claim_state TEXT NOT NULL
+                CHECK (claim_state IN ('reserved','owned')),
+            event_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(canonical_family_id)
+                REFERENCES canonical_families(canonical_family_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(library_id)
+                REFERENCES libraries(library_id)
+                ON DELETE RESTRICT
+        );
+    """,
+}
 
 
 class LibraryRegistryError(RuntimeError):
@@ -32,83 +110,79 @@ def _connect(path: Path) -> sqlite3.Connection:
     return connection
 
 
-def initialize_library_registry(path: Path) -> dict[str, Any]:
-    connection = _connect(path)
+def _ensure_registry_schema_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS registry_schema_versions (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.commit()
+
+
+def _registry_applied_versions(connection: sqlite3.Connection) -> set[int]:
+    _ensure_registry_schema_table(connection)
+    rows = connection.execute(
+        "SELECT version FROM registry_schema_versions ORDER BY version"
+    ).fetchall()
+    return {int(row["version"]) for row in rows}
+
+
+def _apply_registry_migration(
+    connection: sqlite3.Connection,
+    version: int,
+    sql: str,
+) -> None:
+    if not sql.strip():
+        raise LibraryRegistryError(
+            f"Registry-Migration {version} ist leer."
+        )
     try:
         connection.executescript(
-            """
-            BEGIN IMMEDIATE;
-
-            CREATE TABLE IF NOT EXISTS registry_schema_versions (
-                version INTEGER PRIMARY KEY,
-                applied_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS libraries (
-                library_id TEXT PRIMARY KEY,
-                display_name TEXT NOT NULL,
-                database_path TEXT NOT NULL UNIQUE,
-                workspace_root TEXT NOT NULL,
-                work_root TEXT NOT NULL,
-                archive_root TEXT NOT NULL,
-                settings_json TEXT NOT NULL DEFAULT '{}',
-                is_main INTEGER NOT NULL DEFAULT 0 CHECK (is_main IN (0,1)),
-                is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_libraries_single_main
-            ON libraries(is_main)
-            WHERE is_main = 1;
-
-            CREATE TABLE IF NOT EXISTS source_backups (
-                backup_id TEXT PRIMARY KEY,
-                source_kind TEXT NOT NULL,
-                source_identity TEXT NOT NULL,
-                backup_path TEXT NOT NULL,
-                metadata_json TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(source_kind, source_identity, backup_path)
-            );
-
-            CREATE TABLE IF NOT EXISTS source_families (
-                source_family_key TEXT PRIMARY KEY,
-                backup_id TEXT NOT NULL,
-                family_key TEXT NOT NULL,
-                content_fingerprint TEXT,
-                metadata_json TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(backup_id, family_key),
-                FOREIGN KEY(backup_id)
-                    REFERENCES source_backups(backup_id)
-                    ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS family_claims (
-                source_family_key TEXT PRIMARY KEY,
-                library_id TEXT NOT NULL,
-                claim_state TEXT NOT NULL
-                    CHECK (claim_state IN ('reserved','owned')),
-                event_id TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(source_family_key)
-                    REFERENCES source_families(source_family_key)
-                    ON DELETE CASCADE,
-                FOREIGN KEY(library_id)
-                    REFERENCES libraries(library_id)
-                    ON DELETE RESTRICT
-            );
-
-            INSERT OR IGNORE INTO registry_schema_versions(version, applied_at)
-            VALUES (1, datetime('now'));
-
+            "BEGIN IMMEDIATE;\n"
+            + sql
+            + f"""
+            INSERT INTO registry_schema_versions(version, applied_at)
+            VALUES ({int(version)}, datetime('now'));
             COMMIT;
             """
         )
+    except Exception:
+        try:
+            connection.execute("ROLLBACK")
+        except sqlite3.OperationalError:
+            pass
+        raise
+
+
+def initialize_library_registry(path: Path) -> dict[str, Any]:
+    connection = _connect(path)
+    try:
+        applied = _registry_applied_versions(connection)
+        unsupported = sorted(
+            version
+            for version in applied
+            if version > REGISTRY_SCHEMA_VERSION
+        )
+        if unsupported:
+            raise LibraryRegistryError(
+                "Die Bibliotheks-Registry stammt aus einer neueren "
+                "Anwendungsversion: "
+                + ", ".join(str(version) for version in unsupported)
+            )
+
+        newly_applied: list[int] = []
+        for version in sorted(REGISTRY_MIGRATIONS):
+            if version in applied:
+                continue
+            _apply_registry_migration(
+                connection,
+                version,
+                REGISTRY_MIGRATIONS[version],
+            )
+            newly_applied.append(version)
 
         integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
@@ -124,15 +198,18 @@ def initialize_library_registry(path: Path) -> dict[str, Any]:
                 "Fremdschlüsselprüfung der Bibliotheks-Registry ist fehlgeschlagen."
             )
 
-        versions = [
-            int(row["version"])
-            for row in connection.execute(
-                "SELECT version FROM registry_schema_versions ORDER BY version"
-            ).fetchall()
-        ]
+        versions = sorted(_registry_applied_versions(connection))
+        expected = set(range(1, REGISTRY_SCHEMA_VERSION + 1))
+        if set(versions) != expected:
+            raise LibraryRegistryError(
+                "Registry-Schemastand ist unvollständig: "
+                + ", ".join(str(version) for version in versions)
+            )
+
         return {
             "database_path": str(path),
             "schema_versions": versions,
+            "newly_applied_versions": newly_applied,
             "integrity": integrity,
             "foreign_key_errors": 0,
         }
@@ -144,7 +221,6 @@ def initialize_library_registry(path: Path) -> dict[str, Any]:
         raise
     finally:
         connection.close()
-
 
 def ensure_library_identity(database_path: Path, library_id: str) -> dict[str, str]:
     clean_id = str(library_id or "").strip()
