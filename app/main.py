@@ -344,7 +344,7 @@ def ensure_job_thumbnail(
     *,
     library_context: LibraryContext | None = None,
 ) -> Path | None:
-    context = library_context or build_main_library_context()
+    context = library_context or current_library_context()
     target = _thumbnail_path(
         job_id,
         library_id=context.library_id,
@@ -1144,7 +1144,7 @@ def _event_payload_with_folder_layout(
     event_id: str | None = None,
 ) -> dict[str, Any]:
     result = dict(payload)
-    with database_connection(DATABASE_FILE) as connection:
+    with database_connection(current_database_file()) as connection:
         if event_id:
             state = ensure_event_layout_snapshot(
                 connection,
@@ -1165,7 +1165,7 @@ def _canonical_membership_preflight(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], JSONResponse | None]:
     """Expand a visible UI selection to the complete active time membership."""
-    with database_connection(DATABASE_FILE) as connection:
+    with database_connection(current_database_file()) as connection:
         membership = resolve_payload_membership(connection, payload)
     expanded = {
         **payload,
@@ -1201,10 +1201,10 @@ def _available_families_for_event_payload(
         if int(value) > 0
     })
     if not requested:
-        return list_job_available_families(DATABASE_FILE, job_id)
+        return list_job_available_families(current_database_file(), job_id)
 
     placeholders = ",".join("?" for _ in requested)
-    with database_connection(DATABASE_FILE) as connection:
+    with database_connection(current_database_file()) as connection:
         rows = connection.execute(
             f"""SELECT ff.id AS family_id,ff.job_id,ff.family_key,ff.original_stem,
                        ff.selected_capture_time,ff.capture_time_confidence,
@@ -1243,14 +1243,14 @@ def _available_families_for_event_payload(
 
 @app.get("/api/settings/event-folder-layout", tags=["Einstellungen"])
 def api_get_event_folder_layout() -> dict[str, Any]:
-    with database_connection(DATABASE_FILE) as connection:
+    with database_connection(current_database_file()) as connection:
         return get_global_event_folder_layout(connection)
 
 
 @app.put("/api/settings/event-folder-layout", tags=["Einstellungen"])
 def api_set_event_folder_layout(payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        with database_connection(DATABASE_FILE) as connection:
+        with database_connection(current_database_file()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             state = set_global_event_folder_layout(
                 connection,
@@ -1265,7 +1265,7 @@ def api_set_event_folder_layout(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/events/{event_id}/folder-layout", tags=["Ereignisse"])
 def api_event_folder_layout(event_id: str) -> dict[str, Any]:
-    with database_connection(DATABASE_FILE) as connection:
+    with database_connection(current_database_file()) as connection:
         event = connection.execute(
             "SELECT id FROM events WHERE id=? AND parent_event_id IS NULL",
             (event_id,),
@@ -1366,18 +1366,18 @@ def get_health() -> dict[str, Any]:
         )
 
     paths = {
-        "workspace": path_status(WORKSPACE_PATH),
+        "workspace": path_status(current_workspace_root()),
         "sd_card_backups": path_status(
-            WORKSPACE_PATH / BACKUP_DIRECTORY_NAME
+            current_workspace_root() / BACKUP_DIRECTORY_NAME
         ),
         "shared_work_area": path_status(
-            WORKSPACE_PATH / WORK_DIRECTORY_NAME
+            current_work_root()
         ),
         "database": path_status(DATABASE_DIRECTORY),
         "logs": path_status(LOG_PATH),
     }
 
-    archive_path = path_status(ARCHIVE_ROOT)
+    archive_path = path_status(current_archive_root())
     import_path = path_status(IMPORT_ROOT)
 
     for name, information in paths.items():
@@ -1454,7 +1454,7 @@ def get_health() -> dict[str, Any]:
             "loaded": config_loaded,
         },
         "database": {
-            "path": str(DATABASE_FILE),
+            "path": str(current_database_file()),
             "initialized":
                 DATABASE_INITIALIZATION_ERROR is None
                 and DATABASE_INITIALIZATION is not None,
@@ -1484,7 +1484,7 @@ def get_health() -> dict[str, Any]:
             ),
         },
         "library_registry": {
-            "path": str(REGISTRY_DATABASE_FILE),
+            "path": str(REGISTRY_current_database_file()),
             "initialized": (
                 LIBRARY_REGISTRY_ERROR is None
                 and LIBRARY_REGISTRY_INITIALIZATION is not None
@@ -1528,7 +1528,7 @@ def get_health() -> dict[str, Any]:
 
 def list_jobs() -> list[dict[str, Any]]:
     return list_database_jobs(
-        DATABASE_FILE,
+        current_database_file(),
         limit=50,
     )
 
@@ -1959,7 +1959,7 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
     total_size = 0
     source_device_id = source_device_id_for_path(path, root_key, root)
     history_rows = (
-        list_imported_source_files(DATABASE_FILE, source_device_id)
+        list_imported_source_files(current_database_file(), source_device_id)
         if source_device_id
         else []
     )
@@ -1995,7 +1995,7 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
             new_fast += 1
     signature = quick_source_signature(path)
     duplicate = find_folder_import_by_identity(
-        DATABASE_FILE,
+        current_database_file(),
         source_signature=signature,
         include_active=True,
     )
@@ -2147,7 +2147,7 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     source_device_id = source_device_id_for_path(source, root_key, root)
     source_signature = quick_source_signature(source)
     duplicate = find_folder_import_by_identity(
-        DATABASE_FILE,
+        current_database_file(),
         source_signature=source_signature,
         include_active=True,
     )
@@ -2171,12 +2171,12 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     }.get(source_mode, "manual")
     try:
         job = create_job(
-            DATABASE_FILE,
+            current_database_file(),
             job_id=job_id,
             kind="sd_import",
             trigger_type=trigger_type,
             source_path=str(source),
-            working_path=str(WORKSPACE_PATH / WORK_DIRECTORY_NAME),
+            working_path=str(current_work_root()),
             operation="folder_import",
             source_volume_label=label,
             source_signature=source_signature,
@@ -2212,7 +2212,7 @@ def api_jobs() -> dict[str, Any]:
     tags=["Aufträge"],
 )
 def api_job_thumbnail(job_id: str):
-    job = get_job(DATABASE_FILE, job_id)
+    job = get_job(current_database_file(), job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Auftrag wurde nicht gefunden.")
     path = ensure_job_thumbnail(job_id)
@@ -2234,7 +2234,7 @@ def api_job_detail(
     job_id: str,
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -2253,7 +2253,7 @@ def api_job_detail(
 )
 def api_backups() -> dict[str, Any]:
     backups = list_backup_lifecycles(
-        DATABASE_FILE,
+        current_database_file(),
         limit=100,
     )
 
@@ -2269,8 +2269,8 @@ def api_backups() -> dict[str, Any]:
 )
 def api_archive_summary() -> dict[str, Any]:
     return list_archive_candidates(
-        DATABASE_FILE,
-        ARCHIVE_ROOT,
+        current_database_file(),
+        current_archive_root(),
     )
 
 
@@ -2284,11 +2284,11 @@ def api_archive_verify(
 ) -> dict[str, Any]:
     try:
         return verify_event_archive(
-            DATABASE_FILE,
-            ARCHIVE_ROOT,
+            current_database_file(),
+            current_archive_root(),
             job_id,
             event_id,
-            workspace_path=WORKSPACE_PATH,
+            workspace_path=current_workspace_root(),
         )
     except ArchiveVerificationError as error:
         message = str(error)
@@ -2309,9 +2309,9 @@ def api_ssd_release(
 ) -> dict[str, Any]:
     try:
         return release_event_ssd(
-            DATABASE_FILE,
-            WORKSPACE_PATH,
-            ARCHIVE_ROOT,
+            current_database_file(),
+            current_workspace_root(),
+            current_archive_root(),
             job_id,
             event_id,
         )
@@ -4720,7 +4720,7 @@ def api_job_day_groups(
     job_id: str,
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -4731,7 +4731,7 @@ def api_job_day_groups(
         )
 
     groups = list_job_day_groups(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -4765,7 +4765,7 @@ def api_job_events(
     job_id: str,
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -4776,14 +4776,14 @@ def api_job_events(
         )
 
     refresh_live_event_inventories(
-        DATABASE_FILE,
-        WORKSPACE_PATH,
-        ARCHIVE_ROOT,
+        current_database_file(),
+        current_workspace_root(),
+        current_archive_root(),
         job_id=job_id,
     )
 
     events = list_job_events(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -4813,10 +4813,10 @@ def api_job_events(
     tags=["Ereignisse"],
 )
 def api_event_suggestions(job_id: str) -> dict[str, Any]:
-    job = get_job(DATABASE_FILE, job_id)
+    job = get_job(current_database_file(), job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
-    suggestions = list_event_suggestions(DATABASE_FILE, job_id)
+    suggestions = list_event_suggestions(current_database_file(), job_id)
     return {"job_id": job_id, "count": len(suggestions), "suggestions": suggestions}
 
 
@@ -4825,7 +4825,7 @@ def api_event_suggestions(job_id: str) -> dict[str, Any]:
     tags=["Ereignisse"],
 )
 def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    job = get_job(DATABASE_FILE, job_id)
+    job = get_job(current_database_file(), job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
     family_ids = [
@@ -4835,7 +4835,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
     ]
     target_event_id = str(payload.get("target_event_id") or "")
     try:
-        with database_connection(DATABASE_FILE) as connection:
+        with database_connection(current_database_file()) as connection:
             target = connection.execute(
                 """SELECT * FROM events
                    WHERE id=? AND parent_event_id IS NULL
@@ -4847,11 +4847,11 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
 
         if target is not None and str(target["status"] or "") == "archived":
             context = get_event_edit_context(
-                DATABASE_FILE, target_job_id, target_event_id
+                current_database_file(), target_job_id, target_event_id
             )
             incoming_available = {
                 int(family["family_id"]): dict(family)
-                for family in list_job_available_families(DATABASE_FILE, job_id)
+                for family in list_job_available_families(current_database_file(), job_id)
                 if int(family["family_id"]) in set(family_ids)
             }
             if set(incoming_available) != set(family_ids):
@@ -4889,14 +4889,14 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
                 list(family_map.values()),
             )
             result = propose_event_change(
-                DATABASE_FILE,
+                current_database_file(),
                 target_job_id,
                 target_event_id,
                 preview,
                 event_name=str(target["name"]),
                 notes=str(target["notes"] or ""),
-                archive_root=ARCHIVE_ROOT,
-                workspace_path=WORKSPACE_PATH,
+                archive_root=current_archive_root(),
+                workspace_path=current_workspace_root(),
             )
             return {
                 "job_id": job_id,
@@ -4914,7 +4914,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
             }
 
         result = accept_event_suggestion(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
             family_ids,
             target_event_id,
@@ -4932,7 +4932,7 @@ def api_archive_change_reviews(
     job_id: str,
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -4943,7 +4943,7 @@ def api_archive_change_reviews(
         )
 
     reviews = list_archive_change_reviews(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -4976,7 +4976,7 @@ def api_create_event(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -5003,7 +5003,7 @@ def api_create_event(
     try:
         archived_target = None
         if existing_parent_event_id:
-            with database_connection(DATABASE_FILE) as connection:
+            with database_connection(current_database_file()) as connection:
                 archived_target = connection.execute(
                     """SELECT * FROM events
                        WHERE id=? AND job_id=? AND parent_event_id IS NULL
@@ -5013,7 +5013,7 @@ def api_create_event(
 
         if archived_target is not None:
             context = get_event_edit_context(
-                DATABASE_FILE, job_id, existing_parent_event_id
+                current_database_file(), job_id, existing_parent_event_id
             )
             current_start = str(archived_target["start_datetime"] or "")[:19]
             current_end = str(archived_target["end_datetime"] or "")[:19]
@@ -5068,14 +5068,14 @@ def api_create_event(
             }
             preview = build_event_preview(combined_payload, editable_families)
             result = propose_event_change(
-                DATABASE_FILE,
+                current_database_file(),
                 job_id,
                 existing_parent_event_id,
                 preview,
                 event_name=str(archived_target["name"]),
                 notes=str(archived_target["notes"] or ""),
-                archive_root=ARCHIVE_ROOT,
-                workspace_path=WORKSPACE_PATH,
+                archive_root=current_archive_root(),
+                workspace_path=current_workspace_root(),
             )
             return {
                 "job_id": job_id,
@@ -5105,7 +5105,7 @@ def api_create_event(
             )
 
         result = create_planned_event(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
             preview,
         )
@@ -5164,17 +5164,17 @@ def api_event_structure(job_id: str, event_id: str):
     infer time boundaries from file names or from the folder layout.
     """
     refresh_live_event_inventories(
-        DATABASE_FILE,
-        WORKSPACE_PATH,
-        ARCHIVE_ROOT,
+        current_database_file(),
+        current_workspace_root(),
+        current_archive_root(),
         job_id=job_id,
         event_id=event_id,
     )
-    context = get_event_edit_context(DATABASE_FILE, job_id, event_id, workspace_path=WORKSPACE_PATH)
+    context = get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
     event = context["event"]
     from app.structure_view import render_structure
 
-    with database_connection(DATABASE_FILE) as c:
+    with database_connection(current_database_file()) as c:
         cr = c.execute(
             """SELECT * FROM event_change_requests
                WHERE event_id=?
@@ -5276,17 +5276,17 @@ def api_event_structure(job_id: str, event_id: str):
     tags=["Ereignisse"],
 )
 def api_event_edit_context(job_id: str, event_id: str) -> dict[str, Any]:
-    if get_job(DATABASE_FILE, job_id) is None:
+    if get_job(current_database_file(), job_id) is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
     refresh_live_event_inventories(
-        DATABASE_FILE,
-        WORKSPACE_PATH,
-        ARCHIVE_ROOT,
+        current_database_file(),
+        current_workspace_root(),
+        current_archive_root(),
         job_id=job_id,
         event_id=event_id,
     )
     try:
-        return get_event_edit_context(DATABASE_FILE, job_id, event_id, workspace_path=WORKSPACE_PATH)
+        return get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
     except ValueError as error:
         raise HTTPException(status_code=404 if "nicht gefunden" in str(error) else 409, detail=str(error)) from error
 
@@ -5507,10 +5507,10 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
     tags=["Ereignisse"],
 )
 def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
-    if get_job(DATABASE_FILE, job_id) is None:
+    if get_job(current_database_file(), job_id) is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
     try:
-        context = get_event_edit_context(DATABASE_FILE, job_id, event_id, workspace_path=WORKSPACE_PATH)
+        context = get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
         payload = _event_payload_with_folder_layout(payload, event_id=event_id)
         preview = None
         if payload.get("cascade_confirmed") or payload.get("child_segments"):
@@ -5525,7 +5525,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                 requested_no_event_segments = normalize_no_event_segments(
                     payload.get("no_event_segments") or []
                 )
-                with database_connection(DATABASE_FILE) as connection:
+                with database_connection(current_database_file()) as connection:
                     occupied = _no_event_normal_conflicts(
                         connection,
                         job_id,
@@ -5553,7 +5553,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                 if child_segments:
                     combined = []
                     can_auto = True
-                    with database_connection(DATABASE_FILE) as connection:
+                    with database_connection(current_database_file()) as connection:
                         for seg in child_segments:
                             start_dt = f"{start_date}T{seg.get('start_time') or '00:00'}:00"
                             end_dt = f"{end_date}T{seg.get('end_time') or '23:59'}:59"
@@ -5565,7 +5565,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                 else:
                     start_dt = f"{start_date}T{payload.get('start_time') or '00:00'}:00" if uses_time else f"{start_date}T00:00:00"
                     end_dt = f"{end_date}T{payload.get('end_time') or '23:59'}:59" if uses_time else f"{end_date}T23:59:59"
-                    with database_connection(DATABASE_FILE) as connection:
+                    with database_connection(current_database_file()) as connection:
                         cascade_preview = cascade_preview_for_interval(connection, job_id, event_id, start_dt, end_dt)
                 if cascade_preview["has_conflicts"] and not cascade_confirmed:
                     return JSONResponse(
@@ -5593,7 +5593,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
             archived_event_ids = [str(item.get("event_id")) for item in cascade_preview.get("items", []) if str(item.get("status")) == "archived"]
             if archived_event_ids:
                 placeholders = ",".join("?" for _ in archived_event_ids)
-                with database_connection(DATABASE_FILE) as connection:
+                with database_connection(current_database_file()) as connection:
                     archived_rows = connection.execute(
                         f"""SELECT DISTINCT ea.family_id FROM event_assignments ea JOIN events e ON e.id=ea.event_id
                             WHERE ea.family_id IS NOT NULL AND COALESCE(e.parent_event_id,e.id) IN ({placeholders})""",
@@ -5668,12 +5668,12 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
             archived_items = [item for item in cascade_preview.get("items", []) if str(item.get("status")) == "archived"]
             if archived_items:
                 archive_bundle = prepare_archived_cascade_impacts(
-                    DATABASE_FILE, job_id, event_id, preview, cascade_preview, WORKSPACE_PATH
+                    current_database_file(), job_id, event_id, preview, cascade_preview, current_workspace_root()
                 )
 
         result = update_event_definition(
-            DATABASE_FILE, job_id, event_id, preview,
-            workspace_path=WORKSPACE_PATH,
+            current_database_file(), job_id, event_id, preview,
+            workspace_path=current_workspace_root(),
             app_version=APP_VERSION,
             event_name=str(payload.get("event_name") or context["event"]["name"]),
             notes=str(payload.get("notes") or ""),
@@ -5698,7 +5698,7 @@ def api_delete_event(
     event_id: str,
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -5710,7 +5710,7 @@ def api_delete_event(
 
     try:
         result = delete_planned_event(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
             event_id,
         )
@@ -5769,7 +5769,7 @@ def api_event_sort_plan(
     verify_sha256: bool = False,
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -5781,10 +5781,10 @@ def api_event_sort_plan(
 
     try:
         return build_event_sort_plan(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
             event_id,
-            WORKSPACE_PATH,
+            current_workspace_root(),
             verify_sha256=verify_sha256,
         )
 
@@ -5814,7 +5814,7 @@ def api_apply_event_sort(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -5826,10 +5826,10 @@ def api_apply_event_sort(
 
     try:
         run = prepare_sort_run(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
             event_id,
-            WORKSPACE_PATH,
+            current_workspace_root(),
             expected_plan_token=str(
                 payload.get("plan_token") or ""
             ),
@@ -5875,12 +5875,12 @@ def api_event_reconcile_plan(
     event_id: str,
     verify_sha256: bool = False,
 ) -> dict[str, Any]:
-    job = get_job(DATABASE_FILE, job_id)
+    job = get_job(current_database_file(), job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
     try:
         return build_workspace_reconcile_plan(
-            DATABASE_FILE, job_id, event_id, WORKSPACE_PATH, verify_sha256=verify_sha256
+            current_database_file(), job_id, event_id, current_workspace_root(), verify_sha256=verify_sha256
         )
     except (SortApplyError, SortPlanError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -5892,12 +5892,12 @@ def api_event_reconcile_plan(
     status_code=202,
 )
 def api_event_reconcile_sort(job_id: str, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    job = get_job(DATABASE_FILE, job_id)
+    job = get_job(current_database_file(), job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
     try:
         run = prepare_workspace_reconcile_run(
-            DATABASE_FILE, job_id, event_id, WORKSPACE_PATH,
+            current_database_file(), job_id, event_id, current_workspace_root(),
             expected_plan_token=str(payload.get("plan_token") or ""),
             confirmation_phrase=str(payload.get("confirmation_phrase") or ""),
         )
@@ -5920,7 +5920,7 @@ def api_event_reapply_plan(
     event_id: str,
     verify_sha256: bool = False,
 ) -> dict[str, Any]:
-    job = get_job(DATABASE_FILE, job_id)
+    job = get_job(current_database_file(), job_id)
     if job is None:
         raise HTTPException(
             status_code=404,
@@ -5929,10 +5929,10 @@ def api_event_reapply_plan(
 
     try:
         return build_event_sort_plan(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
             event_id,
-            WORKSPACE_PATH,
+            current_workspace_root(),
             verify_sha256=verify_sha256,
             allow_reapply=True,
         )
@@ -5955,7 +5955,7 @@ def api_event_reapply(
     event_id: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    job = get_job(DATABASE_FILE, job_id)
+    job = get_job(current_database_file(), job_id)
     if job is None:
         raise HTTPException(
             status_code=404,
@@ -5964,10 +5964,10 @@ def api_event_reapply(
 
     try:
         run = prepare_reapply_sort_run(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
             event_id,
-            WORKSPACE_PATH,
+            current_workspace_root(),
             expected_plan_token=str(payload.get("plan_token") or ""),
             confirmation_phrase=str(payload.get("confirmation_phrase") or ""),
         )
@@ -6005,7 +6005,7 @@ def api_sort_run(
     run_id: str,
 ) -> dict[str, Any]:
     run = get_sort_run(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
         run_id,
     )
@@ -6028,7 +6028,7 @@ def api_latest_event_sort_run(
     event_id: str,
 ) -> dict[str, Any]:
     run = latest_event_sort_run(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
         event_id,
     )
@@ -6047,7 +6047,7 @@ def api_event_preview(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -6087,17 +6087,17 @@ def api_event_preview(
 @app.get("/api/events/search", tags=["Ereignisse"])
 def api_search_events(q: str = "", limit: int = 25, offset: int = 0) -> dict[str, Any]:
     refresh_live_event_inventories(
-        DATABASE_FILE,
-        WORKSPACE_PATH,
-        ARCHIVE_ROOT,
+        current_database_file(),
+        current_workspace_root(),
+        current_archive_root(),
     )
-    detect_all_event_structure_changes(DATABASE_FILE)
-    return search_events(DATABASE_FILE, query=q, limit=limit, offset=offset)
+    detect_all_event_structure_changes(current_database_file())
+    return search_events(current_database_file(), query=q, limit=limit, offset=offset)
 
 
 
 def _canonical_event_anchor_job_id(event_id: str) -> str:
-    with database_connection(DATABASE_FILE) as connection:
+    with database_connection(current_database_file()) as connection:
         row = connection.execute(
             "SELECT job_id FROM events WHERE id=? AND parent_event_id IS NULL",
             (event_id,),
@@ -6110,8 +6110,8 @@ def _canonical_event_anchor_job_id(event_id: str) -> str:
 @app.get("/api/events/{event_id}", tags=["Ereignisse"])
 def api_canonical_event(event_id: str) -> dict[str, Any]:
     anchor_job_id = _canonical_event_anchor_job_id(event_id)
-    context = get_event_edit_context(DATABASE_FILE, anchor_job_id, event_id, workspace_path=WORKSPACE_PATH)
-    with database_connection(DATABASE_FILE) as connection:
+    context = get_event_edit_context(current_database_file(), anchor_job_id, event_id, workspace_path=current_workspace_root())
+    with database_connection(current_database_file()) as connection:
         source_job_ids = [
             str(row["job_id"])
             for row in connection.execute(
@@ -6130,7 +6130,7 @@ def api_canonical_event(event_id: str) -> dict[str, Any]:
 @app.get("/api/events/{event_id}/structure", tags=["Ereignisse"])
 def api_canonical_event_structure(event_id: str) -> dict[str, Any]:
     anchor_job_id = _canonical_event_anchor_job_id(event_id)
-    context = get_event_edit_context(DATABASE_FILE, anchor_job_id, event_id, workspace_path=WORKSPACE_PATH)
+    context = get_event_edit_context(current_database_file(), anchor_job_id, event_id, workspace_path=current_workspace_root())
     return {
         "event_id": event_id,
         "anchor_job_id": anchor_job_id,
@@ -6212,7 +6212,7 @@ def api_canonical_event_reapply(
 @app.get("/api/jobs/{job_id}/no-event/targets", tags=["Ereignisse"])
 def api_no_event_targets(job_id: str, months: str = "") -> dict[str, Any]:
     month_keys = [part.strip() for part in str(months or "").split(",") if part.strip()]
-    return {"targets": list_no_event_month_targets(DATABASE_FILE, month_keys, prefer_job_id=job_id)}
+    return {"targets": list_no_event_month_targets(current_database_file(), month_keys, prefer_job_id=job_id)}
 
 
 @app.post("/api/jobs/{job_id}/no-event/assign-existing", tags=["Ereignisse"])
@@ -6243,7 +6243,7 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
         selected_family_ids = list(membership_payload["selected_family_ids"])
 
     try:
-        with database_connection(DATABASE_FILE) as connection:
+        with database_connection(current_database_file()) as connection:
             target_row = connection.execute(
                 "SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",
                 (target_event_id,),
@@ -6259,7 +6259,7 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
             normalized_new = normalize_no_event_segments(segments) if segments else []
             target_job_id = str(target_row["job_id"])
             context = get_event_edit_context(
-                DATABASE_FILE, target_job_id, target_event_id
+                current_database_file(), target_job_id, target_event_id
             )
             existing_segments = [
                 {
@@ -6296,7 +6296,7 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                     job_id, {"selected_family_ids": selected_family_ids}
                 )
                 if selected_family_ids
-                else list_job_available_families(DATABASE_FILE, job_id)
+                else list_job_available_families(current_database_file(), job_id)
             )
             requested_set = set(selected_family_ids)
             incoming_ids = {
@@ -6338,14 +6338,14 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                 list(family_map.values()),
             )
             result = propose_event_change(
-                DATABASE_FILE,
+                current_database_file(),
                 target_job_id,
                 target_event_id,
                 preview,
                 event_name="Ohne Ereignis",
                 notes=str(target_row["notes"] or ""),
-                archive_root=ARCHIVE_ROOT,
-                workspace_path=WORKSPACE_PATH,
+                archive_root=current_archive_root(),
+                workspace_path=current_workspace_root(),
             )
             return {
                 "status": "archive_change_request_created",
@@ -6360,7 +6360,7 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
             }
 
         return assign_free_families_to_existing_no_event(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
             target_event_id,
             segments,
@@ -6378,8 +6378,8 @@ def api_legacy_multi_backup_plan(legacy_event_id: str) -> dict[str, Any]:
     )
     try:
         return build_legacy_reconcile_plan(
-            DATABASE_FILE,
-            WORKSPACE_PATH,
+            current_database_file(),
+            current_workspace_root(),
             legacy_event_id,
         )
     except LegacyMultiBackupError as error:
@@ -6397,8 +6397,8 @@ def api_legacy_multi_backup_apply(
     )
     try:
         return apply_legacy_reconcile(
-            DATABASE_FILE,
-            WORKSPACE_PATH,
+            current_database_file(),
+            current_workspace_root(),
             legacy_event_id,
             expected_plan_token=str(payload.get("plan_token") or ""),
             confirmation_phrase=str(payload.get("confirmation_phrase") or ""),
@@ -6410,7 +6410,7 @@ def api_legacy_multi_backup_apply(
 @app.get("/api/event-structure-changes/{change_id}", tags=["Ereignisse"])
 def api_event_structure_change(change_id: str) -> dict[str, Any]:
     try:
-        return get_structure_change(DATABASE_FILE, change_id)
+        return get_structure_change(current_database_file(), change_id)
     except EventStructureChangeError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -6419,8 +6419,8 @@ def api_event_structure_change(change_id: str) -> dict[str, Any]:
 def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         return confirm_applied_structure_change(
-            DATABASE_FILE,
-            WORKSPACE_PATH,
+            current_database_file(),
+            current_workspace_root(),
             change_id,
             input_path=str(payload.get("input_path") or ""),
             app_version=RELEASE_VERSION,
@@ -6433,8 +6433,8 @@ def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]
 def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         return prepare_archived_structure_change(
-            DATABASE_FILE,
-            WORKSPACE_PATH,
+            current_database_file(),
+            current_workspace_root(),
             change_id,
             input_path=str(payload.get("input_path") or ""),
             app_version=RELEASE_VERSION,
@@ -6447,9 +6447,9 @@ def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any
 def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
     try:
         return verify_archived_structure_change(
-            DATABASE_FILE,
-            ARCHIVE_ROOT,
-            WORKSPACE_PATH,
+            current_database_file(),
+            current_archive_root(),
+            current_workspace_root(),
             change_id,
         )
     except EventStructureChangeError as error:
@@ -6458,7 +6458,7 @@ def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
 
 @app.get("/api/tasks", tags=["Aufgaben"])
 def api_global_tasks() -> dict[str, Any]:
-    tasks = list_global_tasks(DATABASE_FILE)
+    tasks = list_global_tasks(current_database_file())
     return {"tasks": tasks, "count": sum(int(t.get("count", 1)) for t in tasks)}
 
 
@@ -6466,7 +6466,7 @@ def api_global_tasks() -> dict[str, Any]:
 def api_active_event_mutation(job_id: str) -> dict[str, Any]:
     from app.event_mutation import get_active_mutation
     from app.database import database_connection
-    with database_connection(DATABASE_FILE) as connection:
+    with database_connection(current_database_file()) as connection:
         row = get_active_mutation(connection, job_id)
     if row is None:
         return {"active": False, "mutation": None}
@@ -6482,9 +6482,9 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
     from app.event_mutation import cancel_mutation
     from app.database import database_connection
     try:
-        with database_connection(DATABASE_FILE) as connection:
+        with database_connection(current_database_file()) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            result = cancel_mutation(connection, mutation_id, job_id, workspace_path=WORKSPACE_PATH)
+            result = cancel_mutation(connection, mutation_id, job_id, workspace_path=current_workspace_root())
             connection.commit()
         return result
     except ValueError as error:
@@ -6500,26 +6500,26 @@ def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
     """
     selected = [part.strip() for part in str(jobs or "").split(",") if part.strip()]
     for job_id in selected:
-        if get_job(DATABASE_FILE, job_id) is None:
+        if get_job(current_database_file(), job_id) is None:
             raise HTTPException(status_code=404, detail="Mindestens eine Sicherung wurde nicht gefunden.")
 
     refresh_live_event_inventories(
-        DATABASE_FILE,
-        WORKSPACE_PATH,
-        ARCHIVE_ROOT,
+        current_database_file(),
+        current_workspace_root(),
+        current_archive_root(),
     )
-    detect_all_event_structure_changes(DATABASE_FILE)
+    detect_all_event_structure_changes(current_database_file())
     payload = build_global_workspace_summary(
-        DATABASE_FILE,
+        current_database_file(),
         selected,
-        workspace_path=WORKSPACE_PATH,
+        workspace_path=current_workspace_root(),
     )
 
     suggestions: list[dict[str, Any]] = []
     for job_id in selected:
-        job = get_job(DATABASE_FILE, job_id) or {}
+        job = get_job(current_database_file(), job_id) or {}
         label = str(job.get("source_volume_label") or job_id)
-        for suggestion in list_event_suggestions(DATABASE_FILE, job_id):
+        for suggestion in list_event_suggestions(current_database_file(), job_id):
             suggestions.append({
                 **suggestion,
                 "source_job_id": job_id,
@@ -6537,7 +6537,7 @@ def api_workspace_summary(
     job_id: str,
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -6548,33 +6548,33 @@ def api_workspace_summary(
         )
 
     live_inventory = refresh_live_event_inventories(
-        DATABASE_FILE,
-        WORKSPACE_PATH,
-        ARCHIVE_ROOT,
+        current_database_file(),
+        current_workspace_root(),
+        current_archive_root(),
         job_id=job_id,
     )
 
     day_groups = list_job_day_groups(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
     events = list_job_events(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
     planning_overview = (
         list_job_planning_overview(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
-            workspace_path=WORKSPACE_PATH,
+            workspace_path=current_workspace_root(),
         )
     )
 
     archive_reviews = (
         list_archive_change_reviews(
-            DATABASE_FILE,
+            current_database_file(),
             job_id,
         )
     )
@@ -6600,10 +6600,10 @@ def api_workspace_summary(
         "day_groups": day_groups,
         "event_count": len(events),
         "events": events,
-        "time_segments": list_job_time_segments(DATABASE_FILE, job_id),
+        "time_segments": list_job_time_segments(current_database_file(), job_id),
         "planning_overview": planning_overview,
         "released_archive_groups": list_global_released_archive_groups(
-            DATABASE_FILE
+            current_database_file()
         ),
         "archive_change_review_count": (
             len(archive_reviews)
@@ -6671,7 +6671,7 @@ def api_job_files(
     review_only: bool = False,
 ) -> dict[str, Any]:
     job = get_job(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -6682,7 +6682,7 @@ def api_job_files(
         )
 
     files = list_job_files(
-        DATABASE_FILE,
+        current_database_file(),
         job_id,
     )
 
@@ -6711,7 +6711,7 @@ def api_file_metadata(
     file_id: int,
 ) -> dict[str, Any]:
     candidates = list_file_metadata_candidates(
-        DATABASE_FILE,
+        current_database_file(),
         file_id,
     )
 
@@ -6744,7 +6744,7 @@ def api_run_metadata_test() -> JSONResponse:
     )
 
     source = (
-        WORKSPACE_PATH
+        current_workspace_root()
         / "_test"
         / "METADATA_FIXTURES_001"
     )
@@ -6760,7 +6760,7 @@ def api_run_metadata_test() -> JSONResponse:
 
     try:
         job = create_job(
-            DATABASE_FILE,
+            current_database_file(),
             job_id=job_id,
             kind="simulation",
             trigger_type="manual",
@@ -6801,20 +6801,20 @@ def api_run_simulated_job() -> JSONResponse:
     )
 
     template = (
-        WORKSPACE_PATH
+        current_workspace_root()
         / "_test"
         / "SD_SIM_001"
         / "simulierte-sd"
     )
 
     working_path = (
-        WORKSPACE_PATH
+        current_workspace_root()
         / WORK_DIRECTORY_NAME
     )
 
     try:
         job = create_job(
-            DATABASE_FILE,
+            current_database_file(),
             job_id=job_id,
             kind="simulation",
             trigger_type="manual",
@@ -8782,7 +8782,7 @@ def healthz() -> JSONResponse:
 def api_list_event_reassignments(job_id: str, event_id: str) -> JSONResponse:
     try:
         from app.event_reassignment import list_event_reassignments, EventReassignmentError
-        result = list_event_reassignments(DATABASE_FILE, job_id, event_id)
+        result = list_event_reassignments(current_database_file(), job_id, event_id)
         return JSONResponse(content=result)
     except EventReassignmentError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -8795,7 +8795,7 @@ def api_assign_event_reassignments(job_id: str, event_id: str, body: dict) -> JS
     try:
         from app.event_reassignment import assign_event_reassignments, EventReassignmentError
         result = assign_event_reassignments(
-            DATABASE_FILE, job_id, event_id, body.get("family_ids") or [],
+            current_database_file(), job_id, event_id, body.get("family_ids") or [],
             target_mode=str(body.get("target_mode") or ""),
             target_event_id=body.get("target_event_id"),
             new_event_name=body.get("new_event_name"),
@@ -8823,7 +8823,7 @@ def api_list_change_requests(
     """Aenderungsauftraege auflisten."""
     try:
         requests = list_event_change_requests(
-            DATABASE_FILE, job_id,
+            current_database_file(), job_id,
             event_id=event_id, status=status,
         )
         return JSONResponse(content={"requests": requests})
@@ -8834,7 +8834,7 @@ def api_list_change_requests(
 @app.get("/api/change-requests/{cr_id}")
 def api_get_change_request(cr_id: str) -> JSONResponse:
     """Aenderungsauftrag lesen."""
-    cr = get_event_change_request(DATABASE_FILE, cr_id)
+    cr = get_event_change_request(current_database_file(), cr_id)
     if cr is None:
         raise HTTPException(status_code=404, detail="ChangeRequest nicht gefunden.")
     return JSONResponse(content=cr)
@@ -8848,9 +8848,9 @@ def api_get_change_request_assistant(
     """Kompakter Archivassistent; refresh scannt den realen Bestand read-only."""
     try:
         return JSONResponse(content=build_archive_change_assistant(
-            DATABASE_FILE,
-            ARCHIVE_ROOT,
-            WORKSPACE_PATH,
+            current_database_file(),
+            current_archive_root(),
+            current_workspace_root(),
             cr_id,
             scan_live=bool(refresh),
         ))
@@ -8861,7 +8861,7 @@ def api_get_change_request_assistant(
 @app.get("/api/change-requests/{cr_id}/files")
 def api_get_change_request_files(cr_id: str) -> JSONResponse:
     """Datei-Bestaetigungen eines Aenderungsauftrags."""
-    files = get_event_change_files(DATABASE_FILE, cr_id)
+    files = get_event_change_files(current_database_file(), cr_id)
     return JSONResponse(content=files)
 
 
@@ -8869,13 +8869,13 @@ def api_get_change_request_files(cr_id: str) -> JSONResponse:
 def api_get_change_request_preview(cr_id: str) -> JSONResponse:
     """Vorschau der Aenderung (alte/neue Pfade) fuer einen ChangeRequest."""
     try:
-        cr = get_event_change_request(DATABASE_FILE, cr_id)
+        cr = get_event_change_request(current_database_file(), cr_id)
         if cr is None:
             raise HTTPException(status_code=404, detail="ChangeRequest nicht gefunden.")
 
         # Hole Event-Details via get_event_edit_context
         try:
-            ctx = get_event_edit_context(DATABASE_FILE, cr["job_id"], cr["event_id"])
+            ctx = get_event_edit_context(current_database_file(), cr["job_id"], cr["event_id"])
             event = ctx.get("event")
         except Exception:
             event = {"id": cr["event_id"], "name": "Unbekannt"}
@@ -8903,7 +8903,7 @@ def api_get_change_request_preview(cr_id: str) -> JSONResponse:
         except Exception:
             structure_lines = ["Berechnung fehlgeschlagen"]
 
-        file_reviews = get_event_change_files(DATABASE_FILE, cr_id)
+        file_reviews = get_event_change_files(current_database_file(), cr_id)
 
         # Vergleiche old/new Pfade mit den file_reviews
         diff_entries = []
@@ -8945,7 +8945,7 @@ def api_propose_event_change(
         if isinstance(preview, dict):
             preview = _event_payload_with_folder_layout(preview, event_id=event_id)
         from app.database import get_event_edit_context
-        ctx = get_event_edit_context(DATABASE_FILE, job_id, event_id, workspace_path=WORKSPACE_PATH)
+        ctx = get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
         if not preview and body.get("start_date") and body.get("end_date"):
             editable_families = [
                 {
@@ -8997,11 +8997,11 @@ def api_propose_event_change(
         # Layoutzustand und setzen dieses Kennzeichen bewusst nicht.
         preview["_folder_layout_explicit"] = True
         result = propose_event_change(
-            DATABASE_FILE, job_id, event_id, preview,
+            current_database_file(), job_id, event_id, preview,
             event_name=body.get("event_name") or preview.get("event_name"),
             notes=body.get("notes", ""),
-            archive_root=ARCHIVE_ROOT,
-            workspace_path=WORKSPACE_PATH,
+            archive_root=current_archive_root(),
+            workspace_path=current_workspace_root(),
         )
         return JSONResponse(content=result, status_code=201)
     except EventChangeRequestError as exc:
@@ -9013,7 +9013,7 @@ def api_propose_event_change(
 @app.get("/api/change-requests/{cr_id}/reassignments")
 def api_change_request_reassignments(cr_id: str):
     try:
-        return list_archive_reassignments(DATABASE_FILE, cr_id)
+        return list_archive_reassignments(current_database_file(), cr_id)
     except ArchiveReassignmentError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -9035,7 +9035,7 @@ def api_confirm_change(cr_id: str) -> JSONResponse:
     """Aenderungsauftrag bestaetigen."""
     try:
         result = confirm_event_change(
-            DATABASE_FILE, cr_id, ARCHIVE_ROOT, WORKSPACE_PATH
+            current_database_file(), cr_id, current_archive_root(), current_workspace_root()
         )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
@@ -9049,7 +9049,7 @@ def api_cancel_change(cr_id: str) -> JSONResponse:
     """Aenderungsauftrag abbrechen."""
     try:
         result = cancel_event_change(
-            DATABASE_FILE, cr_id, ARCHIVE_ROOT, WORKSPACE_PATH
+            current_database_file(), cr_id, current_archive_root(), current_workspace_root()
         )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
@@ -9063,7 +9063,7 @@ def api_get_change_reversal(cr_id: str, refresh: bool = False) -> JSONResponse:
     try:
         from app.archive_reversal import build_archive_reversal_assistant
         return JSONResponse(content=build_archive_reversal_assistant(
-            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id, scan_live=bool(refresh)
+            current_database_file(), current_archive_root(), current_workspace_root(), cr_id, scan_live=bool(refresh)
         ))
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -9074,7 +9074,7 @@ def api_prepare_change_reversal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_reversal import prepare_archive_reversal
         return JSONResponse(content=prepare_archive_reversal(
-            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+            current_database_file(), current_archive_root(), current_workspace_root(), cr_id
         ))
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -9085,7 +9085,7 @@ def api_verify_change_reversal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_reversal import verify_archive_reversal
         return JSONResponse(content=verify_archive_reversal(
-            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+            current_database_file(), current_archive_root(), current_workspace_root(), cr_id
         ))
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -9096,7 +9096,7 @@ def api_finish_change_reversal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_reversal import finish_archive_reversal
         return JSONResponse(content=finish_archive_reversal(
-            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+            current_database_file(), current_archive_root(), current_workspace_root(), cr_id
         ))
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -9108,7 +9108,7 @@ def api_verify_archive_release_copy(cr_id: str) -> JSONResponse:
     try:
         from app.archive_release_stock import verify_archive_release_copies
         result = verify_archive_release_copies(
-            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+            current_database_file(), current_archive_root(), current_workspace_root(), cr_id
         )
         return JSONResponse(content=result)
     except Exception as exc:
@@ -9121,7 +9121,7 @@ def api_verify_archive_release_removal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_release_stock import verify_archive_release_removal
         result = verify_archive_release_removal(
-            DATABASE_FILE, ARCHIVE_ROOT, WORKSPACE_PATH, cr_id
+            current_database_file(), current_archive_root(), current_workspace_root(), cr_id
         )
         return JSONResponse(content=result)
     except Exception as exc:
@@ -9133,7 +9133,7 @@ def api_verify_change(cr_id: str) -> JSONResponse:
     """Manuelle Archivänderung rein lesend gegen die Kamerabibliothek prüfen."""
     try:
         result = verify_event_change(
-            DATABASE_FILE, cr_id, ARCHIVE_ROOT, WORKSPACE_PATH
+            current_database_file(), cr_id, current_archive_root(), current_workspace_root()
         )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
@@ -9147,7 +9147,7 @@ def api_archive_change(cr_id: str) -> JSONResponse:
     """Geprüften manuellen Änderungsauftrag abschließen; Archiv bleibt read-only."""
     try:
         result = finish_event_change(
-            DATABASE_FILE, cr_id, ARCHIVE_ROOT, WORKSPACE_PATH
+            current_database_file(), cr_id, current_archive_root(), current_workspace_root()
         )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
