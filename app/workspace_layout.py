@@ -132,14 +132,15 @@ def ensure_workspace_layout(workspace_path: Path) -> dict[str, Any]:
 
 def shared_work_root(workspace_path: Path) -> Path:
     root = resolve_workspace_root(workspace_path)
-    target = (root / WORK_DIRECTORY_NAME).resolve(strict=False)
+    entry = root / WORK_DIRECTORY_NAME
+    target = entry.resolve(strict=False)
 
     if not target.exists() or not target.is_dir():
         raise WorkspaceLayoutError(
             "Der dauerhafte Arbeitsbereich fehlt: " + str(target)
         )
 
-    if not _is_relative_to(target, root):
+    if not entry.is_symlink() and not _is_relative_to(target, root):
         raise WorkspaceLayoutError(
             "Der dauerhafte Arbeitsbereich verlässt das SSD-Dataset."
         )
@@ -191,14 +192,15 @@ def resolve_library_work_root(
 
 def backup_root(workspace_path: Path) -> Path:
     root = resolve_workspace_root(workspace_path)
-    target = (root / BACKUP_DIRECTORY_NAME).resolve(strict=False)
+    entry = root / BACKUP_DIRECTORY_NAME
+    target = entry.resolve(strict=False)
 
     if not target.exists() or not target.is_dir():
         raise WorkspaceLayoutError(
             "Der Ordner für SD-Kartensicherungen fehlt: " + str(target)
         )
 
-    if not _is_relative_to(target, root):
+    if not entry.is_symlink() and not _is_relative_to(target, root):
         raise WorkspaceLayoutError(
             "Der Sicherungsordner verlässt das SSD-Dataset."
         )
