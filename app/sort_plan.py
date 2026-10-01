@@ -1380,13 +1380,21 @@ def build_event_sort_plan(
             if allow_reapply and current_root_kind == "shared_workspace"
             else source_root
         )
+        destination_root_kind = (
+            "central_stock" if is_free_stock else "target_root"
+        )
+        destination_base = (
+            central_stock_root
+            if destination_root_kind == "central_stock"
+            else target_root
+        )
         source_absolute = (
             source_base.joinpath(*source_relative.parts).resolve(
                 strict=False
             )
         )
         destination_absolute = (
-            target_root.joinpath(*destination_relative.parts).resolve(
+            destination_base.joinpath(*destination_relative.parts).resolve(
                 strict=False
             )
         )
@@ -1401,7 +1409,7 @@ def build_event_sort_plan(
                 ),
             })
 
-        if not _is_relative_to(destination_absolute, target_root):
+        if not _is_relative_to(destination_absolute, destination_base):
             blockers.append({
                 "code": "target_outside_root",
                 "file_id": file_id,
@@ -1577,6 +1585,7 @@ def build_event_sort_plan(
             "source_relative_path": str(source_relative),
             "source_absolute_path": str(source_absolute),
             "destination_relative_path": str(destination_relative),
+            "destination_root_kind": destination_root_kind,
             "structural_leaf_relative_path": str(structural_leaf),
             "free_stock": is_free_stock,
             "destination_absolute_path": str(destination_absolute),
