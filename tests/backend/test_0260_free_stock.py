@@ -228,8 +228,9 @@ def test_reconcile_shift_renormalizes_cross_job_free_file(tmp_path):
     execute_workspace_reconcile_run(db, run["id"], workspace)
     assert not old_free.exists()
     assert not old_free.parent.exists()
-    assert (root / free_entry["destination_relative_path"]).read_bytes() == b"free"
-    assert (root / "2026/2026-07-23 · 11-31–14-59/free2.JPG").read_bytes() == b"free2"
+    central = workspace / "SD-Kartensicherungen"
+    assert (central / free_entry["destination_relative_path"]).read_bytes() == b"free"
+    assert (central / "2026/2026-07-23 · 11-31–14-59/free2.JPG").read_bytes() == b"free2"
     assert foreign.read_text() == "keep"
     with database_connection(db) as connection:
         row = connection.execute(
@@ -313,8 +314,9 @@ def test_deleting_one_of_two_events_merges_free_stock_across_jobs(tmp_path):
     )
     execute_workspace_reconcile_run(db, run["id"], workspace)
     assert not old_free.exists()
+    central = workspace / "SD-Kartensicherungen"
     for key in ("event", "free", "free2"):
-        assert (root / by_id[file_ids[key]]["destination_relative_path"]).read_bytes() == key.encode()
+        assert (central / by_id[file_ids[key]]["destination_relative_path"]).read_bytes() == key.encode()
     assert (root / "2026/07-23 - Second/Alle/other.JPG").read_bytes() == b"other"
     with database_connection(db) as connection:
         assert connection.execute(
