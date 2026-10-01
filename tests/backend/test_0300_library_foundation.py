@@ -11,6 +11,11 @@ from app.library_context import (
     list_active_library_contexts,
     resolve_library_context,
 )
+from app.workspace_layout import (
+    WorkspaceLayoutError,
+    ensure_workspace_layout,
+    resolve_library_work_root,
+)
 from app.library_registry import (
     LibraryRegistryError,
     MAIN_LIBRARY_ID,
@@ -477,3 +482,70 @@ def test_0300_source_helper_requires_exact_mount_target(monkeypatch):
 def test_0300_source_helper_reports_current_deployment_version():
     assert source_helper.app.version == "0.30.0"
     assert source_helper.healthz()["version"] == "0.30.0"
+
+
+def test_0300_main_adoption_preserves_user_metadata(tmp_path):
+    state = _foundation(tmp_path)
+
+    register_library(
+        state["registry_file"],
+        library_id=MAIN_LIBRARY_ID,
+        display_name="Private Fotos",
+        database_path=state["database_file"],
+        workspace_root=state["workspace"],
+        work_root=state["work_root"],
+        archive_root=state["archive"],
+        is_main=True,
+        is_active=True,
+        settings={
+            "custom_setting": "bleibt-erhalten",
+            "adopted_existing_database": True,
+        },
+    )
+
+    adopted_again = adopt_main_library(
+        state["registry_file"],
+        database_path=state["database_file"],
+        workspace_root=state["workspace"],
+        work_root=state["work_root"],
+        archive_root=state["archive"],
+    )
+
+    assert adopted_again["display_name"] == "Private Fotos"
+    assert adopted_again["settings"]["custom_setting"] == "bleibt-erhalten"
+    assert adopted_again["settings"]["adopted_existing_database"] is True
+
+
+def test_0300_library_work_root_isolated_below_shared_work_area(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
+
+    business_root = workspace / "Arbeitsbereich" / "Business"
+    resolved = resolve_library_work_root(
+        workspace,
+        business_root,
+    )
+    assert resolved == business_root.resolve()
+    assert resolved.is_dir()
+
+    unsafe = workspace / "SD-Kartensicherungen" / "Business"
+    with pytest.raises(
+        WorkspaceLayoutError,
+        match="innerhalb",
+    ):
+        resolve_library_work_root(
+            workspace,
+            unsafe,
+        )
+
+
+def test_0300_worker_passes_context_work_root_to_both_pipelines():
+    repo_root = Path(__file__).resolve().parents[2]
+    main_source = (repo_root / "app" / "main.py").read_text()
+    folder_source = (repo_root / "app" / "folder_import.py").read_text()
+    pipeline_source = (repo_root / "app" / "pipeline.py").read_text()
+
+    assert "work_root=work_root" in main_source
+    assert "resolve_library_work_root(" in folder_source
+    assert "resolve_library_work_root(" in pipeline_source
