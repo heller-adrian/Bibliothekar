@@ -222,6 +222,12 @@ def register_library(
     work_value = _absolute(work_root, "work_root")
     archive_value = _absolute(archive_root, "archive_root")
 
+    registry_value = _absolute(registry_path, "registry_path")
+    if Path(database_value) == Path(registry_value):
+        raise LibraryRegistryError(
+            "Bibliotheks-Datenbank und globale Registry müssen getrennte Dateien sein."
+        )
+
     try:
         Path(work_value).relative_to(Path(workspace_value))
     except ValueError as error:
@@ -467,6 +473,20 @@ def claim_source_family(
     connection = _connect(registry_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
+        library = connection.execute(
+            """
+            SELECT library_id
+            FROM libraries
+            WHERE library_id = ?
+              AND is_active = 1
+            """,
+            (str(library_id),),
+        ).fetchone()
+        if library is None:
+            raise LibraryRegistryError(
+                "Dateifamilien können nur einer aktiven Bibliothek zugeordnet werden."
+            )
+
         existing = connection.execute(
             "SELECT * FROM family_claims WHERE source_family_key = ?",
             (str(source_family_key),),
