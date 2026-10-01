@@ -48,6 +48,19 @@ def test_0279_cross_backup_accept_api_returns_after_success(tmp_path: Path, monk
         )
 
     monkeypatch.setattr(main, "DATABASE_FILE", db)
+    # 0.31.0 adds a separate global claim layer. This historical regression
+    # remains scoped to the frozen cross-backup event behavior; dedicated
+    # 0.31 tests exercise the registry/claim integration.
+    monkeypatch.setattr(
+        main,
+        "_reserve_global_family_ids",
+        lambda event_id, family_ids: {"newly_reserved": []},
+    )
+    monkeypatch.setattr(
+        main,
+        "_release_new_global_reservations",
+        lambda reservation: None,
+    )
     result = main.api_accept_event_suggestion(
         "incoming",
         {"family_ids": [family_id], "target_event_id": "anchor_event"},
