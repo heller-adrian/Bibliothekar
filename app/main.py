@@ -166,6 +166,7 @@ from app.library_runtime import (
 from app.global_library_inventory import (
     admitted_family_keys,
     backfill_library_inventory,
+    blocked_family_ids,
     claim_event_families,
     register_analysis_inventory,
     release_event_reservations,
@@ -1285,10 +1286,29 @@ def _available_families_for_event_payload(
         for value in (payload.get("selected_family_ids") or [])
         if int(value) > 0
     })
+    blocked = blocked_family_ids(
+        REGISTRY_DATABASE_FILE,
+        database_path=current_database_file(),
+        library_id=current_library_context().library_id,
+        job_id=job_id,
+    )
+
     if not requested:
-        return list_job_available_families(current_database_file(), job_id)
+        return list_job_available_families(
+            current_database_file(),
+            job_id,
+            excluded_family_ids=blocked,
+        )
 
     placeholders = ",".join("?" for _ in requested)
+    blocked_sorted = sorted(blocked)
+    blocked_sql = ""
+    blocked_params: list[int] = []
+    if blocked_sorted:
+        blocked_placeholders = ",".join("?" for _ in blocked_sorted)
+        blocked_sql = f" AND ff.id NOT IN ({blocked_placeholders})"
+        blocked_params = blocked_sorted
+
     with database_connection(current_database_file()) as connection:
         rows = connection.execute(
             f"""SELECT ff.id AS family_id,ff.job_id,ff.family_key,ff.original_stem,
@@ -1301,6 +1321,7 @@ def _available_families_for_event_payload(
                 LEFT JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
                 WHERE ff.id IN ({placeholders})
                   AND ff.selected_capture_time IS NOT NULL
+                  {blocked_sql}
                   AND NOT EXISTS (
                     SELECT 1 FROM event_assignments ea
                     JOIN events e ON e.id=ea.event_id
@@ -1309,12 +1330,15 @@ def _available_families_for_event_payload(
                   )
                 GROUP BY ff.id
                 ORDER BY ff.selected_capture_time,ff.id""",
-            tuple(requested),
+            (*requested, *blocked_params),
         ).fetchall()
+
     if len(rows) != len(requested):
         raise ValueError(
-            "Die Auswahl ist nicht mehr aktuell. Mindestens eine Dateifamilie ist nicht mehr frei."
+            "Die Auswahl ist nicht mehr aktuell. Mindestens eine Dateifamilie "
+            "ist nicht mehr frei oder gehört inzwischen zu einer anderen Bibliothek."
         )
+
     return [
         {
             **dict(row),
@@ -1323,8 +1347,6 @@ def _available_families_for_event_payload(
         }
         for row in rows
     ]
-
-
 
 @app.get("/api/settings/event-folder-layout", tags=["Einstellungen"])
 def api_get_event_folder_layout() -> dict[str, Any]:
@@ -4815,9 +4837,16 @@ def api_job_day_groups(
             detail="Auftrag wurde nicht gefunden.",
         )
 
+    blocked = blocked_family_ids(
+        REGISTRY_DATABASE_FILE,
+        database_path=current_database_file(),
+        library_id=current_library_context().library_id,
+        job_id=job_id,
+    )
     groups = list_job_day_groups(
         current_database_file(),
         job_id,
+        excluded_family_ids=blocked,
     )
 
     dated_groups = [
@@ -4836,11 +4865,9 @@ def api_job_day_groups(
         "job_id": job_id,
         "count": len(groups),
         "dated_count": len(dated_groups),
-        "has_without_date":
-            bool(undated_groups),
+        "has_without_date": bool(undated_groups),
         "groups": groups,
     }
-
 
 @app.get(
     "/api/jobs/{job_id}/events",
@@ -6670,15 +6697,18 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
 
 @app.get("/api/workspace/summary", tags=["Arbeitsbereich"])
 def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
-    """Canonical 0.28 workspace projection.
-
-    The backup selection is a view filter only. Event identity, occupancy and
-    membership remain library-wide and are never rewritten by this endpoint.
-    """
-    selected = [part.strip() for part in str(jobs or "").split(",") if part.strip()]
+    """Canonical workspace projection for the selected library."""
+    selected = [
+        part.strip()
+        for part in str(jobs or "").split(",")
+        if part.strip()
+    ]
     for job_id in selected:
         if get_job(current_database_file(), job_id) is None:
-            raise HTTPException(status_code=404, detail="Mindestens eine Sicherung wurde nicht gefunden.")
+            raise HTTPException(
+                status_code=404,
+                detail="Mindestens eine Sicherung wurde nicht gefunden.",
+            )
 
     refresh_live_event_inventories(
         current_database_file(),
@@ -6686,17 +6716,31 @@ def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
         current_archive_root(),
     )
     detect_all_event_structure_changes(current_database_file())
+
+    excluded_by_job = {
+        job_id: blocked_family_ids(
+            REGISTRY_DATABASE_FILE,
+            database_path=current_database_file(),
+            library_id=current_library_context().library_id,
+            job_id=job_id,
+        )
+        for job_id in selected
+    }
     payload = build_global_workspace_summary(
         current_database_file(),
         selected,
         workspace_path=current_workspace_root(),
+        excluded_family_ids_by_job=excluded_by_job,
     )
 
     suggestions: list[dict[str, Any]] = []
     for job_id in selected:
         job = get_job(current_database_file(), job_id) or {}
         label = str(job.get("source_volume_label") or job_id)
-        for suggestion in list_event_suggestions(current_database_file(), job_id):
+        for suggestion in list_event_suggestions(
+            current_database_file(),
+            job_id,
+        ):
             suggestions.append({
                 **suggestion,
                 "source_job_id": job_id,
@@ -6704,7 +6748,6 @@ def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
             })
     payload["event_suggestions"] = suggestions
     return payload
-
 
 @app.get(
     "/api/jobs/{job_id}/workspace-summary",
@@ -6731,9 +6774,16 @@ def api_workspace_summary(
         job_id=job_id,
     )
 
+    blocked = blocked_family_ids(
+        REGISTRY_DATABASE_FILE,
+        database_path=current_database_file(),
+        library_id=current_library_context().library_id,
+        job_id=job_id,
+    )
     day_groups = list_job_day_groups(
         current_database_file(),
         job_id,
+        excluded_family_ids=blocked,
     )
 
     events = list_job_events(
@@ -6741,19 +6791,16 @@ def api_workspace_summary(
         job_id,
     )
 
-    planning_overview = (
-        list_job_planning_overview(
-            current_database_file(),
-            job_id,
-            workspace_path=current_workspace_root(),
-        )
+    planning_overview = list_job_planning_overview(
+        current_database_file(),
+        job_id,
+        workspace_path=current_workspace_root(),
+        excluded_family_ids=blocked,
     )
 
-    archive_reviews = (
-        list_archive_change_reviews(
-            current_database_file(),
-            job_id,
-        )
+    archive_reviews = list_archive_change_reviews(
+        current_database_file(),
+        job_id,
     )
 
     dated_groups = [
@@ -6761,7 +6808,6 @@ def api_workspace_summary(
         for group in day_groups
         if group.get("has_date")
     ]
-
     without_date = next(
         (
             group
@@ -6777,62 +6823,36 @@ def api_workspace_summary(
         "day_groups": day_groups,
         "event_count": len(events),
         "events": events,
-        "time_segments": list_job_time_segments(current_database_file(), job_id),
+        "time_segments": list_job_time_segments(
+            current_database_file(),
+            job_id,
+        ),
         "planning_overview": planning_overview,
         "released_archive_groups": list_global_released_archive_groups(
             current_database_file()
         ),
-        "archive_change_review_count": (
-            len(archive_reviews)
-        ),
-        "archive_change_reviews": (
-            archive_reviews
-        ),
+        "archive_change_review_count": len(archive_reviews),
+        "archive_change_reviews": archive_reviews,
         "statistics": {
             "day_count": len(dated_groups),
             "file_count": sum(
-                int(
-                    group.get(
-                        "file_count",
-                        0,
-                    )
-                )
+                int(group.get("file_count", 0))
                 for group in day_groups
             ),
             "family_count": sum(
-                int(
-                    group.get(
-                        "family_count",
-                        0,
-                    )
-                )
+                int(group.get("family_count", 0))
                 for group in day_groups
             ),
             "total_size_bytes": sum(
-                int(
-                    group.get(
-                        "total_size_bytes",
-                        0,
-                    )
-                )
+                int(group.get("total_size_bytes", 0))
                 for group in day_groups
             ),
             "review_required_count": sum(
-                int(
-                    group.get(
-                        "review_required_count",
-                        0,
-                    )
-                )
+                int(group.get("review_required_count", 0))
                 for group in day_groups
             ),
             "without_date_file_count": (
-                int(
-                    without_date.get(
-                        "file_count",
-                        0,
-                    )
-                )
+                int(without_date.get("file_count", 0))
                 if without_date
                 else 0
             ),
