@@ -2639,7 +2639,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         if (group.group_type === "released_archive_separator") {
           const separator=document.createElement("div");
           separator.style.cssText="margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--border)";
-          separator.innerHTML='<div style="display:flex;align-items:center;gap:7px;font-weight:700">Freigewordene Archivaufnahmen <button class="bk-help" type="button" aria-label="Hinweis zu freigewordenen Archivaufnahmen" data-help="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand. Auswahl verwendet automatisch die jeweilige Ursprungssicherung.">?</button></div>';
+          separator.innerHTML='<div style="display:flex;align-items:center;gap:7px;font-weight:700">Freigewordene Archivaufnahmen <button class="bk-help" type="button" aria-label="Hinweis zu freigewordenen Archivaufnahmen" data-help="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand.">?</button></div>';
           dayList.appendChild(separator);
           continue;
         }
@@ -2860,7 +2860,6 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-meta";
 
         metadata.innerHTML = `
-          ${group.released_archive ? `<span>Herkunft: ${escapeHtml(group.source_label || group.job_id || "")}</span>` : ""}
           <span>
             ${Number(
               group.file_count || 0

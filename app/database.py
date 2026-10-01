@@ -4740,11 +4740,9 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
         # keinen separaten Neu-Zuordnungsauftrag mehr, sollen aber als offene
         # Aufgabe sichtbar bleiben, bis sie über „Aufnahmen“ neu verplant sind.
         for row in connection.execute(
-            """SELECT marker.job_id,
-                      COALESCE(j.source_volume_label,marker.job_id) AS label,
+            """SELECT MIN(marker.job_id) AS anchor_job_id,
                       COUNT(DISTINCT marker.family_id) AS n
                FROM released_free_families marker
-               JOIN jobs j ON j.id=marker.job_id
                JOIN file_families ff ON ff.id=marker.family_id
                WHERE ff.selected_capture_time IS NOT NULL
                  AND NOT EXISTS (
@@ -4759,18 +4757,16 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                      AND f.current_root_kind='shared_workspace'
                      AND f.current_relative_path LIKE 'Freigewordene Archivdateien/%'
                  )
-               GROUP BY marker.job_id,j.source_volume_label
-               HAVING COUNT(DISTINCT marker.family_id) > 0
-               ORDER BY MAX(marker.created_at) DESC"""
+               HAVING COUNT(DISTINCT marker.family_id) > 0"""
         ).fetchall():
             tasks.append({
                 'kind': 'released_archive_families',
-                'job_id': row['job_id'],
+                'job_id': row['anchor_job_id'],
                 'title': 'Freigewordene Archivaufnahmen',
-                'detail': f"{int(row['n'])} Familie" + ('' if int(row['n']) == 1 else 'n') + f" · {row['label']}",
+                'detail': f"{int(row['n'])} Familie" + ('' if int(row['n']) == 1 else 'n'),
                 'count': 1,
                 'family_count': int(row['n']),
-                'href': f"/workspace?job={row['job_id']}&task=free",
+                'href': f"/workspace?job={row['anchor_job_id']}&task=free",
             })
 
         # Freie Familien sind nur dann eine Aufgabe, wenn sie nicht bereits aus

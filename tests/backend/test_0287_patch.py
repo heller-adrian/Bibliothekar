@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app import main
-from app.database import database_connection, delete_planned_event, initialize_database
+from app.database import database_connection, delete_planned_event, initialize_database, list_global_tasks
 from app.global_workspace import build_global_workspace_summary
 from app.planning import list_global_released_archive_groups
 from app.workspace_layout import shared_work_root
@@ -140,3 +140,39 @@ def test_0287_day_controls_lock_month_and_year_and_archive_selection_stays_globa
     assert "data-child-start-month-year" in EVENTS_HTML
     assert "data-child-end-month-year" in EVENTS_HTML
     assert "<select data-segment-day" in EVENTS_HTML
+
+
+def test_0287_released_archive_task_is_global_across_backups(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        seed_job(connection, "a")
+        seed_job(connection, "b")
+        fa, _ = _seed_family_file(
+            connection, job_id="a", stem="A", capture="2026-07-20T10:00:00",
+            current_path="Freigewordene Archivdateien/2026/2026-07-20/A.JPG", content=b"a",
+        )
+        fb, _ = _seed_family_file(
+            connection, job_id="b", stem="B", capture="2026-07-20T11:00:00",
+            current_path="Freigewordene Archivdateien/2026/2026-07-20/B.JPG", content=b"b",
+        )
+        connection.executemany(
+            """INSERT INTO released_free_families(
+                   job_id,family_id,released_start_datetime,released_end_datetime,
+                   created_at,archive_origin
+               ) VALUES (?, ?, '2026-07-20T00:00:00', '2026-07-20T23:59:59', ?, 1)""",
+            [("a", fa, NOW), ("b", fb, NOW)],
+        )
+
+    tasks = [
+        task for task in list_global_tasks(db)
+        if task.get("kind") == "released_archive_families"
+    ]
+    assert len(tasks) == 1
+    assert tasks[0]["family_count"] == 2
+    assert tasks[0]["detail"] == "2 Familien"
+
+
+def test_0287_released_archive_card_hides_backup_origin():
+    assert "Herkunft:" not in WORKSPACE_HTML
+    assert "Auswahl verwendet automatisch die jeweilige Ursprungssicherung." not in WORKSPACE_HTML
