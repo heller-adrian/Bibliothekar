@@ -277,7 +277,7 @@ def register_library(
         if is_active:
             active_rows = connection.execute(
                 """
-                SELECT library_id, work_root
+                SELECT library_id, work_root, archive_root
                 FROM libraries
                 WHERE is_active = 1
                   AND library_id <> ?
@@ -285,6 +285,7 @@ def register_library(
                 (clean_id,),
             ).fetchall()
             requested_root = Path(work_value)
+            requested_archive = Path(archive_value)
             for active_row in active_rows:
                 active_root = Path(str(active_row["work_root"]))
                 if (
@@ -294,6 +295,17 @@ def register_library(
                 ):
                     raise LibraryRegistryError(
                         "Aktive Bibliotheks-Arbeitsbereiche dürfen sich nicht "
+                        "überschneiden oder ineinander liegen."
+                    )
+
+                active_archive = Path(str(active_row["archive_root"]))
+                if (
+                    requested_archive == active_archive
+                    or requested_archive in active_archive.parents
+                    or active_archive in requested_archive.parents
+                ):
+                    raise LibraryRegistryError(
+                        "Aktive Bibliotheks-Archive dürfen sich nicht "
                         "überschneiden oder ineinander liegen."
                     )
 
