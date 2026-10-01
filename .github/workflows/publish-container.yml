@@ -91,19 +91,19 @@ jobs:
 
           VERSION="${GITHUB_REF_NAME#patch/}"
           TAG="v${VERSION}"
-          RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null || true)"
-
-          if [ -z "$RELEASE_JSON" ]; then
-            echo "No existing release for ${TAG}; skipping prerelease synchronization."
-            exit 0
+          RELEASE_JSON=""
+          if RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null)"; then
+            RELEASE_EXISTS=true
+          else
+            RELEASE_EXISTS=false
+            RELEASE_JSON=""
           fi
 
-          if [ "$(printf '%s' "$RELEASE_JSON" | jq -r '.prerelease')" != "true" ]; then
-            echo "Release ${TAG} exists as a regular release; converting it to the active patch prerelease."
+          if [ "${RELEASE_EXISTS}" = "true" ]; then
+            printf '%s' "${RELEASE_JSON}" | jq -r '.body // ""' > /tmp/release-body.md
+          else
+            : > /tmp/release-body.md
           fi
-
-          RELEASE_ID="$(printf '%s' "$RELEASE_JSON" | jq -r '.id')"
-          printf '%s' "$RELEASE_JSON" | jq -r '.body // ""' > /tmp/release-body.md
 
           python - <<'PY'
           import os
@@ -114,6 +114,13 @@ jobs:
           body = path.read_text()
           digest = os.environ["IMAGE_DIGEST"]
           sha = os.environ["GITHUB_SHA"]
+          version = os.environ["VERSION"]
+
+          if not body.strip():
+              body = (
+                  f"Bibliothekar v{version} Prerelease.\n\n"
+                  "Teststand des aktiven Patch-Branches."
+              )
 
           body, digest_count = re.subn(
               r"(Digest:\s*\n)(?:`?sha256:[0-9a-f]+`?)",
@@ -139,6 +146,13 @@ jobs:
           git tag -f "${TAG}" "${GITHUB_SHA}"
           git push origin "refs/tags/${TAG}" --force
 
-          gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"             -f target_commitish="${GITHUB_SHA}"             -F prerelease=true             --raw-field make_latest=false             --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
+          if [ "${RELEASE_EXISTS}" = "true" ]; then
+            RELEASE_ID="$(printf '%s' "${RELEASE_JSON}" | jq -r '.id')"
+            gh api               --method PATCH               "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"               -f target_commitish="${GITHUB_SHA}"               -F prerelease=true               --raw-field make_latest=false               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
+            echo "Updated prerelease ${TAG}."
+          else
+            gh api               --method POST               "repos/${GITHUB_REPOSITORY}/releases"               -f tag_name="${TAG}"               -f target_commitish="${GITHUB_SHA}"               -f name="${TAG}"               -F draft=false               -F prerelease=true               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
+            echo "Created prerelease ${TAG}."
+          fi
 
           echo "Synchronized prerelease ${TAG} to ${GITHUB_SHA} with digest ${IMAGE_DIGEST}."
