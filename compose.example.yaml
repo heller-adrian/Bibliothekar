@@ -1,6 +1,6 @@
 services:
-  kamera-automatisierung:
-    image: ${KAMERA_IMAGE:-ghcr.io/OWNER/kamera-automatisierung:latest}
+  bibliothekar:
+    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:patch-0.29.0}
     restart: unless-stopped
     user: "568:568"
 
@@ -10,24 +10,25 @@ services:
       KAMERA_WORKSPACE: /workspace
       KAMERA_DATABASE_DIR: /database
       KAMERA_LOG_DIR: /logs
-      KAMERA_ARCHIVE_ROOT: /camera-library
-      KAMERA_IMPORT_ROOT: /import-sources
-      KAMERA_REMOVABLE_ROOT: /removable-sources
-      KAMERA_NAS_SOURCE_ROOT: /nas-sources
+      KAMERA_POOL_PROBE: /workspace
+      KAMERA_ARCHIVE_ROOT: /main-library
+      KAMERA_IMPORT_ROOT: /sources/import
+      KAMERA_REMOVABLE_ROOT: /sources/removable
+      KAMERA_NAS_SOURCE_ROOT: /sources/nas
       KAMERA_SOURCE_HELPER_URL: http://127.0.0.1:8090
 
     ports:
-      - "${KAMERA_PORT:-30044}:8080"
+      - "${BIBLIOTHEKAR_PORT:-30044}:8080"
 
     volumes:
-      - ${KAMERA_CONFIG_DIR}:/config
-      - ${KAMERA_DATABASE_DIR}:/database
-      - ${KAMERA_LOG_DIR}:/logs
-      - ${KAMERA_WORKSPACE_DIR}:/workspace
-      - ${KAMERA_LIBRARY_DIR}:/camera-library:ro
-      - ${KAMERA_SD_BACKUP_DIR}:/import-sources:ro
-      - ${KAMERA_REMOVABLE_DIR}:/removable-sources:ro
-      - ${KAMERA_NAS_ROOT}:/nas-sources:ro
+      - ${BIBLIOTHEKAR_CONFIG_DIR}:/config
+      - ${BIBLIOTHEKAR_DATABASE_DIR}:/database
+      - ${BIBLIOTHEKAR_LOG_DIR}:/logs
+      - ${BIBLIOTHEKAR_WORKSPACE_DIR}:/workspace
+      - ${BIBLIOTHEKAR_MAIN_LIBRARY_DIR}:/main-library:ro
+      - ${BIBLIOTHEKAR_IMPORT_SOURCE_DIR}:/sources/import:ro
+      - ${BIBLIOTHEKAR_NAS_SOURCE_DIR}:/sources/nas:ro
+      - ${BIBLIOTHEKAR_REMOVABLE_DIR}:/sources/removable:ro
 
     read_only: true
 
@@ -41,17 +42,17 @@ services:
       - no-new-privileges:true
 
   source-helper:
-    image: ${KAMERA_IMAGE:-ghcr.io/OWNER/kamera-automatisierung:latest}
+    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:patch-0.29.0}
     restart: unless-stopped
     user: "0:0"
     privileged: true
     pid: host
-    network_mode: service:kamera-automatisierung
+    network_mode: service:bibliothekar
 
     environment:
       TZ: ${TZ:-Europe/Berlin}
       KAMERA_REMOVABLE_MOUNT_ROOT: /media-sources
-      KAMERA_HOST_MOUNT_ROOT: ${KAMERA_REMOVABLE_DIR}
+      KAMERA_HOST_MOUNT_ROOT: ${BIBLIOTHEKAR_REMOVABLE_DIR}
 
     command:
       - uvicorn
@@ -64,7 +65,7 @@ services:
     volumes:
       - /dev:/dev
       - /run/udev:/run/udev:ro
-      - ${KAMERA_REMOVABLE_DIR}:/media-sources:rshared
+      - ${BIBLIOTHEKAR_REMOVABLE_DIR}:/media-sources:rshared
 
     read_only: true
 
