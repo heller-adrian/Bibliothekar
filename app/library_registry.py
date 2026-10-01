@@ -274,6 +274,29 @@ def register_library(
         ).fetchone()
         created_at = str(existing["created_at"]) if existing else now
 
+        if is_active:
+            active_rows = connection.execute(
+                """
+                SELECT library_id, work_root
+                FROM libraries
+                WHERE is_active = 1
+                  AND library_id <> ?
+                """,
+                (clean_id,),
+            ).fetchall()
+            requested_root = Path(work_value)
+            for active_row in active_rows:
+                active_root = Path(str(active_row["work_root"]))
+                if (
+                    requested_root == active_root
+                    or requested_root in active_root.parents
+                    or active_root in requested_root.parents
+                ):
+                    raise LibraryRegistryError(
+                        "Aktive Bibliotheks-Arbeitsbereiche dürfen sich nicht "
+                        "überschneiden oder ineinander liegen."
+                    )
+
         connection.execute(
             """
             INSERT INTO libraries(
