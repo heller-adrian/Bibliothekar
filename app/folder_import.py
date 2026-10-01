@@ -473,6 +473,7 @@ def run_folder_import_job(
     import_history_callback: ImportHistoryCallback | None = None,
     family_admission_callback: FamilyAdmissionCallback | None = None,
     work_root: Path | None = None,
+    central_stock: bool = False,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).astimezone()
 
@@ -500,11 +501,18 @@ def run_folder_import_job(
         )
 
     backups_root = workspace_backup_root(workspace)
-    work_root = resolve_library_work_root(
-        workspace,
-        work_root,
-    )
-    temporary_job_root = backups_root / job_id
+    if central_stock:
+        destination_root = backups_root
+        temporary_job_root = backups_root / ".incoming" / job_id
+    else:
+        destination_root = resolve_library_work_root(
+            workspace,
+            work_root,
+        )
+        temporary_job_root = backups_root / job_id
+    # Keep the historic local variable for the mature import pipeline below.
+    # In 0.31.1 it points at the central stock for real camera imports.
+    work_root = destination_root
     temporary_original = temporary_job_root / "Original"
     temporary_protocol = temporary_job_root / "Protokoll"
     permanent_protocol = log_dir / "backups" / job_id
@@ -530,7 +538,8 @@ def run_folder_import_job(
         "source_path": str(source),
         "lifecycle": {
             "temporary_backup": str(temporary_original),
-            "shared_workspace": str(work_root),
+            "central_stock": str(work_root) if central_stock else None,
+            "shared_workspace": str(work_root) if not central_stock else None,
             "protocol_archive": str(permanent_protocol),
         },
     }
@@ -758,7 +767,11 @@ def run_folder_import_job(
             "workspace_moving",
             0,
             len(plan),
-            "Medienfamilien werden ohne zweite Datenkopie in Tagesordner verschoben.",
+            (
+                "Medienfamilien werden in den zentralen Tagesbestand übernommen."
+                if central_stock
+                else "Medienfamilien werden ohne zweite Datenkopie in Tagesordner verschoben."
+            ),
         )
         move_import_into_workspace(
             temporary_original,
@@ -784,7 +797,11 @@ def run_folder_import_job(
             "workspace_verification",
             len(plan),
             len(plan),
-            "Arbeitsbereich wurde vollständig gegen das Manifest geprüft.",
+            (
+                "Zentraler Aufnahmebestand wurde vollständig gegen das Manifest geprüft."
+                if central_stock
+                else "Arbeitsbereich wurde vollständig gegen das Manifest geprüft."
+            ),
         )
 
         status.update({
@@ -805,6 +822,7 @@ def run_folder_import_job(
             "snapshot": snapshot_receipt,
             "organization": {
                 "working_root": str(work_root),
+                "storage_scope": "central_stock" if central_stock else "library_workspace",
                 "file_count": len(plan),
                 "excluded_file_count": len(excluded),
                 "verified": True,
@@ -846,6 +864,7 @@ def run_folder_import_job(
             "import_mode": "folder",
             "temporary_backup_removed": True,
             "workspace": str(work_root),
+            "storage_scope": "central_stock" if central_stock else "library_workspace",
         })
 
         progress(
@@ -853,7 +872,12 @@ def run_folder_import_job(
             "completed",
             len(plan),
             len(plan),
-            "Ordnerimport, Metadatenanalyse, Tagesgruppierung und Prüfung sind abgeschlossen.",
+            (
+                "Ordnerimport, Metadatenanalyse und Übernahme in den zentralen "
+                "Tagesbestand sind abgeschlossen."
+                if central_stock
+                else "Ordnerimport, Metadatenanalyse, Tagesgruppierung und Prüfung sind abgeschlossen."
+            ),
         )
         return status
     except Exception as error:
