@@ -2,7 +2,7 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.28.1-ui1**\n\nAktuelle TrueNAS-/Container-Ausgabe: **0.29.1**  
+Aktueller Entwicklungsstand: **0.28.1-ui1**\n\nAktuelle TrueNAS-/Container-Ausgabe: **0.30.0**  
 Stabiler fachlicher Kamerakern: **0.28.7**
 
 ## Ziel
@@ -29,11 +29,21 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.29.1
+## TrueNAS Custom App 0.30.0
 
-0.29.1 ist die formularbasierte Ein-Container-TrueNAS-Custom-App-Stufe auf Basis des stabilen 0.28.7-Kerns. Die Deployment-Version wird getrennt vom fachlichen Kern geführt, damit der eingefrorene 0.28.7-Regressionsvertrag unverändert bleibt.
+0.30.0 baut auf der formularbasierten Ein-Container-TrueNAS-Custom-App 0.29.1 auf und ergänzt das Bibliotheksfundament. Die Deployment-Version wird weiterhin getrennt vom stabilen fachlichen Kern 0.28.7 geführt.
 
 Die fachliche Ereignis-, Archiv-, Reassignment-, XMP-, Export- und Unterereignislogik bleibt in diesem Schritt unverändert.
+
+Neu in 0.30.0:
+
+- die bestehende `/database/kamera.sqlite3` wird ohne Kopie als **Main Library** adoptiert
+- eine kleine globale Registry liegt unter `/database/bibliothekar-global.sqlite3`
+- jede Bibliothek besitzt einen stabilen `LibraryContext`
+- der Hintergrund-Worker löst den Datenbankpfad über den Bibliothekskontext auf
+- gemeinsame Quellen und spätere bibliotheksübergreifende Reservierungen haben eine eigene globale Datenbasis
+- bestehende Arbeits- und Archivpfade bleiben unverändert
+- für das TrueNAS-Upgrade ist **kein zusätzlicher Storage-Mount** erforderlich
 
 Containerpfade:
 
@@ -51,7 +61,7 @@ Der tatsächliche Hostpfad auf TrueNAS ist frei wählbar. Workspace und Archiv d
 
 `compose.example.yaml` ist die Vorlage für die TrueNAS-Custom-App-Installation.
 
-Der aktuelle `source-helper` für direkt angeschlossene SD-Karten/USB-Datenträger bleibt in 0.29.0 als optionaler, privilegierter Begleitdienst erhalten. Er ist ausdrücklich noch nicht die endgültige Discover-/Katalog-Lösung.
+Seit 0.29.1 laufen Web-App und Quellen-Helper im selben Container. Der Geräte-Helper bleibt für direkt angeschlossene SD-/USB-Medien privilegiert; die eigentliche Web-App läuft intern als UID/GID 568. Die weitere Discover-Härtung ist für 0.32 vorgesehen.
 
 ## Projektstruktur
 
