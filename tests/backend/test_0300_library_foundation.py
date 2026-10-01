@@ -1,9 +1,13 @@
 from pathlib import Path
+from types import SimpleNamespace
+import json
 
 import pytest
 
+from app import main, source_helper
 from app.database import initialize_database
 from app.library_context import (
+    LibraryContext,
     list_active_library_contexts,
     resolve_library_context,
 )
@@ -276,3 +280,200 @@ def test_0300_worker_and_ui_are_library_foundation_aware():
     assert "Kern" in ui_source
     assert "ghcr.io/heller-adrian/bibliothekar:patch-0.30.0" in compose
     assert "KAMERA_REGISTRY_DATABASE: /database/bibliothekar-global.sqlite3" in compose
+
+
+def test_0300_registry_file_cannot_be_used_as_library_database(tmp_path):
+    state = _foundation(tmp_path)
+
+    with pytest.raises(
+        LibraryRegistryError,
+        match="globale Registry",
+    ):
+        register_library(
+            state["registry_file"],
+            library_id="broken",
+            display_name="Broken",
+            database_path=state["registry_file"],
+            workspace_root=state["workspace"],
+            work_root=state["work_root"],
+            archive_root=state["archive"],
+        )
+
+
+def test_0300_inactive_library_cannot_claim_unowned_family(tmp_path):
+    state = _foundation(tmp_path)
+    second_work = state["workspace"] / "Bibliotheken" / "business"
+    second_archive = tmp_path / "business-archive"
+    second_work.mkdir(parents=True)
+    second_archive.mkdir()
+    register_library(
+        state["registry_file"],
+        library_id="business",
+        display_name="Business",
+        database_path=tmp_path / "database" / "business.sqlite3",
+        workspace_root=state["workspace"],
+        work_root=second_work,
+        archive_root=second_archive,
+        is_active=False,
+    )
+    register_source_backup(
+        state["registry_file"],
+        backup_id="backup-inactive",
+        source_kind="sd_backup",
+        source_identity="sd-inactive",
+        backup_path="/workspace/SD-Kartensicherungen/SD-inactive",
+    )
+    register_source_family(
+        state["registry_file"],
+        source_family_key="backup-inactive:family-1",
+        backup_id="backup-inactive",
+        family_key="family-1",
+    )
+
+    with pytest.raises(
+        LibraryRegistryError,
+        match="aktiven Bibliothek",
+    ):
+        claim_source_family(
+            state["registry_file"],
+            source_family_key="backup-inactive:family-1",
+            library_id="business",
+            event_id="event-business",
+            claim_state="reserved",
+        )
+
+
+def test_0300_worker_rotates_after_last_served_library(tmp_path):
+    state = _foundation(tmp_path)
+    for library_id, display_name in (
+        ("business", "Business"),
+        ("private", "Private"),
+    ):
+        work_root = state["workspace"] / "Bibliotheken" / library_id
+        archive_root = tmp_path / f"{library_id}-archive"
+        work_root.mkdir(parents=True)
+        archive_root.mkdir()
+        register_library(
+            state["registry_file"],
+            library_id=library_id,
+            display_name=display_name,
+            database_path=tmp_path / "database" / f"{library_id}.sqlite3",
+            workspace_root=state["workspace"],
+            work_root=work_root,
+            archive_root=archive_root,
+            is_active=True,
+        )
+
+    contexts = list_active_library_contexts(state["registry_file"])
+    assert [context.library_id for context in contexts] == [
+        "main",
+        "business",
+        "private",
+    ]
+
+    rotated = main.ordered_worker_contexts(contexts, "main")
+    assert [context.library_id for context in rotated] == [
+        "business",
+        "private",
+        "main",
+    ]
+
+    rotated_again = main.ordered_worker_contexts(contexts, "business")
+    assert [context.library_id for context in rotated_again] == [
+        "private",
+        "main",
+        "business",
+    ]
+
+
+def test_0300_worker_thumbnail_uses_library_database_and_distinct_cache_key(
+    tmp_path,
+    monkeypatch,
+):
+    seen = []
+    context = LibraryContext(
+        library_id="business",
+        display_name="Business",
+        database_path=tmp_path / "business.sqlite3",
+        workspace_root=tmp_path / "workspace",
+        work_root=tmp_path / "workspace" / "Business",
+        archive_root=tmp_path / "archive",
+        is_main=False,
+        settings={},
+    )
+
+    def fake_list_job_files(database_path, job_id):
+        seen.append((database_path, job_id))
+        return []
+
+    monkeypatch.setattr(main, "list_job_files", fake_list_job_files)
+
+    assert main.ensure_job_thumbnail(
+        "job-same-id",
+        library_context=context,
+    ) is None
+    assert seen == [(context.database_path, "job-same-id")]
+    assert main._thumbnail_path(
+        "job-same-id",
+        library_id="main",
+    ) != main._thumbnail_path(
+        "job-same-id",
+        library_id="business",
+    )
+
+
+def test_0300_source_helper_requires_exact_mount_target(monkeypatch):
+    parent_only = SimpleNamespace(
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "filesystems": [
+                    {
+                        "target": "/sources/removable",
+                        "source": "/host/removable",
+                        "fstype": "none",
+                        "options": "rw",
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        source_helper,
+        "run",
+        lambda *args, **kwargs: parent_only,
+    )
+    assert source_helper._mount_info(
+        "/sources/removable/card-1"
+    ) is None
+
+    exact = SimpleNamespace(
+        returncode=0,
+        stdout=json.dumps(
+            {
+                "filesystems": [
+                    {
+                        "target": "/sources/removable/card-1",
+                        "source": "/dev/sdz1",
+                        "fstype": "vfat",
+                        "options": "ro,nosuid,nodev,noexec",
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        source_helper,
+        "run",
+        lambda *args, **kwargs: exact,
+    )
+    info = source_helper._mount_info(
+        "/sources/removable/card-1"
+    )
+    assert info is not None
+    assert info["source"] == "/dev/sdz1"
+
+
+def test_0300_source_helper_reports_current_deployment_version():
+    assert source_helper.app.version == "0.30.0"
+    assert source_helper.healthz()["version"] == "0.30.0"
