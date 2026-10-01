@@ -297,3 +297,181 @@ def migrate_main_free_stock_to_central(
         "kept_applied": kept_applied,
         "kept_staging": kept_staging,
     }
+
+
+
+def synchronize_central_stock_projections(
+    database_paths: list[Path],
+    workspace_path: Path,
+) -> dict[str, Any]:
+    """Refresh free-file paths in every library from the physical central stock.
+
+    Every library keeps local IDs and local applied-event paths. A path is
+    propagated only when the corresponding file is physically present in the
+    central stock. Locally applied/archived files and "Später zuordnen" staging
+    are never overwritten.
+    """
+
+    central = backup_root(workspace_path).resolve(strict=False)
+    unique_databases: list[Path] = []
+    seen_databases: set[str] = set()
+    for raw in database_paths:
+        path = Path(raw).resolve(strict=False)
+        key = str(path)
+        if key in seen_databases or not path.is_file():
+            continue
+        seen_databases.add(key)
+        unique_databases.append(path)
+
+    central_paths: dict[tuple[str, str], dict[str, Any]] = {}
+    conflicts: list[str] = []
+
+    for database_path in unique_databases:
+        with database_connection(database_path) as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    """SELECT job_id,original_relative_path,current_relative_path,
+                              size_bytes,sha256_current,sha256_original
+                       FROM files
+                       WHERE current_root_kind='shared_workspace'
+                         AND COALESCE(TRIM(current_relative_path),'') <> ''
+                       ORDER BY job_id,id"""
+                ).fetchall()
+            ]
+
+        for row in rows:
+            relative = Path(str(row["current_relative_path"]))
+            if relative.is_absolute() or ".." in relative.parts:
+                continue
+            normalized = relative.as_posix()
+            if (
+                normalized == "Später zuordnen"
+                or normalized.startswith("Später zuordnen/")
+            ):
+                continue
+            candidate = (central / relative).resolve(strict=False)
+            try:
+                candidate.relative_to(central)
+            except ValueError:
+                continue
+            if not candidate.is_file():
+                continue
+            try:
+                if int(candidate.stat().st_size) != int(row["size_bytes"]):
+                    continue
+            except OSError:
+                continue
+
+            identity = (
+                str(row["job_id"]),
+                str(row["original_relative_path"]),
+            )
+            existing = central_paths.get(identity)
+            if (
+                existing is not None
+                and str(existing["current_relative_path"]) != normalized
+            ):
+                conflicts.append(
+                    identity[0]
+                    + ":"
+                    + identity[1]
+                    + " → "
+                    + str(existing["current_relative_path"])
+                    + " / "
+                    + normalized
+                )
+                continue
+            central_paths[identity] = {
+                **row,
+                "current_relative_path": normalized,
+            }
+
+    if conflicts:
+        raise GlobalStockError(
+            "Mehrdeutige zentrale Dateipfade erkannt: "
+            + " | ".join(conflicts[:10])
+        )
+
+    updated_by_database: dict[str, int] = {}
+    total_updated = 0
+
+    for database_path in unique_databases:
+        updated = 0
+        with database_connection(database_path) as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT
+                        f.id,
+                        f.job_id,
+                        f.original_relative_path,
+                        f.current_relative_path,
+                        EXISTS (
+                            SELECT 1
+                            FROM event_assignments ea
+                            JOIN events assigned ON assigned.id=ea.event_id
+                            JOIN events root
+                              ON root.id=COALESCE(
+                                  assigned.parent_event_id,
+                                  assigned.id
+                              )
+                            WHERE root.status IN ('applied','archived')
+                              AND (
+                                  (ea.family_id IS NOT NULL
+                                   AND ea.family_id=f.family_id)
+                                  OR
+                                  (ea.file_id IS NOT NULL
+                                   AND ea.file_id=f.id)
+                              )
+                        ) AS locally_owned
+                    FROM files f
+                    ORDER BY f.id
+                    """
+                ).fetchall()
+            ]
+
+            for row in rows:
+                identity = (
+                    str(row["job_id"]),
+                    str(row["original_relative_path"]),
+                )
+                central_row = central_paths.get(identity)
+                if central_row is None or bool(row["locally_owned"]):
+                    continue
+
+                current = str(row.get("current_relative_path") or "")
+                if (
+                    current == "Später zuordnen"
+                    or current.startswith("Später zuordnen/")
+                ):
+                    continue
+
+                central_relative = str(
+                    central_row["current_relative_path"]
+                )
+                if current == central_relative:
+                    continue
+
+                connection.execute(
+                    """UPDATE files
+                       SET current_relative_path=?,
+                           current_root_kind='shared_workspace',
+                           updated_at=datetime('now')
+                       WHERE id=?""",
+                    (central_relative, int(row["id"])),
+                )
+                updated += 1
+
+            connection.commit()
+
+        updated_by_database[str(database_path)] = updated
+        total_updated += updated
+
+    return {
+        "database_count": len(unique_databases),
+        "central_file_count": len(central_paths),
+        "updated_file_count": total_updated,
+        "updated_by_database": updated_by_database,
+    }
