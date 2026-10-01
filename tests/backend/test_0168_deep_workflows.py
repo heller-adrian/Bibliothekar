@@ -139,7 +139,7 @@ def test_archived_delete_returns_files_to_ssd_and_finishes_without_app_writing_a
         ).fetchone()
         assert review["action"] == "delete"
         release_rel = str(review["workspace_release_path"])
-    target = workspace / "Arbeitsbereich" / release_rel
+    target = workspace / "SD-Kartensicherungen" / release_rel
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(source.read_bytes())
 
