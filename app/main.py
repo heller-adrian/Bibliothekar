@@ -427,10 +427,17 @@ def ensure_job_thumbnail(
         )
     )
 
-    roots = [
-        workspace_backup_root(context.workspace_root).resolve(strict=False),
-        context.work_root.resolve(strict=False),
-    ]
+    roots: list[Path] = []
+    try:
+        roots.append(
+            workspace_backup_root(context.workspace_root).resolve(strict=False)
+        )
+    except WorkspaceLayoutError:
+        # Isolated test/runtime contexts may expose only their library work root.
+        pass
+    work_root = context.work_root.resolve(strict=False)
+    if work_root not in roots:
+        roots.append(work_root)
     for row in candidates:
         relative = Path(str(row["current_relative_path"]))
         source = None
