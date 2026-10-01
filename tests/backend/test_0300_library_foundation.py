@@ -22,6 +22,7 @@ from app.library_registry import (
     adopt_main_library,
     claim_source_family,
     get_source_family_claim,
+    ensure_library_identity,
     initialize_library_registry,
     list_libraries,
     read_library_identity,
@@ -356,13 +357,16 @@ def test_0300_worker_rotates_after_last_served_library(tmp_path):
     ):
         work_root = state["workspace"] / "Bibliotheken" / library_id
         archive_root = tmp_path / f"{library_id}-archive"
+        database_path = tmp_path / "database" / f"{library_id}.sqlite3"
         work_root.mkdir(parents=True)
         archive_root.mkdir()
+        initialize_database(database_path)
+        ensure_library_identity(database_path, library_id)
         register_library(
             state["registry_file"],
             library_id=library_id,
             display_name=display_name,
-            database_path=tmp_path / "database" / f"{library_id}.sqlite3",
+            database_path=database_path,
             workspace_root=state["workspace"],
             work_root=work_root,
             archive_root=archive_root,
@@ -549,3 +553,45 @@ def test_0300_worker_passes_context_work_root_to_both_pipelines():
     assert "work_root=work_root" in main_source
     assert "resolve_library_work_root(" in folder_source
     assert "resolve_library_work_root(" in pipeline_source
+
+
+def test_0300_active_library_requires_initialized_matching_database(tmp_path):
+    state = _foundation(tmp_path)
+    work_root = state["workspace"] / "Bibliotheken" / "business"
+    archive_root = tmp_path / "business-archive"
+    work_root.mkdir(parents=True)
+    archive_root.mkdir()
+
+    missing_database = tmp_path / "database" / "missing.sqlite3"
+    with pytest.raises(
+        LibraryRegistryError,
+        match="vorhandene SQLite-Datenbank",
+    ):
+        register_library(
+            state["registry_file"],
+            library_id="business",
+            display_name="Business",
+            database_path=missing_database,
+            workspace_root=state["workspace"],
+            work_root=work_root,
+            archive_root=archive_root,
+            is_active=True,
+        )
+
+    wrong_database = tmp_path / "database" / "wrong.sqlite3"
+    initialize_database(wrong_database)
+    ensure_library_identity(wrong_database, "other-library")
+    with pytest.raises(
+        LibraryRegistryError,
+        match="stimmt nicht",
+    ):
+        register_library(
+            state["registry_file"],
+            library_id="business",
+            display_name="Business",
+            database_path=wrong_database,
+            workspace_root=state["workspace"],
+            work_root=work_root,
+            archive_root=archive_root,
+            is_active=True,
+        )
