@@ -604,7 +604,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
             # proof for removed empty subevents such as a deleted "Teil B".
             cleanup_obsolete_structure(
                 root,
-                [src for src,_,_,_ in moved],
+                [src for src,_,_,_,_ in moved],
                 [f['destination_absolute_path'] for f in [*plan['files'],*(plan.get('assets') or [])]],
                 set(plan['event_ids']),
                 managed_event_roots=plan.get('managed_event_roots') or [],
