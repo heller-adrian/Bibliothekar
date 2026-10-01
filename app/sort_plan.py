@@ -517,6 +517,7 @@ def _build_plan_token(
     event: dict[str, Any],
     source_root: Path,
     target_root: Path,
+    central_stock_root: Path,
     entries: list[dict[str, Any]],
     asset_entries: list[dict[str, Any]],
     directory_rows: list[dict[str, Any]],
@@ -1745,7 +1746,8 @@ def build_event_sort_plan(
                 destination_container / filename,
                 asset_kind=released_asset_kind,
             )
-            destination_absolute = target_root.joinpath(
+            destination_base = target_root
+            destination_absolute = destination_base.joinpath(
                 *destination_relative.parts
             ).resolve(strict=False)
 
@@ -2561,6 +2563,7 @@ def build_event_sort_plan(
         event,
         source_root,
         target_root,
+        central_stock_root,
         entries,
         asset_entries,
         directory_rows,
