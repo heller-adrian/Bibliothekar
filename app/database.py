@@ -486,7 +486,7 @@ def _job_workflow_states(connection: sqlite3.Connection) -> dict[str, dict[str, 
         job_id = str(job["id"])
         families = connection.execute(
             "SELECT id FROM file_families WHERE job_id=? ORDER BY id",
-            (job_id, *exclusion_params),
+            (job_id,),
         ).fetchall()
         family_ids = [int(row["id"]) for row in families]
         total = len(family_ids)
@@ -1978,7 +1978,7 @@ def list_job_day_groups(
 
             ORDER BY day_key
             """,
-            (job_id,),
+            (job_id, *exclusion_params),
         ).fetchall()
 
         undated_row = connection.execute(
