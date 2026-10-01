@@ -2,7 +2,7 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktuelle TrueNAS-/Container-Ausgabe: **0.29.0**  
+Aktueller Entwicklungsstand: **0.28.1-ui1**\n\nAktuelle TrueNAS-/Container-Ausgabe: **0.29.0**  
 Stabiler fachlicher Kamerakern: **0.28.7**
 
 ## Ziel
