@@ -428,7 +428,7 @@ def ensure_job_thumbnail(
     )
 
     roots = [
-        workspace_backup_root(WORKSPACE_PATH).resolve(strict=False),
+        workspace_backup_root(context.workspace_root).resolve(strict=False),
         context.work_root.resolve(strict=False),
     ]
     for row in candidates:
