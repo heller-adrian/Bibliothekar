@@ -101,7 +101,7 @@ def test_archived_removed_family_returns_to_free_ssd_stock(tmp_path):
     reviews=get_event_change_files(db,crid)
     released=next(r for r in reviews if r['family_id']==fids[1] and r['action']=='delete')
     source=archive/str(released['old_path'])
-    target=workspace/'Arbeitsbereich'/str(released['workspace_release_path'])
+    target=workspace/'SD-Kartensicherungen'/str(released['workspace_release_path'])
     target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(source.read_bytes())
     assert verify_archive_release_copies(db,archive,workspace,crid)['complete']
     source.unlink()
@@ -165,7 +165,7 @@ def test_archived_no_event_edit_keeps_true_segments_and_releases_removed_family(
     cr=propose_event_change(db,'j','no',preview,event_name='Ohne Ereignis'); crid=cr['change_request_id']
     confirm_event_change(db,crid,archive,workspace)
     released=next(r for r in get_event_change_files(db,crid) if r['family_id']==fids[1] and r['action']=='delete')
-    source=archive/str(released['old_path']); target=workspace/'Arbeitsbereich'/str(released['workspace_release_path'])
+    source=archive/str(released['old_path']); target=workspace/'SD-Kartensicherungen'/str(released['workspace_release_path'])
     target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(source.read_bytes())
     assert verify_archive_release_copies(db,archive,workspace,crid)['complete']
     source.unlink()
