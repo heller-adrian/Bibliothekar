@@ -2,7 +2,7 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.28.1-ui1**\n\nAktuelle TrueNAS-/Container-Ausgabe: **0.30.0**  
+Aktueller Entwicklungsstand: **0.28.1-ui1**\n\nAktuelle TrueNAS-/Container-Ausgabe: **0.30.1**  
 Stabiler fachlicher Kamerakern: **0.28.7**
 
 ## Ziel
@@ -29,11 +29,19 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.30.0
+## TrueNAS Custom App 0.30.1
 
-0.30.0 baut auf der formularbasierten Ein-Container-TrueNAS-Custom-App 0.29.1 auf und ergänzt das Bibliotheksfundament. Die Deployment-Version wird weiterhin getrennt vom stabilen fachlichen Kern 0.28.7 geführt.
+0.30.1 ist der UI-Regressionsfix auf Basis des Bibliotheksfundaments 0.30.0. 0.30.0 baut auf der formularbasierten Ein-Container-TrueNAS-Custom-App 0.29.1 auf und ergänzt das Bibliotheksfundament. Die Deployment-Version wird weiterhin getrennt vom stabilen fachlichen Kern 0.28.7 geführt.
 
 Die fachliche Ereignis-, Archiv-, Reassignment-, XMP-, Export- und Unterereignislogik bleibt in diesem Schritt unverändert.
+
+Fix in 0.30.1:
+
+- gemeinsames Shell-JavaScript wieder syntaktisch gültig
+- gespeichertes Hell-/Dunkel-Theme wird wieder angewendet
+- Hamburger-Menü und Dialoge reagieren wieder
+- Aufgaben-Zähler lädt wieder aus `/api/tasks`
+- CSS/Designstand bleibt identisch zu 0.28.7
 
 Neu in 0.30.0:
 
