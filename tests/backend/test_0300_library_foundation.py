@@ -265,6 +265,7 @@ def test_0300_worker_and_ui_are_library_foundation_aware():
     repo_root = Path(__file__).resolve().parents[2]
     main_source = (repo_root / "app" / "main.py").read_text()
     ui_source = (repo_root / "app" / "ui_shell.py").read_text()
+    compose = (repo_root / "compose.example.yaml").read_text()
 
     assert 'DEPLOYMENT_VERSION = "0.30.0"' in main_source
     assert "list_active_library_contexts(" in main_source
@@ -273,3 +274,5 @@ def test_0300_worker_and_ui_are_library_foundation_aware():
     assert '"/api/libraries/current"' in main_source
     assert "deployment_version" in ui_source
     assert "Kern" in ui_source
+    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.30.0" in compose
+    assert "KAMERA_REGISTRY_DATABASE: /database/bibliothekar-global.sqlite3" in compose
