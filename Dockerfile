@@ -33,14 +33,17 @@ RUN mkdir -p \
         /database \
         /logs \
         /workspace \
-        /import-sources \
+        /main-library \
+        /sources/import \
+        /sources/nas \
+        /sources/removable \
     && chown -R 568:568 \
         /opt/kamera \
         /config \
         /database \
         /logs \
         /workspace \
-        /import-sources
+        /sources
 
 USER 568:568
 
