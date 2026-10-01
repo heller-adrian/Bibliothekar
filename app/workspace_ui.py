@@ -4185,7 +4185,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         postSaveAction?.scrollIntoView({behavior:"smooth",block:"center"});
       } else if (task === "free") {
         document.querySelector(".day-groups")?.scrollIntoView({behavior:"smooth",block:"start"});
-        setStatus("Offene Aufgabe: In dieser Sicherung gibt es noch nicht zugeordnete Familien.");
+        setStatus("Offene Aufgabe: Es gibt noch nicht zugeordnete Familien.");
       }
     }).catch(
       error => setStatus(

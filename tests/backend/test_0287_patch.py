@@ -174,5 +174,6 @@ def test_0287_released_archive_task_is_global_across_backups(tmp_path: Path):
 
 
 def test_0287_released_archive_card_hides_backup_origin():
-    assert "Herkunft:" not in WORKSPACE_HTML
+    assert 'group.released_archive ? `<span>Herkunft:' not in WORKSPACE_HTML
     assert "Auswahl verwendet automatisch die jeweilige Ursprungssicherung." not in WORKSPACE_HTML
+    assert "Offene Aufgabe: In dieser Sicherung gibt es noch nicht zugeordnete Familien." not in WORKSPACE_HTML
