@@ -281,6 +281,14 @@ def backfill_library_claims(
     database_path: Path,
     library_id: str,
 ) -> dict[str, int]:
+    """Reconcile registry claims with the library database's current truth.
+
+    This is intentionally stronger than a one-way backfill: stale claims owned
+    by this library are released when their family is no longer assigned to a
+    draft/planned/applied/archived event. That is essential after a successful
+    applied-event shrink/delete which returns files to the global central stock.
+    """
+
     with database_connection(database_path) as connection:
         rows = connection.execute(
             """
@@ -304,19 +312,26 @@ def backfill_library_claims(
             ORDER BY job_id, family_key, event_id
             """
         ).fetchall()
+        all_family_rows = connection.execute(
+            """SELECT job_id,family_key
+               FROM file_families
+               ORDER BY job_id,id"""
+        ).fetchall()
 
-    # Falls historische Sonderfälle dieselbe Familie mehrfach referenzieren,
-    # gewinnt der stärkere Zustand: owned vor reserved.
-    selected: dict[tuple[str, str], dict[str, Any]] = {}
+    desired: dict[str, dict[str, str]] = {}
     for raw in rows:
         row = dict(raw)
-        key = (str(row["job_id"]), str(row["family_key"]))
+        source_key = occurrence_key(
+            library_id,
+            str(row["job_id"]),
+            str(row["family_key"]),
+        )
         state = (
             "owned"
             if str(row["event_status"]) in {"applied", "archived"}
             else "reserved"
         )
-        previous = selected.get(key)
+        previous = desired.get(source_key)
         if (
             previous is None
             or (
@@ -324,21 +339,45 @@ def backfill_library_claims(
                 and str(previous["claim_state"]) != "owned"
             )
         ):
-            selected[key] = {
+            desired[source_key] = {
                 "event_id": str(row["event_id"]),
                 "claim_state": state,
             }
 
+    all_source_keys = [
+        occurrence_key(
+            library_id,
+            str(row["job_id"]),
+            str(row["family_key"]),
+        )
+        for row in all_family_rows
+    ]
+    existing = get_source_family_claims(
+        registry_path,
+        all_source_keys,
+    )
+
+    # Remove claims that still point at this library although its database no
+    # longer assigns the family anywhere. Claims owned by another library are
+    # never touched.
+    for source_key, claim in existing.items():
+        if str(claim.get("library_id") or "") != library_id:
+            continue
+        if source_key in desired:
+            continue
+        release_source_family_claim(
+            registry_path,
+            source_family_key=source_key,
+            library_id=library_id,
+            allowed_states={"reserved", "owned"},
+        )
+
     reserved = 0
     owned = 0
-    for (job_id, family_key), row in selected.items():
+    for source_key, row in desired.items():
         claim_source_family(
             registry_path,
-            source_family_key=occurrence_key(
-                library_id,
-                job_id,
-                family_key,
-            ),
+            source_family_key=source_key,
             library_id=library_id,
             event_id=str(row["event_id"]),
             claim_state=str(row["claim_state"]),
