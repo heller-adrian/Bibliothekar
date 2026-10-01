@@ -301,7 +301,13 @@ MAIN_LIBRARY_CONTEXT = build_main_library_context()
 
 
 def current_library_context() -> LibraryContext:
-    return get_current_library() or MAIN_LIBRARY_CONTEXT
+    current = get_current_library()
+    if current is not None:
+        return current
+    # Direkte interne/testseitige Aufrufe ohne HTTP-Request bleiben mit den
+    # aktuellen Main-Konstanten kompatibel. Im echten Request setzt die
+    # Middleware immer den Registry-basierten LibraryContext.
+    return build_main_library_context()
 
 
 def current_database_file() -> Path:
@@ -1591,7 +1597,7 @@ def get_health() -> dict[str, Any]:
             ),
         },
         "library_registry": {
-            "path": str(REGISTRY_current_database_file()),
+            "path": str(REGISTRY_DATABASE_FILE),
             "initialized": (
                 LIBRARY_REGISTRY_ERROR is None
                 and LIBRARY_REGISTRY_INITIALIZATION is not None
