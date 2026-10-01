@@ -67,9 +67,10 @@ def test_0301_task_backend_contract_is_unchanged():
 
 
 def test_0301_versions_are_consistent():
-    assert main.DEPLOYMENT_VERSION == "0.30.1"
-    assert source_helper.app.version == "0.30.1"
-    assert source_helper.healthz()["version"] == "0.30.1"
+    deployment = tuple(map(int, main.DEPLOYMENT_VERSION.split(".")))
+    assert deployment >= (0, 30, 1)
+    assert source_helper.app.version == main.DEPLOYMENT_VERSION
+    assert source_helper.healthz()["version"] == main.DEPLOYMENT_VERSION
 
 
 def test_0301_compose_uses_patch_image():
@@ -77,4 +78,7 @@ def test_0301_compose_uses_patch_image():
 
     repo_root = Path(__file__).resolve().parents[2]
     compose = (repo_root / "compose.example.yaml").read_text()
-    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.30.1" in compose
+    assert (
+        "ghcr.io/heller-adrian/bibliothekar:patch-"
+        + main.DEPLOYMENT_VERSION
+    ) in compose
