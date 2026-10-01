@@ -923,31 +923,44 @@ def _rollback_one(
 def _remove_empty_source_directories(
     plan: dict[str, Any],
 ) -> list[Path]:
-    source_root = Path(plan["source_root"]).resolve(strict=False)
-    target_root = Path(plan["target_root"]).resolve(strict=False)
+    roots = [
+        Path(plan["source_root"]).resolve(strict=False),
+        Path(plan["target_root"]).resolve(strict=False),
+        Path(str(plan.get("central_stock_root") or plan["target_root"])).resolve(strict=False),
+    ]
+    unique_roots: list[Path] = []
+    for root in roots:
+        if root not in unique_roots:
+            unique_roots.append(root)
+
     candidates: set[Path] = set()
 
     for entry in [*plan["files"], *(plan.get("assets") or [])]:
         if entry["status"] != "move":
             continue
 
-        entry_source_root = (
-            target_root
-            if str(
-                entry.get("current_root_kind")
-                or entry.get("source_root_kind")
-                or "job_root"
-            ) == "shared_workspace"
-            else source_root
+        source = Path(str(entry["source_absolute_path"])).resolve(strict=False)
+        entry_source_root = next(
+            (
+                root
+                for root in unique_roots
+                if _is_relative_to(source, root)
+            ),
+            None,
         )
-        current = Path(entry["source_absolute_path"]).parent
-        if entry_source_root == target_root:
-            for persistent_name in ("Freigewordene Archivdateien", "Später zuordnen"):
-                persistent_root = (target_root / persistent_name).resolve(strict=False)
-                try:
-                    current.relative_to(persistent_root)
-                except ValueError:
-                    continue
+        if entry_source_root is None:
+            continue
+
+        current = source.parent
+        persistent_roots = [
+            (Path(plan["target_root"]) / "Später zuordnen").resolve(strict=False),
+            (
+                Path(str(plan.get("central_stock_root") or plan["target_root"]))
+                / "Freigewordene Archivdateien"
+            ).resolve(strict=False),
+        ]
+        for persistent_root in persistent_roots:
+            if _is_relative_to(current, persistent_root):
                 entry_source_root = persistent_root
                 break
 
