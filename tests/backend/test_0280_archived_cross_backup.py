@@ -83,6 +83,19 @@ def test_0280_later_backup_extends_archived_event_via_change_request(
     incoming_path.write_bytes(incoming_b)
 
     monkeypatch.setattr(main, "DATABASE_FILE", db)
+    # 0.31.0 adds a separate global claim layer. This historical regression
+    # remains scoped to the frozen cross-backup event behavior; dedicated
+    # 0.31 tests exercise the registry/claim integration.
+    monkeypatch.setattr(
+        main,
+        "_reserve_global_family_ids",
+        lambda event_id, family_ids: {"newly_reserved": []},
+    )
+    monkeypatch.setattr(
+        main,
+        "_release_new_global_reservations",
+        lambda reservation: None,
+    )
     monkeypatch.setattr(main, "WORKSPACE_PATH", workspace)
     monkeypatch.setattr(main, "ARCHIVE_ROOT", archive)
 
