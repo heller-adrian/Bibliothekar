@@ -528,12 +528,14 @@ def _build_plan_token(
         "event_status": str(event.get("status") or ""),
         "source_root": str(source_root),
         "target_root": str(target_root),
+        "central_stock_root": str(central_stock_root),
         "files": [
             {
                 "file_id": int(entry["file_id"]),
                 "family_id": entry.get("family_id"),
                 "source": str(entry["source_relative_path"]),
                 "destination": str(entry["destination_relative_path"]),
+                "destination_root_kind": str(entry.get("destination_root_kind") or "target_root"),
                 "size": int(entry["expected_size_bytes"]),
                 "sha256": str(entry.get("stored_sha256") or ""),
                 "source_device": entry.get("source_device"),
@@ -555,6 +557,7 @@ def _build_plan_token(
                 "source_root_kind": str(entry.get("source_root_kind") or "shared_workspace"),
                 "released_archive_asset_id": entry.get("released_archive_asset_id"),
                 "destination": str(entry["destination_relative_path"]),
+                "destination_root_kind": str(entry.get("destination_root_kind") or "target_root"),
                 "size": int(entry["expected_size_bytes"]),
                 "sha256": str(entry.get("stored_sha256") or ""),
                 "source_device": entry.get("source_device"),
@@ -1723,7 +1726,7 @@ def build_event_sort_plan(
                 asset.get("current_relative_path"),
                 "Freigewordene Zusatzdatei",
             )
-            source_absolute = target_root.joinpath(*source_relative.parts).resolve(
+            source_absolute = central_stock_root.joinpath(*source_relative.parts).resolve(
                 strict=False
             )
             structural_leaf = PurePosixPath(next(iter(target_leaves)))
@@ -1744,13 +1747,13 @@ def build_event_sort_plan(
                 *destination_relative.parts
             ).resolve(strict=False)
 
-            if not _is_relative_to(source_absolute, target_root):
+            if not _is_relative_to(source_absolute, central_stock_root):
                 blockers.append({
                     "code": "released_asset_source_outside_root",
                     "path": str(source_relative),
                     "message": "Eine freigewordene Zusatzdatei verlässt den Arbeitsbereich.",
                 })
-            if not _is_relative_to(destination_absolute, target_root):
+            if not _is_relative_to(destination_absolute, destination_base):
                 blockers.append({
                     "code": "released_asset_target_outside_root",
                     "path": str(destination_relative),
@@ -1823,13 +1826,13 @@ def build_event_sort_plan(
                     "path": str(destination_relative),
                     "message": "Am Ziel einer freigewordenen Zusatzdatei existiert bereits ein anderer Eintrag.",
                 })
-            if _path_has_symlink(source_absolute, target_root):
+            if _path_has_symlink(source_absolute, central_stock_root):
                 blockers.append({
                     "code": "released_asset_source_symlink_component",
                     "path": str(source_relative),
                     "message": "Der Quellpfad einer freigewordenen Zusatzdatei enthält einen symbolischen Link.",
                 })
-            if _path_has_symlink(destination_absolute.parent, target_root):
+            if _path_has_symlink(destination_absolute.parent, destination_base):
                 blockers.append({
                     "code": "released_asset_target_symlink_component",
                     "path": str(destination_relative),
@@ -1859,6 +1862,7 @@ def build_event_sort_plan(
                 "source_relative_path": str(source_relative),
                 "source_absolute_path": str(source_absolute),
                 "destination_relative_path": str(destination_relative),
+                "destination_root_kind": "target_root",
                 "destination_absolute_path": str(destination_absolute),
                 "expected_size_bytes": expected_size,
                 "source_size_bytes": source_size,
@@ -2013,7 +2017,15 @@ def build_event_sort_plan(
                     destination_container / loose_path.name,
                     asset_kind=asset_kind,
                 )
-                destination_absolute = target_root.joinpath(
+                destination_root_kind = (
+                    "central_stock" if target_is_free_stock else "target_root"
+                )
+                destination_base = (
+                    central_stock_root
+                    if destination_root_kind == "central_stock"
+                    else target_root
+                )
+                destination_absolute = destination_base.joinpath(
                     *destination_relative.parts
                 ).resolve(strict=False)
 
@@ -2038,7 +2050,7 @@ def build_event_sort_plan(
                     })
                 if _path_has_symlink(
                     destination_absolute.parent,
-                    target_root,
+                    destination_base,
                 ):
                     blockers.append({
                         "code": "loose_asset_target_symlink_component",
@@ -2067,6 +2079,7 @@ def build_event_sort_plan(
                     "source_relative_path": str(source_relative),
                     "source_absolute_path": str(loose_path),
                     "destination_relative_path": str(destination_relative),
+                    "destination_root_kind": destination_root_kind,
                     "destination_absolute_path": str(destination_absolute),
                     "expected_size_bytes": expected_size,
                     "source_size_bytes": expected_size,
@@ -2190,7 +2203,15 @@ def build_event_sort_plan(
                 destination_parent / filename,
                 asset_kind=asset_kind,
             )
-            destination_absolute = target_root.joinpath(
+            destination_root_kind = (
+                "central_stock" if target_is_free_stock else "target_root"
+            )
+            destination_base = (
+                central_stock_root
+                if destination_root_kind == "central_stock"
+                else target_root
+            )
+            destination_absolute = destination_base.joinpath(
                 *destination_relative.parts
             ).resolve(strict=False)
 
@@ -2293,6 +2314,7 @@ def build_event_sort_plan(
                 "source_relative_path": str(source_relative),
                 "source_absolute_path": str(source_absolute),
                 "destination_relative_path": str(destination_relative),
+                "destination_root_kind": destination_root_kind,
                 "destination_absolute_path": str(destination_absolute),
                 "expected_size_bytes": expected_size,
                 "source_size_bytes": source_size,
@@ -2389,34 +2411,56 @@ def build_event_sort_plan(
             ),
         })
 
-    source_device = int(source_root.stat().st_dev)
     target_device = int(target_root.stat().st_dev)
-    same_filesystem = source_device == target_device
-
-    if not same_filesystem:
-        blockers.append({
-            "code": "different_filesystem",
-            "message": (
-                "Quelle und Ziel liegen nicht auf demselben Dateisystem. "
-                "Für diese Sortierung sind nur Verschiebungen innerhalb "
-                "des SSD-Arbeitsbereichs zulässig."
-            ),
-        })
-
-    statvfs = os.statvfs(target_root)
-    available_bytes = int(statvfs.f_bavail * statvfs.f_frsize)
-    total_bytes = sum(
-        int(entry["expected_size_bytes"])
-        for entry in [*entries, *asset_entries]
-        if not entry["same_path"]
+    central_device = int(central_stock_root.stat().st_dev)
+    target_available = int(
+        os.statvfs(target_root).f_bavail * os.statvfs(target_root).f_frsize
     )
-    required_extra_bytes = 0 if same_filesystem else total_bytes
+    central_available = int(
+        os.statvfs(central_stock_root).f_bavail
+        * os.statvfs(central_stock_root).f_frsize
+    )
+    required_target_bytes = 0
+    required_central_bytes = 0
+    for entry in [*entries, *asset_entries]:
+        if entry.get("same_path") or entry.get("status") != "move":
+            continue
+        source_device = entry.get("source_device")
+        destination_kind = str(
+            entry.get("destination_root_kind") or "target_root"
+        )
+        destination_device = (
+            central_device
+            if destination_kind == "central_stock"
+            else target_device
+        )
+        if source_device is None or int(source_device) == destination_device:
+            continue
+        if destination_kind == "central_stock":
+            required_central_bytes += int(entry["expected_size_bytes"])
+        else:
+            required_target_bytes += int(entry["expected_size_bytes"])
 
-    if required_extra_bytes > available_bytes:
+    required_extra_bytes = required_target_bytes + required_central_bytes
+    same_filesystem = required_extra_bytes == 0
+    available_bytes = min(target_available, central_available)
+
+    if required_target_bytes > target_available:
         blockers.append({
             "code": "insufficient_space",
+            "message": "Im Bibliotheks-Arbeitsbereich reicht der freie Speicher für den geprüften Transfer nicht aus.",
+        })
+    if required_central_bytes > central_available:
+        blockers.append({
+            "code": "insufficient_central_stock_space",
+            "message": "Im zentralen Aufnahmebestand reicht der freie Speicher für den geprüften Rücktransfer nicht aus.",
+        })
+    if required_extra_bytes:
+        warnings.append({
+            "code": "cross_filesystem_copy_verify",
             "message": (
-                "Der freie Speicher reicht für die geplante Operation nicht aus."
+                "Mindestens eine Datei wechselt das Dateisystem. Bibliothekar "
+                "verwendet dafür Copy → SHA-256-Prüfung → Quelllöschung."
             ),
         })
 
