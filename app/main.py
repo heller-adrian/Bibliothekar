@@ -666,7 +666,9 @@ def process_claimed_job(
                     / "Original"
                 ),
                 workspace_path=str(
-                    work_root
+                    workspace_backup_root(workspace_path)
+                    if operation == "folder_import"
+                    else work_root
                 ),
                 protocol_path=str(
                     LOG_PATH / "backups" / job_id
@@ -848,6 +850,7 @@ def process_claimed_job(
             temporary_backup_path=str(
                 workspace_path
                 / BACKUP_DIRECTORY_NAME
+                / (".incoming" if operation == "folder_import" else "")
                 / job_id
                 / "Original"
             ),
@@ -943,11 +946,14 @@ def process_claimed_job(
                     temporary_backup_path=str(
                         workspace_path
                         / BACKUP_DIRECTORY_NAME
+                        / (".incoming" if operation == "folder_import" else "")
                         / job_id
                         / "Original"
                     ),
                     workspace_path=str(
-                        work_root
+                        workspace_backup_root(workspace_path)
+                        if operation == "folder_import"
+                        else work_root
                     ),
                     protocol_path=str(
                         LOG_PATH / "backups" / job_id
