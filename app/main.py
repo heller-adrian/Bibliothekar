@@ -165,6 +165,7 @@ from app.library_runtime import (
 )
 from app.global_library_inventory import (
     admitted_family_keys,
+    backfill_library_claims,
     backfill_library_inventory,
     blocked_family_ids,
     claim_event_families,
@@ -1040,11 +1041,17 @@ def startup_database() -> None:
             REGISTRY_DATABASE_FILE,
             database_path=DATABASE_FILE,
             library_id=MAIN_LIBRARY_ID,
-            claim_all_owned=True,
+            claim_all_owned=False,
+        )
+        main_claims = backfill_library_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=DATABASE_FILE,
+            library_id=MAIN_LIBRARY_ID,
         )
         LIBRARY_REGISTRY_INITIALIZATION = {
             **(LIBRARY_REGISTRY_INITIALIZATION or {}),
             "main_inventory": main_inventory,
+            "main_claims": main_claims,
         }
         LIBRARY_REGISTRY_ERROR = None
 
