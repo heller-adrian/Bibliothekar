@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_0290_runtime_defaults_are_portable():
     assert main.APP_VERSION == "0.27.5"
     assert main.RELEASE_VERSION == "0.28.7"
-    assert main.DEPLOYMENT_VERSION == "0.29.0"
+    assert main.DEPLOYMENT_VERSION == "0.29.1"
     assert str(main.WORKSPACE_PATH) == "/workspace"
     assert str(main.DATABASE_DIRECTORY) == "/database"
     assert str(main.LOG_PATH) == "/logs"
@@ -32,7 +32,7 @@ def test_0290_no_fixed_legacy_truenas_host_path_in_runtime():
 
 def test_0290_compose_uses_custom_app_mount_contract():
     compose = (REPO_ROOT / "compose.example.yaml").read_text()
-    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.29.0" in compose
+    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.29.1" in compose
     assert "KAMERA_WORKSPACE: /workspace" in compose
     assert "KAMERA_POOL_PROBE: /workspace" in compose
     assert "KAMERA_ARCHIVE_ROOT: /main-library" in compose
