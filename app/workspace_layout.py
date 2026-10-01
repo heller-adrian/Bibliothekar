@@ -158,26 +158,36 @@ def resolve_library_work_root(
         return shared_root
 
     target = requested_work_root.expanduser().resolve(strict=False)
-    if not target.exists() or not target.is_dir():
-        raise WorkspaceLayoutError(
-            "Der Bibliotheks-Arbeitsbereich ist nicht verfügbar: "
-            + str(target)
-        )
-    if not os.access(target, os.R_OK | os.W_OK | os.X_OK):
-        raise WorkspaceLayoutError(
-            "Der Bibliotheks-Arbeitsbereich ist nicht vollständig zugreifbar: "
-            + str(target)
-        )
-
     backup = backup_root(workspace_path)
+
     if (
         target == backup
         or _is_relative_to(target, backup)
         or _is_relative_to(backup, target)
     ):
         raise WorkspaceLayoutError(
-            "Bibliotheks-Arbeitsbereich und SD-Kartensicherungen dürfen "
-            "nicht ineinander liegen."
+            "Der Bibliotheks-Arbeitsbereich darf nicht innerhalb der "
+            "SD-Kartensicherungen liegen und beide Bereiche dürfen sich "
+            "nicht überlappen."
+        )
+
+    if not target.exists():
+        if _is_relative_to(target, shared_root):
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            raise WorkspaceLayoutError(
+                "Der Bibliotheks-Arbeitsbereich ist nicht verfügbar: "
+                + str(target)
+            )
+    if not target.is_dir():
+        raise WorkspaceLayoutError(
+            "Der Bibliotheks-Arbeitsbereich ist kein Verzeichnis: "
+            + str(target)
+        )
+    if not os.access(target, os.R_OK | os.W_OK | os.X_OK):
+        raise WorkspaceLayoutError(
+            "Der Bibliotheks-Arbeitsbereich ist nicht vollständig zugreifbar: "
+            + str(target)
         )
 
     if int(target.stat().st_dev) != int(backup.stat().st_dev):
