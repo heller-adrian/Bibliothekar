@@ -33,7 +33,8 @@ def _release_case(tmp_path: Path, *, with_asset: bool = False):
         tmp_path, full_archive_triplet=True
     )
     work = workspace / "Arbeitsbereich"
-    backup_root = workspace / "SD-Kartensicherungen" / "old"
+    central = workspace / "SD-Kartensicherungen"
+    backup_root = central / "old"
     backup_root.mkdir(parents=True, exist_ok=True)
 
     late_payload = b"late-camera"
@@ -131,6 +132,7 @@ def _release_case(tmp_path: Path, *, with_asset: bool = False):
         "workspace": workspace,
         "archive": archive,
         "work": work,
+        "central": central,
         "folder": folder,
         "keep_family": keep_family,
         "late_family": late_family,
@@ -150,7 +152,7 @@ def _copy_release_rows(case):
     ]
     for row in rows:
         source = case["archive"] / row["old_path"]
-        target = case["work"] / row["workspace_release_path"]
+        target = case["central"] / row["workspace_release_path"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     return rows
@@ -242,8 +244,8 @@ def test_0271_release_stock_copy_remove_finish_and_reappear_globally(tmp_path: P
             "Freigewordene Archivdateien/"
         )
 
-    assert (work / file_row["current_relative_path"]).is_file()
-    assert (work / asset["current_relative_path"]).is_file()
+    assert (case["central"] / file_row["current_relative_path"]).is_file()
+    assert (case["central"] / asset["current_relative_path"]).is_file()
 
     groups = list_global_released_archive_groups(db)
     group = next(
@@ -283,7 +285,7 @@ def test_0271_release_copy_requires_correct_sha_before_archive_removal(tmp_path:
         row for row in get_event_change_files(case["db"], case["cr_id"])
         if row["action"] == "delete"
     )
-    target = case["work"] / row["workspace_release_path"]
+    target = case["central"] / row["workspace_release_path"]
     target.write_bytes(b"wrong")
 
     bad = verify_archive_release_copies(
@@ -311,7 +313,7 @@ def test_0271_release_copy_requires_archive_original_until_first_verification(tm
     assert len(rows) == 1
 
     source = case["archive"] / rows[0]["old_path"]
-    target = case["work"] / rows[0]["workspace_release_path"]
+    target = case["central"] / rows[0]["workspace_release_path"]
     assert source.is_file()
     assert target.is_file()
 
@@ -342,7 +344,7 @@ def test_0271_cancel_cleans_release_copy_only_while_archive_original_is_intact(t
         case["db"], case["cr_id"], case["archive"], case["workspace"]
     )
     rows = _copy_release_rows(case)
-    release_path = case["work"] / rows[0]["workspace_release_path"]
+    release_path = case["central"] / rows[0]["workspace_release_path"]
     assert release_path.is_file()
 
     cancelled = cancel_event_change(
@@ -365,7 +367,7 @@ def test_0271_cancel_cleans_release_copy_only_while_archive_original_is_intact(t
     assert reversal["reversal_required"] is True
     assert reversal["reversal"]["active"] is True
     assert reversal["reversal"]["phase"] == "prepare"
-    assert (case2["work"] / rows2[0]["workspace_release_path"]).is_file()
+    assert (case2["central"] / rows2[0]["workspace_release_path"]).is_file()
 
 
 def test_0271_released_stock_can_be_sorted_again_with_released_asset(tmp_path: Path):
