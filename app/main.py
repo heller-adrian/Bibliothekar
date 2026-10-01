@@ -29,6 +29,7 @@ from app.global_stock import (
     migrate_main_free_stock_to_central,
     project_all_imports,
     project_import_job,
+    synchronize_central_stock_projections,
 )
 from app.canonical_membership import resolve_payload_membership
 from app.event_layout import (
@@ -514,6 +515,25 @@ WORKSPACE_LAYOUT_INITIALIZATION: dict[str, Any] | None = None
 WORKSPACE_LAYOUT_ERROR: str | None = None
 LIBRARY_REGISTRY_INITIALIZATION: dict[str, Any] | None = None
 LIBRARY_REGISTRY_ERROR: str | None = None
+
+
+def synchronize_global_central_stock() -> dict[str, Any]:
+    rows = list_libraries(
+        REGISTRY_DATABASE_FILE,
+        active_only=False,
+        registered_only=True,
+    )
+    database_paths = [
+        Path(str(row["database_path"]))
+        for row in rows
+        if str(row.get("database_path") or "").strip()
+    ]
+    if DATABASE_FILE not in database_paths:
+        database_paths.insert(0, DATABASE_FILE)
+    return synchronize_central_stock_projections(
+        database_paths,
+        WORKSPACE_PATH,
+    )
 
 
 def folder_import_display_label(
@@ -1160,11 +1180,14 @@ def startup_database() -> None:
                 "claims": claims,
             }
 
+        central_projection_sync = synchronize_global_central_stock()
+
         LIBRARY_REGISTRY_INITIALIZATION = {
             **(LIBRARY_REGISTRY_INITIALIZATION or {}),
             "main_inventory": main_inventory,
             "main_claims": main_claims,
             "secondary_sync": secondary_sync,
+            "central_projection_sync": central_projection_sync,
         }
         LIBRARY_REGISTRY_ERROR = None
 
@@ -1997,6 +2020,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             library_id=library_id,
             claim_all_owned=False,
         )
+        synchronize_global_central_stock()
     except Exception as error:
         if created_database:
             for candidate in (
@@ -6182,14 +6206,12 @@ def _sort_run_thread_target(
             run_id,
             compatibility_workspace_root(library_context),
         )
-        if run_row is not None:
-            claim_event_families(
-                REGISTRY_DATABASE_FILE,
-                database_path=library_context.database_path,
-                library_id=library_context.library_id,
-                event_id=str(run_row["event_id"]),
-                claim_state="owned",
-            )
+        backfill_library_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=library_context.database_path,
+            library_id=library_context.library_id,
+        )
+        synchronize_global_central_stock()
 
     except Exception as error:
         print(
@@ -6208,6 +6230,12 @@ def _reconcile_run_thread_target(
             run_id,
             compatibility_workspace_root(library_context),
         )
+        backfill_library_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=library_context.database_path,
+            library_id=library_context.library_id,
+        )
+        synchronize_global_central_stock()
     except Exception as error:
         print(f"Arbeitsbereich-Abgleich {run_id} beendet mit Fehler: {error}", flush=True)
 
@@ -9670,6 +9698,12 @@ def api_archive_change(cr_id: str) -> JSONResponse:
                 family_ids=removed_ids,
                 allowed_states={"owned", "reserved"},
             )
+        backfill_library_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=current_database_file(),
+            library_id=current_library_context().library_id,
+        )
+        synchronize_global_central_stock()
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
