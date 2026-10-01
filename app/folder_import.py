@@ -39,6 +39,7 @@ MetadataCallback = Callable[[dict[str, Any], dict[str, str]], None]
 PathCallback = Callable[[list[dict[str, Any]]], None]
 IdentityCallback = Callable[[str, str], None]
 ImportHistoryCallback = Callable[[list[dict[str, Any]]], None]
+FamilyAdmissionCallback = Callable[[dict[str, Any], dict[str, str], dict[str, int]], dict[str, Any]]
 
 
 
@@ -470,6 +471,7 @@ def run_folder_import_job(
     imported_hashes: set[tuple[int, str]] | None = None,
     duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
     import_history_callback: ImportHistoryCallback | None = None,
+    family_admission_callback: FamilyAdmissionCallback | None = None,
     work_root: Path | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).astimezone()
@@ -684,10 +686,41 @@ def run_folder_import_job(
             str(entry["relative_path"]): str(entry["sha256"])
             for entry in entries
         }
+        size_by_path = {
+            str(entry["relative_path"]): int(entry["size_bytes"])
+            for entry in entries
+        }
+
+        admission: dict[str, Any] = {
+            "allowed_family_keys": None,
+            "blocked_families": [],
+        }
+        if family_admission_callback is not None:
+            admission = family_admission_callback(
+                analysis,
+                checksum_by_path,
+                size_by_path,
+            ) or admission
+            allowed_raw = admission.get("allowed_family_keys")
+            if allowed_raw is not None:
+                allowed = {str(value) for value in allowed_raw}
+                analysis = {
+                    **analysis,
+                    "files": [
+                        row for row in (analysis.get("files") or [])
+                        if str(row.get("family_key") or "") in allowed
+                    ],
+                    "families": [
+                        row for row in (analysis.get("families") or [])
+                        if str(row.get("family_key") or "") in allowed
+                    ],
+                }
+
         media_checksums = {
             str(record["relative_path"]):
                 checksum_by_path[str(record["relative_path"])]
             for record in analysis.get("files", [])
+            if str(record.get("relative_path") or "") in checksum_by_path
         }
         if metadata_callback is not None:
             metadata_callback(analysis, media_checksums)
@@ -697,8 +730,14 @@ def run_folder_import_job(
             analysis,
             work_root,
         )
-        if not plan:
+        if not plan and not admission.get("blocked_families"):
             raise PipelineError("Die Quelle enthält keine unterstützten Medien.")
+        organization_summary["blocked_family_count"] = len(
+            admission.get("blocked_families") or []
+        )
+        organization_summary["blocked_families"] = list(
+            admission.get("blocked_families") or []
+        )
 
         manifest["organization"] = organization_summary
         manifest["excluded_files"] = [
@@ -757,7 +796,8 @@ def run_folder_import_job(
                 "already_imported_file_count": len(already_imported),
                 "duplicate_file_count": len(already_imported),
                 "duplicate_files": duplicate_details,
-                "new_file_count": len(entries),
+                "new_file_count": len(plan),
+                "blocked_family_count": len(admission.get("blocked_families") or []),
                 "signature": source_signature,
                 "fingerprint": source_fingerprint,
                 "size_bytes": total_size,
