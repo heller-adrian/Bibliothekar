@@ -351,11 +351,27 @@ def test_0300_inactive_library_cannot_claim_unowned_family(tmp_path):
 
 def test_0300_worker_rotates_after_last_served_library(tmp_path):
     state = _foundation(tmp_path)
+
+    main_root = state["work_root"] / "main"
+    main_root.mkdir()
+    register_library(
+        state["registry_file"],
+        library_id=MAIN_LIBRARY_ID,
+        display_name="Main Library",
+        database_path=state["database_file"],
+        workspace_root=state["workspace"],
+        work_root=main_root,
+        archive_root=state["archive"],
+        is_main=True,
+        is_active=True,
+        settings={"adopted_existing_database": True},
+    )
+
     for library_id, display_name in (
         ("business", "Business"),
         ("private", "Private"),
     ):
-        work_root = state["workspace"] / "Bibliotheken" / library_id
+        work_root = state["work_root"] / library_id
         archive_root = tmp_path / f"{library_id}-archive"
         database_path = tmp_path / "database" / f"{library_id}.sqlite3"
         work_root.mkdir(parents=True)
@@ -393,7 +409,6 @@ def test_0300_worker_rotates_after_last_served_library(tmp_path):
         "main",
         "business",
     ]
-
 
 def test_0300_worker_thumbnail_uses_library_database_and_distinct_cache_key(
     tmp_path,
@@ -507,6 +522,24 @@ def test_0300_main_adoption_preserves_user_metadata(tmp_path):
         },
     )
 
+    migrated_main_root = state["work_root"] / "main"
+    migrated_main_root.mkdir()
+    register_library(
+        state["registry_file"],
+        library_id=MAIN_LIBRARY_ID,
+        display_name="Private Fotos",
+        database_path=state["database_file"],
+        workspace_root=state["workspace"],
+        work_root=migrated_main_root,
+        archive_root=state["archive"],
+        is_main=True,
+        is_active=True,
+        settings={
+            "custom_setting": "bleibt-erhalten",
+            "adopted_existing_database": True,
+        },
+    )
+
     adopted_again = adopt_main_library(
         state["registry_file"],
         database_path=state["database_file"],
@@ -518,6 +551,7 @@ def test_0300_main_adoption_preserves_user_metadata(tmp_path):
     assert adopted_again["display_name"] == "Private Fotos"
     assert adopted_again["settings"]["custom_setting"] == "bleibt-erhalten"
     assert adopted_again["settings"]["adopted_existing_database"] is True
+    assert adopted_again["work_root"] == str(migrated_main_root.resolve())
 
 
 def test_0300_library_work_root_isolated_below_shared_work_area(tmp_path):
@@ -593,5 +627,31 @@ def test_0300_active_library_requires_initialized_matching_database(tmp_path):
             workspace_root=state["workspace"],
             work_root=work_root,
             archive_root=archive_root,
+            is_active=True,
+        )
+
+
+def test_0300_active_work_roots_must_not_overlap(tmp_path):
+    state = _foundation(tmp_path)
+    business_database = tmp_path / "database" / "business.sqlite3"
+    business_root = state["work_root"] / "business"
+    business_archive = tmp_path / "business-archive"
+    business_root.mkdir()
+    business_archive.mkdir()
+    initialize_database(business_database)
+    ensure_library_identity(business_database, "business")
+
+    with pytest.raises(
+        LibraryRegistryError,
+        match="Arbeitsbereiche dürfen sich nicht",
+    ):
+        register_library(
+            state["registry_file"],
+            library_id="business",
+            display_name="Business",
+            database_path=business_database,
+            workspace_root=state["workspace"],
+            work_root=business_root,
+            archive_root=business_archive,
             is_active=True,
         )
