@@ -1058,13 +1058,26 @@ def worker_loop() -> None:
 
     while not WORKER_STOP.is_set():
         try:
-            contexts = ordered_worker_contexts(
-                list_active_library_contexts(
-                    REGISTRY_DATABASE_FILE
-                ),
-                last_library_id,
+            # Kamera-/Ordnerimporte sind seit 0.31.1 globaler Bestand und
+            # liegen ausschließlich in der Main-Datenbank. Sie werden deshalb
+            # direkt aus dieser Queue übernommen und nicht über die
+            # Bibliotheks-Registry wiederentdeckt. Ein fehlerhafter oder
+            # vorübergehend unvollständiger Sekundärkontext kann den globalen
+            # Import damit nicht mehr dauerhaft auf "queued" halten.
+            global_import = claim_next_job(
+                DATABASE_FILE,
+                operation="folder_import",
             )
-            claimed = claim_next_library_job(contexts)
+            if global_import is not None:
+                claimed = (MAIN_LIBRARY_CONTEXT, global_import)
+            else:
+                contexts = ordered_worker_contexts(
+                    list_active_library_contexts(
+                        REGISTRY_DATABASE_FILE
+                    ),
+                    last_library_id,
+                )
+                claimed = claim_next_library_job(contexts)
 
             if claimed is None:
                 WORKER_STOP.wait(1.0)
