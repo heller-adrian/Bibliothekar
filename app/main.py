@@ -1088,6 +1088,20 @@ def startup_database() -> None:
             MAIN_LIBRARY_ID,
         )
 
+        legacy_layout = migrate_legacy_applied_files(
+            DATABASE_FILE,
+            WORKSPACE_PATH,
+        )
+        global_stock_migration = migrate_main_free_stock_to_central(
+            DATABASE_FILE,
+            WORKSPACE_PATH,
+        )
+        WORKSPACE_LAYOUT_INITIALIZATION = {
+            **legacy_layout,
+            "global_stock_migration": global_stock_migration,
+        }
+        WORKSPACE_LAYOUT_ERROR = None
+
         main_inventory = backfill_library_inventory(
             REGISTRY_DATABASE_FILE,
             database_path=DATABASE_FILE,
@@ -1099,20 +1113,47 @@ def startup_database() -> None:
             database_path=DATABASE_FILE,
             library_id=MAIN_LIBRARY_ID,
         )
+
+        secondary_sync: dict[str, dict[str, Any]] = {}
+        for library_row in list_libraries(
+            REGISTRY_DATABASE_FILE,
+            active_only=False,
+            registered_only=True,
+        ):
+            library_id = str(library_row["library_id"])
+            if library_id == MAIN_LIBRARY_ID:
+                continue
+            library_database = Path(str(library_row["database_path"]))
+            initialize_database(library_database)
+            ensure_library_identity(library_database, library_id)
+            projection = project_all_imports(
+                DATABASE_FILE,
+                library_database,
+            )
+            inventory = backfill_library_inventory(
+                REGISTRY_DATABASE_FILE,
+                database_path=library_database,
+                library_id=library_id,
+                claim_all_owned=False,
+            )
+            claims = backfill_library_claims(
+                REGISTRY_DATABASE_FILE,
+                database_path=library_database,
+                library_id=library_id,
+            )
+            secondary_sync[library_id] = {
+                "projection": projection,
+                "inventory": inventory,
+                "claims": claims,
+            }
+
         LIBRARY_REGISTRY_INITIALIZATION = {
             **(LIBRARY_REGISTRY_INITIALIZATION or {}),
             "main_inventory": main_inventory,
             "main_claims": main_claims,
+            "secondary_sync": secondary_sync,
         }
         LIBRARY_REGISTRY_ERROR = None
-
-        WORKSPACE_LAYOUT_INITIALIZATION = (
-            migrate_legacy_applied_files(
-                DATABASE_FILE,
-                WORKSPACE_PATH,
-            )
-        )
-        WORKSPACE_LAYOUT_ERROR = None
 
         recovered_protocols = recover_cross_device_protocol_failures(
             WORKSPACE_PATH,
