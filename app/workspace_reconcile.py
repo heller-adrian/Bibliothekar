@@ -398,7 +398,11 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
         "workspace_root":str(anchor_plan.get("workspace_root") or "") if anchor_plan else "",
         "source_root":str(anchor_plan.get("target_root") or "") if anchor_plan else "",
         "target_root":str(anchor_plan.get("target_root") or "") if anchor_plan else "",
-        "central_stock_root":str(anchor_plan.get("central_stock_root") or "") if anchor_plan else "",
+        "central_stock_root":str(
+            anchor_plan.get("central_stock_root")
+            or anchor_plan.get("target_root")
+            or ""
+        ) if anchor_plan else "",
         "directories":list(directories.values()),"blockers":blockers,"warnings":warnings,
         "structure_text":structure_text,
         "plan_token":token,"apply_confirmation_phrase":CONFIRMATION_PHRASE,
@@ -413,7 +417,7 @@ def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_
     plan=build_workspace_reconcile_plan(database_path,job_id,anchor_event_id,workspace_path)
     if not plan['summary']['ready']: raise SortApplyError("Der gemeinsame Änderungsplan besitzt Blocker und darf nicht angewendet werden.")
     if str(expected_plan_token)!=str(plan['plan_token']): raise SortApplyError("Der gemeinsame Änderungsplan ist nicht mehr aktuell. Bitte erneut prüfen.")
-    run_id='RECON_'+uuid.uuid4().hex.upper(); now=_now(); root=str(Path(plan['target_root']).resolve(strict=False)); central=str(Path(plan['central_stock_root']).resolve(strict=False))
+    run_id='RECON_'+uuid.uuid4().hex.upper(); now=_now(); root=str(Path(plan['target_root']).resolve(strict=False)); central=str(Path(plan.get('central_stock_root') or plan['target_root']).resolve(strict=False))
     with database_connection(database_path) as c:
         c.execute('BEGIN IMMEDIATE')
         for eid in plan['event_ids']:
