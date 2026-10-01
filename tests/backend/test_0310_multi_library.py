@@ -167,7 +167,7 @@ def test_0310_versions_and_frozen_css_contract():
 def test_0310_registry_v2_tracks_media_and_family_members(tmp_path):
     registry = tmp_path / "registry.sqlite3"
     status = initialize_library_registry(registry)
-    assert status["schema_versions"] == [1, 2]
+    assert status["schema_versions"] == [1, 2, 3]
 
     register_source_backup(
         registry,
