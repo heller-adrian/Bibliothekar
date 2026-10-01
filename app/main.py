@@ -25,6 +25,11 @@ from app.transfer_ui import TRANSFER_HTML
 from app.ui_shell import apply_shell
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
+from app.global_stock import (
+    migrate_main_free_stock_to_central,
+    project_all_imports,
+    project_import_job,
+)
 from app.canonical_membership import resolve_payload_membership
 from app.event_layout import (
     ensure_event_layout_snapshot,
@@ -209,7 +214,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.31.0"
+DEPLOYMENT_VERSION = "0.31.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -422,15 +427,23 @@ def ensure_job_thumbnail(
         )
     )
 
-    work_root = context.work_root
+    roots = [
+        workspace_backup_root(WORKSPACE_PATH).resolve(strict=False),
+        context.work_root.resolve(strict=False),
+    ]
     for row in candidates:
         relative = Path(str(row["current_relative_path"]))
-        source = (work_root / relative).resolve()
-        try:
-            source.relative_to(work_root.resolve())
-        except ValueError:
-            continue
-        if not source.is_file():
+        source = None
+        for root in roots:
+            candidate = (root / relative).resolve(strict=False)
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                continue
+            if candidate.is_file():
+                source = candidate
+                break
+        if source is None:
             continue
 
         try:
@@ -648,6 +661,7 @@ def process_claimed_job(
                 temporary_backup_path=str(
                     workspace_path
                     / BACKUP_DIRECTORY_NAME
+                    / (".incoming" if operation == "folder_import" else "")
                     / job_id
                     / "Original"
                 ),
@@ -703,7 +717,7 @@ def process_claimed_job(
                     job_id,
                     plan,
                     working_path=str(
-                        work_root
+                        workspace_backup_root(workspace_path)
                     ),
                 )
 
@@ -795,6 +809,7 @@ def process_claimed_job(
                 import_history_callback=persist_import_history,
                 family_admission_callback=admit_families,
                 work_root=work_root,
+                central_stock=True,
             )
             organization = result.get("organization", {})
             if str(job.get("trigger_type") or "") in {"approved_sd", "usb_key"}:
@@ -873,15 +888,47 @@ def process_claimed_job(
         )
 
         if operation == "folder_import":
+            if database_file.resolve(strict=False) != DATABASE_FILE.resolve(strict=False):
+                raise RuntimeError(
+                    "Globaler Kameraimport wurde unerwartet außerhalb der Main-Datenbank verarbeitet."
+                )
+
+            projection_results: dict[str, dict[str, int]] = {}
+            for library in list_active_library_contexts(REGISTRY_DATABASE_FILE):
+                if library.library_id == MAIN_LIBRARY_ID:
+                    continue
+                projected = project_import_job(
+                    DATABASE_FILE,
+                    library.database_path,
+                    job_id,
+                )
+                backfill = backfill_library_inventory(
+                    REGISTRY_DATABASE_FILE,
+                    database_path=library.database_path,
+                    library_id=library.library_id,
+                    claim_all_owned=False,
+                )
+                projection_results[library.library_id] = {
+                    **projected,
+                    "inventory_families": int(backfill.get("family_count") or 0),
+                }
+
             try:
                 ensure_job_thumbnail(
                     job_id,
-                    library_context=context,
+                    library_context=MAIN_LIBRARY_CONTEXT,
                 )
             except Exception as thumbnail_error:
                 print(
                     "Vorschaubild konnte nicht erstellt werden:",
                     thumbnail_error,
+                    flush=True,
+                )
+
+            if projection_results:
+                print(
+                    "Globaler Import wurde in Bibliotheken projiziert:",
+                    projection_results,
                     flush=True,
                 )
 
