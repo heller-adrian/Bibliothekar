@@ -165,8 +165,9 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.29.0"
-RELEASE_VERSION = "0.29.0"
+APP_VERSION = "0.27.5"
+RELEASE_VERSION = "0.28.7"
+DEPLOYMENT_VERSION = "0.29.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1214,6 +1215,7 @@ def get_health() -> dict[str, Any]:
     return {
         "application": "kamera-automatisierung",
         "version": RELEASE_VERSION,
+        "deployment_version": DEPLOYMENT_VERSION,
         "status": "ok" if not errors else "degraded",
         "time": datetime.now().astimezone().isoformat(),
         "runtime": {
