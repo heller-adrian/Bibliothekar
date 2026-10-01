@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """Normalize physical released archive stock while preserving provenance.
 
-Only the SSD workspace below Arbeitsbereich/Freigewordene Archivdateien is
-modified. The camera archive is never written.
+Only the central stock below SD-Kartensicherungen/Freigewordene Archivdateien
+is modified. The camera archive is never written.
 """
 
 from datetime import date, timedelta
@@ -13,7 +13,7 @@ import os
 
 from app.database import database_connection
 from app.free_stock_layout import released_origin_directory
-from app.workspace_layout import shared_work_root
+from app.workspace_layout import backup_root
 
 ROOT_NAME = "Freigewordene Archivdateien"
 
@@ -30,7 +30,7 @@ def _safe_work_path(root: Path, relative: str) -> Path:
     try:
         path.relative_to(root)
     except ValueError as exc:
-        raise ReleasedArchiveMaintenanceError("SSD-Pfad verlässt den Arbeitsbereich.") from exc
+        raise ReleasedArchiveMaintenanceError("SSD-Pfad verlässt den zentralen Aufnahmebestand.") from exc
     return path
 
 
@@ -50,7 +50,7 @@ def normalize_released_archive_stock_for_days(
     workspace_path: Path,
     days: list[str] | set[str] | tuple[str, ...],
 ) -> dict[str, Any]:
-    work_root = shared_work_root(workspace_path).resolve(strict=False)
+    work_root = backup_root(workspace_path).resolve(strict=False)
     release_root = (work_root / ROOT_NAME).resolve(strict=False)
     release_root.mkdir(parents=True, exist_ok=True)
     wanted_days = sorted({str(value)[:10] for value in days if str(value)})
