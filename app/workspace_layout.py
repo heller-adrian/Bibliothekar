@@ -175,6 +175,11 @@ def resolve_library_work_root(
             "Der Bibliotheks-Arbeitsbereich ist nicht vollständig zugreifbar: "
             + str(target)
         )
+    if int(target.stat().st_dev) != int(shared_root.stat().st_dev):
+        raise WorkspaceLayoutError(
+            "Der Bibliotheks-Arbeitsbereich muss auf demselben Dateisystem "
+            "wie der gemeinsame Arbeitsbereich liegen."
+        )
 
     return target
 
