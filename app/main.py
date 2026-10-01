@@ -169,8 +169,12 @@ from app.global_library_inventory import (
     backfill_library_inventory,
     blocked_family_ids,
     claim_event_families,
+    promote_family_ids_owned,
     register_analysis_inventory,
     release_event_reservations,
+    release_family_ids_claims,
+    release_new_reservations,
+    reserve_family_ids,
 )
 
 # ── Change-Request-Workflow (0.16.0) ────────────────────────────
@@ -4933,6 +4937,88 @@ def api_job_events(
     }
 
 
+def _reserve_global_family_ids(
+    event_id: str,
+    family_ids: list[int] | set[int],
+) -> dict[str, Any]:
+    return reserve_family_ids(
+        REGISTRY_DATABASE_FILE,
+        database_path=current_database_file(),
+        library_id=current_library_context().library_id,
+        event_id=event_id,
+        family_ids=family_ids,
+    )
+
+
+def _release_new_global_reservations(reservation: dict[str, Any] | None) -> None:
+    if not reservation:
+        return
+    release_new_reservations(
+        REGISTRY_DATABASE_FILE,
+        library_id=current_library_context().library_id,
+        source_family_keys=list(reservation.get("newly_reserved") or []),
+    )
+
+
+def _promote_global_family_ids_owned(
+    event_id: str,
+    family_ids: list[int] | set[int],
+) -> None:
+    promote_family_ids_owned(
+        REGISTRY_DATABASE_FILE,
+        database_path=current_database_file(),
+        library_id=current_library_context().library_id,
+        event_id=event_id,
+        family_ids=family_ids,
+    )
+
+
+def _change_request_selected_family_ids(change_request: dict[str, Any]) -> set[int]:
+    raw = change_request.get("selected_family_ids")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            raw = []
+    return {
+        int(value)
+        for value in (raw or [])
+        if str(value).strip() and int(value) > 0
+    }
+
+
+def _assigned_family_ids_for_root_event(event_id: str) -> set[int]:
+    with database_connection(current_database_file()) as connection:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT ea.family_id
+            FROM event_assignments ea
+            JOIN events assigned ON assigned.id = ea.event_id
+            WHERE (
+                assigned.id = ?
+                OR assigned.parent_event_id = ?
+            )
+              AND ea.family_id IS NOT NULL
+            """,
+            (event_id, event_id),
+        ).fetchall()
+    return {int(row["family_id"]) for row in rows}
+
+
+def _reserve_archive_change_preview(
+    event_id: str,
+    preview: dict[str, Any],
+) -> dict[str, Any]:
+    return _reserve_global_family_ids(
+        event_id,
+        {
+            int(value)
+            for value in (preview.get("selected_family_ids") or [])
+            if int(value) > 0
+        },
+    )
+
+
 @app.get(
     "/api/jobs/{job_id}/event-suggestions",
     tags=["Ereignisse"],
@@ -4959,6 +5045,8 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
         if value is not None
     ]
     target_event_id = str(payload.get("target_event_id") or "")
+    reservation: dict[str, Any] | None = None
+    mutation_committed = False
     try:
         with database_connection(current_database_file()) as connection:
             target = connection.execute(
@@ -4969,14 +5057,24 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
             ).fetchone()
 
         target_job_id = str(target["job_id"]) if target is not None else None
+        if target is None:
+            raise EventSuggestionError("Das passende Ereignis ist nicht mehr verfügbar.")
 
-        if target is not None and str(target["status"] or "") == "archived":
+        reservation = _reserve_global_family_ids(
+            target_event_id,
+            family_ids,
+        )
+
+        if str(target["status"] or "") == "archived":
             context = get_event_edit_context(
                 current_database_file(), target_job_id, target_event_id
             )
             incoming_available = {
                 int(family["family_id"]): dict(family)
-                for family in list_job_available_families(current_database_file(), job_id)
+                for family in _available_families_for_event_payload(
+                    job_id,
+                    {"selected_family_ids": family_ids},
+                )
                 if int(family["family_id"]) in set(family_ids)
             }
             if set(incoming_available) != set(family_ids):
@@ -5044,10 +5142,27 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
             family_ids,
             target_event_id,
         )
-    except (ValueError, TypeError, EventSuggestionError, EventChangeRequestError) as error:
+        mutation_committed = True
+        if str(result.get("target_status") or "") == "applied":
+            _promote_global_family_ids_owned(
+                target_event_id,
+                family_ids,
+            )
+        return {"job_id": job_id, "target_job_id": target_job_id, **result}
+    except (
+        ValueError,
+        TypeError,
+        EventSuggestionError,
+        EventChangeRequestError,
+        LibraryRegistryError,
+    ) as error:
+        if reservation is not None and not mutation_committed:
+            _release_new_global_reservations(reservation)
         raise HTTPException(status_code=409, detail=str(error)) from error
-    return {"job_id": job_id, "target_job_id": target_job_id, **result}
-
+    except Exception:
+        if reservation is not None and not mutation_committed:
+            _release_new_global_reservations(reservation)
+        raise
 
 @app.get(
     "/api/jobs/{job_id}/archive-change-reviews",
@@ -5192,16 +5307,24 @@ def api_create_event(
                 ],
             }
             preview = build_event_preview(combined_payload, editable_families)
-            result = propose_event_change(
-                current_database_file(),
-                job_id,
+            archive_reservation = _reserve_archive_change_preview(
                 existing_parent_event_id,
                 preview,
-                event_name=str(archived_target["name"]),
-                notes=str(archived_target["notes"] or ""),
-                archive_root=current_archive_root(),
-                workspace_path=current_workspace_root(),
             )
+            try:
+                result = propose_event_change(
+                    current_database_file(),
+                    job_id,
+                    existing_parent_event_id,
+                    preview,
+                    event_name=str(archived_target["name"]),
+                    notes=str(archived_target["notes"] or ""),
+                    archive_root=current_archive_root(),
+                    workspace_path=current_workspace_root(),
+                )
+            except Exception:
+                _release_new_global_reservations(archive_reservation)
+                raise
             return {
                 "job_id": job_id,
                 "status": "archive_change_request_created",
@@ -6554,16 +6677,24 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                 },
                 list(family_map.values()),
             )
-            result = propose_event_change(
-                current_database_file(),
-                target_job_id,
+            archive_reservation = _reserve_archive_change_preview(
                 target_event_id,
                 preview,
-                event_name="Ohne Ereignis",
-                notes=str(target_row["notes"] or ""),
-                archive_root=current_archive_root(),
-                workspace_path=current_workspace_root(),
             )
+            try:
+                result = propose_event_change(
+                    current_database_file(),
+                    target_job_id,
+                    target_event_id,
+                    preview,
+                    event_name="Ohne Ereignis",
+                    notes=str(target_row["notes"] or ""),
+                    archive_root=current_archive_root(),
+                    workspace_path=current_workspace_root(),
+                )
+            except Exception:
+                _release_new_global_reservations(archive_reservation)
+                raise
             return {
                 "status": "archive_change_request_created",
                 "event_id": target_event_id,
@@ -6576,13 +6707,30 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                 "prepared_structure_path": result.get("prepared_structure_path") or "",
             }
 
-        return assign_free_families_to_existing_no_event(
-            current_database_file(),
-            job_id,
+        assignment_reservation = _reserve_global_family_ids(
             target_event_id,
-            segments,
-            family_ids=selected_family_ids or None,
+            selected_family_ids,
         )
+        assignment_committed = False
+        try:
+            assigned = assign_free_families_to_existing_no_event(
+                current_database_file(),
+                job_id,
+                target_event_id,
+                segments,
+                family_ids=selected_family_ids or None,
+            )
+            assignment_committed = True
+            if str(assigned.get("target_status") or "") == "applied":
+                _promote_global_family_ids_owned(
+                    target_event_id,
+                    assigned.get("family_ids") or selected_family_ids,
+                )
+            return assigned
+        except Exception:
+            if not assignment_committed:
+                _release_new_global_reservations(assignment_reservation)
+            raise
     except (ValueError, EventPreviewError, EventChangeRequestError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -9206,13 +9354,21 @@ def api_propose_event_change(
         # verändern. Automatische Archiv-Erweiterungen behalten ihren bisherigen
         # Layoutzustand und setzen dieses Kennzeichen bewusst nicht.
         preview["_folder_layout_explicit"] = True
-        result = propose_event_change(
-            current_database_file(), job_id, event_id, preview,
-            event_name=body.get("event_name") or preview.get("event_name"),
-            notes=body.get("notes", ""),
-            archive_root=current_archive_root(),
-            workspace_path=current_workspace_root(),
+        archive_reservation = _reserve_archive_change_preview(
+            event_id,
+            preview,
         )
+        try:
+            result = propose_event_change(
+                current_database_file(), job_id, event_id, preview,
+                event_name=body.get("event_name") or preview.get("event_name"),
+                notes=body.get("notes", ""),
+                archive_root=current_archive_root(),
+                workspace_path=current_workspace_root(),
+            )
+        except Exception:
+            _release_new_global_reservations(archive_reservation)
+            raise
         return JSONResponse(content=result, status_code=201)
     except EventChangeRequestError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -9258,8 +9414,22 @@ def api_confirm_change(cr_id: str) -> JSONResponse:
 def api_cancel_change(cr_id: str) -> JSONResponse:
     """Aenderungsauftrag abbrechen."""
     try:
+        change_request = get_event_change_request(current_database_file(), cr_id)
+        if change_request is None:
+            raise EventChangeApplyError("ChangeRequest nicht gefunden.")
+        selected_ids = _change_request_selected_family_ids(change_request)
+        assigned_ids = _assigned_family_ids_for_root_event(
+            str(change_request["event_id"])
+        )
         result = cancel_event_change(
             current_database_file(), cr_id, current_archive_root(), current_workspace_root()
+        )
+        release_family_ids_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=current_database_file(),
+            library_id=current_library_context().library_id,
+            family_ids=selected_ids - assigned_ids,
+            allowed_states={"reserved"},
         )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
@@ -9356,9 +9526,29 @@ def api_verify_change(cr_id: str) -> JSONResponse:
 def api_archive_change(cr_id: str) -> JSONResponse:
     """Geprüften manuellen Änderungsauftrag abschließen; Archiv bleibt read-only."""
     try:
+        change_request = get_event_change_request(current_database_file(), cr_id)
+        if change_request is None:
+            raise EventChangeApplyError("ChangeRequest nicht gefunden.")
+        event_id = str(change_request["event_id"])
+        selected_ids = _change_request_selected_family_ids(change_request)
+        previously_assigned = _assigned_family_ids_for_root_event(event_id)
         result = finish_event_change(
             current_database_file(), cr_id, current_archive_root(), current_workspace_root()
         )
+        if selected_ids:
+            _promote_global_family_ids_owned(
+                event_id,
+                selected_ids,
+            )
+        removed_ids = previously_assigned - selected_ids
+        if removed_ids:
+            release_family_ids_claims(
+                REGISTRY_DATABASE_FILE,
+                database_path=current_database_file(),
+                library_id=current_library_context().library_id,
+                family_ids=removed_ids,
+                allowed_states={"owned", "reserved"},
+            )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
