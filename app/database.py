@@ -486,7 +486,7 @@ def _job_workflow_states(connection: sqlite3.Connection) -> dict[str, dict[str, 
         job_id = str(job["id"])
         families = connection.execute(
             "SELECT id FROM file_families WHERE job_id=? ORDER BY id",
-            (job_id,),
+            (job_id, *exclusion_params),
         ).fetchall()
         family_ids = [int(row["id"]) for row in families]
         total = len(family_ids)
@@ -1905,6 +1905,8 @@ def list_file_metadata_candidates(
 def list_job_day_groups(
     database_path: Path,
     job_id: str,
+    *,
+    excluded_family_ids: set[int] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Liefert die für den Arbeitsbereich benötigten Tagesgruppen.
@@ -1914,11 +1916,19 @@ def list_job_day_groups(
     berechnet.
     """
 
+    excluded = sorted({int(value) for value in (excluded_family_ids or set())})
+    exclusion_sql = ""
+    exclusion_params: list[Any] = []
+    if excluded:
+        placeholders = ",".join("?" for _ in excluded)
+        exclusion_sql = f" AND (family_id IS NULL OR family_id NOT IN ({placeholders}))"
+        exclusion_params = excluded
+
     with database_connection(
         database_path
     ) as connection:
         dated_rows = connection.execute(
-            """
+            f"""
             SELECT
                 substr(
                     selected_capture_time,
@@ -1957,6 +1967,7 @@ def list_job_day_groups(
 
             WHERE job_id = ?
               AND selected_capture_time IS NOT NULL
+              {exclusion_sql}
 
             GROUP BY
                 substr(
@@ -1971,7 +1982,7 @@ def list_job_day_groups(
         ).fetchall()
 
         undated_row = connection.execute(
-            """
+            f"""
             SELECT
                 COUNT(*) AS file_count,
 
@@ -1996,8 +2007,9 @@ def list_job_day_groups(
 
             WHERE job_id = ?
               AND selected_capture_time IS NULL
+              {exclusion_sql}
             """,
-            (job_id,),
+            (job_id, *exclusion_params),
         ).fetchone()
 
     result = []
