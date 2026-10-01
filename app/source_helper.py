@@ -5,11 +5,12 @@ from typing import Any
 import json
 import os
 import re
+import stat
 import subprocess
 
 from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="Kamera-Quellen-Helfer", version="0.30.1")
+app = FastAPI(title="Kamera-Quellen-Helfer", version="0.31.0")
 MOUNT_ROOT = Path(
     os.environ.get(
         "KAMERA_REMOVABLE_MOUNT_ROOT",
@@ -19,6 +20,12 @@ MOUNT_ROOT = Path(
 # Kompatibilitaetsalias fuer bestehende Tests/Diagnosecode. In 0.29.1
 # gibt es keinen separaten Host-Mount-Namespace mehr.
 HOST_MOUNT_ROOT = MOUNT_ROOT
+DEVICE_NODE_ROOT = Path(
+    os.environ.get(
+        "KAMERA_DEVICE_NODE_ROOT",
+        "/dev/bibliothekar",
+    )
+)
 ALLOWED_FS = {"vfat", "exfat", "ntfs", "ext2", "ext3", "ext4", "xfs", "btrfs"}
 
 
@@ -48,6 +55,95 @@ def flattened(nodes: list[dict[str, Any]], parent: dict[str, Any] | None = None)
 
 def safe_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-")[:100] or "medium"
+
+
+def _kernel_name(node: dict[str, Any]) -> str:
+    value = str(node.get("kname") or "").strip()
+    if value:
+        return Path(value).name
+    value = str(node.get("path") or node.get("name") or "").strip()
+    return Path(value).name
+
+
+def _managed_device_node_path(kernel_name: str) -> Path:
+    return DEVICE_NODE_ROOT / safe_id(kernel_name)
+
+
+def _block_device_numbers(kernel_name: str) -> tuple[int, int]:
+    sysfs_path = Path("/sys/class/block") / kernel_name / "dev"
+    try:
+        value = sysfs_path.read_text(encoding="utf-8").strip()
+        major_text, minor_text = value.split(":", 1)
+        major = int(major_text)
+        minor = int(minor_text)
+    except (OSError, ValueError) as error:
+        raise RuntimeError(
+            "Major/Minor des Blockgeräts konnten nicht gelesen werden: "
+            + str(sysfs_path)
+        ) from error
+    if major < 0 or minor < 0:
+        raise RuntimeError("Ungültige Major/Minor-Werte für Blockgerät.")
+    return major, minor
+
+
+def _node_matches_device(path: Path, major: int, minor: int) -> bool:
+    try:
+        info = path.stat()
+    except OSError:
+        return False
+    return bool(
+        stat.S_ISBLK(info.st_mode)
+        and os.major(info.st_rdev) == major
+        and os.minor(info.st_rdev) == minor
+    )
+
+
+def _ensure_mount_device_node(item: dict[str, Any]) -> tuple[str, bool]:
+    original = Path(str(item.get("device_path") or ""))
+    if original.exists():
+        return str(original), False
+
+    kernel_name = str(item.get("kernel_name") or "").strip()
+    if not kernel_name:
+        raise RuntimeError("Kernelname des Blockgeräts fehlt.")
+
+    major, minor = _block_device_numbers(kernel_name)
+    DEVICE_NODE_ROOT.mkdir(parents=True, exist_ok=True)
+    managed = _managed_device_node_path(kernel_name)
+
+    if managed.exists() or managed.is_symlink():
+        if not _node_matches_device(managed, major, minor):
+            managed.unlink(missing_ok=True)
+
+    if not managed.exists():
+        os.mknod(
+            managed,
+            stat.S_IFBLK | 0o600,
+            os.makedev(major, minor),
+        )
+
+    if not _node_matches_device(managed, major, minor):
+        managed.unlink(missing_ok=True)
+        raise RuntimeError(
+            "Temporärer Geräte-Node stimmt nicht mit dem erkannten Blockgerät überein."
+        )
+
+    return str(managed), True
+
+
+def _remove_managed_device_node(kernel_name: str) -> None:
+    if not kernel_name:
+        return
+    path = _managed_device_node_path(kernel_name)
+    try:
+        if path.exists() or path.is_symlink():
+            path.unlink()
+    except OSError:
+        return
+    try:
+        DEVICE_NODE_ROOT.rmdir()
+    except OSError:
+        pass
 
 
 def classify(parent: dict[str, Any], partition: dict[str, Any]) -> str:
@@ -159,11 +255,16 @@ def _cleanup_stale_managed_mounts(active_device_paths: set[str]) -> None:
 def devices() -> list[dict[str, Any]]:
     data = lsblk()
     flat = list(flattened(data.get("blockdevices") or []))
-    active_device_paths = {
-        str(node.get("path") or node.get("name") or "")
-        for node in flat
-        if node.get("type") == "part" and node.get("fstype")
-    }
+    active_device_paths: set[str] = set()
+    for node in flat:
+        if node.get("type") != "part" or not node.get("fstype"):
+            continue
+        path = str(node.get("path") or node.get("name") or "")
+        if path:
+            active_device_paths.add(path)
+        kernel_name = _kernel_name(node)
+        if kernel_name:
+            active_device_paths.add(str(_managed_device_node_path(kernel_name)))
     _cleanup_stale_managed_mounts(active_device_paths)
 
     results = []
@@ -179,6 +280,12 @@ def devices() -> list[dict[str, Any]]:
             continue
 
         path = str(node.get("path") or node.get("name") or "")
+        kernel_name = _kernel_name(node)
+        managed_device_path = (
+            str(_managed_device_node_path(kernel_name))
+            if kernel_name
+            else ""
+        )
         parent_serial = str(parent.get("serial") or "").strip()
         serial_identity = (
             parent_serial + "-" + str(node.get("size") or "")
@@ -199,7 +306,11 @@ def devices() -> list[dict[str, Any]]:
         mount_options = str((info or {}).get("options") or "")
         mount_source = str((info or {}).get("source") or "")
 
-        if is_mounted and not _same_device_source(mount_source, path):
+        if (
+            is_mounted
+            and not _same_device_source(mount_source, path)
+            and not _same_device_source(mount_source, managed_device_path)
+        ):
             # Staler Mount: derselbe Mountpunkt gehoert nicht mehr zur aktuell
             # erkannten Geraeteinstanz. Sicher loesen und als unmounted melden.
             run("umount", mount_path, check=False)
@@ -216,6 +327,7 @@ def devices() -> list[dict[str, Any]]:
         results.append(
             {
                 "device_path": path,
+                "kernel_name": kernel_name,
                 "device_id": device_id,
                 "kind": classify(parent, node),
                 "size_bytes": int(node.get("size") or 0),
@@ -250,7 +362,7 @@ def selected_device(path: str) -> dict[str, Any]:
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "version": "0.30.1", "mount_root": str(MOUNT_ROOT), "mode": "direct"}
+    return {"status": "ok", "version": "0.31.0", "mount_root": str(MOUNT_ROOT), "device_node_root": str(DEVICE_NODE_ROOT), "mode": "direct"}
 
 
 @app.get("/devices")
@@ -275,18 +387,33 @@ def mount_device(payload: dict[str, Any]):
     elif item["filesystem"] in {"exfat", "ntfs"}:
         options += ",uid=568,gid=568,umask=0022"
 
+    try:
+        mount_source, managed_node = _ensure_mount_device_node(item)
+    except (OSError, RuntimeError) as error:
+        run("rmdir", str(mount_path), check=False)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Blockgerät ist im Container nicht direkt verfügbar und "
+                "konnte nicht sicher bereitgestellt werden: "
+                + str(error)
+            ),
+        ) from error
+
     result = run(
         "mount",
         "-t",
         item["filesystem"],
         "-o",
         options,
-        path,
+        mount_source,
         str(mount_path),
         check=False,
     )
     if result.returncode != 0:
         run("rmdir", str(mount_path), check=False)
+        if managed_node:
+            _remove_managed_device_node(str(item.get("kernel_name") or ""))
         raise HTTPException(
             status_code=500,
             detail=(
@@ -300,6 +427,8 @@ def mount_device(payload: dict[str, Any]):
     if not refreshed.get("read_only"):
         run("umount", str(mount_path), check=False)
         run("rmdir", str(mount_path), check=False)
+        if managed_node:
+            _remove_managed_device_node(str(item.get("kernel_name") or ""))
         raise HTTPException(
             status_code=500,
             detail="Die Quelle konnte nicht nachweislich nur lesend eingebunden werden.",
@@ -325,4 +454,5 @@ def unmount_device(payload: dict[str, Any]):
             ).strip(),
         )
     run("rmdir", str(mount_path), check=False)
+    _remove_managed_device_node(str(item.get("kernel_name") or ""))
     return {"mounted": False, "device": selected_device(path)}
