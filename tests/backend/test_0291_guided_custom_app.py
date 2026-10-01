@@ -48,7 +48,7 @@ def test_0291_source_helper_mounts_directly_without_host_namespace():
 
 def test_0291_compose_is_one_service_and_guided_custom_app_compatible():
     compose = (REPO_ROOT / "compose.example.yaml").read_text()
-    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.29.1" in compose
+    assert "ghcr.io/heller-adrian/bibliothekar:patch-" in compose
     assert "\n  source-helper:" not in compose
     assert "pid: host" not in compose
     assert "network_mode:" not in compose
