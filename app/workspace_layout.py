@@ -190,13 +190,9 @@ def resolve_library_work_root(
             + str(target)
         )
 
-    if int(target.stat().st_dev) != int(backup.stat().st_dev):
-        raise WorkspaceLayoutError(
-            "Der Bibliotheks-Arbeitsbereich muss auf demselben Dateisystem "
-            "wie die gemeinsamen SD-Kartensicherungen liegen, damit "
-            "Hardlinks sicher funktionieren."
-        )
-
+    # 0.31.1: Bibliotheks-Arbeitsbereiche dürfen auf anderen Datasets
+    # oder Pools liegen. Sichere Transfers wählen je nach Dateisystem
+    # Link+Unlink oder Copy+Verify+Delete; Hardlinks sind keine Voraussetzung.
     return target
 
 
