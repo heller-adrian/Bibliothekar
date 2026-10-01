@@ -15,6 +15,7 @@ from app.library_registry import (
     register_source_family,
     register_source_family_members,
     register_source_media,
+    release_source_family_claim,
     release_source_family_reservation,
 )
 
@@ -352,6 +353,187 @@ def backfill_library_claims(
         "owned_count": owned,
         "claim_count": reserved + owned,
     }
+
+
+def source_family_keys_for_ids(
+    database_path: Path,
+    library_id: str,
+    family_ids: list[int] | set[int],
+) -> dict[int, str]:
+    requested = sorted({int(value) for value in family_ids if int(value) > 0})
+    if not requested:
+        return {}
+
+    placeholders = ",".join("?" for _ in requested)
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT id, job_id, family_key
+            FROM file_families
+            WHERE id IN ({placeholders})
+            ORDER BY id
+            """,
+            tuple(requested),
+        ).fetchall()
+
+    found = {int(row["id"]) for row in rows}
+    missing = sorted(set(requested) - found)
+    if missing:
+        raise LibraryRegistryError(
+            "Mindestens eine Dateifamilie wurde nicht gefunden: "
+            + ", ".join(str(value) for value in missing)
+        )
+
+    return {
+        int(row["id"]): occurrence_key(
+            library_id,
+            str(row["job_id"]),
+            str(row["family_key"]),
+        )
+        for row in rows
+    }
+
+
+def reserve_family_ids(
+    registry_path: Path,
+    *,
+    database_path: Path,
+    library_id: str,
+    event_id: str,
+    family_ids: list[int] | set[int],
+) -> dict[str, Any]:
+    mapping = source_family_keys_for_ids(
+        database_path,
+        library_id,
+        family_ids,
+    )
+    claims = get_source_family_claims(
+        registry_path,
+        list(mapping.values()),
+    )
+    newly_reserved: list[str] = []
+
+    try:
+        for family_id, source_key in mapping.items():
+            claim = claims.get(source_key)
+            if claim is not None:
+                owner = str(claim.get("library_id") or "")
+                state = str(claim.get("claim_state") or "")
+                claim_event = str(claim.get("event_id") or "")
+                if owner != library_id:
+                    raise LibraryRegistryError(
+                        "Mindestens eine Dateifamilie ist bereits einer "
+                        "anderen Bibliothek vorbehalten."
+                    )
+                if (
+                    state == "reserved"
+                    and claim_event
+                    and claim_event != event_id
+                ):
+                    raise LibraryRegistryError(
+                        "Mindestens eine Dateifamilie ist bereits für ein "
+                        "anderes Ereignis dieser Bibliothek reserviert."
+                    )
+                # owned bleibt owned; eine bestehende Reservierung desselben
+                # Ereignisses wird nicht unnötig neu geschrieben.
+                continue
+
+            claim_source_family(
+                registry_path,
+                source_family_key=source_key,
+                library_id=library_id,
+                event_id=event_id,
+                claim_state="reserved",
+            )
+            newly_reserved.append(source_key)
+    except Exception:
+        for source_key in reversed(newly_reserved):
+            try:
+                release_source_family_reservation(
+                    registry_path,
+                    source_family_key=source_key,
+                    library_id=library_id,
+                )
+            except Exception:
+                pass
+        raise
+
+    return {
+        "family_ids": sorted(mapping),
+        "source_family_keys": mapping,
+        "newly_reserved": newly_reserved,
+    }
+
+
+def release_new_reservations(
+    registry_path: Path,
+    *,
+    library_id: str,
+    source_family_keys: list[str],
+) -> int:
+    released = 0
+    for source_key in reversed(list(source_family_keys)):
+        try:
+            if release_source_family_reservation(
+                registry_path,
+                source_family_key=source_key,
+                library_id=library_id,
+            ):
+                released += 1
+        except LibraryRegistryError:
+            # Ein zwischenzeitlich zu owned hochgestufter Claim darf durch
+            # Rollback niemals wieder freigegeben werden.
+            continue
+    return released
+
+
+def promote_family_ids_owned(
+    registry_path: Path,
+    *,
+    database_path: Path,
+    library_id: str,
+    event_id: str,
+    family_ids: list[int] | set[int],
+) -> int:
+    mapping = source_family_keys_for_ids(
+        database_path,
+        library_id,
+        family_ids,
+    )
+    for source_key in mapping.values():
+        claim_source_family(
+            registry_path,
+            source_family_key=source_key,
+            library_id=library_id,
+            event_id=event_id,
+            claim_state="owned",
+        )
+    return len(mapping)
+
+
+def release_family_ids_claims(
+    registry_path: Path,
+    *,
+    database_path: Path,
+    library_id: str,
+    family_ids: list[int] | set[int],
+    allowed_states: set[str],
+) -> int:
+    mapping = source_family_keys_for_ids(
+        database_path,
+        library_id,
+        family_ids,
+    )
+    released = 0
+    for source_key in mapping.values():
+        if release_source_family_claim(
+            registry_path,
+            source_family_key=source_key,
+            library_id=library_id,
+            allowed_states=allowed_states,
+        ):
+            released += 1
+    return released
 
 
 def blocked_family_ids(
