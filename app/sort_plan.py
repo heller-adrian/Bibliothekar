@@ -2226,11 +2226,11 @@ def build_event_sort_plan(
                     "path": str(source_relative),
                     "message": "XMP-Quelle verlässt den Arbeitsbereich.",
                 })
-            if not _is_relative_to(destination_absolute, target_root):
+            if not _is_relative_to(destination_absolute, destination_base):
                 blockers.append({
                     "code": "xmp_target_outside_root",
                     "path": str(destination_relative),
-                    "message": "XMP-Ziel verlässt den Arbeitsbereich.",
+                    "message": "XMP-Ziel verlässt den zulässigen Zielbereich.",
                 })
 
             source_exists = source_absolute.exists()
@@ -2294,7 +2294,7 @@ def build_event_sort_plan(
                     "path": str(source_relative),
                     "message": "Der XMP-Quellpfad enthält einen symbolischen Link.",
                 })
-            if _path_has_symlink(destination_absolute.parent, target_root):
+            if _path_has_symlink(destination_absolute.parent, destination_base):
                 blockers.append({
                     "code": "xmp_target_symlink_component",
                     "path": str(destination_relative),
