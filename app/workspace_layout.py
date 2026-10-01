@@ -147,6 +147,38 @@ def shared_work_root(workspace_path: Path) -> Path:
     return target
 
 
+def resolve_library_work_root(
+    workspace_path: Path,
+    requested_work_root: Path | None = None,
+) -> Path:
+    shared_root = shared_work_root(workspace_path)
+
+    if requested_work_root is None:
+        return shared_root
+
+    target = requested_work_root.expanduser().resolve(strict=False)
+    if target != shared_root and not _is_relative_to(target, shared_root):
+        raise WorkspaceLayoutError(
+            "Der Bibliotheks-Arbeitsbereich muss innerhalb von "
+            + str(shared_root)
+            + " liegen."
+        )
+
+    target.mkdir(parents=True, exist_ok=True)
+    if not target.is_dir():
+        raise WorkspaceLayoutError(
+            "Der Bibliotheks-Arbeitsbereich ist kein Verzeichnis: "
+            + str(target)
+        )
+    if not os.access(target, os.R_OK | os.W_OK | os.X_OK):
+        raise WorkspaceLayoutError(
+            "Der Bibliotheks-Arbeitsbereich ist nicht vollständig zugreifbar: "
+            + str(target)
+        )
+
+    return target
+
+
 def backup_root(workspace_path: Path) -> Path:
     root = resolve_workspace_root(workspace_path)
     target = (root / BACKUP_DIRECTORY_NAME).resolve(strict=False)
