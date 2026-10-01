@@ -6,6 +6,7 @@ ENV \
     TZ=Europe/Berlin \
     KAMERA_SOURCE_HELPER_ENABLED=true \
     KAMERA_REMOVABLE_MOUNT_ROOT=/sources/removable \
+    KAMERA_DEVICE_NODE_ROOT=/dev/bibliothekar \
     KAMERA_WEB_UID=568 \
     KAMERA_WEB_GID=568
 
@@ -49,7 +50,7 @@ RUN mkdir -p \
         /workspace \
         /sources
 
-# 0.29.1 startet absichtlich als root: nur der interne Quellen-Helper
+# 0.31.0 startet absichtlich als root: nur der interne Quellen-Helper
 # benoetigt Mount-/Geraeterechte. Der Supervisor startet die eigentliche
 # Bibliothekar-Web-App explizit als UID/GID 568.
 USER 0:0
