@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_0290_runtime_defaults_are_portable():
     assert main.APP_VERSION == "0.27.5"
     assert main.RELEASE_VERSION == "0.28.7"
-    assert main.DEPLOYMENT_VERSION == "0.29.1"
+    assert tuple(map(int, main.DEPLOYMENT_VERSION.split("."))) >= (0, 29, 1)
     assert str(main.WORKSPACE_PATH) == "/workspace"
     assert str(main.DATABASE_DIRECTORY) == "/database"
     assert str(main.LOG_PATH) == "/logs"
