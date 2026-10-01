@@ -6,7 +6,7 @@ from app import main
 from app.database import database_connection, delete_planned_event, initialize_database, list_global_tasks
 from app.global_workspace import build_global_workspace_summary
 from app.planning import list_global_released_archive_groups
-from app.workspace_layout import shared_work_root
+from app.workspace_layout import backup_root
 from app.workspace_reconcile import (
     build_workspace_reconcile_plan,
     execute_workspace_reconcile_run,
@@ -50,7 +50,7 @@ def test_0287_delete_applied_flattens_xmp_and_export_into_free_day(tmp_path: Pat
         "export": "2026/2026-07-23/A_Export.jpg",
     }
 
-    free_root = shared_work_root(workspace) / "2026" / "2026-07-23"
+    free_root = backup_root(workspace) / "2026" / "2026-07-23"
     assert (free_root / "A.JPG").read_bytes() == b"camera-a"
     assert (free_root / "A.xmp").read_bytes() == b"xmp-a"
     assert (free_root / "A_Export.jpg").read_bytes() == b"export-a"
@@ -82,7 +82,7 @@ def test_0287_delete_applied_archive_origin_flattens_all_assets_in_archive_relea
         "export": prefix + "A_Export.jpg",
     }
 
-    free_root = shared_work_root(workspace) / "Freigewordene Archivdateien" / "2026" / "2026-07-23"
+    free_root = backup_root(workspace) / "Freigewordene Archivdateien" / "2026" / "2026-07-23"
     assert (free_root / "A.JPG").read_bytes() == b"camera-a"
     assert (free_root / "A.xmp").read_bytes() == b"xmp-a"
     assert (free_root / "A_Export.jpg").read_bytes() == b"export-a"
