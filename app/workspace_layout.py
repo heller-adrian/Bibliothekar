@@ -201,9 +201,18 @@ def backup_root(workspace_path: Path) -> Path:
     entry = root / BACKUP_DIRECTORY_NAME
     target = entry.resolve(strict=False)
 
-    if not target.exists() or not target.is_dir():
+    if not target.exists():
+        try:
+            target.mkdir(mode=0o775)
+            _fsync_directory(root)
+        except OSError as error:
+            raise WorkspaceLayoutError(
+                "Der Ordner für SD-Kartensicherungen konnte nicht angelegt werden: "
+                + str(target)
+            ) from error
+    if not target.is_dir():
         raise WorkspaceLayoutError(
-            "Der Ordner für SD-Kartensicherungen fehlt: " + str(target)
+            "Der Pfad für SD-Kartensicherungen ist kein Ordner: " + str(target)
         )
 
     if not entry.is_symlink() and not _is_relative_to(target, root):
