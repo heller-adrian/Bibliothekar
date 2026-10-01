@@ -281,8 +281,9 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
         task['kind'] in {'reassignment','resort','unassigned_families'}
         for task in list_global_tasks(db)
     )
-    assert len(list((root/'2026'/'2026-07-23 · 00-00–12-59').glob('*.JPG')))==1
-    assert len(list((root/'2026'/'2026-07-23 · 15-01–23-59').glob('*.JPG')))==1
+    central=workspace/'SD-Kartensicherungen'
+    assert len(list((central/'2026'/'2026-07-23 · 00-00–12-59').glob('*.JPG')))==1
+    assert len(list((central/'2026'/'2026-07-23 · 15-01–23-59').glob('*.JPG')))==1
     cards=list_job_planning_overview(db,'j')['available_day_groups']
     released_cards=[card for card in cards if card.get('released_free')]
     assert len(released_cards)==2
@@ -290,8 +291,8 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
     target=create(db,{'event_kind':'no_event','no_event_segments':cards})['parent_event']
     # Creating a new plan does not move files. Refreshing tasks only clears the
     # informational release marker because the families are assigned again.
-    assert len(list((root/'2026'/'2026-07-23 · 00-00–12-59').glob('*.JPG')))==1
-    assert len(list((root/'2026'/'2026-07-23 · 15-01–23-59').glob('*.JPG')))==1
+    assert len(list((central/'2026'/'2026-07-23 · 00-00–12-59').glob('*.JPG')))==1
+    assert len(list((central/'2026'/'2026-07-23 · 15-01–23-59').glob('*.JPG')))==1
     list_global_tasks(db)
     with database_connection(db) as c:
         assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==0
@@ -333,7 +334,7 @@ def test_0260_applied_delete_releases_files_and_keeps_open_task(tmp_path,preserv
             "SELECT COUNT(*) FROM audit_log WHERE entity_id=? AND action='event_deleted_after_reconcile'",
             (event['id'],),
         ).fetchone()[0]==1
-    assert (workspace/'Arbeitsbereich'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
+    assert (workspace/'SD-Kartensicherungen'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
     assert not any(
         task['kind'] in {'reassignment','resort','unassigned_families'}
         for task in list_global_tasks(db)
@@ -460,7 +461,7 @@ def test_0260_applied_year_change_document_lifecycle(tmp_path,cancel):
     execute_workspace_reconcile_run(db,run['id'],workspace)
     assert not old_document.exists()
     assert new_document.exists()
-    assert (root/'2025'/'2025-12-31'/'1.JPG').read_bytes()==b'1'
+    assert (workspace/'SD-Kartensicherungen'/'2025'/'2025-12-31'/'1.JPG').read_bytes()==b'1'
 
 
 def test_archive_parent_preview_keeps_files_read_only_and_pending_release_hidden(tmp_path):
