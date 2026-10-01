@@ -179,6 +179,7 @@ def test_0286_released_archive_assets_follow_cross_job_family_and_layout_roles(t
     workspace.mkdir()
     ensure_workspace_layout(workspace)
     work = shared_work_root(workspace)
+    central = workspace / "SD-Kartensicherungen"
 
     release_dir = "Freigewordene Archivdateien/2026/2026-07-23"
     camera_rel = release_dir + "/A.JPG"
@@ -256,7 +257,7 @@ def test_0286_released_archive_assets_follow_cross_job_family_and_layout_roles(t
         (xmp_rel, b"xmp"),
         (export_rel, b"export"),
     ):
-        path = work / rel
+        path = central / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
 
