@@ -580,7 +580,7 @@ def prepare_sort_run(
                 str(plan["plan_token"]),
                 str(plan["source_root"]),
                 str(plan["target_root"]),
-                str(plan["central_stock_root"]),
+                str(plan.get("central_stock_root") or plan["target_root"]),
                 int(summary["file_count"]),
                 int(summary["move_count"]),
                 int(summary["directory_count"]),
