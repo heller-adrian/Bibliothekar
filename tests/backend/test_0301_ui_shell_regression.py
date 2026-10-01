@@ -1,0 +1,59 @@
+from app import main, source_helper, ui_shell
+
+
+def _fnv1a32(text: str) -> str:
+    value = 0x811C9DC5
+    for byte in text.encode("utf-8"):
+        value ^= byte
+        value = (value * 0x01000193) & 0xFFFFFFFF
+    return f"{value:08x}"
+
+
+def test_0301_shell_css_matches_frozen_0287_design():
+    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 43515
+    assert _fnv1a32(ui_shell.BIBLIOTHEKAR_CSS) == "6c49c6e0"
+
+
+def test_0301_shell_javascript_version_block_is_real_javascript():
+    malformed = (
+        'document.querySelectorAll("[data-bk-version]").forEach(node => {\\n'
+    )
+    assert malformed not in ui_shell.BIBLIOTHEKAR_JS
+
+    expected = """document.querySelectorAll("[data-bk-version]").forEach(node => {
+      const deployment = data.deployment_version || data.version || "";
+      const core = data.version || "";
+      node.textContent = deployment && core && deployment !== core
+        ? `${deployment} · Kern ${core}`
+        : deployment;
+    });"""
+    assert expected in ui_shell.BIBLIOTHEKAR_JS
+
+
+def test_0301_critical_shell_initializers_are_present():
+    script = ui_shell.BIBLIOTHEKAR_JS
+
+    assert "applyTheme(stored);" in script
+    assert 'menuButton?.addEventListener("click"' in script
+    assert "async function refreshTasks()" in script
+    assert 'fetch("/api/tasks", {cache: "no-store"})' in script
+    assert 'fetch("/api/health", {cache: "no-store"})' in script
+
+
+def test_0301_task_backend_contract_is_unchanged():
+    source = main.api_global_tasks.__code__
+    assert source.co_argcount == 0
+
+
+def test_0301_versions_are_consistent():
+    assert main.DEPLOYMENT_VERSION == "0.30.1"
+    assert source_helper.app.version == "0.30.1"
+    assert source_helper.healthz()["version"] == "0.30.1"
+
+
+def test_0301_compose_uses_patch_image():
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    compose = (repo_root / "compose.example.yaml").read_text()
+    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.30.1" in compose
