@@ -11,6 +11,7 @@ import uuid
 
 from app.database import database_connection
 from app.job_readiness import job_sort_readiness
+from app.safe_transfer import SafeTransferError, move_verified_no_overwrite
 from app.sort_plan import (
     SortPlanError,
     build_event_sort_plan,
@@ -302,6 +303,9 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
         run_id = str(run["id"])
         source_root = Path(str(run["source_root"])).resolve(strict=False)
         target_root = Path(str(run["target_root"])).resolve(strict=False)
+        central_root = Path(
+            str(run.get("central_root") or run["target_root"])
+        ).resolve(strict=False)
         with database_connection(database_path) as connection:
             camera_operations = [
                 {**dict(row), "_operation_kind": "camera"}
@@ -332,11 +336,21 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
                 destination_rel = _safe_relative(operation["destination_relative_path"])
                 operation_source_root = (
                     target_root
-                    if str(operation.get("source_root_kind") or "job_root") == "shared_workspace"
+                    if (
+                        str(run.get("run_kind") or "initial") == "reapply"
+                        and str(operation.get("source_root_kind") or "job_root")
+                        == "shared_workspace"
+                    )
                     else source_root
                 )
+                destination_root = (
+                    central_root
+                    if str(operation.get("destination_root_kind") or "target_root")
+                    == "central_stock"
+                    else target_root
+                )
                 source = operation_source_root.joinpath(*source_rel.parts)
-                destination = target_root.joinpath(*destination_rel.parts)
+                destination = destination_root.joinpath(*destination_rel.parts)
                 expected_size = int(operation["expected_size_bytes"])
                 expected_sha = str(operation["expected_sha256"] or "").strip()
 
@@ -351,23 +365,20 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
                     _verify_recovery_copy(source, expected_size, expected_sha)
                 elif destination_exists and not source_exists:
                     _verify_recovery_copy(destination, expected_size, expected_sha)
-                    _rollback_one(source, destination)
+                    _rollback_one(
+                        source,
+                        destination,
+                        expected_size=expected_size,
+                        expected_sha256=expected_sha,
+                    )
                     _verify_recovery_copy(source, expected_size, expected_sha)
                 elif source_exists and destination_exists:
-                    source_info = os.lstat(source)
-                    destination_info = os.lstat(destination)
-                    if (
-                        not stat.S_ISREG(source_info.st_mode)
-                        or not stat.S_ISREG(destination_info.st_mode)
-                        or int(source_info.st_dev) != int(destination_info.st_dev)
-                        or int(source_info.st_ino) != int(destination_info.st_ino)
-                    ):
-                        raise SortApplyError(
-                            "Wiederherstellung ist mehrdeutig: Quelle und Ziel existieren als verschiedene Dateien: "
-                            + str(source) + " / " + str(destination)
-                        )
-                    _verify_recovery_copy(source, expected_size, expected_sha)
-                    _rollback_one(source, destination)
+                    _rollback_one(
+                        source,
+                        destination,
+                        expected_size=expected_size,
+                        expected_sha256=expected_sha,
+                    )
                 else:
                     raise SortApplyError(
                         "Wiederherstellung ist nicht möglich, weil Quelle und Ziel fehlen: "
@@ -463,7 +474,11 @@ def prepare_sort_run(
 
     job_ready, job_blocker = job_sort_readiness(plan["job"])
     source_mode = str((plan.get("job") or {}).get("source_root_field") or "")
-    if not job_ready and source_mode not in {"shared_workspace", "released_archive_workspace"}:
+    if not job_ready and source_mode not in {
+        "shared_workspace",
+        "released_archive_workspace",
+        "central_stock",
+    }:
         raise SortApplyError(job_blocker)
 
     run_id = "SORT_" + uuid.uuid4().hex.upper()
@@ -533,6 +548,7 @@ def prepare_sort_run(
                 phase,
                 source_root,
                 target_root,
+                central_root,
                 file_count,
                 verified_file_count,
                 move_count,
@@ -553,7 +569,7 @@ def prepare_sort_run(
                 ?, ?, ?, ?,
                 'queued',
                 'Wartet auf vollständige SHA-256-Prüfung',
-                ?, ?, ?, 0, ?, 0, ?, 0, ?, 0, 0,
+                ?, ?, ?, ?, 0, ?, 0, ?, 0, ?, 0, 0,
                 NULL, ?, ?, NULL, ?, NULL
             )
             """,
@@ -564,6 +580,7 @@ def prepare_sort_run(
                 str(plan["plan_token"]),
                 str(plan["source_root"]),
                 str(plan["target_root"]),
+                str(plan["central_stock_root"]),
                 int(summary["file_count"]),
                 int(summary["move_count"]),
                 int(summary["directory_count"]),
@@ -601,6 +618,7 @@ def prepare_sort_run(
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
                 str(entry.get("current_root_kind") or "job_root"),
+                str(entry.get("destination_root_kind") or "target_root"),
                 status_value,
             ))
 
@@ -615,9 +633,10 @@ def prepare_sort_run(
                 expected_size_bytes,
                 expected_sha256,
                 source_root_kind,
+                destination_root_kind,
                 status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             operations,
         )
@@ -641,6 +660,7 @@ def prepare_sort_run(
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
                 str(entry.get("source_root_kind") or "shared_workspace"),
+                str(entry.get("destination_root_kind") or "target_root"),
                 status_value,
             ))
 
@@ -649,9 +669,10 @@ def prepare_sort_run(
             INSERT INTO sort_asset_operations (
                 sort_run_id, sequence_number, asset_kind, family_id,
                 source_file_id, source_relative_path, destination_relative_path,
-                expected_size_bytes, expected_sha256, source_root_kind, status
+                expected_size_bytes, expected_sha256, source_root_kind,
+                destination_root_kind, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             asset_operations,
         )
@@ -830,100 +851,53 @@ def _move_without_overwrite(
     destination: Path,
     entry: dict[str, Any],
 ) -> None:
-    source_stat = _assert_source_identity(source, entry)
-
-    if destination.exists() or destination.is_symlink():
-        raise SortApplyError(
-            "Am Ziel ist zwischenzeitlich ein Eintrag entstanden: "
-            + str(destination)
-        )
-
-    os.link(
-        source,
-        destination,
-        follow_symlinks=False,
-    )
-
-    destination_stat = os.lstat(destination)
-
-    if (
-        int(destination_stat.st_dev) != int(source_stat.st_dev)
-        or int(destination_stat.st_ino) != int(source_stat.st_ino)
-    ):
-        destination.unlink(missing_ok=True)
-        raise SortApplyError(
-            "Der sichere Link-Schritt konnte nicht bestätigt werden: "
-            + str(destination)
-        )
-
-    source_check = os.lstat(source)
-
-    if (
-        int(source_check.st_dev) != int(destination_stat.st_dev)
-        or int(source_check.st_ino) != int(destination_stat.st_ino)
-    ):
-        destination.unlink(missing_ok=True)
-        raise SortApplyError(
-            "Die Quelldatei änderte sich während der Verschiebung: "
-            + str(source)
-        )
-
+    _assert_source_identity(source, entry)
     try:
-        source.unlink()
-    except Exception:
-        destination.unlink(missing_ok=True)
-        _fsync_directory(destination.parent)
-        raise
+        move_verified_no_overwrite(
+            source,
+            destination,
+            expected_size=int(entry["expected_size_bytes"]),
+            expected_sha256=str(entry.get("stored_sha256") or ""),
+        )
+    except SafeTransferError as error:
+        raise SortApplyError(str(error)) from error
 
 
 def _rollback_one(
     source: Path,
     destination: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
 ) -> None:
     source_exists = source.exists() or source.is_symlink()
     destination_exists = destination.exists() or destination.is_symlink()
 
     if destination_exists and not source_exists:
-        source.parent.mkdir(parents=True, exist_ok=True)
-        os.link(
-            destination,
-            source,
-            follow_symlinks=False,
-        )
-        source_stat = os.lstat(source)
-        destination_stat = os.lstat(destination)
-
-        if (
-            int(source_stat.st_dev) != int(destination_stat.st_dev)
-            or int(source_stat.st_ino) != int(destination_stat.st_ino)
-        ):
-            source.unlink(missing_ok=True)
-            raise SortApplyError(
-                "Rollback-Link konnte nicht bestätigt werden: " + str(source)
+        _verify_recovery_copy(destination, expected_size, expected_sha256)
+        try:
+            move_verified_no_overwrite(
+                destination,
+                source,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
             )
+        except SafeTransferError as error:
+            raise SortApplyError(str(error)) from error
+        _verify_recovery_copy(source, expected_size, expected_sha256)
+        return
 
+    if source_exists and destination_exists:
+        # A crash can leave both verified copies behind during a cross-filesystem
+        # move. The journaled source is authoritative until SQLite finalization.
+        _verify_recovery_copy(source, expected_size, expected_sha256)
+        _verify_recovery_copy(destination, expected_size, expected_sha256)
         destination.unlink()
-        _fsync_directory(source.parent)
         _fsync_directory(destination.parent)
         return
 
-    if destination_exists and source_exists:
-        source_stat = os.lstat(source)
-        destination_stat = os.lstat(destination)
-
-        if (
-            int(source_stat.st_dev) == int(destination_stat.st_dev)
-            and int(source_stat.st_ino) == int(destination_stat.st_ino)
-        ):
-            destination.unlink()
-            _fsync_directory(destination.parent)
-            return
-
-        raise SortApplyError(
-            "Rollback-Konflikt: Quelle und Ziel existieren mit verschiedenen Inodes."
-        )
-
     if source_exists and not destination_exists:
+        _verify_recovery_copy(source, expected_size, expected_sha256)
         return
 
     raise SortApplyError(
@@ -1663,7 +1637,12 @@ def execute_sort_run(
             destination = Path(entry["destination_absolute_path"])
 
             try:
-                _rollback_one(source, destination)
+                _rollback_one(
+                    source,
+                    destination,
+                    expected_size=int(entry["expected_size_bytes"]),
+                    expected_sha256=str(entry.get("stored_sha256") or ""),
+                )
                 if entry.get("_operation_kind") == "asset":
                     _update_asset_operation(
                         database_path,
