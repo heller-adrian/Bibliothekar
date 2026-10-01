@@ -7,7 +7,7 @@ from typing import Any
 from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.archive_reassignment_segments import ArchiveSegmentError, build_archive_reassignment_segments
 from app.database import database_connection
-from app.workspace_layout import WorkspaceLayoutError, shared_work_root
+from app.workspace_layout import WorkspaceLayoutError, backup_root
 
 
 RELEASE_DIRECTORY_NAME = "Freigewordene Archivdateien"
@@ -36,7 +36,7 @@ def _safe_relative(value: Any) -> PurePosixPath:
 
 def _safe_workspace_path(workspace_path: Path, relative_value: Any) -> Path:
     try:
-        root = shared_work_root(workspace_path).resolve(strict=False)
+        root = backup_root(workspace_path).resolve(strict=False)
     except WorkspaceLayoutError as exc:
         raise ArchiveReleaseStockError(str(exc)) from exc
     rel = _safe_relative(relative_value)
@@ -44,7 +44,7 @@ def _safe_workspace_path(workspace_path: Path, relative_value: Any) -> Path:
     try:
         target.relative_to(root)
     except ValueError as exc:
-        raise ArchiveReleaseStockError("Der SSD-Pfad verlässt den Arbeitsbereich.") from exc
+        raise ArchiveReleaseStockError("Der Rückkehrpfad verlässt den zentralen Aufnahmebestand.") from exc
     return target
 
 
@@ -288,7 +288,7 @@ def prepare_archive_release_stock(
             "root": RELEASE_DIRECTORY_NAME,
         }
 
-    root = shared_work_root(workspace_path).resolve(strict=False)
+    root = backup_root(workspace_path).resolve(strict=False)
     prepared: list[tuple[str, int, str]] = []
     created_paths: list[Path] = []
     try:
@@ -498,7 +498,7 @@ def cleanup_archive_release_stock(
     cr_id: str,
 ) -> dict[str, Any]:
     context = _release_context(database_path, cr_id)
-    root = shared_work_root(workspace_path).resolve(strict=False)
+    root = backup_root(workspace_path).resolve(strict=False)
     removed = 0
     warnings: list[str] = []
     parents: set[Path] = set()
