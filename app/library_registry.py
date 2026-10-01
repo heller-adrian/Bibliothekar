@@ -1173,12 +1173,17 @@ def claim_source_family(
         connection.close()
 
 
-def release_source_family_reservation(
+def release_source_family_claim(
     registry_path: Path,
     *,
     source_family_key: str,
     library_id: str,
+    allowed_states: set[str] | None = None,
 ) -> bool:
+    allowed = set(allowed_states or {"reserved"})
+    if not allowed or not allowed.issubset({"reserved", "owned"}):
+        raise LibraryRegistryError("Ungültiger Freigabezustand.")
+
     connection = _connect(registry_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
@@ -1205,11 +1210,11 @@ def release_source_family_reservation(
 
         if str(row["library_id"]) != str(library_id):
             raise LibraryRegistryError(
-                "Reservierung gehört zu einer anderen Bibliothek."
+                "Reservierung bzw. Besitz gehört zu einer anderen Bibliothek."
             )
-        if str(row["claim_state"]) != "reserved":
+        if str(row["claim_state"]) not in allowed:
             raise LibraryRegistryError(
-                "Übernommene Dateifamilien werden nicht durch Abbruch wieder freigegeben."
+                "Dieser globale Familienzustand darf in diesem Workflow nicht freigegeben werden."
             )
 
         connection.execute(
@@ -1223,6 +1228,20 @@ def release_source_family_reservation(
         raise
     finally:
         connection.close()
+
+
+def release_source_family_reservation(
+    registry_path: Path,
+    *,
+    source_family_key: str,
+    library_id: str,
+) -> bool:
+    return release_source_family_claim(
+        registry_path,
+        source_family_key=source_family_key,
+        library_id=library_id,
+        allowed_states={"reserved"},
+    )
 
 
 def get_source_family_claims(
