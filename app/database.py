@@ -642,6 +642,8 @@ def list_imported_media_origins(
 
 def claim_next_job(
     database_path: Path,
+    *,
+    operation: str | None = None,
 ) -> dict[str, Any] | None:
     connection = connect(
         database_path
@@ -652,15 +654,28 @@ def claim_next_job(
             "BEGIN IMMEDIATE"
         )
 
-        row = connection.execute(
-            """
-            SELECT *
-            FROM jobs
-            WHERE state = 'queued'
-            ORDER BY created_at ASC, id ASC
-            LIMIT 1
-            """
-        ).fetchone()
+        if operation is None:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM jobs
+                WHERE state = 'queued'
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+                """
+            ).fetchone()
+        else:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM jobs
+                WHERE state = 'queued'
+                  AND operation = ?
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+                """,
+                (str(operation),),
+            ).fetchone()
 
         if row is None:
             connection.commit()
