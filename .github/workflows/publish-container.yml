@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -80,3 +80,65 @@ jobs:
 
       - name: Record published digest
         run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Synchronize existing prerelease
+        if: startsWith(github.ref, 'refs/heads/patch/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#patch/}"
+          TAG="v${VERSION}"
+          RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null || true)"
+
+          if [ -z "$RELEASE_JSON" ]; then
+            echo "No existing release for ${TAG}; skipping prerelease synchronization."
+            exit 0
+          fi
+
+          if [ "$(printf '%s' "$RELEASE_JSON" | jq -r '.prerelease')" != "true" ]; then
+            echo "Release ${TAG} is not a prerelease; leaving it unchanged."
+            exit 0
+          fi
+
+          RELEASE_ID="$(printf '%s' "$RELEASE_JSON" | jq -r '.id')"
+          printf '%s' "$RELEASE_JSON" | jq -r '.body // ""' > /tmp/release-body.md
+
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("/tmp/release-body.md")
+          body = path.read_text()
+          digest = os.environ["IMAGE_DIGEST"]
+          sha = os.environ["GITHUB_SHA"]
+
+          body, digest_count = re.subn(
+              r"(Digest:\s*\n)(?:`?sha256:[0-9a-f]+`?)",
+              lambda m: m.group(1) + digest,
+              body,
+              count=1,
+          )
+          body, commit_count = re.subn(
+              r"(Source commit:\s*\n)(?:`?[0-9a-f]{40}`?)",
+              lambda m: m.group(1) + sha,
+              body,
+              count=1,
+          )
+
+          if digest_count != 1 or commit_count != 1:
+              raise SystemExit(
+                  "Prerelease body does not contain the expected Digest/Source commit fields."
+              )
+
+          path.write_text(body)
+          PY
+
+          gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}"             -f sha="${GITHUB_SHA}"             -F force=true >/dev/null
+
+          gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"             -f target_commitish="${GITHUB_SHA}"             -F prerelease=true             --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
+
+          echo "Synchronized ${TAG} to ${GITHUB_SHA} with digest ${IMAGE_DIGEST}."
