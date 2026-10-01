@@ -972,57 +972,6 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
 .bk-language-note {
   margin-top: 9px; color: var(--bk-muted); font-size: .9rem;
 }
-.bk-settings-tabs {
-  display: flex; gap: 8px; flex-wrap: wrap;
-  padding: 0 0 12px; border-bottom: 1px solid var(--bk-line);
-}
-.bk-settings-tabs button.active {
-  background: var(--bk-ink) !important;
-  color: var(--bk-paper) !important;
-  border-color: var(--bk-ink) !important;
-}
-.bk-settings-panel[hidden] { display: none !important; }
-.bk-library-list { display: grid; gap: 10px; margin-top: 10px; }
-.bk-library-card {
-  border: 1px solid var(--bk-line); border-radius: 12px;
-  padding: 12px; background: var(--bk-surface);
-  display: grid; gap: 9px;
-}
-.bk-library-card-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; flex-wrap: wrap;
-}
-.bk-library-meta {
-  display: grid; gap: 3px; color: var(--bk-muted);
-  font-size: .84rem; overflow-wrap: anywhere;
-}
-.bk-library-actions { display: flex; gap: 7px; flex-wrap: wrap; }
-.bk-library-form {
-  display: grid; gap: 9px; margin-top: 10px;
-  padding: 12px; border: 1px solid var(--bk-line);
-  border-radius: 12px; background: var(--bk-surface);
-}
-.bk-library-form label { display: grid; gap: 5px; }
-.bk-library-form input { width: 100%; box-sizing: border-box; }
-.bk-library-status {
-  color: var(--bk-muted); font-size: .88rem; line-height: 1.35;
-  white-space: pre-wrap;
-}
-.bk-library-status.is-error { color: var(--bk-danger); }
-.bk-library-status.is-ok { color: var(--bk-green); }
-.bk-library-switch-list { display: grid; gap: 9px; }
-.bk-library-switch {
-  width: 100%; display: flex !important; align-items: center;
-  justify-content: space-between; gap: 12px; text-align: left;
-  padding: 12px !important; border: 1px solid var(--bk-line) !important;
-  background: var(--bk-surface) !important;
-}
-.bk-library-switch.active {
-  border-color: var(--bk-green) !important;
-}
-.bk-library-switch small {
-  color: var(--bk-muted); display: block; margin-top: 3px;
-}
 
 body[data-bk-area="assistant"] main,
 body[data-bk-area="metadata"] main {
@@ -1678,6 +1627,62 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
     grid-template-columns: 1fr 1fr;
   }
 }
+"""
+
+
+BIBLIOTHEKAR_0310_CSS = r"""
+.bk-settings-tabs {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 0 0 12px; border-bottom: 1px solid var(--bk-line);
+}
+.bk-settings-tabs button.active {
+  background: var(--bk-ink) !important;
+  color: var(--bk-paper) !important;
+  border-color: var(--bk-ink) !important;
+}
+.bk-settings-panel[hidden] { display: none !important; }
+.bk-library-list { display: grid; gap: 10px; margin-top: 10px; }
+.bk-library-card {
+  border: 1px solid var(--bk-line); border-radius: 12px;
+  padding: 12px; background: var(--bk-surface);
+  display: grid; gap: 9px;
+}
+.bk-library-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.bk-library-meta {
+  display: grid; gap: 3px; color: var(--bk-muted);
+  font-size: .84rem; overflow-wrap: anywhere;
+}
+.bk-library-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+.bk-library-form {
+  display: grid; gap: 9px; margin-top: 10px;
+  padding: 12px; border: 1px solid var(--bk-line);
+  border-radius: 12px; background: var(--bk-surface);
+}
+.bk-library-form label { display: grid; gap: 5px; }
+.bk-library-form input { width: 100%; box-sizing: border-box; }
+.bk-library-status {
+  color: var(--bk-muted); font-size: .88rem; line-height: 1.35;
+  white-space: pre-wrap;
+}
+.bk-library-status.is-error { color: var(--bk-danger); }
+.bk-library-status.is-ok { color: var(--bk-green); }
+.bk-library-switch-list { display: grid; gap: 9px; }
+.bk-library-switch {
+  width: 100%; display: flex !important; align-items: center;
+  justify-content: space-between; gap: 12px; text-align: left;
+  padding: 12px !important; border: 1px solid var(--bk-line) !important;
+  background: var(--bk-surface) !important;
+}
+.bk-library-switch.active {
+  border-color: var(--bk-green) !important;
+}
+.bk-library-switch small {
+  color: var(--bk-muted); display: block; margin-top: 3px;
+}
+
 """
 
 
@@ -2581,7 +2586,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     result = html
     result = result.replace(
         "</head>",
-        f"<style>{BIBLIOTHEKAR_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
