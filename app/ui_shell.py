@@ -1688,7 +1688,7 @@ BIBLIOTHEKAR_0310_CSS = r"""
 
 
 BIBLIOTHEKAR_0311_CSS = r"""
-/* 0.31.1: Einstellungsdialog auf jeder Seite identisch und sicher scrollbar. */
+/* 0.32.2: breiter, responsiver Einstellungsdialog mit scrollbaren Tabs. */
 .bk-dialog {
   max-height: calc(100dvh - 28px) !important;
   overflow: hidden !important;
@@ -1702,15 +1702,63 @@ BIBLIOTHEKAR_0311_CSS = r"""
   scrollbar-gutter: stable;
 }
 #bk-settings-dialog {
-  width: min(620px, calc(100vw - 28px));
+  width: min(880px, calc(100vw - 28px));
 }
 #bk-settings-dialog .bk-settings-tabs {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0 6px;
 }
 #bk-settings-dialog .bk-settings-tabs button {
   min-width: 0 !important;
+  flex: 1 1 0;
+  white-space: nowrap;
   border-radius: 11px !important;
+}
+#bk-settings-dialog .bk-settings-group,
+#bk-settings-dialog .bk-library-card,
+#bk-settings-dialog .bk-library-form,
+#bk-settings-dialog .bk-library-add-card {
+  border: 1px solid var(--bk-line);
+  border-radius: 14px !important;
+  background: var(--bk-surface);
+  padding: 14px;
+}
+#bk-settings-dialog .bk-settings-group {
+  margin-top: 12px;
+}
+#bk-settings-dialog .bk-settings-group:first-of-type {
+  border-top: 1px solid var(--bk-line);
+}
+#bk-settings-dialog .bk-library-add-card {
+  margin-top: 10px;
+}
+#bk-settings-dialog .bk-library-add-card > summary {
+  cursor: pointer;
+  font-weight: 800;
+  list-style: none;
+}
+#bk-settings-dialog .bk-library-add-card > summary::-webkit-details-marker {
+  display: none;
+}
+#bk-settings-dialog .bk-library-add-card > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform .16s ease;
+}
+#bk-settings-dialog .bk-library-add-card[open] > summary::before {
+  transform: rotate(90deg);
+}
+#bk-settings-dialog .bk-library-add-card .bk-library-form {
+  margin-top: 12px;
+  background: var(--bk-surface-2);
 }
 #bk-settings-dialog input:not([type="checkbox"]):not([type="radio"]),
 #bk-settings-dialog select,
@@ -1723,20 +1771,44 @@ BIBLIOTHEKAR_0311_CSS = r"""
   background: var(--bk-surface-2) !important;
   box-shadow: none !important;
 }
-#bk-settings-dialog .bk-library-card,
-#bk-settings-dialog .bk-library-form,
 #bk-library-dialog .bk-library-switch {
   border-radius: 12px !important;
 }
-#bk-library-management-list {
-  min-width: 0;
-}
+#bk-library-management-list,
 .bk-settings-panel {
   min-width: 0;
 }
-@media (max-width: 620px) {
+@media (max-width: 700px) {
+  #bk-settings-dialog {
+    width: calc(100vw - 18px);
+  }
+  #bk-settings-dialog .bk-dialog-body {
+    padding: 16px;
+  }
+  #bk-settings-dialog .bk-dialog-head {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) 38px;
+    align-items: start;
+    gap: 8px;
+  }
+  #bk-settings-dialog .bk-dialog-head > div:first-child {
+    grid-column: 2;
+    text-align: center;
+  }
+  #bk-settings-dialog .bk-dialog-close {
+    grid-column: 3;
+    grid-row: 1;
+  }
   #bk-settings-dialog .bk-settings-tabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-inline: -4px;
+    padding-inline: 4px;
+  }
+  #bk-settings-dialog .bk-settings-tabs button {
+    flex: 0 0 auto;
+    min-width: max-content !important;
+  }
+  #bk-settings-dialog .bk-choice-row {
+    justify-content: center;
   }
 }
 """
@@ -2597,18 +2669,20 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <section class="bk-settings-group" id="bk-library-settings">
         <div><strong>Bibliotheken</strong><div style="color:var(--bk-muted);margin-top:4px">Anzeigenamen und registrierte Mountpfade verwalten</div></div>
         <div id="bk-library-management-list" class="bk-library-list"></div>
-        <div class="bk-library-form">
-          <strong>Bibliothek hinzufügen</strong>
-          <div style="color:var(--bk-muted);font-size:.88rem">Die Host Paths werden zuerst in TrueNAS eingebunden. Hier werden ausschließlich die Container-Mountpfade eingetragen.</div>
-          <label><span>Anzeigename</span><input id="bk-new-library-name" placeholder="z. B. Business"></label>
-          <label><span>Arbeitsbereich · RW</span><input id="bk-new-library-work" placeholder="/libraries/business/workspace"></label>
-          <label><span>Archiv · RO</span><input id="bk-new-library-archive" placeholder="/libraries/business/archive"></label>
-          <div class="bk-library-actions">
-            <button id="bk-new-library-check" type="button">Prüfen</button>
-            <button id="bk-new-library-create" type="button" class="bk-positive-action" disabled>Bibliothek hinzufügen</button>
+        <details class="bk-library-add-card">
+          <summary>Bibliothek hinzufügen</summary>
+          <div class="bk-library-form">
+            <div style="color:var(--bk-muted);font-size:.88rem">Die Host Paths werden zuerst in TrueNAS eingebunden. Hier werden ausschließlich die Container-Mountpfade eingetragen.</div>
+            <label><span>Anzeigename</span><input id="bk-new-library-name" placeholder="z. B. Business"></label>
+            <label><span>Arbeitsbereich · RW</span><input id="bk-new-library-work" placeholder="/libraries/business/workspace"></label>
+            <label><span>Archiv · RO</span><input id="bk-new-library-archive" placeholder="/libraries/business/archive"></label>
+            <div class="bk-library-actions">
+              <button id="bk-new-library-check" type="button">Prüfen</button>
+              <button id="bk-new-library-create" type="button" class="bk-positive-action" disabled>Bibliothek hinzufügen</button>
+            </div>
+            <div id="bk-new-library-status" class="bk-library-status"></div>
           </div>
-          <div id="bk-new-library-status" class="bk-library-status"></div>
-        </div>
+        </details>
       </section>
     </div>
   </div>
