@@ -152,7 +152,7 @@ def test_0269_released_free_marker_is_not_an_open_task_or_reassignment(tmp_path)
         ).fetchone()
         assert tuple(marker) == ('2026-07-23T00:00:00','2026-07-23T23:59:59')
 
-    assert (workspace/'Arbeitsbereich'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
+    assert (workspace/'SD-Kartensicherungen'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
     tasks=list_global_tasks(db)
     assert not any(
         item['kind'] in {'reassignment','resort','unassigned_families'}
