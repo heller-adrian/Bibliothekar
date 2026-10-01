@@ -181,6 +181,8 @@ def _load_active_assignments(
 def list_job_available_families(
     database_path: Path,
     job_id: str,
+    *,
+    excluded_family_ids: set[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Return unassigned families for safe event planning."""
 
@@ -200,10 +202,12 @@ def list_job_available_families(
         if row.get("family_id") is not None
     }
 
+    excluded = {int(value) for value in (excluded_family_ids or set())}
     return [
         family
         for family in family_stats
         if int(family["family_id"]) not in assigned_family_ids
+        and int(family["family_id"]) not in excluded
     ]
 
 
@@ -493,6 +497,8 @@ def list_job_planning_overview(
     database_path: Path,
     job_id: str,
     workspace_path: Path | None = None,
+    *,
+    excluded_family_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     """
     Return existing event groups and only the still-free day stock.
@@ -505,6 +511,12 @@ def list_job_planning_overview(
         database_path,
         job_id,
     )
+    excluded = {int(value) for value in (excluded_family_ids or set())}
+    if excluded:
+        family_stats = [
+            family for family in family_stats
+            if int(family["family_id"]) not in excluded
+        ]
 
     # Vor dem ersten Anwenden existieren Lightroom-XMP/Exporte unter
     # Umständen bereits physisch im freien SSD-Bestand, aber noch nicht als
