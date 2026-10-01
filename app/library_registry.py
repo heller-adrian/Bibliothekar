@@ -10,7 +10,7 @@ import os
 import sqlite3
 
 
-REGISTRY_SCHEMA_VERSION = 1
+REGISTRY_SCHEMA_VERSION = 2
 MAIN_LIBRARY_ID = "main"
 
 
@@ -87,6 +87,54 @@ REGISTRY_MIGRATIONS: dict[int, str] = {
                 REFERENCES libraries(library_id)
                 ON DELETE RESTRICT
         );
+    """,
+    2: """
+        ALTER TABLE libraries
+        ADD COLUMN is_registered INTEGER NOT NULL DEFAULT 1
+        CHECK (is_registered IN (0,1));
+
+        ALTER TABLE libraries
+        ADD COLUMN deactivated_at TEXT;
+
+        ALTER TABLE libraries
+        ADD COLUMN unregistered_at TEXT;
+
+        CREATE TABLE source_media (
+            media_id TEXT PRIMARY KEY,
+            backup_id TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT NOT NULL,
+            media_type TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(backup_id, relative_path),
+            FOREIGN KEY(backup_id)
+                REFERENCES source_backups(backup_id)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_source_media_backup_sha
+        ON source_media(backup_id, sha256);
+
+        CREATE TABLE source_family_members (
+            source_family_key TEXT NOT NULL,
+            media_id TEXT NOT NULL,
+            member_role TEXT NOT NULL DEFAULT 'member',
+            member_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(source_family_key, media_id),
+            FOREIGN KEY(source_family_key)
+                REFERENCES source_families(source_family_key)
+                ON DELETE CASCADE,
+            FOREIGN KEY(media_id)
+                REFERENCES source_media(media_id)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_source_family_members_media
+        ON source_family_members(media_id);
     """,
 }
 
@@ -304,13 +352,6 @@ def register_library(
             "Bibliotheks-Datenbank und globale Registry müssen getrennte Dateien sein."
         )
 
-    try:
-        Path(work_value).relative_to(Path(workspace_value))
-    except ValueError as error:
-        raise LibraryRegistryError(
-            "Der Arbeitsbereich einer Bibliothek muss innerhalb des Workspace liegen."
-        ) from error
-
     if (
         Path(archive_value) == Path(workspace_value)
         or Path(archive_value) in Path(workspace_value).parents
@@ -390,10 +431,10 @@ def register_library(
             INSERT INTO libraries(
                 library_id, display_name, database_path,
                 workspace_root, work_root, archive_root,
-                settings_json, is_main, is_active,
-                created_at, updated_at
+                settings_json, is_main, is_active, is_registered,
+                created_at, updated_at, deactivated_at, unregistered_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, NULL)
             ON CONFLICT(library_id) DO UPDATE SET
                 display_name = excluded.display_name,
                 database_path = excluded.database_path,
@@ -403,6 +444,9 @@ def register_library(
                 settings_json = excluded.settings_json,
                 is_main = excluded.is_main,
                 is_active = excluded.is_active,
+                is_registered = 1,
+                deactivated_at = excluded.deactivated_at,
+                unregistered_at = NULL,
                 updated_at = excluded.updated_at
             """,
             (
@@ -417,6 +461,7 @@ def register_library(
                 1 if is_active else 0,
                 created_at,
                 now,
+                None if is_active else now,
             ),
         )
         connection.commit()
@@ -482,6 +527,10 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     result = dict(row)
     result["is_main"] = bool(result["is_main"])
     result["is_active"] = bool(result["is_active"])
+    if "is_registered" in result:
+        result["is_registered"] = bool(result["is_registered"])
+    else:
+        result["is_registered"] = True
     try:
         result["settings"] = json.loads(str(result.pop("settings_json") or "{}"))
     except (TypeError, ValueError):
@@ -512,17 +561,121 @@ def list_libraries(
     registry_path: Path,
     *,
     active_only: bool = True,
+    registered_only: bool = True,
 ) -> list[dict[str, Any]]:
     connection = _connect(registry_path)
     try:
-        sql = "SELECT * FROM libraries"
+        conditions: list[str] = []
         if active_only:
-            sql += " WHERE is_active = 1"
+            conditions.append("is_active = 1")
+        if registered_only:
+            conditions.append("COALESCE(is_registered, 1) = 1")
+        sql = "SELECT * FROM libraries"
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
         sql += " ORDER BY is_main DESC, display_name COLLATE NOCASE, library_id"
         rows = connection.execute(sql).fetchall()
         return [_row_to_dict(row) for row in rows]
     finally:
         connection.close()
+
+
+def update_library_display_name(
+    registry_path: Path,
+    library_id: str,
+    display_name: str,
+) -> dict[str, Any]:
+    clean_name = " ".join(str(display_name or "").split()).strip()
+    if not clean_name:
+        raise LibraryRegistryError("Anzeigename darf nicht leer sein.")
+
+    connection = _connect(registry_path)
+    try:
+        cursor = connection.execute(
+            """
+            UPDATE libraries
+            SET display_name = ?, updated_at = ?
+            WHERE library_id = ?
+              AND COALESCE(is_registered, 1) = 1
+            """,
+            (clean_name, _now(), str(library_id)),
+        )
+        if cursor.rowcount != 1:
+            raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+        connection.commit()
+    finally:
+        connection.close()
+
+    result = get_library(registry_path, library_id, active_only=False)
+    if result is None:
+        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+    return result
+
+
+def set_library_active(
+    registry_path: Path,
+    library_id: str,
+    active: bool,
+) -> dict[str, Any]:
+    existing = get_library(registry_path, library_id, active_only=False)
+    if existing is None or not existing.get("is_registered", True):
+        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+    if existing.get("is_main") and not active:
+        raise LibraryRegistryError("Die Hauptbibliothek kann nicht deaktiviert werden.")
+
+    return register_library(
+        registry_path,
+        library_id=str(existing["library_id"]),
+        display_name=str(existing["display_name"]),
+        database_path=Path(str(existing["database_path"])),
+        workspace_root=Path(str(existing["workspace_root"])),
+        work_root=Path(str(existing["work_root"])),
+        archive_root=Path(str(existing["archive_root"])),
+        is_main=bool(existing["is_main"]),
+        is_active=bool(active),
+        settings=dict(existing.get("settings") or {}),
+    )
+
+
+def unregister_library(
+    registry_path: Path,
+    library_id: str,
+) -> dict[str, Any]:
+    existing = get_library(registry_path, library_id, active_only=False)
+    if existing is None:
+        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+    if existing.get("is_main"):
+        raise LibraryRegistryError("Die Hauptbibliothek kann nicht abgemeldet werden.")
+
+    now = _now()
+    connection = _connect(registry_path)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        cursor = connection.execute(
+            """
+            UPDATE libraries
+            SET is_active = 0,
+                is_registered = 0,
+                deactivated_at = COALESCE(deactivated_at, ?),
+                unregistered_at = ?,
+                updated_at = ?
+            WHERE library_id = ?
+            """,
+            (now, now, now, str(library_id)),
+        )
+        if cursor.rowcount != 1:
+            raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+    result = get_library(registry_path, library_id, active_only=False)
+    if result is None:
+        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+    return result
 
 
 def register_source_backup(
@@ -761,6 +914,159 @@ def register_source_family(
     except Exception:
         connection.rollback()
         raise
+    finally:
+        connection.close()
+
+
+
+def register_source_media(
+    registry_path: Path,
+    *,
+    backup_id: str,
+    relative_path: str,
+    size_bytes: int,
+    sha256: str,
+    media_type: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    clean_backup = str(backup_id or "").strip()
+    clean_relative = str(relative_path or "").strip().replace("\\", "/")
+    clean_sha = str(sha256 or "").strip().lower()
+    if not clean_backup or not clean_relative or not clean_sha:
+        raise LibraryRegistryError(
+            "Backup-ID, relativer Pfad und SHA256 sind für Quelldateien erforderlich."
+        )
+    media_id = "media-" + hashlib.sha256(
+        (clean_backup + "\0" + clean_relative).encode("utf-8", "surrogateescape")
+    ).hexdigest()
+    now = _now()
+    connection = _connect(registry_path)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        backup = connection.execute(
+            "SELECT backup_id FROM source_backups WHERE backup_id = ?",
+            (clean_backup,),
+        ).fetchone()
+        if backup is None:
+            raise LibraryRegistryError("Quelldatei verweist auf unbekannte Sicherung.")
+
+        existing = connection.execute(
+            "SELECT media_id, sha256, created_at FROM source_media WHERE backup_id=? AND relative_path=?",
+            (clean_backup, clean_relative),
+        ).fetchone()
+        if existing is not None and str(existing["sha256"]).lower() != clean_sha:
+            raise LibraryRegistryError(
+                "Eine bekannte Quelldatei darf nicht still durch anderen Inhalt ersetzt werden."
+            )
+
+        connection.execute(
+            """
+            INSERT INTO source_media(
+                media_id, backup_id, relative_path, size_bytes,
+                sha256, media_type, metadata_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(backup_id, relative_path) DO UPDATE SET
+                size_bytes = excluded.size_bytes,
+                media_type = excluded.media_type,
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                media_id,
+                clean_backup,
+                clean_relative,
+                max(0, int(size_bytes or 0)),
+                clean_sha,
+                str(media_type or "").strip() or None,
+                json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+                str(existing["created_at"]) if existing else now,
+                now,
+            ),
+        )
+        row = connection.execute(
+            "SELECT * FROM source_media WHERE backup_id=? AND relative_path=?",
+            (clean_backup, clean_relative),
+        ).fetchone()
+        connection.commit()
+        return dict(row)
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def register_source_family_members(
+    registry_path: Path,
+    *,
+    source_family_key: str,
+    media_ids: list[str],
+) -> int:
+    clean_family = str(source_family_key or "").strip()
+    unique_media = [str(value).strip() for value in dict.fromkeys(media_ids) if str(value).strip()]
+    if not clean_family:
+        raise LibraryRegistryError("Quellfamilien-ID fehlt.")
+
+    connection = _connect(registry_path)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        family = connection.execute(
+            "SELECT source_family_key FROM source_families WHERE source_family_key=?",
+            (clean_family,),
+        ).fetchone()
+        if family is None:
+            raise LibraryRegistryError("Quellfamilie wurde nicht gefunden.")
+
+        connection.execute(
+            "DELETE FROM source_family_members WHERE source_family_key=?",
+            (clean_family,),
+        )
+        now = _now()
+        for order, media_id in enumerate(unique_media):
+            media = connection.execute(
+                "SELECT media_id FROM source_media WHERE media_id=?",
+                (media_id,),
+            ).fetchone()
+            if media is None:
+                raise LibraryRegistryError(
+                    "Familienmitglied verweist auf unbekannte Quelldatei: " + media_id
+                )
+            connection.execute(
+                """
+                INSERT INTO source_family_members(
+                    source_family_key, media_id, member_role, member_order, created_at
+                )
+                VALUES (?, ?, 'member', ?, ?)
+                """,
+                (clean_family, media_id, order, now),
+            )
+        connection.commit()
+        return len(unique_media)
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def list_source_family_members(
+    registry_path: Path,
+    source_family_key: str,
+) -> list[dict[str, Any]]:
+    connection = _connect(registry_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT m.*, fm.member_role, fm.member_order
+            FROM source_family_members fm
+            JOIN source_media m ON m.media_id = fm.media_id
+            WHERE fm.source_family_key = ?
+            ORDER BY fm.member_order, m.relative_path
+            """,
+            (str(source_family_key),),
+        ).fetchall()
+        return [dict(row) for row in rows]
     finally:
         connection.close()
 
