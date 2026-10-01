@@ -29,6 +29,8 @@ from app.library_registry import (
     get_source_family_claim,
     initialize_library_registry,
     register_library,
+    register_source_backup,
+    register_source_family,
 )
 
 
@@ -196,15 +198,17 @@ def test_0322_planning_reservations_are_library_local_but_ownership_is_global(tm
         is_active=True,
     )
 
-    create_job(
-        main_db,
-        job_id="GLOBAL_IMPORT",
-        kind="sd_import",
-        trigger_type="manual",
-        operation="folder_import",
-        source_path="/source",
-        working_path="/workspace/SD-Kartensicherungen",
-    )
+    for database in (main_db, second_db):
+        create_job(
+            database,
+            job_id="GLOBAL_IMPORT",
+            kind="sd_import",
+            trigger_type="manual",
+            operation="folder_import",
+            source_path="/source",
+            working_path="/workspace/SD-Kartensicherungen",
+        )
+
     main_family = _insert_family(
         main_db,
         job_id="GLOBAL_IMPORT",
@@ -212,27 +216,35 @@ def test_0322_planning_reservations_are_library_local_but_ownership_is_global(tm
         relative_path="2026/2026-10-02/A.JPG",
         data=b"same-content",
     )
-    project_import_job(main_db, second_db, "GLOBAL_IMPORT")
+    second_family = _insert_family(
+        second_db,
+        job_id="GLOBAL_IMPORT",
+        family_key="same-family",
+        relative_path="2026/2026-10-02/A.JPG",
+        data=b"same-content",
+    )
 
-    with database_connection(second_db) as connection:
-        second_family = int(
-            connection.execute(
-                "SELECT id FROM file_families WHERE job_id='GLOBAL_IMPORT'"
-            ).fetchone()["id"]
+    for library_id, source_identity in (
+        (MAIN_LIBRARY_ID, "main-source"),
+        ("second", "second-source"),
+    ):
+        backup_id = f"{library_id}:GLOBAL_IMPORT"
+        register_source_backup(
+            registry,
+            backup_id=backup_id,
+            source_kind="existing_library",
+            source_identity=source_identity,
+            backup_path=f"/source/{library_id}",
+            metadata={"library_id": library_id, "job_id": "GLOBAL_IMPORT"},
         )
-
-    backfill_library_inventory(
-        registry,
-        database_path=main_db,
-        library_id=MAIN_LIBRARY_ID,
-        claim_all_owned=False,
-    )
-    backfill_library_inventory(
-        registry,
-        database_path=second_db,
-        library_id="second",
-        claim_all_owned=False,
-    )
+        register_source_family(
+            registry,
+            source_family_key=f"{library_id}:GLOBAL_IMPORT:same-family",
+            backup_id=backup_id,
+            family_key="same-family",
+            content_fingerprint="family-members-sha256:0322-same-family",
+            metadata={"library_id": library_id, "job_id": "GLOBAL_IMPORT"},
+        )
 
     reserve_family_ids(
         registry,
