@@ -2601,6 +2601,7 @@ def build_event_sort_plan(
         "workspace_root": str(workspace_root),
         "source_root": str(source_root),
         "target_root": str(target_root),
+        "central_stock_root": str(central_stock_root),
         "structure_text": structure_text,
         "summary": summary,
         "blockers": blockers,
