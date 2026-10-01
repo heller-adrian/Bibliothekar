@@ -17,7 +17,7 @@ import os
 import shutil
 
 from app.database import database_connection
-from app.workspace_layout import shared_work_root
+from app.workspace_layout import backup_root, shared_work_root
 
 
 REVERSAL_DIRECTORY_NAME = "Rückänderung"
@@ -61,6 +61,10 @@ def _safe_archive_path(archive_root: Path, value: Any) -> Path:
 
 def _work_root(workspace_path: Path) -> Path:
     return shared_work_root(workspace_path).resolve(strict=False)
+
+
+def _central_root(workspace_path: Path) -> Path:
+    return backup_root(workspace_path).resolve(strict=False)
 
 
 def _base(workspace_path: Path, cr_id: str) -> Path:
@@ -332,6 +336,7 @@ def prepare_archive_reversal(
     base = _base(workspace_path, cr_id)
     restore_root = base / "Wiederherstellung"
     work_root = _work_root(workspace_path)
+    central_root = _central_root(workspace_path)
     for rel in manifest.get("original_directories") or []:
         restore_root.joinpath(*_safe_relative(rel).parts).mkdir(parents=True, exist_ok=True)
 
@@ -382,7 +387,7 @@ def prepare_archive_reversal(
         if not release_rel:
             missing_sources.append(old_path)
             continue
-        source = work_root.joinpath(*_safe_relative(release_rel).parts).resolve(strict=False)
+        source = central_root.joinpath(*_safe_relative(release_rel).parts).resolve(strict=False)
         if not _matches(source, size, sha):
             missing_sources.append(old_path)
             continue
@@ -482,6 +487,7 @@ def _reversal_state(
     manifest = _read_json(_manifest_path(workspace_path, cr_id))
     _cr, _event, rows = _request_context(database_path, cr_id)
     work_root = _work_root(workspace_path)
+    central_root = _central_root(workspace_path)
     restore_root = _base(workspace_path, cr_id) / "Wiederherstellung"
 
     operations: list[dict[str, Any]] = []
