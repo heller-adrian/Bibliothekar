@@ -1,6 +1,6 @@
 services:
   bibliothekar:
-    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:patch-0.30.1}
+    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:patch-0.31.0}
     restart: unless-stopped
     user: "0:0"
     privileged: true
@@ -20,6 +20,7 @@ services:
       KAMERA_SOURCE_HELPER_URL: http://127.0.0.1:8090
       KAMERA_SOURCE_HELPER_ENABLED: "true"
       KAMERA_REMOVABLE_MOUNT_ROOT: /sources/removable
+      KAMERA_DEVICE_NODE_ROOT: /dev/bibliothekar
       KAMERA_WEB_UID: "568"
       KAMERA_WEB_GID: "568"
 
