@@ -115,7 +115,7 @@ def test_applied_delete_preview_removes_event_tree_and_completed_run_stays_polla
     assert receipt["progress_percent"] == 100
     assert not event_root.exists()
 
-    free_file = root / next(
+    free_file = workspace / "SD-Kartensicherungen" / next(
         item["destination_relative_path"]
         for item in plan["files"] if item["file_id"] == file_ids["event"]
     )
