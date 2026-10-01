@@ -136,9 +136,8 @@ jobs:
           path.write_text(body)
           PY
 
-          if ! gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}"             -f sha="${GITHUB_SHA}"             -F force=true >/dev/null; then
-            gh api               --method POST               "repos/${GITHUB_REPOSITORY}/git/refs"               -f ref="refs/tags/${TAG}"               -f sha="${GITHUB_SHA}" >/dev/null
-          fi
+          git tag -f "${TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG}" --force
 
           gh api             --method PATCH             "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"             -f target_commitish="${GITHUB_SHA}"             -F prerelease=true             --raw-field make_latest=false             --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
 
