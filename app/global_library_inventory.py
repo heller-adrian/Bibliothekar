@@ -10,6 +10,7 @@ from app.library_registry import (
     LibraryRegistryError,
     claim_source_family,
     get_source_family_claim,
+    get_source_family_claims,
     register_source_backup,
     register_source_family,
     register_source_family_members,
@@ -270,6 +271,42 @@ def backfill_library_inventory(
         "family_count": family_count,
         "media_count": media_count,
         "claim_count": claim_count,
+    }
+
+
+def blocked_family_ids(
+    registry_path: Path,
+    *,
+    database_path: Path,
+    library_id: str,
+    job_id: str | None = None,
+) -> set[int]:
+    params: list[Any] = []
+    sql = "SELECT id, job_id, family_key FROM file_families"
+    if job_id is not None:
+        sql += " WHERE job_id = ?"
+        params.append(str(job_id))
+    sql += " ORDER BY id"
+
+    with database_connection(database_path) as connection:
+        rows = connection.execute(sql, params).fetchall()
+
+    keyed = {
+        occurrence_key(
+            library_id,
+            str(row["job_id"]),
+            str(row["family_key"]),
+        ): int(row["id"])
+        for row in rows
+    }
+    claims = get_source_family_claims(
+        registry_path,
+        list(keyed),
+    )
+    return {
+        keyed[source_key]
+        for source_key, claim in claims.items()
+        if str(claim.get("library_id") or "") != library_id
     }
 
 
