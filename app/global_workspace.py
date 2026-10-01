@@ -208,6 +208,8 @@ def build_global_workspace_summary(
     database_path: Path,
     selected_job_ids: list[str],
     workspace_path: Path | None = None,
+    *,
+    excluded_family_ids_by_job: dict[str, set[int]] | None = None,
 ) -> dict[str, Any]:
     selected = {str(value) for value in selected_job_ids if str(value)}
     jobs = [get_job(database_path, value) for value in sorted(selected)]
@@ -219,16 +221,27 @@ def build_global_workspace_summary(
     reviews: list[dict[str, Any]] = []
     for job in jobs:
         job_id = str(job["id"])
+        excluded = set(
+            (excluded_family_ids_by_job or {}).get(job_id, set())
+        )
         overview = list_job_planning_overview(
             database_path,
             job_id,
             workspace_path=workspace_path,
+            excluded_family_ids=excluded,
         )
         available_items.extend(
             (job_id, dict(group))
             for group in (overview.get("available_day_groups") or [])
         )
-        day_groups.extend({**dict(group), "job_id": job_id} for group in list_job_day_groups(database_path, job_id))
+        day_groups.extend(
+            {**dict(group), "job_id": job_id}
+            for group in list_job_day_groups(
+                database_path,
+                job_id,
+                excluded_family_ids=excluded,
+            )
+        )
         time_segments.extend({**dict(row), "job_id": job_id} for row in list_job_time_segments(database_path, job_id))
         reviews.extend(dict(row) for row in list_archive_change_reviews(database_path, job_id))
 
