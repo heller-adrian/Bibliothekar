@@ -202,8 +202,8 @@ def test_0275_partial_reuse_renames_remaining_released_segment(tmp_path: Path):
     )
     assert "2026-07-22 · 21-00–23-59" in camera["current_relative_path"]
     assert "2026-07-22 · 21-00–23-59" in asset["current_relative_path"]
-    assert (case["work"] / camera["current_relative_path"]).is_file()
-    assert (case["work"] / asset["current_relative_path"]).is_file()
+    assert (case["central"] / camera["current_relative_path"]).is_file()
+    assert (case["central"] / asset["current_relative_path"]).is_file()
 
     group = next(
         item for item in list_global_released_archive_groups(case["db"])
