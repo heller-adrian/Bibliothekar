@@ -88,7 +88,7 @@ def test_0273_cancel_after_archive_removal_becomes_verified_reversal(tmp_path: P
     assert finished["status"] == "abgebrochen"
     assert (case["archive"] / rows[0]["old_path"]).is_file()
     assert (case["work"] / "Später zuordnen").is_dir()
-    assert (case["work"] / "Freigewordene Archivdateien").is_dir()
+    assert (case["central"] / "Freigewordene Archivdateien").is_dir()
     assert not (
         case["work"] / "Später zuordnen" / "Rückänderung" / case["cr_id"]
     ).exists()
@@ -151,9 +151,10 @@ def test_0273_archived_delete_has_only_release_then_remove_old_root(tmp_path: Pa
     ]
     assert rows
     work = workspace / "Arbeitsbereich"
+    central = workspace / "SD-Kartensicherungen"
     for row in rows:
         source = archive / row["old_path"]
-        target = work / row["workspace_release_path"]
+        target = central / row["workspace_release_path"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
 
@@ -179,7 +180,7 @@ def test_0273_archived_delete_has_only_release_then_remove_old_root(tmp_path: Pa
     result = finish_event_change(db, cr_id, archive, workspace)
     assert result["event_deleted"] is True
     assert (work / "Später zuordnen").is_dir()
-    assert (work / "Freigewordene Archivdateien").is_dir()
+    assert (central / "Freigewordene Archivdateien").is_dir()
     with database_connection(db) as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM events WHERE id='archive'"
