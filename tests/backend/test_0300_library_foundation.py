@@ -85,7 +85,7 @@ def test_0300_library_identity_is_additive_migration_39(tmp_path):
     assert "library_identity" in state["initialized"]["tables"]
 
     registry_status = initialize_library_registry(state["registry_file"])
-    assert registry_status["schema_versions"] == [1, 2]
+    assert registry_status["schema_versions"] == [1, 2, 3]
     assert registry_status["newly_applied_versions"] == []
 
 
@@ -161,7 +161,7 @@ def test_0300_registry_rejects_archive_nested_in_workspace(tmp_path):
         )
 
 
-def test_0300_global_reservation_blocks_duplicate_family_from_second_backup(tmp_path):
+def test_0300_global_ownership_blocks_duplicate_family_from_second_backup(tmp_path):
     state = _foundation(tmp_path)
 
     main_root = state["work_root"] / "main"
@@ -232,12 +232,31 @@ def test_0300_global_reservation_blocks_duplicate_family_from_second_backup(tmp_
         event_id="event-main",
         claim_state="reserved",
     )
+    # Planung ist ab 0.32.2 bibliothekslokal: beide Bibliotheken dürfen
+    # dieselbe kanonische Familie zunächst unabhängig reservieren.
+    claim_source_family(
+        state["registry_file"],
+        source_family_key="backup-2:family-9",
+        library_id="business",
+        event_id="event-business",
+        claim_state="reserved",
+    )
+
+    # Erst tatsächlicher Besitz nach Apply ist global exklusiv.
+    claim_source_family(
+        state["registry_file"],
+        source_family_key="backup-1:family-1",
+        library_id=MAIN_LIBRARY_ID,
+        event_id="event-main",
+        claim_state="owned",
+    )
     duplicate_claim = get_source_family_claim(
         state["registry_file"],
         "backup-2:family-9",
     )
     assert duplicate_claim is not None
     assert duplicate_claim["library_id"] == MAIN_LIBRARY_ID
+    assert duplicate_claim["claim_state"] == "owned"
 
     with pytest.raises(
         LibraryRegistryError,
@@ -248,7 +267,7 @@ def test_0300_global_reservation_blocks_duplicate_family_from_second_backup(tmp_
             source_family_key="backup-2:family-9",
             library_id="business",
             event_id="event-business",
-            claim_state="reserved",
+            claim_state="owned",
         )
 
 def test_0300_planned_reservation_can_be_released(tmp_path):
