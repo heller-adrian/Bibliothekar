@@ -1225,6 +1225,45 @@ def release_source_family_reservation(
         connection.close()
 
 
+def get_source_family_claims(
+    registry_path: Path,
+    source_family_keys: list[str],
+) -> dict[str, dict[str, Any]]:
+    keys = [str(value).strip() for value in dict.fromkeys(source_family_keys) if str(value).strip()]
+    if not keys:
+        return {}
+
+    connection = _connect(registry_path)
+    try:
+        result: dict[str, dict[str, Any]] = {}
+        for offset in range(0, len(keys), 400):
+            chunk = keys[offset:offset + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = connection.execute(
+                f"""
+                SELECT
+                    sf.source_family_key,
+                    fc.canonical_family_id,
+                    fc.library_id,
+                    fc.claim_state,
+                    fc.event_id,
+                    fc.created_at,
+                    fc.updated_at
+                FROM source_families sf
+                JOIN family_claims fc
+                  ON fc.canonical_family_id = sf.canonical_family_id
+                WHERE sf.source_family_key IN ({placeholders})
+                """,
+                chunk,
+            ).fetchall()
+            for row in rows:
+                item = dict(row)
+                result[str(item["source_family_key"])] = item
+        return result
+    finally:
+        connection.close()
+
+
 def get_source_family_claim(
     registry_path: Path,
     source_family_key: str,
