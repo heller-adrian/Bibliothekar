@@ -5391,7 +5391,7 @@ def api_create_event(
             detail=message,
         ) from error
 
-    except ValueError as error:
+    except (ValueError, LibraryRegistryError) as error:
         message = str(error)
 
         status_code = (
@@ -6731,7 +6731,12 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
             if not assignment_committed:
                 _release_new_global_reservations(assignment_reservation)
             raise
-    except (ValueError, EventPreviewError, EventChangeRequestError) as exc:
+    except (
+        ValueError,
+        EventPreviewError,
+        EventChangeRequestError,
+        LibraryRegistryError,
+    ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -9370,6 +9375,8 @@ def api_propose_event_change(
             _release_new_global_reservations(archive_reservation)
             raise
         return JSONResponse(content=result, status_code=201)
+    except LibraryRegistryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except EventChangeRequestError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
