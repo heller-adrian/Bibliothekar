@@ -772,9 +772,11 @@ def test_0300_worker_skips_broken_queue_and_uses_next_library(
         settings={},
     )
 
+    healthy.database_path.touch()
+
+    seen = []
     def fake_claim(database_path):
-        if database_path == broken.database_path:
-            raise RuntimeError("DB offline")
+        seen.append(database_path)
         return {"id": "job-healthy"}
 
     monkeypatch.setattr(main, "claim_next_job", fake_claim)
@@ -784,6 +786,8 @@ def test_0300_worker_skips_broken_queue_and_uses_next_library(
     context, job = claimed
     assert context.library_id == "healthy"
     assert job["id"] == "job-healthy"
+    assert seen == [healthy.database_path]
+    assert broken.database_path.exists() is False
 
 
 def test_0300_source_family_identity_cannot_be_rebound(tmp_path):
@@ -813,4 +817,27 @@ def test_0300_source_family_identity_cannot_be_rebound(tmp_path):
             backup_id="backup-stable",
             family_key="family-1",
             content_fingerprint="family-content-sha256:changed",
+        )
+
+
+def test_0300_backup_identity_cannot_be_rebound(tmp_path):
+    state = _foundation(tmp_path)
+    register_source_backup(
+        state["registry_file"],
+        backup_id="backup-stable-origin",
+        source_kind="sd_backup",
+        source_identity="sd-card-a",
+        backup_path="/workspace/SD-Kartensicherungen/a",
+    )
+
+    with pytest.raises(
+        LibraryRegistryError,
+        match="andere Quelle",
+    ):
+        register_source_backup(
+            state["registry_file"],
+            backup_id="backup-stable-origin",
+            source_kind="sd_backup",
+            source_identity="sd-card-b",
+            backup_path="/workspace/SD-Kartensicherungen/b",
         )
