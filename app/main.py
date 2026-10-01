@@ -633,6 +633,7 @@ def process_claimed_job(
                 imported_hashes=imported_hashes,
                 duplicate_origins=duplicate_origins,
                 import_history_callback=persist_import_history,
+                work_root=work_root,
             )
             organization = result.get("organization", {})
             if str(job.get("trigger_type") or "") in {"approved_sd", "usb_key"}:
@@ -655,6 +656,7 @@ def process_claimed_job(
                 ),
                 job_id=job_id,
                 progress_callback=report_progress,
+                work_root=work_root,
             )
             completion_prefix = "Simulation erfolgreich abgeschlossen."
 
