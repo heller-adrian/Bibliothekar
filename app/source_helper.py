@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI(title="Kamera-Quellen-Helfer", version="0.21.1")
 MOUNT_ROOT = Path(os.environ.get("KAMERA_REMOVABLE_MOUNT_ROOT", "/media-sources"))
-HOST_MOUNT_ROOT = Path(os.environ.get("KAMERA_HOST_MOUNT_ROOT", "/mnt/apps/appdata/kamera-automatisierung/removable-sources"))
+HOST_MOUNT_ROOT = Path(os.environ.get("KAMERA_HOST_MOUNT_ROOT", "/sources/removable"))
 ALLOWED_FS = {"vfat", "exfat", "ntfs", "ext2", "ext3", "ext4", "xfs", "btrfs"}
 
 
