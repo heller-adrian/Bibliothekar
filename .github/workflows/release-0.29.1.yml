@@ -1,0 +1,55 @@
+name: Create GitHub release 0.29.1
+
+on:
+  push:
+    branches:
+      - 'ops/release-0.29.1'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create v0.29.1 release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if gh release view v0.29.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v0.29.1 already exists."
+            exit 0
+          fi
+
+          cat > /tmp/release-notes.md <<'EOF'
+          ## Bibliothekar 0.29.1
+
+          TrueNAS-Integrationsrelease für die formularbasierte Custom-App-Installation.
+
+          - Ein-Container-Architektur für TrueNAS Custom App
+          - Bibliothekar-Web-App läuft intern als UID/GID 568
+          - Quellen-/SD-Helper bleibt lokal im Container auf 127.0.0.1:8090
+          - kein zweiter Compose-Service mehr
+          - kein `pid: host`, kein `network_mode: service:...`, kein `nsenter`
+          - Wechselmedien werden weiterhin erzwungen read-only gemountet
+          - fachlicher Kamerakern bleibt 0.28.7 unverändert
+
+          QA:
+          - 518/518 Backend-Tests PASS
+          - Archiv-Isolation PASS
+          - TrueNAS-Compose-Validierung PASS
+          - Container Build & Push PASS
+
+          Container:
+          `ghcr.io/heller-adrian/bibliothekar:patch-0.29.1`
+
+          Digest:
+          `sha256:092c92f1fd72223eabac1fdb976a8b170b5e4daf9f72d21005de9bab1d5cd72c`
+
+          Source commit:
+          `0b3e636a8e09da735c73f841f728110d65f895db`
+          EOF
+
+          gh release create v0.29.1             --repo "$GITHUB_REPOSITORY"             --target 0b3e636a8e09da735c73f841f728110d65f895db             --title "Bibliothekar 0.29.1"             --notes-file /tmp/release-notes.md             --prerelease
