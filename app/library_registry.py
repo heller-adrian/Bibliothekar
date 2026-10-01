@@ -10,7 +10,7 @@ import os
 import sqlite3
 
 
-REGISTRY_SCHEMA_VERSION = 2
+REGISTRY_SCHEMA_VERSION = 3
 MAIN_LIBRARY_ID = "main"
 
 
@@ -135,6 +135,44 @@ REGISTRY_MIGRATIONS: dict[int, str] = {
 
         CREATE INDEX idx_source_family_members_media
         ON source_family_members(media_id);
+    """,
+    3: """
+        ALTER TABLE family_claims RENAME TO family_claims_v2;
+
+        CREATE TABLE family_claims (
+            canonical_family_id TEXT NOT NULL,
+            library_id TEXT NOT NULL,
+            claim_state TEXT NOT NULL
+                CHECK (claim_state IN ('reserved','owned')),
+            event_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(canonical_family_id, library_id),
+            FOREIGN KEY(canonical_family_id)
+                REFERENCES canonical_families(canonical_family_id)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(library_id)
+                REFERENCES libraries(library_id)
+                ON DELETE RESTRICT
+        );
+
+        INSERT INTO family_claims(
+            canonical_family_id, library_id, claim_state,
+            event_id, created_at, updated_at
+        )
+        SELECT
+            canonical_family_id, library_id, claim_state,
+            event_id, created_at, updated_at
+        FROM family_claims_v2;
+
+        DROP TABLE family_claims_v2;
+
+        CREATE UNIQUE INDEX idx_family_claims_single_owner
+        ON family_claims(canonical_family_id)
+        WHERE claim_state = 'owned';
+
+        CREATE INDEX idx_family_claims_library_state
+        ON family_claims(library_id, claim_state);
     """,
 }
 
@@ -1079,6 +1117,12 @@ def claim_source_family(
     event_id: str | None,
     claim_state: str = "reserved",
 ) -> dict[str, Any]:
+    """Create a library-local reservation or the single global ownership claim.
+
+    Reservations are intentionally allowed in more than one library. Ownership
+    remains globally exclusive and therefore becomes the blocking state for
+    other libraries.
+    """
     if claim_state not in {"reserved", "owned"}:
         raise LibraryRegistryError("Ungültiger Reservierungszustand.")
 
@@ -1114,13 +1158,27 @@ def claim_source_family(
             SELECT *
             FROM family_claims
             WHERE canonical_family_id = ?
+              AND library_id = ?
+            """,
+            (canonical_id, str(library_id)),
+        ).fetchone()
+        global_owner = connection.execute(
+            """
+            SELECT *
+            FROM family_claims
+            WHERE canonical_family_id = ?
+              AND claim_state = 'owned'
+            LIMIT 1
             """,
             (canonical_id,),
         ).fetchone()
 
-        if existing and str(existing["library_id"]) != str(library_id):
+        if (
+            global_owner is not None
+            and str(global_owner["library_id"]) != str(library_id)
+        ):
             raise LibraryRegistryError(
-                "Diese Dateifamilie ist bereits einer anderen Bibliothek vorbehalten."
+                "Diese Dateifamilie wurde bereits von einer anderen Bibliothek übernommen."
             )
 
         if (
@@ -1139,8 +1197,7 @@ def claim_source_family(
                 event_id, created_at, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(canonical_family_id) DO UPDATE SET
-                library_id = excluded.library_id,
+            ON CONFLICT(canonical_family_id, library_id) DO UPDATE SET
                 claim_state = excluded.claim_state,
                 event_id = excluded.event_id,
                 updated_at = excluded.updated_at
@@ -1159,8 +1216,9 @@ def claim_source_family(
             SELECT *
             FROM family_claims
             WHERE canonical_family_id = ?
+              AND library_id = ?
             """,
-            (canonical_id,),
+            (canonical_id, str(library_id)),
         ).fetchone()
         connection.commit()
         result = dict(row)
@@ -1200,26 +1258,26 @@ def release_source_family_claim(
             SELECT claim_state, library_id
             FROM family_claims
             WHERE canonical_family_id = ?
+              AND library_id = ?
             """,
-            (canonical_id,),
+            (canonical_id, str(library_id)),
         ).fetchone()
 
         if row is None:
             connection.commit()
             return False
-
-        if str(row["library_id"]) != str(library_id):
-            raise LibraryRegistryError(
-                "Reservierung bzw. Besitz gehört zu einer anderen Bibliothek."
-            )
         if str(row["claim_state"]) not in allowed:
             raise LibraryRegistryError(
-                "Dieser globale Familienzustand darf in diesem Workflow nicht freigegeben werden."
+                "Dieser Familienzustand darf in diesem Workflow nicht freigegeben werden."
             )
 
         connection.execute(
-            "DELETE FROM family_claims WHERE canonical_family_id = ?",
-            (canonical_id,),
+            """
+            DELETE FROM family_claims
+            WHERE canonical_family_id = ?
+              AND library_id = ?
+            """,
+            (canonical_id, str(library_id)),
         )
         connection.commit()
         return True
@@ -1244,11 +1302,110 @@ def release_source_family_reservation(
     )
 
 
+def _source_family_library_id(row: dict[str, Any]) -> str:
+    try:
+        metadata = json.loads(str(row.get("source_metadata_json") or "{}"))
+        value = str(metadata.get("library_id") or "").strip()
+        if value:
+            return value
+    except (TypeError, ValueError):
+        pass
+    source_key = str(row.get("source_family_key") or "")
+    return source_key.split(":", 1)[0] if ":" in source_key else ""
+
+
+def _effective_claim(
+    rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not rows:
+        return None
+    source_library_id = _source_family_library_id(rows[0])
+    for row in rows:
+        if str(row.get("claim_state") or "") == "owned":
+            return row
+    for row in rows:
+        if (
+            str(row.get("claim_state") or "") == "reserved"
+            and str(row.get("library_id") or "") == source_library_id
+        ):
+            return row
+    return None
+
+
 def get_source_family_claims(
     registry_path: Path,
     source_family_keys: list[str],
 ) -> dict[str, dict[str, Any]]:
-    keys = [str(value).strip() for value in dict.fromkeys(source_family_keys) if str(value).strip()]
+    """Return the claim that is effective for each library occurrence.
+
+    A global ownership claim always wins. Without ownership, only the
+    reservation belonging to the queried occurrence's own library is visible;
+    reservations from other libraries do not block planning.
+    """
+    keys = [
+        str(value).strip()
+        for value in dict.fromkeys(source_family_keys)
+        if str(value).strip()
+    ]
+    if not keys:
+        return {}
+
+    connection = _connect(registry_path)
+    try:
+        candidates: dict[str, list[dict[str, Any]]] = {}
+        for offset in range(0, len(keys), 400):
+            chunk = keys[offset:offset + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = connection.execute(
+                f"""
+                SELECT
+                    sf.source_family_key,
+                    sf.metadata_json AS source_metadata_json,
+                    fc.canonical_family_id,
+                    fc.library_id,
+                    fc.claim_state,
+                    fc.event_id,
+                    fc.created_at,
+                    fc.updated_at
+                FROM source_families sf
+                JOIN family_claims fc
+                  ON fc.canonical_family_id = sf.canonical_family_id
+                WHERE sf.source_family_key IN ({placeholders})
+                ORDER BY sf.source_family_key, fc.claim_state, fc.library_id
+                """,
+                chunk,
+            ).fetchall()
+            for raw in rows:
+                item = dict(raw)
+                candidates.setdefault(
+                    str(item["source_family_key"]),
+                    [],
+                ).append(item)
+
+        result: dict[str, dict[str, Any]] = {}
+        for source_key, rows in candidates.items():
+            claim = _effective_claim(rows)
+            if claim is None:
+                continue
+            item = dict(claim)
+            item.pop("source_metadata_json", None)
+            result[source_key] = item
+        return result
+    finally:
+        connection.close()
+
+
+def get_source_family_local_claims(
+    registry_path: Path,
+    source_family_keys: list[str],
+    library_id: str,
+) -> dict[str, dict[str, Any]]:
+    """Return only claims owned/reserved by the explicitly named library."""
+    keys = [
+        str(value).strip()
+        for value in dict.fromkeys(source_family_keys)
+        if str(value).strip()
+    ]
     if not keys:
         return {}
 
@@ -1271,12 +1428,13 @@ def get_source_family_claims(
                 FROM source_families sf
                 JOIN family_claims fc
                   ON fc.canonical_family_id = sf.canonical_family_id
+                 AND fc.library_id = ?
                 WHERE sf.source_family_key IN ({placeholders})
                 """,
-                chunk,
+                [str(library_id), *chunk],
             ).fetchall()
-            for row in rows:
-                item = dict(row)
+            for raw in rows:
+                item = dict(raw)
                 result[str(item["source_family_key"])] = item
         return result
     finally:
@@ -1287,27 +1445,19 @@ def get_source_family_claim(
     registry_path: Path,
     source_family_key: str,
 ) -> dict[str, Any] | None:
-    connection = _connect(registry_path)
-    try:
-        canonical_id = _canonical_for_source_family(
-            connection,
-            source_family_key,
-        )
-        if canonical_id is None:
-            return None
-        row = connection.execute(
-            """
-            SELECT *
-            FROM family_claims
-            WHERE canonical_family_id = ?
-            """,
-            (canonical_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        result = dict(row)
-        result["source_family_key"] = str(source_family_key)
-        return result
-    finally:
-        connection.close()
+    return get_source_family_claims(
+        registry_path,
+        [source_family_key],
+    ).get(str(source_family_key))
 
+
+def get_source_family_local_claim(
+    registry_path: Path,
+    source_family_key: str,
+    library_id: str,
+) -> dict[str, Any] | None:
+    return get_source_family_local_claims(
+        registry_path,
+        [source_family_key],
+        library_id,
+    ).get(str(source_family_key))
