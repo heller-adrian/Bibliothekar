@@ -524,8 +524,21 @@ def release_family_ids_claims(
         library_id,
         family_ids,
     )
+    claims = get_source_family_claims(
+        registry_path,
+        list(mapping.values()),
+    )
     released = 0
     for source_key in mapping.values():
+        claim = claims.get(source_key)
+        if claim is None:
+            continue
+        if str(claim.get("library_id") or "") != library_id:
+            raise LibraryRegistryError(
+                "Eine freizugebende Dateifamilie gehört zu einer anderen Bibliothek."
+            )
+        if str(claim.get("claim_state") or "") not in allowed_states:
+            continue
         if release_source_family_claim(
             registry_path,
             source_family_key=source_key,
