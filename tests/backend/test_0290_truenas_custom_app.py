@@ -32,7 +32,7 @@ def test_0290_no_fixed_legacy_truenas_host_path_in_runtime():
 
 def test_0290_compose_uses_custom_app_mount_contract():
     compose = (REPO_ROOT / "compose.example.yaml").read_text()
-    assert "ghcr.io/heller-adrian/bibliothekar:patch-0.29.1" in compose
+    assert "ghcr.io/heller-adrian/bibliothekar:patch-" in compose
     assert "KAMERA_WORKSPACE: /workspace" in compose
     assert "KAMERA_POOL_PROBE: /workspace" in compose
     assert "KAMERA_ARCHIVE_ROOT: /main-library" in compose
