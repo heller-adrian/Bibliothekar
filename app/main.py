@@ -5194,6 +5194,25 @@ def api_create_event(
             job_id,
             preview,
         )
+        parent_event_id = str(
+            (result.get("parent_event") or {}).get("id") or ""
+        )
+        try:
+            claim_event_families(
+                REGISTRY_DATABASE_FILE,
+                database_path=current_database_file(),
+                library_id=current_library_context().library_id,
+                event_id=parent_event_id,
+                claim_state="reserved",
+            )
+        except Exception:
+            if parent_event_id:
+                delete_planned_event(
+                    current_database_file(),
+                    job_id,
+                    parent_event_id,
+                )
+            raise
 
     except EventPreviewError as error:
         message = str(error)
@@ -5756,19 +5775,53 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                     current_database_file(), job_id, event_id, preview, cascade_preview, current_workspace_root()
                 )
 
-        result = update_event_definition(
-            current_database_file(), job_id, event_id, preview,
-            workspace_path=current_workspace_root(),
-            app_version=APP_VERSION,
-            event_name=str(payload.get("event_name") or context["event"]["name"]),
-            notes=str(payload.get("notes") or ""),
-            expected_revision=int(payload.get("revision") or 0),
-            cascade_confirmed=cascade_confirmed,
-            allow_archived_manual=bool(archive_bundle),
-        )
+        old_status = str((context.get("event") or {}).get("status") or "")
+        released_reservations = 0
+        if old_status in {"draft", "planned"}:
+            released_reservations = release_event_reservations(
+                REGISTRY_DATABASE_FILE,
+                database_path=current_database_file(),
+                library_id=current_library_context().library_id,
+                event_id=event_id,
+            )
+        try:
+            result = update_event_definition(
+                current_database_file(), job_id, event_id, preview,
+                workspace_path=current_workspace_root(),
+                app_version=APP_VERSION,
+                event_name=str(payload.get("event_name") or context["event"]["name"]),
+                notes=str(payload.get("notes") or ""),
+                expected_revision=int(payload.get("revision") or 0),
+                cascade_confirmed=cascade_confirmed,
+                allow_archived_manual=bool(archive_bundle),
+            )
+            claim_event_families(
+                REGISTRY_DATABASE_FILE,
+                database_path=current_database_file(),
+                library_id=current_library_context().library_id,
+                event_id=event_id,
+                claim_state=(
+                    "owned"
+                    if old_status in {"applied", "archived"}
+                    else "reserved"
+                ),
+            )
+        except Exception:
+            if released_reservations:
+                try:
+                    claim_event_families(
+                        REGISTRY_DATABASE_FILE,
+                        database_path=current_database_file(),
+                        library_id=current_library_context().library_id,
+                        event_id=event_id,
+                        claim_state="reserved",
+                    )
+                except Exception:
+                    pass
+            raise
         if archive_bundle:
             result["archive_manual"] = archive_bundle
-    except (ValueError, EventPreviewError, TypeError) as error:
+    except (ValueError, EventPreviewError, TypeError, LibraryRegistryError) as error:
         message = str(error)
         raise HTTPException(status_code=404 if "nicht gefunden" in message else 409, detail=message) from error
     return {"status": "updated", **result}
@@ -5793,6 +5846,12 @@ def api_delete_event(
             detail="Sicherung wurde nicht gefunden.",
         )
 
+    released_reservations = release_event_reservations(
+        REGISTRY_DATABASE_FILE,
+        database_path=current_database_file(),
+        library_id=current_library_context().library_id,
+        event_id=event_id,
+    )
     try:
         result = delete_planned_event(
             current_database_file(),
@@ -5801,6 +5860,17 @@ def api_delete_event(
         )
 
     except ValueError as error:
+        if released_reservations:
+            try:
+                claim_event_families(
+                    REGISTRY_DATABASE_FILE,
+                    database_path=current_database_file(),
+                    library_id=current_library_context().library_id,
+                    event_id=event_id,
+                    claim_state="reserved",
+                )
+            except Exception:
+                pass
         message = str(error)
 
         status_code = (
@@ -5825,11 +5895,24 @@ def _sort_run_thread_target(
     library_context: LibraryContext,
 ) -> None:
     try:
+        with database_connection(library_context.database_path) as connection:
+            run_row = connection.execute(
+                "SELECT event_id FROM sort_runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
         execute_sort_run(
             library_context.database_path,
             run_id,
             compatibility_workspace_root(library_context),
         )
+        if run_row is not None:
+            claim_event_families(
+                REGISTRY_DATABASE_FILE,
+                database_path=library_context.database_path,
+                library_id=library_context.library_id,
+                event_id=str(run_row["event_id"]),
+                claim_state="owned",
+            )
 
     except Exception as error:
         print(
