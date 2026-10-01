@@ -157,7 +157,7 @@ def prepare_reapply_sort_run(
             """
             INSERT INTO sort_runs (
                 id, job_id, event_id, plan_token, status, phase,
-                source_root, target_root, file_count, verified_file_count,
+                source_root, target_root, central_root, file_count, verified_file_count,
                 move_count, moved_file_count, directory_count,
                 created_directory_count, total_size_bytes, verified_bytes,
                 moved_bytes, error_message, details_json,
@@ -166,7 +166,7 @@ def prepare_reapply_sort_run(
             VALUES (
                 ?, ?, ?, ?, 'queued',
                 'Wartet auf vollständig erneute SHA-256-Prüfung',
-                ?, ?, ?, 0, ?, 0, ?, 0, ?, 0, 0,
+                ?, ?, ?, ?, 0, ?, 0, ?, 0, ?, 0, 0,
                 NULL, ?, ?, NULL, ?, NULL, 'reapply'
             )
             """,
@@ -177,6 +177,7 @@ def prepare_reapply_sort_run(
                 str(plan["plan_token"]),
                 str(plan["source_root"]),
                 str(plan["target_root"]),
+                str(plan["central_stock_root"]),
                 int(summary["file_count"]),
                 int(summary["move_count"]),
                 int(summary["directory_count"]),
@@ -212,6 +213,7 @@ def prepare_reapply_sort_run(
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
                 "shared_workspace",
+                str(entry.get("destination_root_kind") or "target_root"),
                 status_value,
             ))
 
@@ -220,9 +222,10 @@ def prepare_reapply_sort_run(
             INSERT INTO sort_operations (
                 sort_run_id, sequence_number, file_id,
                 source_relative_path, destination_relative_path,
-                expected_size_bytes, expected_sha256, source_root_kind, status
+                expected_size_bytes, expected_sha256, source_root_kind,
+                destination_root_kind, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             operations,
         )
@@ -246,6 +249,7 @@ def prepare_reapply_sort_run(
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
                 "shared_workspace",
+                str(entry.get("destination_root_kind") or "target_root"),
                 status_value,
             ))
 
@@ -254,9 +258,10 @@ def prepare_reapply_sort_run(
             INSERT INTO sort_asset_operations (
                 sort_run_id, sequence_number, asset_kind, family_id,
                 source_file_id, source_relative_path, destination_relative_path,
-                expected_size_bytes, expected_sha256, source_root_kind, status
+                expected_size_bytes, expected_sha256, source_root_kind,
+                destination_root_kind, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             asset_operations,
         )
