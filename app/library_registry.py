@@ -370,13 +370,19 @@ def adopt_main_library(
     settings = dict(existing.get("settings") or {}) if existing else {}
     settings["adopted_existing_database"] = True
 
+    effective_work_root = (
+        Path(str(existing["work_root"]))
+        if existing
+        else work_root
+    )
+
     return register_library(
         registry_path,
         library_id=MAIN_LIBRARY_ID,
         display_name=display_name,
         database_path=database_path,
         workspace_root=workspace_root,
-        work_root=work_root,
+        work_root=effective_work_root,
         archive_root=archive_root,
         is_main=True,
         is_active=True,
