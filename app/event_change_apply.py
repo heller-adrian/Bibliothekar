@@ -292,13 +292,17 @@ def cancel_event_change(
                     ),
                 }
 
+    cleanup_warnings: list[str] = []
     if workspace_path is not None:
         from app.archive_staging import cleanup_archive_change_staging
         from app.archive_release_stock import cleanup_archive_release_stock
         cleanup_archive_change_staging(
             database_path, workspace_path, cr_id, remove_originals=False
         )
-        cleanup_archive_release_stock(database_path, workspace_path, cr_id)
+        release_cleanup = cleanup_archive_release_stock(
+            database_path, workspace_path, cr_id
+        )
+        cleanup_warnings.extend(release_cleanup.get("warnings") or [])
         try:
             from app.archive_reversal import cleanup_archive_reversal
             cleanup_archive_reversal(workspace_path, cr_id)
@@ -316,6 +320,7 @@ def cancel_event_change(
         "status": "abgebrochen",
         "change_request_id": cr_id,
         "reversal_required": False,
+        "cleanup_warnings": cleanup_warnings,
     }
 
 def verify_event_change(
