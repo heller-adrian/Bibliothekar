@@ -21,7 +21,7 @@ from app.storage_config import (
 
 # Legacy aliases remain stable for internal compatibility roots and existing
 # installations. New physical layouts use the configurable names below.
-BACKUP_DIRECTORY_NAME = DEFAULT_BACKUP_DIRECTORY_NAME
+BACKUP_DIRECTORY_NAME = "SD-Kartensicherungen"
 WORK_DIRECTORY_NAME = "Arbeitsbereich"
 WORKSPACES_DIRECTORY_NAME = DEFAULT_WORKSPACES_DIRECTORY_NAME
 METADATA_DIRECTORY_NAME = DEFAULT_METADATA_DIRECTORY_NAME
@@ -115,9 +115,10 @@ def ensure_workspace_layout(workspace_path: Path) -> dict[str, Any]:
     # unverändert. Bei einer frischen Installation entsteht der Main-Bereich
     # dagegen unter Arbeitsbereiche/main.
     legacy_main = root / WORK_DIRECTORY_NAME
+    existing_legacy_main = legacy_main.exists() and not legacy_main.is_symlink()
     main_work = (
         legacy_main.resolve(strict=False)
-        if legacy_main.exists()
+        if existing_legacy_main
         else default_library_work_root(root, "main").resolve(strict=False)
     )
 
@@ -137,6 +138,13 @@ def ensure_workspace_layout(workspace_path: Path) -> dict[str, Any]:
                 "Ein Strukturordner ist nicht vollständig zugreifbar: "
                 + str(directory)
             )
+
+    # Neue Installationen erhalten den neuen kanonischen Main-Pfad und zugleich
+    # einen transparenten Legacy-Alias. Bestehende echte Arbeitsbereich-Ordner
+    # werden niemals automatisch ersetzt oder verschoben.
+    if not existing_legacy_main and not legacy_main.exists() and not legacy_main.is_symlink():
+        legacy_main.symlink_to(main_work, target_is_directory=True)
+        created.append(str(legacy_main))
 
     return {
         "workspace_root": str(root),
