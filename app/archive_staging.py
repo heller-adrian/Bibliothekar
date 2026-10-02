@@ -858,14 +858,6 @@ def prepare_archive_change_staging_for_request(
     staging_by_file_id: dict[int, str] = {}
 
     try:
-        release_root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        warnings.append(
-            "Stammordner „Freigewordene Archivdateien“ konnte nicht erhalten werden: "
-            + str(exc)
-        )
-
-    try:
         staging_base.mkdir(parents=True, exist_ok=True)
         for relative in sorted(directories, key=lambda value: (len(value.parts), value.as_posix())):
             target = staging_base.joinpath(*relative.parts).resolve(strict=False)
@@ -1251,6 +1243,14 @@ def cleanup_archive_change_staging(
                     pass
         except OSError as exc:
             warnings.append("Rückänderungs-Hilfsbereich konnte nicht vollständig entfernt werden: " + str(exc))
+
+    try:
+        release_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        warnings.append(
+            "Stammordner „Freigewordene Archivdateien“ konnte nicht erhalten werden: "
+            + str(exc)
+        )
 
     try:
         staging_base.mkdir(parents=True, exist_ok=True)
