@@ -1276,6 +1276,15 @@ def cleanup_archive_change_staging(
                     workspace_path,
                     original_rel,
                 )
+                original_was_already_moved = not original_path.exists()
+                if (
+                    original_was_already_moved
+                    and removed_helper
+                    and row.get("released_asset_id") is not None
+                ):
+                    removed_released_asset_ids.append(
+                        int(row["released_asset_id"])
+                    )
             except Exception as exc:
                 warnings.append(
                     "SSD-Original konnte nicht aufgelöst werden: "
