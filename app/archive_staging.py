@@ -858,6 +858,14 @@ def prepare_archive_change_staging_for_request(
     staging_by_file_id: dict[int, str] = {}
 
     try:
+        release_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        warnings.append(
+            "Stammordner „Freigewordene Archivdateien“ konnte nicht erhalten werden: "
+            + str(exc)
+        )
+
+    try:
         staging_base.mkdir(parents=True, exist_ok=True)
         for relative in sorted(directories, key=lambda value: (len(value.parts), value.as_posix())):
             target = staging_base.joinpath(*relative.parts).resolve(strict=False)
@@ -1001,30 +1009,85 @@ def cleanup_archive_change_staging(
     removed_empty_source_directories = 0
     warnings: list[str] = []
 
+    central_root = backup_root(workspace_path).resolve(strict=False)
+    release_root = (
+        central_root / "Freigewordene Archivdateien"
+    ).resolve(strict=False)
+
     with database_connection(database_path) as connection:
         cr = connection.execute(
             "SELECT prepared_structure_path FROM event_change_requests WHERE id=?",
             (cr_id,),
         ).fetchone()
-        rows = connection.execute(
-            """SELECT file_id,old_path,workspace_original_path,workspace_staging_path,
-                      expected_size_bytes,expected_sha256
-               FROM event_change_file_reviews
-               WHERE change_request_id=? AND source_root_kind='shared_workspace'
-               ORDER BY id""",
-            (cr_id,),
-        ).fetchall()
+        camera_rows = [
+            {
+                **dict(row),
+                "review_kind": "camera",
+                "released_asset_id": None,
+                "staging_relative_path": str(
+                    row["workspace_staging_path"] or ""
+                ),
+            }
+            for row in connection.execute(
+                """SELECT file_id,old_path,workspace_original_path,
+                          workspace_staging_path,expected_size_bytes,
+                          expected_sha256
+                   FROM event_change_file_reviews
+                   WHERE change_request_id=?
+                     AND source_root_kind='shared_workspace'
+                   ORDER BY id""",
+                (cr_id,),
+            ).fetchall()
+        ]
+        asset_rows = [
+            {
+                **dict(row),
+                "review_kind": "asset",
+                "workspace_original_path": str(row["old_path"] or ""),
+                "staging_relative_path": (
+                    (
+                        PurePosixPath(STAGING_DIRECTORY_NAME)
+                        / _safe_relative(str(row["new_path"] or ""))
+                    ).as_posix()
+                    if str(row["new_path"] or "").strip()
+                    else ""
+                ),
+            }
+            for row in connection.execute(
+                """SELECT review.id,review.family_id,review.old_path,
+                          review.new_path,review.expected_size_bytes,
+                          review.expected_sha256,
+                          released.id AS released_asset_id
+                   FROM event_change_asset_reviews review
+                   JOIN released_archive_assets released
+                     ON released.family_id=review.family_id
+                    AND released.current_relative_path=review.old_path
+                   WHERE review.change_request_id=?
+                     AND review.action='move'
+                   ORDER BY review.id""",
+                (cr_id,),
+            ).fetchall()
+        ]
 
-    def remove_known(relative_value: str, expected_size: int, expected_sha: str, label: str) -> bool:
+    rows = camera_rows + asset_rows
+    removed_released_asset_ids: list[int] = []
+
+    def remove_known(
+        relative_value: str,
+        root: Path,
+        expected_size: int,
+        expected_sha: str,
+        label: str,
+    ) -> tuple[bool, Path | None]:
         if not relative_value:
-            return False
+            return False, None
         try:
             rel = _safe_relative(relative_value)
-            path = work_root.joinpath(*rel.parts).resolve(strict=False)
-            if not _inside(path, work_root):
-                raise ArchiveStagingError("Pfad verlässt den Arbeitsbereich.")
+            path = root.joinpath(*rel.parts).resolve(strict=False)
+            if not _inside(path, root):
+                raise ArchiveStagingError("Pfad verlässt den zulässigen SSD-Bestand.")
             if not path.exists():
-                return False
+                return False, path
             if not path.is_file() or path.is_symlink():
                 raise ArchiveStagingError("Pfad ist keine reguläre Datei.")
             if int(path.stat().st_size) != int(expected_size):
@@ -1032,36 +1095,93 @@ def cleanup_archive_change_staging(
             if not expected_sha or _sha256_file(path) != expected_sha:
                 raise ArchiveStagingError("SHA-256 stimmt nicht.")
             path.unlink()
-            return True
+            return True, path
         except Exception as exc:
             warnings.append(f"{label}: {relative_value}: {exc}")
-            return False
+            return False, None
+
+    def cleanup_empty_source_parents(path: Path, root: Path) -> None:
+        nonlocal removed_empty_source_directories
+        stop_root = root
+        if _inside(path, release_root):
+            stop_root = release_root
+        current = path.parent
+        while _inside(current, root) and current != stop_root:
+            try:
+                current.rmdir()
+                removed_empty_source_directories += 1
+            except OSError:
+                break
+            current = current.parent
 
     for row in rows:
-        expected_size = int(row["expected_size_bytes"] or 0)
-        expected_sha = str(row["expected_sha256"] or "")
-        staging_rel = str(row["workspace_staging_path"] or "")
-        original_rel = str(row["workspace_original_path"] or row["old_path"] or "")
-        if remove_known(staging_rel, expected_size, expected_sha, "Staging konnte nicht entfernt werden"):
+        expected_size = int(row.get("expected_size_bytes") or 0)
+        expected_sha = str(row.get("expected_sha256") or "")
+        staging_rel = str(row.get("staging_relative_path") or "")
+        original_rel = str(
+            row.get("workspace_original_path")
+            or row.get("old_path")
+            or ""
+        )
+
+        removed_helper, _ = remove_known(
+            staging_rel,
+            work_root,
+            expected_size,
+            expected_sha,
+            "Staging konnte nicht entfernt werden",
+        )
+        if removed_helper:
             removed_staged += 1
+
         if remove_originals and original_rel != staging_rel:
-            if remove_known(original_rel, expected_size, expected_sha, "SSD-Original konnte nicht freigegeben werden"):
+            try:
+                original_path, source_root = _workspace_source_path(
+                    workspace_path,
+                    original_rel,
+                )
+            except Exception as exc:
+                warnings.append(
+                    "SSD-Original konnte nicht aufgelöst werden: "
+                    + original_rel
+                    + ": "
+                    + str(exc)
+                )
+                continue
+            try:
+                rel = original_path.relative_to(source_root).as_posix()
+            except ValueError:
+                warnings.append(
+                    "SSD-Original verlässt den zulässigen Bestand: "
+                    + original_rel
+                )
+                continue
+            removed_original, removed_path = remove_known(
+                rel,
+                source_root,
+                expected_size,
+                expected_sha,
+                "SSD-Original konnte nicht freigegeben werden",
+            )
+            if removed_original and removed_path is not None:
                 removed_originals += 1
-                try:
-                    original_path = work_root.joinpath(*_safe_relative(original_rel).parts).resolve(strict=False)
-                    current = original_path.parent
-                    while _inside(current, work_root) and current != work_root and current.parent != work_root:
-                        try:
-                            current.rmdir()
-                            removed_empty_source_directories += 1
-                        except OSError:
-                            break
-                        current = current.parent
-                except Exception as exc:
-                    warnings.append(
-                        "Leerer SSD-Quellordner konnte nicht vollständig aufgeräumt werden: "
-                        + str(exc)
+                cleanup_empty_source_parents(removed_path, source_root)
+                if row.get("released_asset_id") is not None:
+                    removed_released_asset_ids.append(
+                        int(row["released_asset_id"])
                     )
+
+    if removed_released_asset_ids:
+        with database_connection(database_path) as connection:
+            placeholders = ",".join(
+                "?" for _ in removed_released_asset_ids
+            )
+            connection.execute(
+                f"""DELETE FROM released_archive_assets
+                    WHERE id IN ({placeholders})""",
+                tuple(sorted(set(removed_released_asset_ids))),
+            )
+            connection.commit()
 
     try:
         if event_document_spec is None:
