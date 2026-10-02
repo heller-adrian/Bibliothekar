@@ -14,26 +14,10 @@ from app.archive_staging import (
 )
 from app.event_change_request import get_event_change_files, get_event_change_request
 from app.archive_release_stock import describe_archive_release_stock
-from app.workspace_layout import backup_root, shared_work_root
 
 
 class ArchiveChangeAssistantError(RuntimeError):
     pass
-
-
-def _display_root_name(path: Path, fallback: str) -> str:
-    try:
-        name = path.expanduser().resolve(strict=False).name.strip()
-    except OSError:
-        name = path.name.strip()
-    return name or fallback
-
-
-def _archive_display_root(archive_root: Path) -> str:
-    name = _display_root_name(archive_root, "Kamerabibliothek")
-    # Der Hauptarchiv-Mount heißt im Container technisch /main-library,
-    # im Finder/Produkt aber weiterhin Kamerabibliothek.
-    return "Kamerabibliothek" if name == "main-library" else name
 
 
 def _parent_dir(value: Any) -> str:
@@ -230,6 +214,9 @@ def build_archive_change_assistant(
     cr_id: str,
     *,
     scan_live: bool = False,
+    archive_display_root: str = "Kamerabibliothek",
+    work_display_root: str = "Arbeitsbereich",
+    backup_display_root: str = "SD-Kartensicherungen",
 ) -> dict[str, Any]:
     cr = get_event_change_request(database_path, cr_id)
     if cr is None:
@@ -253,15 +240,9 @@ def build_archive_change_assistant(
     obsolete = list(description.get("obsolete_directories") or [])
     event_document = description.get("event_document")
 
-    archive_display_root = _archive_display_root(archive_root)
-    work_display_root = _display_root_name(
-        shared_work_root(workspace_path),
-        "Arbeitsbereich",
-    )
-    backup_display_root = _display_root_name(
-        backup_root(workspace_path),
-        "SD-Kartensicherungen",
-    )
+    archive_display_root = str(archive_display_root or "Kamerabibliothek").strip() or "Kamerabibliothek"
+    work_display_root = str(work_display_root or "Arbeitsbereich").strip() or "Arbeitsbereich"
+    backup_display_root = str(backup_display_root or "SD-Kartensicherungen").strip() or "SD-Kartensicherungen"
 
     actionable = [
         row for row in rows
