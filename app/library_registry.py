@@ -909,20 +909,60 @@ def register_source_backup(
         connection.execute("BEGIN IMMEDIATE")
         existing = connection.execute(
             """
-            SELECT source_kind, source_identity, created_at
+            SELECT source_kind, source_identity, backup_path, created_at
             FROM source_backups
             WHERE backup_id = ?
             """,
             (clean_backup_id,),
         ).fetchone()
-        if existing is not None and (
-            str(existing["source_kind"]) != clean_kind
-            or str(existing["source_identity"]) != clean_identity
-        ):
-            raise LibraryRegistryError(
-                "Eine bestehende Backup-ID darf nicht auf eine andere Quelle "
-                "umgebunden werden."
-            )
+        effective_identity = clean_identity
+        if existing is not None:
+            existing_kind = str(existing["source_kind"])
+            existing_identity = str(existing["source_identity"])
+            existing_path = str(existing["backup_path"])
+            if existing_kind != clean_kind:
+                raise LibraryRegistryError(
+                    "Eine bestehende Backup-ID darf nicht auf einen anderen "
+                    "Quellentyp umgebunden werden."
+                )
+            if existing_identity != clean_identity:
+                metadata_library = str((metadata or {}).get("library_id") or "")
+                physical_identity = str(
+                    (metadata or {}).get("physical_source_identity") or ""
+                )
+                safe_legacy_upgrade = (
+                    clean_kind == "existing_library"
+                    and metadata_library
+                    and physical_identity
+                    and existing_identity == physical_identity
+                    and clean_identity == metadata_library + ":" + physical_identity
+                    and existing_path == clean_path
+                )
+                if not safe_legacy_upgrade:
+                    raise LibraryRegistryError(
+                        "Eine bestehende Backup-ID darf nicht auf eine andere "
+                        "Quelle umgebunden werden."
+                    )
+                # 0.32.8-Kompatibilitätsmigration: Der alte Eintrag war bereits
+                # bibliotheksspezifisch in seiner Backup-ID, nur die Identität
+                # war noch nicht namespaced. Alle physischen Merkmale müssen
+                # deshalb unverändert sein.
+                connection.execute(
+                    """
+                    UPDATE source_backups
+                    SET source_identity=?, metadata_json=?, updated_at=?
+                    WHERE backup_id=?
+                    """,
+                    (
+                        clean_identity,
+                        serialized,
+                        now,
+                        clean_backup_id,
+                    ),
+                )
+                effective_identity = clean_identity
+            else:
+                effective_identity = existing_identity
 
         connection.execute(
             """
@@ -939,7 +979,7 @@ def register_source_backup(
             (
                 clean_backup_id,
                 clean_kind,
-                clean_identity,
+                effective_identity,
                 clean_path,
                 serialized,
                 str(existing["created_at"]) if existing else now,
