@@ -6196,7 +6196,8 @@ def api_workspace_summary(
         ),
         "planning_overview": planning_overview,
         "released_archive_groups": list_global_released_archive_groups(
-            current_database_file()
+            current_database_file(),
+            excluded_family_ids=blocked,
         ),
         "archive_change_review_count": len(archive_reviews),
         "archive_change_reviews": archive_reviews,
