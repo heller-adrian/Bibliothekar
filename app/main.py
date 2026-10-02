@@ -1229,6 +1229,11 @@ def startup_database() -> None:
             MAIN_LIBRARY_ID,
             active_only=False,
         )
+        registered_libraries = list_libraries(
+            REGISTRY_DATABASE_FILE,
+            active_only=False,
+            registered_only=True,
+        )
         workspace_layout = ensure_workspace_layout(
             WORKSPACE_PATH,
             configured_main_work_root=(
@@ -1236,7 +1241,35 @@ def startup_database() -> None:
                 if existing_main is not None
                 else None
             ),
+            create_default_main=existing_main is not None,
         )
+
+        # 0.32.9: Eine frische Installation besitzt absichtlich noch keine
+        # Bibliothek. Nur die neutralen Workspace-Stämme werden vorbereitet;
+        # die erste Bibliothek (Name, Arbeitsbereich, Archiv) legt der Nutzer
+        # über das Onboarding selbst an.
+        if not registered_libraries:
+            WORKSPACE_LAYOUT_INITIALIZATION = {
+                **workspace_layout,
+                "onboarding_required": True,
+            }
+            LIBRARY_REGISTRY_INITIALIZATION = {
+                **(LIBRARY_REGISTRY_INITIALIZATION or {}),
+                "onboarding_required": True,
+            }
+            WORKSPACE_LAYOUT_ERROR = None
+            LIBRARY_REGISTRY_ERROR = None
+            DATABASE_INITIALIZATION_ERROR = None
+
+            WORKER_STOP.clear()
+            if WORKER_THREAD is None or not WORKER_THREAD.is_alive():
+                WORKER_THREAD = Thread(
+                    target=worker_loop,
+                    name="kamera-job-worker",
+                    daemon=True,
+                )
+                WORKER_THREAD.start()
+            return
 
         adopt_main_library(
             REGISTRY_DATABASE_FILE,
