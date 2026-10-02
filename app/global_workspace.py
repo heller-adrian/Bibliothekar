@@ -282,7 +282,14 @@ def build_global_workspace_summary(
             "available_day_groups": available,
             "timeline_groups": timeline,
         },
-        "released_archive_groups": list_global_released_archive_groups(database_path),
+        "released_archive_groups": list_global_released_archive_groups(
+            database_path,
+            excluded_family_ids={
+                int(family_id)
+                for values in (excluded_family_ids_by_job or {}).values()
+                for family_id in values
+            },
+        ),
         "archive_change_review_count": len(reviews),
         "archive_change_reviews": reviews,
         "statistics": {
