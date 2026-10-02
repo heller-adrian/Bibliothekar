@@ -5998,6 +5998,16 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
             connection.execute("BEGIN IMMEDIATE")
             result = cancel_mutation(connection, mutation_id, job_id, workspace_path=current_workspace_root())
             connection.commit()
+
+        # Ein verworfener Edit stellt die lokale Ereigniswahrheit wieder her.
+        # Danach müssen auch globale Reservierungs-/Besitz-Claims und die
+        # zentralen freien Pfade wieder exakt diesem Zustand entsprechen.
+        backfill_library_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=current_database_file(),
+            library_id=current_library_context().library_id,
+        )
+        synchronize_global_central_stock()
         return result
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
