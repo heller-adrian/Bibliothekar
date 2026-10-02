@@ -1148,10 +1148,24 @@ def build_event_sort_plan(
                 })
     
     job_ready, job_blocker = job_sort_readiness(job)
-    if not job_ready and not released_workspace_source and not shared_workspace_source:
+    if (
+        not job_ready
+        and not central_stock_source
+        and not released_workspace_source
+        and not shared_workspace_source
+    ):
         blockers.append({
             "code": "job_not_verified",
             "message": job_blocker,
+        })
+    elif central_stock_source and not job_ready:
+        warnings.append({
+            "code": "central_stock_source",
+            "message": (
+                "Die ausgewählten Dateien liegen bereits im globalen, geprüften "
+                "SSD-Bestand. Der ursprüngliche Sicherungsauftrag bleibt nur "
+                "Herkunft und ist keine physische Sortierquelle mehr."
+            ),
         })
     elif released_workspace_source:
         warnings.append({
