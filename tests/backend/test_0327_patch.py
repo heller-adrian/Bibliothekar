@@ -183,6 +183,7 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
     db = tmp_path / "kamera.sqlite3"
     workspace = tmp_path / "workspace"
     archive = tmp_path / "archive"
+    workspace.mkdir()
     ensure_workspace_layout(workspace)
     archive.mkdir()
     initialize_database(db)
