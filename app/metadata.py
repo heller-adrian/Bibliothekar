@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from app.source_filter import should_ignore_source_path
 from zoneinfo import ZoneInfo
 import json
 import re
@@ -540,13 +541,16 @@ def analyze_tree(
         if not source_file:
             continue
 
-        metadata_by_path[str(
-            Path(source_file).resolve()
-        )] = entry
+        source_path = Path(source_file)
+        if should_ignore_source_path(source_root, source_path):
+            continue
+        metadata_by_path[str(source_path.resolve())] = entry
 
     files: list[dict[str, Any]] = []
 
     for path in sorted(source_root.rglob("*")):
+        if should_ignore_source_path(source_root, path):
+            continue
         if not path.is_file():
             continue
 
