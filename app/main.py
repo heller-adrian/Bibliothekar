@@ -453,7 +453,14 @@ def compatibility_workspace_root(context: LibraryContext) -> Path:
 
 
 def current_workspace_root() -> Path:
-    return compatibility_workspace_root(current_library_context())
+    current = get_current_library()
+    if current is None:
+        # Direkte interne/ältere Testaufrufe besitzen keinen Request-Kontext.
+        # Sie behalten den bisherigen neutralen Workspace-Pfad; echte
+        # Bibliotheksrequests laufen immer durch die Middleware und erhalten
+        # die bibliotheksspezifische Kompatibilitätsansicht.
+        return current_library_context().workspace_root
+    return compatibility_workspace_root(current)
 
 
 def current_work_root() -> Path:
