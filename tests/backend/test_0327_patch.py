@@ -100,7 +100,7 @@ def test_0327_time_range_trims_selected_day_stock_instead_of_rejecting_it():
             "end_date": "2026-07-25",
             "start_time": "10:00",
             "end_time": "23:59",
-            "uses_time_range": False,
+            "uses_time_range": True,
             "preserve_day_folders": False,
             "selected_day_keys": ["2026-07-25"],
             "selected_family_ids": [1, 2, 3],
