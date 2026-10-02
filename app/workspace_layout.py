@@ -104,26 +104,37 @@ def resolve_workspace_root(workspace_path: Path) -> Path:
     return root
 
 
-def ensure_workspace_layout(workspace_path: Path) -> dict[str, Any]:
+def ensure_workspace_layout(
+    workspace_path: Path,
+    *,
+    configured_main_work_root: Path | None = None,
+) -> dict[str, Any]:
     root = resolve_workspace_root(workspace_path)
     configured = storage_paths(root)
     backup = configured["backup_root"]
     workspaces = configured["workspaces_root"]
     metadata = configured["metadata_root"]
 
-    # Bestehende 0.32.7-Installationen behalten ihren Main-Arbeitsbereich
-    # unverändert. Bei einer frischen Installation entsteht der Main-Bereich
-    # dagegen unter Arbeitsbereiche/main.
+    # "main" ist ausschließlich der Erstinstallations-Standard. Sobald die
+    # Registry einen Main-Arbeitsbereich kennt, ist dieser gespeicherte Pfad
+    # autoritativ und darf weder durch /Arbeitsbereiche/main ersetzt noch
+    # zusätzlich vorausgesetzt werden.
     legacy_main = root / WORK_DIRECTORY_NAME
     existing_legacy_main = legacy_main.exists() and not legacy_main.is_symlink()
-    main_work = (
-        legacy_main.resolve(strict=False)
-        if existing_legacy_main
-        else default_library_work_root(root, "main").resolve(strict=False)
-    )
+
+    if configured_main_work_root is not None:
+        main_work = configured_main_work_root.expanduser().resolve(strict=False)
+        main_is_existing_configuration = True
+    else:
+        main_work = (
+            legacy_main.resolve(strict=False)
+            if existing_legacy_main
+            else default_library_work_root(root, "main").resolve(strict=False)
+        )
+        main_is_existing_configuration = False
 
     created: list[str] = []
-    for directory in (backup, workspaces, metadata, main_work):
+    for directory in (backup, workspaces, metadata):
         if directory.exists() and not directory.is_dir():
             raise WorkspaceLayoutError(
                 "Ein benötigter Strukturpfad ist kein Ordner: "
@@ -139,12 +150,43 @@ def ensure_workspace_layout(workspace_path: Path) -> dict[str, Any]:
                 + str(directory)
             )
 
-    # Neue Installationen erhalten den neuen kanonischen Main-Pfad und zugleich
-    # einen transparenten Legacy-Alias. Bestehende echte Arbeitsbereich-Ordner
-    # werden niemals automatisch ersetzt oder verschoben.
-    if not existing_legacy_main and not legacy_main.exists() and not legacy_main.is_symlink():
-        legacy_main.symlink_to(main_work, target_is_directory=True)
-        created.append(str(legacy_main))
+    if main_work.exists() and not main_work.is_dir():
+        raise WorkspaceLayoutError(
+            "Der gespeicherte Main-Arbeitsbereich ist kein Ordner: "
+            + str(main_work)
+        )
+    if not main_work.exists():
+        if main_is_existing_configuration:
+            raise WorkspaceLayoutError(
+                "Der gespeicherte Main-Arbeitsbereich ist nicht verfügbar: "
+                + str(main_work)
+            )
+        main_work.mkdir(mode=0o775, parents=True)
+        _fsync_directory(main_work.parent)
+        created.append(str(main_work))
+    if not os.access(main_work, os.R_OK | os.W_OK | os.X_OK):
+        raise WorkspaceLayoutError(
+            "Der Main-Arbeitsbereich ist nicht vollständig zugreifbar: "
+            + str(main_work)
+        )
+
+    # Der Legacy-Alias ist nur Kompatibilität. Er folgt dem autoritativen
+    # Registry-Pfad und begründet niemals selbst eine Pflicht zu "main".
+    if not existing_legacy_main:
+        if legacy_main.is_symlink():
+            try:
+                if legacy_main.resolve(strict=False) != main_work:
+                    legacy_main.unlink(missing_ok=True)
+                    legacy_main.symlink_to(main_work, target_is_directory=True)
+                    created.append(str(legacy_main))
+            except OSError as error:
+                raise WorkspaceLayoutError(
+                    "Der Kompatibilitätsalias des Main-Arbeitsbereichs konnte "
+                    "nicht aktualisiert werden: " + str(legacy_main)
+                ) from error
+        elif not legacy_main.exists():
+            legacy_main.symlink_to(main_work, target_is_directory=True)
+            created.append(str(legacy_main))
 
     return {
         "workspace_root": str(root),
@@ -188,10 +230,10 @@ def resolve_library_work_root(
     workspace_path: Path,
     requested_work_root: Path | None = None,
 ) -> Path:
-    shared_root = shared_work_root(workspace_path)
-
+    # Ein explizit gespeicherter Bibliothekspfad darf niemals davon abhängen,
+    # ob der historische/default Main-Pfad noch existiert.
     if requested_work_root is None:
-        return shared_root
+        return shared_work_root(workspace_path)
 
     target = requested_work_root.expanduser().resolve(strict=False)
     backup = backup_root(workspace_path)
@@ -209,10 +251,7 @@ def resolve_library_work_root(
 
     if not target.exists():
         configured_workspaces = storage_paths(workspace_path)["workspaces_root"]
-        if (
-            _is_relative_to(target, shared_root)
-            or _is_relative_to(target, configured_workspaces)
-        ):
+        if _is_relative_to(target, configured_workspaces):
             target.mkdir(parents=True, exist_ok=True)
         else:
             raise WorkspaceLayoutError(
