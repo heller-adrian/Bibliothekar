@@ -10,6 +10,7 @@ import re
 import hashlib
 
 from app.metadata import analyze_tree
+from app.source_filter import should_ignore_source_path
 from app.pipeline import (
     PipelineError,
     append_log,
@@ -46,6 +47,8 @@ FamilyAdmissionCallback = Callable[[dict[str, Any], dict[str, str], dict[str, in
 def quick_source_signature(source: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(source.rglob("*")):
+        if should_ignore_source_path(source, path):
+            continue
         if path.is_symlink() or not path.is_file():
             continue
         stat = path.stat()
