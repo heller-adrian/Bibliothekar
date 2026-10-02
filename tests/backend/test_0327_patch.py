@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from app.archive_reversal import verify_archive_reversal
 from app.archive_staging import cleanup_archive_change_staging
 from app.database import database_connection, initialize_database
 from app.event_change_apply import cancel_event_change, confirm_event_change
@@ -349,6 +350,11 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
 
     assert incoming_path.is_file()
     assert xmp_path.is_file()
+
+    reversal_check = verify_archive_reversal(
+        db, archive, workspace, cr_id
+    )
+    assert reversal_check["complete"], reversal_check
 
     cancelled = cancel_event_change(db, cr_id, archive, workspace)
     assert cancelled["status"] == "abgebrochen"
