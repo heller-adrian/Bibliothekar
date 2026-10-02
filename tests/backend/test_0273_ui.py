@@ -11,7 +11,7 @@ def test_0273_reversal_is_separate_right_to_left_three_step_workflow():
     finder = source.index('{phase:"finder", number:2')
     prepare = source.index('{phase:"prepare", number:1')
     assert verify < finder < prepare
-    assert "In „Später zuordnen“ liegt dein ursprünglicher Bestand:" in source
+    assert "Dieser Wiederherstellungsbereich wird erst mit „Rückänderung vorbereiten“ angelegt:" in source
     assert "/reversal/prepare" in source
     assert "/reversal/verify" in source
     assert "/reversal/finish" in source
