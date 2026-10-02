@@ -307,9 +307,12 @@ SOURCE_HELPER_URL = os.environ.get(
 
 def build_main_library_context() -> LibraryContext:
     legacy = WORKSPACE_PATH / WORK_DIRECTORY_NAME
+    # Nur ein echter bestehender Legacy-Ordner bleibt kanonisch. Der auf
+    # frischen 0.32.8-Installationen erzeugte Kompatibilitäts-Symlink darf
+    # nicht wieder zur gespeicherten Fachwurzel werden.
     work_root = (
         legacy
-        if legacy.exists()
+        if legacy.exists() and not legacy.is_symlink()
         else default_library_work_root(WORKSPACE_PATH, MAIN_LIBRARY_ID)
     )
     return LibraryContext(
