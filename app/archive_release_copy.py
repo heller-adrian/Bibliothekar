@@ -114,7 +114,7 @@ def create_archive_release_copies(
                 "family_id": row.get("family_id"),
                 "old_path": row.get("old_path"),
                 "workspace_release_path": release_rel,
-                "status": "copy_created",
+                "status": "release_copy_verified",
             })
     except Exception:
         for target in reversed(created_paths):
@@ -131,16 +131,17 @@ def create_archive_release_copies(
             table = "event_change_asset_reviews" if kind == "asset" else "event_change_file_reviews"
             connection.execute(
                 f"""UPDATE {table}
-                    SET verification_status='copy_created',
+                    SET verification_status='release_copy_verified',
                         actual_size_bytes=?,actual_sha256=?,
-                        verified_at=NULL,updated_at=?
+                        verified_at=?,updated_at=?
                     WHERE id=? AND change_request_id=?""",
-                (copied_size, copied_sha, now, review_id, cr_id),
+                (copied_size, copied_sha, now, now, review_id, cr_id),
             )
 
     return {
         "complete": True,
         "copied_file_count": len(results),
+        "verified_file_count": len(results),
         "file_count": len(results),
         "files": results,
     }
