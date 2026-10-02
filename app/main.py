@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 import json
 import hashlib
@@ -310,6 +310,27 @@ def build_main_library_context() -> LibraryContext:
 
 MAIN_LIBRARY_CONTEXT = build_main_library_context()
 
+# Bibliotheksdatenbanken können nach dem Prozessstart aus der Registry
+# aufgelöst werden (z. B. sekundäre/Testbibliotheken). Der Request-Pfad darf
+# deshalb niemals voraussetzen, dass nur die Startup-Schleife alle tatsächlich
+# verwendeten DBs migriert hat.
+_LIBRARY_SCHEMA_LOCK = Lock()
+_LIBRARY_SCHEMA_READY: set[str] = set()
+
+
+def ensure_library_database_schema(context: LibraryContext) -> dict[str, Any] | None:
+    database_path = context.database_path.expanduser().resolve(strict=False)
+    key = str(database_path)
+    if key in _LIBRARY_SCHEMA_READY:
+        return None
+
+    with _LIBRARY_SCHEMA_LOCK:
+        if key in _LIBRARY_SCHEMA_READY:
+            return None
+        result = initialize_database(database_path)
+        _LIBRARY_SCHEMA_READY.add(key)
+        return result
+
 
 def current_library_context() -> LibraryContext:
     current = get_current_library()
@@ -500,6 +521,20 @@ async def library_context_middleware(request: Request, call_next):
                     "library_id": requested,
                 },
             )
+
+    try:
+        ensure_library_database_schema(context)
+    except Exception as error:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": (
+                    "Bibliotheks-Datenbank konnte nicht auf den aktuellen "
+                    "Schemastand gebracht werden: " + str(error)
+                ),
+                "library_id": context.library_id,
+            },
+        )
 
     token = set_current_library(context)
     try:
@@ -1114,6 +1149,9 @@ def startup_database() -> None:
         DATABASE_INITIALIZATION = initialize_database(
             DATABASE_FILE
         )
+        _LIBRARY_SCHEMA_READY.add(
+            str(DATABASE_FILE.expanduser().resolve(strict=False))
+        )
 
         workspace_layout = ensure_workspace_layout(
             WORKSPACE_PATH
@@ -1170,7 +1208,17 @@ def startup_database() -> None:
             if library_id == MAIN_LIBRARY_ID:
                 continue
             library_database = Path(str(library_row["database_path"]))
-            initialize_database(library_database)
+            secondary_context = LibraryContext(
+                library_id=library_id,
+                display_name=str(library_row["display_name"]),
+                database_path=library_database,
+                workspace_root=Path(str(library_row["workspace_root"])),
+                work_root=Path(str(library_row["work_root"])),
+                archive_root=Path(str(library_row["archive_root"])),
+                is_main=bool(library_row["is_main"]),
+                settings=dict(library_row.get("settings") or {}),
+            )
+            ensure_library_database_schema(secondary_context)
             ensure_library_identity(library_database, library_id)
             projection = project_all_imports(
                 DATABASE_FILE,
