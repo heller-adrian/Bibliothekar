@@ -61,8 +61,18 @@ def _managed_candidates_from_document(event_root: Path, data: dict) -> set[Path]
         if name:
             bases.append(event_root / name)
 
+    folder_layout = data.get("folder_layout") or {}
+    managed_layout_paths: list[str] = []
+    if bool(folder_layout.get("structure_enabled")):
+        try:
+            from app.event_layout import layout_paths
+            managed_layout_paths = layout_paths(folder_layout.get("layout") or {})
+        except Exception:
+            managed_layout_paths = []
+
     for base in bases:
         candidates.add(base)
+        leaf_bases: list[Path] = []
         if preserve:
             try:
                 day_dirs = [
@@ -74,8 +84,23 @@ def _managed_candidates_from_document(event_root: Path, data: dict) -> set[Path]
             for day_dir in day_dirs:
                 candidates.add(day_dir)
                 candidates.update(day_dir / branch for branch in WORKSPACE_BRANCHES)
+                leaf_bases.append(day_dir)
         else:
             candidates.update(base / branch for branch in WORKSPACE_BRANCHES)
+            leaf_bases.append(base)
+
+        # Seit 0.28 sind Ereignis-Unterordner frei konfigurierbar. Das alte
+        # event.json ist der Besitznachweis dafür, dass z. B. ein leerer
+        # früherer Input-/Exportordner "Test" von Bibliothekar stammt. Solche
+        # leeren, im neuen Layout nicht mehr benötigten Ordner dürfen nach
+        # erfolgreichem Reconcile genauso entfernt werden wie die historischen
+        # Alle/Sortiert/Export-Zweige.
+        for leaf in leaf_bases:
+            for relative in managed_layout_paths:
+                current = leaf
+                for part in Path(relative).parts:
+                    current = current / part
+                    candidates.add(current)
     return candidates
 
 
