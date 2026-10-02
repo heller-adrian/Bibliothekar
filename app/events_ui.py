@@ -4558,7 +4558,16 @@ EVENTS_HTML = r"""<!doctype html>
         if (changeRequestDialog.open) changeRequestDialog.close();
         await loadEvents({reset:true});
         refreshGlobalTasks();
-        setStatus("Archivänderung verworfen. Der vorherige Zustand bleibt gültig.", false, true);
+        const cleanupWarnings=Array.isArray(data.cleanup_warnings) ? data.cleanup_warnings : [];
+        if (cleanupWarnings.length) {
+          setStatus(
+            "Archivänderung verworfen. Eigene SSD-Kopien wurden entfernt; fremde oder unbekannte Inhalte blieben unangetastet: "
+              + cleanupWarnings.join(" · "),
+            true
+          );
+        } else {
+          setStatus("Archivänderung verworfen. Der vorherige Zustand bleibt gültig.", false, true);
+        }
         return data;
       }
 
