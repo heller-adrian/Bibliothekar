@@ -432,9 +432,9 @@ def _ensure_compatibility_link(link: Path, target: Path) -> None:
 
 
 def compatibility_workspace_root(context: LibraryContext) -> Path:
-    if context.is_main:
-        return context.workspace_root
-
+    # Alle Bibliotheken – auch die primäre – erhalten für Altcode intern eine
+    # kleine Kompatibilitätsansicht. Dadurch hängt kein Arbeitsablauf mehr von
+    # /workspace/Arbeitsbereich oder /workspace/Arbeitsbereiche/main ab.
     root = Path("/tmp/bibliothekar-library-workspaces") / re.sub(
         r"[^A-Za-z0-9._-]+",
         "-",
