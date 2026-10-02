@@ -1770,6 +1770,24 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
                     work_root=replacement,
                 )
 
+        # Den Legacy-Alias auf frischen Installationen nach einer
+        # Umbenennung des Arbeitsbereiche-Stamms auf die neue kanonische
+        # Main-Wurzel nachziehen. Ein echter historischer Arbeitsbereich wird
+        # niemals angefasst.
+        legacy_alias = root / WORK_DIRECTORY_NAME
+        if legacy_alias.is_symlink():
+            main_row = get_library(
+                REGISTRY_DATABASE_FILE,
+                MAIN_LIBRARY_ID,
+                active_only=False,
+            )
+            if main_row is not None:
+                legacy_alias.unlink()
+                legacy_alias.symlink_to(
+                    Path(str(main_row["work_root"])).resolve(strict=False),
+                    target_is_directory=True,
+                )
+
         old_backup = old_paths["backup_directory_name"]
         new_backup = new_paths["backup_directory_name"]
         if old_backup != new_backup:
@@ -1809,6 +1827,24 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
                 )
             except Exception:
                 pass
+        try:
+            legacy_alias = root / WORK_DIRECTORY_NAME
+            if legacy_alias.is_symlink():
+                old_main = next(
+                    (
+                        row for row in previous_rows
+                        if str(row["library_id"]) == MAIN_LIBRARY_ID
+                    ),
+                    None,
+                )
+                if old_main is not None:
+                    legacy_alias.unlink()
+                    legacy_alias.symlink_to(
+                        Path(str(old_main["work_root"])).resolve(strict=False),
+                        target_is_directory=True,
+                    )
+        except OSError:
+            pass
         detail = str(error)
         if isinstance(error, OSError):
             detail += (
