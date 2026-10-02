@@ -56,10 +56,29 @@ def _event_counts(
             FROM files WHERE family_id IN ({ph})""",
         tuple(family_ids),
     ).fetchone()
+    released_assets = {"file_count": 0, "total_size_bytes": 0}
+    if str(status or "") in {"draft", "planned"}:
+        asset_values = connection.execute(
+            f"""SELECT COUNT(*) AS file_count,
+                       COALESCE(SUM(size_bytes),0) AS total_size_bytes
+                FROM released_archive_assets
+                WHERE family_id IN ({ph})""",
+            tuple(family_ids),
+        ).fetchone()
+        released_assets = {
+            "file_count": int(asset_values["file_count"] or 0),
+            "total_size_bytes": int(asset_values["total_size_bytes"] or 0),
+        }
     return {
         "family_count": len(family_ids),
-        "file_count": int(values["file_count"] or 0),
-        "total_size_bytes": int(values["total_size_bytes"] or 0),
+        "file_count": (
+            int(values["file_count"] or 0)
+            + int(released_assets["file_count"])
+        ),
+        "total_size_bytes": (
+            int(values["total_size_bytes"] or 0)
+            + int(released_assets["total_size_bytes"])
+        ),
         "review_required_count": int(values["review_required_count"] or 0),
     }
 
@@ -98,10 +117,26 @@ def _visible_events(
                 and family_rows
             ):
                 from app.workspace_assets import discover_workspace_family_assets
+                family_ids = [int(row["id"]) for row in family_rows]
+                ph = ",".join("?" for _ in family_ids)
+                released_family_ids = {
+                    int(row["family_id"])
+                    for row in connection.execute(
+                        f"""SELECT DISTINCT family_id
+                            FROM released_archive_assets
+                            WHERE family_id IN ({ph})""",
+                        tuple(family_ids),
+                    ).fetchall()
+                }
+                discover_ids = [
+                    family_id
+                    for family_id in family_ids
+                    if family_id not in released_family_ids
+                ]
                 physical_assets = discover_workspace_family_assets(
                     database_path,
                     workspace_path,
-                    [int(row["id"]) for row in family_rows],
+                    discover_ids,
                 )
                 counts["file_count"] += sum(
                     int(item.get("file_count") or 0)
