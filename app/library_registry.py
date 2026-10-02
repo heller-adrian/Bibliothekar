@@ -1117,11 +1117,10 @@ def claim_source_family(
     event_id: str | None,
     claim_state: str = "reserved",
 ) -> dict[str, Any]:
-    """Create a library-local reservation or the single global ownership claim.
+    """Create the single global reservation or ownership claim.
 
-    Reservations are intentionally allowed in more than one library. Ownership
-    remains globally exclusive and therefore becomes the blocking state for
-    other libraries.
+    Planning already reserves the canonical family globally. Applying the event
+    promotes that same library's reservation to owned.
     """
     if claim_state not in {"reserved", "owned"}:
         raise LibraryRegistryError("Ungültiger Reservierungszustand.")
