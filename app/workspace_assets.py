@@ -44,27 +44,44 @@ def discover_workspace_family_assets(
 
     try:
         root = resolve_workspace_root(workspace_path).resolve(strict=False)
-        work_root = shared_work_root(workspace_path).resolve(strict=False)
         central_root = backup_root(workspace_path).resolve(strict=False)
     except Exception:
         return {}
-    if not root.is_dir() or not work_root.is_dir() or not central_root.is_dir():
+    try:
+        work_root = shared_work_root(workspace_path).resolve(strict=False)
+    except Exception:
+        work_root = None
+    if not root.is_dir() or not central_root.is_dir():
         return {}
+    if work_root is not None and not work_root.is_dir():
+        work_root = None
 
-    def physical_path(relative_value: str, *, prefer_central: bool = False) -> Path:
+    def _safe_under(path: Path, base: Path) -> bool:
+        try:
+            path.relative_to(base)
+            return True
+        except ValueError:
+            return False
+
+    def physical_path(
+        relative_value: str,
+        *,
+        prefer_central: bool = False,
+    ) -> tuple[Path, Path, str]:
         relative = Path(str(relative_value or "").strip())
         if relative.is_absolute() or ".." in relative.parts:
-            return root / "__unsafe__"
-        candidates = (
-            (central_root / relative, work_root / relative)
-            if prefer_central
-            else (work_root / relative, central_root / relative)
-        )
-        for candidate in candidates:
-            resolved = candidate.resolve(strict=False)
-            if _inside(resolved, root) and resolved.is_file():
-                return resolved
-        return candidates[0].resolve(strict=False)
+            return central_root / "__unsafe__", central_root, "central_stock"
+        roots: list[tuple[Path, str]] = [(central_root, "central_stock")]
+        if work_root is not None:
+            roots.append((work_root, "shared_workspace"))
+        if not prefer_central and len(roots) > 1:
+            roots = [roots[1], roots[0]]
+        for base, kind in roots:
+            candidate = (base / relative).resolve(strict=False)
+            if _safe_under(candidate, base) and candidate.is_file():
+                return candidate, base, kind
+        base, kind = roots[0]
+        return (base / relative).resolve(strict=False), base, kind
 
     placeholders = ",".join("?" for _ in ids)
     with database_connection(database_path) as connection:
@@ -111,12 +128,15 @@ def discover_workspace_family_assets(
         family_id: int,
         path: Path,
         *,
+        source_root: Path,
+        source_root_kind: str,
         asset_kind: str,
         tracked: bool,
         source_file_id: int | None = None,
     ) -> None:
         resolved = path.resolve(strict=False)
-        if resolved in seen_paths or not _inside(resolved, root):
+        source_root = source_root.resolve(strict=False)
+        if resolved in seen_paths or not _safe_under(resolved, source_root):
             return
         try:
             if not resolved.is_file() or resolved.is_symlink():
@@ -138,11 +158,14 @@ def discover_workspace_family_assets(
         )
         bucket["assets"].append({
             "asset_kind": asset_kind,
-            "path": str(resolved.relative_to(root).as_posix()),
+            "path": str(resolved.relative_to(source_root).as_posix()),
             "filename": resolved.name,
             "size_bytes": size,
             "tracked": tracked,
             "source_file_id": source_file_id,
+            "source_root_kind": source_root_kind,
+            "source_root_path": str(source_root),
+            "absolute_path": str(resolved),
         })
         bucket["file_count"] += 1
         bucket["total_size_bytes"] += size
@@ -155,9 +178,15 @@ def discover_workspace_family_assets(
         relative = str(row.get("current_relative_path") or "").strip()
         if not relative:
             continue
+        tracked_path, tracked_root, tracked_kind = physical_path(
+            relative,
+            prefer_central=True,
+        )
         add_asset(
             family_id,
-            physical_path(relative, prefer_central=True),
+            tracked_path,
+            source_root=tracked_root,
+            source_root_kind=tracked_kind,
             asset_kind=str(row.get("asset_kind") or "other"),
             tracked=True,
             source_file_id=(
@@ -173,21 +202,24 @@ def discover_workspace_family_assets(
         relative = str(row.get("current_relative_path") or "").strip()
         if not relative:
             continue
-        path = physical_path(
+        path, source_root, source_kind = physical_path(
             relative,
             prefer_central=str(relative).replace("\\", "/").startswith(
                 "Freigewordene Archivdateien/"
             ),
         )
-        if not _inside(path, root):
+        if not _safe_under(path, source_root):
             continue
         known_physical_paths.add(path)
-        scan_directories.add(path.parent)
+        scan_directories.add((path.parent, source_root, source_kind))
 
     # Match only within directories that contain a known camera/import row.
     # Thus an unrelated JPEG elsewhere in Arbeitsbereich is never adopted.
-    for directory in sorted(scan_directories, key=lambda value: str(value)):
-        if not directory.is_dir() or not _inside(directory, root):
+    for directory, source_root, source_kind in sorted(
+        scan_directories,
+        key=lambda value: str(value[0]),
+    ):
+        if not directory.is_dir() or not _safe_under(directory, source_root):
             continue
         try:
             candidates = sorted(directory.iterdir(), key=lambda value: value.name.casefold())
@@ -198,7 +230,7 @@ def discover_workspace_family_assets(
             if (
                 resolved in known_physical_paths
                 or resolved in seen_paths
-                or not _inside(resolved, root)
+                or not _safe_under(resolved, source_root)
             ):
                 continue
             try:
@@ -227,6 +259,8 @@ def discover_workspace_family_assets(
             add_asset(
                 family_id,
                 resolved,
+                source_root=source_root,
+                source_root_kind=source_kind,
                 asset_kind=asset_kind,
                 tracked=False,
                 source_file_id=(
