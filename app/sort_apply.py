@@ -334,14 +334,21 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
             for operation in reversed(operations):
                 source_rel = _safe_relative(operation["source_relative_path"])
                 destination_rel = _safe_relative(operation["destination_relative_path"])
+                stored_source_root = str(
+                    operation.get("source_root_path") or ""
+                ).strip()
                 operation_source_root = (
-                    target_root
-                    if (
-                        str(run.get("run_kind") or "initial") == "reapply"
-                        and str(operation.get("source_root_kind") or "job_root")
-                        == "shared_workspace"
+                    Path(stored_source_root).resolve(strict=False)
+                    if stored_source_root
+                    else (
+                        target_root
+                        if (
+                            str(run.get("run_kind") or "initial") == "reapply"
+                            and str(operation.get("source_root_kind") or "job_root")
+                            == "shared_workspace"
+                        )
+                        else source_root
                     )
-                    else source_root
                 )
                 destination_root = (
                     central_root
@@ -618,6 +625,7 @@ def prepare_sort_run(
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
                 str(entry.get("current_root_kind") or "job_root"),
+                str(entry.get("source_root_path") or plan["source_root"]),
                 str(entry.get("destination_root_kind") or "target_root"),
                 status_value,
             ))
@@ -633,10 +641,11 @@ def prepare_sort_run(
                 expected_size_bytes,
                 expected_sha256,
                 source_root_kind,
+                source_root_path,
                 destination_root_kind,
                 status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             operations,
         )
@@ -660,6 +669,7 @@ def prepare_sort_run(
                 int(entry["expected_size_bytes"]),
                 str(entry["stored_sha256"]),
                 str(entry.get("source_root_kind") or "shared_workspace"),
+                str(entry.get("source_root_path") or plan["source_root"]),
                 str(entry.get("destination_root_kind") or "target_root"),
                 status_value,
             ))
@@ -670,9 +680,9 @@ def prepare_sort_run(
                 sort_run_id, sequence_number, asset_kind, family_id,
                 source_file_id, source_relative_path, destination_relative_path,
                 expected_size_bytes, expected_sha256, source_root_kind,
-                destination_root_kind, status
+                source_root_path, destination_root_kind, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             asset_operations,
         )
