@@ -31,73 +31,98 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.31.0
+## TrueNAS Custom App 0.32.8
 
-0.31.0 baut auf dem Bibliotheksfundament 0.30.0/0.30.1 auf und aktiviert die
-Mehrbibliotheks-Nutzung. Der stabile fachliche Kamerakern bleibt **0.28.7**:
-Ereignis-, Archiv-, Reassignment-, XMP-, Export- und Unterereignislogik werden
-nicht neu definiert, sondern über einen request-lokalen `LibraryContext` auf
-die jeweils ausgewählte Bibliothek geroutet.
+0.32.8 vereinfacht die Speicherarchitektur der Mehrbibliotheks-Nutzung, ohne
+bestehende Bibliotheken automatisch zu verschieben. Der fachliche Kamerakern
+bleibt kompatibel; neue Speicherpfade werden zentral aufgelöst.
 
-Neu in 0.31.0:
+### Gemeinsamer Kamera-Arbeitsbereich
 
-- Bibliotheksumschalter; verschiedene Browser-Tabs können unabhängig in
-  verschiedenen Bibliotheken arbeiten
-- Bibliotheksverwaltung unter **Einstellungen → Konfiguration**:
-  prüfen, hinzufügen, Anzeigename ändern, deaktivieren, reaktivieren und
-  abmelden
-- jede zusätzliche Bibliothek erhält automatisch eine eigene SQLite-Datenbank
-  unter `/database/libraries/<interne-id>.sqlite3`
-- globale Registry v2 mit Datei-/Familieninventar sowie bibliotheksübergreifenden
-  Reservierungen und Besitzständen
-- eine freie Familie kann in einer Bibliothek geplant werden und verschwindet
-  dann unmittelbar aus dem freien Bestand der anderen Bibliotheken
-- freie Altbestände der Main Library bleiben beim Registry-Backfill frei;
-  nur geplante Bestände werden `reserved`, angewendete/archivierte Bestände
-  werden `owned`
-- direkte SD-/USB-Medien können bei fehlendem Host-Geräte-Node über einen eng
-  begrenzten temporären Block-Node unter `/dev/bibliothekar` eingebunden
-  werden; das Medium wird weiterhin ausschließlich read-only gemountet
-- der eingefrorene 0.28.7-CSS-Grundstand bleibt bytegenau erhalten; neue
-  0.31-Komponenten liegen in einem getrennten Zusatz-CSS
+TrueNAS bindet standardmäßig genau **einen** gemeinsamen read-write Host Path
+als `/workspace` ein. Das kann ein eigenes Dataset oder auch ein normaler Ordner
+innerhalb eines vorhandenen Datasets sein.
 
-Basis-Containerpfade:
+Bibliothekar verwaltet darunter standardmäßig:
+
+- `/workspace/SD-Kartensicherungen` – globaler Sicherungs- und Rückkehrbestand
+- `/workspace/Arbeitsbereiche` – Stamm für Bibliotheks-Arbeitsbereiche
+- `/workspace/Metadatenkorrektur` – vorbereiteter allgemeiner Arbeitsbereich
+- `/workspace/Arbeitsbereiche/main` – Standard-Arbeitsbereich der Main Library
+
+Die Namen der drei von Bibliothekar verwalteten Stammordner können unter
+**Einstellungen → Pfade** geändert werden. Dabei werden ausschließlich
+App-eigene Ordner innerhalb des bereits gemounteten `/workspace` verwaltet.
+TrueNAS-Datasets oder Host-Path-Mounts werden niemals von Bibliothekar erzeugt
+oder umgehängt.
+
+Bestehende Installationen mit einem echten `/workspace/Arbeitsbereich` werden
+nicht automatisch verschoben. Auf frischen Installationen existiert dieser Name
+nur als Kompatibilitätsalias auf `/workspace/Arbeitsbereiche/main`.
+
+### Bibliotheken
+
+Jede zusätzliche Bibliothek erhält weiterhin eine eigene SQLite-Datenbank unter
+`/database/libraries/<interne-id>.sqlite3`.
+
+Standardmäßig erzeugt Bibliothekar ihren Arbeitsbereich selbst unter:
+
+`/workspace/Arbeitsbereiche/<interne-id>`
+
+Damit ist für einen normalen zusätzlichen Bibliotheks-Arbeitsbereich kein
+weiterer TrueNAS Host Path nötig.
+
+Soll eine Bibliothek bewusst auf einem anderen Dataset oder an einem anderen
+Speicherort arbeiten, wird dieser Ort zuerst in TrueNAS als zusätzlicher
+read-write Host Path in den Container eingebunden. Anschließend kann der
+Containerpfad unter **Einstellungen → Bibliotheken** als Arbeitsbereich
+eingetragen werden. Pfadänderungen verschieben keine Dateien automatisch.
+
+### Archive
+
+Archive werden absichtlich **nicht** unter einem gemeinsamen Archiv-Mount
+zentralisiert. Jede Bibliothek erhält in TrueNAS ihren eigenen read-only Host
+Path. Dadurch kann jedes Archiv unabhängig auf einem anderen Dataset, Pool oder
+Ordner liegen.
+
+Beispiel:
+
+- Host-Archiv A → `/main-library` (RO)
+- Host-Archiv B → `/libraries/test/archive` (RO)
+
+Den jeweiligen Containerpfad speichert Bibliothekar pro Bibliothek. Die
+Bibliotheksverwaltung erlaubt Anzeigename, Arbeitsbereich und Archivpfad später
+erneut zu prüfen und anzupassen. Das Archiv bleibt für Bibliothekar read-only;
+physische Archivänderungen bleiben kontrollierte Nutzeraktionen.
+
+### Hardlinks
+
+Bibliothekar entscheidet nicht anhand des Pfadnamens, ob ein Hardlink möglich
+sein müsste. Entscheidend ist das tatsächliche Dateisystem. Liegen globaler
+Bestand und Bibliotheks-Arbeitsbereich auf demselben Dateisystem, wird ein
+Hardlink verwendet. Meldet das Betriebssystem `EXDEV`, zeigt Bibliothekar
+ausdrücklich die Wahl **Kopieren** oder **Verschieben**.
+
+Ein gemeinsamer `/workspace`-Mount erleichtert Hardlinks, garantiert sie aber
+nicht, wenn darunter wiederum unterschiedliche ZFS-Datasets eingehängt sind.
+
+### Basis-Containerpfade
 
 - `/config` – Anwendungskonfiguration
-- `/database` – Main-SQLite, globale Registry und Datenbanken weiterer Bibliotheken
+- `/database` – Main-SQLite, globale Registry und Bibliotheksdatenbanken
 - `/logs` – Protokolle
-- `/workspace` – gemeinsamer globaler Bestand, insbesondere `SD-Kartensicherungen`
-- `/main-library` – Hauptbibliothek, nur lesend eingebunden
-- `/sources/import` – zusätzliche allgemeine Importquelle, nur lesend
-- `/sources/nas` – NAS-Quellen, nur lesend
-- `/sources/removable` – beschreibbarer Mountpunkt für direkt bereitgestellte
-  Wechselmedien; das eigentliche Medium wird read-only eingebunden
+- `/workspace` – gemeinsamer Kamera-Arbeitsbereich, read-write
+- `/main-library` – Main-Archiv, read-only
+- weitere Bibliotheksarchive – jeweils eigener read-only Host Path
+- optionale externe Bibliotheks-Arbeitsbereiche – eigener read-write Host Path
+- `/sources/import` – zusätzliche allgemeine Importquelle, read-only
+- `/sources/nas` – NAS-Quellen, read-only
+- `/sources/removable` – Mountpunkt für direkt bereitgestellte Wechselmedien
 - `/tmp` – flüchtiges tmpfs
 
-Für zusätzliche Bibliotheken werden in TrueNAS zwei weitere Host-Path-Mounts
-angelegt, zum Beispiel:
-
-- `/libraries/business/workspace` – Arbeitsbereich, read-write
-- `/libraries/business/archive` – Archiv, read-only
-
-Die Containerpfade sind frei wählbar und werden anschließend in Bibliothekar
-unter **Einstellungen → Konfiguration → Bibliotheken** eingetragen. Bibliothekar
-löscht beim Deaktivieren oder Abmelden weder Dateien noch Datenbanken noch
-Archive.
-
-Der Arbeitsbereich einer Bibliothek muss auf demselben Dateisystem wie die
-gemeinsamen `SD-Kartensicherungen` liegen, wenn Bibliothekar Hardlinks zwischen
-beiden Bereichen verwenden soll. Das Archiv darf auf einem anderen Dataset
-liegen und wird read-only erwartet.
-
-`compose.example.yaml` enthält die aktuelle Ein-Container-Vorlage. Web-App und
-Quellen-Helper laufen weiterhin im selben Container; nur der lokale
-Geräte-Helper benötigt die privilegierten Mount-/Geräterechte, während die
-Web-App intern als UID/GID `568:568` läuft. Die weitere Discover-Härtung bleibt
-für 0.32 vorgesehen.
-
-Die vollständige formularbasierte TrueNAS-Konfiguration ist in
-`docs/truenas-guided-custom-app-0.31.0.md` dokumentiert.
+`compose.example.yaml` enthält die Ein-Container-Vorlage. Die detaillierte
+Speicherarchitektur für 0.32.8 ist in `docs/truenas-storage-0.32.8.md`
+beschrieben.
 
 ## Projektstruktur
 
