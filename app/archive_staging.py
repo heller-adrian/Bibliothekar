@@ -1301,6 +1301,7 @@ def cleanup_archive_change_staging(
                     + original_rel
                 )
                 continue
+            source_was_missing = not original_path.exists()
             removed_original, removed_path = remove_known(
                 rel,
                 source_root,
@@ -1315,6 +1316,14 @@ def cleanup_archive_change_staging(
                     removed_released_asset_ids.append(
                         int(row["released_asset_id"])
                     )
+            elif source_was_missing and row.get("released_asset_id") is not None:
+                # Beim ausdrücklich gewählten Cross-Dataset-Verschieben wurde
+                # die globale Quelldatei bereits nach verifizierter Hilfskopie
+                # entfernt. Nach erfolgreicher Archivprüfung ist deshalb nur
+                # noch der Herkunftsnachweis als verbraucht zu bereinigen.
+                removed_released_asset_ids.append(
+                    int(row["released_asset_id"])
+                )
 
     if removed_released_asset_ids:
         with database_connection(database_path) as connection:
