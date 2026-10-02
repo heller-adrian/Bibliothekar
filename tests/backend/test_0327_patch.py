@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 from pathlib import Path
 
+import pytest
+
+import app.archive_staging as archive_staging
 from app.archive_reversal import verify_archive_reversal
-from app.archive_staging import cleanup_archive_change_staging
+from app.archive_staging import ArchiveStagingError, cleanup_archive_change_staging
 from app.database import database_connection, initialize_database
 from app.event_change_apply import cancel_event_change, confirm_event_change
 from app.event_change_request import propose_event_change
@@ -375,3 +379,53 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
         / "Alle"
         / "incoming.XMP"
     ).exists()
+
+
+
+def test_0327_cross_dataset_staging_requires_explicit_choice_and_verifies_copy_move(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source = tmp_path / "source.JPG"
+    staged = tmp_path / "helper" / "source.JPG"
+    payload = b"cross-dataset-payload"
+    source.write_bytes(payload)
+    expected_sha = _sha(payload)
+
+    def exdev_link(*args, **kwargs):
+        raise OSError(errno.EXDEV, "cross-device link")
+
+    monkeypatch.setattr(archive_staging.os, "link", exdev_link)
+
+    with pytest.raises(ArchiveStagingError, match="TRANSFER_CHOICE_REQUIRED"):
+        archive_staging._stage_verified_source(
+            source,
+            staged,
+            expected_size=len(payload),
+            expected_sha=expected_sha,
+        )
+    assert source.read_bytes() == payload
+    assert not staged.exists()
+
+    mode = archive_staging._stage_verified_source(
+        source,
+        staged,
+        expected_size=len(payload),
+        expected_sha=expected_sha,
+        fallback_mode="copy",
+    )
+    assert mode == "copy"
+    assert source.read_bytes() == payload
+    assert staged.read_bytes() == payload
+
+    staged.unlink()
+    mode = archive_staging._stage_verified_source(
+        source,
+        staged,
+        expected_size=len(payload),
+        expected_sha=expected_sha,
+        fallback_mode="move",
+    )
+    assert mode == "move"
+    assert not source.exists()
+    assert staged.read_bytes() == payload
