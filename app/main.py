@@ -228,7 +228,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.32.8"
+DEPLOYMENT_VERSION = "0.32.9"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -2468,35 +2468,65 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     if not display_name:
         raise HTTPException(status_code=422, detail="Anzeigename fehlt.")
 
+    existing_registered = list_libraries(
+        REGISTRY_DATABASE_FILE,
+        active_only=False,
+        registered_only=True,
+    )
+    first_library = not existing_registered
     library_id = (
-        _library_slug(display_name)
-        + "-"
-        + uuid.uuid4().hex[:8]
+        MAIN_LIBRARY_ID
+        if first_library
+        else (
+            _library_slug(display_name)
+            + "-"
+            + uuid.uuid4().hex[:8]
+        )
     )
     requested_work = str(payload.get("work_root") or "").strip()
+    if not requested_work and first_library:
+        requested_work = str(
+            storage_paths(WORKSPACE_PATH)["workspaces_root"]
+            / (_library_slug(display_name) or "bibliothek")
+        )
     checked = inspect_library_paths(
         requested_work,
         str(payload.get("archive_root") or ""),
-        default_library_id=(library_id if not requested_work else None),
+        default_library_id=(
+            library_id
+            if (not requested_work and not first_library)
+            else None
+        ),
     )
     if not checked["valid"]:
         raise HTTPException(status_code=422, detail=checked)
 
     database_path = (
-        DATABASE_DIRECTORY
-        / "libraries"
-        / f"{library_id}.sqlite3"
+        DATABASE_FILE
+        if first_library
+        else (
+            DATABASE_DIRECTORY
+            / "libraries"
+            / f"{library_id}.sqlite3"
+        )
     )
-    created_database = not database_path.exists()
+    created_database = (
+        not first_library
+        and not database_path.exists()
+    )
 
     try:
         resolved_work = Path(str(checked["work_root"]))
         resolved_work.mkdir(parents=True, exist_ok=True)
         initialize_database(database_path)
         ensure_library_identity(database_path, library_id)
-        projection = project_all_imports(
-            DATABASE_FILE,
-            database_path,
+        projection = (
+            {"jobs": 0, "families": 0, "files": 0}
+            if first_library
+            else project_all_imports(
+                DATABASE_FILE,
+                database_path,
+            )
         )
         row = register_library(
             REGISTRY_DATABASE_FILE,
@@ -2506,14 +2536,15 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             workspace_root=WORKSPACE_PATH,
             work_root=resolved_work,
             archive_root=Path(str(checked["archive_root"])),
-            is_main=False,
+            is_main=first_library,
             is_active=True,
             settings={
-                "created_by": "bibliothekar-0.32.8",
+                "created_by": "bibliothekar-0.32.9",
                 "projected_imports": projection,
                 "managed_default_work_root": bool(
                     checked.get("managed_default_work_root")
                 ),
+                "user_created_primary_library": bool(first_library),
             },
         )
         backfill_library_inventory(
@@ -2523,6 +2554,12 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             claim_all_owned=False,
         )
         synchronize_global_central_stock()
+        if first_library:
+            global MAIN_LIBRARY_CONTEXT
+            MAIN_LIBRARY_CONTEXT = resolve_library_context(
+                REGISTRY_DATABASE_FILE,
+                MAIN_LIBRARY_ID,
+            )
     except Exception as error:
         # Eine fehlgeschlagene Neuanlage darf keinen aktiven Registry-Zombie
         # hinterlassen. Registry und gerade erzeugte DB werden gemeinsam
@@ -2611,15 +2648,6 @@ def api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, An
                     REGISTRY_DATABASE_FILE,
                     MAIN_LIBRARY_ID,
                 )
-                # Der Legacy-Alias folgt dem gespeicherten Main-Pfad. Ein
-                # echter historischer /workspace/Arbeitsbereich wird nicht
-                # verändert.
-                legacy_alias = WORKSPACE_PATH / WORK_DIRECTORY_NAME
-                if legacy_alias.is_symlink() or not legacy_alias.exists():
-                    _ensure_compatibility_link(
-                        legacy_alias,
-                        MAIN_LIBRARY_CONTEXT.work_root,
-                    )
         except LibraryRegistryError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
