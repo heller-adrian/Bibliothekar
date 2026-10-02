@@ -1617,6 +1617,206 @@ def _available_families_for_event_payload(
         for row in rows
     ])
 
+def _storage_settings_state() -> dict[str, Any]:
+    names = load_storage_settings()
+    paths = storage_paths(WORKSPACE_PATH)
+    libraries = []
+    for row in list_libraries(
+        REGISTRY_DATABASE_FILE,
+        active_only=False,
+        registered_only=True,
+    ):
+        work = Path(str(row["work_root"])).resolve(strict=False)
+        hardlink = (
+            _same_filesystem(paths["backup_root"], work)
+            if paths["backup_root"].exists() and work.exists()
+            else None
+        )
+        libraries.append({
+            "library_id": str(row["library_id"]),
+            "display_name": str(row["display_name"]),
+            "work_root": str(work),
+            "archive_root": str(row["archive_root"]),
+            "hardlink_to_central_stock": hardlink,
+        })
+    return {
+        **names,
+        "workspace_root": str(paths["workspace_root"]),
+        "backup_root": str(paths["backup_root"]),
+        "workspaces_root": str(paths["workspaces_root"]),
+        "metadata_root": str(paths["metadata_root"]),
+        "libraries": libraries,
+    }
+
+
+def _rewrite_job_working_path_prefix(
+    database_path: Path,
+    old_root: Path,
+    new_root: Path,
+) -> None:
+    if not database_path.is_file():
+        return
+    old_text = str(old_root.resolve(strict=False))
+    new_text = str(new_root.resolve(strict=False))
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            "SELECT id,working_path FROM jobs WHERE working_path IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            value = str(row["working_path"] or "")
+            if value == old_text:
+                replacement = new_text
+            elif value.startswith(old_text.rstrip("/") + "/"):
+                replacement = new_text.rstrip("/") + value[len(old_text):]
+            else:
+                continue
+            connection.execute(
+                "UPDATE jobs SET working_path=?,updated_at=? WHERE id=?",
+                (
+                    replacement,
+                    datetime.now(timezone.utc).isoformat(),
+                    str(row["id"]),
+                ),
+            )
+        connection.commit()
+
+
+@app.get("/api/settings/storage-paths", tags=["Einstellungen"])
+def api_get_storage_paths() -> dict[str, Any]:
+    return _storage_settings_state()
+
+
+@app.put("/api/settings/storage-paths", tags=["Einstellungen"])
+def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        old_names = load_storage_settings()
+        new_names = normalize_storage_settings(payload)
+    except StorageSettingsError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    root = WORKSPACE_PATH.expanduser().resolve(strict=False)
+    if not root.is_dir():
+        raise HTTPException(status_code=422, detail="Der Workspace-Mount ist nicht verfügbar.")
+
+    key_map = {
+        "backup_directory_name": "backup",
+        "workspaces_directory_name": "workspaces",
+        "metadata_directory_name": "metadata",
+    }
+    moved: list[tuple[Path, Path]] = []
+    previous_rows = list_libraries(
+        REGISTRY_DATABASE_FILE,
+        active_only=False,
+        registered_only=True,
+    )
+    try:
+        old_paths = {
+            key: (root / old_names[key]).resolve(strict=False)
+            for key in key_map
+        }
+        new_paths = {
+            key: (root / new_names[key]).resolve(strict=False)
+            for key in key_map
+        }
+
+        # Alle drei Namen vor dem ersten Dateisystemeingriff prüfen.
+        for key in key_map:
+            old_path = old_paths[key]
+            new_path = new_paths[key]
+            if old_path == new_path:
+                continue
+            if new_path.exists():
+                raise StorageSettingsError(
+                    "Der neue Ordnername ist bereits belegt: " + str(new_path)
+                )
+            if old_path.exists():
+                if old_path.is_symlink() or not old_path.is_dir():
+                    raise StorageSettingsError(
+                        "Der bisherige verwaltete Pfad ist kein normaler Ordner: "
+                        + str(old_path)
+                    )
+
+        # App-eigene Stammordner dürfen innerhalb desselben Workspace-Mounts
+        # atomar umbenannt werden. Kein Dateiinhalt wird kopiert.
+        for key in key_map:
+            old_path = old_paths[key]
+            new_path = new_paths[key]
+            if old_path == new_path:
+                continue
+            if old_path.exists():
+                old_path.rename(new_path)
+                moved.append((new_path, old_path))
+            else:
+                new_path.mkdir(parents=True, exist_ok=True)
+                moved.append((new_path, old_path))
+
+        save_storage_settings(new_names)
+
+        old_workspaces = old_paths["workspaces_directory_name"]
+        new_workspaces = new_paths["workspaces_directory_name"]
+        if old_workspaces != new_workspaces:
+            for row in previous_rows:
+                old_work = Path(str(row["work_root"])).resolve(strict=False)
+                try:
+                    relative = old_work.relative_to(old_workspaces)
+                except ValueError:
+                    continue
+                replacement = (new_workspaces / relative).resolve(strict=False)
+                update_library_paths(
+                    REGISTRY_DATABASE_FILE,
+                    str(row["library_id"]),
+                    work_root=replacement,
+                )
+
+        old_backup = old_paths["backup_directory_name"]
+        new_backup = new_paths["backup_directory_name"]
+        if old_backup != new_backup:
+            for row in previous_rows:
+                _rewrite_job_working_path_prefix(
+                    Path(str(row["database_path"])),
+                    old_backup,
+                    new_backup,
+                )
+
+        global MAIN_LIBRARY_CONTEXT
+        MAIN_LIBRARY_CONTEXT = resolve_library_context(
+            REGISTRY_DATABASE_FILE,
+            MAIN_LIBRARY_ID,
+        )
+        return _storage_settings_state()
+    except Exception as error:
+        # Best effort: Konfiguration und atomare Verzeichnis-Renames zurück.
+        try:
+            save_storage_settings(old_names)
+        except Exception:
+            pass
+        for current, previous in reversed(moved):
+            try:
+                if current.exists() and not previous.exists():
+                    current.rename(previous)
+            except OSError:
+                pass
+        # Registrypfade ebenfalls auf den vorherigen Stand zurückführen.
+        for row in previous_rows:
+            try:
+                update_library_paths(
+                    REGISTRY_DATABASE_FILE,
+                    str(row["library_id"]),
+                    work_root=Path(str(row["work_root"])),
+                    archive_root=Path(str(row["archive_root"])),
+                )
+            except Exception:
+                pass
+        detail = str(error)
+        if isinstance(error, OSError):
+            detail += (
+                " Der Ordner könnte als eigener TrueNAS-Hostpfad/Dataset-Mount "
+                "eingebunden sein. Solche Mounts werden in TrueNAS umgestellt, "
+                "nicht durch Bibliothekar umbenannt."
+            )
+        raise HTTPException(status_code=422, detail=detail) from error
+
+
 @app.get("/api/settings/event-folder-layout", tags=["Einstellungen"])
 def api_get_event_folder_layout() -> dict[str, Any]:
     with database_connection(current_database_file()) as connection:
