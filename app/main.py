@@ -1974,21 +1974,39 @@ def _mount_read_only(path: Path) -> bool:
     return "ro" in {part.strip() for part in options.split(",")}
 
 
+def _same_filesystem(path_a: Path, path_b: Path) -> bool | None:
+    try:
+        return int(path_a.stat().st_dev) == int(path_b.stat().st_dev)
+    except OSError:
+        return None
+
+
 def inspect_library_paths(
     work_root_value: str,
     archive_root_value: str,
     *,
     exclude_library_id: str | None = None,
+    default_library_id: str | None = None,
 ) -> dict[str, Any]:
-    work_root = Path(str(work_root_value or "").strip()).expanduser()
+    raw_work = str(work_root_value or "").strip()
+    if not raw_work and default_library_id:
+        work_root = default_library_work_root(
+            WORKSPACE_PATH,
+            default_library_id,
+        )
+        managed_default = True
+    else:
+        work_root = Path(raw_work).expanduser()
+        managed_default = False
+
     archive_root = Path(str(archive_root_value or "").strip()).expanduser()
     errors: list[str] = []
     warnings: list[str] = []
 
     if not work_root.is_absolute():
-        errors.append("Der Arbeitsbereich-Mount muss ein absoluter Containerpfad sein.")
+        errors.append("Der Arbeitsbereich muss ein absoluter Containerpfad sein.")
     if not archive_root.is_absolute():
-        errors.append("Der Archiv-Mount muss ein absoluter Containerpfad sein.")
+        errors.append("Das Archiv muss ein absoluter Containerpfad sein.")
 
     resolved_work = work_root.resolve(strict=False)
     resolved_archive = archive_root.resolve(strict=False)
@@ -2006,7 +2024,7 @@ def inspect_library_paths(
         elif not _mount_read_only(resolved_archive):
             errors.append(
                 "Der Archiv-Mount ist nicht nachweislich read-only. "
-                "Bitte den Host Path in TrueNAS als Read Only einbinden."
+                "Bitte diesen Host Path in TrueNAS einzeln als Read Only einbinden."
             )
 
         if (
@@ -2046,14 +2064,35 @@ def inspect_library_paths(
                     + "."
                 )
 
+    try:
+        central = workspace_backup_root(WORKSPACE_PATH)
+        hardlink_compatible = (
+            _same_filesystem(central, resolved_work)
+            if resolved_work.exists()
+            else None
+        )
+    except Exception:
+        central = Path()
+        hardlink_compatible = None
+
+    if hardlink_compatible is False:
+        warnings.append(
+            "Arbeitsbereich und SD-Kartensicherungen liegen auf unterschiedlichen "
+            "Dateisystemen. Hardlinks sind dort nicht möglich; Bibliothekar bietet "
+            "bei Bedarf Kopieren oder Verschieben an."
+        )
+
     return {
         "valid": not errors,
         "work_root": str(resolved_work),
         "archive_root": str(resolved_archive),
+        "managed_default_work_root": managed_default,
         "archive_read_only": (
             bool(resolved_archive.exists())
             and _mount_read_only(resolved_archive)
         ),
+        "hardlink_to_central_stock": hardlink_compatible,
+        "central_stock_root": str(central) if str(central) != "." else "",
         "errors": errors,
         "warnings": warnings,
     }
@@ -2085,6 +2124,9 @@ def api_check_library(payload: dict[str, Any]) -> dict[str, Any]:
         exclude_library_id=(
             str(payload.get("library_id") or "").strip() or None
         ),
+        default_library_id=(
+            str(payload.get("default_library_id") or "").strip() or None
+        ),
     )
 
 
@@ -2100,18 +2142,20 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     if not display_name:
         raise HTTPException(status_code=422, detail="Anzeigename fehlt.")
 
-    checked = inspect_library_paths(
-        str(payload.get("work_root") or ""),
-        str(payload.get("archive_root") or ""),
-    )
-    if not checked["valid"]:
-        raise HTTPException(status_code=422, detail=checked)
-
     library_id = (
         _library_slug(display_name)
         + "-"
         + uuid.uuid4().hex[:8]
     )
+    requested_work = str(payload.get("work_root") or "").strip()
+    checked = inspect_library_paths(
+        requested_work,
+        str(payload.get("archive_root") or ""),
+        default_library_id=(library_id if not requested_work else None),
+    )
+    if not checked["valid"]:
+        raise HTTPException(status_code=422, detail=checked)
+
     database_path = (
         DATABASE_DIRECTORY
         / "libraries"
@@ -2120,6 +2164,8 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     created_database = not database_path.exists()
 
     try:
+        resolved_work = Path(str(checked["work_root"]))
+        resolved_work.mkdir(parents=True, exist_ok=True)
         initialize_database(database_path)
         ensure_library_identity(database_path, library_id)
         projection = project_all_imports(
@@ -2132,13 +2178,16 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             display_name=display_name,
             database_path=database_path,
             workspace_root=WORKSPACE_PATH,
-            work_root=Path(str(checked["work_root"])),
+            work_root=resolved_work,
             archive_root=Path(str(checked["archive_root"])),
             is_main=False,
             is_active=True,
             settings={
-                "created_by": "bibliothekar-0.32.4",
+                "created_by": "bibliothekar-0.32.8",
                 "projected_imports": projection,
+                "managed_default_work_root": bool(
+                    checked.get("managed_default_work_root")
+                ),
             },
         )
         backfill_library_inventory(
@@ -2181,6 +2230,41 @@ def api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, An
                 library_id,
                 str(payload.get("display_name") or ""),
             )
+        except LibraryRegistryError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    wants_paths = "work_root" in payload or "archive_root" in payload
+    if wants_paths:
+        requested_work = str(
+            payload.get("work_root")
+            if "work_root" in payload
+            else row["work_root"]
+        )
+        requested_archive = str(
+            payload.get("archive_root")
+            if "archive_root" in payload
+            else row["archive_root"]
+        )
+        checked = inspect_library_paths(
+            requested_work,
+            requested_archive,
+            exclude_library_id=library_id,
+        )
+        if not checked["valid"]:
+            raise HTTPException(status_code=422, detail=checked)
+        try:
+            row = update_library_paths(
+                REGISTRY_DATABASE_FILE,
+                library_id,
+                work_root=Path(str(checked["work_root"])),
+                archive_root=Path(str(checked["archive_root"])),
+            )
+            if library_id == MAIN_LIBRARY_ID:
+                global MAIN_LIBRARY_CONTEXT
+                MAIN_LIBRARY_CONTEXT = resolve_library_context(
+                    REGISTRY_DATABASE_FILE,
+                    MAIN_LIBRARY_ID,
+                )
         except LibraryRegistryError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
