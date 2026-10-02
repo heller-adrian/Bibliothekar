@@ -11,6 +11,7 @@ import os
 import shutil
 import tempfile
 
+from app.source_filter import should_ignore_source_path
 from app.workspace_layout import (
     backup_root as workspace_backup_root,
     resolve_library_work_root,
@@ -298,7 +299,11 @@ def source_manifest(
         )
 
     entries: list[dict[str, Any]] = []
-    paths = sorted(source.rglob("*"))
+    paths = [
+        path
+        for path in sorted(source.rglob("*"))
+        if not should_ignore_source_path(source, path)
+    ]
     total_files = sum(
         1
         for candidate in paths
