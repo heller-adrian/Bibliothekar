@@ -301,6 +301,8 @@ def _released_archive_family_ids(
 
 def list_global_released_archive_groups(
     database_path: Path,
+    *,
+    excluded_family_ids: set[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Globaler freier SSD-Bestand, der aus abgeschlossenen Archivänderungen stammt."""
     with database_connection(database_path) as connection:
@@ -367,8 +369,11 @@ def list_global_released_archive_groups(
                 physical=False,
             )
 
+    excluded = {int(value) for value in (excluded_family_ids or set())}
     grouped: dict[tuple[str,str], dict[str, Any]] = {}
     for row in rows:
+        if int(row["family_id"]) in excluded:
+            continue
         job_id = str(row["job_id"])
         effective = effective_by_family.get(int(row["family_id"]))
         if effective is None:
