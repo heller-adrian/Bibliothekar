@@ -125,9 +125,13 @@ def test_0327_time_range_trims_selected_day_stock_instead_of_rejecting_it():
 
 def test_0327_released_archive_group_counts_assets_and_honors_exclusion(tmp_path: Path):
     db = tmp_path / "kamera.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
     initialize_database(db)
     payload = b"camera"
     asset = b"xmp"
+    export = b"export-copy"
 
     with database_connection(db) as connection:
         _seed_job(connection, "new")
@@ -172,14 +176,28 @@ def test_0327_released_archive_group_counts_assets_and_honors_exclusion(tmp_path
             ),
         )
 
-    groups = list_global_released_archive_groups(db)
+    central = workspace / "SD-Kartensicherungen"
+    camera_path = central / "Freigewordene Archivdateien/2026/2026-07-25/rel.JPG"
+    camera_path.parent.mkdir(parents=True, exist_ok=True)
+    camera_path.write_bytes(payload)
+    xmp_path = central / "Freigewordene Archivdateien/2026/2026-07-25/rel.XMP"
+    xmp_path.write_bytes(asset)
+    export_path = central / "Freigewordene Archivdateien/2026/2026-07-25/rel_Export.JPG"
+    export_path.write_bytes(export)
+
+    groups = list_global_released_archive_groups(
+        db,
+        workspace_path=workspace,
+    )
     assert len(groups) == 1
     assert groups[0]["family_count"] == 1
-    assert groups[0]["file_count"] == 2
+    # Kameraoriginal + journalisierte XMP + später hinzugekommener Export.
+    assert groups[0]["file_count"] == 3
 
     assert list_global_released_archive_groups(
         db,
         excluded_family_ids={family_id},
+        workspace_path=workspace,
     ) == []
 
 
