@@ -326,6 +326,9 @@ def prepare_archive_reversal(
     archive_root: Path,
     workspace_path: Path,
     cr_id: str,
+    *,
+    archive_display_root: str = "Kamerabibliothek",
+    work_display_root: str = "Arbeitsbereich",
 ) -> dict[str, Any]:
     manifest = prepare_reversal_baseline(database_path, archive_root, workspace_path, cr_id)
     request_path = _request_path(workspace_path, cr_id)
@@ -411,7 +414,15 @@ def prepare_archive_reversal(
     request["status"] = "prepared"
     request["prepared_at"] = _now()
     _write_json(request_path, request)
-    return build_archive_reversal_assistant(database_path, archive_root, workspace_path, cr_id, scan_live=True)
+    return build_archive_reversal_assistant(
+        database_path,
+        archive_root,
+        workspace_path,
+        cr_id,
+        scan_live=True,
+        archive_display_root=archive_display_root,
+        work_display_root=work_display_root,
+    )
 
 
 def _planned_extra_directories(database_path: Path, cr_id: str, manifest: dict[str, Any]) -> list[str]:
@@ -483,6 +494,9 @@ def _reversal_state(
     archive_root: Path,
     workspace_path: Path,
     cr_id: str,
+    *,
+    archive_display_root: str = "Kamerabibliothek",
+    work_display_root: str = "Arbeitsbereich",
 ) -> dict[str, Any]:
     manifest = _read_json(_manifest_path(workspace_path, cr_id))
     _cr, _event, rows = _request_context(database_path, cr_id)
@@ -543,11 +557,11 @@ def _reversal_state(
         operations.append({
             "kind": "restore_from_ssd",
             "title": "Ursprünglichen Bestand aus Später zuordnen zurückkopieren",
-            "source": "Arbeitsbereich/" + (
+            "source": work_display_root + "/" + (
                 restore_root.joinpath(*_safe_relative(str(manifest["original_root"])).parts)
                 .relative_to(work_root).as_posix()
             ),
-            "target": "Kamerabibliothek/" + PurePosixPath(str(manifest["original_root"])).parent.as_posix(),
+            "target": archive_display_root + "/" + PurePosixPath(str(manifest["original_root"])).parent.as_posix(),
             "items": sorted(set([PurePosixPath(value).name for value in restore_items] + [PurePosixPath(value).name for value in missing_dirs])),
             "detail": "Fehlende ursprüngliche Ordner und Dateien aus dem vorbereiteten Rückänderungsbestand zurück in die alte Archivstruktur übernehmen.",
             "state": "pending",
@@ -557,8 +571,8 @@ def _reversal_state(
         operations.append({
             "kind": "move_back",
             "title": "Archivdateien an ihren ursprünglichen Ort zurückverschieben",
-            "source": "Kamerabibliothek/" + source,
-            "target": "Kamerabibliothek/" + target,
+            "source": archive_display_root + "/" + source,
+            "target": archive_display_root + "/" + target,
             "items": sorted(names),
             "detail": "Diese Dateien sind noch im Archiv vorhanden und müssen nur an ihren ursprünglichen Ort zurück.",
             "state": "pending",
@@ -568,7 +582,7 @@ def _reversal_state(
         operations.append({
             "kind": "remove_new_files",
             "title": "Nur durch die verworfene Änderung hinzugekommene Archivdateien entfernen",
-            "paths": ["Kamerabibliothek/" + value for value in sorted(set(remove_files))],
+            "paths": [archive_display_root + "/" + value for value in sorted(set(remove_files))],
             "items": [PurePosixPath(value).name for value in sorted(set(remove_files))],
             "detail": "Diese Dateien gehörten nicht zum ursprünglichen Archivzustand. Die SSD-Originale bleiben erhalten.",
             "state": "pending",
@@ -590,7 +604,7 @@ def _reversal_state(
         operations.append({
             "kind": "remove_new_directories",
             "title": "Nicht zum Ursprungszustand gehörende neue Ordner entfernen",
-            "paths": ["Kamerabibliothek/" + value for value in remove_dirs],
+            "paths": [archive_display_root + "/" + value for value in remove_dirs],
             "items": [PurePosixPath(value).name for value in remove_dirs],
             "detail": "Nach der Rücksortierung diese durch die verworfene Änderung entstandenen Ordner entfernen.",
             "state": "pending",
@@ -603,7 +617,7 @@ def _reversal_state(
         "manifest": manifest,
         "operations": operations,
         "complete": len(operations) == 0,
-        "original_stock_path": "Arbeitsbereich/" + (
+        "original_stock_path": work_display_root + "/" + (
             restore_event_root.relative_to(work_root).as_posix()
         ),
     }
@@ -616,6 +630,8 @@ def build_archive_reversal_assistant(
     cr_id: str,
     *,
     scan_live: bool = False,
+    archive_display_root: str = "Kamerabibliothek",
+    work_display_root: str = "Arbeitsbereich",
 ) -> dict[str, Any]:
     request_path = _request_path(workspace_path, cr_id)
     if not request_path.is_file():
@@ -628,7 +644,7 @@ def build_archive_reversal_assistant(
             "change_request_id": cr_id,
             "phase": "prepare",
             "status": "requested",
-            "original_stock_path": "Arbeitsbereich/" + (
+            "original_stock_path": work_display_root + "/" + (
                 (
                     _base(workspace_path, cr_id)
                     / "Wiederherstellung"
@@ -638,9 +654,20 @@ def build_archive_reversal_assistant(
             ),
             "original_root": manifest["original_root"],
             "operations": [],
+            "path_labels": {
+                "archive_root": archive_display_root,
+                "work_root": work_display_root,
+            },
             "live_refreshed": False,
         }
-    state = _reversal_state(database_path, archive_root, workspace_path, cr_id)
+    state = _reversal_state(
+        database_path,
+        archive_root,
+        workspace_path,
+        cr_id,
+        archive_display_root=archive_display_root,
+        work_display_root=work_display_root,
+    )
     return {
         "active": True,
         "change_request_id": cr_id,
@@ -649,6 +676,10 @@ def build_archive_reversal_assistant(
         "original_stock_path": state["original_stock_path"],
         "original_root": manifest["original_root"],
         "operations": state["operations"],
+        "path_labels": {
+            "archive_root": archive_display_root,
+            "work_root": work_display_root,
+        },
         "live_refreshed": bool(scan_live),
     }
 
