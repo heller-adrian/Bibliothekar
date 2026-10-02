@@ -2162,33 +2162,52 @@ def get_health() -> dict[str, Any]:
             f"Konfiguration nicht lesbar: {error}"
         )
 
-    health_workspace = current_workspace_root()
-    try:
-        health_backup_root = workspace_backup_root(health_workspace)
-    except (WorkspaceLayoutError, StorageSettingsError, OSError):
-        # Health ist Diagnose und darf bei einem fehlenden/unmounteten
-        # Workspace nicht selbst fehlschlagen. Den erwarteten Pfad melden,
-        # damit der Zustand sauber als degraded sichtbar bleibt.
+    onboarding = _onboarding_required()
+    if onboarding:
+        health_workspace = WORKSPACE_PATH.resolve(strict=False)
         try:
-            health_backup_root = storage_paths(
-                health_workspace
-            )["backup_root"]
+            setup_paths = storage_paths(health_workspace)
+            health_backup_root = Path(setup_paths["backup_root"])
+            health_work_area = Path(setup_paths["workspaces_root"])
         except Exception:
             health_backup_root = (
                 health_workspace / BACKUP_DIRECTORY_NAME
             ).resolve(strict=False)
+            health_work_area = (
+                health_workspace / "Arbeitsbereiche"
+            ).resolve(strict=False)
+        archive_path = {
+            "path": None,
+            "exists": False,
+            "is_directory": False,
+            "readable": False,
+            "writable": False,
+            "configured": False,
+        }
+    else:
+        health_workspace = current_workspace_root()
+        try:
+            health_backup_root = workspace_backup_root(health_workspace)
+        except (WorkspaceLayoutError, StorageSettingsError, OSError):
+            try:
+                health_backup_root = storage_paths(
+                    health_workspace
+                )["backup_root"]
+            except Exception:
+                health_backup_root = (
+                    health_workspace / BACKUP_DIRECTORY_NAME
+                ).resolve(strict=False)
+        health_work_area = current_work_root()
+        archive_path = path_status(current_archive_root())
 
     paths = {
         "workspace": path_status(health_workspace),
         "sd_card_backups": path_status(health_backup_root),
-        "shared_work_area": path_status(
-            current_work_root()
-        ),
+        "shared_work_area": path_status(health_work_area),
         "database": path_status(DATABASE_DIRECTORY),
         "logs": path_status(LOG_PATH),
     }
 
-    archive_path = path_status(current_archive_root())
     import_path = path_status(IMPORT_ROOT)
 
     for name, information in paths.items():
@@ -2303,7 +2322,12 @@ def get_health() -> dict[str, Any]:
             "error": LIBRARY_REGISTRY_ERROR,
             "details": LIBRARY_REGISTRY_INITIALIZATION,
         },
-        "library": current_library_context().public_dict(),
+        "library": (
+            None
+            if onboarding
+            else current_library_context().public_dict()
+        ),
+        "onboarding_required": onboarding,
         "workspace_layout": {
             "initialized": (
                 WORKSPACE_LAYOUT_ERROR is None
@@ -2771,6 +2795,12 @@ def api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, An
                     REGISTRY_DATABASE_FILE,
                     MAIN_LIBRARY_ID,
                 )
+                legacy_alias = WORKSPACE_PATH / WORK_DIRECTORY_NAME
+                if legacy_alias.is_symlink():
+                    _ensure_compatibility_link(
+                        legacy_alias,
+                        MAIN_LIBRARY_CONTEXT.work_root,
+                    )
         except LibraryRegistryError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
