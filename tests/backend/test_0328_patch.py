@@ -22,8 +22,9 @@ from app.library_registry import (
     update_library_paths,
 )
 from app.global_library_inventory import backfill_library_inventory
+from app.global_stock import migrate_main_free_stock_to_central
 from app.sort_plan import build_event_sort_plan
-from app.workspace_layout import ensure_workspace_layout
+from app.workspace_layout import ensure_workspace_layout, resolve_library_work_root
 
 
 def test_0328_fresh_workspace_uses_single_managed_root(tmp_path: Path, monkeypatch):
@@ -719,3 +720,144 @@ def test_0328_failed_library_creation_removes_registry_zombie_and_new_db(
         ).fetchone()
     assert int(count["n"]) == 0
     assert list((database_dir / "libraries").glob("*.sqlite3")) == []
+
+
+
+def test_0328_explicit_library_work_root_does_not_require_default_main(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "workspace"
+    workspaces = workspace / "Arbeitsbereiche"
+    custom_main = workspaces / "Arbeitsbereich"
+    workspace.mkdir()
+    custom_main.mkdir(parents=True)
+
+    # Exakter Fehlerfall aus dem Clean-Slate-Test: der historische Alias zeigt
+    # noch auf den inzwischen entfernten Erstinstallations-Standard "main".
+    (workspace / "Arbeitsbereich").symlink_to(
+        workspaces / "main",
+        target_is_directory=True,
+    )
+
+    resolved = resolve_library_work_root(
+        workspace,
+        custom_main,
+    )
+
+    assert resolved == custom_main.resolve()
+    assert not (workspaces / "main").exists()
+
+
+def test_0328_registered_main_workspace_retargets_alias_without_recreating_main(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "workspace"
+    workspaces = workspace / "Arbeitsbereiche"
+    custom_main = workspaces / "Arbeitsbereich"
+    workspace.mkdir()
+    custom_main.mkdir(parents=True)
+
+    legacy = workspace / "Arbeitsbereich"
+    legacy.symlink_to(
+        workspaces / "main",
+        target_is_directory=True,
+    )
+
+    layout = ensure_workspace_layout(
+        workspace,
+        configured_main_work_root=custom_main,
+    )
+
+    assert Path(layout["work_root"]) == custom_main.resolve()
+    assert legacy.is_symlink()
+    assert legacy.resolve() == custom_main.resolve()
+    assert not (workspaces / "main").exists()
+
+
+def test_0328_global_stock_migration_uses_registered_main_workspace(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = tmp_path / "config" / "settings.json"
+    monkeypatch.setenv("KAMERA_CONFIG", str(config))
+
+    workspace = tmp_path / "workspace"
+    custom_main = workspace / "Arbeitsbereiche" / "Arbeitsbereich"
+    database = tmp_path / "kamera.sqlite3"
+    workspace.mkdir()
+    custom_main.mkdir(parents=True)
+    initialize_database(database)
+
+    # Kein /Arbeitsbereiche/main und kein funktionierender Legacy-Alias nötig.
+    result = migrate_main_free_stock_to_central(
+        database,
+        workspace,
+        main_work_root=custom_main,
+    )
+
+    assert result["migrated"] == 0
+    assert result["already_migrated"] == 0
+    assert not (workspace / "Arbeitsbereiche" / "main").exists()
+
+
+def test_0328_main_path_edit_retargets_legacy_alias_to_saved_path(
+    tmp_path: Path,
+    monkeypatch,
+):
+    database_dir = tmp_path / "database"
+    database = database_dir / "kamera.sqlite3"
+    registry = database_dir / "registry.sqlite3"
+    workspace = tmp_path / "workspace"
+    default_main = workspace / "Arbeitsbereiche" / "main"
+    custom_main = workspace / "Arbeitsbereiche" / "Arbeitsbereich"
+    archive = tmp_path / "archive"
+
+    database_dir.mkdir()
+    workspace.mkdir()
+    default_main.mkdir(parents=True)
+    custom_main.mkdir(parents=True)
+    archive.mkdir()
+    initialize_database(database)
+    initialize_library_registry(registry)
+    adopt_main_library(
+        registry,
+        database_path=database,
+        workspace_root=workspace,
+        work_root=default_main,
+        archive_root=archive,
+    )
+
+    legacy = workspace / "Arbeitsbereich"
+    legacy.symlink_to(default_main, target_is_directory=True)
+
+    monkeypatch.setattr(main, "WORKSPACE_PATH", workspace)
+    monkeypatch.setattr(main, "REGISTRY_DATABASE_FILE", registry)
+    monkeypatch.setattr(
+        main,
+        "inspect_library_paths",
+        lambda *args, **kwargs: {
+            "valid": True,
+            "work_root": str(custom_main),
+            "archive_root": str(archive),
+            "managed_default_work_root": False,
+            "archive_read_only": True,
+            "hardlink_to_central_stock": True,
+            "errors": [],
+            "warnings": [],
+        },
+    )
+
+    result = main.api_update_library(
+        MAIN_LIBRARY_ID,
+        {
+            "work_root": str(custom_main),
+            "archive_root": str(archive),
+        },
+    )
+
+    stored = get_library(registry, MAIN_LIBRARY_ID, active_only=False)
+    assert stored is not None
+    assert Path(str(stored["work_root"])) == custom_main.resolve()
+    assert Path(str(result["library"]["work_root"])) == custom_main.resolve()
+    assert legacy.is_symlink()
+    assert legacy.resolve() == custom_main.resolve()
