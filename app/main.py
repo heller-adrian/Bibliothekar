@@ -2213,8 +2213,21 @@ def inspect_library_paths(
 
     if not errors:
         try:
-            resolve_library_work_root(WORKSPACE_PATH, resolved_work)
-        except WorkspaceLayoutError as error:
+            if managed_default:
+                managed_parent = storage_paths(WORKSPACE_PATH)["workspaces_root"]
+                if not managed_parent.is_dir():
+                    errors.append(
+                        "Der verwaltete Stamm für Bibliotheks-Arbeitsbereiche "
+                        "ist nicht verfügbar: " + str(managed_parent)
+                    )
+                elif not os.access(managed_parent, os.R_OK | os.W_OK | os.X_OK):
+                    errors.append(
+                        "Der verwaltete Stamm für Bibliotheks-Arbeitsbereiche "
+                        "ist nicht vollständig zugreifbar."
+                    )
+            else:
+                resolve_library_work_root(WORKSPACE_PATH, resolved_work)
+        except (WorkspaceLayoutError, StorageSettingsError) as error:
             errors.append(str(error))
 
         if not resolved_archive.exists() or not resolved_archive.is_dir():
