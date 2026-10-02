@@ -169,6 +169,7 @@ from app.library_registry import (
     update_library_database_path,
     update_library_paths,
     set_library_active,
+    remove_library_registration,
     unregister_library,
 )
 from app.library_context import (
@@ -2512,7 +2513,18 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
         )
         synchronize_global_central_stock()
     except Exception as error:
+        # Eine fehlgeschlagene Neuanlage darf keinen aktiven Registry-Zombie
+        # hinterlassen. Registry und gerade erzeugte DB werden gemeinsam
+        # zurückgerollt; vorhandene ältere DBs/Registrierungen bleiben
+        # grundsätzlich unangetastet.
         if created_database:
+            try:
+                remove_library_registration(
+                    REGISTRY_DATABASE_FILE,
+                    library_id,
+                )
+            except Exception:
+                pass
             for candidate in (
                 database_path,
                 Path(str(database_path) + "-wal"),
