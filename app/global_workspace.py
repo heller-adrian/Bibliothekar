@@ -317,6 +317,7 @@ def build_global_workspace_summary(
                 for values in (excluded_family_ids_by_job or {}).values()
                 for family_id in values
             },
+            workspace_path=workspace_path,
         ),
         "archive_change_review_count": len(reviews),
         "archive_change_reviews": reviews,
