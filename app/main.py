@@ -215,7 +215,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.32.4"
+DEPLOYMENT_VERSION = "0.32.5"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -8452,6 +8452,17 @@ def api_propose_event_change(
         if isinstance(preview, dict):
             preview = _event_payload_with_folder_layout(preview, event_id=event_id)
         from app.database import get_event_edit_context
+        # Archivänderungen werden unmittelbar vor der Planung noch einmal aus
+        # dem realen Bibliotheksordner inventarisiert. Dadurch basiert die
+        # Zeit-/Dateiauswahl nicht auf einem möglicherweise älteren Editor-
+        # Snapshot oder nur auf historischen SQLite-Aufnahmezeiten.
+        refresh_live_event_inventories(
+            current_database_file(),
+            current_workspace_root(),
+            current_archive_root(),
+            job_id=job_id,
+            event_id=event_id,
+        )
         ctx = get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
         if not preview and body.get("start_date") and body.get("end_date"):
             editable_families = [
@@ -8629,6 +8640,19 @@ def api_finish_change_reversal(cr_id: str) -> JSONResponse:
         return JSONResponse(content=finish_archive_reversal(
             current_database_file(), current_archive_root(), current_workspace_root(), cr_id
         ))
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/change-requests/{cr_id}/release-copy/create")
+def api_create_archive_release_copy(cr_id: str) -> JSONResponse:
+    """Freigewordene Archivdateien nach ausdrücklicher Freigabe auf die SSD kopieren."""
+    try:
+        from app.archive_release_stock import create_archive_release_copies
+        result = create_archive_release_copies(
+            current_database_file(), current_archive_root(), current_workspace_root(), cr_id
+        )
+        return JSONResponse(content=result)
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
