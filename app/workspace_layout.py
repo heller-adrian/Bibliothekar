@@ -108,6 +108,7 @@ def ensure_workspace_layout(
     workspace_path: Path,
     *,
     configured_main_work_root: Path | None = None,
+    create_default_main: bool = True,
 ) -> dict[str, Any]:
     root = resolve_workspace_root(workspace_path)
     configured = storage_paths(root)
@@ -125,12 +126,14 @@ def ensure_workspace_layout(
     if configured_main_work_root is not None:
         main_work = configured_main_work_root.expanduser().resolve(strict=False)
         main_is_existing_configuration = True
+    elif existing_legacy_main:
+        main_work = legacy_main.resolve(strict=False)
+        main_is_existing_configuration = True
+    elif create_default_main:
+        main_work = default_library_work_root(root, "main").resolve(strict=False)
+        main_is_existing_configuration = False
     else:
-        main_work = (
-            legacy_main.resolve(strict=False)
-            if existing_legacy_main
-            else default_library_work_root(root, "main").resolve(strict=False)
-        )
+        main_work = None
         main_is_existing_configuration = False
 
     created: list[str] = []
@@ -150,50 +153,38 @@ def ensure_workspace_layout(
                 + str(directory)
             )
 
-    if main_work.exists() and not main_work.is_dir():
-        raise WorkspaceLayoutError(
-            "Der gespeicherte Main-Arbeitsbereich ist kein Ordner: "
-            + str(main_work)
-        )
-    if not main_work.exists():
-        if main_is_existing_configuration:
+    if main_work is not None:
+        if main_work.exists() and not main_work.is_dir():
             raise WorkspaceLayoutError(
-                "Der gespeicherte Main-Arbeitsbereich ist nicht verfügbar: "
+                "Der gespeicherte Haupt-Arbeitsbereich ist kein Ordner: "
                 + str(main_work)
             )
-        main_work.mkdir(mode=0o775, parents=True)
-        _fsync_directory(main_work.parent)
-        created.append(str(main_work))
-    if not os.access(main_work, os.R_OK | os.W_OK | os.X_OK):
-        raise WorkspaceLayoutError(
-            "Der Main-Arbeitsbereich ist nicht vollständig zugreifbar: "
-            + str(main_work)
-        )
-
-    # Der Legacy-Alias ist nur Kompatibilität. Er folgt dem autoritativen
-    # Registry-Pfad und begründet niemals selbst eine Pflicht zu "main".
-    if not existing_legacy_main:
-        if legacy_main.is_symlink():
-            try:
-                if legacy_main.resolve(strict=False) != main_work:
-                    legacy_main.unlink(missing_ok=True)
-                    legacy_main.symlink_to(main_work, target_is_directory=True)
-                    created.append(str(legacy_main))
-            except OSError as error:
+        if not main_work.exists():
+            if main_is_existing_configuration:
                 raise WorkspaceLayoutError(
-                    "Der Kompatibilitätsalias des Main-Arbeitsbereichs konnte "
-                    "nicht aktualisiert werden: " + str(legacy_main)
-                ) from error
-        elif not legacy_main.exists():
-            legacy_main.symlink_to(main_work, target_is_directory=True)
-            created.append(str(legacy_main))
+                    "Der gespeicherte Haupt-Arbeitsbereich ist nicht verfügbar: "
+                    + str(main_work)
+                )
+            main_work.mkdir(mode=0o775, parents=True)
+            _fsync_directory(main_work.parent)
+            created.append(str(main_work))
+        if not os.access(main_work, os.R_OK | os.W_OK | os.X_OK):
+            raise WorkspaceLayoutError(
+                "Der Haupt-Arbeitsbereich ist nicht vollständig zugreifbar: "
+                + str(main_work)
+            )
+
+    # 0.32.9: Auf neuen Installationen wird kein technischer "main"-Ordner
+    # und kein neuer /workspace/Arbeitsbereich-Kompatibilitätslink angelegt.
+    # Bestehende Legacy-Pfade bleiben unangetastet; operative Altcode-Pfade
+    # erhalten pro Bibliothek eine interne /tmp-Kompatibilitätsansicht.
 
     return {
         "workspace_root": str(root),
         "backup_root": str(backup),
         "workspaces_root": str(workspaces),
         "metadata_root": str(metadata),
-        "work_root": str(main_work),
+        "work_root": str(main_work) if main_work is not None else None,
         "storage_names": load_storage_settings(),
         "created_directories": created,
     }
