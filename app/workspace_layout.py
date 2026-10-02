@@ -176,8 +176,18 @@ def ensure_workspace_layout(
 
     # 0.32.9: Auf neuen Installationen wird kein technischer "main"-Ordner
     # und kein neuer /workspace/Arbeitsbereich-Kompatibilitätslink angelegt.
-    # Bestehende Legacy-Pfade bleiben unangetastet; operative Altcode-Pfade
-    # erhalten pro Bibliothek eine interne /tmp-Kompatibilitätsansicht.
+    # Ein bereits vorhandener Kompatibilitäts-Symlink darf aber auf den
+    # gespeicherten Haupt-Arbeitsbereich nachgezogen werden.
+    if main_work is not None and legacy_main.is_symlink():
+        try:
+            if legacy_main.resolve(strict=False) != main_work:
+                legacy_main.unlink(missing_ok=True)
+                legacy_main.symlink_to(main_work, target_is_directory=True)
+        except OSError as error:
+            raise WorkspaceLayoutError(
+                "Der vorhandene Kompatibilitätsalias konnte nicht aktualisiert werden: "
+                + str(legacy_main)
+            ) from error
 
     return {
         "workspace_root": str(root),
