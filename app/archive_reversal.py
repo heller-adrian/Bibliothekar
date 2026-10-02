@@ -119,13 +119,32 @@ def _request_context(database_path: Path, cr_id: str) -> tuple[dict[str, Any], d
                 (cr_id,),
             ).fetchall()
         ]
-        assets = [
-            {**dict(row), "review_kind": "asset", "source_root_kind": "camera_archive", "file_id": None}
-            for row in connection.execute(
-                "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? AND action<>'advisory' ORDER BY id",
-                (cr_id,),
-            ).fetchall()
-        ]
+        assets = []
+        for row in connection.execute(
+            """SELECT review.*,
+                      EXISTS (
+                          SELECT 1
+                          FROM released_archive_assets released
+                          WHERE released.family_id=review.family_id
+                            AND released.current_relative_path=review.old_path
+                            AND released.size_bytes=review.expected_size_bytes
+                            AND released.sha256=review.expected_sha256
+                      ) AS from_released_stock
+               FROM event_change_asset_reviews review
+               WHERE review.change_request_id=?
+                 AND review.action<>'advisory'
+               ORDER BY review.id""",
+            (cr_id,),
+        ).fetchall():
+            item = dict(row)
+            item["review_kind"] = "asset"
+            item["source_root_kind"] = (
+                "shared_workspace"
+                if bool(item.pop("from_released_stock", 0))
+                else "camera_archive"
+            )
+            item["file_id"] = None
+            assets.append(item)
     return cr, event, camera + assets
 
 
@@ -204,6 +223,8 @@ def prepare_reversal_baseline(
     original_assets: list[dict[str, Any]] = []
     for row in request_rows:
         if str(row.get("review_kind") or "") != "asset" or _is_advisory_row(row):
+            continue
+        if str(row.get("source_root_kind") or "camera_archive") != "camera_archive":
             continue
         old_rel = str(row.get("old_path") or "").strip()
         if not old_rel:
