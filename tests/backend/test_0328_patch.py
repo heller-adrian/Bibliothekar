@@ -596,3 +596,68 @@ def test_0328_missing_secondary_database_is_not_silently_recreated(
     with pytest.raises(LibraryRegistryError, match="SQLite-Datenbank"):
         main._resolve_registered_library_database(row)
     assert not missing.exists()
+
+
+
+def test_0328_legacy_existing_library_identity_is_upgraded_in_place(
+    tmp_path: Path,
+):
+    registry = tmp_path / "registry.sqlite3"
+    database = tmp_path / "kamera.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    work = workspace / "Arbeitsbereiche" / "Arbeitsbereich"
+
+    work.mkdir(parents=True)
+    archive.mkdir()
+    initialize_database(database)
+    ensure_library_identity(database, MAIN_LIBRARY_ID)
+    initialize_library_registry(registry)
+    register_library(
+        registry,
+        library_id=MAIN_LIBRARY_ID,
+        display_name="Main",
+        database_path=database,
+        workspace_root=workspace,
+        work_root=work,
+        archive_root=archive,
+        is_main=True,
+        is_active=True,
+    )
+    _insert_0328_inventory_fixture(database)
+
+    with database_connection(registry) as connection:
+        connection.execute(
+            """INSERT INTO source_backups(
+                   backup_id,source_kind,source_identity,backup_path,
+                   metadata_json,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?,?)""",
+            (
+                "main:SHARED_JOB",
+                "existing_library",
+                "same-signature",
+                "/shared/source",
+                "{}",
+                "2026-10-02T19:00:00+00:00",
+                "2026-10-02T19:00:00+00:00",
+            ),
+        )
+        connection.commit()
+
+    result = backfill_library_inventory(
+        registry,
+        database_path=database,
+        library_id=MAIN_LIBRARY_ID,
+        claim_all_owned=False,
+    )
+
+    assert result["family_count"] == 1
+    with database_connection(registry) as connection:
+        row = connection.execute(
+            """SELECT source_identity,backup_path
+               FROM source_backups
+               WHERE backup_id='main:SHARED_JOB'"""
+        ).fetchone()
+    assert row is not None
+    assert str(row["source_identity"]) == "main:same-signature"
+    assert str(row["backup_path"]) == "/shared/source"
