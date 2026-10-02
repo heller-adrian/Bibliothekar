@@ -14,11 +14,26 @@ from app.archive_staging import (
 )
 from app.event_change_request import get_event_change_files, get_event_change_request
 from app.archive_release_stock import describe_archive_release_stock
-from app.workspace_layout import shared_work_root
+from app.workspace_layout import backup_root, shared_work_root
 
 
 class ArchiveChangeAssistantError(RuntimeError):
     pass
+
+
+def _display_root_name(path: Path, fallback: str) -> str:
+    try:
+        name = path.expanduser().resolve(strict=False).name.strip()
+    except OSError:
+        name = path.name.strip()
+    return name or fallback
+
+
+def _archive_display_root(archive_root: Path) -> str:
+    name = _display_root_name(archive_root, "Kamerabibliothek")
+    # Der Hauptarchiv-Mount heißt im Container technisch /main-library,
+    # im Finder/Produkt aber weiterhin Kamerabibliothek.
+    return "Kamerabibliothek" if name == "main-library" else name
 
 
 def _parent_dir(value: Any) -> str:
@@ -238,6 +253,16 @@ def build_archive_change_assistant(
     obsolete = list(description.get("obsolete_directories") or [])
     event_document = description.get("event_document")
 
+    archive_display_root = _archive_display_root(archive_root)
+    work_display_root = _display_root_name(
+        shared_work_root(workspace_path),
+        "Arbeitsbereich",
+    )
+    backup_display_root = _display_root_name(
+        backup_root(workspace_path),
+        "SD-Kartensicherungen",
+    )
+
     actionable = [
         row for row in rows
         if str(row.get("action") or "") == "move"
@@ -274,8 +299,8 @@ def build_archive_change_assistant(
         operations.append({
             "kind": "remove_deleted_event_root",
             "title": "Alten Ereignisordner vollständig entfernen",
-            "paths": [f"Kamerabibliothek/{old_root}"] if old_path.exists() else [],
-            "all_paths": [f"Kamerabibliothek/{old_root}"],
+            "paths": [f"{archive_display_root}/{old_root}"] if old_path.exists() else [],
+            "all_paths": [f"{archive_display_root}/{old_root}"],
             "detail": (
                 "Nachdem alle Archivdateien sicher auf die SSD zurückgeholt wurden, "
                 "den bisherigen Ereignisordner einschließlich event.json vollständig entfernen."
@@ -333,7 +358,7 @@ def build_archive_change_assistant(
                 copy_state = "done" if directory_done and file_done else "pending"
 
             helper_sources = [
-                f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{value}"
+                f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{value}"
                 for value in copy_roots
             ]
             helper_items = list(names)
@@ -342,7 +367,7 @@ def build_archive_change_assistant(
                 document_rel = str(event_document.get("target_relative_path") or "")
                 if document_rel:
                     helper_sources.append(
-                        f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{document_rel}"
+                        f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{document_rel}"
                     )
                     helper_items.append("event.json")
                     includes_event_document = True
@@ -368,7 +393,7 @@ def build_archive_change_assistant(
                 ),
                 "sources": helper_sources,
                 "items": helper_items,
-                "target": f"Kamerabibliothek/{parent}",
+                "target": f"{archive_display_root}/{parent}",
                 "detail": (
                     (
                         "Die vorbereitete Struktur vollständig übernehmen. "
@@ -410,8 +435,8 @@ def build_archive_change_assistant(
             operations.append({
                 "kind": "copy_files",
                 "title": "Neue Dateien in einen vorhandenen Archivordner übernehmen",
-                "source": f"Arbeitsbereich/{source}",
-                "target": f"Kamerabibliothek/{target}",
+                "source": f"{work_display_root}/{source}",
+                "target": f"{archive_display_root}/{target}",
                 "items": [_basename(row.get("new_path")) for row in shown_members],
                 "file_count": len(shown_members),
                 "detail": (
@@ -443,7 +468,7 @@ def build_archive_change_assistant(
             operations.append({
                 "kind": "replace_event_document",
                 "title": "Aktuelle event.json ins Archiv übernehmen",
-                "source": f"Arbeitsbereich/{STAGING_DIRECTORY_NAME}/{target_rel}",
+                "source": f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{target_rel}",
                 "target": f"Kamerabibliothek/{target_rel}",
                 "items": ["event.json"],
                 "file_count": 1,
@@ -498,14 +523,14 @@ def build_archive_change_assistant(
                 "kind": "move_archive_files",
                 "title": "Dateien innerhalb der Kamerabibliothek verschieben",
                 "source": (
-                    f"Kamerabibliothek/{source_dirs[0]}"
+                    f"{archive_display_root}/{source_dirs[0]}"
                     if len(source_dirs) == 1 else ""
                 ),
                 "sources": (
-                    [f"Kamerabibliothek/{value}" for value in source_dirs]
+                    [f"{archive_display_root}/{value}" for value in source_dirs]
                     if len(source_dirs) > 1 else []
                 ),
-                "target": f"Kamerabibliothek/{target}",
+                "target": f"{archive_display_root}/{target}",
                 "items": [
                     _basename(
                         live_states.get(
@@ -537,8 +562,8 @@ def build_archive_change_assistant(
                 "kind": "remove_directories",
                 "title": "Nicht mehr benötigte alte Ordner entfernen",
                 "items": [_basename(value) for value in pending_obsolete],
-                "paths": [f"Kamerabibliothek/{value}" for value in pending_obsolete],
-                "all_paths": [f"Kamerabibliothek/{value}" for value in obsolete],
+                "paths": [f"{archive_display_root}/{value}" for value in pending_obsolete],
+                "all_paths": [f"{archive_display_root}/{value}" for value in obsolete],
                 "detail": (
                     "Diese alten Ordner müssen nach den Verschiebungen leer sein "
                     "und können dann entfernt werden."
@@ -568,7 +593,7 @@ def build_archive_change_assistant(
         "prepared": status != "aenderbar_vorschlagen",
         "live_refreshed": bool(scan_live),
         "preparation": {
-            "helper_root": f"Arbeitsbereich/{helper_root}" if helper_root else "",
+            "helper_root": f"{work_display_root}/{helper_root}" if helper_root else "",
             "incoming_file_count": int(description.get("incoming_file_count") or 0),
             "missing_directories": missing,
             "helper_directories": list(description.get("helper_directories") or []),
@@ -582,6 +607,11 @@ def build_archive_change_assistant(
             ),
         },
         "release_stock": release_stock,
+        "path_labels": {
+            "archive_root": archive_display_root,
+            "work_root": work_display_root,
+            "backup_root": backup_display_root,
+        },
         "operations": operations,
         "target_structure": (
             {
@@ -591,7 +621,7 @@ def build_archive_change_assistant(
             }
             if delete_event
             else {
-                "root": f"Kamerabibliothek/{target_root}",
+                "root": f"{archive_display_root}/{target_root}",
                 "lines": _tree_lines(
                     target_root,
                     list(description.get("desired_directories") or []),
