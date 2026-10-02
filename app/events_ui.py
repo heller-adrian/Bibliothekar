@@ -4068,14 +4068,14 @@ EVENTS_HTML = r"""<!doctype html>
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Hilfsbereiche vorbereiten</h3><p class="muted">Die App bereitet nur SSD-Hilfsstrukturen vor. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.</p></div></div>`;
           html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} neue Dateien</strong> werden unter <em>Später zuordnen</em> als Hardlinks vorbereitet · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt.`;
           if (Number(prep.release_file_count || 0) > 0) {
-            html += `<div style="margin-top:7px"><strong>${Number(prep.release_file_count)} freigewordene Archivdateien</strong>: Die benötigten Zielordner unter <em>Freigewordene Archivdateien</em> werden angelegt. Die Dateien selbst kopierst du erst in Schritt 2 manuell.</div>`;
+            html += `<div style="margin-top:7px"><strong>${Number(prep.release_file_count)} freigewordene Archivdateien</strong>: Die benötigten Zielordner unter <em>Freigewordene Archivdateien</em> werden angelegt. Die Dateien selbst kopiert Bibliothekar erst im nächsten Schritt nach deiner ausdrücklichen Freigabe.</div>`;
           }
           if (prep.helper_root) html += `<div class="muted" style="margin-top:7px">Hilfsbereich</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(prep.helper_root)}</code>`;
           if (missing.length) {
             html += `<details style="margin-top:10px"><summary>Fehlende Struktur anzeigen</summary><div style="margin-top:7px">${missing.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
           }
           html += `</div>`;
-          html += `<details class="card"><summary><strong>Was passiert beim Vorbereiten?</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und – falls nötig – Hardlinks unter „Später zuordnen“. Freigewordene Archivdateien werden nicht automatisch kopiert. Die Kamerabibliothek bleibt unverändert.</p></details>`;
+          html += `<details class="card"><summary><strong>Was passiert beim Vorbereiten?</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und – falls nötig – Hardlinks unter „Später zuordnen“. Freigewordene Archivdateien werden hier noch nicht kopiert; das geschieht erst nach einem eigenen Klick. Die Kamerabibliothek bleibt unverändert.</p></details>`;
           html += `<div id="change-prep-progress" class="change-progress"><div class="muted" data-progress-label>Hilfsbereich wird vorbereitet …</div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
           if (String(cr.status) === "aenderbar_bestaetigt") {
             html += `<div class="success-text">✓ Hilfsbereich ist bereits vorbereitet.</div><div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepared-next>Weiter</button></div></section>`;
@@ -4092,8 +4092,9 @@ EVENTS_HTML = r"""<!doctype html>
           const liveRefreshAvailable = releaseStage === "complete";
           html += `<section class="change-pane"><div class="change-pane-heading"><div><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">Finder-Arbeit</h3><button class="bk-help" type="button" aria-label="Hinweis zur Finder-Arbeit" data-help="Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv. „Aktualisieren“ prüft den tatsächlichen Archivbestand und passt VON-Pfade sowie Erledigt-Status an.">?</button></div>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:6px">✓ Aktueller Archivbestand wurde read-only nach Pfad, Größe und SHA-256 geprüft.</p>' : ''}</div>${liveRefreshAvailable ? '<button type="button" class="plan-button change-refresh-button" data-cr-refresh-live>↻ Aktualisieren</button>' : ''}</div>`;
 
-          if (releaseRequired && releaseStage === "copy_to_ssd") {
-            html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">Kopiere die unten genannten Dateien aus der Kamerabibliothek in die vorbereiteten Zielordner unter <em>Arbeitsbereich/Freigewordene Archivdateien</em>. Noch nichts im Archiv löschen.</p>`;
+          if (releaseRequired && (releaseStage === "copy_to_ssd" || releaseStage === "verify_copy")) {
+            const copiesReady = releaseStage === "verify_copy";
+            html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">${copiesReady ? "Bibliothekar hat die geplanten Archivdateien auf die SSD kopiert. Prüfe jetzt die Kopien nochmals gegen Größe und SHA-256, bevor du im Archiv etwas entfernst." : "Bibliothekar kann die unten exakt aufgeführten Archivdateien nach deiner Freigabe read-only lesen und selbst in die vorbereiteten Zielordner unter <em>Arbeitsbereich/Freigewordene Archivdateien</em> kopieren. Noch nichts im Archiv löschen."}</p>`;
             if (releaseSegments.length) {
               html += `<div style="display:grid;gap:8px;margin-top:10px">`;
               for (const segment of releaseSegments) {
@@ -4123,7 +4124,9 @@ EVENTS_HTML = r"""<!doctype html>
             }
             html += `</div></details></div>`;
             html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div><div id="change-release-errors" class="danger-text" style="display:none"></div></div>`;
-            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-copy-verify>SSD-Kopien prüfen</button></div></section>`;
+            html += copiesReady
+              ? `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-copy-verify>SSD-Kopien prüfen</button></div></section>`
+              : `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-copy-create>SSD-Kopien anlegen</button></div></section>`;
           } else if (releaseRequired && releaseStage === "remove_archive") {
             html += `<div class="card"><strong>✓ SSD-Kopien vollständig geprüft</strong><p class="success-text" style="margin-top:5px">Alle freigewordenen Dateien stimmen nach Größe und SHA-256 mit dem geplanten Bestand überein.</p></div>`;
             html += `<div class="card"><strong>2. Bestätigte Archivoriginale entfernen</strong><p class="muted" style="margin-top:5px">Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.</p><details style="margin-top:10px"><summary>${releaseRows.length} Archivpfade anzeigen</summary><div style="margin-top:8px">${releaseRows.map(row => `<code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(row.old_path || "")}</code>`).join("")}</div></details></div>`;
@@ -4202,6 +4205,37 @@ EVENTS_HTML = r"""<!doctype html>
             liveRefreshButton.classList.remove("loading");
             liveRefreshButton.textContent="↻ Aktualisieren";
             setStatus(error.message,true);
+          }
+        });
+
+        const releaseCreateButton=changeRequestBody.querySelector("[data-cr-release-copy-create]");
+        releaseCreateButton?.addEventListener("click", async () => {
+          const progress=changeRequestBody.querySelector("#change-release-progress");
+          const bar=progress?.querySelector(".change-progress-bar");
+          const label=progress?.querySelector("[data-progress-label]");
+          const errors=progress?.querySelector("#change-release-errors");
+          releaseCreateButton.disabled=true;
+          progress?.classList.add("active");
+          if(bar) bar.style.width="35%";
+          if(label) label.textContent="Archivdateien werden geprüft und sicher auf die SSD kopiert …";
+          if(errors){errors.style.display="none";errors.innerHTML="";}
+          try {
+            const result=await requestJson(
+              `/api/change-requests/${encodeURIComponent(crId)}/release-copy/create`,
+              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}
+            );
+            if(bar) bar.style.width="100%";
+            if(label) label.textContent=`${Number(result.copied_file_count||0)} SSD-Kopien wurden angelegt.`;
+            await new Promise(resolve=>setTimeout(resolve,180));
+            await showChangeRequestDetail(crId,{phase:"finder"});
+          } catch(error) {
+            releaseCreateButton.disabled=false;
+            if(bar) bar.style.width="100%";
+            if(label) label.textContent="Kopieren fehlgeschlagen.";
+            if(errors){
+              errors.style.display="block";
+              errors.textContent=error.message;
+            }
           }
         });
 
