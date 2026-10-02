@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -91,6 +92,31 @@ def _release_context(database_path: Path, cr_id: str) -> dict[str, Any]:
                 (cr_id,),
             ).fetchall()
         ]
+
+        live_times_by_family: dict[int, set[str]] = {}
+        for live_row in connection.execute(
+            """SELECT family_id,selected_capture_time
+               FROM event_inventory_files
+               WHERE event_id=? AND root_kind='camera_archive'
+                 AND known_file_id IS NOT NULL
+                 AND family_id IS NOT NULL
+                 AND COALESCE(selected_capture_time,'')<>''""",
+            (str(cr["event_id"]),),
+        ).fetchall():
+            live_times_by_family.setdefault(int(live_row["family_id"]), set()).add(
+                str(live_row["selected_capture_time"])
+            )
+        for pending in pending_rows:
+            family_id = int(pending["family_id"])
+            live_times = live_times_by_family.get(family_id) or set()
+            if len(live_times) > 1:
+                raise ArchiveReleaseStockError(
+                    "Widersprüchliche Live-Aufnahmezeiten für Archivfamilie "
+                    + str(family_id)
+                )
+            if len(live_times) == 1:
+                pending["selected_capture_time"] = next(iter(live_times))
+
         try:
             segments = build_archive_reassignment_segments(connection, cr, pending_rows)
         except ArchiveSegmentError as exc:
@@ -258,13 +284,23 @@ def describe_archive_release_stock(
     statuses = [str(row.get("verification_status") or "pending") for row in rows]
     archive_removed = all(status == "verified" for status in statuses)
     copy_verified = all(status in {"release_copy_verified", "verified"} for status in statuses)
-    stage = "complete" if archive_removed else ("remove_archive" if copy_verified else "copy_to_ssd")
+    copies_created = all(
+        status in {"copy_created", "release_copy_verified", "verified"}
+        for status in statuses
+    )
+    stage = (
+        "complete" if archive_removed
+        else "remove_archive" if copy_verified
+        else "verify_copy" if copies_created
+        else "copy_to_ssd"
+    )
     return {
         "required": True,
         "file_count": len(rows),
         "family_count": len(context["family_ids"]),
         "segments": context["segments"],
         "rows": rows,
+        "copies_created": copies_created,
         "copy_verified": copy_verified,
         "archive_removed": archive_removed,
         "stage": stage,
