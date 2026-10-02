@@ -361,6 +361,7 @@ def prepare_archive_reversal(
     restore_root = base / "Wiederherstellung"
     work_root = _work_root(workspace_path)
     central_root = _central_root(workspace_path)
+    prepared_targets: list[tuple[Path, int, str]] = []
     for rel in manifest.get("original_directories") or []:
         restore_root.joinpath(*_safe_relative(rel).parts).mkdir(parents=True, exist_ok=True)
 
@@ -377,6 +378,11 @@ def prepare_archive_reversal(
                 os.link(source, target, follow_symlinks=False)
             except OSError:
                 shutil.copyfile(source, target)
+        prepared_targets.append((
+            target,
+            int(asset.get("size_bytes") or 0),
+            str(asset.get("sha256") or ""),
+        ))
 
     event_json = manifest.get("event_json")
     if event_json:
@@ -388,6 +394,11 @@ def prepare_archive_reversal(
                 os.link(source, target, follow_symlinks=False)
             except OSError:
                 shutil.copyfile(source, target)
+        prepared_targets.append((
+            target,
+            int(event_json.get("size_bytes") or 0),
+            str(event_json.get("sha256") or ""),
+        ))
 
     missing_sources: list[str] = []
     for row in rows:
@@ -424,12 +435,24 @@ def prepare_archive_reversal(
                 shutil.copyfile(source, target)
         if not _matches(target, size, sha):
             raise ArchiveReversalError("Rückkehrkopie konnte nicht sicher vorbereitet werden: " + old_path)
+        prepared_targets.append((target, size, sha))
 
     if missing_sources:
         raise ArchiveReversalError(
             "Der ursprüngliche Bestand ist für folgende Archivdateien weder im Archiv noch im geprüften SSD-Bestand vorhanden: "
             + ", ".join(missing_sources[:5])
         )
+
+    if not restore_root.is_dir():
+        raise ArchiveReversalError(
+            "Der Wiederherstellungsbereich konnte nicht materialisiert werden."
+        )
+    for target, size, sha in prepared_targets:
+        if not sha or not _matches(target, size, sha):
+            raise ArchiveReversalError(
+                "Eine vorbereitete Rückänderungsdatei ist nicht vollständig verifiziert: "
+                + str(target)
+            )
 
     request = _read_json(request_path)
     request["status"] = "prepared"
