@@ -588,6 +588,14 @@ def cleanup_archive_release_stock(
                 if cursor.exists() and cursor.is_dir() and not any(cursor.iterdir()):
                     cursor.rmdir()
                 else:
+                    if cursor.exists() and cursor.is_dir():
+                        relative_cursor = cursor.relative_to(root).as_posix()
+                        warning = (
+                            "Laufbezogener SSD-Ordner bleibt erhalten, weil er fremde "
+                            "oder unbekannte Inhalte enthält: " + relative_cursor
+                        )
+                        if warning not in warnings:
+                            warnings.append(warning)
                     break
             except OSError:
                 break
