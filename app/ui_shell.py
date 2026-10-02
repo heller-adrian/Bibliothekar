@@ -2669,13 +2669,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 <dialog id="bk-settings-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
-      <div><h2>Einstellungen</h2><div style="color:var(--bk-muted);margin-top:5px">Darstellung, Sprache, Ereignisordner und Bibliotheken</div></div>
+      <div><h2>Einstellungen</h2><div style="color:var(--bk-muted);margin-top:5px">Darstellung, Sprache, Ordner, Speicherpfade und Bibliotheken</div></div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <div class="bk-settings-tabs" role="tablist" aria-label="Einstellungsbereiche">
       <button type="button" class="active" data-bk-settings-area="appearance">Erscheinungsbild</button>
       <button type="button" data-bk-settings-area="general">Allgemein</button>
       <button type="button" data-bk-settings-area="folders">Ereignisordner</button>
+      <button type="button" data-bk-settings-area="paths">Pfade</button>
       <button type="button" data-bk-settings-area="libraries">Bibliotheken</button>
     </div>
 
@@ -2723,17 +2724,40 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       </section>
     </div>
 
+    <div class="bk-settings-panel" data-bk-settings-panel="paths" hidden>
+      <section class="bk-settings-group" id="bk-storage-path-settings">
+        <div><strong>Verwaltete Pfade</strong><div style="color:var(--bk-muted);margin-top:4px">Ordner innerhalb des gemeinsamen Kamera-Arbeitsbereichs</div></div>
+        <div class="bk-library-meta" style="margin-top:10px">
+          <span>Workspace-Mount: <code id="bk-storage-workspace-root">/workspace</code></span>
+          <span>TrueNAS stellt nur diesen RW-Stamm bereit. Bibliothekar verwaltet die folgenden Unterordner.</span>
+        </div>
+        <div class="bk-library-form" style="margin-top:12px">
+          <label><span>SD-Kartensicherungen</span><input id="bk-storage-backup-name" value="SD-Kartensicherungen"></label>
+          <label><span>Bibliotheks-Arbeitsbereiche</span><input id="bk-storage-workspaces-name" value="Arbeitsbereiche"></label>
+          <label><span>Metadatenkorrektur</span><input id="bk-storage-metadata-name" value="Metadatenkorrektur"></label>
+        </div>
+        <div class="bk-library-meta" style="margin-top:10px">
+          <span id="bk-storage-backup-preview"></span>
+          <span id="bk-storage-workspaces-preview"></span>
+          <span id="bk-storage-metadata-preview"></span>
+        </div>
+        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Eigene TrueNAS-Datasets oder zusätzliche Host Paths werden weiterhin in TrueNAS eingebunden und anschließend bei der jeweiligen Bibliothek als benutzerdefinierter Pfad gewählt.</p>
+        <div class="bk-library-actions"><button id="bk-storage-save" type="button" class="bk-positive-action">Pfade speichern</button></div>
+        <div id="bk-storage-status" class="bk-library-status"></div>
+      </section>
+    </div>
+
     <div class="bk-settings-panel" data-bk-settings-panel="libraries" hidden>
       <section class="bk-settings-group" id="bk-library-settings">
-        <div><strong>Bibliotheken</strong><div style="color:var(--bk-muted);margin-top:4px">Anzeigenamen und registrierte Mountpfade verwalten</div></div>
+        <div><strong>Bibliotheken</strong><div style="color:var(--bk-muted);margin-top:4px">Anzeigenamen, Arbeitsbereiche und einzeln gemountete Archive verwalten</div></div>
         <div id="bk-library-management-list" class="bk-library-list"></div>
         <details class="bk-library-add-card">
           <summary>Bibliothek hinzufügen</summary>
           <div class="bk-library-form">
-            <div style="color:var(--bk-muted);font-size:.88rem">Die Host Paths werden zuerst in TrueNAS eingebunden. Hier werden ausschließlich die Container-Mountpfade eingetragen.</div>
+            <div style="color:var(--bk-muted);font-size:.88rem;line-height:1.45">Standardmäßig legt Bibliothekar den Arbeitsbereich automatisch unter <code>/workspace/Arbeitsbereiche/&lt;Bibliotheks-ID&gt;</code> an. Nur für einen externen Arbeitsbereich ist ein zusätzlicher RW-Host-Path in TrueNAS nötig. Das Archiv wird aus Sicherheitsgründen pro Bibliothek separat als Read Only Host Path eingebunden.</div>
             <label><span>Anzeigename</span><input id="bk-new-library-name" placeholder="z. B. Business"></label>
-            <label><span>Arbeitsbereich · RW</span><input id="bk-new-library-work" placeholder="/libraries/business/workspace"></label>
-            <label><span>Archiv · RO</span><input id="bk-new-library-archive" placeholder="/libraries/business/archive"></label>
+            <label><span>Arbeitsbereich · optional</span><input id="bk-new-library-work" placeholder="Leer = automatisch im gemeinsamen Workspace"></label>
+            <label><span>Archiv · eigener RO-Mount</span><input id="bk-new-library-archive" placeholder="/libraries/business/archive"></label>
             <div class="bk-library-actions">
               <button id="bk-new-library-check" type="button">Prüfen</button>
               <button id="bk-new-library-create" type="button" class="bk-positive-action" disabled>Bibliothek hinzufügen</button>
@@ -2765,7 +2789,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.32.7 · Kern 0.28.7</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.32.8 · Kern 0.28.7</span></p>
   </div>
 </dialog>
 
