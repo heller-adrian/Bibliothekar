@@ -311,3 +311,53 @@ def test_0328_released_stock_sort_plan_uses_13_files_without_legacy_job_blockers
         Path(item["source_root_path"]).resolve()
         for item in [*plan["files"], *plan["assets"]]
     } == {central.resolve()}
+
+
+
+def test_0328_managed_workspaces_name_change_retargets_main_alias_and_registry(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = tmp_path / "config" / "settings.json"
+    monkeypatch.setenv("KAMERA_CONFIG", str(config))
+
+    workspace = tmp_path / "workspace"
+    database_dir = tmp_path / "database"
+    database = database_dir / "kamera.sqlite3"
+    registry = database_dir / "registry.sqlite3"
+    archive = tmp_path / "archive"
+    workspace.mkdir()
+    database_dir.mkdir()
+    archive.mkdir()
+
+    layout = ensure_workspace_layout(workspace)
+    initialize_database(database)
+    initialize_library_registry(registry)
+    adopt_main_library(
+        registry,
+        database_path=database,
+        workspace_root=workspace,
+        work_root=Path(layout["work_root"]),
+        archive_root=archive,
+    )
+
+    monkeypatch.setattr(main, "WORKSPACE_PATH", workspace)
+    monkeypatch.setattr(main, "REGISTRY_DATABASE_FILE", registry)
+
+    result = main.api_set_storage_paths({
+        "backup_directory_name": "SD-Kartensicherungen",
+        "workspaces_directory_name": "Bibliotheksbereiche",
+        "metadata_directory_name": "Metadatenkorrektur",
+    })
+
+    canonical = workspace / "Bibliotheksbereiche" / "main"
+    legacy = workspace / "Arbeitsbereich"
+    stored = get_library(registry, MAIN_LIBRARY_ID, active_only=False)
+
+    assert Path(result["workspaces_root"]) == workspace / "Bibliotheksbereiche"
+    assert canonical.is_dir()
+    assert not (workspace / "Arbeitsbereiche").exists()
+    assert legacy.is_symlink()
+    assert legacy.resolve() == canonical.resolve()
+    assert stored is not None
+    assert Path(str(stored["work_root"])) == canonical.resolve()
