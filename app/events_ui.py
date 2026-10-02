@@ -4076,7 +4076,7 @@ EVENTS_HTML = r"""<!doctype html>
           const prep = assistant.preparation || {};
           const missing = prep.missing_directories || [];
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Hilfsbereiche vorbereiten</h3><p class="muted">Die App bereitet nur SSD-Hilfsstrukturen vor. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.</p></div></div>`;
-          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} neue Dateien</strong> werden unter <em>Später zuordnen</em> als Hardlinks vorbereitet · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt.`;
+          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} neue Dateien</strong> werden unter <em>Später zuordnen</em> vorbereitet · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt. Hardlinks werden bevorzugt; falls Quelle und Ziel auf unterschiedlichen Dateisystemen liegen, fragt Bibliothekar ausdrücklich nach <strong>Kopieren</strong> oder <strong>Verschieben</strong>.`;
           if (Number(prep.release_file_count || 0) > 0) {
             html += `<div style="margin-top:7px"><strong>${Number(prep.release_file_count)} freigewordene Archivdateien</strong>: Die benötigten Zielordner unter <em>Freigewordene Archivdateien</em> werden angelegt. Die Dateien selbst kopiert Bibliothekar erst im nächsten Schritt nach deiner ausdrücklichen Freigabe.</div>`;
           }
@@ -4085,7 +4085,7 @@ EVENTS_HTML = r"""<!doctype html>
             html += `<details style="margin-top:10px"><summary>Fehlende Struktur anzeigen</summary><div style="margin-top:7px">${missing.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
           }
           html += `</div>`;
-          html += `<details class="card"><summary><strong>Was passiert beim Vorbereiten?</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und – falls nötig – Hardlinks unter „Später zuordnen“. Freigewordene Archivdateien werden hier noch nicht kopiert; das geschieht erst nach einem eigenen Klick. Die Kamerabibliothek bleibt unverändert.</p></details>`;
+          html += `<details class="card"><summary><strong>Was passiert beim Vorbereiten?</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und versucht für eingehende freie Dateien zuerst Hardlinks unter „Später zuordnen“. Sind Hardlinks zwischen den Speicherorten nicht möglich, wird angehalten und du wählst ausdrücklich Kopieren oder Verschieben. Freigewordene Archivdateien aus dem Archiv werden hier noch nicht kopiert; das geschieht erst nach einem eigenen Klick. Die Kamerabibliothek bleibt unverändert.</p></details>`;
           html += `<div id="change-prep-progress" class="change-progress"><div class="muted" data-progress-label>Hilfsbereich wird vorbereitet …</div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
           if (String(cr.status) === "aenderbar_bestaetigt") {
             html += `<div class="success-text">✓ Hilfsbereich ist bereits vorbereitet.</div><div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepared-next>Weiter</button></div></section>`;
@@ -4232,7 +4232,7 @@ EVENTS_HTML = r"""<!doctype html>
           try {
             const result=await requestJson(
               `/api/change-requests/${encodeURIComponent(crId)}/release-copy/create`,
-              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}
+              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(options.body || {})}
             );
             if(bar) bar.style.width="100%";
             if(label) label.textContent=`${Number(result.verified_file_count||result.copied_file_count||0)} SSD-Kopien wurden angelegt und vollständig geprüft.`;
@@ -4349,21 +4349,57 @@ EVENTS_HTML = r"""<!doctype html>
           const progress = changeRequestBody.querySelector("#change-prep-progress");
           const bar = progress?.querySelector(".change-progress-bar");
           const label = progress?.querySelector("[data-progress-label]");
-          prepareBtn.disabled = true;
-          progress?.classList.add("active");
-          if (label) label.textContent = "Ordner und Hardlinks werden unter „Später zuordnen“ vorbereitet …";
-          if (bar) bar.style.width = "35%";
-          try {
-            await changeRequestAction(crId, "confirm", {terminal:false});
-            if (bar) bar.style.width = "100%";
-            if (label) label.textContent = "Hilfsbereich ist vorbereitet.";
-            await new Promise(resolve => setTimeout(resolve, 180));
-            await showChangeRequestDetail(crId, {phase:finderNeeded ? "finder" : "verify"});
-          } catch (error) {
-            prepareBtn.disabled = false;
-            if (label) label.textContent = error.message;
-            throw error;
-          }
+          const runPreparation = async (transferMode=null) => {
+            prepareBtn.disabled = true;
+            progress?.classList.add("active");
+            if (label) {
+              label.textContent = transferMode === "copy"
+                ? "Dateien werden sicher kopiert und geprüft …"
+                : transferMode === "move"
+                  ? "Dateien werden sicher verschoben und geprüft …"
+                  : "Hardlinks werden unter „Später zuordnen“ vorbereitet …";
+            }
+            if (bar) bar.style.width = "35%";
+            try {
+              await changeRequestAction(
+                crId,
+                "confirm",
+                {
+                  terminal:false,
+                  body: transferMode ? {transfer_mode:transferMode} : {}
+                }
+              );
+              if (bar) bar.style.width = "100%";
+              if (label) label.textContent = "Hilfsbereich ist vorbereitet.";
+              await new Promise(resolve => setTimeout(resolve, 180));
+              await showChangeRequestDetail(crId, {phase:finderNeeded ? "finder" : "verify"});
+            } catch (error) {
+              prepareBtn.disabled = false;
+              const message=String(error?.message || "");
+              if (message.includes("TRANSFER_CHOICE_REQUIRED")) {
+                if (bar) bar.style.width = "100%";
+                if (label) label.textContent = "Hardlinks sind zwischen diesen Speicherorten nicht möglich.";
+                const existing=changeRequestBody.querySelector("#change-transfer-choice");
+                existing?.remove();
+                progress?.insertAdjacentHTML(
+                  "afterend",
+                  '<div id="change-transfer-choice" class="card" style="margin-top:12px"><strong>Hardlinks sind zwischen diesen Speicherorten nicht möglich.</strong><p class="muted" style="margin-top:6px">Wähle, wie die verifizierten freien SSD-Dateien für diesen Archivauftrag unter „Später zuordnen“ bereitgestellt werden sollen.</p><div class="edit-actions"><button type="button" class="plan-button bk-positive-action" data-transfer-copy>Kopieren</button><button type="button" class="plan-button" data-transfer-move>Verschieben</button></div></div>'
+                );
+                changeRequestBody.querySelector("[data-transfer-copy]")?.addEventListener(
+                  "click",
+                  () => runPreparation("copy")
+                );
+                changeRequestBody.querySelector("[data-transfer-move]")?.addEventListener(
+                  "click",
+                  () => runPreparation("move")
+                );
+                return;
+              }
+              if (label) label.textContent = message;
+              throw error;
+            }
+          };
+          await runPreparation();
         });
 
         const finderDoneBtn = changeRequestBody.querySelector("[data-cr-finder-done]");
