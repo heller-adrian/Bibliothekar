@@ -195,16 +195,31 @@ def project_all_imports(
 def migrate_main_free_stock_to_central(
     database_path: Path,
     workspace_path: Path,
+    *,
+    main_work_root: Path | None = None,
 ) -> dict[str, int]:
     """Move legacy free/planned Main files from Arbeitsbereich to central stock.
 
     Applied event files and library-specific "Später zuordnen" material remain
     in the Main library work root. The operation is idempotent and validates
     every destination before deleting a source.
+
+    The saved Main work_root is authoritative when supplied. The historical
+    shared_work_root() lookup remains only as a compatibility fallback for old
+    isolated callers/tests.
     """
 
     central = backup_root(workspace_path).resolve(strict=False)
-    work = shared_work_root(workspace_path).resolve(strict=False)
+    work = (
+        main_work_root.expanduser().resolve(strict=False)
+        if main_work_root is not None
+        else shared_work_root(workspace_path).resolve(strict=False)
+    )
+    if not work.exists() or not work.is_dir():
+        raise GlobalStockError(
+            "Der gespeicherte Main-Arbeitsbereich ist nicht verfügbar: "
+            + str(work)
+        )
 
     with database_connection(database_path) as connection:
         rows = [
