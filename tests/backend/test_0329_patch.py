@@ -169,7 +169,9 @@ def test_0329_clean_workspace_has_no_automatic_main_folder(tmp_path: Path, monke
     assert (workspace / "SD-Kartensicherungen").is_dir()
     assert (workspace / "Metadatenkorrektur").is_dir()
     assert not (workspace / "Arbeitsbereiche" / "main").exists()
-    assert not (workspace / "Arbeitsbereich").exists()
+    legacy = workspace / "Arbeitsbereich"
+    assert legacy.is_symlink()
+    assert legacy.resolve() == (workspace / "Arbeitsbereiche").resolve()
 
 
 def test_0329_main_is_never_created_even_by_legacy_default_or_missing_saved_path(
