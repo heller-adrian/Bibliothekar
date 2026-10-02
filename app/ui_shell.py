@@ -1711,7 +1711,7 @@ BIBLIOTHEKAR_0310_CSS = r"""
 
 
 BIBLIOTHEKAR_0311_CSS = r"""
-/* 0.32.5: responsiver Dialog plus dauerhaft sichtbarer Bibliothekskontext. */
+/* 0.32.6: responsiver Dialog plus dauerhaft sichtbarer Bibliothekskontext. */
 .bk-dialog {
   max-height: calc(100dvh - 28px) !important;
   overflow: hidden !important;
@@ -2765,7 +2765,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.32.5 · Kern 0.28.7</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.32.6 · Kern 0.28.7</span></p>
   </div>
 </dialog>
 
