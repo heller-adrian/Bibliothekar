@@ -546,6 +546,11 @@ def adopt_main_library(
         if existing
         else work_root
     )
+    effective_archive_root = (
+        Path(str(existing["archive_root"]))
+        if existing
+        else archive_root
+    )
 
     return register_library(
         registry_path,
@@ -554,7 +559,7 @@ def adopt_main_library(
         database_path=database_path,
         workspace_root=workspace_root,
         work_root=effective_work_root,
-        archive_root=archive_root,
+        archive_root=effective_archive_root,
         is_main=True,
         is_active=True,
         settings=settings,
