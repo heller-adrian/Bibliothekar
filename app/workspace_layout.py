@@ -200,7 +200,11 @@ def resolve_library_work_root(
         )
 
     if not target.exists():
-        if _is_relative_to(target, shared_root):
+        configured_workspaces = storage_paths(workspace_path)["workspaces_root"]
+        if (
+            _is_relative_to(target, shared_root)
+            or _is_relative_to(target, configured_workspaces)
+        ):
             target.mkdir(parents=True, exist_ok=True)
         else:
             raise WorkspaceLayoutError(
