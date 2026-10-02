@@ -8402,12 +8402,22 @@ def api_get_change_request_assistant(
 ) -> JSONResponse:
     """Kompakter Archivassistent; refresh scannt den realen Bestand read-only."""
     try:
+        context = current_library_context()
+        archive_label = (
+            "Kamerabibliothek"
+            if context.is_main
+            else (context.archive_root.name or "Kamerabibliothek")
+        )
+        work_label = context.work_root.name or "Arbeitsbereich"
         return JSONResponse(content=build_archive_change_assistant(
             current_database_file(),
             current_archive_root(),
             current_workspace_root(),
             cr_id,
             scan_live=bool(refresh),
+            archive_display_root=archive_label,
+            work_display_root=work_label,
+            backup_display_root=BACKUP_DIRECTORY_NAME,
         ))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
