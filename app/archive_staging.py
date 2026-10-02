@@ -645,22 +645,27 @@ def _request_preview_and_plan(
                 # Review-Zeile. Der Journal-Abgleich bleibt nur als Legacy-
                 # Fallback für bereits vor der Migration offene Aufträge.
                 "source_root_kind": (
-                    str(row.get("source_root_kind") or "")
-                    if str(row.get("source_root_kind") or "") in {
-                        "camera_archive", "shared_workspace"
-                    }
-                    else (
-                        "shared_workspace"
-                        if (
-                            (
-                                int(row["family_id"])
-                                if row.get("family_id") is not None
-                                else None
-                            ),
-                            str(row.get("old_path") or ""),
-                        ) in released_asset_sources
-                        else "camera_archive"
+                    "shared_workspace"
+                    if (
+                        str(row.get("source_root_kind") or "") == "shared_workspace"
+                        or (
+                            str(row.get("source_root_kind") or "camera_archive")
+                                == "camera_archive"
+                            and not str(
+                                row.get("workspace_original_path") or ""
+                            ).strip()
+                            and row.get("released_archive_asset_id") is None
+                            and (
+                                (
+                                    int(row["family_id"])
+                                    if row.get("family_id") is not None
+                                    else None
+                                ),
+                                str(row.get("old_path") or ""),
+                            ) in released_asset_sources
+                        )
                     )
+                    else "camera_archive"
                 ),
                 "workspace_original_path": (
                     str(row.get("workspace_original_path") or "")
@@ -1168,11 +1173,25 @@ def cleanup_archive_change_staging(
                           review.new_path,review.workspace_original_path,
                           review.workspace_staging_path,
                           review.expected_size_bytes,review.expected_sha256,
-                          review.released_archive_asset_id
+                          COALESCE(
+                              review.released_archive_asset_id,
+                              released.id
+                          ) AS released_archive_asset_id
                    FROM event_change_asset_reviews review
+                   LEFT JOIN released_archive_assets released
+                     ON released.family_id=review.family_id
+                    AND released.current_relative_path=review.old_path
                    WHERE review.change_request_id=?
                      AND review.action='move'
-                     AND review.source_root_kind='shared_workspace'
+                     AND (
+                         review.source_root_kind='shared_workspace'
+                         OR (
+                             review.source_root_kind='camera_archive'
+                             AND COALESCE(review.workspace_original_path,'')=''
+                             AND review.released_archive_asset_id IS NULL
+                             AND released.id IS NOT NULL
+                         )
+                     )
                    ORDER BY review.id""",
                 (cr_id,),
             ).fetchall()
