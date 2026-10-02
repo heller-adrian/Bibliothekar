@@ -71,7 +71,7 @@ def load_storage_settings() -> dict[str, str]:
     }
 
 
-def save_storage_settings(values: dict[str, Any]) -> dict[str, str]:
+def normalize_storage_settings(values: dict[str, Any]) -> dict[str, str]:
     current = load_storage_settings()
     merged = {
         **current,
@@ -106,7 +106,11 @@ def save_storage_settings(values: dict[str, Any]) -> dict[str, str]:
         raise StorageSettingsError(
             "Die drei verwalteten Stammordner müssen unterschiedliche Namen haben."
         )
+    return cleaned
 
+
+def save_storage_settings(values: dict[str, Any]) -> dict[str, str]:
+    cleaned = normalize_storage_settings(values)
     path = _config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     data: dict[str, Any] = {}
@@ -117,7 +121,10 @@ def save_storage_settings(values: dict[str, Any]) -> dict[str, str]:
                 "Die Anwendungskonfiguration muss ein JSON-Objekt sein."
             )
         data = raw
-    data["storage"] = cleaned
+    existing_storage = data.get("storage")
+    if not isinstance(existing_storage, dict):
+        existing_storage = {}
+    data["storage"] = {**existing_storage, **cleaned}
 
     encoded = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     descriptor, temp_name = tempfile.mkstemp(
