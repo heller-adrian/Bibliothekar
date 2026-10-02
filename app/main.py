@@ -620,7 +620,8 @@ const nameEl=document.getElementById("name"),workEl=document.getElementById("wor
 async function json(url,options={{}}){{const r=await fetch(url,options);let d={{}};try{{d=await r.json()}}catch{{}}if(!r.ok)throw new Error(typeof d.detail==="string"?d.detail:JSON.stringify(d.detail||d));return d}}
 button.addEventListener("click",async()=>{{button.disabled=true;statusEl.className="";statusEl.textContent="Bibliothek wird geprüft …";try{{
 const payload={{display_name:nameEl.value,work_root:workEl.value,archive_root:archiveEl.value}};
-const check=await json("/api/libraries/check",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{work_root:payload.work_root||("{workspaces_root}/"+String(payload.display_name||"Bibliothek").trim().replace(/[^A-Za-z0-9._-]+/g,"-")),archive_root:payload.archive_root}})}});
+const managedName=String(payload.display_name||"Bibliothek").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,32)||"bibliothek";
+const check=await json("/api/libraries/check",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{work_root:payload.work_root,archive_root:payload.archive_root,default_library_id:payload.work_root?"":managedName}})}});
 if(!check.valid)throw new Error((check.errors||[]).join("\n"));
 await json("/api/libraries",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(payload)}});
 statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";location.assign("/");
