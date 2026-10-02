@@ -119,31 +119,24 @@ def _visible_events(
                 from app.workspace_assets import discover_workspace_family_assets
                 family_ids = [int(row["id"]) for row in family_rows]
                 ph = ",".join("?" for _ in family_ids)
-                released_family_ids = {
-                    int(row["family_id"])
-                    for row in connection.execute(
-                        f"""SELECT DISTINCT family_id
-                            FROM released_archive_assets
-                            WHERE family_id IN ({ph})""",
-                        tuple(family_ids),
-                    ).fetchall()
-                }
-                discover_ids = [
-                    family_id
-                    for family_id in family_ids
-                    if family_id not in released_family_ids
-                ]
                 physical_assets = discover_workspace_family_assets(
                     database_path,
                     workspace_path,
-                    discover_ids,
+                    family_ids,
                 )
+                # Journalisierte released_archive_assets stecken bereits in
+                # _event_counts(). Hier kommen nur später physisch hinzugekommene,
+                # noch nicht journalisierte XMP-/Exportdateien dazu.
                 counts["file_count"] += sum(
-                    int(item.get("file_count") or 0)
+                    int(item.get("untracked_file_count") or 0)
                     for item in physical_assets.values()
                 )
                 counts["total_size_bytes"] += sum(
-                    int(item.get("total_size_bytes") or 0)
+                    sum(
+                        int(asset.get("size_bytes") or 0)
+                        for asset in (item.get("assets") or [])
+                        if not bool(asset.get("tracked"))
+                    )
                     for item in physical_assets.values()
                 )
             folder_layout = ensure_event_layout_snapshot(
