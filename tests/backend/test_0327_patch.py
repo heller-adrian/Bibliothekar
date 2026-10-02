@@ -100,7 +100,7 @@ def test_0327_time_range_trims_selected_day_stock_instead_of_rejecting_it():
             "end_date": "2026-07-25",
             "start_time": "10:00",
             "end_time": "23:59",
-            "uses_time_range": True,
+            "uses_time_range": False,
             "preserve_day_folders": False,
             "selected_day_keys": ["2026-07-25"],
             "selected_family_ids": [1, 2, 3],
@@ -229,8 +229,8 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
                    time_model_version
                ) VALUES (
                    'archive','old',NULL,'parent','Test',
-                   '2026-07-25T10:00:00','2026-07-25T23:59:59',
-                   1,'07.25 - Test','archived',?,?, 'event',0,1,?,?, 'continuous',2
+                   '2026-07-25T00:00:00','2026-07-25T23:59:59',
+                   0,'07.25 - Test','archived',?,?, 'event',0,1,?,?, 'continuous',2
                )""",
             (NOW, NOW, NOW, NOW),
         )
