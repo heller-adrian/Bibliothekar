@@ -8662,8 +8662,21 @@ def api_cancel_change(cr_id: str) -> JSONResponse:
 def api_get_change_reversal(cr_id: str, refresh: bool = False) -> JSONResponse:
     try:
         from app.archive_reversal import build_archive_reversal_assistant
+        context = current_library_context()
+        archive_label = (
+            "Kamerabibliothek"
+            if context.is_main
+            else (context.archive_root.name or "Kamerabibliothek")
+        )
+        work_label = context.work_root.name or "Arbeitsbereich"
         return JSONResponse(content=build_archive_reversal_assistant(
-            current_database_file(), current_archive_root(), current_workspace_root(), cr_id, scan_live=bool(refresh)
+            current_database_file(),
+            current_archive_root(),
+            current_workspace_root(),
+            cr_id,
+            scan_live=bool(refresh),
+            archive_display_root=archive_label,
+            work_display_root=work_label,
         ))
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -8673,8 +8686,20 @@ def api_get_change_reversal(cr_id: str, refresh: bool = False) -> JSONResponse:
 def api_prepare_change_reversal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_reversal import prepare_archive_reversal
+        context = current_library_context()
+        archive_label = (
+            "Kamerabibliothek"
+            if context.is_main
+            else (context.archive_root.name or "Kamerabibliothek")
+        )
+        work_label = context.work_root.name or "Arbeitsbereich"
         return JSONResponse(content=prepare_archive_reversal(
-            current_database_file(), current_archive_root(), current_workspace_root(), cr_id
+            current_database_file(),
+            current_archive_root(),
+            current_workspace_root(),
+            cr_id,
+            archive_display_root=archive_label,
+            work_display_root=work_label,
         ))
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
