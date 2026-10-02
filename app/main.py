@@ -310,23 +310,23 @@ SOURCE_HELPER_URL = os.environ.get(
 
 def build_main_library_context() -> LibraryContext:
     legacy = WORKSPACE_PATH / WORK_DIRECTORY_NAME
-    # Nur ein echter bestehender Legacy-Ordner bleibt kanonisch. Der auf
-    # frischen 0.32.8-Installationen erzeugte Kompatibilitäts-Symlink darf
-    # nicht wieder zur gespeicherten Fachwurzel werden.
+    # Reiner Bootstrap-Kontext für Codepfade ohne Request. Er erzeugt und
+    # impliziert niemals /Arbeitsbereiche/main. Ohne registrierte Bibliothek
+    # ist der Work-Pfad absichtlich nur ein nicht angelegter Platzhalter.
     work_root = (
-        legacy
+        legacy.resolve(strict=False)
         if legacy.exists() and not legacy.is_symlink()
-        else default_library_work_root(WORKSPACE_PATH, MAIN_LIBRARY_ID)
+        else (WORKSPACE_PATH / ".bibliothekar-ohne-bibliothek").resolve(strict=False)
     )
     return LibraryContext(
         library_id=MAIN_LIBRARY_ID,
-        display_name="Main Library",
+        display_name="Nicht eingerichtet",
         database_path=DATABASE_FILE,
         workspace_root=WORKSPACE_PATH,
         work_root=work_root,
         archive_root=ARCHIVE_ROOT,
         is_main=True,
-        settings={"bootstrap": True},
+        settings={"bootstrap": True, "onboarding_required": True},
     )
 
 
@@ -471,13 +471,29 @@ def current_archive_root() -> Path:
     return current_library_context().archive_root
 
 
+def _default_requested_library_id() -> str:
+    rows = list_libraries(
+        REGISTRY_DATABASE_FILE,
+        active_only=True,
+        registered_only=True,
+    )
+    if not rows:
+        return MAIN_LIBRARY_ID
+    main_row = next(
+        (row for row in rows if str(row["library_id"]) == MAIN_LIBRARY_ID),
+        None,
+    )
+    return str((main_row or rows[0])["library_id"])
+
+
 def _requested_library_id(request: Request) -> str:
+    fallback = _default_requested_library_id()
     return str(
         request.headers.get("X-Bibliothekar-Library")
         or request.query_params.get("library")
         or request.query_params.get("library_id")
-        or MAIN_LIBRARY_ID
-    ).strip() or MAIN_LIBRARY_ID
+        or fallback
+    ).strip() or fallback
 
 
 WORKER_STOP = Event()
@@ -1339,7 +1355,7 @@ def startup_database() -> None:
                 if existing_main is not None
                 else None
             ),
-            create_default_main=existing_main is not None,
+            create_default_main=False,
         )
 
         # 0.32.9: Eine frische Installation besitzt absichtlich noch keine
@@ -1369,44 +1385,50 @@ def startup_database() -> None:
                 WORKER_THREAD.start()
             return
 
-        adopt_main_library(
-            REGISTRY_DATABASE_FILE,
-            database_path=DATABASE_FILE,
-            workspace_root=WORKSPACE_PATH,
-            work_root=Path(workspace_layout["work_root"]),
-            archive_root=ARCHIVE_ROOT,
-        )
-        MAIN_LIBRARY_CONTEXT = resolve_library_context(
-            REGISTRY_DATABASE_FILE,
-            MAIN_LIBRARY_ID,
-        )
+        if existing_main is not None:
+            MAIN_LIBRARY_CONTEXT = resolve_library_context(
+                REGISTRY_DATABASE_FILE,
+                MAIN_LIBRARY_ID,
+            )
+            legacy_layout = migrate_legacy_applied_files(
+                DATABASE_FILE,
+                WORKSPACE_PATH,
+            )
+            global_stock_migration = migrate_main_free_stock_to_central(
+                DATABASE_FILE,
+                WORKSPACE_PATH,
+                main_work_root=MAIN_LIBRARY_CONTEXT.work_root,
+            )
+            main_inventory = backfill_library_inventory(
+                REGISTRY_DATABASE_FILE,
+                database_path=DATABASE_FILE,
+                library_id=MAIN_LIBRARY_ID,
+                claim_all_owned=False,
+            )
+            main_claims = backfill_library_claims(
+                REGISTRY_DATABASE_FILE,
+                database_path=DATABASE_FILE,
+                library_id=MAIN_LIBRARY_ID,
+            )
+        else:
+            # Eine Registry ohne Primärbibliothek ist zulässig. Insbesondere
+            # wird beim Update niemals wieder eine "main"-Bibliothek oder ein
+            # "main"-Arbeitsordner erzeugt.
+            MAIN_LIBRARY_CONTEXT = build_main_library_context()
+            legacy_layout = {}
+            global_stock_migration = {
+                "skipped": True,
+                "reason": "Keine registrierte Primärbibliothek.",
+            }
+            main_inventory = None
+            main_claims = None
 
-        legacy_layout = migrate_legacy_applied_files(
-            DATABASE_FILE,
-            WORKSPACE_PATH,
-        )
-        global_stock_migration = migrate_main_free_stock_to_central(
-            DATABASE_FILE,
-            WORKSPACE_PATH,
-            main_work_root=MAIN_LIBRARY_CONTEXT.work_root,
-        )
         WORKSPACE_LAYOUT_INITIALIZATION = {
+            **workspace_layout,
             **legacy_layout,
             "global_stock_migration": global_stock_migration,
         }
         WORKSPACE_LAYOUT_ERROR = None
-
-        main_inventory = backfill_library_inventory(
-            REGISTRY_DATABASE_FILE,
-            database_path=DATABASE_FILE,
-            library_id=MAIN_LIBRARY_ID,
-            claim_all_owned=False,
-        )
-        main_claims = backfill_library_claims(
-            REGISTRY_DATABASE_FILE,
-            database_path=DATABASE_FILE,
-            library_id=MAIN_LIBRARY_ID,
-        )
 
         secondary_sync: dict[str, dict[str, Any]] = {}
         for library_row in list_libraries(
@@ -1487,7 +1509,11 @@ def startup_database() -> None:
                 ),
                 workspace_path=str(
                     organization.get("working_root")
-                    or MAIN_LIBRARY_CONTEXT.work_root
+                    or (
+                        MAIN_LIBRARY_CONTEXT.work_root
+                        if existing_main is not None
+                        else WORKSPACE_PATH
+                    )
                 ),
                 protocol_path=str(outputs.get("protocol") or ""),
                 snapshot_backend=str(
@@ -1990,9 +2016,18 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
                 )
 
         global MAIN_LIBRARY_CONTEXT
-        MAIN_LIBRARY_CONTEXT = resolve_library_context(
+        current_main = get_library(
             REGISTRY_DATABASE_FILE,
             MAIN_LIBRARY_ID,
+            active_only=False,
+        )
+        MAIN_LIBRARY_CONTEXT = (
+            resolve_library_context(
+                REGISTRY_DATABASE_FILE,
+                MAIN_LIBRARY_ID,
+            )
+            if current_main is not None and bool(current_main.get("is_active"))
+            else build_main_library_context()
         )
         return _storage_settings_state()
     except Exception as error:
