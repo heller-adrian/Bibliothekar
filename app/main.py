@@ -164,7 +164,9 @@ from app.library_registry import (
     get_library,
     register_library,
     ensure_library_identity,
+    read_library_identity,
     update_library_display_name,
+    update_library_database_path,
     update_library_paths,
     set_library_active,
     unregister_library,
@@ -363,6 +365,52 @@ def current_library_context() -> LibraryContext:
 
 def current_database_file() -> Path:
     return current_library_context().database_path
+
+
+def _resolve_registered_library_database(
+    row: dict[str, Any],
+) -> tuple[Path, dict[str, Any]]:
+    """Return the existing DB; safely repair only the canonical path if needed."""
+    library_id = str(row.get("library_id") or "").strip()
+    configured = Path(str(row.get("database_path") or "")).expanduser().resolve(
+        strict=False
+    )
+    if configured.is_file():
+        return configured, row
+
+    canonical = (
+        DATABASE_DIRECTORY
+        / "libraries"
+        / f"{library_id}.sqlite3"
+    ).resolve(strict=False)
+
+    if canonical != configured and canonical.is_file():
+        try:
+            identity = read_library_identity(canonical)
+        except Exception as error:
+            raise LibraryRegistryError(
+                "Die gefundene Ersatz-Datenbank ist nicht lesbar: "
+                + str(canonical)
+            ) from error
+        if identity == library_id:
+            repaired = update_library_database_path(
+                REGISTRY_DATABASE_FILE,
+                library_id,
+                canonical,
+            )
+            return canonical, repaired
+
+    raise LibraryRegistryError(
+        "Die registrierte SQLite-Datenbank der Bibliothek fehlt. "
+        "Erwarteter Pfad: "
+        + str(configured)
+        + (
+            " · Auch der sichere Standardpfad wurde nicht mit passender "
+            "Bibliotheks-ID gefunden: " + str(canonical)
+            if canonical != configured
+            else ""
+        )
+    )
 
 
 def _ensure_compatibility_link(link: Path, target: Path) -> None:
@@ -2499,6 +2547,15 @@ def api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, An
         except LibraryRegistryError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
+    # Eine aktive Bibliothek darf beim bloßen Pfadwechsel nicht an einem
+    # veralteten DB-Eintrag scheitern, wenn ihre echte, identitätsgeprüfte
+    # Standard-DB weiterhin vorhanden ist.
+    if bool(row.get("is_active")):
+        try:
+            _, row = _resolve_registered_library_database(row)
+        except LibraryRegistryError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
     wants_paths = "work_root" in payload or "archive_root" in payload
     if wants_paths:
         requested_work = str(
@@ -2567,9 +2624,19 @@ def api_activate_library(library_id: str) -> dict[str, Any]:
         if existing is None or not existing.get("is_registered", True):
             raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
 
-        database_path = Path(str(existing["database_path"]))
+        database_path, existing = _resolve_registered_library_database(
+            existing
+        )
+        # Aktivieren darf niemals still eine neue leere Bibliotheks-DB
+        # erzeugen. initialize_database() läuft erst nach dem Existenz- und
+        # Identitätscheck und dient hier ausschließlich Schema-Migrationen.
         initialize_database(database_path)
-        ensure_library_identity(database_path, library_id)
+        identity = read_library_identity(database_path)
+        if identity != library_id:
+            raise LibraryRegistryError(
+                "Die SQLite-Datenbank gehört nicht zu dieser Bibliothek: "
+                + str(database_path)
+            )
         project_all_imports(
             DATABASE_FILE,
             database_path,
