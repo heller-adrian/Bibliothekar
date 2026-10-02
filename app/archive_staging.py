@@ -1097,6 +1097,16 @@ def cleanup_archive_change_staging(
         stop_root = root
         if _inside(path, release_root):
             stop_root = release_root
+        else:
+            try:
+                relative = path.relative_to(root)
+                if relative.parts:
+                    # Bestehende Standard-Hauptzweige wie Arbeitsbereich/2026
+                    # bleiben erhalten; nur darunter nachweislich leere
+                    # Quellordner dieses Vorgangs werden entfernt.
+                    stop_root = (root / relative.parts[0]).resolve(strict=False)
+            except ValueError:
+                stop_root = root
         current = path.parent
         while _inside(current, root) and current != stop_root:
             try:
