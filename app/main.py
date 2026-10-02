@@ -5285,6 +5285,16 @@ def api_delete_event(
             detail=message,
         ) from error
 
+    # Nach dem Löschen eines geplanten Ereignisses ist die lokale DB bereits
+    # wieder frei. Jetzt die globale Claim-Wahrheit sofort nachziehen, damit
+    # dieselben Familien in allen Bibliotheken wieder angeboten werden.
+    backfill_library_claims(
+        REGISTRY_DATABASE_FILE,
+        database_path=current_database_file(),
+        library_id=current_library_context().library_id,
+    )
+    synchronize_global_central_stock()
+
     return {
         "status": "deleted",
         **result,
