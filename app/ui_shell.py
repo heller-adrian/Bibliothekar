@@ -1612,7 +1612,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
 }
 
 @media (max-width: 430px) {
-  .bk-brand-title { font-size: 1.02rem; }
+  .bk-brand span:last-child { font-size: 1.02rem; }
   .bk-task-button { min-width: 70px; }
   .bk-tabs {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
