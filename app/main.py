@@ -2631,19 +2631,17 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
         )
     )
     requested_work = str(payload.get("work_root") or "").strip()
-    if not requested_work and first_library:
-        requested_work = str(
-            storage_paths(WORKSPACE_PATH)["workspaces_root"]
-            / (_library_slug(display_name) or "bibliothek")
+    default_work_id = None
+    if not requested_work:
+        default_work_id = (
+            _library_slug(display_name)
+            if first_library
+            else library_id
         )
     checked = inspect_library_paths(
         requested_work,
         str(payload.get("archive_root") or ""),
-        default_library_id=(
-            library_id
-            if (not requested_work and not first_library)
-            else None
-        ),
+        default_library_id=default_work_id,
     )
     if not checked["valid"]:
         raise HTTPException(status_code=422, detail=checked)
