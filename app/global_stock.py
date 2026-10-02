@@ -409,10 +409,21 @@ def synchronize_central_stock_projections(
                               marker.released_start_datetime,
                               marker.released_end_datetime,
                               marker.created_at,marker.archive_origin,
-                              ff.family_key
+                              ff.family_key,
+                              GROUP_CONCAT(
+                                  CASE WHEN f.current_root_kind='shared_workspace'
+                                       THEN f.current_relative_path ELSE NULL END,
+                                  char(10)
+                              ) AS central_candidate_paths
                        FROM released_free_families marker
                        JOIN file_families ff ON ff.id=marker.family_id
-                       WHERE marker.archive_origin=1"""
+                       LEFT JOIN files f ON f.family_id=marker.family_id
+                       WHERE marker.archive_origin=1
+                       GROUP BY marker.job_id,marker.family_id,
+                                marker.released_start_datetime,
+                                marker.released_end_datetime,
+                                marker.created_at,marker.archive_origin,
+                                ff.family_key"""
                 ).fetchall()
             ]
             asset_rows = [
@@ -432,6 +443,23 @@ def synchronize_central_stock_projections(
             job_id = str(row.get("job_id") or "")
             if not family_key or not job_id:
                 continue
+
+            physically_free = False
+            for raw_path in str(row.get("central_candidate_paths") or "").splitlines():
+                rel = Path(raw_path.strip())
+                if not raw_path.strip() or rel.is_absolute() or ".." in rel.parts:
+                    continue
+                candidate = (central / rel).resolve(strict=False)
+                try:
+                    candidate.relative_to(central)
+                except ValueError:
+                    continue
+                if candidate.is_file():
+                    physically_free = True
+                    break
+            if not physically_free:
+                continue
+
             identity = (job_id, family_key)
             existing = central_release_markers.get(identity)
             if existing is not None:
