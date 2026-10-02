@@ -797,6 +797,48 @@ def set_library_active(
     )
 
 
+def remove_library_registration(
+    registry_path: Path,
+    library_id: str,
+) -> None:
+    """Remove a just-created registry row after a failed creation transaction.
+
+    This is intentionally stricter than unregister_library(): it is only valid
+    when the library has no claims. It never deletes a library database or any
+    filesystem content.
+    """
+    existing = get_library(registry_path, library_id, active_only=False)
+    if existing is None:
+        return
+    if existing.get("is_main"):
+        raise LibraryRegistryError(
+            "Die Hauptbibliothek darf nicht aus der Registry entfernt werden."
+        )
+
+    connection = _connect(registry_path)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        claim = connection.execute(
+            "SELECT 1 FROM family_claims WHERE library_id=? LIMIT 1",
+            (str(library_id),),
+        ).fetchone()
+        if claim is not None:
+            raise LibraryRegistryError(
+                "Bibliotheksregistrierung besitzt bereits globale Claims und "
+                "darf nicht automatisch entfernt werden."
+            )
+        connection.execute(
+            "DELETE FROM libraries WHERE library_id=?",
+            (str(library_id),),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def unregister_library(
     registry_path: Path,
     library_id: str,
