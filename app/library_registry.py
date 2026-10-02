@@ -1162,24 +1162,32 @@ def claim_source_family(
             """,
             (canonical_id, str(library_id)),
         ).fetchone()
-        global_owner = connection.execute(
+        other_claim = connection.execute(
             """
             SELECT *
             FROM family_claims
             WHERE canonical_family_id = ?
-              AND claim_state = 'owned'
+              AND library_id <> ?
+            ORDER BY CASE claim_state WHEN 'owned' THEN 0 ELSE 1 END, library_id
             LIMIT 1
             """,
-            (canonical_id,),
+            (canonical_id, str(library_id)),
         ).fetchone()
 
-        if (
-            global_owner is not None
-            and str(global_owner["library_id"]) != str(library_id)
-        ):
-            raise LibraryRegistryError(
-                "Diese Dateifamilie wurde bereits von einer anderen Bibliothek übernommen."
-            )
+        # Planung ist bereits eine globale Belegung. Eine kanonische Familie
+        # darf deshalb zu jedem Zeitpunkt nur zu genau einer Bibliothek gehören.
+        if other_claim is not None:
+            if str(other_claim["claim_state"]) == "owned":
+                message = (
+                    "Diese Dateifamilie wurde bereits von einer anderen "
+                    "Bibliothek übernommen."
+                )
+            else:
+                message = (
+                    "Diese Dateifamilie ist bereits für ein geplantes Ereignis "
+                    "einer anderen Bibliothek reserviert."
+                )
+            raise LibraryRegistryError(message)
 
         if (
             existing
@@ -1317,30 +1325,53 @@ def _source_family_library_id(row: dict[str, Any]) -> str:
 def _effective_claim(
     rows: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
+    """Return the single globally effective claim for one canonical family.
+
+    Since 0.32.3 both reservation and ownership are globally exclusive. The
+    composite primary key introduced in 0.32.2 is retained for migration
+    compatibility, but contradictory multi-library reservations are surfaced
+    explicitly instead of being hidden.
+    """
     if not rows:
         return None
-    source_library_id = _source_family_library_id(rows[0])
-    for row in rows:
-        if str(row.get("claim_state") or "") == "owned":
-            return row
-    for row in rows:
-        if (
-            str(row.get("claim_state") or "") == "reserved"
-            and str(row.get("library_id") or "") == source_library_id
-        ):
-            return row
-    return None
+
+    owners = [
+        row
+        for row in rows
+        if str(row.get("claim_state") or "") == "owned"
+    ]
+    if len(owners) > 1:
+        raise LibraryRegistryError(
+            "Widersprüchliche globale Besitz-Claims für eine Dateifamilie."
+        )
+    if owners:
+        return owners[0]
+
+    reservations = [
+        row
+        for row in rows
+        if str(row.get("claim_state") or "") == "reserved"
+    ]
+    if len(reservations) > 1:
+        libraries = sorted({
+            str(row.get("library_id") or "")
+            for row in reservations
+        })
+        raise LibraryRegistryError(
+            "Widersprüchliche globale Reservierungen für eine Dateifamilie: "
+            + ", ".join(value for value in libraries if value)
+        )
+    return reservations[0] if reservations else None
 
 
 def get_source_family_claims(
     registry_path: Path,
     source_family_keys: list[str],
 ) -> dict[str, dict[str, Any]]:
-    """Return the claim that is effective for each library occurrence.
+    """Return the globally effective claim for each library occurrence.
 
-    A global ownership claim always wins. Without ownership, only the
-    reservation belonging to the queried occurrence's own library is visible;
-    reservations from other libraries do not block planning.
+    Both reserved and owned claims block the same canonical family in every
+    other library. Planning itself is therefore globally exclusive.
     """
     keys = [
         str(value).strip()
