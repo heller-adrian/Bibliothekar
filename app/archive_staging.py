@@ -11,6 +11,7 @@ erfolgreichen Archivpruefung unangetastet.
 
 from pathlib import Path, PurePosixPath
 from typing import Any
+import errno
 import hashlib
 import os
 
@@ -78,6 +79,77 @@ def _workspace_source_path(
 
     # Der anschließende Existenzcheck liefert die konkrete Fehlermeldung.
     return work_candidate, work_root
+
+
+def _stage_verified_source(
+    source: Path,
+    staged: Path,
+    *,
+    expected_size: int,
+    expected_sha: str,
+) -> bool:
+    """Create one no-overwrite helper link/copy and verify its identity."""
+    if staged.exists() or staged.is_symlink():
+        if staged.is_file() and not staged.is_symlink():
+            src_stat = source.stat()
+            dst_stat = staged.stat()
+            if (
+                int(src_stat.st_dev) == int(dst_stat.st_dev)
+                and int(src_stat.st_ino) == int(dst_stat.st_ino)
+                and _sha256_file(staged) == expected_sha
+            ):
+                return False
+        raise ArchiveStagingError(
+            "Der vorbereitete SSD-Zielpfad ist bereits belegt: " + str(staged)
+        )
+
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    copied = False
+    try:
+        try:
+            os.link(source, staged, follow_symlinks=False)
+        except OSError as exc:
+            if exc.errno != errno.EXDEV:
+                raise
+            copied = True
+            with source.open("rb") as src, staged.open("xb") as dst:
+                while True:
+                    block = src.read(1024 * 1024)
+                    if not block:
+                        break
+                    dst.write(block)
+                dst.flush()
+                os.fsync(dst.fileno())
+
+        if (
+            not staged.is_file()
+            or staged.is_symlink()
+            or int(staged.stat().st_size) != int(expected_size)
+            or _sha256_file(staged) != expected_sha
+        ):
+            raise ArchiveStagingError(
+                "Die vorbereitete SSD-Datei konnte nicht sicher bestätigt werden: "
+                + str(staged)
+            )
+        if not copied:
+            src_stat = source.stat()
+            dst_stat = staged.stat()
+            if (
+                int(src_stat.st_dev) != int(dst_stat.st_dev)
+                or int(src_stat.st_ino) != int(dst_stat.st_ino)
+            ):
+                raise ArchiveStagingError(
+                    "Der SSD-Hardlink konnte nicht sicher bestätigt werden: "
+                    + str(staged)
+                )
+        return True
+    except Exception:
+        try:
+            if staged.exists() and staged.is_file() and not staged.is_symlink():
+                staged.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _safe_component(value: Any, label: str) -> str:
@@ -419,7 +491,11 @@ def describe_archive_change_staging(
             missing.add(directory)
 
     incoming = [
-        item for item in (plan.get("families_with_plans") or [])
+        item
+        for item in [
+            *(plan.get("families_with_plans") or []),
+            *(plan.get("assets_with_plans") or []),
+        ]
         if str(item.get("source_root_kind") or "camera_archive") == "shared_workspace"
         and str(item.get("action") or "") == "move"
         and str(item.get("new_path") or "").strip()
@@ -793,52 +869,67 @@ def prepare_archive_change_staging_for_request(
                 target.mkdir(parents=True)
                 created_dirs.append(target)
 
-        for item in plan.get("families_with_plans") or []:
-            if str(item.get("source_root_kind") or "camera_archive") != "shared_workspace":
-                continue
-            file_id = int(item["file_id"])
-            source_rel = _safe_relative(item.get("workspace_original_path") or item.get("old_path"))
+        incoming_items = [
+            item
+            for item in [
+                *(plan.get("families_with_plans") or []),
+                *(plan.get("assets_with_plans") or []),
+            ]
+            if str(item.get("source_root_kind") or "camera_archive") == "shared_workspace"
+            and str(item.get("action") or "") == "move"
+            and str(item.get("new_path") or "").strip()
+        ]
+        staged_asset_count = 0
+        for item in incoming_items:
+            file_id = (
+                int(item["file_id"])
+                if item.get("file_id") is not None
+                else None
+            )
+            source_rel = _safe_relative(
+                item.get("workspace_original_path")
+                or item.get("old_path")
+            )
             target_rel = _safe_relative(item.get("new_path"))
-            source = work_root.joinpath(*source_rel.parts).resolve(strict=False)
+            source, source_root = _workspace_source_path(
+                workspace_path,
+                source_rel,
+            )
             staged_rel = PurePosixPath(STAGING_DIRECTORY_NAME) / target_rel
             staged = work_root.joinpath(*staged_rel.parts).resolve(strict=False)
 
-            if not _inside(source, work_root) or not _inside(staged, staging_base):
-                raise ArchiveStagingError("Eine SSD-Zuführung verlässt den Arbeitsbereich.")
+            if not _inside(source, source_root) or not _inside(staged, staging_base):
+                raise ArchiveStagingError(
+                    "Eine SSD-Zuführung verlässt den zulässigen Bestand."
+                )
             if not source.exists() or not source.is_file() or source.is_symlink():
-                raise ArchiveStagingError("SSD-Quelldatei fehlt oder ist unsicher: " + str(source))
+                raise ArchiveStagingError(
+                    "SSD-Quelldatei fehlt oder ist unsicher: " + str(source)
+                )
             expected_size = int(item.get("expected_size_bytes") or 0)
             expected_sha = str(item.get("expected_sha256") or "").strip()
             if int(source.stat().st_size) != expected_size:
-                raise ArchiveStagingError("SSD-Quelldatei hat eine abweichende Größe: " + str(source))
-            if not expected_sha or _sha256_file(source) != expected_sha:
-                raise ArchiveStagingError("SSD-Quelldatei hat eine abweichende SHA-256-Summe: " + str(source))
-
-            staged.parent.mkdir(parents=True, exist_ok=True)
-            if staged.exists() or staged.is_symlink():
-                if staged.is_file():
-                    src_stat = source.stat()
-                    dst_stat = staged.stat()
-                    if (
-                        int(src_stat.st_dev) == int(dst_stat.st_dev)
-                        and int(src_stat.st_ino) == int(dst_stat.st_ino)
-                    ):
-                        staging_by_file_id[file_id] = staged_rel.as_posix()
-                        continue
                 raise ArchiveStagingError(
-                    "Der vorbereitete SSD-Zielpfad ist bereits belegt: " + str(staged)
+                    "SSD-Quelldatei hat eine abweichende Größe: " + str(source)
                 )
-            os.link(source, staged, follow_symlinks=False)
-            staged_paths.append(staged)
-            src_stat = source.stat()
-            dst_stat = staged.stat()
-            if (
-                int(src_stat.st_dev) != int(dst_stat.st_dev)
-                or int(src_stat.st_ino) != int(dst_stat.st_ino)
-                or _sha256_file(staged) != expected_sha
-            ):
-                raise ArchiveStagingError("Der SSD-Hardlink konnte nicht sicher bestätigt werden: " + str(staged))
-            staging_by_file_id[file_id] = staged_rel.as_posix()
+            if not expected_sha or _sha256_file(source) != expected_sha:
+                raise ArchiveStagingError(
+                    "SSD-Quelldatei hat eine abweichende SHA-256-Summe: "
+                    + str(source)
+                )
+
+            created = _stage_verified_source(
+                source,
+                staged,
+                expected_size=expected_size,
+                expected_sha=expected_sha,
+            )
+            if created:
+                staged_paths.append(staged)
+            if file_id is not None:
+                staging_by_file_id[file_id] = staged_rel.as_posix()
+            else:
+                staged_asset_count += 1
 
         staged_event_document = ""
         if event_document is not None:
@@ -871,7 +962,9 @@ def prepare_archive_change_staging_for_request(
         return {
             **description,
             "prepared_structure_path": prepared_rel.as_posix(),
-            "staged_file_count": len(staging_by_file_id),
+            "staged_file_count": len(staging_by_file_id) + staged_asset_count,
+            "staged_camera_file_count": len(staging_by_file_id),
+            "staged_asset_count": staged_asset_count,
             "staging_by_file_id": staging_by_file_id,
             "staged_event_document": staged_event_document,
             "created_directories": [
