@@ -15,7 +15,7 @@ from app.database import database_connection
 from app.event_inventory import _filename_family_source
 from app.filename_collisions import export_collision_base_stem
 from app.metadata import classify_media
-from app.workspace_layout import shared_work_root
+from app.workspace_layout import backup_root, resolve_workspace_root, shared_work_root
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -43,11 +43,28 @@ def discover_workspace_family_assets(
         return {}
 
     try:
-        root = shared_work_root(workspace_path).resolve(strict=False)
+        root = resolve_workspace_root(workspace_path).resolve(strict=False)
+        work_root = shared_work_root(workspace_path).resolve(strict=False)
+        central_root = backup_root(workspace_path).resolve(strict=False)
     except Exception:
         return {}
-    if not root.is_dir():
+    if not root.is_dir() or not work_root.is_dir() or not central_root.is_dir():
         return {}
+
+    def physical_path(relative_value: str, *, prefer_central: bool = False) -> Path:
+        relative = Path(str(relative_value or "").strip())
+        if relative.is_absolute() or ".." in relative.parts:
+            return root / "__unsafe__"
+        candidates = (
+            (central_root / relative, work_root / relative)
+            if prefer_central
+            else (work_root / relative, central_root / relative)
+        )
+        for candidate in candidates:
+            resolved = candidate.resolve(strict=False)
+            if _inside(resolved, root) and resolved.is_file():
+                return resolved
+        return candidates[0].resolve(strict=False)
 
     placeholders = ",".join("?" for _ in ids)
     with database_connection(database_path) as connection:
@@ -140,7 +157,7 @@ def discover_workspace_family_assets(
             continue
         add_asset(
             family_id,
-            root.joinpath(*Path(relative).parts),
+            physical_path(relative, prefer_central=True),
             asset_kind=str(row.get("asset_kind") or "other"),
             tracked=True,
             source_file_id=(
@@ -156,7 +173,12 @@ def discover_workspace_family_assets(
         relative = str(row.get("current_relative_path") or "").strip()
         if not relative:
             continue
-        path = root.joinpath(*Path(relative).parts).resolve(strict=False)
+        path = physical_path(
+            relative,
+            prefer_central=str(relative).replace("\\", "/").startswith(
+                "Freigewordene Archivdateien/"
+            ),
+        )
         if not _inside(path, root):
             continue
         known_physical_paths.add(path)
