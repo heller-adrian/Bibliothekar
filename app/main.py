@@ -215,7 +215,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.32.6"
+DEPLOYMENT_VERSION = "0.32.7"
 
 CONFIG_PATH = Path(
     os.environ.get(
