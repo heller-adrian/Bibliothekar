@@ -576,20 +576,35 @@ def scan_event_inventory(
         if known_file_id is not None:
             used_known_ids.add(known_file_id)
 
-        capture_time = (
-            str(known.get("selected_capture_time") or "") if known is not None else
-            str(metadata.get("selected_capture_time") or "")
-        ).strip() or None
-        capture_source = (
-            "database_import"
-            if known is not None and capture_time
-            else str(metadata.get("selected_capture_source") or "").strip() or None
+        # Der physisch neu gelesene Archivbestand ist die IST-Wahrheit.
+        # Für bekannte Kameraoriginale wurde bisher immer die historische
+        # SQLite-Aufnahmezeit bevorzugt. Nach einer älteren Fehlzuordnung konnte
+        # dadurch ein real vorhandenes Foto trotz korrekter EXIF-Zeit im falschen
+        # Freigabezeitraum landen. Belastbare Medienmetadaten des aktuell
+        # gelesenen Originals schlagen deshalb den gespeicherten Importwert;
+        # SQLite bleibt nur der sichere Fallback, wenn die Datei selbst keine
+        # belastbare Zeit mehr liefert.
+        live_capture_time = str(metadata.get("selected_capture_time") or "").strip() or None
+        live_capture_source = str(metadata.get("selected_capture_source") or "").strip() or None
+        live_confidence = str(metadata.get("capture_time_confidence") or "missing")
+        live_capture_trusted = bool(
+            live_capture_time
+            and live_confidence in {"high", "medium"}
+            and "FileModifyDate" not in str(live_capture_source or "")
+            and "FileCreateDate" not in str(live_capture_source or "")
         )
-        confidence = (
-            "high"
-            if known is not None and capture_time
-            else str(metadata.get("capture_time_confidence") or "missing")
-        )
+        if known is not None and live_capture_trusted:
+            capture_time = live_capture_time
+            capture_source = live_capture_source
+            confidence = live_confidence
+        elif known is not None:
+            capture_time = str(known.get("selected_capture_time") or "").strip() or None
+            capture_source = "database_import" if capture_time else None
+            confidence = "high" if capture_time else "missing"
+        else:
+            capture_time = live_capture_time
+            capture_source = live_capture_source
+            confidence = live_confidence
         asset_kind = _asset_kind(
             event_rel,
             media_type,
