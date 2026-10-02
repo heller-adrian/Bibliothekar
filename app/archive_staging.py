@@ -81,14 +81,44 @@ def _workspace_source_path(
     return work_candidate, work_root
 
 
+def _copy_verified_bytes(
+    source: Path,
+    target: Path,
+    *,
+    expected_size: int,
+    expected_sha: str,
+) -> None:
+    """Copy with no overwrite and verify the completed bytes."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with source.open("rb") as src, target.open("xb") as dst:
+        while True:
+            block = src.read(1024 * 1024)
+            if not block:
+                break
+            dst.write(block)
+        dst.flush()
+        os.fsync(dst.fileno())
+    if (
+        not target.is_file()
+        or target.is_symlink()
+        or int(target.stat().st_size) != int(expected_size)
+        or _sha256_file(target) != expected_sha
+    ):
+        raise ArchiveStagingError(
+            "Die kopierte SSD-Datei konnte nicht sicher bestätigt werden: "
+            + str(target)
+        )
+
+
 def _stage_verified_source(
     source: Path,
     staged: Path,
     *,
     expected_size: int,
     expected_sha: str,
-) -> bool:
-    """Create one no-overwrite helper link/copy and verify its identity."""
+    fallback_mode: str | None = None,
+) -> str:
+    """Create a helper hardlink; on EXDEV require an explicit copy/move choice."""
     if staged.exists() or staged.is_symlink():
         if staged.is_file() and not staged.is_symlink():
             src_stat = source.stat()
@@ -98,28 +128,31 @@ def _stage_verified_source(
                 and int(src_stat.st_ino) == int(dst_stat.st_ino)
                 and _sha256_file(staged) == expected_sha
             ):
-                return False
+                return "existing_hardlink"
         raise ArchiveStagingError(
             "Der vorbereitete SSD-Zielpfad ist bereits belegt: " + str(staged)
         )
 
     staged.parent.mkdir(parents=True, exist_ok=True)
-    copied = False
+    mode = "hardlink"
     try:
         try:
             os.link(source, staged, follow_symlinks=False)
         except OSError as exc:
             if exc.errno != errno.EXDEV:
                 raise
-            copied = True
-            with source.open("rb") as src, staged.open("xb") as dst:
-                while True:
-                    block = src.read(1024 * 1024)
-                    if not block:
-                        break
-                    dst.write(block)
-                dst.flush()
-                os.fsync(dst.fileno())
+            if fallback_mode not in {"copy", "move"}:
+                raise ArchiveStagingError(
+                    "TRANSFER_CHOICE_REQUIRED: Hardlinks sind zwischen diesen "
+                    "Speicherorten nicht möglich."
+                ) from exc
+            mode = str(fallback_mode)
+            _copy_verified_bytes(
+                source,
+                staged,
+                expected_size=expected_size,
+                expected_sha=expected_sha,
+            )
 
         if (
             not staged.is_file()
@@ -131,7 +164,7 @@ def _stage_verified_source(
                 "Die vorbereitete SSD-Datei konnte nicht sicher bestätigt werden: "
                 + str(staged)
             )
-        if not copied:
+        if mode == "hardlink":
             src_stat = source.stat()
             dst_stat = staged.stat()
             if (
@@ -142,7 +175,19 @@ def _stage_verified_source(
                     "Der SSD-Hardlink konnte nicht sicher bestätigt werden: "
                     + str(staged)
                 )
-        return True
+        elif mode == "move":
+            if (
+                not source.is_file()
+                or source.is_symlink()
+                or int(source.stat().st_size) != int(expected_size)
+                or _sha256_file(source) != expected_sha
+            ):
+                raise ArchiveStagingError(
+                    "Die SSD-Quelle hat sich vor dem Verschieben verändert: "
+                    + str(source)
+                )
+            source.unlink()
+        return mode
     except Exception:
         try:
             if staged.exists() and staged.is_file() and not staged.is_symlink():
@@ -797,8 +842,12 @@ def prepare_archive_change_staging_for_request(
     workspace_path: Path,
     archive_root: Path,
     cr_id: str,
+    *,
+    transfer_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Materialize only the missing helper structure and incoming SSD hardlinks."""
+    """Materialize missing helper structure; cross-dataset transfer needs consent."""
+    if transfer_mode not in {None, "copy", "move"}:
+        raise ArchiveStagingError("Ungültige Transferauswahl für den Hilfsbereich.")
     cr, preview, plan = _request_preview_and_plan(database_path, cr_id)
 
     # 0.28.3: Frühere manuelle Archiv-Strukturaufgaben hinterließen ihre
@@ -855,6 +904,8 @@ def prepare_archive_change_staging_for_request(
 
     created_dirs: list[Path] = []
     staged_paths: list[Path] = []
+    moved_sources: list[tuple[Path, Path, int, str]] = []
+    transfer_modes: set[str] = set()
     staging_by_file_id: dict[int, str] = {}
 
     try:
@@ -918,14 +969,18 @@ def prepare_archive_change_staging_for_request(
                     + str(source)
                 )
 
-            created = _stage_verified_source(
+            staged_mode = _stage_verified_source(
                 source,
                 staged,
                 expected_size=expected_size,
                 expected_sha=expected_sha,
+                fallback_mode=transfer_mode,
             )
-            if created:
+            transfer_modes.add(staged_mode)
+            if staged_mode != "existing_hardlink":
                 staged_paths.append(staged)
+            if staged_mode == "move":
+                moved_sources.append((source, staged, expected_size, expected_sha))
             if file_id is not None:
                 staging_by_file_id[file_id] = staged_rel.as_posix()
             else:
@@ -970,8 +1025,51 @@ def prepare_archive_change_staging_for_request(
             "created_directories": [
                 path.relative_to(work_root).as_posix() for path in created_dirs
             ],
+            "transfer_mode": (
+                "move" if "move" in transfer_modes
+                else "copy" if "copy" in transfer_modes
+                else "hardlink"
+            ),
         }
     except Exception:
+        # A cross-dataset move is only considered successful when the complete
+        # preparation succeeds. Restore any already removed source before the
+        # helper copy is cleaned up.
+        for source, staged, expected_size, expected_sha in reversed(moved_sources):
+            try:
+                if source.exists():
+                    if (
+                        not source.is_file()
+                        or source.is_symlink()
+                        or int(source.stat().st_size) != int(expected_size)
+                        or _sha256_file(source) != expected_sha
+                    ):
+                        raise ArchiveStagingError(
+                            "Rollback gesperrt: SSD-Quelle ist abweichend vorhanden: "
+                            + str(source)
+                        )
+                    continue
+                if (
+                    not staged.is_file()
+                    or staged.is_symlink()
+                    or int(staged.stat().st_size) != int(expected_size)
+                    or _sha256_file(staged) != expected_sha
+                ):
+                    raise ArchiveStagingError(
+                        "Rollback gesperrt: Hilfskopie ist nicht mehr verifiziert: "
+                        + str(staged)
+                    )
+                _copy_verified_bytes(
+                    staged,
+                    source,
+                    expected_size=expected_size,
+                    expected_sha=expected_sha,
+                )
+            except Exception as rollback_exc:
+                raise ArchiveStagingError(
+                    "Verschieben konnte nicht sicher zurückgerollt werden: "
+                    + str(rollback_exc)
+                ) from rollback_exc
         for staged in reversed(staged_paths):
             try:
                 staged.unlink(missing_ok=True)
@@ -998,6 +1096,7 @@ def cleanup_archive_change_staging(
     staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
     removed_staged = 0
     removed_originals = 0
+    restored_originals = 0
     removed_empty_source_directories = 0
     warnings: list[str] = []
 
@@ -1125,6 +1224,41 @@ def cleanup_archive_change_staging(
             or row.get("old_path")
             or ""
         )
+
+        # Beim expliziten Cross-Dataset-"Verschieben" liegt die einzige
+        # Quellkopie nach der Vorbereitung im Hilfsbereich. Wird der Auftrag
+        # verworfen, muss der globale freie Originalpfad vor dem Entfernen der
+        # Hilfskopie vollständig wiederhergestellt werden.
+        if not remove_originals and original_rel and original_rel != staging_rel:
+            try:
+                original_path, _ = _workspace_source_path(
+                    workspace_path,
+                    original_rel,
+                )
+                staging_path = work_root.joinpath(
+                    *_safe_relative(staging_rel).parts
+                ).resolve(strict=False)
+                if not original_path.exists() and staging_path.is_file() and not staging_path.is_symlink():
+                    if (
+                        int(staging_path.stat().st_size) != expected_size
+                        or not expected_sha
+                        or _sha256_file(staging_path) != expected_sha
+                    ):
+                        raise ArchiveStagingError(
+                            "Hilfskopie ist für die Wiederherstellung nicht verifiziert."
+                        )
+                    _copy_verified_bytes(
+                        staging_path,
+                        original_path,
+                        expected_size=expected_size,
+                        expected_sha=expected_sha,
+                    )
+                    restored_originals += 1
+            except Exception as exc:
+                warnings.append(
+                    "SSD-Original konnte beim Verwerfen nicht wiederhergestellt werden: "
+                    + original_rel + ": " + str(exc)
+                )
 
         removed_helper, _ = remove_known(
             staging_rel,
@@ -1285,6 +1419,7 @@ def cleanup_archive_change_staging(
     return {
         "removed_staging_file_count": removed_staged,
         "removed_original_file_count": removed_originals,
+        "restored_original_file_count": restored_originals,
         "removed_empty_source_directory_count": removed_empty_source_directories,
         "warnings": warnings,
     }
