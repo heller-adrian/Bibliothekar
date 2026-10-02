@@ -1177,6 +1177,7 @@ def propose_archived_event_deletion(
                     "old_path": str(item.get("relative_path") or ""),
                     "expected_size_bytes": int(item.get("size_bytes") or 0),
                     "expected_sha256": str(item.get("sha256") or ""),
+                    "planned_capture_time": str(item.get("selected_capture_time") or "")[:19],
                 })
 
             if unresolved:
@@ -1199,12 +1200,13 @@ def propose_archived_event_deletion(
                     "expected_sha256": str(
                         row["sha256_current"] or row["sha256_original"] or ""
                     ),
-                    "planned_capture_time": str(row.get("selected_capture_time") or "")[:19],
+                    "planned_capture_time": str(row["selected_capture_time"] or "")[:19],
                 }
                 for row in connection.execute(
                     f"""SELECT f.id AS file_id,f.family_id,
                                f.current_relative_path,f.original_relative_path,
-                               f.size_bytes,f.sha256_current,f.sha256_original
+                               f.size_bytes,f.sha256_current,f.sha256_original,
+                               f.selected_capture_time
                         FROM files f
                         WHERE f.family_id IN ({placeholders})
                         ORDER BY f.family_id,f.id""",
