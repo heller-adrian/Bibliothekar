@@ -580,6 +580,109 @@ def _compute_event_plan(
                 "advisory_reason": advisory_reason,
             })
 
+    # Freigewordene Archivbestände sind globaler SSD-Bestand. Wenn eine
+    # solche Familie wieder direkt in ein archiviertes Ereignis aufgenommen
+    # wird, gehören ihre XMP-/Exportdateien genauso zum neuen SOLL wie die
+    # Kameraoriginale. released_archive_assets ist hierfür der dauerhafte,
+    # SHA-256-geprüfte Herkunftsnachweis.
+    if added_family_ids:
+        placeholders = ",".join("?" for _ in sorted(added_family_ids))
+        with database_connection(database_path) as connection:
+            incoming_assets = [
+                dict(row)
+                for row in connection.execute(
+                    f"""SELECT asset.*,ff.selected_capture_time,
+                               ff.capture_time_confidence
+                        FROM released_archive_assets asset
+                        JOIN file_families ff ON ff.id=asset.family_id
+                        WHERE asset.family_id IN ({placeholders})
+                        ORDER BY asset.family_id,asset.id""",
+                    tuple(sorted(added_family_ids)),
+                ).fetchall()
+            ]
+
+        camera_targets_by_file_id = {
+            int(item["file_id"]): str(item.get("new_path") or "")
+            for item in file_plans
+            if item.get("file_id") is not None
+            and str(item.get("new_path") or "")
+        }
+        camera_targets_by_family: dict[int, list[str]] = {}
+        for item in file_plans:
+            if (
+                item.get("family_id") is None
+                or not str(item.get("new_path") or "")
+            ):
+                continue
+            camera_targets_by_family.setdefault(
+                int(item["family_id"]), []
+            ).append(str(item["new_path"]))
+
+        for item in incoming_assets:
+            family_id = int(item["family_id"])
+            old_path = str(item.get("current_relative_path") or "")
+            filename = PurePosixPath(old_path.replace("\\", "/")).name
+            if not filename:
+                raise EventChangeRequestError(
+                    "Eine freigewordene Zusatzdatei besitzt keinen Dateinamen."
+                )
+            asset_kind = str(item.get("asset_kind") or "other")
+            capture = str(item.get("selected_capture_time") or "")[:19] or None
+            source_file_id = item.get("source_file_id")
+            candidate = None
+
+            # XMP/abgeleitete Begleitdateien folgen bevorzugt exakt dem
+            # zugehörigen Kameraoriginal. Dadurch bleiben Tages-, Unterereignis-
+            # und benutzerdefinierte Organisationsordner konsistent.
+            if asset_kind != "export" and source_file_id is not None:
+                camera_target = camera_targets_by_file_id.get(int(source_file_id))
+                if camera_target:
+                    candidate = (
+                        PurePosixPath(camera_target).parent / filename
+                    ).as_posix()
+
+            if candidate is None and asset_kind != "export":
+                family_targets = camera_targets_by_family.get(family_id) or []
+                if family_targets:
+                    candidate = (
+                        PurePosixPath(sorted(family_targets)[0]).parent / filename
+                    ).as_posix()
+
+            if candidate is None:
+                candidate = target_for(
+                    filename=filename,
+                    capture=capture,
+                    branch="Export" if asset_kind == "export" else "Alle",
+                    old_event_relative_path="",
+                )
+
+            if not candidate:
+                raise EventChangeRequestError(
+                    "Eine freigewordene Zusatzdatei lässt sich nicht eindeutig "
+                    "in die neue Archivstruktur einordnen: " + filename
+                )
+
+            candidate = reserve_archive_asset_target(candidate, asset_kind)
+            asset_plans.append({
+                "asset_kind": asset_kind,
+                "source_file_id": source_file_id,
+                "family_id": family_id,
+                "old_path": old_path,
+                "new_path": candidate,
+                "action": "move",
+                "expected_size_bytes": int(item.get("size_bytes") or 0),
+                "expected_sha256": str(item.get("sha256") or ""),
+                "selected_capture_time": capture,
+                "capture_time_confidence": str(
+                    item.get("capture_time_confidence") or "missing"
+                ),
+                "advisory": False,
+                "advisory_reason": "",
+                "source_root_kind": "shared_workspace",
+                "workspace_original_path": old_path,
+                "released_archive_asset_id": int(item["id"]),
+            })
+
     # 0.28.5: Byte-identische XMP-/Exportdateien derselben Familie und Rolle
     # sind keine zusätzlichen Pflichtobjekte. Eine kanonische Repräsentation
     # bleibt verwaltet; weitere identische Kopien werden sichtbar als Hinweis
