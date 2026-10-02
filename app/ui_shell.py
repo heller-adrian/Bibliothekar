@@ -1612,7 +1612,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
 }
 
 @media (max-width: 430px) {
-  .bk-brand span:last-child { font-size: 1.02rem; }
+  .bk-brand-title { font-size: 1.02rem; }
   .bk-task-button { min-width: 70px; }
   .bk-tabs {
     --bk-tab-overlap: clamp(12px, 4vw, 18px);
@@ -1683,12 +1683,35 @@ BIBLIOTHEKAR_0310_CSS = r"""
   color: var(--bk-muted); display: block; margin-top: 3px;
 }
 
+.bk-brand-copy {
+  display: grid;
+  align-content: center;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.04;
+}
+.bk-brand-title {
+  font-size: 1.13rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+.bk-brand-library {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(248, 244, 233, .72);
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
 """
 
 
 
 BIBLIOTHEKAR_0311_CSS = r"""
-/* 0.32.2: breiter, responsiver Einstellungsdialog mit scrollbaren Tabs. */
+/* 0.32.3: responsiver Dialog plus dauerhaft sichtbarer Bibliothekskontext. */
 .bk-dialog {
   max-height: calc(100dvh - 28px) !important;
   overflow: hidden !important;
@@ -1863,6 +1886,23 @@ BIBLIOTHEKAR_JS = r"""
   document.querySelectorAll('a[href^="/"]').forEach(link => {
     link.setAttribute("href", bkLibraryHref(link.getAttribute("href")));
   });
+
+  const currentLibraryName = document.getElementById("bk-current-library-name");
+  async function bkRefreshCurrentLibraryName() {
+    if (!currentLibraryName) return;
+    try {
+      const response = await fetch("/api/libraries/current", {cache:"no-store"});
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      const name = String(data.display_name || data.library_id || bkLibraryId || "Bibliothek");
+      currentLibraryName.textContent = name;
+      currentLibraryName.title = name;
+    } catch (_) {
+      currentLibraryName.textContent = bkLibraryId === "main" ? "Hauptbibliothek" : bkLibraryId;
+      currentLibraryName.title = currentLibraryName.textContent;
+    }
+  }
+  bkRefreshCurrentLibraryName();
 
   const stored = localStorage.getItem("bibliothekar-theme") || "light";
 
@@ -2562,7 +2602,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 <header class="bk-shell">
   <a class="bk-brand" href="/" aria-label="Bibliothekar Startseite">
     <span class="bk-mark" aria-hidden="true"><span class="y"></span><span class="r"></span><span class="b"></span></span>
-    <span>Bibliothekar</span>
+    <span class="bk-brand-copy">
+      <span class="bk-brand-title">Bibliothekar</span>
+      <span id="bk-current-library-name" class="bk-brand-library">Bibliothek …</span>
+    </span>
   </a>
 
   <nav class="bk-tabs bk-tabs-active-{active}" aria-label="Hauptbereiche">
@@ -2707,7 +2750,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.32.2 · Kern 0.28.7</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.32.3 · Kern 0.28.7</span></p>
   </div>
 </dialog>
 
