@@ -394,18 +394,29 @@ def build_event_preview(
     }
 
     if requested_family_ids:
+        # Die sichtbare Tages-/Segmentauswahl definiert den Quellbestand,
+        # nicht eine Pflicht, jede angeklickte Familie in den später enger
+        # eingetragenen Zeitraum zu zwingen. Familien außerhalb des konkret
+        # gewählten Zeitfensters bleiben einfach frei. Blockiert wird nur,
+        # wenn eine explizit angeklickte Familie tatsächlich nicht mehr zum
+        # verfügbaren Quellbestand gehört.
+        available_requested_ids = {
+            int(family["family_id"])
+            for family in available_dated_families
+        }
+        unavailable_ids = sorted(
+            requested_family_ids - available_requested_ids
+        )
+        if unavailable_ids:
+            raise EventPreviewError(
+                "Die Auswahl ist nicht mehr aktuell. Mindestens eine "
+                "Dateifamilie ist nicht mehr verfügbar."
+            )
+
         candidate_families = [
             family for family in candidate_families
             if int(family["family_id"]) in requested_family_ids
         ]
-
-        found_ids = {int(family["family_id"]) for family in candidate_families}
-        missing_ids = sorted(requested_family_ids - found_ids)
-        if missing_ids:
-            raise EventPreviewError(
-                "Die ausgewählten Familien passen nicht vollständig "
-                "zum Zeitraum oder sind nicht mehr verfügbar."
-            )
 
     if not candidate_families:
         raise EventPreviewError(
