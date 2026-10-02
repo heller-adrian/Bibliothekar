@@ -6,10 +6,11 @@ from pathlib import Path
 from app import main, ui_shell
 from app.archive_release_copy import create_archive_release_copies
 from app.archive_release_stock import (
+    _release_context,
     describe_archive_release_stock,
     verify_archive_release_copies,
 )
-from app.database import get_event_edit_context
+from app.database import database_connection, get_event_edit_context
 from app.event_change_apply import cancel_event_change, confirm_event_change
 from app.event_inventory import scan_event_inventory
 from app.events_ui import EVENTS_HTML
@@ -112,6 +113,74 @@ def test_0325_release_copy_is_created_verified_and_removed_on_cancel(tmp_path: P
     assert not any(path.is_file() for path in release_root.rglob("*"))
 
 
+def test_0325_release_plan_keeps_frozen_capture_time_after_inventory_refresh(
+    tmp_path: Path,
+):
+    case = _release_case(tmp_path)
+    db = case["db"]
+    cr_id = case["cr_id"]
+    late_family = case["late_family"]
+
+    with database_connection(db) as connection:
+        row = connection.execute(
+            """SELECT planned_capture_time
+               FROM event_change_file_reviews
+               WHERE change_request_id=? AND family_id=? AND action='delete'""",
+            (cr_id, late_family),
+        ).fetchone()
+        assert row is not None
+        assert str(row["planned_capture_time"]).startswith("2026-07-22T21:30:00")
+
+        connection.execute(
+            """UPDATE event_inventory_files
+               SET selected_capture_time='2026-07-22T18:00:00'
+               WHERE event_id='archive' AND root_kind='camera_archive'
+                 AND family_id=?""",
+            (late_family,),
+        )
+
+    context = _release_context(db, cr_id)
+    released = [
+        row for row in context["rows"]
+        if int(row["family_id"]) == late_family
+    ]
+    assert released
+    assert all(
+        str(row["planned_capture_time"]).startswith("2026-07-22T21:30:00")
+        for row in released
+    )
+    assert all(
+        int(row["segment"]["family_ids"][0]) == late_family
+        or late_family in [int(value) for value in row["segment"]["family_ids"]]
+        for row in released
+    )
+
+
+def test_0325_cancel_preserves_foreign_release_file_and_reports_warning(
+    tmp_path: Path,
+):
+    case = _release_case(tmp_path)
+    db = case["db"]
+    archive = case["archive"]
+    workspace = case["workspace"]
+    cr_id = case["cr_id"]
+
+    confirm_event_change(db, cr_id, archive, workspace)
+    create_archive_release_copies(db, archive, workspace, cr_id)
+    stock = describe_archive_release_stock(db, cr_id)
+    target = case["central"] / stock["rows"][0]["workspace_release_path"]
+    foreign = target.parent / "fremd.txt"
+    foreign.write_text("nicht von Bibliothekar", encoding="utf-8")
+
+    cancelled = cancel_event_change(db, cr_id, archive, workspace)
+    assert cancelled["status"] == "abgebrochen"
+    assert cancelled["cleanup_warnings"]
+    assert any("fremde" in warning for warning in cancelled["cleanup_warnings"])
+    assert foreign.is_file()
+    assert not target.exists()
+    assert (case["central"] / "Freigewordene Archivdateien").is_dir()
+
+
 def test_0325_cleanup_removes_empty_custom_folder_from_old_event_document(
     tmp_path: Path,
 ):
@@ -170,3 +239,4 @@ def test_0325_ui_and_version_contract():
     assert "Schritt 2 von 3" not in EVENTS_HTML
     assert "friendlyWorkspacePath" in EVENTS_HTML
     assert "structure-change-verify-feedback" in EVENTS_HTML
+    assert "cleanup_warnings" in EVENTS_HTML
