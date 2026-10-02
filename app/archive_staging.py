@@ -1176,7 +1176,7 @@ def cleanup_archive_change_staging(
                           COALESCE(
                               review.released_archive_asset_id,
                               released.id
-                          ) AS released_archive_asset_id
+                          ) AS released_asset_id
                    FROM event_change_asset_reviews review
                    LEFT JOIN released_archive_assets released
                      ON released.family_id=review.family_id
