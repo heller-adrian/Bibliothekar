@@ -1837,12 +1837,53 @@ BIBLIOTHEKAR_0311_CSS = r"""
 """
 
 
+BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
+(() => {
+  const pageUrl = new URL(window.location.href);
+  const libraryId = pageUrl.searchParams.get("library") || "main";
+  window.__bkLibraryId = libraryId;
+
+  if (window.__bkLibraryFetchInstalled) return;
+  const originalFetch = window.fetch.bind(window);
+  window.__bkOriginalFetch = originalFetch;
+
+  window.fetch = (input, init={}) => {
+    let url;
+    try {
+      url = new URL(
+        input instanceof Request ? input.url : String(input),
+        window.location.href,
+      );
+    } catch (_) {
+      return originalFetch(input, init);
+    }
+
+    if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) {
+      return originalFetch(input, init);
+    }
+
+    const headers = new Headers(
+      input instanceof Request ? input.headers : undefined
+    );
+    new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value));
+    headers.set("X-Bibliothekar-Library", libraryId);
+
+    if (input instanceof Request) {
+      return originalFetch(new Request(input, {...init, headers}));
+    }
+    return originalFetch(input, {...init, headers});
+  };
+
+  window.__bkLibraryFetchInstalled = true;
+})();
+"""
+
+
 BIBLIOTHEKAR_JS = r"""
 (() => {
   const root = document.documentElement;
   const pageUrl = new URL(window.location.href);
-  const bkLibraryId = pageUrl.searchParams.get("library") || "main";
-  const bkOriginalFetch = window.fetch.bind(window);
+  const bkLibraryId = window.__bkLibraryId || pageUrl.searchParams.get("library") || "main";
 
   function bkLibraryHref(href, libraryId=bkLibraryId) {
     try {
@@ -1856,32 +1897,6 @@ BIBLIOTHEKAR_JS = r"""
       return String(href || "/");
     }
   }
-
-  window.fetch = (input, init={}) => {
-    let url;
-    try {
-      url = new URL(
-        input instanceof Request ? input.url : String(input),
-        window.location.href,
-      );
-    } catch (_) {
-      return bkOriginalFetch(input, init);
-    }
-    if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) {
-      return bkOriginalFetch(input, init);
-    }
-
-    const headers = new Headers(
-      input instanceof Request ? input.headers : undefined
-    );
-    new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set("X-Bibliothekar-Library", bkLibraryId);
-
-    if (input instanceof Request) {
-      return bkOriginalFetch(new Request(input, {...init, headers}));
-    }
-    return bkOriginalFetch(input, {...init, headers});
-  };
 
   document.querySelectorAll('a[href^="/"]').forEach(link => {
     link.setAttribute("href", bkLibraryHref(link.getAttribute("href")));
@@ -2783,6 +2798,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     result = result.replace(
         f'<body class="bibliothekar-redesign" data-bk-area="{area}">',
         f'<body class="bibliothekar-redesign" data-bk-area="{area}">\n'
+        + f"<script>{BIBLIOTHEKAR_BOOTSTRAP_JS}</script>\n"
         + _shell_markup(area, subarea),
         1,
     )
