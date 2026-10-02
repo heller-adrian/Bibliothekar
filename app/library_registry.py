@@ -403,7 +403,8 @@ def register_library(
         database_file = Path(database_value)
         if not database_file.is_file():
             raise LibraryRegistryError(
-                "Eine aktive Bibliothek benötigt eine vorhandene SQLite-Datenbank."
+                "Eine aktive Bibliothek benötigt eine vorhandene SQLite-Datenbank: "
+                + str(database_file)
             )
         try:
             database_identity = read_library_identity(database_file)
@@ -646,6 +647,81 @@ def update_library_display_name(
         if cursor.rowcount != 1:
             raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
         connection.commit()
+    finally:
+        connection.close()
+
+    result = get_library(registry_path, library_id, active_only=False)
+    if result is None:
+        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+    return result
+
+
+def update_library_database_path(
+    registry_path: Path,
+    library_id: str,
+    database_path: Path,
+) -> dict[str, Any]:
+    existing = get_library(registry_path, library_id, active_only=False)
+    if existing is None or not existing.get("is_registered", True):
+        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+
+    database_value = _absolute(database_path, "database_path")
+    database_file = Path(database_value)
+    if not database_file.is_file():
+        raise LibraryRegistryError(
+            "Bibliotheks-Datenbank wurde nicht gefunden: " + database_value
+        )
+
+    try:
+        identity = read_library_identity(database_file)
+    except sqlite3.DatabaseError as error:
+        raise LibraryRegistryError(
+            "Bibliotheks-Datenbank ist nicht lesbar: " + database_value
+        ) from error
+    if identity != str(existing["library_id"]):
+        raise LibraryRegistryError(
+            "Die gefundene SQLite-Datenbank gehört zu einer anderen Bibliothek: "
+            + str(identity or "ohne Bibliotheks-ID")
+        )
+
+    registry_value = _absolute(registry_path, "registry_path")
+    if database_value == registry_value:
+        raise LibraryRegistryError(
+            "Bibliotheks-Datenbank und globale Registry müssen getrennte Dateien sein."
+        )
+
+    connection = _connect(registry_path)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        conflict = connection.execute(
+            """
+            SELECT library_id
+            FROM libraries
+            WHERE database_path = ?
+              AND library_id <> ?
+              AND COALESCE(is_registered, 1) = 1
+            """,
+            (database_value, str(library_id)),
+        ).fetchone()
+        if conflict is not None:
+            raise LibraryRegistryError(
+                "Diese SQLite-Datenbank ist bereits einer anderen Bibliothek zugeordnet."
+            )
+        cursor = connection.execute(
+            """
+            UPDATE libraries
+            SET database_path = ?, updated_at = ?
+            WHERE library_id = ?
+              AND COALESCE(is_registered, 1) = 1
+            """,
+            (database_value, _now(), str(library_id)),
+        )
+        if cursor.rowcount != 1:
+            raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
     finally:
         connection.close()
 
