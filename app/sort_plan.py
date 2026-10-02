@@ -1941,6 +1941,8 @@ def build_event_sort_plan(
                 "source_file_id": asset.get("source_file_id"),
                 "source_root_kind": "shared_workspace",
                 "current_root_kind": "shared_workspace",
+                "physical_source_kind": "central_stock",
+                "source_root_path": str(central_stock_root),
                 "source_relative_path": str(source_relative),
                 "source_absolute_path": str(source_absolute),
                 "destination_relative_path": str(destination_relative),
@@ -2158,6 +2160,13 @@ def build_event_sort_plan(
                     ),
                     "current_root_kind": str(
                         source_candidate.get("current_root_kind") or "shared_workspace"
+                    ),
+                    "physical_source_kind": str(
+                        source_candidate.get("physical_source_kind") or "shared_workspace"
+                    ),
+                    "source_root_path": str(
+                        source_candidate.get("source_root_path")
+                        or source_directory
                     ),
                     "source_relative_path": str(source_relative),
                     "source_absolute_path": str(loose_path),
@@ -2395,6 +2404,10 @@ def build_event_sort_plan(
                 "asset_kind": asset_kind,
                 "family_id": family_id,
                 "source_file_id": source_file_id,
+                "source_root_kind": "shared_workspace",
+                "current_root_kind": "shared_workspace",
+                "physical_source_kind": "shared_workspace",
+                "source_root_path": str(target_root),
                 "source_relative_path": str(source_relative),
                 "source_absolute_path": str(source_absolute),
                 "destination_relative_path": str(destination_relative),
