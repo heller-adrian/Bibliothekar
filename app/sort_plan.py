@@ -963,29 +963,90 @@ def build_event_sort_plan(
         for row in file_rows
     )
 
-    if allow_reapply:
-        # Applied/Reapply bleibt vollständig innerhalb des Arbeitsbereichs
-        # der aktuell gewählten Bibliothek.
-        source_root = target_root
-        source_root_field = "shared_workspace"
-    elif central_stock_source:
-        # 0.31.1: Freie und nur geplante Aufnahmen liegen physisch im
-        # zentralen Tagesbestand. Erst Anwenden überführt sie in die Bibliothek.
-        source_root = central_stock_root
-        source_root_field = "central_stock"
-    elif released_workspace_source:
-        # Kompatibilitätsweg für einen noch nicht migrierten Altbestand.
-        source_root = target_root
-        source_root_field = "released_archive_workspace"
-    elif shared_workspace_source:
-        # Kompatibilitätsweg für den Main-Bestand vor der 0.31.1-Migration.
-        source_root = target_root
-        source_root_field = "shared_workspace"
-    else:
-        source_root, source_root_field = _resolve_job_root(
+    legacy_source_root: Path | None = None
+    legacy_source_field = ""
+    try:
+        legacy_source_root, legacy_source_field = _resolve_job_root(
             job,
             workspace_root,
         )
+    except SortPlanError:
+        # Seit dem globalen Central Stock ist der Importjob nur noch Herkunft.
+        # Ein fehlender alter Job-Root ist daher kein Fehler, solange jede
+        # konkrete Datei später aus Central Stock/Arbeitsbereich aufgelöst wird.
+        legacy_source_root = None
+        legacy_source_field = ""
+
+    if allow_reapply:
+        source_root = target_root
+        source_root_field = "shared_workspace"
+    elif central_stock_source:
+        source_root = central_stock_root
+        source_root_field = "central_stock"
+    elif released_workspace_source:
+        # Der Marker "shared_workspace" ist historisch; physisch liegt der
+        # Rückkehrbestand seit 0.31.1 bevorzugt im globalen Central Stock.
+        source_root = central_stock_root
+        source_root_field = "central_stock"
+    elif shared_workspace_source:
+        source_root = target_root
+        source_root_field = "shared_workspace"
+    elif legacy_source_root is not None:
+        source_root = legacy_source_root
+        source_root_field = legacy_source_field
+    else:
+        # Repräsentative Run-Wurzel. Die tatsächlich verwendete Wurzel wird
+        # ab 0.32.8 pro Operation als source_root_path gejournaled.
+        source_root = central_stock_root
+        source_root_field = "per_file"
+
+    def physical_source_for(
+        relative: PurePosixPath,
+        *,
+        declared_root_kind: str,
+    ) -> tuple[Path, Path, str]:
+        """Resolve the current physical source without trusting stale provenance."""
+        if allow_reapply:
+            base = target_root
+            return base, base.joinpath(*relative.parts).resolve(strict=False), "shared_workspace"
+
+        central_candidate = central_stock_root.joinpath(*relative.parts).resolve(strict=False)
+        work_candidate = target_root.joinpath(*relative.parts).resolve(strict=False)
+
+        # Global free/released stock is authoritative whenever it physically
+        # exists there. This also makes the original import job irrelevant.
+        if (
+            _is_relative_to(central_candidate, central_stock_root)
+            and central_candidate.is_file()
+        ):
+            return central_stock_root, central_candidate, "central_stock"
+
+        if (
+            declared_root_kind == "shared_workspace"
+            and _is_relative_to(work_candidate, target_root)
+            and work_candidate.is_file()
+        ):
+            return target_root, work_candidate, "shared_workspace"
+
+        if legacy_source_root is not None:
+            legacy_candidate = legacy_source_root.joinpath(*relative.parts).resolve(strict=False)
+            if (
+                _is_relative_to(legacy_candidate, legacy_source_root)
+                and legacy_candidate.is_file()
+            ):
+                return legacy_source_root, legacy_candidate, "job_root"
+
+        # Missing-source diagnostics must still point at the semantically
+        # correct modern location, not at a long-gone import directory.
+        if (
+            declared_root_kind == "shared_workspace"
+            or relative.as_posix().startswith("Freigewordene Archivdateien/")
+        ):
+            return central_stock_root, central_candidate, "central_stock"
+        if legacy_source_root is not None:
+            legacy_candidate = legacy_source_root.joinpath(*relative.parts).resolve(strict=False)
+            return legacy_source_root, legacy_candidate, "job_root"
+        return target_root, work_candidate, "shared_workspace"
 
     year = str(event.get("start_datetime") or "")[:4]
 
@@ -1393,10 +1454,9 @@ def build_event_sort_plan(
             # empty parent structure in this event.
 
         destination_relative = PurePosixPath(*destination_parts)
-        source_base = (
-            target_root
-            if allow_reapply and current_root_kind == "shared_workspace"
-            else source_root
+        source_base, source_absolute, physical_source_kind = physical_source_for(
+            source_relative,
+            declared_root_kind=current_root_kind,
         )
         destination_root_kind = (
             "central_stock" if is_free_stock else "target_root"
@@ -1405,11 +1465,6 @@ def build_event_sort_plan(
             central_stock_root
             if destination_root_kind == "central_stock"
             else target_root
-        )
-        source_absolute = (
-            source_base.joinpath(*source_relative.parts).resolve(
-                strict=False
-            )
         )
         destination_absolute = (
             destination_base.joinpath(*destination_relative.parts).resolve(
@@ -1602,6 +1657,8 @@ def build_event_sort_plan(
             "family_status": family_status,
             "media_type": str(file_record.get("media_type") or "other"),
             "current_root_kind": current_root_kind,
+            "physical_source_kind": physical_source_kind,
+            "source_root_path": str(source_base),
             "source_relative_path": str(source_relative),
             "source_absolute_path": str(source_absolute),
             "destination_relative_path": str(destination_relative),
