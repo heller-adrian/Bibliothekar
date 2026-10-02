@@ -2254,6 +2254,7 @@ BIBLIOTHEKAR_JS = r"""
         body:JSON.stringify({
           work_root:newLibraryWork?.value || "",
           archive_root:newLibraryArchive?.value || "",
+          default_library_id:(newLibraryWork?.value || "").trim() ? "" : "__preview__new-library",
         }),
       });
       newLibraryChecked = Boolean(result.valid);
@@ -2296,6 +2297,56 @@ BIBLIOTHEKAR_JS = r"""
       newLibraryStatus.className = "bk-library-status is-error";
     }
   });
+
+  const storageSettings = document.getElementById("bk-storage-path-settings");
+
+  function bkRenderStorageSettings(data) {
+    if (!storageSettings || !data) return;
+    const setValue=(id,value)=>{const node=document.getElementById(id);if(node)node.value=String(value||"");};
+    const setText=(id,value)=>{const node=document.getElementById(id);if(node)node.textContent=String(value||"");};
+    setValue("bk-storage-backup-name", data.backup_directory_name);
+    setValue("bk-storage-workspaces-name", data.workspaces_directory_name);
+    setValue("bk-storage-metadata-name", data.metadata_directory_name);
+    setText("bk-storage-workspace-root", data.workspace_root || "/workspace");
+    setText("bk-storage-backup-preview", "SD-Kartensicherungen: " + String(data.backup_root || ""));
+    setText("bk-storage-workspaces-preview", "Arbeitsbereiche: " + String(data.workspaces_root || ""));
+    setText("bk-storage-metadata-preview", "Metadatenkorrektur: " + String(data.metadata_root || ""));
+  }
+
+  async function bkLoadStorageSettings() {
+    if (!storageSettings) return;
+    const status=document.getElementById("bk-storage-status");
+    try {
+      const data=await bkJson("/api/settings/storage-paths");
+      bkRenderStorageSettings(data);
+      if(status){status.textContent="";status.className="bk-library-status";}
+    } catch(error) {
+      if(status){status.textContent=error.message;status.className="bk-library-status is-error";}
+    }
+  }
+
+  document.getElementById("bk-storage-save")?.addEventListener("click", async () => {
+    const status=document.getElementById("bk-storage-status");
+    if(status){status.textContent="Pfade werden geprüft und gespeichert …";status.className="bk-library-status";}
+    try {
+      const data=await bkJson("/api/settings/storage-paths", {
+        method:"PUT",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          backup_directory_name:document.getElementById("bk-storage-backup-name")?.value || "",
+          workspaces_directory_name:document.getElementById("bk-storage-workspaces-name")?.value || "",
+          metadata_directory_name:document.getElementById("bk-storage-metadata-name")?.value || "",
+        }),
+      });
+      bkRenderStorageSettings(data);
+      if(status){status.textContent="Gespeichert. App-eigene Ordner wurden sicher aktualisiert; externe TrueNAS-Mounts bleiben unverändert.";status.className="bk-library-status is-ok";}
+      await bkRefreshLibraryManagement();
+    } catch(error) {
+      if(status){status.textContent=error.message;status.className="bk-library-status is-error";}
+    }
+  });
+
+  document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadStorageSettings);
 
   const folderSettings = document.getElementById("bk-folder-layout-settings");
   let folderLayoutState = null;
