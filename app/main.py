@@ -215,7 +215,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.32.3"
+DEPLOYMENT_VERSION = "0.32.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -2023,7 +2023,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             is_main=False,
             is_active=True,
             settings={
-                "created_by": "bibliothekar-0.32.3",
+                "created_by": "bibliothekar-0.32.4",
                 "projected_imports": projection,
             },
         )
