@@ -217,3 +217,46 @@ def test_0273_stale_helper_child_is_never_reused_as_current_instruction(tmp_path
     rendered = repr(assistant["operations"])
     assert "STALE-VOM-ALTEN-AUFTRAG" not in rendered
     assert any(item["kind"] == "copy_helper_folders" for item in assistant["operations"])
+
+
+def test_0326_reversal_uses_library_specific_display_paths(tmp_path: Path):
+    case = _release_case(tmp_path)
+    confirm_event_change(
+        case["db"], case["cr_id"], case["archive"], case["workspace"]
+    )
+    rows = _copy_release_rows(case)
+    assert verify_archive_release_copies(
+        case["db"], case["archive"], case["workspace"], case["cr_id"]
+    )["complete"]
+    for row in rows:
+        (case["archive"] / row["old_path"]).unlink()
+    assert verify_archive_release_removal(
+        case["db"], case["archive"], case["workspace"], case["cr_id"]
+    )["complete"]
+
+    cancelled = cancel_event_change(
+        case["db"], case["cr_id"], case["archive"], case["workspace"]
+    )
+    assert cancelled["reversal_required"] is True
+
+    prepared = prepare_archive_reversal(
+        case["db"],
+        case["archive"],
+        case["workspace"],
+        case["cr_id"],
+        archive_display_root="Testarchiv",
+        work_display_root="Testarbeitsbereich",
+    )
+    assert prepared["path_labels"] == {
+        "archive_root": "Testarchiv",
+        "work_root": "Testarbeitsbereich",
+    }
+    assert prepared["original_stock_path"].startswith(
+        "Testarbeitsbereich/Später zuordnen/"
+    )
+    restore = next(
+        item for item in prepared["operations"]
+        if item["kind"] == "restore_from_ssd"
+    )
+    assert restore["source"].startswith("Testarbeitsbereich/")
+    assert restore["target"].startswith("Testarchiv/")
