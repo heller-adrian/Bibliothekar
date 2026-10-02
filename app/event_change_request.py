@@ -255,6 +255,53 @@ def _compute_event_plan(
         )
         return lower <= value <= upper
 
+    if inventory is not None:
+        # Für bereits archivierte Familien wird die Zugehörigkeit zum neuen
+        # Zeitraum aus dem frisch inventarisierten physischen Archivbestand
+        # abgeleitet. Die UI übermittelt selected_family_ids weiterhin als
+        # Transparenz-/Kompatibilitätswert, darf aber keinen älteren DB-Zeitwert
+        # gegen eine belastbare live gelesene Aufnahmezeit durchsetzen.
+        live_times_by_family: dict[int, set[str]] = {}
+        for item in inventory.get("files") or []:
+            if item.get("known_file_id") is None or item.get("family_id") is None:
+                continue
+            capture = str(item.get("selected_capture_time") or "")[:19]
+            if capture:
+                live_times_by_family.setdefault(int(item["family_id"]), set()).add(capture)
+
+        conflicts = {
+            family_id: sorted(values)
+            for family_id, values in live_times_by_family.items()
+            if len(values) > 1
+        }
+        if conflicts:
+            family_id = sorted(conflicts)[0]
+            raise EventChangeRequestError(
+                "Die real gelesenen Kameraoriginale einer Archivfamilie besitzen "
+                f"widersprüchliche Aufnahmezeiten (Familie {family_id}). "
+                "Die Archivänderung wurde sicherheitshalber gestoppt."
+            )
+
+        physical_with_time = {
+            family_id: next(iter(values))
+            for family_id, values in live_times_by_family.items()
+            if len(values) == 1
+        }
+        unresolved_current = current_family_ids - set(physical_with_time)
+        derived_current = {
+            family_id
+            for family_id, capture in physical_with_time.items()
+            if family_id in current_family_ids and capture_belongs(capture)
+        }
+        # Ohne belastbare Live-Zeit bleibt die bisher explizit übermittelte
+        # Auswahl bestehen; wir entfernen eine Familie in diesem Sonderfall
+        # niemals nur aufgrund fehlender Metadaten.
+        derived_current |= requested_set & unresolved_current
+        requested_set = (requested_set - current_family_ids) | derived_current
+        requested_ids = sorted(requested_set)
+        removed_family_ids = current_family_ids - requested_set
+        added_family_ids = requested_set - current_family_ids
+
     def target_for(
         *,
         filename: str,
