@@ -4613,6 +4613,15 @@ EVENTS_HTML = r"""<!doctype html>
       return value ? value : "Direkt im Ereignis";
     }
 
+    function friendlyWorkspacePath(value) {
+      const raw=String(value||"").replaceAll("\\","/");
+      for(const marker of ["/Arbeitsbereich/","/SD-Kartensicherungen/"]){
+        const index=raw.lastIndexOf(marker);
+        if(index>=0) return raw.slice(index+1);
+      }
+      return raw;
+    }
+
     function clearStructureTaskFromUrl(changeId) {
       const url=new URL(window.location.href);
       if(url.searchParams.get("task")===`structure:${changeId}`){
@@ -4721,26 +4730,40 @@ EVENTS_HTML = r"""<!doctype html>
         return;
       }
       if(change.status==="prepared"){
-        const prepared=String(d.prepared_event_json_path||"");
+        const prepared=friendlyWorkspacePath(d.prepared_event_json_path||"");
         const target=(String(d.event_name||"") && String(d.status||"")==="archived") ? "im Ereignisordner des Archivs" : "im Archiv";
         structureChangeBody.innerHTML=preview+`
-          <div class="card" style="margin-top:14px"><strong>Schritt 2 von 3 · event.json ersetzen</strong>
+          <div class="card" style="margin-top:14px"><strong>Schritt 2 von 2 · event.json ersetzen</strong>
             <p>Vorbereitet:</p><code style="display:block;white-space:pre-wrap;word-break:break-all">${escapeHtml(prepared)}</code>
             <p>Ersetze damit die vorhandene <code>event.json</code> ${target}. Andere Archivdateien werden von Bibliothekar nicht verändert.</p>
           </div>
           <div class="edit-actions"><button type="button" id="structure-change-verify" class="plan-button bk-positive-action">Prüfen</button></div>`;
-        document.getElementById("structure-change-verify")?.addEventListener("click",async()=>{
-          structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">Archivbestand und event.json werden geprüft …</p>');
-          await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/verify-archive`,{method:"POST"});
-          clearStructureTaskFromUrl(changeId);
-          structureChangeDialog.close();
-          await loadEvents({reset:true});
-          await refreshGlobalTasks();
-          setStatus("Archivänderung geprüft und in SQLite übernommen.",false,true);
+        document.getElementById("structure-change-verify")?.addEventListener("click",async(event)=>{
+          const button=event.currentTarget;
+          button.disabled=true;
+          const oldFeedback=document.getElementById("structure-change-verify-feedback");
+          oldFeedback?.remove();
+          structureChangeBody.insertAdjacentHTML("beforeend",'<p id="structure-change-verify-feedback" class="muted">Archivbestand und event.json werden geprüft …</p>');
+          try{
+            await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/verify-archive`,{method:"POST"});
+            clearStructureTaskFromUrl(changeId);
+            structureChangeDialog.close();
+            await loadEvents({reset:true});
+            await refreshGlobalTasks();
+            setStatus("Archivänderung geprüft und in SQLite übernommen.",false,true);
+          }catch(error){
+            button.disabled=false;
+            const feedback=document.getElementById("structure-change-verify-feedback");
+            if(feedback){
+              feedback.className="error-box";
+              feedback.textContent=error.message;
+            }
+            setStatus(error.message,true);
+          }
         });
       }else{
         structureChangeBody.innerHTML=preview+`
-          <div class="card" style="margin-top:14px"><strong>Archiv · Schritt 1 von 3</strong><p>Bibliothekar erzeugt eine neue event.json unter „Später zuordnen“. Die Kamerabibliothek bleibt read-only.</p></div>
+          <div class="card" style="margin-top:14px"><strong>Archiv · Schritt 1 von 2</strong><p>Bibliothekar erzeugt eine neue event.json unter „Später zuordnen“. Die Kamerabibliothek bleibt read-only.</p></div>
           <div class="edit-actions"><button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>event.json vorbereiten</button></div>`;
         document.getElementById("structure-change-prepare")?.addEventListener("click",async()=>{
           const input=document.getElementById("structure-change-input").value;
