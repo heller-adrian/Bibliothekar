@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import hashlib
 
+import pytest
+
 from app import main, ui_shell
 from app.database import (
     create_planned_event,
@@ -12,10 +14,14 @@ from app.database import (
 from app.library_registry import (
     MAIN_LIBRARY_ID,
     adopt_main_library,
+    LibraryRegistryError,
+    ensure_library_identity,
     get_library,
     initialize_library_registry,
+    register_library,
     update_library_paths,
 )
+from app.global_library_inventory import backfill_library_inventory
 from app.sort_plan import build_event_sort_plan
 from app.workspace_layout import ensure_workspace_layout
 
@@ -361,3 +367,232 @@ def test_0328_managed_workspaces_name_change_retargets_main_alias_and_registry(
     assert legacy.resolve() == canonical.resolve()
     assert stored is not None
     assert Path(str(stored["work_root"])) == canonical.resolve()
+
+
+
+def _insert_0328_inventory_fixture(database: Path, job_id: str = "SHARED_JOB") -> None:
+    with database_connection(database) as connection:
+        connection.execute(
+            """INSERT INTO jobs(
+                   id,kind,trigger_type,state,stage,operation,
+                   source_volume_label,source_signature,source_path,
+                   created_at,updated_at
+               ) VALUES (
+                   ?,'sd_import','manual','completed','done','folder_import',
+                   'Shared','same-signature','/shared/source',?,?
+               )""",
+            (
+                job_id,
+                "2026-10-02T20:00:00+00:00",
+                "2026-10-02T20:00:00+00:00",
+            ),
+        )
+        family_id = int(
+            connection.execute(
+                """INSERT INTO file_families(
+                       job_id,family_key,original_stem,status,
+                       selected_capture_time,capture_time_confidence
+                   ) VALUES (?,?,?,'complete',?,'high')""",
+                (
+                    job_id,
+                    "FAMILY",
+                    "20260719_190100_Fuji-X-E5",
+                    "2026-07-19T19:01:00",
+                ),
+            ).lastrowid
+        )
+        payload = b"same-source"
+        digest = hashlib.sha256(payload).hexdigest()
+        connection.execute(
+            """INSERT INTO files(
+                   job_id,family_id,original_relative_path,
+                   current_relative_path,original_filename,
+                   extension,media_type,size_bytes,
+                   sha256_original,sha256_current,
+                   selected_capture_time,selected_capture_source,
+                   capture_time_confidence,review_status,
+                   metadata_write_status,current_root_kind,
+                   created_at,updated_at
+               ) VALUES (
+                   ?,?,?,?,?,?,?,?,?,?,?,?,'high','not_required',
+                   'not_requested','shared_workspace',?,?
+               )""",
+            (
+                job_id,
+                family_id,
+                "2026-07-19/photo.JPG",
+                "2026-07-19/photo.JPG",
+                "photo.JPG",
+                ".JPG",
+                "jpeg",
+                len(payload),
+                digest,
+                digest,
+                "2026-07-19T19:01:00",
+                "DateTimeOriginal",
+                "2026-10-02T20:00:00+00:00",
+                "2026-10-02T20:00:00+00:00",
+            ),
+        )
+        connection.commit()
+
+
+def test_0328_two_library_inventory_backfills_do_not_collide_on_source_backup(
+    tmp_path: Path,
+):
+    registry = tmp_path / "registry.sqlite3"
+    main_db = tmp_path / "kamera.sqlite3"
+    test_db = tmp_path / "libraries" / "test.sqlite3"
+    workspace = tmp_path / "workspace"
+    main_archive = tmp_path / "main-archive"
+    test_archive = tmp_path / "test-archive"
+    main_work = workspace / "Arbeitsbereiche" / "Arbeitsbereich"
+    test_work = workspace / "Arbeitsbereiche" / "Testarbeitsbereich"
+
+    for path in (workspace, main_archive, test_archive, main_work, test_work):
+        path.mkdir(parents=True, exist_ok=True)
+    initialize_database(main_db)
+    initialize_database(test_db)
+    ensure_library_identity(main_db, MAIN_LIBRARY_ID)
+    ensure_library_identity(test_db, "test")
+    initialize_library_registry(registry)
+    register_library(
+        registry,
+        library_id=MAIN_LIBRARY_ID,
+        display_name="Main",
+        database_path=main_db,
+        workspace_root=workspace,
+        work_root=main_work,
+        archive_root=main_archive,
+        is_main=True,
+        is_active=True,
+    )
+    register_library(
+        registry,
+        library_id="test",
+        display_name="Test",
+        database_path=test_db,
+        workspace_root=workspace,
+        work_root=test_work,
+        archive_root=test_archive,
+        is_main=False,
+        is_active=True,
+    )
+
+    _insert_0328_inventory_fixture(main_db)
+    _insert_0328_inventory_fixture(test_db)
+
+    main_result = backfill_library_inventory(
+        registry,
+        database_path=main_db,
+        library_id=MAIN_LIBRARY_ID,
+        claim_all_owned=False,
+    )
+    test_result = backfill_library_inventory(
+        registry,
+        database_path=test_db,
+        library_id="test",
+        claim_all_owned=False,
+    )
+
+    assert main_result["family_count"] == 1
+    assert test_result["family_count"] == 1
+    with database_connection(registry) as connection:
+        backups = [
+            dict(row)
+            for row in connection.execute(
+                """SELECT backup_id,source_identity,backup_path
+                   FROM source_backups
+                   WHERE source_kind='existing_library'
+                   ORDER BY backup_id"""
+            ).fetchall()
+        ]
+        canonical = connection.execute(
+            "SELECT COUNT(*) AS n FROM canonical_families"
+        ).fetchone()
+    assert len(backups) == 2
+    assert {row["source_identity"] for row in backups} == {
+        "main:same-signature",
+        "test:same-signature",
+    }
+    assert {row["backup_path"] for row in backups} == {"/shared/source"}
+    assert int(canonical["n"]) == 1
+
+
+def test_0328_registered_database_path_repairs_only_matching_canonical_db(
+    tmp_path: Path,
+    monkeypatch,
+):
+    database_dir = tmp_path / "database"
+    registry = database_dir / "bibliothekar-global.sqlite3"
+    workspace = tmp_path / "workspace"
+    work = workspace / "Arbeitsbereiche" / "Testarbeitsbereich"
+    archive = tmp_path / "archive"
+    canonical = database_dir / "libraries" / "test.sqlite3"
+    stale = tmp_path / "old-location" / "test.sqlite3"
+
+    work.mkdir(parents=True)
+    archive.mkdir()
+    initialize_database(canonical)
+    ensure_library_identity(canonical, "test")
+    initialize_library_registry(registry)
+    register_library(
+        registry,
+        library_id="test",
+        display_name="Test",
+        database_path=stale,
+        workspace_root=workspace,
+        work_root=work,
+        archive_root=archive,
+        is_main=False,
+        is_active=False,
+    )
+
+    monkeypatch.setattr(main, "DATABASE_DIRECTORY", database_dir)
+    monkeypatch.setattr(main, "REGISTRY_DATABASE_FILE", registry)
+
+    row = get_library(registry, "test", active_only=False)
+    assert row is not None
+    resolved, repaired = main._resolve_registered_library_database(row)
+
+    assert resolved == canonical.resolve()
+    assert Path(str(repaired["database_path"])) == canonical.resolve()
+    stored = get_library(registry, "test", active_only=False)
+    assert stored is not None
+    assert Path(str(stored["database_path"])) == canonical.resolve()
+
+
+def test_0328_missing_secondary_database_is_not_silently_recreated(
+    tmp_path: Path,
+    monkeypatch,
+):
+    database_dir = tmp_path / "database"
+    registry = database_dir / "bibliothekar-global.sqlite3"
+    workspace = tmp_path / "workspace"
+    work = workspace / "Arbeitsbereiche" / "Testarbeitsbereich"
+    archive = tmp_path / "archive"
+    missing = database_dir / "libraries" / "test.sqlite3"
+
+    work.mkdir(parents=True)
+    archive.mkdir()
+    initialize_library_registry(registry)
+    register_library(
+        registry,
+        library_id="test",
+        display_name="Test",
+        database_path=missing,
+        workspace_root=workspace,
+        work_root=work,
+        archive_root=archive,
+        is_main=False,
+        is_active=False,
+    )
+
+    monkeypatch.setattr(main, "DATABASE_DIRECTORY", database_dir)
+    monkeypatch.setattr(main, "REGISTRY_DATABASE_FILE", registry)
+
+    row = get_library(registry, "test", active_only=False)
+    assert row is not None
+    with pytest.raises(LibraryRegistryError, match="SQLite-Datenbank"):
+        main._resolve_registered_library_database(row)
+    assert not missing.exists()
