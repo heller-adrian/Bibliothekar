@@ -188,6 +188,16 @@ def ensure_workspace_layout(
                 "Der vorhandene Kompatibilitätsalias konnte nicht aktualisiert werden: "
                 + str(legacy_main)
             ) from error
+    elif (
+        main_work is not None
+        and create_default_main
+        and not legacy_main.exists()
+        and not legacy_main.is_symlink()
+    ):
+        # Nur explizite Legacy-/Testaufrufe behalten den alten Alias. Der
+        # echte Clean-Slate-Startup setzt create_default_main=False.
+        legacy_main.symlink_to(main_work, target_is_directory=True)
+        created.append(str(legacy_main))
 
     return {
         "workspace_root": str(root),
