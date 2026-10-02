@@ -800,6 +800,8 @@ def set_library_active(
 def remove_library_registration(
     registry_path: Path,
     library_id: str,
+    *,
+    allow_main: bool = False,
 ) -> None:
     """Remove a just-created registry row after a failed creation transaction.
 
@@ -810,7 +812,7 @@ def remove_library_registration(
     existing = get_library(registry_path, library_id, active_only=False)
     if existing is None:
         return
-    if existing.get("is_main"):
+    if existing.get("is_main") and not allow_main:
         raise LibraryRegistryError(
             "Die Hauptbibliothek darf nicht aus der Registry entfernt werden."
         )
