@@ -293,7 +293,7 @@ def test_0324_archived_delete_blocks_unresolved_user_file(tmp_path: Path):
 
 
 def test_0324_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.32.5"
+    assert main.DEPLOYMENT_VERSION == "0.32.6"
     assert "0.32.5 · Kern 0.28.7" in ui_shell._shell_markup(
         "workspace",
         "events",
