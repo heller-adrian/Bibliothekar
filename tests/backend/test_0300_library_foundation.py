@@ -232,17 +232,20 @@ def test_0300_global_ownership_blocks_duplicate_family_from_second_backup(tmp_pa
         event_id="event-main",
         claim_state="reserved",
     )
-    # Planung ist ab 0.32.2 bibliothekslokal: beide Bibliotheken dürfen
-    # dieselbe kanonische Familie zunächst unabhängig reservieren.
-    claim_source_family(
-        state["registry_file"],
-        source_family_key="backup-2:family-9",
-        library_id="business",
-        event_id="event-business",
-        claim_state="reserved",
-    )
+    # Bereits die Planung ist global exklusiv.
+    with pytest.raises(
+        LibraryRegistryError,
+        match="anderen Bibliothek",
+    ):
+        claim_source_family(
+            state["registry_file"],
+            source_family_key="backup-2:family-9",
+            library_id="business",
+            event_id="event-business",
+            claim_state="reserved",
+        )
 
-    # Erst tatsächlicher Besitz nach Apply ist global exklusiv.
+    # Apply stuft den bestehenden Claim derselben Bibliothek zu owned hoch.
     claim_source_family(
         state["registry_file"],
         source_family_key="backup-1:family-1",
