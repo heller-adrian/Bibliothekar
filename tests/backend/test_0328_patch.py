@@ -38,12 +38,14 @@ def test_0328_fresh_workspace_uses_single_managed_root(tmp_path: Path, monkeypat
     assert Path(layout["backup_root"]) == workspace / "SD-Kartensicherungen"
     assert Path(layout["workspaces_root"]) == workspace / "Arbeitsbereiche"
     assert Path(layout["metadata_root"]) == workspace / "Metadatenkorrektur"
-    assert Path(layout["work_root"]) == workspace / "Arbeitsbereiche" / "main"
+    assert Path(layout["work_root"]) == workspace / "Arbeitsbereiche"
+    assert not (workspace / "Arbeitsbereiche" / "main").exists()
 
-    # Der alte interne Name bleibt nur als transparenter Kompatibilitätsalias.
+    # Vor der ersten Bibliothek gibt es keinen Bibliotheks-Unterordner und
+    # keinen automatisch erzeugten Legacy-Alias.
     legacy = workspace / "Arbeitsbereich"
-    assert legacy.is_symlink()
-    assert legacy.resolve() == Path(layout["work_root"]).resolve()
+    assert not legacy.exists()
+    assert not legacy.is_symlink()
 
 
 def test_0328_main_archive_path_survives_bootstrap_adoption(tmp_path: Path):
@@ -357,15 +359,16 @@ def test_0328_managed_workspaces_name_change_retargets_main_alias_and_registry(
         "metadata_directory_name": "Metadatenkorrektur",
     })
 
-    canonical = workspace / "Bibliotheksbereiche" / "main"
+    canonical = workspace / "Bibliotheksbereiche"
     legacy = workspace / "Arbeitsbereich"
     stored = get_library(registry, MAIN_LIBRARY_ID, active_only=False)
 
-    assert Path(result["workspaces_root"]) == workspace / "Bibliotheksbereiche"
+    assert Path(result["workspaces_root"]) == canonical
     assert canonical.is_dir()
+    assert not (canonical / "main").exists()
     assert not (workspace / "Arbeitsbereiche").exists()
-    assert legacy.is_symlink()
-    assert legacy.resolve() == canonical.resolve()
+    assert not legacy.exists()
+    assert not legacy.is_symlink()
     assert stored is not None
     assert Path(str(stored["work_root"])) == canonical.resolve()
 
