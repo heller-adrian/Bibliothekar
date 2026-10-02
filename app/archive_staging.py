@@ -15,7 +15,7 @@ import hashlib
 import os
 
 from app.database import database_connection
-from app.workspace_layout import shared_work_root
+from app.workspace_layout import backup_root, shared_work_root
 
 
 STAGING_DIRECTORY_NAME = "Später zuordnen"
@@ -44,6 +44,40 @@ def _safe_relative(value: Any) -> PurePosixPath:
     ):
         raise ArchiveStagingError("Unsicherer relativer Arbeitsbereichspfad: " + raw)
     return path
+
+
+def _workspace_source_path(
+    workspace_path: Path,
+    relative_value: Any,
+) -> tuple[Path, Path]:
+    """Resolve one SSD source without confusing central stock and work root."""
+    rel = _safe_relative(relative_value)
+    work_root = shared_work_root(workspace_path).resolve(strict=False)
+    central_root = backup_root(workspace_path).resolve(strict=False)
+    work_candidate = work_root.joinpath(*rel.parts).resolve(strict=False)
+    central_candidate = central_root.joinpath(*rel.parts).resolve(strict=False)
+
+    work_exists = work_candidate.exists() or work_candidate.is_symlink()
+    central_exists = central_candidate.exists() or central_candidate.is_symlink()
+
+    # Freigewordene Archivdateien gehören definitionsgemäß zum globalen
+    # Zentralbestand, auch wenn ein gleichnamiger Legacy-Pfad im Arbeitsbereich
+    # existieren sollte.
+    if rel.parts and rel.parts[0] == "Freigewordene Archivdateien":
+        return central_candidate, central_root
+
+    if central_exists and not work_exists:
+        return central_candidate, central_root
+    if work_exists and not central_exists:
+        return work_candidate, work_root
+    if central_exists and work_exists:
+        raise ArchiveStagingError(
+            "SSD-Quelle ist mehrdeutig vorhanden (Zentralbestand und "
+            "Bibliotheks-Arbeitsbereich): " + rel.as_posix()
+        )
+
+    # Der anschließende Existenzcheck liefert die konkrete Fehlermeldung.
+    return work_candidate, work_root
 
 
 def _safe_component(value: Any, label: str) -> str:
@@ -440,6 +474,17 @@ def _request_preview_and_plan(
             "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? ORDER BY id",
             (cr_id,),
         ).fetchall()]
+        released_asset_sources = {
+            (
+                int(row["family_id"]) if row["family_id"] is not None else None,
+                str(row["current_relative_path"] or ""),
+            )
+            for row in connection.execute(
+                """SELECT family_id,current_relative_path
+                   FROM released_archive_assets
+                   ORDER BY id"""
+            ).fetchall()
+        }
     cr = dict(cr_row)
     try:
         subevents = json.loads(cr.get("child_segments_json") or "[]")
@@ -473,7 +518,33 @@ def _request_preview_and_plan(
             for row in camera
         ],
         "assets_with_plans": [
-            {**row, "source_root_kind": "camera_archive"}
+            {
+                **row,
+                "source_root_kind": (
+                    "shared_workspace"
+                    if (
+                        (
+                            int(row["family_id"])
+                            if row.get("family_id") is not None
+                            else None
+                        ),
+                        str(row.get("old_path") or ""),
+                    ) in released_asset_sources
+                    else "camera_archive"
+                ),
+                "workspace_original_path": (
+                    str(row.get("old_path") or "")
+                    if (
+                        (
+                            int(row["family_id"])
+                            if row.get("family_id") is not None
+                            else None
+                        ),
+                        str(row.get("old_path") or ""),
+                    ) in released_asset_sources
+                    else ""
+                ),
+            }
             for row in assets
         ],
     }
