@@ -3565,7 +3565,8 @@ def get_event_edit_context(
         live_inventory_rows = []
         if live_root_kind is not None:
             live_inventory_rows = connection.execute(
-                """SELECT family_id,filename,asset_kind,known_file_id,event_relative_path
+                """SELECT family_id,filename,asset_kind,known_file_id,event_relative_path,
+                          selected_capture_time,selected_capture_source,capture_time_confidence
                    FROM event_inventory_files
                    WHERE event_id=? AND root_kind=?
                      AND asset_kind IN ('camera_original','xmp','export','derived_media')
@@ -3608,12 +3609,28 @@ def get_event_edit_context(
         family_id = int(live_row["family_id"])
         stats = live_by_family.setdefault(
             family_id,
-            {"file_count": 0, "camera_file_count": 0, "asset_kinds": set(), "display_stem": None},
+            {
+                "file_count": 0,
+                "camera_file_count": 0,
+                "asset_kinds": set(),
+                "display_stem": None,
+                "capture_times": set(),
+                "capture_confidences": set(),
+                "capture_sources": set(),
+            },
         )
         stats["file_count"] += 1
         asset_kind = str(live_row["asset_kind"] or "")
         if live_row["known_file_id"] is not None:
             stats["camera_file_count"] += 1
+            live_capture = str(live_row["selected_capture_time"] or "").strip()
+            live_confidence = str(live_row["capture_time_confidence"] or "missing")
+            if live_capture and live_confidence in {"high", "medium"}:
+                stats["capture_times"].add(live_capture)
+                stats["capture_confidences"].add(live_confidence)
+                live_source = str(live_row["selected_capture_source"] or "").strip()
+                if live_source:
+                    stats["capture_sources"].add(live_source)
         elif asset_kind:
             stats["asset_kinds"].add(asset_kind)
         if stats["display_stem"] is None or live_row["known_file_id"] is not None:
@@ -3638,6 +3655,28 @@ def get_event_edit_context(
         )
         if assigned_here and live_inventory_available:
             item["file_count"] = item["live_file_count"]
+            # Bei archivierten/angewendeten Ereignissen ist der aktuelle
+            # physische Bestand maßgeblich. Wenn alle real gelesenen
+            # Kameraoriginale einer Familie dieselbe belastbare Aufnahmezeit
+            # liefern, verwendet auch der Editor genau diese Zeit statt eines
+            # möglicherweise veralteten SQLite-Werts. Widersprüche werden
+            # sichtbar als Konflikt behandelt und niemals geraten.
+            live_capture_times = sorted(live.get("capture_times") or []) if live is not None else []
+            if len(live_capture_times) == 1:
+                item["selected_capture_time"] = live_capture_times[0]
+                confidences = set(live.get("capture_confidences") or []) if live is not None else set()
+                item["capture_time_confidence"] = (
+                    "high" if confidences == {"high"} else "medium"
+                )
+                item["live_capture_source"] = ", ".join(
+                    sorted(live.get("capture_sources") or [])
+                ) if live is not None else ""
+                item["live_capture_conflict"] = False
+            elif len(live_capture_times) > 1:
+                item["selected_capture_time"] = None
+                item["capture_time_confidence"] = "conflict"
+                item["live_capture_source"] = ""
+                item["live_capture_conflict"] = True
 
         # Planned Ereignisse besitzen noch kein Event-Inventar. XMP/Exporte,
         # die bereits physisch neben der Kamerafamilie liegen, sollen im
