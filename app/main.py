@@ -1221,13 +1221,23 @@ def startup_database() -> None:
             str(DATABASE_FILE.expanduser().resolve(strict=False))
         )
 
-        workspace_layout = ensure_workspace_layout(
-            WORKSPACE_PATH
-        )
-
         LIBRARY_REGISTRY_INITIALIZATION = initialize_library_registry(
             REGISTRY_DATABASE_FILE
         )
+        existing_main = get_library(
+            REGISTRY_DATABASE_FILE,
+            MAIN_LIBRARY_ID,
+            active_only=False,
+        )
+        workspace_layout = ensure_workspace_layout(
+            WORKSPACE_PATH,
+            configured_main_work_root=(
+                Path(str(existing_main["work_root"]))
+                if existing_main is not None
+                else None
+            ),
+        )
+
         adopt_main_library(
             REGISTRY_DATABASE_FILE,
             database_path=DATABASE_FILE,
@@ -1247,6 +1257,7 @@ def startup_database() -> None:
         global_stock_migration = migrate_main_free_stock_to_central(
             DATABASE_FILE,
             WORKSPACE_PATH,
+            main_work_root=MAIN_LIBRARY_CONTEXT.work_root,
         )
         WORKSPACE_LAYOUT_INITIALIZATION = {
             **legacy_layout,
@@ -2600,6 +2611,15 @@ def api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, An
                     REGISTRY_DATABASE_FILE,
                     MAIN_LIBRARY_ID,
                 )
+                # Der Legacy-Alias folgt dem gespeicherten Main-Pfad. Ein
+                # echter historischer /workspace/Arbeitsbereich wird nicht
+                # verändert.
+                legacy_alias = WORKSPACE_PATH / WORK_DIRECTORY_NAME
+                if legacy_alias.is_symlink() or not legacy_alias.exists():
+                    _ensure_compatibility_link(
+                        legacy_alias,
+                        MAIN_LIBRARY_CONTEXT.work_root,
+                    )
         except LibraryRegistryError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
