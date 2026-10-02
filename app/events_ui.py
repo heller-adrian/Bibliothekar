@@ -4345,19 +4345,19 @@ EVENTS_HTML = r"""<!doctype html>
         });
 
         const prepareBtn = changeRequestBody.querySelector("[data-cr-prepare]");
-        if (prepareBtn) prepareBtn.addEventListener("click", async () => {
-          const progress = changeRequestBody.querySelector("#change-prep-progress");
-          const bar = progress?.querySelector(".change-progress-bar");
-          const label = progress?.querySelector("[data-progress-label]");
-          const runPreparation = async (transferMode=null) => {
+        if (prepareBtn) {
+          const runArchivePreparation = async (transferMode=null) => {
+            const progress = changeRequestBody.querySelector("#change-prep-progress");
+            const bar = progress?.querySelector(".change-progress-bar");
+            const label = progress?.querySelector("[data-progress-label]");
             prepareBtn.disabled = true;
             progress?.classList.add("active");
             if (label) {
-              label.textContent = transferMode === "copy"
-                ? "Dateien werden sicher kopiert und geprüft …"
-                : transferMode === "move"
-                  ? "Dateien werden sicher verschoben und geprüft …"
-                  : "Hardlinks werden unter „Später zuordnen“ vorbereitet …";
+              label.textContent = transferMode
+                ? (transferMode === "copy"
+                    ? "Dateien werden verifiziert kopiert und der Hilfsbereich wird vorbereitet …"
+                    : "Dateien werden verifiziert verschoben und der Hilfsbereich wird vorbereitet …")
+                : "Ordner und Hardlinks werden unter „Später zuordnen“ vorbereitet …";
             }
             if (bar) bar.style.width = "35%";
             try {
@@ -4366,41 +4366,72 @@ EVENTS_HTML = r"""<!doctype html>
                 "confirm",
                 {
                   terminal:false,
-                  body: transferMode ? {transfer_mode:transferMode} : {}
+                  payload: transferMode ? {transfer_mode:transferMode} : {}
                 }
               );
               if (bar) bar.style.width = "100%";
               if (label) label.textContent = "Hilfsbereich ist vorbereitet.";
+              changeRequestBody.querySelector("#change-transfer-choice")?.remove();
               await new Promise(resolve => setTimeout(resolve, 180));
-              await showChangeRequestDetail(crId, {phase:finderNeeded ? "finder" : "verify"});
+              await showChangeRequestDetail(
+                crId,
+                {phase:finderNeeded ? "finder" : "verify"}
+              );
             } catch (error) {
               prepareBtn.disabled = false;
-              const message=String(error?.message || "");
+              const message = String(error?.message || error || "");
               if (message.includes("TRANSFER_CHOICE_REQUIRED")) {
                 if (bar) bar.style.width = "100%";
-                if (label) label.textContent = "Hardlinks sind zwischen diesen Speicherorten nicht möglich.";
-                const existing=changeRequestBody.querySelector("#change-transfer-choice");
-                existing?.remove();
-                progress?.insertAdjacentHTML(
-                  "afterend",
-                  '<div id="change-transfer-choice" class="card" style="margin-top:12px"><strong>Hardlinks sind zwischen diesen Speicherorten nicht möglich.</strong><p class="muted" style="margin-top:6px">Wähle, wie die verifizierten freien SSD-Dateien für diesen Archivauftrag unter „Später zuordnen“ bereitgestellt werden sollen.</p><div class="edit-actions"><button type="button" class="plan-button bk-positive-action" data-transfer-copy>Kopieren</button><button type="button" class="plan-button" data-transfer-move>Verschieben</button></div></div>'
-                );
-                changeRequestBody.querySelector("[data-transfer-copy]")?.addEventListener(
-                  "click",
-                  () => runPreparation("copy")
-                );
-                changeRequestBody.querySelector("[data-transfer-move]")?.addEventListener(
-                  "click",
-                  () => runPreparation("move")
-                );
+                if (label) {
+                  label.textContent =
+                    "Hardlinks sind zwischen diesen Speicherorten nicht möglich. "
+                    + "Wähle, wie die Dateien nach „Später zuordnen“ gelangen sollen.";
+                }
+                let chooser = changeRequestBody.querySelector("#change-transfer-choice");
+                if (!chooser) {
+                  chooser = document.createElement("div");
+                  chooser.id = "change-transfer-choice";
+                  chooser.className = "card";
+                  chooser.style.marginTop = "12px";
+                  chooser.innerHTML = `
+                    <strong>Speicherorte liegen auf unterschiedlichen Dateisystemen</strong>
+                    <p class="muted" style="margin-top:6px">
+                      Ein Hardlink ist deshalb nicht möglich. Beide Varianten prüfen Größe und SHA-256 vollständig.
+                    </p>
+                    <div style="display:grid;gap:9px;margin-top:10px">
+                      <button type="button" class="plan-button" data-cr-transfer-choice="copy">
+                        Kopieren
+                      </button>
+                      <div class="muted">
+                        Die freie Quelldatei bleibt zunächst erhalten. Nach erfolgreichem Abschluss wird die nicht mehr benötigte SSD-Kopie bereinigt.
+                      </div>
+                      <button type="button" class="plan-button" data-cr-transfer-choice="move">
+                        Verschieben
+                      </button>
+                      <div class="muted">
+                        Erst nach vollständig verifizierter Hilfskopie wird die freie Quelldatei entfernt. Beim Verwerfen wird sie sicher zurückgestellt.
+                      </div>
+                    </div>
+                  `;
+                  progress?.insertAdjacentElement("afterend", chooser);
+                  chooser.querySelectorAll("[data-cr-transfer-choice]").forEach(button => {
+                    button.addEventListener("click", () => {
+                      const mode = String(button.dataset.crTransferChoice || "");
+                      chooser.remove();
+                      runArchivePreparation(mode).catch(err => setStatus(err.message, true));
+                    });
+                  });
+                }
                 return;
               }
               if (label) label.textContent = message;
               throw error;
             }
           };
-          await runPreparation();
-        });
+          prepareBtn.addEventListener("click", () => {
+            runArchivePreparation(null).catch(error => setStatus(error.message, true));
+          });
+        }
 
         const finderDoneBtn = changeRequestBody.querySelector("[data-cr-finder-done]");
         if (finderDoneBtn) finderDoneBtn.addEventListener("click", async () => {
@@ -4578,7 +4609,7 @@ EVENTS_HTML = r"""<!doctype html>
       const res = await fetch(`/api/change-requests/${encodeURIComponent(crId)}/${action}`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({})
+        body:JSON.stringify(options.payload || {})
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
