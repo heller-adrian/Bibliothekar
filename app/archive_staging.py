@@ -641,29 +641,41 @@ def _request_preview_and_plan(
         "assets_with_plans": [
             {
                 **row,
+                # 0.32.8: Neue Aufträge tragen die Herkunft dauerhaft in der
+                # Review-Zeile. Der Journal-Abgleich bleibt nur als Legacy-
+                # Fallback für bereits vor der Migration offene Aufträge.
                 "source_root_kind": (
-                    "shared_workspace"
-                    if (
-                        (
-                            int(row["family_id"])
-                            if row.get("family_id") is not None
-                            else None
-                        ),
-                        str(row.get("old_path") or ""),
-                    ) in released_asset_sources
-                    else "camera_archive"
+                    str(row.get("source_root_kind") or "")
+                    if str(row.get("source_root_kind") or "") in {
+                        "camera_archive", "shared_workspace"
+                    }
+                    else (
+                        "shared_workspace"
+                        if (
+                            (
+                                int(row["family_id"])
+                                if row.get("family_id") is not None
+                                else None
+                            ),
+                            str(row.get("old_path") or ""),
+                        ) in released_asset_sources
+                        else "camera_archive"
+                    )
                 ),
                 "workspace_original_path": (
-                    str(row.get("old_path") or "")
-                    if (
-                        (
-                            int(row["family_id"])
-                            if row.get("family_id") is not None
-                            else None
-                        ),
-                        str(row.get("old_path") or ""),
-                    ) in released_asset_sources
-                    else ""
+                    str(row.get("workspace_original_path") or "")
+                    or (
+                        str(row.get("old_path") or "")
+                        if (
+                            (
+                                int(row["family_id"])
+                                if row.get("family_id") is not None
+                                else None
+                            ),
+                            str(row.get("old_path") or ""),
+                        ) in released_asset_sources
+                        else ""
+                    )
                 ),
             }
             for row in assets
@@ -884,6 +896,7 @@ def prepare_archive_change_staging_for_request(
             "prepared_structure_path": "",
             "staged_file_count": 0,
             "staging_by_file_id": {},
+            "staging_by_asset_id": {},
             "created_directories": [],
         }
 
@@ -907,6 +920,7 @@ def prepare_archive_change_staging_for_request(
     moved_sources: list[tuple[Path, Path, int, str]] = []
     transfer_modes: set[str] = set()
     staging_by_file_id: dict[int, str] = {}
+    staging_by_asset_id: dict[int, str] = {}
 
     try:
         staging_base.mkdir(parents=True, exist_ok=True)
@@ -985,6 +999,9 @@ def prepare_archive_change_staging_for_request(
                 staging_by_file_id[file_id] = staged_rel.as_posix()
             else:
                 staged_asset_count += 1
+                review_id = item.get("id")
+                if review_id is not None:
+                    staging_by_asset_id[int(review_id)] = staged_rel.as_posix()
 
         staged_event_document = ""
         if event_document is not None:
@@ -1021,6 +1038,7 @@ def prepare_archive_change_staging_for_request(
             "staged_camera_file_count": len(staging_by_file_id),
             "staged_asset_count": staged_asset_count,
             "staging_by_file_id": staging_by_file_id,
+            "staging_by_asset_id": staging_by_asset_id,
             "staged_event_document": staged_event_document,
             "created_directories": [
                 path.relative_to(work_root).as_posix() for path in created_dirs
@@ -1134,8 +1152,9 @@ def cleanup_archive_change_staging(
             {
                 **dict(row),
                 "review_kind": "asset",
-                "workspace_original_path": str(row["old_path"] or ""),
-                "staging_relative_path": (
+                "staging_relative_path": str(
+                    row["workspace_staging_path"] or ""
+                ) or (
                     (
                         PurePosixPath(STAGING_DIRECTORY_NAME)
                         / _safe_relative(str(row["new_path"] or ""))
@@ -1146,15 +1165,14 @@ def cleanup_archive_change_staging(
             }
             for row in connection.execute(
                 """SELECT review.id,review.family_id,review.old_path,
-                          review.new_path,review.expected_size_bytes,
-                          review.expected_sha256,
-                          released.id AS released_asset_id
+                          review.new_path,review.workspace_original_path,
+                          review.workspace_staging_path,
+                          review.expected_size_bytes,review.expected_sha256,
+                          review.released_archive_asset_id
                    FROM event_change_asset_reviews review
-                   JOIN released_archive_assets released
-                     ON released.family_id=review.family_id
-                    AND released.current_relative_path=review.old_path
                    WHERE review.change_request_id=?
                      AND review.action='move'
+                     AND review.source_root_kind='shared_workspace'
                    ORDER BY review.id""",
                 (cr_id,),
             ).fetchall()
