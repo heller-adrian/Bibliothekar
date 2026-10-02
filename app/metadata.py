@@ -387,7 +387,7 @@ def build_candidates(
 
         if (
             str(tag_name).startswith("EXIF:")
-            and str(tag_name).endswith(":DateTimeOriginal")
+            and str(tag_name).rsplit(":", 1)[-1] in {"DateTimeOriginal", "CreateDate"}
             and not re.search(r"(?:Z|[+-]\d{2}:\d{2})$", raw_text)
         ):
             offset = next(
