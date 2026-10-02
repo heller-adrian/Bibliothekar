@@ -425,7 +425,11 @@ def _compute_event_plan(
 
         new_path = ""
         if family_id in requested_set:
-            capture = str(row["selected_capture_time"] or "")[:19]
+            capture = str(
+                observed.get("selected_capture_time")
+                if observed is not None
+                else row["selected_capture_time"] or ""
+            )[:19]
             candidate = target_for(
                 filename=filename,
                 capture=capture,
@@ -461,6 +465,11 @@ def _compute_event_plan(
             ),
             "source_root_kind": source_root_kind,
             "workspace_original_path": old_path if incoming_workspace else "",
+            "planned_capture_time": str(
+                observed.get("selected_capture_time")
+                if observed is not None
+                else row["selected_capture_time"] or ""
+            )[:19],
         })
 
     reserved_archive_targets: set[str] = {
@@ -904,9 +913,9 @@ def propose_event_change(
                 INSERT INTO event_change_file_reviews (
                     change_request_id, family_id, file_id, old_path, new_path,
                     action, expected_size_bytes, expected_sha256,
-                    source_root_kind, workspace_original_path,
+                    source_root_kind, workspace_original_path, planned_capture_time,
                     confirmed, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
                 (
                     cr_id,
@@ -919,6 +928,7 @@ def propose_event_change(
                     str(family_plan.get("expected_sha256") or ""),
                     str(family_plan.get("source_root_kind") or "camera_archive"),
                     str(family_plan.get("workspace_original_path") or ""),
+                    str(family_plan.get("planned_capture_time") or ""),
                     now,
                     now,
                 ),
@@ -930,8 +940,8 @@ def propose_event_change(
                 INSERT INTO event_change_asset_reviews(
                     change_request_id,asset_kind,source_file_id,family_id,
                     old_path,new_path,action,expected_size_bytes,expected_sha256,
-                    advisory,advisory_reason,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    advisory,advisory_reason,planned_capture_time,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     cr_id,
@@ -945,6 +955,7 @@ def propose_event_change(
                     str(asset.get("expected_sha256") or ""),
                     int(bool(asset.get("advisory"))),
                     str(asset.get("advisory_reason") or ""),
+                    str(asset.get("selected_capture_time") or "")[:19],
                     now,
                     now,
                 ),
@@ -1151,6 +1162,7 @@ def propose_archived_event_deletion(
                         "old_path": str(item.get("relative_path") or ""),
                         "expected_size_bytes": int(item.get("size_bytes") or 0),
                         "expected_sha256": str(item.get("sha256") or ""),
+                        "planned_capture_time": str(item.get("selected_capture_time") or "")[:19],
                     })
                     continue
 
@@ -1187,6 +1199,7 @@ def propose_archived_event_deletion(
                     "expected_sha256": str(
                         row["sha256_current"] or row["sha256_original"] or ""
                     ),
+                    "planned_capture_time": str(row.get("selected_capture_time") or "")[:19],
                 }
                 for row in connection.execute(
                     f"""SELECT f.id AS file_id,f.family_id,
@@ -1232,11 +1245,13 @@ def propose_archived_event_deletion(
             connection.execute(
                 """INSERT INTO event_change_file_reviews(
                        change_request_id,family_id,file_id,old_path,new_path,action,
-                       expected_size_bytes,expected_sha256,confirmed,created_at,updated_at)
-                   VALUES (?,?,?,?,?,'delete',?,?,0,?,?)""",
+                       expected_size_bytes,expected_sha256,planned_capture_time,
+                       confirmed,created_at,updated_at)
+                   VALUES (?,?,?,?,?,'delete',?,?,?,0,?,?)""",
                 (
                     cr_id,row["family_id"],row["file_id"],row["old_path"],"",
-                    row["expected_size_bytes"],row["expected_sha256"],now,now,
+                    row["expected_size_bytes"],row["expected_sha256"],
+                    str(row.get("planned_capture_time") or ""),now,now,
                 ),
             )
 
@@ -1245,12 +1260,13 @@ def propose_archived_event_deletion(
                 """INSERT INTO event_change_asset_reviews(
                        change_request_id,asset_kind,source_file_id,family_id,
                        old_path,new_path,action,expected_size_bytes,expected_sha256,
-                       advisory,advisory_reason,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,'unresolved',?,?,0,'',?,?)""",
+                       advisory,advisory_reason,planned_capture_time,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,'unresolved',?,?,0,'',?,?,?)""",
                 (
                     cr_id,row["asset_kind"],row.get("source_file_id"),row["family_id"],
                     row["old_path"],"",row["expected_size_bytes"],
-                    row["expected_sha256"],now,now,
+                    row["expected_sha256"],
+                    str(row.get("planned_capture_time") or ""),now,now,
                 ),
             )
 
