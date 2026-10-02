@@ -1158,6 +1158,17 @@ def get_event_change_files(
                 (cr_id,),
             ).fetchall()
         ]
+        released_asset_map = {
+            (
+                int(row["family_id"]) if row["family_id"] is not None else None,
+                str(row["current_relative_path"] or ""),
+            ): dict(row)
+            for row in connection.execute(
+                """SELECT id,family_id,current_relative_path
+                   FROM released_archive_assets
+                   ORDER BY id"""
+            ).fetchall()
+        }
         asset_rows = []
         for row in connection.execute(
             "SELECT * FROM event_change_asset_reviews WHERE change_request_id=? ORDER BY id",
@@ -1165,6 +1176,24 @@ def get_event_change_files(
         ).fetchall():
             item = dict(row)
             item["review_kind"] = "asset"
+            legacy_key = (
+                int(item["family_id"]) if item.get("family_id") is not None else None,
+                str(item.get("old_path") or ""),
+            )
+            legacy_released = released_asset_map.get(legacy_key)
+            if (
+                str(item.get("source_root_kind") or "camera_archive")
+                    == "camera_archive"
+                and not str(item.get("workspace_original_path") or "").strip()
+                and item.get("released_archive_asset_id") is None
+                and legacy_released is not None
+            ):
+                # Offene 0.32.7-Aufträge wurden durch Migration 042 mit dem
+                # Default camera_archive ergänzt. Ihre tatsächliche Herkunft
+                # lässt sich noch eindeutig aus dem Release-Journal ableiten.
+                item["source_root_kind"] = "shared_workspace"
+                item["workspace_original_path"] = str(item.get("old_path") or "")
+                item["released_archive_asset_id"] = int(legacy_released["id"])
             item["file_id"] = None
             item["confirmed"] = 0
             legacy_advisory = bool(
