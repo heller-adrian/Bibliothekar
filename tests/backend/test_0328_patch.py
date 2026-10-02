@@ -661,3 +661,61 @@ def test_0328_legacy_existing_library_identity_is_upgraded_in_place(
     assert row is not None
     assert str(row["source_identity"]) == "main:same-signature"
     assert str(row["backup_path"]) == "/shared/source"
+
+
+
+def test_0328_failed_library_creation_removes_registry_zombie_and_new_db(
+    tmp_path: Path,
+    monkeypatch,
+):
+    database_dir = tmp_path / "database"
+    registry = database_dir / "bibliothekar-global.sqlite3"
+    main_db = database_dir / "kamera.sqlite3"
+    workspace = tmp_path / "workspace"
+    work = workspace / "Arbeitsbereiche" / "new-library"
+    archive = tmp_path / "archive"
+
+    database_dir.mkdir()
+    workspace.mkdir()
+    work.mkdir(parents=True)
+    archive.mkdir()
+    initialize_database(main_db)
+    initialize_library_registry(registry)
+
+    monkeypatch.setattr(main, "DATABASE_DIRECTORY", database_dir)
+    monkeypatch.setattr(main, "DATABASE_FILE", main_db)
+    monkeypatch.setattr(main, "REGISTRY_DATABASE_FILE", registry)
+    monkeypatch.setattr(main, "WORKSPACE_PATH", workspace)
+    monkeypatch.setattr(
+        main,
+        "inspect_library_paths",
+        lambda *args, **kwargs: {
+            "valid": True,
+            "work_root": str(work),
+            "archive_root": str(archive),
+            "managed_default_work_root": False,
+            "errors": [],
+            "warnings": [],
+        },
+    )
+
+    def fail_backfill(*args, **kwargs):
+        raise RuntimeError("simulierter Inventory-Fehler")
+
+    monkeypatch.setattr(main, "backfill_library_inventory", fail_backfill)
+
+    with pytest.raises(main.HTTPException, match="simulierter Inventory-Fehler"):
+        main.api_create_library(
+            {
+                "display_name": "Fehlgeschlagen",
+                "work_root": str(work),
+                "archive_root": str(archive),
+            }
+        )
+
+    with database_connection(registry) as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) AS n FROM libraries"
+        ).fetchone()
+    assert int(count["n"]) == 0
+    assert list((database_dir / "libraries").glob("*.sqlite3")) == []
