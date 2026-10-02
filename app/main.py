@@ -1287,14 +1287,13 @@ def startup_database() -> None:
                 status="completed",
                 source_path=str((recovered_job or {}).get("source_path") or ""),
                 temporary_backup_path=str(
-                    WORKSPACE_PATH
-                    / BACKUP_DIRECTORY_NAME
+                    workspace_backup_root(WORKSPACE_PATH)
                     / recovered_job_id
                     / "Original"
                 ),
                 workspace_path=str(
                     organization.get("working_root")
-                    or WORKSPACE_PATH / WORK_DIRECTORY_NAME
+                    or MAIN_LIBRARY_CONTEXT.work_root
                 ),
                 protocol_path=str(outputs.get("protocol") or ""),
                 snapshot_backend=str(
@@ -1944,7 +1943,7 @@ def get_health() -> dict[str, Any]:
     paths = {
         "workspace": path_status(current_workspace_root()),
         "sd_card_backups": path_status(
-            current_workspace_root() / BACKUP_DIRECTORY_NAME
+            workspace_backup_root(current_workspace_root())
         ),
         "shared_work_area": path_status(
             current_work_root()
