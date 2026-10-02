@@ -650,6 +650,47 @@ def update_library_display_name(
     return result
 
 
+def update_library_paths(
+    registry_path: Path,
+    library_id: str,
+    *,
+    work_root: Path | None = None,
+    archive_root: Path | None = None,
+) -> dict[str, Any]:
+    existing = get_library(registry_path, library_id, active_only=False)
+    if existing is None or not existing.get("is_registered", True):
+        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+
+    next_work = (
+        _absolute(work_root, "work_root")
+        if work_root is not None
+        else str(existing["work_root"])
+    )
+    next_archive = (
+        _absolute(archive_root, "archive_root")
+        if archive_root is not None
+        else str(existing["archive_root"])
+    )
+
+    # Die bestehende Registerlogik enthält bereits die Überlappungs- und
+    # Identitätsprüfungen. Ein Pfadwechsel ändert keine Dateien und keine DB.
+    return register_library(
+        registry_path,
+        library_id=str(existing["library_id"]),
+        display_name=str(existing["display_name"]),
+        database_path=Path(str(existing["database_path"])),
+        workspace_root=Path(str(existing["workspace_root"])),
+        work_root=Path(next_work),
+        archive_root=Path(next_archive),
+        is_main=bool(existing["is_main"]),
+        is_active=bool(existing["is_active"]),
+        settings={
+            **dict(existing.get("settings") or {}),
+            "paths_updated_at": _now(),
+        },
+    )
+
+
 def set_library_active(
     registry_path: Path,
     library_id: str,
