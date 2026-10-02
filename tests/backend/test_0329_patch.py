@@ -158,7 +158,7 @@ def test_0329_clean_workspace_has_no_automatic_main_folder(tmp_path: Path, monke
         create_default_main=False,
     )
 
-    assert layout["work_root"] is None
+    assert Path(layout["work_root"]) == workspace / "Arbeitsbereiche"
     assert (workspace / "Arbeitsbereiche").is_dir()
     assert (workspace / "SD-Kartensicherungen").is_dir()
     assert (workspace / "Metadatenkorrektur").is_dir()
