@@ -95,12 +95,15 @@ def test_0325_release_copy_is_created_verified_and_removed_on_cancel(tmp_path: P
     assert copied["copied_file_count"] == 2
 
     created = describe_archive_release_stock(db, cr_id)
-    assert created["stage"] == "verify_copy"
+    assert created["stage"] == "remove_archive"
     assert created["copies_created"] is True
+    assert created["copy_verified"] is True
+    assert copied["verified_file_count"] == 2
     for row in created["rows"]:
         target = case["central"] / row["workspace_release_path"]
         assert target.is_file()
 
+    # Der alte explizite Verify-Weg bleibt idempotent für Wiederaufnahmefälle.
     verified = verify_archive_release_copies(db, archive, workspace, cr_id)
     assert verified["complete"] is True
     assert describe_archive_release_stock(db, cr_id)["stage"] == "remove_archive"
@@ -280,8 +283,8 @@ def test_0325_late_resolved_library_database_gets_current_schema(
 
 
 def test_0325_ui_and_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.32.5"
-    assert "0.32.5 · Kern 0.28.7" in ui_shell._shell_markup(
+    assert main.DEPLOYMENT_VERSION == "0.32.6"
+    assert "0.32.6 · Kern 0.28.7" in ui_shell._shell_markup(
         "workspace",
         "events",
     )
