@@ -5158,6 +5158,7 @@ def api_delete_event(
             current_database_file(),
             job_id,
             event_id,
+            archive_root=current_archive_root(),
         )
 
     except ValueError as error:
