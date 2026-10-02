@@ -10,10 +10,11 @@ from app.archive_release_stock import (
     describe_archive_release_stock,
     verify_archive_release_copies,
 )
-from app.database import database_connection, get_event_edit_context
+from app.database import database_connection, get_event_edit_context, initialize_database
 from app.event_change_apply import cancel_event_change, confirm_event_change
 from app.event_inventory import scan_event_inventory
 from app.events_ui import EVENTS_HTML
+from app.library_context import LibraryContext
 from app.obsolete_structure import cleanup_obsolete_structure
 from tests.backend.test_0271_archive_assistant import _seed
 from tests.backend.test_0271_archive_release_stock import _release_case
@@ -223,6 +224,59 @@ def test_0325_cleanup_removes_empty_custom_folder_from_old_event_document(
     assert not custom.exists()
     assert event_root.is_dir()
     assert str(custom) in removed
+
+
+def test_0325_late_resolved_library_database_gets_current_schema(
+    tmp_path: Path,
+):
+    db = tmp_path / "late-library.sqlite3"
+    initialize_database(db)
+
+    # Simuliere exakt den Produktionsfehler: Die Bibliothek existiert bereits,
+    # wurde aber noch nicht durch Migration 041 geführt.
+    with database_connection(db) as connection:
+        connection.execute("DELETE FROM schema_versions WHERE version=41")
+        connection.execute(
+            "ALTER TABLE event_change_file_reviews DROP COLUMN planned_capture_time"
+        )
+        connection.execute(
+            "ALTER TABLE event_change_asset_reviews DROP COLUMN planned_capture_time"
+        )
+
+    context = LibraryContext(
+        library_id="late-test",
+        display_name="Late Test",
+        database_path=db,
+        workspace_root=tmp_path / "workspace",
+        work_root=tmp_path / "workspace" / "Arbeitsbereich",
+        archive_root=tmp_path / "archive",
+        is_main=False,
+        settings={},
+    )
+    key = str(db.resolve(strict=False))
+    main._LIBRARY_SCHEMA_READY.discard(key)
+
+    result = main.ensure_library_database_schema(context)
+    assert result is not None
+    assert 41 in result["applied_versions"]
+
+    with database_connection(db) as connection:
+        file_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(event_change_file_reviews)"
+            ).fetchall()
+        }
+        asset_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(event_change_asset_reviews)"
+            ).fetchall()
+        }
+
+    assert "planned_capture_time" in file_columns
+    assert "planned_capture_time" in asset_columns
+    assert main.ensure_library_database_schema(context) is None
 
 
 def test_0325_ui_and_version_contract():
