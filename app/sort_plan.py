@@ -1208,24 +1208,40 @@ def build_event_sort_plan(
                     "event_id": str(child["id"]),
                 })
     
+    modern_physical_source = bool(file_rows) and all(
+        any(
+            candidate.is_file()
+            for candidate in (
+                central_stock_root
+                / str(
+                    dict(row).get("current_relative_path")
+                    or dict(row).get("original_relative_path")
+                    or ""
+                ),
+                target_root
+                / str(
+                    dict(row).get("current_relative_path")
+                    or dict(row).get("original_relative_path")
+                    or ""
+                ),
+            )
+        )
+        for row in file_rows
+    )
+
     job_ready, job_blocker = job_sort_readiness(job)
-    if (
-        not job_ready
-        and not central_stock_source
-        and not released_workspace_source
-        and not shared_workspace_source
-    ):
+    if not job_ready and not modern_physical_source:
         blockers.append({
             "code": "job_not_verified",
             "message": job_blocker,
         })
-    elif central_stock_source and not job_ready:
+    elif not job_ready and modern_physical_source:
         warnings.append({
-            "code": "central_stock_source",
+            "code": "modern_physical_source",
             "message": (
-                "Die ausgewählten Dateien liegen bereits im globalen, geprüften "
-                "SSD-Bestand. Der ursprüngliche Sicherungsauftrag bleibt nur "
-                "Herkunft und ist keine physische Sortierquelle mehr."
+                "Alle benötigten Kameraoriginale liegen bereits im aktuellen "
+                "verifizierten SSD-Bestand. Der ursprüngliche Sicherungsauftrag "
+                "bleibt nur Herkunft und ist keine physische Sortierquelle mehr."
             ),
         })
     elif released_workspace_source:
@@ -1236,15 +1252,6 @@ def build_event_sort_plan(
                 "Rückkehrbestand „Freigewordene Archivdateien“. Die ursprüngliche "
                 "Sicherung bleibt nur als Herkunft erhalten und wird nicht erneut "
                 "als physische Sortierquelle benötigt."
-            ),
-        })
-    elif shared_workspace_source and not job_ready:
-        warnings.append({
-            "code": "shared_workspace_source",
-            "message": (
-                "Die Dateien liegen bereits im gemeinsamen verifizierten "
-                "Arbeitsbereich. Der technische Anchor-Job bleibt nur Workflow-"
-                "Eigentümer und ist keine physische Sortierquelle."
             ),
         })
 
