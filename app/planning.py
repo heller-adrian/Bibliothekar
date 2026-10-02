@@ -303,6 +303,7 @@ def list_global_released_archive_groups(
     database_path: Path,
     *,
     excluded_family_ids: set[int] | None = None,
+    workspace_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Globaler freier SSD-Bestand, der aus abgeschlossenen Archivänderungen stammt."""
     with database_connection(database_path) as connection:
@@ -357,6 +358,39 @@ def list_global_released_archive_groups(
         }
         for row in released_asset_rows
     }
+
+    # Der globale Rückkehrbestand ist live: neue eindeutig benannte XMP- oder
+    # _Export-Dateien sollen bereits auf der freien Karte sichtbar werden,
+    # auch wenn sie erst nach der Archivfreigabe physisch hinzugekommen sind.
+    if workspace_path is not None and rows:
+        from app.workspace_assets import discover_workspace_family_assets
+        physical_assets = discover_workspace_family_assets(
+            database_path,
+            workspace_path,
+            [int(row["family_id"]) for row in rows],
+        )
+        job_by_family = {
+            int(row["family_id"]): str(row["job_id"])
+            for row in rows
+        }
+        for family_id, discovered in physical_assets.items():
+            untracked = [
+                asset
+                for asset in (discovered.get("assets") or [])
+                if not bool(asset.get("tracked"))
+            ]
+            if not untracked:
+                continue
+            key = (job_by_family.get(int(family_id), ""), int(family_id))
+            stats = released_asset_stats.setdefault(
+                key,
+                {"file_count": 0, "total_size_bytes": 0},
+            )
+            stats["file_count"] += len(untracked)
+            stats["total_size_bytes"] += sum(
+                int(asset.get("size_bytes") or 0)
+                for asset in untracked
+            )
 
     from app.free_stock_layout import effective_released_range
     effective_by_family: dict[int, tuple[str, str] | None] = {}
