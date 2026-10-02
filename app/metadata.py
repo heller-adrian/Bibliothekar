@@ -325,44 +325,89 @@ def run_exiftool(
     return data
 
 
+def _candidate_rule(
+    tag_name: str,
+    media_type: str,
+) -> tuple[int, str] | None:
+    """Classify date tags without depending on one ExifTool Group1 path."""
+    parts = str(tag_name).split(":")
+    if len(parts) < 2:
+        return None
+    group = parts[0]
+    leaf = parts[-1]
+    middle = parts[1:-1]
+
+    if media_type == "video":
+        if group == "EXIF" and leaf == "DateTimeOriginal":
+            return (10, "high")
+        if group == "EXIF" and leaf == "CreateDate":
+            return (20, "high")
+        if group == "QuickTime" and leaf == "CreationDate":
+            return (30 if "Keys" in middle else 40, "high")
+        if group == "QuickTime" and leaf == "CreateDate":
+            return (50, "high")
+        if group == "QuickTime" and leaf == "MediaCreateDate":
+            return (60, "medium")
+        if group == "QuickTime" and leaf == "TrackCreateDate":
+            return (70, "medium")
+        if group == "XMP" and leaf == "CreateDate":
+            return (80, "medium")
+        if group == "File" and leaf == "FileModifyDate":
+            return (900, "low")
+        return None
+
+    if media_type in {"raw", "jpeg", "image", "xmp"}:
+        if group == "EXIF" and leaf == "DateTimeOriginal":
+            return (10, "high")
+        if group == "XMP" and leaf == "DateTimeOriginal":
+            return (20, "high")
+        if group == "EXIF" and leaf == "CreateDate":
+            return (30, "high")
+        if group == "XMP" and leaf == "CreateDate":
+            return (40, "medium")
+        if group == "EXIF" and leaf == "ModifyDate":
+            return (100, "low")
+        if group == "File" and leaf == "FileModifyDate":
+            return (900, "low")
+    return None
+
+
 def build_candidates(
     metadata: dict[str, Any],
     media_type: str,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
 
-    for (
-        tag_name,
-        priority,
-        confidence,
-    ) in candidate_definition(media_type):
-        raw_value = metadata.get(tag_name)
-
-        if raw_value is None:
+    for tag_name, raw_value in sorted(metadata.items()):
+        rule = _candidate_rule(str(tag_name), media_type)
+        if rule is None or raw_value is None:
             continue
-
+        priority, confidence = rule
         raw_text = str(raw_value).strip()
 
-        # EXIF speichert die Zeitzone häufig in einem separaten Tag.
-        # Ohne diese Zusammenführung würde ExifTool-Zeit fälschlich als
-        # Europe/Berlin interpretiert.
         if (
-            tag_name in {
-                "EXIF:ExifIFD:DateTimeOriginal",
-                "EXIF:ExifIFD:CreateDate",
-            }
+            str(tag_name).startswith("EXIF:")
+            and str(tag_name).endswith(":DateTimeOriginal")
             and not re.search(r"(?:Z|[+-]\d{2}:\d{2})$", raw_text)
         ):
-            offset = metadata.get("EXIF:ExifIFD:OffsetTimeOriginal")
+            offset = next(
+                (
+                    value
+                    for key, value in metadata.items()
+                    if str(key).startswith("EXIF:")
+                    and str(key).endswith(":OffsetTimeOriginal")
+                    and value
+                ),
+                None,
+            )
             if offset:
                 raw_text = raw_text + str(offset).strip()
 
         parsed = parse_exiftool_datetime(raw_text)
 
         candidates.append({
-            "metadata_group":
-                tag_name.split(":", 1)[0],
-            "tag_name": tag_name,
+            "metadata_group": str(tag_name).split(":", 1)[0],
+            "tag_name": str(tag_name),
             "raw_value": raw_text,
             "normalized_datetime": (
                 normalize_datetime(parsed)
@@ -380,6 +425,12 @@ def build_candidates(
             "conflicts_with_selected": False,
         })
 
+    candidates.sort(
+        key=lambda candidate: (
+            int(candidate["priority"]),
+            str(candidate["tag_name"]),
+        )
+    )
     return candidates
 
 
