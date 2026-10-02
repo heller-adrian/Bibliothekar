@@ -193,7 +193,9 @@ def ensure_workspace_layout(
         "backup_root": str(backup),
         "workspaces_root": str(workspaces),
         "metadata_root": str(metadata),
-        "work_root": str(main_work) if main_work is not None else None,
+        # Ohne Bibliothek ist dies nur der neutrale, konfigurierte
+        # Arbeitsbereiche-Stamm – ausdrücklich kein Bibliotheks-Unterordner.
+        "work_root": str(main_work if main_work is not None else workspaces),
         "storage_names": load_storage_settings(),
         "created_directories": created,
     }
