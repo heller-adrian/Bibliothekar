@@ -302,3 +302,61 @@ def test_0271_verify_requires_obsolete_old_event_folder_to_be_removed(tmp_path: 
     second = verify_event_change(db, cr_id, archive)
     assert second["complete"] is True
     assert second["remaining_obsolete_directory_count"] == 0
+
+
+def test_0326_assistant_hides_obsolete_directory_that_is_already_gone(tmp_path: Path):
+    db, workspace, archive, folder, old_family, _, _ = _seed(
+        tmp_path, full_archive_triplet=True
+    )
+    new_folder = "07-22 - Test Archiv 2 umbenannt"
+    preview = _preview(folder, old_family, None)
+    preview["parent_folder"] = new_folder
+    proposed = propose_event_change(
+        db, "old", "archive", preview,
+        event_name="Test Archiv 2 umbenannt",
+        archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+
+    shutil.rmtree(archive / "2026" / folder)
+    assistant = build_archive_change_assistant(
+        db, archive, workspace, cr_id, scan_live=True
+    )
+
+    assert assistant["obsolete_directories"] == [f"2026/{folder}"]
+    assert "remove_directories" not in [
+        item["kind"] for item in assistant["operations"]
+    ]
+
+
+def test_0326_assistant_uses_explicit_library_path_labels(tmp_path: Path):
+    db, workspace, archive, folder, old_family, _, _ = _seed(tmp_path)
+    proposed = propose_event_change(
+        db, "old", "archive", _preview(folder, old_family, None),
+        event_name="Test Archiv 2", notes="nur Notiz",
+        archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+
+    assistant = build_archive_change_assistant(
+        db,
+        archive,
+        workspace,
+        cr_id,
+        archive_display_root="Testarchiv",
+        work_display_root="Testarbeitsbereich",
+        backup_display_root="SD-Kartensicherungen",
+    )
+
+    assert assistant["path_labels"] == {
+        "archive_root": "Testarchiv",
+        "work_root": "Testarbeitsbereich",
+        "backup_root": "SD-Kartensicherungen",
+    }
+    operation = next(
+        item for item in assistant["operations"]
+        if item["kind"] == "replace_event_document"
+    )
+    assert operation["source"].startswith("Testarbeitsbereich/Später zuordnen/")
+    assert operation["target"].startswith("Testarchiv/")
