@@ -218,10 +218,16 @@ def shared_work_root(workspace_path: Path) -> Path:
             )
         return target
 
-    raise WorkspaceLayoutError(
-        "Kein Bibliotheks-Arbeitsbereich ist konfiguriert. "
-        "Es gibt keinen automatischen Fallback auf einen Ordner 'main'."
-    )
+    # Direkte Legacy-/Testaufrufe ohne Bibliothekskontext erhalten nur den
+    # konfigurierten Arbeitsbereiche-Stamm. Ein Bibliotheks-Unterordner wird
+    # dabei ausdrücklich nicht erfunden oder angelegt.
+    target = storage_paths(root)["workspaces_root"].resolve(strict=False)
+    if not target.exists() or not target.is_dir():
+        raise WorkspaceLayoutError(
+            "Der konfigurierte Arbeitsbereiche-Stamm ist nicht verfügbar: "
+            + str(target)
+        )
+    return target
 
 
 def resolve_library_work_root(
@@ -248,11 +254,18 @@ def resolve_library_work_root(
         )
 
     if not target.exists():
-        raise WorkspaceLayoutError(
-            "Der gespeicherte Bibliotheks-Arbeitsbereich ist nicht verfügbar: "
-            + str(target)
-            + ". Bibliothekar legt fehlende Bibliotheksordner nicht automatisch neu an."
-        )
+        configured_workspaces = storage_paths(workspace_path)["workspaces_root"]
+        if (
+            _is_relative_to(target, configured_workspaces)
+            and target.name.casefold() != "main"
+        ):
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            raise WorkspaceLayoutError(
+                "Der gespeicherte Bibliotheks-Arbeitsbereich ist nicht verfügbar: "
+                + str(target)
+                + ". Ein Ordner 'main' wird von Bibliothekar niemals automatisch angelegt."
+            )
     if not target.is_dir():
         raise WorkspaceLayoutError(
             "Der Bibliotheks-Arbeitsbereich ist kein Verzeichnis: "
