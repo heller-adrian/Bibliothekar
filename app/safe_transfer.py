@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import errno
 import hashlib
 import os
 import shutil
@@ -88,36 +89,49 @@ def move_verified_no_overwrite(
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
+    hardlink_created = False
     if _same_filesystem(source, destination.parent):
         try:
             os.link(source, destination, follow_symlinks=False)
+            hardlink_created = True
         except FileExistsError as error:
             raise SafeTransferError(
                 "Zieldatei ist während der Übertragung entstanden: " + str(destination)
             ) from error
-        try:
-            destination_info = _verify_regular_file(
-                destination,
-                expected_size=expected_size,
-                expected_sha256=expected_sha256,
-            )
-            if (
-                int(destination_info.st_dev) != int(source_info.st_dev)
-                or int(destination_info.st_ino) != int(source_info.st_ino)
-            ):
+        except OSError as error:
+            # Docker/TrueNAS-Bind-Mounts können dieselbe st_dev-ID melden,
+            # obwohl ein Hardlink über die Mount-Grenze mit EXDEV verboten ist.
+            # In genau diesem Fall fällt der Transfer auf den verifizierten
+            # Copy-Verify-Delete-Pfad zurück.
+            if error.errno != errno.EXDEV:
                 raise SafeTransferError(
-                    "Der sichere Link-Schritt konnte nicht bestätigt werden: "
-                    + str(destination)
+                    "Sicherer Hardlink-Schritt fehlgeschlagen: " + str(destination)
+                ) from error
+
+        if hardlink_created:
+            try:
+                destination_info = _verify_regular_file(
+                    destination,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
                 )
-            os.unlink(source)
-            _fsync_directory(source.parent)
-            _fsync_directory(destination.parent)
-            return {"method": "link_unlink", "destination": str(destination)}
-        except Exception:
-            if destination.exists() and source.exists():
-                destination.unlink(missing_ok=True)
+                if (
+                    int(destination_info.st_dev) != int(source_info.st_dev)
+                    or int(destination_info.st_ino) != int(source_info.st_ino)
+                ):
+                    raise SafeTransferError(
+                        "Der sichere Link-Schritt konnte nicht bestätigt werden: "
+                        + str(destination)
+                    )
+                os.unlink(source)
+                _fsync_directory(source.parent)
                 _fsync_directory(destination.parent)
-            raise
+                return {"method": "link_unlink", "destination": str(destination)}
+            except Exception:
+                if destination.exists() and source.exists():
+                    destination.unlink(missing_ok=True)
+                    _fsync_directory(destination.parent)
+                raise
 
     temporary = destination.parent / (
         "." + destination.name + ".bibliothekar-" + uuid.uuid4().hex + ".part"
