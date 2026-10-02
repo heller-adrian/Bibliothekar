@@ -120,6 +120,8 @@ def confirm_event_change(
     cr_id: str,
     archive_root: Path | None = None,
     workspace_path: Path | None = None,
+    *,
+    transfer_mode: str | None = None,
 ) -> dict[str, Any]:
     """Markiere einen vorgeschlagenen Auftrag als bereit zur manuellen Ausführung.
 
@@ -157,7 +159,11 @@ def confirm_event_change(
                 database_path, archive_root, workspace_path, cr_id
             )
             staging = prepare_archive_change_staging_for_request(
-                database_path, workspace_path, archive_root, cr_id
+                database_path,
+                workspace_path,
+                archive_root,
+                cr_id,
+                transfer_mode=transfer_mode,
             )
             release_stock = prepare_archive_release_stock(
                 database_path, workspace_path, cr_id
