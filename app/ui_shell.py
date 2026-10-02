@@ -2117,11 +2117,14 @@ BIBLIOTHEKAR_JS = r"""
       +'<span class="badge '+(!inactive?'success':'')+'">'+(!inactive?'Aktiv':'Inaktiv')+'</span></div>'
       +'<label style="display:grid;gap:5px"><span>Anzeigename</span>'
       +'<input data-bk-library-name value="'+bkEscape(row.display_name || id)+'"></label>'
-      +'<div class="bk-library-meta"><span>Arbeitsbereich: '+bkEscape(row.work_root || "")+'</span>'
-      +'<span>Archiv: '+bkEscape(row.archive_root || "")+'</span>'
-      +'<span>Technische ID: '+bkEscape(id)+'</span></div>'
+      +'<label style="display:grid;gap:5px"><span>Arbeitsbereich · RW</span>'
+      +'<input data-bk-library-work value="'+bkEscape(row.work_root || "")+'"></label>'
+      +'<label style="display:grid;gap:5px"><span>Archiv · eigener RO-Mount</span>'
+      +'<input data-bk-library-archive value="'+bkEscape(row.archive_root || "")+'"></label>'
+      +'<div class="bk-library-meta"><span>Technische ID: '+bkEscape(id)+'</span>'
+      +'<span>Pfadänderungen verschieben keine Dateien. Ein externer Pfad muss zuvor in TrueNAS gemountet sein.</span></div>'
       +'<div class="bk-library-actions">'
-      +'<button type="button" data-bk-library-save>Anzeige speichern</button>'
+      +'<button type="button" data-bk-library-save>Speichern</button>'
       +'<button type="button" data-bk-library-check>Prüfen</button>'
       +(row.is_main?'':(
         inactive
@@ -2157,25 +2160,40 @@ BIBLIOTHEKAR_JS = r"""
     host.querySelectorAll("[data-bk-library-card]").forEach(card => {
       const id = String(card.dataset.bkLibraryCard || "");
       const name = card.querySelector("[data-bk-library-name]");
+      const work = card.querySelector("[data-bk-library-work]");
+      const archive = card.querySelector("[data-bk-library-archive]");
       card.querySelector("[data-bk-library-save]")?.addEventListener("click", async () => {
         try {
           await bkJson("/api/libraries/"+encodeURIComponent(id), {
             method:"PATCH", headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({display_name:name?.value || ""}),
+            body:JSON.stringify({
+              display_name:name?.value || "",
+              work_root:work?.value || "",
+              archive_root:archive?.value || "",
+            }),
           });
-          setLibraryCardStatus(card, "Anzeigename gespeichert. Ordner und Mountpfade bleiben unverändert.", true);
+          setLibraryCardStatus(card, "Bibliothekseinstellungen gespeichert. Es wurden keine Dateien verschoben.", true);
           await bkRefreshLibrarySwitcher();
+          await bkRefreshLibraryManagement();
         } catch (error) { setLibraryCardStatus(card, error.message); }
       });
       card.querySelector("[data-bk-library-check]")?.addEventListener("click", async () => {
-        const work = card.querySelector(".bk-library-meta span:nth-child(1)")?.textContent?.replace(/^Arbeitsbereich:\s*/, "") || "";
-        const archive = card.querySelector(".bk-library-meta span:nth-child(2)")?.textContent?.replace(/^Archiv:\s*/, "") || "";
         try {
           const result = await bkJson("/api/libraries/check", {
             method:"POST", headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({library_id:id, work_root:work, archive_root:archive}),
+            body:JSON.stringify({
+              library_id:id,
+              work_root:work?.value || "",
+              archive_root:archive?.value || "",
+            }),
           });
-          setLibraryCardStatus(card, result.valid ? "Prüfung PASS." : (result.errors || []).join("\n"), result.valid);
+          const hardlink = result.hardlink_to_central_stock;
+          const suffix = hardlink === true
+            ? " · Hardlinks zum Zentralbestand möglich."
+            : hardlink === false
+              ? " · Unterschiedliche Dateisysteme: Kopieren/Verschieben erforderlich."
+              : "";
+          setLibraryCardStatus(card, result.valid ? "Prüfung PASS"+suffix : (result.errors || []).join("\n"), result.valid);
         } catch (error) { setLibraryCardStatus(card, error.message); }
       });
       card.querySelector("[data-bk-library-deactivate]")?.addEventListener("click", async () => {
