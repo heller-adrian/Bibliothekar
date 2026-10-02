@@ -302,15 +302,17 @@ def build_archive_change_assistant(
             archive_root,
         )
 
-        covered_workspace_ids: set[int] = set()
+        covered_workspace_rows: set[tuple[str, int]] = set()
         if copy_roots:
             for root_value in copy_roots:
                 for row in workspace_rows:
-                    file_id = row.get("file_id")
-                    if file_id is not None and _path_is_under(
+                    if _path_is_under(
                         str(row.get("new_path") or ""), root_value
                     ):
-                        covered_workspace_ids.add(int(file_id))
+                        covered_workspace_rows.add((
+                            str(row.get("review_kind") or "camera"),
+                            int(row["id"]),
+                        ))
 
             parent = (
                 PurePosixPath(target_root).parent.as_posix()
@@ -326,8 +328,10 @@ def build_archive_change_assistant(
                 )
                 covered_rows = [
                     row for row in workspace_rows
-                    if row.get("file_id") is not None
-                    and int(row["file_id"]) in covered_workspace_ids
+                    if (
+                        str(row.get("review_kind") or "camera"),
+                        int(row["id"]),
+                    ) in covered_workspace_rows
                 ]
                 file_done = all(
                     live_states.get(
@@ -389,8 +393,10 @@ def build_archive_change_assistant(
 
         remaining_workspace = [
             row for row in workspace_rows
-            if row.get("file_id") is None
-            or int(row["file_id"]) not in covered_workspace_ids
+            if (
+                str(row.get("review_kind") or "camera"),
+                int(row["id"]),
+            ) not in covered_workspace_rows
         ]
         grouped_workspace: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for row in remaining_workspace:
