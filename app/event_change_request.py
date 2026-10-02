@@ -1017,13 +1017,32 @@ def propose_archived_event_deletion(
     database_path: Path,
     job_id: str,
     event_id: str,
+    *,
+    archive_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Create a read-only manual deletion request for an archived event.
+    """Create a complete read-only deletion request for an archived event.
 
-    Files are never deleted. Every family needs an explicit manual destination
-    before the read-only verification may complete.
+    The current archive tree is authoritative. Managed XMP/export/sidecar
+    assets are released together with their camera family. Unresolved files
+    block deletion instead of being silently left behind.
     """
     now = datetime.now(timezone.utc).isoformat()
+
+    inventory: dict[str, Any] | None = None
+    if archive_root is not None:
+        try:
+            inventory = scan_event_inventory(
+                database_path,
+                archive_root,
+                job_id,
+                event_id,
+                root_kind="camera_archive",
+                persist=True,
+                update_known_file_locations=True,
+            )
+        except EventInventoryError as exc:
+            raise EventChangeRequestError(str(exc)) from exc
+
     with database_connection(database_path) as connection:
         event = connection.execute(
             "SELECT * FROM events WHERE id=? AND job_id=?", (event_id, job_id)
@@ -1031,14 +1050,19 @@ def propose_archived_event_deletion(
         if event is None:
             raise EventChangeRequestError("Ereignis wurde nicht gefunden.")
         if not event["archived_at"]:
-            raise EventChangeRequestError("Nur archivierte Ereignisse benötigen diesen manuellen Löschauftrag.")
+            raise EventChangeRequestError(
+                "Nur archivierte Ereignisse benötigen diesen manuellen Löschauftrag."
+            )
         existing = connection.execute(
             """SELECT id FROM event_change_requests
                WHERE event_id=? AND status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt')
-               ORDER BY version DESC LIMIT 1""", (event_id,)
+               ORDER BY version DESC LIMIT 1""",
+            (event_id,),
         ).fetchone()
         if existing is not None:
-            raise EventChangeRequestError("Für dieses Ereignis ist bereits ein offener Änderungsauftrag vorhanden.")
+            raise EventChangeRequestError(
+                "Für dieses Ereignis ist bereits ein offener Änderungsauftrag vorhanden."
+            )
 
         assigned = connection.execute(
             """SELECT DISTINCT ea.family_id
@@ -1049,21 +1073,92 @@ def propose_archived_event_deletion(
         ).fetchall()
         family_ids = [int(r["family_id"]) for r in assigned]
         if not family_ids:
-            raise EventChangeRequestError("Dem archivierten Ereignis sind keine Familien zugeordnet.")
-        placeholders = ",".join("?" for _ in family_ids)
-        files = connection.execute(
-            f"""SELECT f.id AS file_id,f.family_id,f.current_relative_path,f.original_relative_path,
-                       f.size_bytes,f.sha256_current,f.sha256_original,ff.selected_capture_time,ff.family_key
-                FROM files f JOIN file_families ff ON ff.id=f.family_id AND ff.job_id=f.job_id
-                WHERE f.family_id IN ({placeholders})
-                ORDER BY ff.selected_capture_time,ff.id,f.id""",
-            tuple(family_ids),
-        ).fetchall()
+            raise EventChangeRequestError(
+                "Dem archivierten Ereignis sind keine Familien zugeordnet."
+            )
+
+        camera_rows: list[dict[str, Any]] = []
+        asset_rows: list[dict[str, Any]] = []
+
+        if inventory is not None:
+            from app.event_document import EVENT_DOCUMENT_FILENAME
+
+            unresolved: list[str] = []
+            for item in inventory.get("files") or []:
+                filename = str(item.get("filename") or "")
+                if filename == EVENT_DOCUMENT_FILENAME:
+                    continue
+
+                known_file_id = item.get("known_file_id")
+                family_id = item.get("family_id")
+                if family_id is not None:
+                    family_id = int(family_id)
+
+                if known_file_id is not None:
+                    if family_id not in family_ids:
+                        unresolved.append(str(item.get("relative_path") or filename))
+                        continue
+                    camera_rows.append({
+                        "file_id": int(known_file_id),
+                        "family_id": family_id,
+                        "old_path": str(item.get("relative_path") or ""),
+                        "expected_size_bytes": int(item.get("size_bytes") or 0),
+                        "expected_sha256": str(item.get("sha256") or ""),
+                    })
+                    continue
+
+                if family_id is None or family_id not in family_ids:
+                    unresolved.append(str(item.get("relative_path") or filename))
+                    continue
+
+                asset_rows.append({
+                    "family_id": family_id,
+                    "source_file_id": item.get("source_file_id"),
+                    "asset_kind": str(item.get("asset_kind") or "other"),
+                    "old_path": str(item.get("relative_path") or ""),
+                    "expected_size_bytes": int(item.get("size_bytes") or 0),
+                    "expected_sha256": str(item.get("sha256") or ""),
+                })
+
+            if unresolved:
+                raise EventChangeRequestError(
+                    "Das archivierte Ereignis enthält nicht eindeutig zuordenbare "
+                    "Dateien. Löschung abgebrochen: " + " | ".join(unresolved[:10])
+                )
+        else:
+            placeholders = ",".join("?" for _ in family_ids)
+            camera_rows = [
+                {
+                    "file_id": int(row["file_id"]),
+                    "family_id": int(row["family_id"]),
+                    "old_path": str(
+                        row["current_relative_path"]
+                        or row["original_relative_path"]
+                        or ""
+                    ).replace("\\", "/").lstrip("/"),
+                    "expected_size_bytes": int(row["size_bytes"] or 0),
+                    "expected_sha256": str(
+                        row["sha256_current"] or row["sha256_original"] or ""
+                    ),
+                }
+                for row in connection.execute(
+                    f"""SELECT f.id AS file_id,f.family_id,
+                               f.current_relative_path,f.original_relative_path,
+                               f.size_bytes,f.sha256_current,f.sha256_original
+                        FROM files f
+                        WHERE f.family_id IN ({placeholders})
+                        ORDER BY f.family_id,f.id""",
+                    tuple(family_ids),
+                ).fetchall()
+            ]
+
         version_row = connection.execute(
-            "SELECT COALESCE(MAX(version),0) AS v FROM event_change_requests WHERE event_id=?", (event_id,)
+            "SELECT COALESCE(MAX(version),0) AS v FROM event_change_requests WHERE event_id=?",
+            (event_id,),
         ).fetchone()
         version = int(version_row["v"] or 0) + 1
         cr_id = f"cr-{uuid.uuid4().hex[:12]}"
+
         connection.execute(
             """INSERT INTO event_change_requests(
                    id,event_id,job_id,event_name,notes,parent_folder,child_folder,uses_time_range,
@@ -1072,27 +1167,62 @@ def propose_archived_event_deletion(
                    status,version,proposed_at,created_at,updated_at,delete_event)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
             (
-                cr_id,event_id,job_id,str(event["name"]),"Ereignis löschen; für alle Familien ein fachliches Ziel wählen.",
-                str(event["folder_name"]),None,0,int(bool(event["preserve_day_folders"])),str(event["start_datetime"] or "")[:10],str(event["end_datetime"] or "")[:10],
-                None,None,str(event["event_kind"] or "event"),None,json.dumps([],ensure_ascii=False),
-                json.dumps(family_ids,ensure_ascii=False),len(files),len(family_ids),"aenderbar_vorschlagen",version,now,now,now,
+                cr_id,event_id,job_id,str(event["name"]),
+                "Ereignis löschen; alle verwalteten Archivdateien sicher zurückholen.",
+                str(event["folder_name"]),None,0,int(bool(event["preserve_day_folders"])),
+                str(event["start_datetime"] or "")[:10],
+                str(event["end_datetime"] or "")[:10],
+                None,None,str(event["event_kind"] or "event"),None,
+                json.dumps([],ensure_ascii=False),
+                json.dumps(family_ids,ensure_ascii=False),
+                len(camera_rows) + len(asset_rows),
+                len(family_ids),
+                "aenderbar_vorschlagen",version,now,now,now,
             ),
         )
-        for row in files:
-            old_path = str(row["current_relative_path"] or row["original_relative_path"] or "").replace("\\","/").lstrip("/")
+
+        for row in camera_rows:
             connection.execute(
                 """INSERT INTO event_change_file_reviews(
                        change_request_id,family_id,file_id,old_path,new_path,action,
                        expected_size_bytes,expected_sha256,confirmed,created_at,updated_at)
                    VALUES (?,?,?,?,?,'delete',?,?,0,?,?)""",
-                (cr_id,int(row["family_id"]),int(row["file_id"]),old_path,"",
-                 int(row["size_bytes"] or 0),str(row["sha256_current"] or row["sha256_original"] or ""),now,now),
+                (
+                    cr_id,row["family_id"],row["file_id"],row["old_path"],"",
+                    row["expected_size_bytes"],row["expected_sha256"],now,now,
+                ),
             )
+
+        for row in asset_rows:
+            connection.execute(
+                """INSERT INTO event_change_asset_reviews(
+                       change_request_id,asset_kind,source_file_id,family_id,
+                       old_path,new_path,action,expected_size_bytes,expected_sha256,
+                       advisory,advisory_reason,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,'unresolved',?,?,0,'',?,?)""",
+                (
+                    cr_id,row["asset_kind"],row.get("source_file_id"),row["family_id"],
+                    row["old_path"],"",row["expected_size_bytes"],
+                    row["expected_sha256"],now,now,
+                ),
+            )
+
         connection.commit()
+
     return {
-        "status":"change_request_created","pending_delete":True,"archive_read_only":True,
-        "change_request_id":cr_id,"event_id":event_id,"event_name":str(event["name"]),
-        "released_family_count":len(family_ids),"released_file_count":len(files),
-        "reassignment_required":True,
-        "message":"Manueller Löschauftrag erstellt. Alle Familien benötigen ein explizites Ziel; die Kamerabibliothek bleibt read-only.",
+        "status": "change_request_created",
+        "pending_delete": True,
+        "archive_read_only": True,
+        "change_request_id": cr_id,
+        "event_id": event_id,
+        "event_name": str(event["name"]),
+        "released_family_count": len(family_ids),
+        "released_file_count": len(camera_rows) + len(asset_rows),
+        "released_asset_count": len(asset_rows),
+        "reassignment_required": True,
+        "message": (
+            "Manueller Löschauftrag erstellt. Kamera- und Zusatzdateien werden "
+            "vollständig in den zentralen Rückkehrbestand aufgenommen."
+        ),
     }
+
