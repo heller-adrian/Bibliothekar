@@ -570,8 +570,91 @@ app = FastAPI(
 )
 
 
+def _registered_library_rows() -> list[dict[str, Any]]:
+    try:
+        return list_libraries(
+            REGISTRY_DATABASE_FILE,
+            active_only=False,
+            registered_only=True,
+        )
+    except Exception:
+        return []
+
+
+def _onboarding_required() -> bool:
+    return not _registered_library_rows()
+
+
+def _library_onboarding_html() -> str:
+    workspaces_root = str(
+        storage_paths(WORKSPACE_PATH)["workspaces_root"]
+    )
+    return f"""<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bibliothekar · Bibliothek einrichten</title>
+<style>
+:root{{color-scheme:dark;--bg:#0c1115;--surface:#172027;--border:#34414a;--text:#f2f4f5;--muted:#aeb8bf;--accent:#58aaf2;--danger:#ff716f}}
+*{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+main{{width:min(760px,calc(100% - 32px));margin:7vh auto}} .card{{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px}}
+h1{{margin:0 0 8px;font-size:2rem}} p{{color:var(--muted);line-height:1.5}} label{{display:grid;gap:7px;margin:18px 0}}
+input{{width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);background:#10171c;color:var(--text);font:inherit}}
+button{{border:0;border-radius:11px;padding:13px 18px;background:var(--accent);color:white;font:inherit;font-weight:650;cursor:pointer}}
+button:disabled{{opacity:.45;cursor:default}} #status{{white-space:pre-wrap;margin-top:15px;color:var(--muted)}} #status.error{{color:var(--danger)}} .hint{{font-size:.9rem}}
+</style>
+</head>
+<body><main><section class="card">
+<h1>Erste Bibliothek einrichten</h1>
+<p>Bibliothekar besitzt noch keine Bibliothek. Lege jetzt Name, Arbeitsbereich und das in TrueNAS read-only gemountete Archiv fest. Es wird kein technischer <code>main</code>-Arbeitsordner angelegt.</p>
+<label>Bibliotheksname<input id="name" value="" placeholder="z. B. Kamerabibliothek"></label>
+<label>Arbeitsbereich · RW<input id="work" value="" placeholder="{workspaces_root}/Kamerabibliothek"></label>
+<p class="hint">Leer lassen: Bibliothekar erzeugt unter <code>{workspaces_root}</code> automatisch einen Ordner aus dem Bibliotheksnamen.</p>
+<label>Archiv · eigener RO-Mount<input id="archive" value="" placeholder="/main-library"></label>
+<button id="create" type="button">Bibliothek prüfen und anlegen</button>
+<div id="status" role="status"></div>
+</section></main>
+<script>
+const nameEl=document.getElementById("name"),workEl=document.getElementById("work"),archiveEl=document.getElementById("archive"),statusEl=document.getElementById("status"),button=document.getElementById("create");
+async function json(url,options={{}}){{const r=await fetch(url,options);let d={{}};try{{d=await r.json()}}catch{{}}if(!r.ok)throw new Error(typeof d.detail==="string"?d.detail:JSON.stringify(d.detail||d));return d}}
+button.addEventListener("click",async()=>{{button.disabled=true;statusEl.className="";statusEl.textContent="Bibliothek wird geprüft …";try{{
+const payload={{display_name:nameEl.value,work_root:workEl.value,archive_root:archiveEl.value}};
+const check=await json("/api/libraries/check",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{work_root:payload.work_root||("{workspaces_root}/"+String(payload.display_name||"Bibliothek").trim().replace(/[^A-Za-z0-9._-]+/g,"-")),archive_root:payload.archive_root}})}});
+if(!check.valid)throw new Error((check.errors||[]).join("\n"));
+await json("/api/libraries",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(payload)}});
+statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";location.assign("/");
+}}catch(e){{statusEl.className="error";statusEl.textContent=e.message;button.disabled=false;}}}});
+</script></body></html>"""
+
+
 @app.middleware("http")
 async def library_context_middleware(request: Request, call_next):
+    if _onboarding_required():
+        path = request.url.path
+        allowed_api = (
+            path.startswith("/api/libraries")
+            or path == "/api/settings/storage-paths"
+            or path == "/api/health"
+        )
+        if not allowed_api:
+            if request.method == "GET" and not path.startswith("/api/"):
+                return HTMLResponse(_library_onboarding_html(), status_code=200)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "Bibliothekar ist noch nicht eingerichtet. Bitte zuerst eine Bibliothek anlegen.",
+                    "onboarding_required": True,
+                },
+            )
+        # Die neutralen Setup-APIs brauchen noch keinen registrierten
+        # Bibliothekskontext. Die globale DB ist beim Startup bereits migriert.
+        token = set_current_library(MAIN_LIBRARY_CONTEXT)
+        try:
+            return await call_next(request)
+        finally:
+            reset_current_library(token)
+
     requested = _requested_library_id(request)
     try:
         context = resolve_library_context(
@@ -580,7 +663,14 @@ async def library_context_middleware(request: Request, call_next):
         )
     except Exception as error:
         if request.url.path.startswith("/api/libraries"):
-            context = MAIN_LIBRARY_CONTEXT
+            rows = _registered_library_rows()
+            if not rows:
+                context = MAIN_LIBRARY_CONTEXT
+            else:
+                context = resolve_library_context(
+                    REGISTRY_DATABASE_FILE,
+                    str(rows[0]["library_id"]),
+                )
         else:
             return JSONResponse(
                 status_code=404,
