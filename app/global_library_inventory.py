@@ -213,13 +213,25 @@ def backfill_library_inventory(
                 or first.get("source_path")
                 or job_id
             )
+            # "existing_library" beschreibt keine zweite physische
+            # Sicherung, sondern die bibliotheksspezifische Projektion eines
+            # bereits bekannten Importjobs. Die Backup-ID war schon immer
+            # bibliotheksspezifisch; die Quellenidentität muss deshalb dieselbe
+            # Dimension enthalten. Sonst kollidieren zwei Bibliotheken, die
+            # denselben globalen Import projizieren, an der absichtlichen
+            # UNIQUE(source_kind, source_identity, backup_path)-Grenze.
+            projection_identity = f"{library_id}:{identity}"
             register_source_backup(
                 registry_path,
                 backup_id=backup_id,
                 source_kind="existing_library",
-                source_identity=identity,
+                source_identity=projection_identity,
                 backup_path=str(first.get("source_path") or job_id),
-                metadata={"library_id": library_id, "job_id": job_id},
+                metadata={
+                    "library_id": library_id,
+                    "job_id": job_id,
+                    "physical_source_identity": identity,
+                },
             )
             backup_registered.add(backup_id)
 
