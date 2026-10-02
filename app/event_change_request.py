@@ -1043,8 +1043,11 @@ def propose_event_change(
                 INSERT INTO event_change_asset_reviews(
                     change_request_id,asset_kind,source_file_id,family_id,
                     old_path,new_path,action,expected_size_bytes,expected_sha256,
-                    advisory,advisory_reason,planned_capture_time,created_at,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    advisory,advisory_reason,planned_capture_time,
+                    source_root_kind,workspace_original_path,
+                    workspace_staging_path,released_archive_asset_id,
+                    created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     cr_id,
@@ -1059,6 +1062,10 @@ def propose_event_change(
                     int(bool(asset.get("advisory"))),
                     str(asset.get("advisory_reason") or ""),
                     str(asset.get("selected_capture_time") or "")[:19],
+                    str(asset.get("source_root_kind") or "camera_archive"),
+                    str(asset.get("workspace_original_path") or ""),
+                    str(asset.get("workspace_staging_path") or ""),
+                    asset.get("released_archive_asset_id"),
                     now,
                     now,
                 ),
