@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import app.archive_staging as archive_staging
+from app.archive_change_assistant import build_archive_change_assistant
 from app.archive_reversal import verify_archive_reversal
 from app.archive_staging import ArchiveStagingError, cleanup_archive_change_staging
 from app.database import database_connection, initialize_database
@@ -334,7 +335,8 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
 
     with database_connection(db) as connection:
         assets = connection.execute(
-            """SELECT asset_kind,old_path,new_path
+            """SELECT asset_kind,old_path,new_path,source_root_kind,
+                      workspace_original_path,released_archive_asset_id
                FROM event_change_asset_reviews
                WHERE change_request_id=?""",
             (cr_id,),
@@ -343,6 +345,9 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
         ("xmp", xmp_rel)
     ]
     assert str(assets[0]["new_path"]).endswith("/Alle/incoming.XMP")
+    assert str(assets[0]["source_root_kind"]) == "shared_workspace"
+    assert str(assets[0]["workspace_original_path"]) == xmp_rel
+    assert assets[0]["released_archive_asset_id"] is not None
 
     confirmed = confirm_event_change(
         db,
@@ -354,6 +359,25 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
     assert preparation["staged_file_count"] == 2
     assert preparation["staged_camera_file_count"] == 1
     assert preparation["staged_asset_count"] == 1
+
+    assistant = build_archive_change_assistant(
+        db,
+        archive,
+        workspace,
+        cr_id,
+    )
+    operation_kinds = [item["kind"] for item in assistant["operations"]]
+    assert "move_archive_files" not in operation_kinds
+    helper_operations = [
+        item for item in assistant["operations"]
+        if item["kind"] == "copy_helper_folders"
+    ]
+    assert helper_operations
+    assert any(
+        source.endswith("/2026/07.25 - Test/Alle")
+        for item in helper_operations
+        for source in (item.get("sources") or [])
+    )
 
     helper_root = workspace / "Arbeitsbereich" / "Später zuordnen"
     assert (
