@@ -81,31 +81,49 @@ def _release_context(database_path: Path, cr_id: str) -> dict[str, Any]:
             dict(row)
             for row in connection.execute(
                 """SELECT r.family_id,ff.family_key,ff.original_stem,
+                          MAX(NULLIF(r.planned_capture_time,'')) AS planned_capture_time,
                           ff.selected_capture_time,COUNT(DISTINCT f.id) AS file_count
                    FROM event_change_file_reviews r
                    JOIN file_families ff ON ff.id=r.family_id
                    LEFT JOIN files f ON f.family_id=ff.id
                    WHERE r.change_request_id=? AND r.action='delete'
                    GROUP BY r.family_id
-                   ORDER BY ff.selected_capture_time,ff.id""",
+                   ORDER BY COALESCE(MAX(NULLIF(r.planned_capture_time,'')),ff.selected_capture_time),ff.id""",
                 (cr_id,),
             ).fetchall()
         ]
 
+        # Neue 0.32.5-Aufträge frieren die beim Planen live gelesene
+        # Aufnahmezeit direkt in den Review-Zeilen ein. Nur Legacy-Aufträge,
+        # die vor Migration 041 entstanden sind, dürfen noch auf den zuletzt
+        # inventarisierten Archivbestand bzw. SQLite zurückfallen.
+        legacy_family_ids = {
+            int(row["family_id"])
+            for row in pending_rows
+            if not str(row.get("planned_capture_time") or "").strip()
+        }
         live_times_by_family: dict[int, set[str]] = {}
-        for live_row in connection.execute(
-            """SELECT family_id,selected_capture_time
-               FROM event_inventory_files
-               WHERE event_id=? AND root_kind='camera_archive'
-                 AND known_file_id IS NOT NULL
-                 AND family_id IS NOT NULL
-                 AND COALESCE(selected_capture_time,'')<>''""",
-            (str(cr["event_id"]),),
-        ).fetchall():
-            live_times_by_family.setdefault(int(live_row["family_id"]), set()).add(
-                str(live_row["selected_capture_time"])
-            )
+        if legacy_family_ids:
+            for live_row in connection.execute(
+                """SELECT family_id,selected_capture_time
+                   FROM event_inventory_files
+                   WHERE event_id=? AND root_kind='camera_archive'
+                     AND known_file_id IS NOT NULL
+                     AND family_id IS NOT NULL
+                     AND COALESCE(selected_capture_time,'')<>''""",
+                (str(cr["event_id"]),),
+            ).fetchall():
+                family_id = int(live_row["family_id"])
+                if family_id in legacy_family_ids:
+                    live_times_by_family.setdefault(family_id, set()).add(
+                        str(live_row["selected_capture_time"])
+                    )
+
         for pending in pending_rows:
+            frozen = str(pending.get("planned_capture_time") or "").strip()
+            if frozen:
+                pending["selected_capture_time"] = frozen
+                continue
             family_id = int(pending["family_id"])
             live_times = live_times_by_family.get(family_id) or set()
             if len(live_times) > 1:
