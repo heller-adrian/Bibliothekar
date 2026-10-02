@@ -8648,7 +8648,7 @@ def api_finish_change_reversal(cr_id: str) -> JSONResponse:
 def api_create_archive_release_copy(cr_id: str) -> JSONResponse:
     """Freigewordene Archivdateien nach ausdrücklicher Freigabe auf die SSD kopieren."""
     try:
-        from app.archive_release_stock import create_archive_release_copies
+        from app.archive_release_copy import create_archive_release_copies
         result = create_archive_release_copies(
             current_database_file(), current_archive_root(), current_workspace_root(), cr_id
         )
