@@ -163,7 +163,7 @@ def test_0322_worker_claims_global_import_before_library_registry_queue(
     assert get_job(database, "GLOBAL_FOLDER_IMPORT")["state"] == "copying"
 
 
-def test_0322_planning_reservations_are_library_local_but_ownership_is_global(tmp_path):
+def test_0322_planning_reservation_is_globally_exclusive(tmp_path):
     main_db = tmp_path / "database" / "main.sqlite3"
     second_db = tmp_path / "database" / "second.sqlite3"
     registry = tmp_path / "database" / "registry.sqlite3"
@@ -258,15 +258,16 @@ def test_0322_planning_reservations_are_library_local_but_ownership_is_global(tm
         registry,
         database_path=second_db,
         library_id="second",
-    ) == set()
+    ) == {second_family}
 
-    reserve_family_ids(
-        registry,
-        database_path=second_db,
-        library_id="second",
-        event_id="second-planned",
-        family_ids=[second_family],
-    )
+    with pytest.raises(LibraryRegistryError):
+        reserve_family_ids(
+            registry,
+            database_path=second_db,
+            library_id="second",
+            event_id="second-planned",
+            family_ids=[second_family],
+        )
 
     promote_family_ids_owned(
         registry,
