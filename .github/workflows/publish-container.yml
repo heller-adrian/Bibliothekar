@@ -13,6 +13,10 @@ permissions:
   contents: write
   packages: write
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/bibliothekar
@@ -91,6 +95,17 @@ jobs:
 
           VERSION="${GITHUB_REF_NAME#patch/}"
           TAG="v${VERSION}"
+
+          # Ein älterer Lauf darf niemals einen neueren Patch-HEAD wieder
+          # zurücktaggen. Der Branch-HEAD wird unmittelbar vor Release-/Tag-
+          # Mutation erneut vom Remote gelesen.
+          CURRENT_HEAD="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | awk '{print $1}')"
+          if [ -z "${CURRENT_HEAD}" ] || [ "${CURRENT_HEAD}" != "${GITHUB_SHA}" ]; then
+            echo "Publish-Lauf ist veraltet: ${GITHUB_SHA}; aktueller Branch-HEAD: ${CURRENT_HEAD:-unbekannt}."
+            echo "Tag und Prerelease werden nicht verändert."
+            exit 0
+          fi
+
           RELEASE_JSON=""
           if RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null)"; then
             RELEASE_EXISTS=true
