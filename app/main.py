@@ -1940,11 +1940,25 @@ def get_health() -> dict[str, Any]:
             f"Konfiguration nicht lesbar: {error}"
         )
 
+    health_workspace = current_workspace_root()
+    try:
+        health_backup_root = workspace_backup_root(health_workspace)
+    except (WorkspaceLayoutError, StorageSettingsError, OSError):
+        # Health ist Diagnose und darf bei einem fehlenden/unmounteten
+        # Workspace nicht selbst fehlschlagen. Den erwarteten Pfad melden,
+        # damit der Zustand sauber als degraded sichtbar bleibt.
+        try:
+            health_backup_root = storage_paths(
+                health_workspace
+            )["backup_root"]
+        except Exception:
+            health_backup_root = (
+                health_workspace / BACKUP_DIRECTORY_NAME
+            ).resolve(strict=False)
+
     paths = {
-        "workspace": path_status(current_workspace_root()),
-        "sd_card_backups": path_status(
-            workspace_backup_root(current_workspace_root())
-        ),
+        "workspace": path_status(health_workspace),
+        "sd_card_backups": path_status(health_backup_root),
         "shared_work_area": path_status(
             current_work_root()
         ),
