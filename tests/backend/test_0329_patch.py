@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from app import main
 from app.database import (
     create_planned_event,
@@ -19,7 +21,11 @@ from app.library_registry import (
 )
 from app.planning import list_job_planning_overview
 from app.sort_plan import build_event_sort_plan
-from app.workspace_layout import ensure_workspace_layout
+from app.workspace_layout import (
+    WorkspaceLayoutError,
+    ensure_workspace_layout,
+    resolve_library_work_root,
+)
 
 
 NOW = "2026-10-02T20:30:00+00:00"
@@ -164,6 +170,34 @@ def test_0329_clean_workspace_has_no_automatic_main_folder(tmp_path: Path, monke
     assert (workspace / "Metadatenkorrektur").is_dir()
     assert not (workspace / "Arbeitsbereiche" / "main").exists()
     assert not (workspace / "Arbeitsbereich").exists()
+
+
+def test_0329_main_is_never_created_even_by_legacy_default_or_missing_saved_path(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "KAMERA_CONFIG",
+        str(tmp_path / "config" / "settings.json"),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    # Selbst ein alter Aufrufer, der den früheren Schalter noch setzt, darf
+    # keinen /Arbeitsbereiche/main-Ordner erzeugen.
+    layout = ensure_workspace_layout(
+        workspace,
+        create_default_main=True,
+    )
+    main_path = workspace / "Arbeitsbereiche" / "main"
+    assert Path(layout["work_root"]) == workspace / "Arbeitsbereiche"
+    assert not main_path.exists()
+
+    # Auch ein veralteter gespeicherter Main-Pfad wird niemals still neu
+    # materialisiert. Der Nutzerpfad bleibt die einzige Quelle der Wahrheit.
+    with pytest.raises(WorkspaceLayoutError):
+        resolve_library_work_root(workspace, main_path)
+    assert not main_path.exists()
 
 
 def test_0329_first_library_is_user_named_primary_without_main_work_folder(
