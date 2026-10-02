@@ -146,6 +146,14 @@ from app.workspace_layout import (
     resolve_library_work_root,
 )
 
+from app.storage_config import (
+    StorageSettingsError,
+    default_library_work_root,
+    load_storage_settings,
+    save_storage_settings,
+    storage_paths,
+)
+
 from app.library_registry import (
     MAIN_LIBRARY_ID,
     LibraryRegistryError,
@@ -156,6 +164,7 @@ from app.library_registry import (
     register_library,
     ensure_library_identity,
     update_library_display_name,
+    update_library_paths,
     set_library_active,
     unregister_library,
 )
@@ -215,7 +224,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.32.7"
+DEPLOYMENT_VERSION = "0.32.8"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -296,12 +305,18 @@ SOURCE_HELPER_URL = os.environ.get(
 
 
 def build_main_library_context() -> LibraryContext:
+    legacy = WORKSPACE_PATH / WORK_DIRECTORY_NAME
+    work_root = (
+        legacy
+        if legacy.exists()
+        else default_library_work_root(WORKSPACE_PATH, MAIN_LIBRARY_ID)
+    )
     return LibraryContext(
         library_id=MAIN_LIBRARY_ID,
         display_name="Main Library",
         database_path=DATABASE_FILE,
         workspace_root=WORKSPACE_PATH,
-        work_root=WORKSPACE_PATH / WORK_DIRECTORY_NAME,
+        work_root=work_root,
         archive_root=ARCHIVE_ROOT,
         is_main=True,
         settings={"bootstrap": True},
