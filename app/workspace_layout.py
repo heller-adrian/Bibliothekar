@@ -108,7 +108,7 @@ def ensure_workspace_layout(
     workspace_path: Path,
     *,
     configured_main_work_root: Path | None = None,
-    create_default_main: bool = True,
+    create_default_main: bool = False,
 ) -> dict[str, Any]:
     root = resolve_workspace_root(workspace_path)
     configured = storage_paths(root)
@@ -116,10 +116,12 @@ def ensure_workspace_layout(
     workspaces = configured["workspaces_root"]
     metadata = configured["metadata_root"]
 
-    # "main" ist ausschließlich der Erstinstallations-Standard. Sobald die
-    # Registry einen Main-Arbeitsbereich kennt, ist dieser gespeicherte Pfad
-    # autoritativ und darf weder durch /Arbeitsbereiche/main ersetzt noch
-    # zusätzlich vorausgesetzt werden.
+    # 0.32.9 invariant: Es gibt keinen automatisch erzeugten
+    # Bibliotheks-Arbeitsbereich "main". Ein Arbeitsbereich stammt entweder
+    # aus der gespeicherten Bibliothekskonfiguration oder ist ein bereits
+    # vorhandener historischer Arbeitsbereich. Der Parameter
+    # create_default_main bleibt nur API-kompatibel und wird absichtlich
+    # nicht zur Pfaderzeugung verwendet.
     legacy_main = root / WORK_DIRECTORY_NAME
     existing_legacy_main = legacy_main.exists() and not legacy_main.is_symlink()
 
@@ -129,9 +131,6 @@ def ensure_workspace_layout(
     elif existing_legacy_main:
         main_work = legacy_main.resolve(strict=False)
         main_is_existing_configuration = True
-    elif create_default_main:
-        main_work = default_library_work_root(root, "main").resolve(strict=False)
-        main_is_existing_configuration = False
     else:
         main_work = None
         main_is_existing_configuration = False
@@ -188,16 +187,6 @@ def ensure_workspace_layout(
                 "Der vorhandene Kompatibilitätsalias konnte nicht aktualisiert werden: "
                 + str(legacy_main)
             ) from error
-    elif (
-        main_work is not None
-        and create_default_main
-        and not legacy_main.exists()
-        and not legacy_main.is_symlink()
-    ):
-        # Nur explizite Legacy-/Testaufrufe behalten den alten Alias. Der
-        # echte Clean-Slate-Startup setzt create_default_main=False.
-        legacy_main.symlink_to(main_work, target_is_directory=True)
-        created.append(str(legacy_main))
 
     return {
         "workspace_root": str(root),
@@ -229,12 +218,10 @@ def shared_work_root(workspace_path: Path) -> Path:
             )
         return target
 
-    target = default_library_work_root(root, "main").resolve(strict=False)
-    if not target.exists() or not target.is_dir():
-        raise WorkspaceLayoutError(
-            "Der dauerhafte Arbeitsbereich fehlt: " + str(target)
-        )
-    return target
+    raise WorkspaceLayoutError(
+        "Kein Bibliotheks-Arbeitsbereich ist konfiguriert. "
+        "Es gibt keinen automatischen Fallback auf einen Ordner 'main'."
+    )
 
 
 def resolve_library_work_root(
@@ -261,14 +248,11 @@ def resolve_library_work_root(
         )
 
     if not target.exists():
-        configured_workspaces = storage_paths(workspace_path)["workspaces_root"]
-        if _is_relative_to(target, configured_workspaces):
-            target.mkdir(parents=True, exist_ok=True)
-        else:
-            raise WorkspaceLayoutError(
-                "Der Bibliotheks-Arbeitsbereich ist nicht verfügbar: "
-                + str(target)
-            )
+        raise WorkspaceLayoutError(
+            "Der gespeicherte Bibliotheks-Arbeitsbereich ist nicht verfügbar: "
+            + str(target)
+            + ". Bibliothekar legt fehlende Bibliotheksordner nicht automatisch neu an."
+        )
     if not target.is_dir():
         raise WorkspaceLayoutError(
             "Der Bibliotheks-Arbeitsbereich ist kein Verzeichnis: "
