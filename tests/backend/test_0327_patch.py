@@ -358,5 +358,20 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
 
     cancelled = cancel_event_change(db, cr_id, archive, workspace)
     assert cancelled["status"] == "abgebrochen"
+    assert cancelled["reversal_required"] is False
     assert incoming_path.is_file()
     assert xmp_path.is_file()
+    assert not (
+        helper_root
+        / "2026"
+        / "07.25 - Test"
+        / "Alle"
+        / "incoming.JPG"
+    ).exists()
+    assert not (
+        helper_root
+        / "2026"
+        / "07.25 - Test"
+        / "Alle"
+        / "incoming.XMP"
+    ).exists()
