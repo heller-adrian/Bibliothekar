@@ -1495,11 +1495,62 @@ def _available_families_for_event_payload(
         job_id=job_id,
     )
 
+    def with_released_assets(
+        families: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        ids = sorted({
+            int(family["family_id"])
+            for family in families
+            if family.get("family_id") is not None
+        })
+        if not ids:
+            return families
+        placeholders = ",".join("?" for _ in ids)
+        with database_connection(current_database_file()) as connection:
+            asset_rows = connection.execute(
+                f"""SELECT family_id,COUNT(*) AS file_count,
+                           COALESCE(SUM(size_bytes),0) AS total_size_bytes,
+                           GROUP_CONCAT(DISTINCT asset_kind) AS asset_kinds
+                    FROM released_archive_assets
+                    WHERE family_id IN ({placeholders})
+                    GROUP BY family_id""",
+                tuple(ids),
+            ).fetchall()
+        stats = {
+            int(row["family_id"]): dict(row)
+            for row in asset_rows
+        }
+        result: list[dict[str, Any]] = []
+        for family in families:
+            item = dict(family)
+            extra = stats.get(int(item["family_id"]))
+            if extra is not None:
+                item["file_count"] = (
+                    int(item.get("file_count") or 0)
+                    + int(extra.get("file_count") or 0)
+                )
+                item["total_size_bytes"] = (
+                    int(item.get("total_size_bytes") or 0)
+                    + int(extra.get("total_size_bytes") or 0)
+                )
+                item["released_archive_asset_count"] = int(
+                    extra.get("file_count") or 0
+                )
+                item["released_archive_asset_kinds"] = sorted({
+                    value
+                    for value in str(extra.get("asset_kinds") or "").split(",")
+                    if value
+                })
+            result.append(item)
+        return result
+
     if not requested:
-        return list_job_available_families(
-            current_database_file(),
-            job_id,
-            excluded_family_ids=blocked,
+        return with_released_assets(
+            list_job_available_families(
+                current_database_file(),
+                job_id,
+                excluded_family_ids=blocked,
+            )
         )
 
     placeholders = ",".join("?" for _ in requested)
@@ -1541,14 +1592,14 @@ def _available_families_for_event_payload(
             "ist nicht mehr frei oder gehört inzwischen zu einer anderen Bibliothek."
         )
 
-    return [
+    return with_released_assets([
         {
             **dict(row),
             "day_key": str(row["selected_capture_time"] or "")[:10] or None,
             "has_date": row["selected_capture_time"] is not None,
         }
         for row in rows
-    ]
+    ])
 
 @app.get("/api/settings/event-folder-layout", tags=["Einstellungen"])
 def api_get_event_folder_layout() -> dict[str, Any]:
