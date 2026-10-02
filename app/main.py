@@ -6259,6 +6259,7 @@ def api_workspace_summary(
         "released_archive_groups": list_global_released_archive_groups(
             current_database_file(),
             excluded_family_ids=blocked,
+            workspace_path=current_workspace_root(),
         ),
         "archive_change_review_count": len(archive_reviews),
         "archive_change_reviews": archive_reviews,
