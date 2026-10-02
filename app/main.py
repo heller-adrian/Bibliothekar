@@ -8669,11 +8669,19 @@ def api_change_request_reassignments_assign(cr_id: str, payload: dict[str, Any])
 
 
 @app.post("/api/change-requests/{cr_id}/confirm")
-def api_confirm_change(cr_id: str) -> JSONResponse:
+def api_confirm_change(cr_id: str, body: dict[str, Any] | None = None) -> JSONResponse:
     """Aenderungsauftrag bestaetigen."""
     try:
+        payload = body or {}
+        transfer_mode = str(payload.get("transfer_mode") or "").strip() or None
+        if transfer_mode not in {None, "copy", "move"}:
+            raise EventChangeApplyError("Ungültige Transferauswahl.")
         result = confirm_event_change(
-            current_database_file(), cr_id, current_archive_root(), current_workspace_root()
+            current_database_file(),
+            cr_id,
+            current_archive_root(),
+            current_workspace_root(),
+            transfer_mode=transfer_mode,
         )
         return JSONResponse(content=result)
     except EventChangeApplyError as exc:
