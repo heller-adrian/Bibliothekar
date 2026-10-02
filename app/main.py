@@ -447,7 +447,7 @@ def compatibility_workspace_root(context: LibraryContext) -> Path:
     )
     _ensure_compatibility_link(
         root / BACKUP_DIRECTORY_NAME,
-        workspace_backup_root(WORKSPACE_PATH),
+        workspace_backup_root(context.workspace_root),
     )
     return root
 
@@ -2660,6 +2660,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
         not first_library
         and not database_path.exists()
     )
+    registration_created = False
 
     try:
         resolved_work = Path(str(checked["work_root"]))
@@ -2693,6 +2694,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
                 "user_created_primary_library": bool(first_library),
             },
         )
+        registration_created = True
         backfill_library_inventory(
             REGISTRY_DATABASE_FILE,
             database_path=database_path,
@@ -2707,18 +2709,20 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
                 MAIN_LIBRARY_ID,
             )
     except Exception as error:
-        # Eine fehlgeschlagene Neuanlage darf keinen aktiven Registry-Zombie
-        # hinterlassen. Registry und gerade erzeugte DB werden gemeinsam
-        # zurückgerollt; vorhandene ältere DBs/Registrierungen bleiben
-        # grundsätzlich unangetastet.
-        if created_database:
+        # Eine fehlgeschlagene Neuanlage darf keinen Registry-Zombie
+        # hinterlassen. Auch die erste, intern als Primärbibliothek geführte
+        # Bibliothek wird aus der Registry zurückgerollt; die globale SQLite
+        # selbst bleibt dabei erhalten.
+        if registration_created:
             try:
                 remove_library_registration(
                     REGISTRY_DATABASE_FILE,
                     library_id,
+                    allow_main=first_library,
                 )
             except Exception:
                 pass
+        if created_database:
             for candidate in (
                 database_path,
                 Path(str(database_path) + "-wal"),
