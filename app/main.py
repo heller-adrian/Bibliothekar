@@ -150,6 +150,7 @@ from app.storage_config import (
     StorageSettingsError,
     default_library_work_root,
     load_storage_settings,
+    normalize_storage_settings,
     save_storage_settings,
     storage_paths,
 )
