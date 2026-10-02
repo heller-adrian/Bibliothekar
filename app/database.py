@@ -3185,6 +3185,8 @@ def delete_planned_event(
     database_path: Path,
     job_id: str,
     event_id: str,
+    *,
+    archive_root: Path | None = None,
 ) -> dict[str, Any]:
     """Delete or safely prepare deletion of one parent event.
 
@@ -3434,7 +3436,12 @@ def delete_planned_event(
         if status == "archived" or event["archived_at"] is not None:
             # Import late to avoid a module cycle at import time.
             from app.event_change_request import propose_archived_event_deletion
-            return propose_archived_event_deletion(database_path, job_id, event_id)
+            return propose_archived_event_deletion(
+                database_path,
+                job_id,
+                event_id,
+                archive_root=archive_root,
+            )
 
         raise ValueError("Dieser Ereigniszustand kann nicht sicher gelöscht werden.")
 
