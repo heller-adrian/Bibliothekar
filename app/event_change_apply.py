@@ -193,6 +193,14 @@ def confirm_event_change(
                      AND source_root_kind='shared_workspace'""",
                 (str(staging_path), now, cr_id, int(file_id)),
             )
+        for review_id, staging_path in (preparation.get("staging_by_asset_id") or {}).items():
+            connection.execute(
+                """UPDATE event_change_asset_reviews
+                   SET workspace_staging_path=?,updated_at=?
+                   WHERE change_request_id=? AND id=?
+                     AND source_root_kind='shared_workspace'""",
+                (str(staging_path), now, cr_id, int(review_id)),
+            )
         connection.commit()
 
     return {
