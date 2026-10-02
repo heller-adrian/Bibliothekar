@@ -3998,6 +3998,10 @@ EVENTS_HTML = r"""<!doctype html>
         const assistant = await assistantRes.json();
         const reviewRows = filesRes.ok ? await filesRes.json() : [];
         const releaseStock = assistant.release_stock || {};
+        const pathLabels = assistant.path_labels || {};
+        const archiveRootLabel = String(pathLabels.archive_root || "Kamerabibliothek");
+        const workRootLabel = String(pathLabels.work_root || "Arbeitsbereich");
+        const backupRootLabel = String(pathLabels.backup_root || "SD-Kartensicherungen");
         const finderNeeded =
           (assistant.operations || []).length > 0
           || Boolean(releaseStock.required);
@@ -4046,13 +4050,16 @@ EVENTS_HTML = r"""<!doctype html>
           if (!rows.length) return "";
           let detail = `<details class="card change-disclosure"><summary><strong>Technische Details</strong> <span class="muted">· ${rows.length} Dateioperationen</span></summary><div style="margin-top:10px;display:grid;gap:8px">`;
           for (const row of rows) {
-            const source = row.source_root_kind === "shared_workspace"
+            const sourceRelative = row.source_root_kind === "shared_workspace"
               ? (row.workspace_staging_path || row.workspace_original_path || row.old_path || "—")
               : (row.old_path || "—");
+            const source = sourceRelative === "—"
+              ? sourceRelative
+              : `${row.source_root_kind === "shared_workspace" ? workRootLabel : archiveRootLabel}/${sourceRelative}`;
             const releaseTarget = String(row.workspace_release_path || "");
             const targetText = releaseTarget
-              ? `Arbeitsbereich/${releaseTarget}`
-              : (row.new_path || "—");
+              ? `${backupRootLabel}/${releaseTarget}`
+              : (row.new_path ? `${archiveRootLabel}/${row.new_path}` : "—");
             const actionText = releaseTarget
               ? "Freigewordene Archivdatei"
               : String(row.action || "Änderung");
@@ -4094,7 +4101,7 @@ EVENTS_HTML = r"""<!doctype html>
 
           if (releaseRequired && (releaseStage === "copy_to_ssd" || releaseStage === "verify_copy")) {
             const copiesReady = releaseStage === "verify_copy";
-            html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">${copiesReady ? "Bibliothekar hat die geplanten Archivdateien auf die SSD kopiert. Prüfe jetzt die Kopien nochmals gegen Größe und SHA-256, bevor du im Archiv etwas entfernst." : "Bibliothekar kann die unten exakt aufgeführten Archivdateien nach deiner Freigabe read-only lesen und selbst in die vorbereiteten Zielordner unter <em>Arbeitsbereich/Freigewordene Archivdateien</em> kopieren. Noch nichts im Archiv löschen."}</p>`;
+            html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">${copiesReady ? "Bibliothekar hat die geplanten Archivdateien auf die SSD kopiert. Prüfe jetzt die Kopien nochmals gegen Größe und SHA-256, bevor du im Archiv etwas entfernst." : "Bibliothekar kann die unten exakt aufgeführten Archivdateien nach deiner Freigabe read-only lesen, auf die SSD kopieren und die Kopien sofort nach Größe und SHA-256 bestätigen. Ziel ist <em>${escapeHtml(backupRootLabel)}/Freigewordene Archivdateien</em>. Noch nichts im Archiv löschen."}</p>`;
             if (releaseSegments.length) {
               html += `<div style="display:grid;gap:8px;margin-top:10px">`;
               for (const segment of releaseSegments) {
@@ -4103,14 +4110,14 @@ EVENTS_HTML = r"""<!doctype html>
                 const targetDirectory = String(segment.workspace_release_directory || "");
                 html += `<details class="card change-operation" style="padding:0"><summary style="display:flex;justify-content:space-between;gap:12px;align-items:center"><strong>${escapeHtml(label)}</strong><span class="muted">${Number(segment.family_count || families.length || 0)} Familien · ${Number(segment.release_file_count ?? segment.file_count ?? 0)} Dateien</span></summary><div class="change-operation-body">`;
                 if (targetDirectory) {
-                  html += `<div><div class="muted">ZIELORDNER AUF DER SSD</div><code style="display:block;white-space:pre-wrap;word-break:break-word">Arbeitsbereich/${escapeHtml(targetDirectory)}</code></div>`;
+                  html += `<div><div class="muted">ZIELORDNER AUF DER SSD</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(backupRootLabel)}/${escapeHtml(targetDirectory)}</code></div>`;
                 }
                 for (const family of families) {
                   const familyLabel = String(family.original_stem || family.family_key || `Familie ${family.family_id || ""}`);
                   const sourcePaths = Array.isArray(family.source_paths) ? family.source_paths : [];
                   html += `<div class="card" style="padding:9px 10px"><strong>${escapeHtml(familyLabel)}</strong><span class="muted" style="margin-left:8px">${Number(family.file_count || sourcePaths.length || 0)} Dateien</span>`;
                   if (sourcePaths.length) {
-                    html += `<div class="muted" style="margin-top:7px">IM ARCHIV</div>${sourcePaths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(path)}</code>`).join("")}`;
+                    html += `<div class="muted" style="margin-top:7px">IM ARCHIV</div>${sourcePaths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(archiveRootLabel)}/${escapeHtml(path)}</code>`).join("")}`;
                   }
                   html += `</div>`;
                 }
@@ -4120,7 +4127,7 @@ EVENTS_HTML = r"""<!doctype html>
             }
             html += `<details style="margin-top:10px"><summary>Konkrete Kopierpfade anzeigen</summary><div style="display:grid;gap:8px;margin-top:8px">`;
             for (const row of releaseRows) {
-              html += `<div class="card" style="padding:9px 10px"><div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(row.old_path || "")}</code><div class="muted" style="margin-top:5px">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">Arbeitsbereich/${escapeHtml(row.workspace_release_path || row.calculated_workspace_release_path || "")}</code></div>`;
+              html += `<div class="card" style="padding:9px 10px"><div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(archiveRootLabel)}/${escapeHtml(row.old_path || "")}</code><div class="muted" style="margin-top:5px">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(backupRootLabel)}/${escapeHtml(row.workspace_release_path || row.calculated_workspace_release_path || "")}</code></div>`;
             }
             html += `</div></details></div>`;
             html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div><div id="change-release-errors" class="danger-text" style="display:none"></div></div>`;
@@ -4129,7 +4136,7 @@ EVENTS_HTML = r"""<!doctype html>
               : `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-copy-create>SSD-Kopien anlegen</button></div></section>`;
           } else if (releaseRequired && releaseStage === "remove_archive") {
             html += `<div class="card"><strong>✓ SSD-Kopien vollständig geprüft</strong><p class="success-text" style="margin-top:5px">Alle freigewordenen Dateien stimmen nach Größe und SHA-256 mit dem geplanten Bestand überein.</p></div>`;
-            html += `<div class="card"><strong>2. Bestätigte Archivoriginale entfernen</strong><p class="muted" style="margin-top:5px">Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.</p><details style="margin-top:10px"><summary>${releaseRows.length} Archivpfade anzeigen</summary><div style="margin-top:8px">${releaseRows.map(row => `<code style="display:block;white-space:pre-wrap;word-break:break-word">Kamerabibliothek/${escapeHtml(row.old_path || "")}</code>`).join("")}</div></details></div>`;
+            html += `<div class="card"><strong>2. Bestätigte Archivoriginale entfernen</strong><p class="muted" style="margin-top:5px">Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.</p><details style="margin-top:10px"><summary>${releaseRows.length} Archivpfade anzeigen</summary><div style="margin-top:8px">${releaseRows.map(row => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(archiveRootLabel)}/${escapeHtml(row.old_path || "")}</code>`).join("")}</div></details></div>`;
             html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div><div id="change-release-errors" class="danger-text" style="display:none"></div></div>`;
             html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-removal-verify>Entfernung aus dem Archiv prüfen</button></div></section>`;
           } else {
@@ -4225,7 +4232,7 @@ EVENTS_HTML = r"""<!doctype html>
               {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}
             );
             if(bar) bar.style.width="100%";
-            if(label) label.textContent=`${Number(result.copied_file_count||0)} SSD-Kopien wurden angelegt.`;
+            if(label) label.textContent=`${Number(result.verified_file_count||result.copied_file_count||0)} SSD-Kopien wurden angelegt und vollständig geprüft.`;
             await new Promise(resolve=>setTimeout(resolve,180));
             await showChangeRequestDetail(crId,{phase:"finder"});
           } catch(error) {
