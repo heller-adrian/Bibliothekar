@@ -469,7 +469,7 @@ def build_archive_change_assistant(
                 "kind": "replace_event_document",
                 "title": "Aktuelle event.json ins Archiv übernehmen",
                 "source": f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{target_rel}",
-                "target": f"Kamerabibliothek/{target_rel}",
+                "target": f"{archive_display_root}/{target_rel}",
                 "items": ["event.json"],
                 "file_count": 1,
                 "detail": (
@@ -550,26 +550,28 @@ def build_archive_change_assistant(
             })
 
         if obsolete:
-            pending_obsolete = list(obsolete)
-            obsolete_state = None
-            if scan_live:
-                pending_obsolete = [
-                    value for value in obsolete
-                    if _safe_archive_path(archive_root, value).exists()
-                ]
-                obsolete_state = "done" if not pending_obsolete else "pending"
-            operations.append({
-                "kind": "remove_directories",
-                "title": "Nicht mehr benötigte alte Ordner entfernen",
-                "items": [_basename(value) for value in pending_obsolete],
-                "paths": [f"{archive_display_root}/{value}" for value in pending_obsolete],
-                "all_paths": [f"{archive_display_root}/{value}" for value in obsolete],
-                "detail": (
-                    "Diese alten Ordner müssen nach den Verschiebungen leer sein "
-                    "und können dann entfernt werden."
-                ),
-                "state": obsolete_state,
-            })
+            # Alte DB-/event.json-Strukturen können noch Verzeichnisse nennen,
+            # die durch eine frühere manuelle Archivänderung bereits physisch
+            # entfernt wurden. Finder-Arbeit entsteht nur für tatsächlich noch
+            # vorhandene Ordner; die historische Soll-Differenz bleibt intern
+            # weiterhin in obsolete_directories nachvollziehbar.
+            pending_obsolete = [
+                value for value in obsolete
+                if _safe_archive_path(archive_root, value).exists()
+            ]
+            if pending_obsolete:
+                operations.append({
+                    "kind": "remove_directories",
+                    "title": "Nicht mehr benötigte alte Ordner entfernen",
+                    "items": [_basename(value) for value in pending_obsolete],
+                    "paths": [f"{archive_display_root}/{value}" for value in pending_obsolete],
+                    "all_paths": [f"{archive_display_root}/{value}" for value in obsolete],
+                    "detail": (
+                        "Diese alten Ordner müssen nach den Verschiebungen leer sein "
+                        "und können dann entfernt werden."
+                    ),
+                    "state": "pending" if scan_live else None,
+                })
 
     if status == "aenderbar_vorschlagen" and preparation_required:
         phase = "prepare"
