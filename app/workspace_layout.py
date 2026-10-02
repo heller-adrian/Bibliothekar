@@ -9,10 +9,22 @@ import os
 import uuid
 
 from app.database import database_connection
+from app.storage_config import (
+    DEFAULT_BACKUP_DIRECTORY_NAME,
+    DEFAULT_WORKSPACES_DIRECTORY_NAME,
+    DEFAULT_METADATA_DIRECTORY_NAME,
+    default_library_work_root,
+    load_storage_settings,
+    storage_paths,
+)
 
 
-BACKUP_DIRECTORY_NAME = "SD-Kartensicherungen"
+# Legacy aliases remain stable for internal compatibility roots and existing
+# installations. New physical layouts use the configurable names below.
+BACKUP_DIRECTORY_NAME = DEFAULT_BACKUP_DIRECTORY_NAME
 WORK_DIRECTORY_NAME = "Arbeitsbereich"
+WORKSPACES_DIRECTORY_NAME = DEFAULT_WORKSPACES_DIRECTORY_NAME
+METADATA_DIRECTORY_NAME = DEFAULT_METADATA_DIRECTORY_NAME
 
 
 class WorkspaceLayoutError(RuntimeError):
@@ -94,57 +106,73 @@ def resolve_workspace_root(workspace_path: Path) -> Path:
 
 def ensure_workspace_layout(workspace_path: Path) -> dict[str, Any]:
     root = resolve_workspace_root(workspace_path)
-    backup_root = root / BACKUP_DIRECTORY_NAME
-    work_root = root / WORK_DIRECTORY_NAME
+    configured = storage_paths(root)
+    backup = configured["backup_root"]
+    workspaces = configured["workspaces_root"]
+    metadata = configured["metadata_root"]
+
+    # Bestehende 0.32.7-Installationen behalten ihren Main-Arbeitsbereich
+    # unverändert. Bei einer frischen Installation entsteht der Main-Bereich
+    # dagegen unter Arbeitsbereiche/main.
+    legacy_main = root / WORK_DIRECTORY_NAME
+    main_work = (
+        legacy_main.resolve(strict=False)
+        if legacy_main.exists()
+        else default_library_work_root(root, "main").resolve(strict=False)
+    )
 
     created: list[str] = []
-
-    for directory in (backup_root, work_root):
+    for directory in (backup, workspaces, metadata, main_work):
         if directory.exists() and not directory.is_dir():
             raise WorkspaceLayoutError(
                 "Ein benötigter Strukturpfad ist kein Ordner: "
                 + str(directory)
             )
-
         if not directory.exists():
-            directory.mkdir(mode=0o775)
-            _fsync_directory(root)
+            directory.mkdir(mode=0o775, parents=True)
+            _fsync_directory(directory.parent)
             created.append(str(directory))
-
         if not os.access(directory, os.R_OK | os.W_OK | os.X_OK):
             raise WorkspaceLayoutError(
                 "Ein Strukturordner ist nicht vollständig zugreifbar: "
                 + str(directory)
             )
 
-    if int(root.stat().st_dev) != int(work_root.stat().st_dev):
-        raise WorkspaceLayoutError(
-            "Der dauerhafte Arbeitsbereich liegt nicht auf demselben Dateisystem."
-        )
-
     return {
         "workspace_root": str(root),
-        "backup_root": str(backup_root),
-        "work_root": str(work_root),
+        "backup_root": str(backup),
+        "workspaces_root": str(workspaces),
+        "metadata_root": str(metadata),
+        "work_root": str(main_work),
+        "storage_names": load_storage_settings(),
         "created_directories": created,
     }
 
 
 def shared_work_root(workspace_path: Path) -> Path:
     root = resolve_workspace_root(workspace_path)
-    entry = root / WORK_DIRECTORY_NAME
-    target = entry.resolve(strict=False)
 
+    # Kompatibilitäts-Roots für Sekundärbibliotheken enthalten weiterhin
+    # bewusst den Alias "Arbeitsbereich". Bestehende Main-Installationen
+    # dürfen denselben Legacy-Pfad behalten.
+    legacy_entry = root / WORK_DIRECTORY_NAME
+    if legacy_entry.exists() or legacy_entry.is_symlink():
+        target = legacy_entry.resolve(strict=False)
+        if not target.exists() or not target.is_dir():
+            raise WorkspaceLayoutError(
+                "Der dauerhafte Arbeitsbereich fehlt: " + str(target)
+            )
+        if not legacy_entry.is_symlink() and not _is_relative_to(target, root):
+            raise WorkspaceLayoutError(
+                "Der dauerhafte Arbeitsbereich verlässt den Workspace."
+            )
+        return target
+
+    target = default_library_work_root(root, "main").resolve(strict=False)
     if not target.exists() or not target.is_dir():
         raise WorkspaceLayoutError(
             "Der dauerhafte Arbeitsbereich fehlt: " + str(target)
         )
-
-    if not entry.is_symlink() and not _is_relative_to(target, root):
-        raise WorkspaceLayoutError(
-            "Der dauerhafte Arbeitsbereich verlässt das SSD-Dataset."
-        )
-
     return target
 
 
@@ -198,13 +226,23 @@ def resolve_library_work_root(
 
 def backup_root(workspace_path: Path) -> Path:
     root = resolve_workspace_root(workspace_path)
-    entry = root / BACKUP_DIRECTORY_NAME
-    target = entry.resolve(strict=False)
+
+    # Sekundärbibliotheks-Kompatibilitätsroots enthalten den Legacy-Alias.
+    legacy_entry = root / BACKUP_DIRECTORY_NAME
+    if legacy_entry.is_symlink():
+        target = legacy_entry.resolve(strict=False)
+    else:
+        configured_name = load_storage_settings()["backup_directory_name"]
+        configured_entry = root / configured_name
+        if configured_entry.exists() or configured_name != BACKUP_DIRECTORY_NAME:
+            target = configured_entry.resolve(strict=False)
+        else:
+            target = legacy_entry.resolve(strict=False)
 
     if not target.exists():
         try:
-            target.mkdir(mode=0o775)
-            _fsync_directory(root)
+            target.mkdir(mode=0o775, parents=True)
+            _fsync_directory(target.parent)
         except OSError as error:
             raise WorkspaceLayoutError(
                 "Der Ordner für SD-Kartensicherungen konnte nicht angelegt werden: "
@@ -214,12 +252,6 @@ def backup_root(workspace_path: Path) -> Path:
         raise WorkspaceLayoutError(
             "Der Pfad für SD-Kartensicherungen ist kein Ordner: " + str(target)
         )
-
-    if not entry.is_symlink() and not _is_relative_to(target, root):
-        raise WorkspaceLayoutError(
-            "Der Sicherungsordner verlässt das SSD-Dataset."
-        )
-
     return target
 
 
