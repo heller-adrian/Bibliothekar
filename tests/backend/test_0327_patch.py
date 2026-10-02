@@ -13,6 +13,7 @@ from app.database import database_connection, initialize_database
 from app.event_change_apply import cancel_event_change, confirm_event_change
 from app.event_change_request import propose_event_change
 from app.event_structure import build_event_preview
+from app.events_ui import EVENTS_HTML
 from app.planning import list_global_released_archive_groups
 from app.workspace_layout import ensure_workspace_layout
 
@@ -429,3 +430,11 @@ def test_0327_cross_dataset_staging_requires_explicit_choice_and_verifies_copy_m
     assert mode == "move"
     assert not source.exists()
     assert staged.read_bytes() == payload
+
+
+def test_0327_ui_offers_copy_or_move_when_cross_dataset_hardlink_fails():
+    assert "TRANSFER_CHOICE_REQUIRED" in EVENTS_HTML
+    assert 'data-cr-transfer-choice="copy"' in EVENTS_HTML
+    assert 'data-cr-transfer-choice="move"' in EVENTS_HTML
+    assert "{transfer_mode:transferMode}" in EVENTS_HTML
+    assert "options.payload || {}" in EVENTS_HTML
