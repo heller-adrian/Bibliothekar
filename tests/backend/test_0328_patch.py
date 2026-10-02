@@ -41,11 +41,11 @@ def test_0328_fresh_workspace_uses_single_managed_root(tmp_path: Path, monkeypat
     assert Path(layout["work_root"]) == workspace / "Arbeitsbereiche"
     assert not (workspace / "Arbeitsbereiche" / "main").exists()
 
-    # Vor der ersten Bibliothek gibt es keinen Bibliotheks-Unterordner und
-    # keinen automatisch erzeugten Legacy-Alias.
+    # Vor der ersten Bibliothek gibt es keinen Bibliotheks-Unterordner.
+    # Der historische Singular-Pfad darf nur auf den neutralen Stamm zeigen.
     legacy = workspace / "Arbeitsbereich"
-    assert not legacy.exists()
-    assert not legacy.is_symlink()
+    assert legacy.is_symlink()
+    assert legacy.resolve() == (workspace / "Arbeitsbereiche").resolve()
 
 
 def test_0328_main_archive_path_survives_bootstrap_adoption(tmp_path: Path):
@@ -367,8 +367,8 @@ def test_0328_managed_workspaces_name_change_retargets_main_alias_and_registry(
     assert canonical.is_dir()
     assert not (canonical / "main").exists()
     assert not (workspace / "Arbeitsbereiche").exists()
-    assert not legacy.exists()
-    assert not legacy.is_symlink()
+    assert legacy.is_symlink()
+    assert legacy.resolve() == canonical.resolve()
     assert stored is not None
     assert Path(str(stored["work_root"])) == canonical.resolve()
 
