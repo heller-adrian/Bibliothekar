@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.35.0 – Eigene Handy-Web-App und responsive Fenster
+
+- Die installierte Handy-Web-App und die normale Website im mobilen Browser erhalten erstmals getrennte Darstellungsmodi. Der Modus wird über `display-mode: standalone` mit iOS-`navigator.standalone`-Fallback erkannt.
+- Die Web-App übernimmt die iOS-Referenzaufteilung: ein reduzierter dunkler Kopf mit Bibliothekar-Marke sowie eine feste untere Navigation für Import, Arbeitsbereich, Archiv, Aufgaben und Menü. Die mobile Website behält zunächst den bisherigen oberen Registerheader und kann unabhängig weiterentwickelt werden.
+- Der Arbeitsbereich der Web-App ist auf kleine Displays verdichtet: vier Kennzahlen stehen wieder in einer Zeile, Auswahlaktionen sind kompakter und Tageskarten behalten Statusbadges in derselben Zeile.
+- Mobile Inhaltskorrekturen gelten bewusst für Web-App und Website: Dialoge und Formfelder bleiben innerhalb des Viewports, Unterereignis-Bedienelemente ragen nicht mehr über den Rahmen und die drei Metadatenbereiche passen ohne abgeschnittenen Reiter in die Breite.
+- Die drei Statuskarten im Import stehen auf dem Handy wieder nebeneinander. Datenbankschemata werden dort als kompakter Bereich (zum Beispiel `1–45`) statt als lange Versionsliste dargestellt.
+- Aufgaben- und Menü-Popover werden in der Web-App oberhalb der unteren Navigation geöffnet; der Assistent bleibt über das Menü erreichbar.
+- Regressionstests sichern die getrennte Standalone-Erkennung, die PWA-Navigation, die mobilen Rahmenkorrekturen und die kompakte Darstellung ab.
+
 ### 0.34.0 – Mehrfachkorrektur mit konstantem Zeitversatz
 
 - Der verwaltete Ordner `/workspace/Metadatenkorrektur/Mehrfachkorrektur` wird beim Startup automatisch neben `Allgemein` angelegt.
