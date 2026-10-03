@@ -1520,8 +1520,14 @@ def reintegrate_library_metadata_family(
             connection.commit()
 
         for _source, _destination, backup in moved:
-            backup.unlink(missing_ok=True)
-            _fsync_directory(backup.parent)
+            try:
+                backup.unlink(missing_ok=True)
+                _fsync_directory(backup.parent)
+            except OSError:
+                # The canonical destination and SQLite state are already
+                # committed. A stale hidden safety copy must not trigger a
+                # destructive rollback after commit.
+                pass
 
         shutil.rmtree(work, ignore_errors=True)
         return {
