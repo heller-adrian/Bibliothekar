@@ -1468,6 +1468,7 @@ def store_metadata_analysis(
                     extension,
                     media_type,
                     size_bytes,
+                    source_size_bytes,
                     sha256_original,
                     sha256_current,
                     selected_capture_time,
@@ -1479,6 +1480,7 @@ def store_metadata_analysis(
                     updated_at
                 )
                 VALUES (
+                    ?,
                     ?,
                     ?,
                     ?,
@@ -1506,6 +1508,7 @@ def store_metadata_analysis(
                     str(record["filename"]),
                     str(record["extension"]),
                     str(record["media_type"]),
+                    int(record["size_bytes"]),
                     int(record["size_bytes"]),
                     checksum,
                     checksum,
