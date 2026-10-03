@@ -177,12 +177,13 @@ def test_0332_global_metadata_tasks_are_grouped_by_area(tmp_path: Path):
         task for task in list_global_tasks(database)
         if task.get("kind") == "metadata_correction"
     ]
-    assert len(tasks) == 2
-    by_area = {task["metadata_area"]: task for task in tasks}
-    assert by_area["general"]["count"] == 1
-    assert by_area["general"]["correction_count"] == 2
-    assert by_area["general"]["blocked_count"] == 1
-    assert by_area["library"]["correction_count"] == 1
+    # Bibliothekskorrekturen werden ab 0.33.5 über den fachlichen
+    # Ohne-Datum-/Prüffall-Task gebündelt und hier nicht doppelt angezeigt.
+    assert len(tasks) == 1
+    assert tasks[0]["metadata_area"] == "general"
+    assert tasks[0]["count"] == 1
+    assert tasks[0]["correction_count"] == 2
+    assert tasks[0]["blocked_count"] == 1
 
 
 def test_0332_metadata_api_expected_error_is_not_internal_server_error(monkeypatch):
