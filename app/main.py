@@ -3653,7 +3653,7 @@ def assistant_interface() -> HTMLResponse:
 def metadata_correction_interface() -> HTMLResponse:
     return HTMLResponse(
         content=apply_shell(
-            _shell_placeholder_html(),
+            METADATA_CORRECTION_HTML,
             active_area="metadata",
         ),
         status_code=200,
@@ -7161,6 +7161,100 @@ def api_workspace_summary(
             ),
         },
     }
+
+@app.get("/api/metadata-correction/areas", tags=["Metadatenkorrektur"])
+def api_metadata_correction_areas() -> dict[str, Any]:
+    context = current_library_context()
+    areas: dict[str, Any] = {}
+    for area in ("library", "general"):
+        try:
+            paths = metadata_area_paths(
+                area=area,
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                create=True,
+            )
+            areas[area] = {
+                "root": str(paths["root"]),
+                "input_root": str(paths["input_root"]),
+                "output_root": str(paths["output_root"]),
+                "available": True,
+            }
+        except MetadataCorrectionError as error:
+            areas[area] = {
+                "available": False,
+                "error": str(error),
+                "input_root": "",
+                "output_root": "",
+            }
+    return {"library_id": context.library_id, "areas": areas}
+
+
+@app.get("/api/metadata-correction/scan", tags=["Metadatenkorrektur"])
+def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
+    context = current_library_context()
+    try:
+        return scan_metadata_area(
+            area=area,
+            workspace_root=context.workspace_root,
+            library_id=context.library_id,
+        )
+    except (MetadataCorrectionError, MetadataError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/metadata-correction/tasks", tags=["Metadatenkorrektur"])
+def api_metadata_correction_tasks(include_completed: bool = False) -> dict[str, Any]:
+    tasks = list_metadata_corrections(
+        current_database_file(),
+        include_completed=include_completed,
+    )
+    return {"tasks": tasks, "count": len(tasks)}
+
+
+@app.post("/api/metadata-correction/tasks", tags=["Metadatenkorrektur"], status_code=201)
+def api_prepare_metadata_correction(payload: dict[str, Any]) -> dict[str, Any]:
+    context = current_library_context()
+    try:
+        task = create_metadata_correction(
+            current_database_file(),
+            area=str(payload.get("area") or "library"),
+            relative_path=str(payload.get("relative_path") or ""),
+            proposed_datetime=payload.get("proposed_datetime"),
+            workspace_root=context.workspace_root,
+            library_id=context.library_id,
+        )
+    except (MetadataCorrectionError, MetadataError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"task": task}
+
+
+@app.post("/api/metadata-correction/tasks/{correction_id}/apply", tags=["Metadatenkorrektur"])
+def api_apply_metadata_correction(correction_id: str) -> dict[str, Any]:
+    context = current_library_context()
+    try:
+        task = apply_metadata_correction(
+            current_database_file(),
+            correction_id,
+            workspace_root=context.workspace_root,
+            library_id=context.library_id,
+        )
+    except MetadataCorrectionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"task": task}
+
+
+@app.post("/api/metadata-correction/tasks/{correction_id}/cancel", tags=["Metadatenkorrektur"])
+def api_cancel_metadata_correction(correction_id: str) -> dict[str, Any]:
+    try:
+        task = cancel_metadata_correction(
+            current_database_file(),
+            correction_id,
+        )
+    except MetadataCorrectionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"task": task}
+
 
 @app.get(
     "/api/jobs/{job_id}/files",
