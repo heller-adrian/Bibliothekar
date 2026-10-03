@@ -2823,7 +2823,7 @@ EVENTS_HTML = r"""<!doctype html>
       eventEditDialog.classList.add("view-mode");
       eventEditHeaderButton.hidden = false;
       eventEditHeaderButton.onclick = () => renderEventEditor(context);
-      eventEditTitle.textContent=`${noEvent?"Ohne Ereignis öffnen":"Ereignis öffnen"} · ${event.name}`;
+      eventEditTitle.textContent=noEvent ? `${event.name} öffnen` : `Ereignis öffnen · ${event.name}`;
       eventEditSubtitle.textContent="Nur-Lesen-Ansicht der aktuell in der Datenbank gespeicherten Definition und Dateizuordnung.";
 
       const childCards=!noEvent?childEvents.map(child=>{
@@ -2834,7 +2834,7 @@ EVENTS_HTML = r"""<!doctype html>
       eventEditBody.innerHTML=`
         <div class="inspect-summary">
           <div class="inspect-field"><span>Status</span><strong>${escapeHtml(eventStatusLabel(event.status))}</strong></div>
-          <div class="inspect-field"><span>Art</span><strong>${noEvent?"Ohne Ereignis":"Ereignis"}</strong></div>
+          <div class="inspect-field"><span>Art</span><strong>${noEvent?escapeHtml(event.name||"Ohne Ereignis"):"Ereignis"}</strong></div>
           ${noEvent
             ? '<div class="inspect-field"><span>Datenbank-Zeitraum</span><strong>komplex</strong></div>'
             : `<div class="inspect-field"><span>Datenbank-Beginn</span><strong>${escapeHtml(inspectDateTime(event.start_datetime))}</strong></div><div class="inspect-field"><span>Datenbank-Ende</span><strong>${escapeHtml(inspectDateTime(event.end_datetime))}</strong></div>`}
@@ -2921,7 +2921,7 @@ EVENTS_HTML = r"""<!doctype html>
       const structural = Boolean(context.structural_editable);
       const archivedChange = Boolean(context.archived_change_request);
       const noEvent = event.event_kind === "no_event";
-      eventEditTitle.textContent = `${noEvent ? "Ohne Ereignis bearbeiten" : "Ereignis bearbeiten"} · ${event.name}`;
+      eventEditTitle.textContent = noEvent ? `${event.name} bearbeiten` : `Ereignis bearbeiten · ${event.name}`;
       eventEditSubtitle.textContent = archivedChange
         ? "Archivierter Bestand: Die App plant die Änderung vollständig, die Kamerabibliothek bleibt read-only."
         : (noEvent
@@ -3245,7 +3245,7 @@ EVENTS_HTML = r"""<!doctype html>
       const noEvent = context.event.event_kind === "no_event";
       const payload = {
         revision: Number(context.event.revision || 1),
-        event_name: noEvent ? "Ohne Ereignis" : document.getElementById("edit-name").value,
+        event_name: noEvent ? String(context.event.name || "Ohne Ereignis") : document.getElementById("edit-name").value,
         notes: document.getElementById("edit-notes").value,
       };
       if (structural) {
