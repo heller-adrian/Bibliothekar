@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.event_naming import (
+    DEFAULT_EVENT_NAMING,
+    naming_snapshot_for_new_event,
+    normalize_event_naming,
+    render_event_folder_name,
+    render_no_event_folder_name,
+)
+
 
 class EventPreviewError(ValueError):
     pass
@@ -172,6 +180,12 @@ def _build_no_event_preview(
             "Bitte für jeden Monat eine eigene Sammlung anlegen."
         )
     month_key = next(iter(months))
+    raw_naming = payload.get("folder_naming") or DEFAULT_EVENT_NAMING
+    naming = (
+        dict(raw_naming)
+        if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
+        else naming_snapshot_for_new_event(raw_naming)
+    )
 
     candidate_families = []
     for family in available_families:
@@ -191,7 +205,14 @@ def _build_no_event_preview(
     selected_file_count = sum(int(f.get("file_count", 0)) for f in candidate_families)
     start_date = segments[0]["day_key"]
     end_date = segments[-1]["day_key"]
-    parent_folder = f"{month_key[5:7]} - Ohne Ereignis"
+    if str(naming.get("mode") or "") == "locked":
+        parent_folder = str(naming.get("locked_folder_name") or "").strip()
+        if not parent_folder:
+            parent_folder = render_no_event_folder_name(month_key, DEFAULT_EVENT_NAMING)
+        no_event_label = str(payload.get("event_name") or "Ohne Ereignis").strip() or "Ohne Ereignis"
+    else:
+        parent_folder = render_no_event_folder_name(month_key, naming)
+        no_event_label = normalize_event_naming(naming)["no_event_label"]
 
     preserve_day_folders = bool(payload.get("preserve_day_folders"))
     folder_layout = _layout_state(payload)
@@ -217,13 +238,14 @@ def _build_no_event_preview(
 
     return {
         "event_kind": "no_event",
-        "event_name": parent_folder,
+        "event_name": no_event_label,
         "parent_folder": parent_folder,
         "child_folder": None,
         "child_event_name": None,
         "uses_time_range": False,
         "preserve_day_folders": preserve_day_folders,
         "folder_layout": folder_layout,
+        "folder_naming": naming,
         "create_subfolders": bool(folder_layout["structure_enabled"]),
         # Legacy bounding values: canonical no-event time data is no_event_segments.
         "start_date": start_date,
@@ -509,21 +531,35 @@ def build_event_preview(
     else:
         parent_structure_day_keys = selected_day_keys
 
+    raw_naming = payload.get("folder_naming") or DEFAULT_EVENT_NAMING
+    naming = (
+        dict(raw_naming)
+        if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
+        else naming_snapshot_for_new_event(raw_naming)
+    )
+
     if event_kind == "no_event":
-        parent_name = "Ohne Ereignis"
-        parent_folder = (
-            f"{start_date[5:7]}"
-            " - Ohne Ereignis"
-        )
+        if str(naming.get("mode") or "") == "locked":
+            parent_name = str(payload.get("event_name") or "Ohne Ereignis").strip() or "Ohne Ereignis"
+            parent_folder = str(naming.get("locked_folder_name") or "").strip()
+            if not parent_folder:
+                parent_folder = render_no_event_folder_name(start_date[:7], DEFAULT_EVENT_NAMING)
+        else:
+            parent_name = normalize_event_naming(naming)["no_event_label"]
+            parent_folder = render_no_event_folder_name(start_date[:7], naming)
     else:
         parent_name = _clean_name(
             payload.get("event_name"),
             "Ereignisname",
         )
-
-        parent_folder = (
-            f"{start_date[5:]}"
-            f" - {parent_name}"
+        parent_folder = render_event_folder_name(
+            event_name=parent_name,
+            start_date=start_date,
+            end_date=end_date,
+            start_time=start_time,
+            end_time=end_time,
+            uses_time_range=uses_time_range,
+            naming=naming,
         )
 
     lines = [
@@ -629,6 +665,7 @@ def build_event_preview(
             preserve_day_folders
         ),
         "folder_layout": folder_layout,
+        "folder_naming": naming,
         "create_subfolders": bool(folder_layout["structure_enabled"]),
         "start_date": start_date,
         "end_date": end_date,
