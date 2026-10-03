@@ -505,21 +505,28 @@ def test_0328_two_library_inventory_backfills_do_not_collide_on_source_backup(
         backups = [
             dict(row)
             for row in connection.execute(
-                """SELECT backup_id,source_identity,backup_path
+                """SELECT backup_id,source_kind,source_identity,backup_path
                    FROM source_backups
-                   WHERE source_kind='existing_library'
                    ORDER BY backup_id"""
             ).fetchall()
         ]
         canonical = connection.execute(
             "SELECT COUNT(*) AS n FROM canonical_families"
         ).fetchone()
-    assert len(backups) == 2
-    assert {row["source_identity"] for row in backups} == {
-        "main:same-signature",
-        "test:same-signature",
-    }
-    assert {row["backup_path"] for row in backups} == {"/shared/source"}
+    assert backups == [
+        {
+            "backup_id": "main:SHARED_JOB",
+            "source_kind": "import",
+            "source_identity": "same-signature",
+            "backup_path": "/shared/source",
+        },
+        {
+            "backup_id": "test:SHARED_JOB",
+            "source_kind": "existing_library",
+            "source_identity": "test:same-signature",
+            "backup_path": "/shared/source",
+        },
+    ]
     assert int(canonical["n"]) == 1
 
 
@@ -603,7 +610,7 @@ def test_0328_missing_secondary_database_is_not_silently_recreated(
 
 
 
-def test_0328_legacy_existing_library_identity_is_upgraded_in_place(
+def test_0328_legacy_main_existing_library_is_upgraded_to_import(
     tmp_path: Path,
 ):
     registry = tmp_path / "registry.sqlite3"
@@ -658,12 +665,13 @@ def test_0328_legacy_existing_library_identity_is_upgraded_in_place(
     assert result["family_count"] == 1
     with database_connection(registry) as connection:
         row = connection.execute(
-            """SELECT source_identity,backup_path
+            """SELECT source_kind,source_identity,backup_path
                FROM source_backups
                WHERE backup_id='main:SHARED_JOB'"""
         ).fetchone()
     assert row is not None
-    assert str(row["source_identity"]) == "main:same-signature"
+    assert str(row["source_kind"]) == "import"
+    assert str(row["source_identity"]) == "same-signature"
     assert str(row["backup_path"]) == "/shared/source"
 
 
