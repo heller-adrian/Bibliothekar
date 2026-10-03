@@ -1016,14 +1016,41 @@ def build_event_sort_plan(
         relative: PurePosixPath,
         *,
         declared_root_kind: str,
+        prefer_workspace: bool = False,
     ) -> tuple[Path, Path, str]:
         """Resolve the current physical source without trusting stale provenance."""
-        if allow_reapply:
-            base = target_root
-            return base, base.joinpath(*relative.parts).resolve(strict=False), "shared_workspace"
-
         central_candidate = central_stock_root.joinpath(*relative.parts).resolve(strict=False)
         work_candidate = target_root.joinpath(*relative.parts).resolve(strict=False)
+
+        if allow_reapply:
+            # A shared reconciliation can contain two physically different
+            # source classes at once: the changed event itself lives in the
+            # library work root, while already-free families from the same day
+            # live in the global central stock.  Reapply must therefore resolve
+            # each file physically instead of forcing every source through the
+            # event work root.
+            if (
+                prefer_workspace
+                and _is_relative_to(work_candidate, target_root)
+                and work_candidate.is_file()
+            ):
+                return target_root, work_candidate, "shared_workspace"
+            if (
+                _is_relative_to(central_candidate, central_stock_root)
+                and central_candidate.is_file()
+            ):
+                return central_stock_root, central_candidate, "central_stock"
+            if (
+                _is_relative_to(work_candidate, target_root)
+                and work_candidate.is_file()
+            ):
+                return target_root, work_candidate, "shared_workspace"
+            # Keep the diagnostic rooted in the most likely physical area.
+            # Inventory-backed event files belong to the work root; generic
+            # free-stock rows belong to central stock.
+            if prefer_workspace:
+                return target_root, work_candidate, "shared_workspace"
+            return central_stock_root, central_candidate, "central_stock"
 
         # Global free/released stock is authoritative whenever it physically
         # exists there. This also makes the original import job irrelevant.
@@ -1476,6 +1503,7 @@ def build_event_sort_plan(
         source_base, source_absolute, physical_source_kind = physical_source_for(
             source_relative,
             declared_root_kind=current_root_kind,
+            prefer_workspace=inventory_file is not None,
         )
         destination_root_kind = (
             "central_stock" if is_free_stock else "target_root"

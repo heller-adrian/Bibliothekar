@@ -610,6 +610,22 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 managed_event_roots=plan.get('managed_event_roots') or [],
                 desired_directories=[d['absolute_path'] for d in plan['directories']],
             )
+            # Free stock lives in the global central stock since 0.31.1. A
+            # delete/reconcile may therefore merge two old interval folders
+            # back into one full-day folder while the event files themselves
+            # still originate in the library work root. Remove only now-empty,
+            # touched central-stock source directories as part of the same
+            # verified cleanup.
+            central_root = Path(
+                str(plan.get('central_stock_root') or run['central_root'])
+            ).resolve(strict=False)
+            if central_root != root:
+                cleanup_obsolete_structure(
+                    central_root,
+                    [src for src,_,_,_,_ in moved],
+                    [f['destination_absolute_path'] for f in [*plan['files'],*(plan.get('assets') or [])]],
+                    set(plan['event_ids']),
+                )
             for eid in plan['event_ids']:
                 document=build_event_document_from_db(database_path,workspace_path,job_id,eid)
                 if document:

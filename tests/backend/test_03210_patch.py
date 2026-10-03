@@ -6,12 +6,23 @@ from pathlib import Path
 from app.database import (
     create_planned_event,
     database_connection,
+    delete_planned_event,
     initialize_database,
 )
 from app.event_suggestions import list_event_suggestions
 from app.folder_import import build_folder_import_plan
 from app.free_stock_layout import FreeStockLayoutError, canonical_free_directory
 from app.sort_plan import build_event_sort_plan
+from app.sort_apply import (
+    CONFIRMATION_PHRASE,
+    execute_sort_run,
+    prepare_sort_run,
+)
+from app.workspace_reconcile import (
+    build_workspace_reconcile_plan,
+    execute_workspace_reconcile_run,
+    prepare_workspace_reconcile_run,
+)
 
 
 NOW_OLD = "2026-10-03T08:00:00+00:00"
@@ -311,3 +322,157 @@ def test_03210_later_in_range_family_still_creates_event_suggestion(
     assert suggestions[0]["target_event_id"] == "EVENT"
     assert suggestions[0]["target_status"] == "applied"
     assert suggestions[0]["family_ids"] == [in_range]
+
+
+
+def test_03210_delete_partial_day_merges_central_intervals_across_backups(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """Deleting an applied slice must merge central-stock edge folders again."""
+    monkeypatch.setenv(
+        "KAMERA_CONFIG",
+        str(tmp_path / "config" / "settings.json"),
+    )
+    database = tmp_path / "kamera.sqlite3"
+    workspace = tmp_path / "workspace"
+    central = workspace / "SD-Kartensicherungen"
+    work = tmp_path / "library-work"
+    compatibility = tmp_path / "compatibility"
+    central.mkdir(parents=True)
+    work.mkdir()
+    compatibility.mkdir()
+    (compatibility / "SD-Kartensicherungen").symlink_to(
+        central,
+        target_is_directory=True,
+    )
+    (compatibility / "Arbeitsbereich").symlink_to(
+        work,
+        target_is_directory=True,
+    )
+    initialize_database(database)
+
+    with database_connection(database) as connection:
+        _insert_job(connection, "FIRST", NOW_OLD)
+        _insert_job(connection, "SECOND", NOW_OLD)
+
+    family_ids = {
+        "first_before": _insert_family_file(
+            database, central, job_id="FIRST", key="first-before",
+            capture="2026-07-20T11:00:57",
+            filename="FIRST_BEFORE.JPG", data=b"1-before",
+        ),
+        "first_event": _insert_family_file(
+            database, central, job_id="FIRST", key="first-event",
+            capture="2026-07-20T14:30:00",
+            filename="FIRST_EVENT.JPG", data=b"1-event",
+        ),
+        "first_after": _insert_family_file(
+            database, central, job_id="FIRST", key="first-after",
+            capture="2026-07-20T22:14:23",
+            filename="FIRST_AFTER.JPG", data=b"1-after",
+        ),
+        "second_before": _insert_family_file(
+            database, central, job_id="SECOND", key="second-before",
+            capture="2026-07-20T11:01:04",
+            filename="SECOND_BEFORE.JPG", data=b"2-before",
+        ),
+        "second_event": _insert_family_file(
+            database, central, job_id="SECOND", key="second-event",
+            capture="2026-07-20T14:45:00",
+            filename="SECOND_EVENT.JPG", data=b"2-event",
+        ),
+        "second_after": _insert_family_file(
+            database, central, job_id="SECOND", key="second-after",
+            capture="2026-07-20T22:14:25",
+            filename="SECOND_AFTER.JPG", data=b"2-after",
+        ),
+    }
+
+    created = create_planned_event(
+        database,
+        "FIRST",
+        _event_preview([
+            family_ids["first_event"],
+            family_ids["second_event"],
+        ]),
+    )
+    event_id = str(created["parent_event"]["id"])
+
+    initial_plan = build_event_sort_plan(
+        database,
+        "FIRST",
+        event_id,
+        compatibility,
+    )
+    assert initial_plan["summary"]["ready"] is True, initial_plan["blockers"]
+    initial_run = prepare_sort_run(
+        database,
+        "FIRST",
+        event_id,
+        compatibility,
+        expected_plan_token=initial_plan["plan_token"],
+        confirmation_phrase=CONFIRMATION_PHRASE,
+    )
+    execute_sort_run(database, initial_run["id"], compatibility)
+
+    before_split = central / "2026" / "2026-07-20 · 00-00–13-59"
+    after_split = central / "2026" / "2026-07-20 · 15-01–23-59"
+    assert before_split.is_dir()
+    assert after_split.is_dir()
+    assert not (central / "2026" / "2026-07-20").exists()
+
+    prepared = delete_planned_event(database, "FIRST", event_id)
+    assert prepared["pending_delete"] is True
+
+    delete_plan = build_workspace_reconcile_plan(
+        database,
+        "FIRST",
+        event_id,
+        compatibility,
+    )
+    assert delete_plan["summary"]["ready"] is True, delete_plan["blockers"]
+    by_family = {
+        int(row["family_id"]): row
+        for row in delete_plan["files"]
+        if row.get("family_id") is not None
+    }
+    assert set(family_ids.values()) <= set(by_family)
+    assert {
+        str(by_family[fid]["physical_source_kind"])
+        for fid in (
+            family_ids["first_before"],
+            family_ids["first_after"],
+            family_ids["second_before"],
+            family_ids["second_after"],
+        )
+    } == {"central_stock"}
+    for fid in family_ids.values():
+        assert Path(
+            str(by_family[fid]["destination_relative_path"])
+        ).parent.as_posix() == "2026/2026-07-20"
+
+    delete_run = prepare_workspace_reconcile_run(
+        database,
+        "FIRST",
+        event_id,
+        compatibility,
+        expected_plan_token=delete_plan["plan_token"],
+        confirmation_phrase=CONFIRMATION_PHRASE,
+    )
+    execute_workspace_reconcile_run(
+        database,
+        delete_run["id"],
+        compatibility,
+    )
+
+    merged = central / "2026" / "2026-07-20"
+    assert merged.is_dir()
+    assert len(list(merged.glob("*.JPG"))) == 6
+    assert not before_split.exists()
+    assert not after_split.exists()
+    with database_connection(database) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE id=?",
+            (event_id,),
+        ).fetchone()[0] == 0

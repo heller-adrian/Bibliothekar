@@ -8,6 +8,7 @@
 - Später importierte freie Aufnahmen werden bereits beim Import gegen die physische Ereignis-Timeline eingeordnet. Liegen sie außerhalb eines angewendeten/archivierten Ereignisses, landen sie direkt im passenden kanonischen freien Zeitordner statt erneut in einem vollständigen Tagesordner.
 - Liegt eine später importierte Aufnahme innerhalb eines bereits belegten Zeitraums, bleibt die bestehende Ereignis-Vorschlags-/Bestätigungslogik maßgeblich; die Datei wird nicht ungefragt einem Ereignis zugeordnet.
 - Regressionstests decken den Mehrsicherungs-Apply, den späteren Import in bestehende Randintervalle und die Zuordnungsvorschläge für tatsächlich in den Ereigniszeitraum fallende Folgeaufnahmen ab.
+- Wird ein angewendetes Teilzeit-Ereignis wieder gelöscht, löst der Reconcile Quellen nun dateiweise aus Bibliotheks-Arbeitsbereich oder globalem Central Stock auf. Die vorherigen Randintervalle werden wieder in den kanonischen freien Tagesordner zusammengeführt; leer gewordene Intervallordner werden nach verifizierter Verschiebung entfernt.
 
 
 ### 0.28.1-ui1 – Deep-Test UI/Workflow-Zwischenpatch
