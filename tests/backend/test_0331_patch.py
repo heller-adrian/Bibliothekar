@@ -10,6 +10,7 @@ from app.metadata_correction import (
     apply_metadata_correction,
     create_metadata_correction,
     metadata_area_paths,
+    reintegrate_library_metadata_family,
     scan_metadata_area,
 )
 from app.metadata_correction_ui import METADATA_CORRECTION_HTML
@@ -177,7 +178,7 @@ def test_0331_metadata_page_uses_shell_and_second_header():
     assert "Mehrfachkorrektur" in html
 
 
-def test_0331_library_correction_reintegrates_family_into_day_stock(
+def test_0331_library_correction_stays_undated_until_explicit_reintegration(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -282,7 +283,7 @@ def test_0331_library_correction_reintegrates_family_into_day_stock(
         library_id="library-a",
     )
     assert completed["status"] == "completed"
-    assert not source.exists()
+    assert source.exists()
 
     with database_connection(database) as connection:
         family = connection.execute(
@@ -302,8 +303,36 @@ def test_0331_library_correction_reintegrates_family_into_day_stock(
     assert file_row["review_status"] == "corrected"
     assert file_row["metadata_write_status"] == "written"
     assert file_row["source_size_bytes"] == len(payload)
-    assert not str(file_row["current_relative_path"]).startswith("Ohne_Datum/")
-    destination = central / str(file_row["current_relative_path"])
+    assert str(file_row["current_relative_path"]).startswith("Ohne_Datum/")
+    assert source.is_file()
+
+    after_write = scan_metadata_area(
+        area="library",
+        workspace_root=workspace,
+        library_id="library-a",
+        database_path=database,
+        library_name="Kamera",
+        allowed_job_ids={"JOB"},
+    )
+    assert after_write["files"][0]["reintegration_ready"] is True
+
+    reintegrated = reintegrate_library_metadata_family(
+        database,
+        workspace_root=workspace,
+        library_id="library-a",
+        family_id=family_id,
+    )
+    assert reintegrated["family_id"] == family_id
+    assert not source.exists()
+
+    with database_connection(database) as connection:
+        final_row = connection.execute(
+            "SELECT current_relative_path FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert final_row is not None
+    assert not str(final_row["current_relative_path"]).startswith("Ohne_Datum/")
+    destination = central / str(final_row["current_relative_path"])
     assert destination.is_file()
     assert destination.read_bytes() == payload
 
