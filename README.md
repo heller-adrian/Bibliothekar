@@ -94,8 +94,8 @@ Sammelordner einschließlich der aktuell gewählten Unterordnerstruktur.
 Die Seite **Metadatenkorrektur** besitzt den normalen Bibliothekar-Header und
 einen zweiten Reiterheader mit:
 
-- **Bibliothek** – zeigt den globalen freien `Ohne_Datum`-Bestand,
-  gruppiert nach der Bibliothek, aus deren Kameraimport die Familie stammt.
+- **Bibliothek** – zeigt den globalen freien `Ohne_Datum`-Bestand als
+  gemeinsame Liste, unabhängig davon, aus welcher Bibliothek der Kameraimport stammt.
 - **Allgemein** – verwendet direkt
   `/workspace/Metadatenkorrektur/Allgemein`.
 - **Mehrfachkorrektur** – in 0.33.5 bereits als geplanter Reiter sichtbar;
@@ -110,13 +110,15 @@ Offene oder blockierte Korrekturen werden im globalen Aufgabenbereich pro
 Metadaten-Reiter gebündelt statt als eine Aufgabe pro Datei dargestellt.
 
 Bei **Bibliothek** wird eine komplette Ohne-Datum-Dateifamilie eingefroren.
-Bibliothekar schreibt die korrigierte Aufnahmezeit auf Arbeitskopien, liest und
-prüft die Metadaten erneut, berechnet anschließend denselben kanonischen
-Tages-/Zeitbestand wie beim Kameraimport und übernimmt die geprüfte Familie
-dorthin. Erst nach erfolgreicher Zielprüfung verschwindet der alte
-`Ohne_Datum`-Pfad. Dateipfade, aktuelle SHA-256-Werte und Aufnahmezeiten
-werden danach in alle Bibliotheksprojektionen gespiegelt; der ursprüngliche
-Quellfingerprint bleibt erhalten.
+**Metadaten ändern** schreibt die korrigierte Aufnahmezeit auf Arbeitskopien,
+liest und prüft die Metadaten erneut und ersetzt erst danach die Dateien
+atomar am bisherigen `Ohne_Datum`-Ort. Die Familie bleibt dort sichtbar und
+wird als **Bereit zum Einsortieren** markiert. Erst der getrennte Befehl
+**In Tagesbestand einsortieren** berechnet denselben kanonischen
+Tages-/Zeitbestand wie beim Kameraimport, vergibt den normalen Bibliothekar-
+Dateinamen und verschiebt die geprüfte Familie dorthin. Dateipfade, aktuelle
+SHA-256-Werte und Aufnahmezeiten werden in alle Bibliotheksprojektionen
+gespiegelt; der ursprüngliche Quellfingerprint bleibt erhalten.
 
 Die Bibliotheks-Metadatenkorrektur erzeugt insbesondere **keine** Ordner
 `Bibliothek/main/Eingang/Ausgang`. Leere Überreste dieses 0.33.0-Entwurfs
