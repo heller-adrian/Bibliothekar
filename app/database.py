@@ -610,7 +610,7 @@ def list_imported_media_origins(
     exclude_job_id: str | None = None,
 ) -> list[dict[str, Any]]:
     conditions = [
-        "j.operation IN ('folder_import','sd_import')",
+        "j.operation IN ('folder_import','sd_import','metadata_multiple_import')",
         "j.state='completed'",
         "COALESCE(TRIM(f.sha256_original),'')<>''",
     ]
