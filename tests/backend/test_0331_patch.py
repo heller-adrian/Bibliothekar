@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import app.metadata_correction as metadata_correction
-from app.database import create_job, database_connection, initialize_database
+from app.database import create_job, database_connection, initialize_database, list_imported_media_origins
 from app.event_naming import normalize_event_naming, render_no_event_folder_name
 from app.global_stock import propagate_corrected_family
 from app.metadata_correction import (
@@ -362,3 +362,31 @@ def test_0331_corrected_family_state_is_propagated_without_touching_source_size(
     assert row["sha256_current"] == "NEW"
     assert row["selected_capture_time"] == "2026-07-20T14:15:30"
     assert row["family_time"] == "2026-07-20T14:15:30"
+
+def test_0331_reimport_duplicate_origin_keeps_original_source_size(tmp_path: Path):
+    database = tmp_path / "kamera.sqlite3"
+    initialize_database(database)
+    _family_id, file_id = _insert_undated_family(database, payload=b"original-size")
+    with database_connection(database) as connection:
+        connection.execute(
+            """UPDATE jobs
+               SET state='completed',stage='completed',
+                   finished_at='2026-10-03T12:30:00+00:00',
+                   updated_at='2026-10-03T12:30:00+00:00'
+               WHERE id='JOB'"""
+        )
+        connection.execute(
+            """UPDATE files
+               SET source_size_bytes=?,
+                   size_bytes=?,
+                   sha256_original='SOURCE-HASH',
+                   sha256_current='CORRECTED-HASH'
+               WHERE id=?""",
+            (len(b"original-size"), 999, file_id),
+        )
+
+    origins = list_imported_media_origins(database)
+    assert len(origins) == 1
+    assert origins[0]["size_bytes"] == len(b"original-size")
+    assert origins[0]["sha256"] == "SOURCE-HASH"
+
