@@ -30,6 +30,7 @@ from app.global_stock import (
     migrate_main_free_stock_to_central,
     project_all_imports,
     project_import_job,
+    propagate_corrected_family,
     synchronize_central_stock_projections,
 )
 from app.canonical_membership import resolve_payload_membership
@@ -92,6 +93,7 @@ from app.metadata_correction import (
     apply_metadata_correction,
     cancel_metadata_correction,
     create_metadata_correction,
+    get_metadata_correction,
     list_metadata_corrections,
     metadata_area_paths,
     scan_metadata_area,
@@ -194,6 +196,7 @@ from app.library_registry import (
     set_library_active,
     remove_library_registration,
     unregister_library,
+    list_library_import_job_ids,
 )
 from app.library_context import (
     LibraryContext,
@@ -251,7 +254,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.33.0"
+DEPLOYMENT_VERSION = "0.33.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1924,7 +1927,6 @@ def _available_families_for_event_payload(
 
 def _storage_settings_state() -> dict[str, Any]:
     names = load_storage_settings()
-    metadata_correction = load_metadata_correction_settings()
     paths = storage_paths(WORKSPACE_PATH)
     libraries = []
     for row in list_libraries(
@@ -1951,7 +1953,6 @@ def _storage_settings_state() -> dict[str, Any]:
         "backup_root": str(paths["backup_root"]),
         "workspaces_root": str(paths["workspaces_root"]),
         "metadata_root": str(paths["metadata_root"]),
-        "metadata_general_root": str(metadata_correction.get("general_root") or ""),
         "libraries": libraries,
     }
 
@@ -2171,65 +2172,31 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/settings/metadata-correction", tags=["Einstellungen"])
 def api_get_metadata_correction_settings() -> dict[str, Any]:
-    settings = load_metadata_correction_settings()
-    raw = str(settings.get("general_root") or "")
-    available = False
-    writable = False
-    if raw:
-        root = Path(raw)
-        available = root.is_dir()
-        writable = available and os.access(root, os.R_OK | os.W_OK | os.X_OK)
+    general = (
+        storage_paths(WORKSPACE_PATH)["metadata_root"] / "Allgemein"
+    ).resolve(strict=False)
     return {
-        **settings,
-        "available": available,
-        "writable": writable,
+        "general_root": str(general),
+        "managed": True,
+        "available": general.is_dir(),
+        "writable": general.is_dir() and os.access(general, os.R_OK | os.W_OK | os.X_OK),
     }
 
 
 @app.put("/api/settings/metadata-correction", tags=["Einstellungen"])
 def api_set_metadata_correction_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    raw = str(payload.get("general_root") or "").strip()
-    if raw:
-        root = Path(raw).expanduser()
-        if not root.is_absolute():
-            raise HTTPException(
-                status_code=422,
-                detail="Der Host-Path für „Allgemein“ muss absolut sein.",
-            )
-        root = root.resolve(strict=False)
-        workspace = WORKSPACE_PATH.expanduser().resolve(strict=False)
-        if (
-            root == workspace
-            or root in workspace.parents
-            or workspace in root.parents
-        ):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "„Allgemein“ benötigt einen eigenen TrueNAS-Host-Path "
-                    "außerhalb des Kamera-Workspace-Mounts."
-                ),
-            )
-        if not root.is_dir():
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Der Host-Path für „Allgemein“ ist nicht verfügbar. "
-                    "Bitte den RW-Host-Path zuerst in TrueNAS mounten."
-                ),
-            )
-        if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-            raise HTTPException(
-                status_code=422,
-                detail="Der Host-Path für „Allgemein“ ist nicht vollständig beschreibbar.",
-            )
-
-    # Validate first and persist only after every mount/path check passed.
-    # A mistyped TrueNAS path must never poison the running configuration.
-    try:
-        save_metadata_correction_settings({"general_root": raw})
-    except StorageSettingsError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+    # Compatibility endpoint for 0.33.0 clients. Since 0.33.1 the location is
+    # managed below /workspace/Metadatenkorrektur and cannot be redirected to
+    # a technical "main" or external input/output tree.
+    requested = str(payload.get("general_root") or "").strip()
+    managed = str(
+        (storage_paths(WORKSPACE_PATH)["metadata_root"] / "Allgemein").resolve(strict=False)
+    )
+    if requested and Path(requested).expanduser().resolve(strict=False) != Path(managed):
+        raise HTTPException(
+            status_code=422,
+            detail="„Allgemein“ wird automatisch im Metadatenkorrektur-Ordner verwaltet.",
+        )
     return api_get_metadata_correction_settings()
 
 
@@ -2910,7 +2877,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             is_main=first_library,
             is_active=True,
             settings={
-                "created_by": "bibliothekar-0.33.0",
+                "created_by": "bibliothekar-0.33.1",
                 "projected_imports": projection,
                 "managed_default_work_root": bool(
                     checked.get("managed_default_work_root")
@@ -3685,11 +3652,13 @@ def assistant_interface() -> HTMLResponse:
     response_class=HTMLResponse,
     tags=["Oberfläche"],
 )
-def metadata_correction_interface() -> HTMLResponse:
+def metadata_correction_interface(area: str = "library") -> HTMLResponse:
+    subarea = area if area in {"library", "general", "multiple"} else "library"
     return HTMLResponse(
         content=apply_shell(
             METADATA_CORRECTION_HTML,
             active_area="metadata",
+            subarea=subarea,
         ),
         status_code=200,
     )
@@ -7200,93 +7169,230 @@ def api_workspace_summary(
         },
     }
 
+def _metadata_library_contexts() -> list[LibraryContext]:
+    return list_active_library_contexts(REGISTRY_DATABASE_FILE)
+
+
+def _metadata_task_location(
+    correction_id: str,
+) -> tuple[LibraryContext, dict[str, Any]]:
+    for context in _metadata_library_contexts():
+        try:
+            task = get_metadata_correction(context.database_path, correction_id)
+        except MetadataCorrectionError:
+            continue
+        return context, task
+    raise MetadataCorrectionError("Metadatenauftrag wurde nicht gefunden.")
+
+
 @app.get("/api/metadata-correction/areas", tags=["Metadatenkorrektur"])
 def api_metadata_correction_areas() -> dict[str, Any]:
-    context = current_library_context()
-    areas: dict[str, Any] = {}
-    for area in ("library", "general"):
-        try:
-            paths = metadata_area_paths(
-                area=area,
-                workspace_root=context.workspace_root,
-                library_id=context.library_id,
-                create=True,
-            )
-            areas[area] = {
-                "root": str(paths["root"]),
-                "input_root": str(paths["input_root"]),
-                "output_root": str(paths["output_root"]),
+    current = current_library_context()
+    general = metadata_area_paths(
+        area="general",
+        workspace_root=current.workspace_root,
+        library_id=current.library_id,
+        create=True,
+    )
+    library_paths = metadata_area_paths(
+        area="library",
+        workspace_root=current.workspace_root,
+        library_id=current.library_id,
+        create=True,
+    )
+    return {
+        "areas": {
+            "library": {
                 "available": True,
-            }
-        except MetadataCorrectionError as error:
-            areas[area] = {
+                "grouped_by_library": True,
+                "source_root": str(library_paths["input_root"]),
+                "destination_root": str(library_paths["output_root"]),
+            },
+            "general": {
+                "available": True,
+                "root": str(general["root"]),
+                "input_root": str(general["input_root"]),
+                "output_root": str(general["output_root"]),
+            },
+            "multiple": {
                 "available": False,
-                "error": str(error),
-                "input_root": "",
-                "output_root": "",
-            }
-    return {"library_id": context.library_id, "areas": areas}
+                "planned_version": "0.34.0",
+                "root": str(
+                    (
+                        storage_paths(current.workspace_root)["metadata_root"]
+                        / "Mehrfachkorrektur"
+                    ).resolve(strict=False)
+                ),
+            },
+        }
+    }
 
 
 @app.get("/api/metadata-correction/scan", tags=["Metadatenkorrektur"])
 def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
-    context = current_library_context()
+    kind = str(area or "library").strip().lower()
     try:
-        return scan_metadata_area(
-            area=area,
-            workspace_root=context.workspace_root,
-            library_id=context.library_id,
-        )
+        if kind == "general":
+            context = current_library_context()
+            return scan_metadata_area(
+                area="general",
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                database_path=context.database_path,
+                library_name=context.display_name,
+            )
+        if kind != "library":
+            raise MetadataCorrectionError(
+                "Mehrfachkorrektur wird mit Version 0.34.0 aktiviert."
+            )
+
+        groups: list[dict[str, Any]] = []
+        flat: list[dict[str, Any]] = []
+        for context in _metadata_library_contexts():
+            job_ids = set(
+                list_library_import_job_ids(
+                    REGISTRY_DATABASE_FILE,
+                    context.library_id,
+                )
+            )
+            group = scan_metadata_area(
+                area="library",
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                database_path=context.database_path,
+                library_name=context.display_name,
+                allowed_job_ids=job_ids,
+            )
+            groups.append(group)
+            flat.extend(group.get("files") or [])
+
+        return {
+            "area": "library",
+            "groups": groups,
+            "files": flat,
+            "summary": {
+                "library_count": len(groups),
+                "family_count": len(flat),
+                "file_count": sum(
+                    int(group.get("summary", {}).get("file_count") or 0)
+                    for group in groups
+                ),
+            },
+        }
     except (MetadataCorrectionError, MetadataError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.get("/api/metadata-correction/tasks", tags=["Metadatenkorrektur"])
 def api_metadata_correction_tasks(include_completed: bool = False) -> dict[str, Any]:
-    tasks = list_metadata_corrections(
-        current_database_file(),
-        include_completed=include_completed,
-    )
+    tasks: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for context in _metadata_library_contexts():
+        for task in list_metadata_corrections(
+            context.database_path,
+            include_completed=include_completed,
+        ):
+            task_id = str(task.get("id") or "")
+            if not task_id or task_id in seen:
+                continue
+            seen.add(task_id)
+            item = dict(task)
+            item["library_id"] = context.library_id
+            item["library_name"] = context.display_name
+            tasks.append(item)
+    tasks.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     return {"tasks": tasks, "count": len(tasks)}
 
 
 @app.post("/api/metadata-correction/tasks", tags=["Metadatenkorrektur"], status_code=201)
 def api_prepare_metadata_correction(payload: dict[str, Any]) -> dict[str, Any]:
-    context = current_library_context()
+    area = str(payload.get("area") or "library").strip().lower()
     try:
-        task = create_metadata_correction(
-            current_database_file(),
-            area=str(payload.get("area") or "library"),
-            relative_path=str(payload.get("relative_path") or ""),
-            proposed_datetime=payload.get("proposed_datetime"),
-            workspace_root=context.workspace_root,
-            library_id=context.library_id,
-        )
-    except (MetadataCorrectionError, MetadataError) as error:
+        if area == "library":
+            library_id = str(payload.get("library_id") or "").strip()
+            if not library_id:
+                raise MetadataCorrectionError("Bibliothek für die Ohne-Datum-Familie fehlt.")
+            context = resolve_library_context(REGISTRY_DATABASE_FILE, library_id)
+            job_ids = set(
+                list_library_import_job_ids(
+                    REGISTRY_DATABASE_FILE,
+                    context.library_id,
+                )
+            )
+            task = create_metadata_correction(
+                context.database_path,
+                area="library",
+                relative_path=str(payload.get("relative_path") or ""),
+                family_id=int(payload.get("family_id") or 0),
+                proposed_datetime=payload.get("proposed_datetime"),
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                library_name=context.display_name,
+                allowed_job_ids=job_ids,
+            )
+        elif area == "general":
+            context = current_library_context()
+            task = create_metadata_correction(
+                context.database_path,
+                area="general",
+                relative_path=str(payload.get("relative_path") or ""),
+                proposed_datetime=payload.get("proposed_datetime"),
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                library_name=context.display_name,
+            )
+        else:
+            raise MetadataCorrectionError(
+                "Mehrfachkorrektur wird mit Version 0.34.0 aktiviert."
+            )
+    except (MetadataCorrectionError, MetadataError, LibraryRegistryError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return {"task": task}
 
 
 @app.post("/api/metadata-correction/tasks/{correction_id}/apply", tags=["Metadatenkorrektur"])
 def api_apply_metadata_correction(correction_id: str) -> dict[str, Any]:
-    context = current_library_context()
     try:
+        context, before = _metadata_task_location(correction_id)
         task = apply_metadata_correction(
-            current_database_file(),
+            context.database_path,
             correction_id,
             workspace_root=context.workspace_root,
             library_id=context.library_id,
         )
-    except MetadataCorrectionError as error:
+        if str(task.get("area") or "") == "library" and str(task.get("status") or "") == "completed":
+            detected = dict(task.get("detected") or {})
+            job_id = str(detected.get("job_id") or "")
+            family_key = str(detected.get("family_key") or "")
+            if job_id and family_key:
+                databases = [
+                    Path(str(row["database_path"]))
+                    for row in list_libraries(
+                        REGISTRY_DATABASE_FILE,
+                        active_only=False,
+                        registered_only=True,
+                    )
+                    if str(row.get("database_path") or "").strip()
+                ]
+                propagation = propagate_corrected_family(
+                    context.database_path,
+                    databases,
+                    job_id=job_id,
+                    family_key=family_key,
+                )
+                synchronize_global_central_stock()
+                task["projection_sync"] = propagation
+        return {"task": task}
+    except (MetadataCorrectionError, GlobalStockError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    return {"task": task}
 
 
 @app.post("/api/metadata-correction/tasks/{correction_id}/cancel", tags=["Metadatenkorrektur"])
 def api_cancel_metadata_correction(correction_id: str) -> dict[str, Any]:
     try:
+        context, _task = _metadata_task_location(correction_id)
         task = cancel_metadata_correction(
-            current_database_file(),
+            context.database_path,
             correction_id,
         )
     except MetadataCorrectionError as error:
