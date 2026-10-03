@@ -13,6 +13,11 @@
 - Tagesgruppen im Arbeitsbereich unterstützen ebenfalls **Alle auswählen/Auswahl aufheben** und Shift-Bereichsauswahl.
 - Der Import- und Prüfverlauf zeigt zunächst höchstens fünf Einträge. Weitere Einträge werden über **Mehr anzeigen** in Fünferblöcken eingeblendet.
 - Regressionstests sichern den zweistufigen Ohne-Datum-Ablauf, die Aufgabenbündelung, Auswahlbedienung und den kompakten Importverlauf ab.
+- Eine Mehrfachauswahl in der Metadatenkorrektur übernimmt denselben bewusst eingegebenen Datum-/Uhrzeitwert jetzt auf alle ausgewählten Einträge; die anschließende Einsortierung wird nur angeboten, wenn die gesamte Auswahl korrigiert und bereit ist. Dadurch kann keine Teilmenge unbemerkt im `Ohne_Datum`-Bestand zurückbleiben.
+- Shift-Auswahl funktioniert in Metadatenkorrektur und Tagesordnern über die gesamte Karte, ohne dabei Browser-Text zu markieren.
+- Die aktive Metadatenkarte verwendet einen innenliegenden Auswahlrahmen statt eines nach außen überstehenden Outlines.
+- Die redundanten Header-Schalter **Alle Tage** und **Auswahl aufheben** wurden aus dem Arbeitsbereich entfernt; die Auswahlsteuerung sitzt direkt bei den Tagesordnern.
+- Sichtbare Versionshinweise in den erklärenden Metadaten-Texten wurden entfernt.
 
 ### 0.33.4 – Startup-Backfill und Import-Worker stabilisieren
 
