@@ -4852,6 +4852,58 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 'href': f"/workspace?job={row['anchor_job_id']}&task=free",
             })
 
+        # Ohne-Datum-Familien sind ein eigener, global sichtbarer Prüfschritt.
+        # Der physische Bestand liegt zentral unter SD-Kartensicherungen und
+        # soll deshalb nicht pro Importjob oder Bibliothek als Aufgabe
+        # vervielfacht werden.
+        undated = connection.execute(
+            """SELECT
+                   COUNT(DISTINCT CASE
+                       WHEN ff.selected_capture_time IS NULL THEN ff.id
+                   END) AS review_n,
+                   COUNT(DISTINCT CASE
+                       WHEN ff.selected_capture_time IS NOT NULL THEN ff.id
+                   END) AS ready_n
+               FROM file_families ff
+               JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
+               WHERE f.current_root_kind='shared_workspace'
+                 AND (
+                   f.current_relative_path='Ohne_Datum'
+                   OR f.current_relative_path LIKE 'Ohne_Datum/%'
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM event_assignments ea
+                   JOIN events e ON e.id=ea.event_id
+                   WHERE ea.family_id=ff.id
+                     AND e.status IN ('draft','planned','applied','archived')
+                 )"""
+        ).fetchone()
+        review_n = int(undated["review_n"] or 0) if undated else 0
+        ready_n = int(undated["ready_n"] or 0) if undated else 0
+        if review_n or ready_n:
+            if review_n:
+                title = "Prüffälle bearbeiten"
+            else:
+                title = "Korrigierte Aufnahmen einsortieren"
+            detail_parts = []
+            if review_n:
+                detail_parts.append(
+                    f"{review_n} Prüffall" + ("" if review_n == 1 else "fälle")
+                )
+            if ready_n:
+                detail_parts.append(
+                    f"{ready_n} bereit zum Einsortieren"
+                )
+            tasks.append({
+                "kind": "metadata_review",
+                "title": title,
+                "detail": " · ".join(detail_parts),
+                "count": 1,
+                "review_count": review_n,
+                "ready_count": ready_n,
+                "href": "/metadata-correction?area=library",
+            })
+
         # Freie Familien sind nur dann eine Aufgabe, wenn sie nicht bereits aus
         # einer Ereignisänderung stammen (diese besitzen oben ihre eigene
         # Neu-Zuordnungsaufgabe). So entstehen keine Doppelmeldungen.
@@ -4870,6 +4922,12 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                ORDER BY first_created"""
         ).fetchall():
             area = str(row["area"])
+            # Bibliotheks-Prüffälle und korrigierte Ohne-Datum-Familien werden
+            # oben als eine fachliche Aufgabe dargestellt. Ein blockierter
+            # Einzelauftrag bleibt auf der Metadatenseite sichtbar, soll den
+            # globalen Aufgabenindikator aber nicht doppeln.
+            if area == "library":
+                continue
             label = "Allgemein" if area == "general" else "Bibliothek"
             count = int(row["n"] or 0)
             blocked = int(row["blocked_n"] or 0)
