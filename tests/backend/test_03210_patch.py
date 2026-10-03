@@ -222,7 +222,7 @@ def test_03210_later_import_uses_existing_free_interval_folder(tmp_path: Path):
                )
                VALUES ('EVENT','FIRST','parent','Test 1',
                        '2026-07-20T14:00:00','2026-07-20T15:00:59',
-                       1,'07-20 - Test 1','applied',?,?,'event',2,?)""",
+                       0,'07-20 - Test 1','applied',?,?,'event',2,?)""",
             (NOW_OLD, NOW_OLD, NOW_OLD),
         )
 
@@ -293,7 +293,7 @@ def test_03210_later_in_range_family_still_creates_event_suggestion(
                )
                VALUES ('EVENT','FIRST','parent','Test 1',
                        '2026-07-20T14:00:00','2026-07-20T15:00:59',
-                       1,'07-20 - Test 1','applied',?,?,'event',2,?)""",
+                       0,'07-20 - Test 1','applied',?,?,'event',2,?)""",
             (NOW_OLD, NOW_OLD, NOW_OLD),
         )
 

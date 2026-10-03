@@ -862,15 +862,20 @@ def build_event_sort_plan(
         )
         affected_days = affected_days_for_event(connection, event_id)
         known_file_ids = {int(row["id"]) for row in file_rows}
-        for free_row in free_file_rows(
-            connection,
-            affected_days,
-            job_id=job_id,
-            # Central free stock is library-wide across import jobs. Initial
-            # apply must therefore renormalize free files from every backup on
-            # the affected day, not only the event's anchor job.
-            shared_library=True,
-        ):
+        # Always include the anchor job for legacy/local source roots and, in
+        # addition, the global central stock across all import jobs. This keeps
+        # old job_root fixtures valid while making the physical free layout
+        # library-wide for current multi-backup imports.
+        free_rows_by_id: dict[int, dict[str, Any]] = {}
+        for shared_library in (False, True):
+            for free_row in free_file_rows(
+                connection,
+                affected_days,
+                job_id=job_id,
+                shared_library=shared_library,
+            ):
+                free_rows_by_id[int(free_row["id"])] = free_row
+        for free_row in free_rows_by_id.values():
             if int(free_row["id"]) not in known_file_ids:
                 file_rows.append(free_row)
         normalized_file_rows: list[dict[str, Any]] = []
