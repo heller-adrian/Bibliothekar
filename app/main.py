@@ -1400,6 +1400,11 @@ def worker_loop() -> None:
                 DATABASE_FILE,
                 operation="folder_import",
             )
+            if global_import is None:
+                global_import = claim_next_job(
+                    DATABASE_FILE,
+                    operation="metadata_multiple_import",
+                )
             if global_import is not None:
                 claimed = (MAIN_LIBRARY_CONTEXT, global_import)
             else:
@@ -7350,6 +7355,12 @@ def api_metadata_correction_areas() -> dict[str, Any]:
         library_id=current.library_id,
         create=True,
     )
+    multiple = metadata_area_paths(
+        area="multiple",
+        workspace_root=current.workspace_root,
+        library_id=current.library_id,
+        create=True,
+    )
     library_paths = metadata_area_paths(
         area="library",
         workspace_root=current.workspace_root,
@@ -7371,14 +7382,10 @@ def api_metadata_correction_areas() -> dict[str, Any]:
                 "output_root": str(general["output_root"]),
             },
             "multiple": {
-                "available": False,
-                "planned_version": "0.34.0",
-                "root": str(
-                    (
-                        storage_paths(current.workspace_root)["metadata_root"]
-                        / "Mehrfachkorrektur"
-                    ).resolve(strict=False)
-                ),
+                "available": True,
+                "root": str(multiple["root"]),
+                "input_root": str(multiple["input_root"]),
+                "output_root": str(multiple["output_root"]),
             },
         }
     }
@@ -7388,19 +7395,17 @@ def api_metadata_correction_areas() -> dict[str, Any]:
 def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
     kind = str(area or "library").strip().lower()
     try:
-        if kind == "general":
+        if kind in {"general", "multiple"}:
             context = current_library_context()
             return scan_metadata_area(
-                area="general",
+                area=kind,
                 workspace_root=context.workspace_root,
                 library_id=context.library_id,
                 database_path=context.database_path,
                 library_name=context.display_name,
             )
         if kind != "library":
-            raise MetadataCorrectionError(
-                "Mehrfachkorrektur ist noch nicht aktiviert."
-            )
+            raise MetadataCorrectionError("Unbekannter Metadatenbereich.")
 
         groups: list[dict[str, Any]] = []
         flat: list[dict[str, Any]] = []
@@ -7447,6 +7452,88 @@ def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
         }
     except (MetadataCorrectionError, MetadataError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/metadata-correction/multiple/preview", tags=["Metadatenkorrektur"])
+def api_preview_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    context = current_library_context()
+    try:
+        preview = preview_multiple_metadata_correction(
+            workspace_root=context.workspace_root,
+            library_id=context.library_id,
+            reference_relative_path=str(
+                payload.get("reference_relative_path") or ""
+            ),
+            proposed_datetime=payload.get("proposed_datetime"),
+        )
+        return {"preview": preview}
+    except (MetadataCorrectionError, MetadataError, ValueError, OSError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/metadata-correction/multiple/apply", tags=["Metadatenkorrektur"])
+def api_apply_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    context = current_library_context()
+    mode = str(payload.get("mode") or "apply").strip().lower()
+    if mode not in {"apply", "apply_and_import"}:
+        raise HTTPException(status_code=422, detail="Unbekannter Mehrfachkorrektur-Modus.")
+
+    try:
+        result = apply_multiple_metadata_correction(
+            workspace_root=context.workspace_root,
+            library_id=context.library_id,
+            reference_relative_path=str(
+                payload.get("reference_relative_path") or ""
+            ),
+            proposed_datetime=payload.get("proposed_datetime"),
+            expected_preview_fingerprint=str(
+                payload.get("preview_fingerprint") or ""
+            ),
+        )
+
+        response: dict[str, Any] = {
+            "applied": True,
+            "result": result,
+        }
+        if mode == "apply_and_import":
+            blocker = _folder_import_runtime_blocker()
+            if blocker:
+                raise MetadataCorrectionError(blocker)
+
+            source_paths = metadata_area_paths(
+                area="multiple",
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                create=True,
+            )
+            source = source_paths["root"]
+            signature = quick_source_signature(source)
+            now = datetime.now().astimezone()
+            job_id = now.strftime("MULTI_IMPORT_%Y%m%d_%H%M%S_%f")
+            job = create_job(
+                DATABASE_FILE,
+                job_id=job_id,
+                kind="sd_import",
+                trigger_type="manual",
+                source_path=str(source),
+                working_path=str(workspace_backup_root(WORKSPACE_PATH)),
+                operation="metadata_multiple_import",
+                source_volume_label="Mehrfachkorrektur",
+                source_signature=signature,
+                source_device_id=None,
+            )
+            response["import_queued"] = True
+            response["job"] = job
+        return response
+    except (
+        MetadataCorrectionError,
+        MetadataError,
+        GlobalStockError,
+        LibraryRegistryError,
+        ValueError,
+        OSError,
+    ) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/api/metadata-correction/correct", tags=["Metadatenkorrektur"])
