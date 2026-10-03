@@ -27,6 +27,7 @@ from app.ui_shell import apply_shell
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
 from app.global_stock import (
+    GlobalStockError,
     migrate_main_free_stock_to_central,
     project_all_imports,
     project_import_job,
