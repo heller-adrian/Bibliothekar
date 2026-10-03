@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 0.33.3 – TrueNAS-sichere Metadaten-Arbeitskopien
+
+- Die Metadatenkorrektur verwendet für ihre drei internen Kopierstellen ausschließlich `shutil.copyfile()` statt `shutil.copy2()`. Damit werden auf TrueNAS/ZFS keine Modus-, ACL- oder Ownership-Metadaten der Quelldatei auf temporäre Arbeitsdateien übertragen.
+- Der bei allgemeinen Einzelkorrekturen beobachtete Fehler `[Errno 1] Operation not permitted` beim Erzeugen der versteckten `.bibliothekar-…`-Arbeitsdatei wird dadurch beseitigt.
+- Derselbe Schutz gilt für Bibliothekskorrekturen: Sowohl `Ohne_Datum` → Arbeitskopie als auch verifizierte Arbeitskopie → kanonischer Zielbestand verwenden nur Nutzdatenkopien und erben die Zielordnerrechte.
+- Regressionstests verbieten `shutil.copy2()` innerhalb der Metadatenkorrektur und simulieren ausdrücklich einen TrueNAS-artigen EPERM-Fehler, während die direkte allgemeine Korrektur weiterhin erfolgreich durchläuft.
+- Es werden keine ACLs, Eigentümer oder Rechte gelockert; insbesondere sind keine `chmod`-/`chown`-Workarounds erforderlich.
+
 ### 0.33.2 – Direkte Metadatenkorrektur und Aufgabenbereinigung
 
 - Die normale Einzelkorrektur wird mit **Metadaten ändern** direkt ausgeführt. Der sichere Ablauf bleibt unverändert: Ausgangszustand einfrieren, Arbeitskopie erzeugen, mit ExifTool schreiben, erneut lesen und verifizieren und erst danach atomar ersetzen bzw. eine Ohne-Datum-Familie in den kanonischen freien Bestand reintegrieren.
