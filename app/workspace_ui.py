@@ -1431,6 +1431,26 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     const noEventButton =
       document.getElementById("no-event-button");
+    let noEventLabel = "Ohne Ereignis";
+
+    function applyNoEventLabel(value) {
+      noEventLabel = String(value || "Ohne Ereignis").trim() || "Ohne Ereignis";
+      if (noEventButton) noEventButton.textContent = noEventLabel;
+      if (existingNoEventButton) existingNoEventButton.textContent = "Zu bestehendem " + noEventLabel;
+    }
+
+    async function loadEventNamingSettings() {
+      try {
+        const data = await getJson("/api/settings/event-naming");
+        applyNoEventLabel(data.no_event_label);
+      } catch (_) {
+        applyNoEventLabel("Ohne Ereignis");
+      }
+    }
+
+    document.addEventListener("bibliothekar:event-naming-updated", event => {
+      applyNoEventLabel(event.detail?.no_event_label);
+    });
 
     const statusElement =
       document.getElementById("status");
@@ -3108,9 +3128,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       if(["no_event","existing_no_event"].includes(dialogMode)){
         const months=[...new Set(segs.map(seg=>String(seg.day_key||"").slice(0,7)).filter(Boolean))];
-        eventName.value=months.length===1
-          ? String(months[0]).slice(5,7)+" - Ohne Ereignis"
-          : "Ohne Ereignis";
+        eventName.value=noEventLabel;
         if(months.length>1){
           dialogError.hidden=false;
           dialogError.textContent="„Ohne Ereignis“ darf nur innerhalb eines Kalendermonats angelegt werden. Bitte die Monate getrennt zuordnen.";
@@ -3174,10 +3192,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     function activateNoEventTarget(target) {
       activeNoEventTarget=target || null;
       if (!activeNoEventTarget) {
-        dialogTitle.textContent="Als „Ohne Ereignis“ zuordnen";
+        dialogTitle.textContent="Als „"+noEventLabel+"“ zuordnen";
         return;
       }
-      dialogTitle.textContent="„Ohne Ereignis“ fortführen";
+      dialogTitle.textContent="„"+noEventLabel+"“ fortführen";
       const currentNew=selectedNoEventSegments(false).filter(seg=>!seg._existing).map(seg=>({...seg,_new:true}));
       const existing=(activeNoEventTarget.segments||[]).map(seg=>({
         day_key:seg.day_key,start_time:seg.start_time,end_time:seg.end_time,
@@ -3208,7 +3226,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         if (!target) {
           activeNoEventTarget=null;
           existingNoEventTargetRow.hidden=true;
-          dialogTitle.textContent="Als „Ohne Ereignis“ zuordnen";
+          dialogTitle.textContent="Als „"+noEventLabel+"“ zuordnen";
           return;
         }
         existingNoEventTargetRow.hidden=false;
@@ -3582,7 +3600,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       dialogMode=mode;const dated=selectedDatedGroups(),noEvent=mode==="no_event"||mode==="existing_no_event",existingNoEvent=mode==="existing_no_event";activeNoEventTarget=null;
       const parentCandidates=noEvent?[]:plannedParentCandidates(dated);existingParentRow.hidden=noEvent||parentCandidates.length===0;
       if(!existingParentRow.hidden){existingParentEvent.innerHTML=`<option value="">Neues Ereignis anlegen</option>`+parentCandidates.map(parent=>`<option value="${escapeHtml(parent.id)}">${escapeHtml(parent.name)} · ${escapeHtml(String(parent.start_datetime||"").slice(0,10))}</option>`).join("");existingParentEvent.value="";}else existingParentEvent.innerHTML="";
-      eventName.value=noEvent?"Ohne Ereignis":"";eventName.disabled=noEvent;dialogTitle.textContent=existingNoEvent?"Zu bestehendem „Ohne Ereignis“ hinzufügen":(noEvent?"Als „Ohne Ereignis“ zuordnen":"Ereignis erstellen");
+      eventName.value=noEvent?noEventLabel:"";eventName.disabled=noEvent;dialogTitle.textContent=existingNoEvent?("Zu bestehendem „"+noEventLabel+"“ hinzufügen"):(noEvent?("Als „"+noEventLabel+"“ zuordnen"):"Ereignis erstellen");
       activeExtension=null;
       eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";
       eventStartDate.disabled=false;eventStartTime.disabled=false;eventEndDate.disabled=false;eventEndTime.disabled=false;eventStartDate.removeAttribute("min");eventStartDate.removeAttribute("max");eventEndDate.removeAttribute("min");eventEndDate.removeAttribute("max");
@@ -3957,6 +3975,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       () => openEventDialog("event")
     );
 
+    loadEventNamingSettings();
+
     existingNoEventButton?.addEventListener("click", () => openEventDialog("no_event"));
 
     noEventButton.addEventListener(
@@ -3979,7 +3999,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       // zuvor gewählten Sammlung übernommenen UI-Zustand vollständig lösen.
       // Zeitblöcke sind nur aus den sichtbaren Tagessegmenten abgeleitet.
       activeNoEventTarget=null;
-      dialogTitle.textContent="Als „Ohne Ereignis“ zuordnen";
+      dialogTitle.textContent="Als „"+noEventLabel+"“ zuordnen";
       renderNoEventSegmentEditor([]);
       syncNoEventRangeDisplayFromSegments();
       eventStartDate.value="";
