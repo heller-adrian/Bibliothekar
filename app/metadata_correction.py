@@ -1285,7 +1285,7 @@ def reintegrate_library_metadata_family(
         / ("META_SORT_" + uuid.uuid4().hex.upper())
     ).resolve(strict=False)
     work.mkdir(parents=True, exist_ok=False)
-    moved: list[tuple[Path, Path]] = []
+    moved: list[tuple[Path, Path, Path]] = []
 
     try:
         prepared: list[dict[str, Any]] = []
