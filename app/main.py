@@ -978,6 +978,17 @@ def process_claimed_job(
                 raise RuntimeError("Ordnerimport besitzt keinen Quellpfad.")
             source = Path(str(source_value))
             managed_multiple_import = operation == "metadata_multiple_import"
+            if managed_multiple_import:
+                expected_multiple_root = metadata_area_paths(
+                    area="multiple",
+                    workspace_root=workspace_path,
+                    library_id=context.library_id,
+                    create=True,
+                )["root"].resolve(strict=False)
+                if source.resolve(strict=False) != expected_multiple_root:
+                    raise RuntimeError(
+                        "Mehrfachkorrektur-Import verweist auf einen unerwarteten Quellordner."
+                    )
 
             def persist_metadata(
                 analysis: dict[str, Any],
