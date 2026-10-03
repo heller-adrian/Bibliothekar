@@ -232,7 +232,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.32.10"
+DEPLOYMENT_VERSION = "0.32.11"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -2750,7 +2750,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             is_main=first_library,
             is_active=True,
             settings={
-                "created_by": "bibliothekar-0.32.10",
+                "created_by": "bibliothekar-0.32.11",
                 "projected_imports": projection,
                 "managed_default_work_root": bool(
                     checked.get("managed_default_work_root")
@@ -5817,6 +5817,11 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                     ).fetchall()
                 archived_family_ids = {int(row["family_id"]) for row in archived_rows}
 
+            globally_blocked_family_ids = blocked_family_ids(
+                REGISTRY_DATABASE_FILE,
+                database_path=current_database_file(),
+                library_id=current_library_context().library_id,
+            )
             editable_families = [
                 {
                     "family_id": int(f["family_id"]),
@@ -5831,6 +5836,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                 }
                 for f in context["families"]
                 if int(f["family_id"]) not in archived_family_ids
+                and int(f["family_id"]) not in globally_blocked_family_ids
                 and (cascade_confirmed or not f["assigned_elsewhere"] or f["assigned_here"])
             ]
             edit_payload = _event_edit_payload_within_new_range(payload, editable_families)
@@ -5888,6 +5894,19 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                 )
 
         old_status = str((context.get("event") or {}).get("status") or "")
+        edit_reservation: dict[str, Any] | None = None
+        if preview is not None:
+            # Reserve every newly selected family before mutating SQLite.
+            # The UI's blocked-family projection is only a snapshot; this
+            # registry reservation is the race-safe multi-library guard.
+            edit_reservation = _reserve_global_family_ids(
+                event_id,
+                {
+                    int(value)
+                    for value in (preview.get("selected_family_ids") or [])
+                    if int(value) > 0
+                },
+            )
         released_reservations = 0
         if old_status in {"draft", "planned"}:
             released_reservations = release_event_reservations(
@@ -5930,6 +5949,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                     )
                 except Exception:
                     pass
+            _release_new_global_reservations(edit_reservation)
             raise
         if archive_bundle:
             result["archive_manual"] = archive_bundle

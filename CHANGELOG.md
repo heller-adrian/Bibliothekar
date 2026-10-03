@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.32.11 – Applied-Änderungen über Bibliotheksgrenzen absichern
+
+- Angewendete Ereignisse lösen Quellen bei Bearbeiten, Erweitern, Verkleinern und Löschen konsequent aus dem konfigurierten Bibliotheks-Arbeitsbereich oder dem globalen Central Stock auf. Freier Kamerabestand bleibt unter SD-Kartensicherungen; freigewordener Archivbestand bleibt unter „Freigewordene Archivdateien“.
+- Globale Besitz-Claims bleiben während einer noch nicht physisch bestätigten Applied-Änderung erhalten. Ein Neustart oder Claim-Abgleich kann herausfallende bzw. zur Löschung vorgemerkte Familien nicht mehr vorzeitig für eine andere Bibliothek freigeben oder auf „reserviert“ zurückstufen.
+- Strukturelle Ereignisänderungen reservieren neu hinzukommende Familien atomar in der globalen Registry, bevor SQLite verändert wird. Damit kann eine zwischen UI-Anzeige und Speichern entstandene Reservierung einer anderen Bibliothek nicht zu einer inkonsistenten Applied-Änderung führen.
+- Die Archiv-Lösch-/Änderungswege bleiben getrennt: Erst nach SHA-verifizierter Rückholung in „Freigewordene Archivdateien“ und bestätigtem Abschluss werden dort Besitz-Claims freigegeben.
+- Neue Regressionstests durchlaufen eine Sekundärbibliothek vollständig: Apply → Verkleinern → Central Stock → Erweitern → Bibliotheks-Arbeitsbereich → Löschen → vollständiger freier Tagesbestand sowie Claim-Erhalt bis zum physischen Abschluss.
+
+
 ### 0.32.10 – Kanonischer Tagesbestand über mehrere Sicherungen
 
 - Beim ersten Anwenden eines Teilzeit-Ereignisses wird der freie zentrale Tagesbestand jetzt sicherungsübergreifend normalisiert. Freie Dateien aus weiteren Sicherungen desselben Tages werden in die tatsächlichen Randintervalle verschoben; ein paralleler unspezifischer Ganztagesordner bleibt nicht mehr zurück.

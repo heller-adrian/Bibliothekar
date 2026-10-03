@@ -299,8 +299,9 @@ def backfill_library_claims(
 
     This is intentionally stronger than a one-way backfill: stale claims owned
     by this library are released when their family is no longer assigned to a
-    draft/planned/applied/archived event. That is essential after a successful
-    applied-event shrink/delete which returns files to the global central stock.
+    draft/planned/applied/archived event and no verified physical reconciliation
+    is still pending. Pending applied-event shrink/delete/reassignment rows stay
+    owned until the file has actually left the library work area.
     """
 
     with database_connection(database_path) as connection:
@@ -324,6 +325,23 @@ def backfill_library_claims(
             WHERE root.status IN ('draft', 'planned', 'applied', 'archived')
               AND COALESCE(ff_direct.id, ff_file.id) IS NOT NULL
             ORDER BY job_id, family_key, event_id
+            """
+        ).fetchall()
+        pending_physical_rows = connection.execute(
+            """
+            SELECT DISTINCT
+                ff.job_id,
+                ff.family_key,
+                pending.event_id
+            FROM event_reapply_removed_families pending
+            JOIN file_families ff
+              ON ff.id = pending.family_id
+            JOIN events source
+              ON source.id = pending.event_id
+            WHERE source.status = 'applied'
+              AND source.archived_at IS NULL
+              AND source.resort_required = 1
+            ORDER BY ff.job_id, ff.family_key, pending.event_id
             """
         ).fetchall()
         all_family_rows = connection.execute(
@@ -357,6 +375,24 @@ def backfill_library_claims(
                 "event_id": str(row["event_id"]),
                 "claim_state": state,
             }
+
+    # A family that has logically left an applied event is still physically
+    # owned by that library until the verified workspace reconciliation has
+    # moved it either to another event or back to global free stock. This
+    # covers shrink, reassignment and pending delete, including a restart in
+    # the middle of the transaction. Such rows must therefore override a
+    # merely planned target assignment and remain globally "owned".
+    for raw in pending_physical_rows:
+        row = dict(raw)
+        source_key = occurrence_key(
+            library_id,
+            str(row["job_id"]),
+            str(row["family_key"]),
+        )
+        desired[source_key] = {
+            "event_id": str(row["event_id"]),
+            "claim_state": "owned",
+        }
 
     all_source_keys = [
         occurrence_key(
