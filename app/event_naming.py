@@ -8,9 +8,13 @@ DEFAULT_NO_EVENT_LABEL = "Ohne Ereignis"
 
 DEFAULT_EVENT_NAMING = {
     "no_event_label": DEFAULT_NO_EVENT_LABEL,
+    # Normal events: start date by default; range/year/time are opt-in.
     "date_mode": "start",
     "include_year": False,
     "include_time": False,
+    # Monthly collection folders have no coherent start/end time range.
+    # They may optionally include the year before the month.
+    "no_event_include_year": False,
 }
 
 
@@ -52,6 +56,7 @@ def normalize_event_naming(value: Any) -> dict[str, Any]:
         "date_mode": date_mode,
         "include_year": bool(raw.get("include_year", False)),
         "include_time": bool(raw.get("include_time", False)),
+        "no_event_include_year": bool(raw.get("no_event_include_year", False)),
     }
 
 
@@ -122,8 +127,9 @@ def render_no_event_folder_name(month_key: str, naming: Any) -> str:
     normalized = normalize_event_naming(naming)
     month = str(month_key or "").strip()
     if not re.fullmatch(r"\d{4}-\d{2}", month):
-        raise EventNamingError("Ungültiger Monat für Ohne-Ereignis-Ordner.")
-    return f"{month[5:7]} - {normalized['no_event_label']}"
+        raise EventNamingError("Ungültiger Monat für Sammelordner.")
+    date_part = month if normalized["no_event_include_year"] else month[5:7]
+    return f"{date_part} - {normalized['no_event_label']}"
 
 
 def legacy_naming_for_existing_event(
@@ -144,18 +150,23 @@ def legacy_naming_for_existing_event(
 
     folder = str(folder_name or "").strip()
     name = str(event_name or "").strip()
-    match = re.match(r"^\d{2}\s*-\s*(.+)$", folder)
-    if match and match.group(1).strip():
-        label = match.group(1).strip()
+    include_year = False
+    match = re.match(r"^(\d{4}-)?\d{2}\s*-\s*(.+)$", folder)
+    if match and match.group(2).strip():
+        include_year = bool(match.group(1))
+        label = match.group(2).strip()
     else:
-        match = re.match(r"^\d{2}\s*-\s*(.+)$", name)
-        label = (
-            match.group(1).strip()
-            if match and match.group(1).strip()
-            else (name or DEFAULT_NO_EVENT_LABEL)
-        )
+        match = re.match(r"^(\d{4}-)?\d{2}\s*-\s*(.+)$", name)
+        if match and match.group(2).strip():
+            include_year = bool(match.group(1))
+            label = match.group(2).strip()
+        else:
+            label = name or DEFAULT_NO_EVENT_LABEL
 
-    return normalize_event_naming({"no_event_label": label})
+    return normalize_event_naming({
+        "no_event_label": label,
+        "no_event_include_year": include_year,
+    })
 
 
 def naming_snapshot_for_new_event(naming: Any) -> dict[str, Any]:
