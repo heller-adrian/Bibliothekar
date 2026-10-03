@@ -611,12 +611,16 @@ def create_metadata_correction(
 
     correction_id = "META_" + uuid.uuid4().hex.upper()
     now = _now()
-    detected = {
+    before_metadata = {
         "selected_capture_time": row.get("selected_capture_time"),
         "selected_capture_source": row.get("selected_capture_source"),
         "capture_time_confidence": row.get("capture_time_confidence"),
         "metadata_candidates": row.get("metadata_candidates") or [],
         "filename_suggestion": filename_hint,
+    }
+    detected = {
+        **before_metadata,
+        "before_metadata": before_metadata,
         "library_id": library_id,
         "library_name": library_name or library_id,
     }
@@ -629,6 +633,28 @@ def create_metadata_correction(
         })
 
     with database_connection(database_path) as connection:
+        active_write = connection.execute(
+            """SELECT id
+               FROM metadata_corrections
+               WHERE area=? AND source_path=? AND status='writing'
+               LIMIT 1""",
+            (str(area), str(source)),
+        ).fetchone()
+        if active_write is not None:
+            raise MetadataCorrectionError(
+                "Für diese Datei läuft bereits eine Metadatenkorrektur."
+            )
+
+        # 0.33.2 führt Einzelkorrekturen direkt aus. Ein älterer, noch nicht
+        # geschriebener Auftrag derselben Datei wird daher durch die neue
+        # bewusste Korrektur ersetzt, statt als Dublette in Aufgaben zu bleiben.
+        connection.execute(
+            """UPDATE metadata_corrections
+               SET status='cancelled', updated_at=?, error_message=NULL
+               WHERE area=? AND source_path=?
+                 AND status IN ('pending_review','prepared','blocked')""",
+            (now, str(area), str(source)),
+        )
         connection.execute(
             """
             INSERT INTO metadata_corrections(
@@ -1219,3 +1245,39 @@ def apply_metadata_correction(
         library_id=library_id,
     )
 
+
+
+def execute_metadata_correction(
+    database_path: Path,
+    *,
+    area: str,
+    relative_path: str,
+    proposed_datetime: Any,
+    workspace_root: Path,
+    library_id: str,
+    family_id: int | None = None,
+    library_name: str | None = None,
+    allowed_job_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Create and execute one user-confirmed metadata correction.
+
+    The durable correction row remains the audit/rollback evidence, but the
+    normal 0.33.2 UI no longer exposes a separate prepare/apply workflow.
+    """
+    task = create_metadata_correction(
+        database_path,
+        area=area,
+        relative_path=relative_path,
+        proposed_datetime=proposed_datetime,
+        workspace_root=workspace_root,
+        library_id=library_id,
+        family_id=family_id,
+        library_name=library_name,
+        allowed_job_ids=allowed_job_ids,
+    )
+    return apply_metadata_correction(
+        database_path,
+        str(task["id"]),
+        workspace_root=workspace_root,
+        library_id=library_id,
+    )

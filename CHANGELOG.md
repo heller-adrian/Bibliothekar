@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.33.2 – Direkte Metadatenkorrektur und Aufgabenbereinigung
+
+- Die normale Einzelkorrektur wird mit **Metadaten ändern** direkt ausgeführt. Der sichere Ablauf bleibt unverändert: Ausgangszustand einfrieren, Arbeitskopie erzeugen, mit ExifTool schreiben, erneut lesen und verifizieren und erst danach atomar ersetzen bzw. eine Ohne-Datum-Familie in den kanonischen freien Bestand reintegrieren.
+- Ein fehlender Import von `MetadataError` in den API-Fehlerpfaden ist behoben. Erwartbare Metadatenfehler können dadurch nicht mehr beim Exception-Matching selbst in einen nackten `Internal Server Error` kippen.
+- Die Uhrzeitfelder übernehmen Sekunden vollständig (`HH:MM:SS`) statt beim Laden auf Minuten zu kürzen und damit unbemerkt `:00` zu setzen.
+- Wiederholte Korrekturen derselben Datei ersetzen ältere noch nicht geschriebene Aufträge. Der ursprüngliche Metadatenzustand wird explizit im Korrekturdatensatz als Vorher-Snapshot bewahrt.
+- Globale Metadatenaufgaben werden pro Bereich gebündelt. Mehrere Dateien unter **Allgemein** oder **Bibliothek** erhöhen den allgemeinen Aufgabenindikator jeweils nur um eine Bereichsaufgabe; alte vorbereitete Einzelaufträge bleiben auf der Metadatenseite kompakt einklappbar.
+- Beim bibliotheksübergreifenden Lesen der Metadatenkorrektur wird das Schema jeder aktiven Bibliotheksdatenbank vor Zugriff sichergestellt. Das verhindert 500er durch noch nicht migrierte Sekundärbibliotheken.
+- `0.34.0` bleibt unverändert für die Mehrfachkorrektur mit Referenzaufnahme und konstantem Zeitversatz reserviert.
+
 ### 0.33.1 – Einstellungs-UX und Metadaten-Reintegration
 
 - Die Ereignisordner-Einstellungen sind in einklappbare Bereiche für Ordnerstruktur, normale Ereignisse und Sammelordner getrennt. Normale Ereignisse können Jahr, Uhrzeit und Von–bis im Namen unabhängig aktivieren; Sammelordner erhalten eine eigene Bezeichnung sowie optional das Jahr.

@@ -4855,27 +4855,40 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
         # Freie Familien sind nur dann eine Aufgabe, wenn sie nicht bereits aus
         # einer Ereignisänderung stammen (diese besitzen oben ihre eigene
         # Neu-Zuordnungsaufgabe). So entstehen keine Doppelmeldungen.
+        # Metadatenkorrekturen werden global nur pro Bereich gebündelt.
+        # Einzeldateien bleiben auf der Metadatenseite nachvollziehbar, blähen
+        # aber den allgemeinen Aufgabenindikator nicht mehr auf.
         for row in connection.execute(
-            """SELECT id,area,status,source_filename,proposed_datetime,error_message
+            """SELECT area,
+                      COUNT(*) AS n,
+                      SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END) AS blocked_n,
+                      MIN(created_at) AS first_created
                FROM metadata_corrections
                WHERE status IN ('pending_review','prepared','writing','blocked')
-               ORDER BY created_at"""
+               GROUP BY area
+               ORDER BY first_created"""
         ).fetchall():
-            state = str(row["status"])
+            area = str(row["area"])
+            label = "Allgemein" if area == "general" else "Bibliothek"
+            count = int(row["n"] or 0)
+            blocked = int(row["blocked_n"] or 0)
             detail = (
-                ("Allgemein" if str(row["area"]) == "general" else "Bibliothek")
-                + " · "
-                + str(row["source_filename"])
+                f"{count} offene Korrektur"
+                + ("" if count == 1 else "en")
             )
-            if state == "blocked" and row["error_message"]:
-                detail += " · blockiert"
+            if blocked:
+                detail += (
+                    f" · {blocked} blockiert"
+                )
             tasks.append({
                 "kind": "metadata_correction",
-                "metadata_correction_id": row["id"],
-                "title": "Metadatenkorrektur",
+                "metadata_area": area,
+                "title": f"Metadatenkorrektur · {label}",
                 "detail": detail,
                 "count": 1,
-                "href": f"/metadata-correction?task=metadata:{row['id']}",
+                "correction_count": count,
+                "blocked_count": blocked,
+                "href": f"/metadata-correction?area={area}",
             })
 
         for row in connection.execute(

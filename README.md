@@ -2,9 +2,9 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.33.1**
+Aktueller Entwicklungsstand: **0.33.2**
 
-Aktuelle TrueNAS-/Container-Ausgabe: **0.33.1**  
+Aktuelle TrueNAS-/Container-Ausgabe: **0.33.2**  
 Stabiler fachlicher Kamerakern als Basis: **0.32.11**
 
 ## Ziel
@@ -31,11 +31,13 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.33.1
+## TrueNAS Custom App 0.33.2
 
-0.33.1 stabilisiert die mit 0.33.0 eingeführte Ereignisbenennung und
+0.33.2 stabilisiert die mit 0.33.0 eingeführte Ereignisbenennung und
 Metadatenkorrektur auf der Mehrbibliotheks- und Sicherheitsarchitektur von
-0.32.x. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand;
+0.32.x. Die Einzelkorrektur schreibt nach dem bewussten Klick direkt über den
+bestehenden Arbeitskopie-/ExifTool-/Verifikationsweg; ein separater
+Vorbereitungsauftrag ist im normalen Ablauf nicht mehr nötig. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand;
 neue Ereignisse und Sammelordner verwenden die bibliotheksspezifischen
 Standardvorlagen.
 
@@ -87,7 +89,7 @@ Von–bis- oder Uhrzeit-Darstellung; optional kann das Jahr vor dem Monat stehen
 Die Einstellungsseite zeigt eine gemeinsame Vorschau für normales Ereignis und
 Sammelordner einschließlich der aktuell gewählten Unterordnerstruktur.
 
-### Metadatenkorrektur 0.33.1
+### Metadatenkorrektur 0.33.2
 
 Die Seite **Metadatenkorrektur** besitzt den normalen Bibliothekar-Header und
 einen zweiten Reiterheader mit:
@@ -96,12 +98,16 @@ einen zweiten Reiterheader mit:
   gruppiert nach der Bibliothek, aus deren Kameraimport die Familie stammt.
 - **Allgemein** – verwendet direkt
   `/workspace/Metadatenkorrektur/Allgemein`.
-- **Mehrfachkorrektur** – in 0.33.1 bereits als geplanter Reiter sichtbar;
+- **Mehrfachkorrektur** – in 0.33.2 bereits als geplanter Reiter sichtbar;
   die Funktion folgt mit 0.34.0.
 
-Für **Allgemein** gibt es keinen Eingang/Ausgang. Bibliothekar arbeitet auf
-einer geprüften Arbeitskopie und ersetzt die Originaldatei erst nach
-erfolgreichem Schreiben und erneutem Metadatenlesen atomar am selben Ort.
+Für **Allgemein** gibt es keinen Eingang/Ausgang. Ein Klick auf
+**Metadaten ändern** friert den Ausgangszustand ein, arbeitet auf einer
+geprüften Arbeitskopie, schreibt die gewählte Aufnahmezeit mit ExifTool, liest
+die Metadaten erneut und ersetzt die Originaldatei erst nach erfolgreicher
+Verifikation atomar am selben Ort. Sekunden werden vollständig übernommen.
+Offene oder blockierte Korrekturen werden im globalen Aufgabenbereich pro
+Metadaten-Reiter gebündelt statt als eine Aufgabe pro Datei dargestellt.
 
 Bei **Bibliothek** wird eine komplette Ohne-Datum-Dateifamilie eingefroren.
 Bibliothekar schreibt die korrigierte Aufnahmezeit auf Arbeitskopien, liest und
@@ -124,7 +130,7 @@ Für zusammengehörige Kameraaufnahmen mit falsch eingestellter Kamera-Uhr ist
 eine Referenzaufnahme ein korrektes Datum mit Uhrzeit erhalten; derselbe
 Zeitversatz wird anschließend auf die übrigen Aufnahmen übertragen, sodass
 deren zeitliche Abstände erhalten bleiben. Vor dem Schreiben wird eine
-vollständige Alt→Neu-Vorschau gezeigt. Diese Funktion ist in 0.33.1 noch nicht
+vollständige Alt→Neu-Vorschau gezeigt. Diese Funktion ist in 0.33.2 noch nicht
 aktiv.
 
 ### Basis-Containerpfade

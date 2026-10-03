@@ -91,7 +91,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   function bestSuggestion(file){return file.preferred_suggestion||file.filename_suggestion||null;}
   function splitSuggestion(hint){
     const dt=String(hint?.datetime||"");
-    return {date:hint?.date||dt.slice(0,10)||"",time:(hint?.time||dt.slice(11,19)||"").slice(0,5)};
+    return {date:hint?.date||dt.slice(0,10)||"",time:(hint?.time||dt.slice(11,19)||"").slice(0,8)};
   }
   function configureArea(){
     const library=state.area==="library", general=state.area==="general", multiple=state.area==="multiple";
@@ -173,42 +173,57 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       +'<span>Dateiname</span><span>'+(filename?(esc(filename.date)+(filename.time?" "+esc(filename.time):" · Uhrzeit fehlt")):"kein Datum erkannt")+'</span></div>'
       +'<label><span>Datum</span><input id="meta-date" type="date" value="'+esc(suggested.date)+'"></label>'
       +'<label><span>Uhrzeit</span><input id="meta-time" type="time" step="1" value="'+esc(suggested.time)+'"></label>'
-      +'<button id="meta-prepare" type="button" class="primary">Änderung vorbereiten</button>'
+      +'<button id="meta-prepare" type="button" class="primary">Metadaten ändern</button>'
       +'<div class="muted">'+(state.area==="library"
-        ?"Die vollständige Familie wird eingefroren. Erst nach Schreiben, Metadatenprüfung und Zielprüfung wird sie aus Ohne_Datum in den normalen Tagesbestand übernommen."
-        :"Beim Vorbereiten werden Pfad, Größe und SHA-256 eingefroren. Die Originaldatei bleibt bis zur bestätigten Schreibprüfung unverändert.")+'</div></div>';
-    $("meta-prepare").addEventListener("click",()=>prepare(file));
+        ?"Die vollständige Familie wird auf Arbeitskopien korrigiert, erneut gelesen und geprüft. Erst danach wird sie aus Ohne_Datum in den normalen Tagesbestand übernommen."
+        :"Bibliothekar schreibt die Änderung zuerst in eine Arbeitskopie, liest und prüft die Metadaten erneut und ersetzt die Datei erst danach atomar am selben Ort.")+'</div></div>';
+    $("meta-prepare").addEventListener("click",()=>correct(file));
   }
-  async function prepare(file){
+  async function correct(file){
     const date=$("meta-date").value,time=$("meta-time").value;
     if(!date||!time){setStatus("Datum und Uhrzeit müssen vollständig angegeben werden.",true);return;}
-    setStatus("Metadatenauftrag wird vorbereitet …");
+    const button=$("meta-prepare");
+    if(button)button.disabled=true;
+    setStatus(state.area==="library"
+      ?"Metadaten werden familienweise geschrieben, geprüft und neu eingeordnet …"
+      :"Metadaten werden geschrieben und vollständig geprüft …");
     try{
       const payload={area:state.area,relative_path:file.relative_path,proposed_datetime:date+"T"+time};
       if(state.area==="library"){payload.library_id=file.library_id;payload.family_id=file.family_id;}
-      await json("/api/metadata-correction/tasks",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-      setStatus("Vorbereitet. Physisch wurde noch nichts verändert.");
-      await loadTasks();renderDetails();
-    }catch(error){setStatus(error.message,true);}
+      await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      await scan(false);
+      await loadTasks(true);
+      setStatus(state.area==="library"
+        ?"Korrektur vollständig geprüft und in den freien Tagesbestand zurückgeführt."
+        :"Korrektur vollständig geschrieben und geprüft.");
+    }catch(error){
+      setStatus(error.message,true);
+      await loadTasks(true);
+    }finally{
+      const current=$("meta-prepare");
+      if(current)current.disabled=false;
+    }
   }
-  async function loadTasks(){
+  async function loadTasks(quiet=false){
     try{
       const data=await json("/api/metadata-correction/tasks");
       state.tasks=data.tasks||[];
       renderTasks();
-    }catch(error){setStatus(error.message,true);}
+    }catch(error){if(!quiet)setStatus(error.message,true);}
   }
   function renderTasks(){
     const host=$("meta-open-tasks");
     const tasks=(state.tasks||[]).filter(t=>String(t.area)===state.area);
     if(!tasks.length){host.innerHTML='<div class="muted">Keine offenen Metadatenaufträge.</div>';return;}
-    host.innerHTML='<strong>Offene Aufgaben</strong>'+tasks.map(t=>'<div class="meta-task">'
+    host.innerHTML='<details><summary><strong>Offene Korrekturen · '+tasks.length+'</strong></summary>'
+      +tasks.map(t=>'<div class="meta-task">'
       +'<div><strong>'+esc(t.source_filename)+'</strong></div>'
       +(state.area==="library"?'<div class="muted">'+esc(t.library_name||t.library_id||"")+'</div>':"")
       +'<div class="muted">'+esc(t.proposed_datetime||"")+'</div>'
       +(t.error_message?'<div class="danger">'+esc(t.error_message)+'</div>':'')
-      +'<div class="meta-actions" style="margin-top:8px"><button class="primary" data-meta-apply="'+esc(t.id)+'">Schreiben & prüfen</button>'
-      +'<button data-meta-cancel="'+esc(t.id)+'">Verwerfen</button></div></div>').join("");
+      +'<div class="meta-actions" style="margin-top:8px"><button class="primary" data-meta-apply="'+esc(t.id)+'">Jetzt ausführen</button>'
+      +'<button data-meta-cancel="'+esc(t.id)+'">Verwerfen</button></div></div>').join("")
+      +'</details>';
     host.querySelectorAll("[data-meta-apply]").forEach(b=>b.addEventListener("click",()=>applyTask(b.dataset.metaApply)));
     host.querySelectorAll("[data-meta-cancel]").forEach(b=>b.addEventListener("click",()=>cancelTask(b.dataset.metaCancel)));
   }
@@ -228,14 +243,18 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     try{await json("/api/metadata-correction/tasks/"+encodeURIComponent(id)+"/cancel",{method:"POST"});await loadTasks();}
     catch(error){setStatus(error.message,true);}
   }
-  async function scan(){
-    if(state.area==="multiple")return;
-    setStatus(state.area==="library"?"Ohne-Datum-Bestand wird gelesen …":"Ordner und Metadaten werden gelesen …");
+  async function scan(announce=true){
+    if(state.area==="multiple")return false;
+    if(announce)setStatus(state.area==="library"?"Ohne-Datum-Bestand wird gelesen …":"Ordner und Metadaten werden gelesen …");
     try{
       state.scan=await json("/api/metadata-correction/scan?area="+encodeURIComponent(state.area));
       state.selected=null;renderFiles();renderDetails();
-      setStatus("Prüfung abgeschlossen. Es wurde noch nichts verändert.");
-    }catch(error){setStatus(error.message,true);}
+      if(announce)setStatus("Prüfung abgeschlossen. Es wurde noch nichts verändert.");
+      return true;
+    }catch(error){
+      if(announce)setStatus(error.message,true);
+      return false;
+    }
   }
   $("meta-scan").addEventListener("click",scan);
   configureArea();

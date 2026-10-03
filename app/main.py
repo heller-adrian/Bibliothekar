@@ -88,12 +88,13 @@ from app.database import (
     list_imported_media_origins,
     store_imported_source_files,
 )
-from app.metadata import analyze_tree
+from app.metadata import MetadataError, analyze_tree
 from app.metadata_correction import (
     MetadataCorrectionError,
     apply_metadata_correction,
     cancel_metadata_correction,
     create_metadata_correction,
+    execute_metadata_correction,
     get_metadata_correction,
     list_metadata_corrections,
     metadata_area_paths,
@@ -255,7 +256,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.33.1"
+DEPLOYMENT_VERSION = "0.33.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -2878,7 +2879,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             is_main=first_library,
             is_active=True,
             settings={
-                "created_by": "bibliothekar-0.33.1",
+                "created_by": f"bibliothekar-{DEPLOYMENT_VERSION}",
                 "projected_imports": projection,
                 "managed_default_work_root": bool(
                     checked.get("managed_default_work_root")
@@ -7171,7 +7172,13 @@ def api_workspace_summary(
     }
 
 def _metadata_library_contexts() -> list[LibraryContext]:
-    return list_active_library_contexts(REGISTRY_DATABASE_FILE)
+    contexts = list_active_library_contexts(REGISTRY_DATABASE_FILE)
+    # Metadatenkorrektur ist bibliotheksübergreifend sichtbar. Auch eine nach
+    # Prozessstart aktivierte/ältere Bibliothek muss deshalb vor dem Lesen der
+    # Korrekturtabelle sicher auf dem aktuellen Schema stehen.
+    for context in contexts:
+        ensure_library_database_schema(context)
+    return contexts
 
 
 def _metadata_task_location(
@@ -7184,6 +7191,42 @@ def _metadata_task_location(
             continue
         return context, task
     raise MetadataCorrectionError("Metadatenauftrag wurde nicht gefunden.")
+
+
+def _sync_completed_library_metadata_correction(
+    context: LibraryContext,
+    task: dict[str, Any],
+) -> dict[str, Any]:
+    if (
+        str(task.get("area") or "") != "library"
+        or str(task.get("status") or "") != "completed"
+    ):
+        return task
+
+    detected = dict(task.get("detected") or {})
+    job_id = str(detected.get("job_id") or "")
+    family_key = str(detected.get("family_key") or "")
+    if not job_id or not family_key:
+        return task
+
+    databases = [
+        Path(str(row["database_path"]))
+        for row in list_libraries(
+            REGISTRY_DATABASE_FILE,
+            active_only=False,
+            registered_only=True,
+        )
+        if str(row.get("database_path") or "").strip()
+    ]
+    propagation = propagate_corrected_family(
+        context.database_path,
+        databases,
+        job_id=job_id,
+        family_key=family_key,
+    )
+    synchronize_global_central_stock()
+    task["projection_sync"] = propagation
+    return task
 
 
 @app.get("/api/metadata-correction/areas", tags=["Metadatenkorrektur"])
@@ -7284,6 +7327,66 @@ def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
+@app.post("/api/metadata-correction/correct", tags=["Metadatenkorrektur"])
+def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    """Write and verify one explicitly confirmed correction in one request."""
+    area = str(payload.get("area") or "library").strip().lower()
+    try:
+        if area == "library":
+            library_id = str(payload.get("library_id") or "").strip()
+            if not library_id:
+                raise MetadataCorrectionError(
+                    "Bibliothek für die Ohne-Datum-Familie fehlt."
+                )
+            context = resolve_library_context(REGISTRY_DATABASE_FILE, library_id)
+            ensure_library_database_schema(context)
+            job_ids = set(
+                list_library_import_job_ids(
+                    REGISTRY_DATABASE_FILE,
+                    context.library_id,
+                )
+            )
+            task = execute_metadata_correction(
+                context.database_path,
+                area="library",
+                relative_path=str(payload.get("relative_path") or ""),
+                family_id=int(payload.get("family_id") or 0),
+                proposed_datetime=payload.get("proposed_datetime"),
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                library_name=context.display_name,
+                allowed_job_ids=job_ids,
+            )
+        elif area == "general":
+            context = current_library_context()
+            ensure_library_database_schema(context)
+            task = execute_metadata_correction(
+                context.database_path,
+                area="general",
+                relative_path=str(payload.get("relative_path") or ""),
+                proposed_datetime=payload.get("proposed_datetime"),
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                library_name=context.display_name,
+            )
+        else:
+            raise MetadataCorrectionError(
+                "Mehrfachkorrektur wird mit Version 0.34.0 aktiviert."
+            )
+
+        task = _sync_completed_library_metadata_correction(context, task)
+        return {"task": task}
+    except (
+        MetadataCorrectionError,
+        MetadataError,
+        GlobalStockError,
+        LibraryRegistryError,
+        ValueError,
+        OSError,
+    ) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.get("/api/metadata-correction/tasks", tags=["Metadatenkorrektur"])
 def api_metadata_correction_tasks(include_completed: bool = False) -> dict[str, Any]:
     tasks: list[dict[str, Any]] = []
@@ -7361,28 +7464,7 @@ def api_apply_metadata_correction(correction_id: str) -> dict[str, Any]:
             workspace_root=context.workspace_root,
             library_id=context.library_id,
         )
-        if str(task.get("area") or "") == "library" and str(task.get("status") or "") == "completed":
-            detected = dict(task.get("detected") or {})
-            job_id = str(detected.get("job_id") or "")
-            family_key = str(detected.get("family_key") or "")
-            if job_id and family_key:
-                databases = [
-                    Path(str(row["database_path"]))
-                    for row in list_libraries(
-                        REGISTRY_DATABASE_FILE,
-                        active_only=False,
-                        registered_only=True,
-                    )
-                    if str(row.get("database_path") or "").strip()
-                ]
-                propagation = propagate_corrected_family(
-                    context.database_path,
-                    databases,
-                    job_id=job_id,
-                    family_key=family_key,
-                )
-                synchronize_global_central_stock()
-                task["projection_sync"] = propagation
+        task = _sync_completed_library_metadata_correction(context, task)
         return {"task": task}
     except (MetadataCorrectionError, GlobalStockError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
