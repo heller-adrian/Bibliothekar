@@ -2515,6 +2515,7 @@ BIBLIOTHEKAR_JS = r"""
       }else if(selected){
         folderLayoutState.input_path=selected.value;
       }
+      bkUpdateSettingsPreview();
     }));
     host.querySelectorAll("[data-bk-layout-child]").forEach(button=>button.addEventListener("click",()=>{
       const found=bkFindParent(folderLayoutState.layout.nodes,button.dataset.bkLayoutChild);
