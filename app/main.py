@@ -256,7 +256,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.33.3"
+DEPLOYMENT_VERSION = "0.33.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -3376,12 +3376,55 @@ def api_source_folders(root_key: str = "nas", relative_path: str = ".") -> dict[
     }
 
 
+def _folder_import_runtime_blocker() -> str | None:
+    startup_errors = [
+        value
+        for value in (
+            DATABASE_INITIALIZATION_ERROR,
+            WORKSPACE_LAYOUT_ERROR,
+            LIBRARY_REGISTRY_ERROR,
+        )
+        if str(value or "").strip()
+    ]
+    if startup_errors:
+        return (
+            "Ordnerimport ist derzeit nicht verfügbar, weil die "
+            "Bibliothekar-Initialisierung fehlgeschlagen ist: "
+            + str(startup_errors[0])
+        )
+
+    # Direkte Unit-Test-Aufrufe laufen ohne Startup-Lifespan. Im echten
+    # Prozess sind nach erfolgreicher Initialisierung alle drei Strukturen
+    # gesetzt; dann muss auch der Queue-Worker tatsächlich leben.
+    initialized = all(
+        value is not None
+        for value in (
+            DATABASE_INITIALIZATION,
+            WORKSPACE_LAYOUT_INITIALIZATION,
+            LIBRARY_REGISTRY_INITIALIZATION,
+        )
+    )
+    if initialized and (
+        WORKER_THREAD is None
+        or not WORKER_THREAD.is_alive()
+    ):
+        return (
+            "Ordnerimport ist derzeit nicht verfügbar, weil der "
+            "Hintergrund-Worker nicht läuft."
+        )
+    return None
+
+
 @app.post(
     "/api/jobs/folder-import",
     tags=["Import"],
     status_code=202,
 )
 def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
+    blocker = _folder_import_runtime_blocker()
+    if blocker:
+        raise HTTPException(status_code=503, detail=blocker)
+
     relative_value = str(payload.get("source_relative_path") or "").strip()
     root_key = str(payload.get("source_root_key") or "saved").strip()
     source = resolve_import_source(relative_value, root_key)
