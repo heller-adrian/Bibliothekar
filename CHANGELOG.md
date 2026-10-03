@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.33.6 – Reintegration von Prüffällen und Auswahl-Feinschliff
+
+- Korrigierte Prüffälle verwenden beim Einsortieren jetzt den explizit bestätigten Zeitstempel als autoritative Quelle. Sekundäre, noch widersprüchliche EXIF-/XMP-Felder können dadurch nicht mehr dazu führen, dass eine bereits korrigierte Familie erneut unter `Ohne_Datum` landet.
+- Vor der Reintegration werden ältere korrigierte Dateien auf einer Arbeitskopie nochmals auf den bestätigten Zeitstempel normalisiert. JPEG-/Bildkorrekturen schreiben dabei sowohl EXIF- als auch XMP-Zeitfelder.
+- Ein Reintegrationsplan, der trotz bestätigter Korrektur wieder nach `Ohne_Datum` zeigen würde, wird nun ausdrücklich abgelehnt.
+- Die Reintegration ersetzt die Quelle erst nach verifizierter normalisierter Arbeitskopie und hält eine versteckte Rückfallkopie bis zum erfolgreichen SQLite-Commit vor.
+- Metadatenkarten verwenden `box-sizing:border-box`, damit Auswahlkarten unabhängig von Fensterbreite und Seitenverhältnis vollständig innerhalb ihres Containers bleiben.
+- Ein normaler Klick auf eine weitere Metadatenkarte nimmt diese jetzt unmittelbar in die bestehende Auswahl auf; Shift-Bereichsauswahl und Checkbox-Abwahl bleiben erhalten.
+- Regressionstests simulieren den realen Konfliktfall und sichern ab, dass eine bestätigte Familie trotzdem in einen echten Tagesbestand einsortiert wird.
+
 ### 0.33.5 – Prüffall-Workflow, Auswahl und kompakter Importverlauf
 
 - Der globale `Ohne_Datum`-Bestand wird in der Metadatenkorrektur als eine gemeinsame Liste dargestellt; die frühere sichtbare Gruppierung nach Main Library, Business und Testbibliothek entfällt.
