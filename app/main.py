@@ -2186,14 +2186,28 @@ def api_get_metadata_correction_settings() -> dict[str, Any]:
 
 @app.put("/api/settings/metadata-correction", tags=["Einstellungen"])
 def api_set_metadata_correction_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    try:
-        settings = save_metadata_correction_settings(payload)
-    except StorageSettingsError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-
-    raw = str(settings.get("general_root") or "")
+    raw = str(payload.get("general_root") or "").strip()
     if raw:
-        root = Path(raw)
+        root = Path(raw).expanduser()
+        if not root.is_absolute():
+            raise HTTPException(
+                status_code=422,
+                detail="Der Host-Path für „Allgemein“ muss absolut sein.",
+            )
+        root = root.resolve(strict=False)
+        workspace = WORKSPACE_PATH.expanduser().resolve(strict=False)
+        if (
+            root == workspace
+            or root in workspace.parents
+            or workspace in root.parents
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "„Allgemein“ benötigt einen eigenen TrueNAS-Host-Path "
+                    "außerhalb des Kamera-Workspace-Mounts."
+                ),
+            )
         if not root.is_dir():
             raise HTTPException(
                 status_code=422,
@@ -2207,6 +2221,13 @@ def api_set_metadata_correction_settings(payload: dict[str, Any]) -> dict[str, A
                 status_code=422,
                 detail="Der Host-Path für „Allgemein“ ist nicht vollständig beschreibbar.",
             )
+
+    # Validate first and persist only after every mount/path check passed.
+    # A mistyped TrueNAS path must never poison the running configuration.
+    try:
+        save_metadata_correction_settings({"general_root": raw})
+    except StorageSettingsError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     return api_get_metadata_correction_settings()
 
 
