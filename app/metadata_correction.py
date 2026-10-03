@@ -918,7 +918,9 @@ def _apply_general_metadata_correction(
     )
     _mark_task_writing(database_path, str(task["id"]))
     try:
-        shutil.copy2(source, temp)
+        # TrueNAS/ZFS: nur Dateiinhalte kopieren. copy2()/copystat kann beim
+        # Übertragen von Modus/ACL-Metadaten mit EPERM scheitern.
+        shutil.copyfile(source, temp)
         if _sha256(temp) != str(task["source_sha256"]):
             raise MetadataCorrectionError(
                 "Die Arbeitskopie stimmt vor dem Schreiben nicht mit der Quelle überein."
@@ -1014,7 +1016,9 @@ def _apply_library_metadata_correction(
             if not _is_relative_to(temp, work):
                 raise MetadataCorrectionError("Unsicherer Arbeitskopiepfad.")
             temp.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, temp)
+            # Arbeitskopien übernehmen bewusst keine ACL-/Ownership-Metadaten
+            # aus dem globalen Bestand; die Zielordnerrechte sollen erben.
+            shutil.copyfile(source, temp)
             if _sha256(temp) != expected_sha:
                 raise MetadataCorrectionError(
                     "Arbeitskopie stimmt nicht mit der eingefrorenen Datei überein."
@@ -1093,7 +1097,9 @@ def _apply_library_metadata_correction(
             incoming = destination.parent / (
                 "." + destination.stem + ".metadata-" + uuid.uuid4().hex + destination.suffix
             )
-            shutil.copy2(Path(item["temp"]), incoming)
+            # Auch die verifizierte Zieldatei kopiert nur Nutzdaten. Das
+            # verhindert TrueNAS-EPERM durch shutil.copy2()/copystat.
+            shutil.copyfile(Path(item["temp"]), incoming)
             if _sha256(incoming) != str(item["output_sha"]):
                 incoming.unlink(missing_ok=True)
                 raise MetadataCorrectionError("Korrigierte Zieldatei stimmt nicht mit der Arbeitskopie überein.")
