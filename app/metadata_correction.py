@@ -786,6 +786,12 @@ def write_metadata_datetime(path: Path, media_type: str, value: str) -> None:
             f"-EXIF:DateTimeOriginal={stamp}",
             f"-EXIF:CreateDate={stamp}",
             f"-EXIF:ModifyDate={stamp}",
+            # Stills can carry a second high-confidence timestamp in XMP.
+            # Normalize it together with EXIF so a previously conflicting
+            # Prüffall cannot remain conflicting after a manual correction.
+            f"-XMP-exif:DateTimeOriginal={stamp}",
+            f"-XMP-xmp:CreateDate={stamp}",
+            f"-XMP-xmp:ModifyDate={stamp}",
         ]
 
     command.append(str(path))
@@ -1322,20 +1328,47 @@ def reintegrate_library_metadata_family(
                 raise MetadataCorrectionError(
                     "Reintegration-Arbeitskopie stimmt nicht mit der Quelle überein."
                 )
+
+            # A family corrected by an older 0.33.x build can still contain
+            # conflicting secondary EXIF/XMP fields. Re-normalize the verified
+            # working copy before planning the canonical day destination.
+            media_type = str(row.get("media_type") or classify_media(temp))
+            write_metadata_datetime(temp, media_type, proposed)
+            verification = verify_metadata_datetime(temp, proposed)
+            normalized_sha = _sha256(temp)
+            normalized_size = int(temp.stat().st_size)
+
             prepared.append({
                 **row,
                 "source": source,
                 "current_relative": current_relative.as_posix(),
                 "temp": temp,
+                "media_type": media_type,
                 "verification": verification,
+                "normalized_sha": normalized_sha,
+                "normalized_size": normalized_size,
             })
 
         analysis = analyze_tree(work, include_other=False)
+
+        # The explicit, verified correction is authoritative for reintegration.
+        # Camera/model metadata from analyze_tree is still used for canonical
+        # filenames, but stale secondary timestamps must never route a corrected
+        # family back into Ohne_Datum.
+        for record in analysis.get("files") or []:
+            record["selected_capture_time"] = proposed[:19]
+            record["selected_capture_source"] = "metadata_correction"
+            record["capture_time_confidence"] = "high"
+            record["review_required"] = False
+        for family_record in analysis.get("families") or []:
+            family_record["selected_capture_time"] = proposed[:19]
+            family_record["capture_time_confidence"] = "high"
+
         entries = [
             {
                 "relative_path": Path(str(item["original_relative_path"])).as_posix(),
-                "size_bytes": int(item["size_bytes"]),
-                "sha256": str(item["sha256_current"]),
+                "size_bytes": int(item["normalized_size"]),
+                "sha256": str(item["normalized_sha"]),
             }
             for item in prepared
         ]
@@ -1383,6 +1416,13 @@ def reintegrate_library_metadata_family(
                 raise MetadataCorrectionError(
                     "Reintegrationsziel verlässt den Zentralbestand."
                 )
+            if (
+                destination_relative.as_posix() == "Ohne_Datum"
+                or destination_relative.as_posix().startswith("Ohne_Datum/")
+            ):
+                raise MetadataCorrectionError(
+                    "Korrigierte Metadaten würden erneut in Ohne_Datum einsortiert."
+                )
             if destination.exists() or destination.is_symlink():
                 raise MetadataCorrectionError(
                     "Reintegrationsziel ist bereits belegt: "
@@ -1395,10 +1435,41 @@ def reintegrate_library_metadata_family(
             source = Path(item["source"])
             destination = Path(item["destination"])
             destination.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(source, destination)
+
+            incoming = source.parent / (
+                "." + source.name + ".reintegrate-" + uuid.uuid4().hex
+            )
+            backup = source.parent / (
+                "." + source.name + ".reintegrate-before-" + uuid.uuid4().hex
+            )
+            shutil.copyfile(Path(item["temp"]), incoming)
+            if _sha256(incoming) != str(item["normalized_sha"]):
+                incoming.unlink(missing_ok=True)
+                raise MetadataCorrectionError(
+                    "Normalisierte Reintegration stimmt vor dem Austausch nicht überein."
+                )
+
+            os.replace(source, backup)
             _fsync_directory(source.parent)
-            _fsync_directory(destination.parent)
-            moved.append((source, destination))
+            try:
+                os.replace(incoming, source)
+                _fsync_directory(source.parent)
+                os.replace(source, destination)
+                _fsync_directory(source.parent)
+                _fsync_directory(destination.parent)
+            except Exception:
+                incoming.unlink(missing_ok=True)
+                if source.exists():
+                    source.unlink(missing_ok=True)
+                if destination.exists():
+                    destination.unlink(missing_ok=True)
+                if backup.exists():
+                    os.replace(backup, source)
+                    _fsync_directory(source.parent)
+                raise
+
+            item["backup"] = backup
+            moved.append((source, destination, backup))
 
         now = _now()
         with database_connection(database_path) as connection:
@@ -1419,11 +1490,22 @@ def reintegrate_library_metadata_family(
             for item in prepared:
                 cursor = connection.execute(
                     """UPDATE files
-                       SET current_relative_path=?,updated_at=?
+                       SET current_relative_path=?,
+                           size_bytes=?,
+                           sha256_current=?,
+                           selected_capture_time=?,
+                           selected_capture_source='metadata_correction',
+                           capture_time_confidence='high',
+                           review_status='corrected',
+                           metadata_write_status='written',
+                           updated_at=?
                        WHERE id=? AND family_id=? AND job_id=?
                          AND current_relative_path=?""",
                     (
                         str(item["destination_relative"]),
+                        int(item["normalized_size"]),
+                        str(item["normalized_sha"]),
+                        proposed[:19],
                         now,
                         int(item["file_id"]),
                         int(family_id),
@@ -1436,6 +1518,10 @@ def reintegrate_library_metadata_family(
                         "Dateipfad wurde während der Einsortierung verändert."
                     )
             connection.commit()
+
+        for _source, _destination, backup in moved:
+            backup.unlink(missing_ok=True)
+            _fsync_directory(backup.parent)
 
         shutil.rmtree(work, ignore_errors=True)
         return {
@@ -1455,12 +1541,16 @@ def reintegrate_library_metadata_family(
         }
 
     except Exception as error:
-        for source, destination in reversed(moved):
+        for source, destination, backup in reversed(moved):
             try:
-                if destination.exists() and not source.exists():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(destination, source)
+                if destination.exists():
+                    destination.unlink(missing_ok=True)
                     _fsync_directory(destination.parent)
+                if source.exists():
+                    source.unlink(missing_ok=True)
+                if backup.exists():
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(backup, source)
                     _fsync_directory(source.parent)
             except OSError:
                 pass
