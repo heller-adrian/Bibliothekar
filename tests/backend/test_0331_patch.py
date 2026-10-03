@@ -214,8 +214,12 @@ def test_0331_library_correction_stays_undated_until_explicit_reintegration(
             confidence = "missing"
         else:
             relative = "DCIM/IMG_0001.JPG"
-            capture = "2026-07-20T14:15:30"
-            confidence = "high"
+            # Regression für den realen 0.33.5-Fall: sekundäre Metadaten
+            # können trotz bestätigter DB-Korrektur noch als Konflikt gelesen
+            # werden. Die Reintegration muss trotzdem den explizit bestätigten
+            # Zeitstempel verwenden und darf nie wieder nach Ohne_Datum planen.
+            capture = None
+            confidence = "conflict"
         return {
             "files": [{
                 "relative_path": relative,
