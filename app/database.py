@@ -2919,6 +2919,17 @@ def create_planned_event(
                     int(preserve_day_folders),
                 ),
             )
+            connection.execute(
+                "UPDATE events SET folder_naming_json=? WHERE id=?",
+                (
+                    json.dumps(
+                        preview.get("folder_naming") or {},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    parent_event_id,
+                ),
+            )
 
         if event_kind == "event":
             connection.execute("UPDATE events SET start_datetime=?,end_datetime=?,time_model_version=2,updated_at=?,revision=revision+? WHERE id=?",
@@ -3570,6 +3581,12 @@ def get_event_edit_context(
     legacy_ranges = merge_intervals((str(c['start_datetime']),str(c['end_datetime'])) for c in children) if legacy else []
     legacy_blocked = len(legacy_ranges) > 1
     event_dict = dict(event)
+    try:
+        event_dict["folder_naming"] = json.loads(
+            str(event_dict.get("folder_naming_json") or "{}")
+        )
+    except (TypeError, ValueError):
+        event_dict["folder_naming"] = {}
     if legacy and not legacy_blocked:
         event_dict['start_datetime'], event_dict['end_datetime'] = legacy_ranges[0]
     status = str(event["status"])
