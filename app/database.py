@@ -626,7 +626,7 @@ def list_imported_media_origins(
                 f.original_relative_path,
                 f.current_relative_path,
                 f.original_filename,
-                f.size_bytes,
+                COALESCE(f.source_size_bytes, f.size_bytes) AS size_bytes,
                 f.sha256_original AS sha256,
                 j.source_volume_label,
                 j.created_at
