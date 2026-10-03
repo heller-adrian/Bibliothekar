@@ -1707,6 +1707,7 @@ def _event_payload_with_folder_layout(
     event_id: str | None = None,
 ) -> dict[str, Any]:
     result = dict(payload)
+    naming: dict[str, Any]
     with database_connection(current_database_file()) as connection:
         if event_id:
             state = ensure_event_layout_snapshot(
@@ -1714,13 +1715,44 @@ def _event_payload_with_folder_layout(
                 event_id,
                 now=datetime.now(timezone.utc).isoformat(),
             )
+            event_row = connection.execute(
+                """SELECT folder_naming_json,folder_name,event_kind,name
+                   FROM events WHERE id=?""",
+                (event_id,),
+            ).fetchone()
+            snapshot: dict[str, Any] = {}
+            if event_row is not None:
+                try:
+                    snapshot = json.loads(
+                        str(event_row["folder_naming_json"] or "{}")
+                    )
+                except (TypeError, ValueError):
+                    snapshot = {}
+            if snapshot:
+                naming = snapshot
+            elif event_row is not None:
+                # 0.32.x events have no naming snapshot. Lock their physical
+                # folder so changing 0.33 settings never renames old events.
+                naming = {
+                    "mode": "locked",
+                    "locked_folder_name": str(event_row["folder_name"] or ""),
+                    "no_event_label": str(event_row["name"] or "Ohne Ereignis"),
+                }
+            else:
+                naming = naming_from_library_settings(
+                    current_library_context().settings
+                )
         else:
             state = get_global_event_folder_layout(connection)
+            naming = naming_from_library_settings(
+                current_library_context().settings
+            )
     result.setdefault("folder_layout", {
         "structure_enabled": bool(state["structure_enabled"]),
         "input_path": str(state["input_path"]),
         "layout": state["layout"],
     })
+    result.setdefault("folder_naming", naming)
     result.setdefault("create_subfolders", bool(state["structure_enabled"]))
     return result
 
