@@ -192,6 +192,113 @@ def project_all_imports(
     return totals
 
 
+
+def propagate_corrected_family(
+    source_database: Path,
+    database_paths: list[Path],
+    *,
+    job_id: str,
+    family_key: str,
+) -> dict[str, int]:
+    """Mirror a verified metadata correction into every library projection.
+
+    The physical central-stock file exists only once. Library databases keep
+    their own local row IDs, therefore the stable mapping is job_id +
+    family_key + original_relative_path.
+    """
+    with database_connection(source_database) as source:
+        family = source.execute(
+            """SELECT selected_capture_time,capture_time_confidence,status
+               FROM file_families
+               WHERE job_id=? AND family_key=?""",
+            (str(job_id), str(family_key)),
+        ).fetchone()
+        if family is None:
+            raise GlobalStockError("Korrigierte Dateifamilie wurde nicht gefunden.")
+        files = [
+            dict(row)
+            for row in source.execute(
+                """SELECT original_relative_path,current_relative_path,
+                          current_root_kind,size_bytes,sha256_current,
+                          selected_capture_time,selected_capture_source,
+                          capture_time_confidence,review_status,
+                          metadata_write_status,updated_at
+                   FROM files
+                   WHERE job_id=?
+                     AND family_id=(
+                       SELECT id FROM file_families
+                       WHERE job_id=? AND family_key=?
+                     )
+                   ORDER BY id""",
+                (str(job_id), str(job_id), str(family_key)),
+            ).fetchall()
+        ]
+
+    updated_databases = 0
+    updated_files = 0
+    source_resolved = source_database.resolve(strict=False)
+    seen: set[str] = set()
+    for raw in database_paths:
+        target_path = Path(raw).resolve(strict=False)
+        key = str(target_path)
+        if key in seen or target_path == source_resolved or not target_path.is_file():
+            continue
+        seen.add(key)
+        with database_connection(target_path) as target:
+            target_family = target.execute(
+                "SELECT id FROM file_families WHERE job_id=? AND family_key=?",
+                (str(job_id), str(family_key)),
+            ).fetchone()
+            if target_family is None:
+                continue
+            target_family_id = int(target_family["id"])
+            target.execute(
+                """UPDATE file_families
+                   SET selected_capture_time=?,capture_time_confidence=?,status=?
+                   WHERE id=?""",
+                (
+                    family["selected_capture_time"],
+                    family["capture_time_confidence"],
+                    family["status"],
+                    target_family_id,
+                ),
+            )
+            local_files = 0
+            for row in files:
+                cursor = target.execute(
+                    """UPDATE files
+                       SET current_relative_path=?,current_root_kind=?,
+                           size_bytes=?,sha256_current=?,
+                           selected_capture_time=?,selected_capture_source=?,
+                           capture_time_confidence=?,review_status=?,
+                           metadata_write_status=?,updated_at=?
+                       WHERE job_id=? AND family_id=? AND original_relative_path=?""",
+                    (
+                        row["current_relative_path"],
+                        row["current_root_kind"],
+                        row["size_bytes"],
+                        row["sha256_current"],
+                        row["selected_capture_time"],
+                        row["selected_capture_source"],
+                        row["capture_time_confidence"],
+                        row["review_status"],
+                        row["metadata_write_status"],
+                        row["updated_at"],
+                        str(job_id),
+                        target_family_id,
+                        row["original_relative_path"],
+                    ),
+                )
+                local_files += int(cursor.rowcount or 0)
+            updated_databases += 1
+            updated_files += local_files
+
+    return {
+        "updated_databases": updated_databases,
+        "updated_files": updated_files,
+    }
+
+
 def migrate_main_free_stock_to_central(
     database_path: Path,
     workspace_path: Path,
