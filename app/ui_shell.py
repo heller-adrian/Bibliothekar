@@ -1929,8 +1929,410 @@ BIBLIOTHEKAR_0311_CSS = r"""
 """
 
 
+BIBLIOTHEKAR_0350_CSS = r"""
+/* 0.35.0: Handy-Layouts werden in Browser und installierter Web-App getrennt.
+ * Die PWA übernimmt die mobile Shell aus den iOS-Referenzen; Inhalts-/Dialog-
+ * Korrekturen gelten bewusst auch für die mobile Website.
+ */
+.bk-pwa-dock { display: none; }
+
+@media (max-width: 700px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  body.bibliothekar-redesign main {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  body.bibliothekar-redesign .card,
+  body.bibliothekar-redesign .job,
+  body.bibliothekar-redesign .event-card,
+  body.bibliothekar-redesign .selection-bar,
+  body.bibliothekar-redesign .source-device-card,
+  body.bibliothekar-redesign .result,
+  body.bibliothekar-redesign .child-event,
+  body.bibliothekar-redesign .suggestion-card {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .bk-dialog,
+  #event-dialog {
+    inline-size: calc(100dvw - 18px) !important;
+    max-inline-size: calc(100dvw - 18px) !important;
+    margin: auto !important;
+    box-sizing: border-box;
+  }
+
+  .bk-dialog-body,
+  #event-dialog > * {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .bk-dialog input:not([type="checkbox"]):not([type="radio"]),
+  .bk-dialog select,
+  .bk-dialog textarea,
+  #event-dialog input:not([type="checkbox"]):not([type="radio"]),
+  #event-dialog select,
+  #event-dialog textarea {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .bk-workspace-subnav {
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 12px;
+    padding-right: 12px;
+    overflow: hidden;
+  }
+
+  .bk-workspace-links {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .bk-metadata-subnav .bk-workspace-links {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  .bk-metadata-subnav .bk-workspace-links a {
+    min-width: 0;
+    padding: 9px 2px;
+    text-align: center;
+    font-size: clamp(.64rem, 2.7vw, .74rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+  }
+
+  /* Statuskarten wie in der mobilen Referenz wieder als kompakte Dreierreihe. */
+  .bk-status-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .bk-status-card {
+    grid-template-columns: 28px minmax(0, 1fr) !important;
+    gap: 6px !important;
+    min-height: 82px !important;
+    padding: 9px !important;
+    border-radius: 13px !important;
+  }
+
+  .bk-status-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+
+  .bk-status-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .bk-status-card .status-label {
+    font-size: .62rem;
+    line-height: 1.05;
+    letter-spacing: .04em;
+  }
+
+  .bk-status-card .status-value {
+    margin-top: 2px;
+    font-size: .84rem;
+    line-height: 1.08;
+    overflow-wrap: anywhere;
+  }
+
+  .bk-status-card .status-detail {
+    margin-top: 2px;
+    font-size: .69rem;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+
+  .bk-source-picker {
+    gap: 6px;
+  }
+
+  .bk-source-option {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* Ereignisdialog: keine aus dem Rahmen ragenden Unterereignis-Bedienelemente. */
+  #event-dialog .create-subevent-head,
+  #event-dialog .create-subevent-top {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  #event-dialog .create-subevent-name {
+    min-width: 0 !important;
+    width: 100%;
+  }
+
+  #event-dialog .create-subevent-head button,
+  #event-dialog .create-subevent-remove {
+    width: 100%;
+    max-width: 100%;
+    white-space: normal !important;
+  }
+
+  #event-dialog .create-subevent-boundaries,
+  #event-dialog .create-subevent-boundary,
+  #event-dialog .event-boundary {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #event-dialog label > span[style*="grid-template-columns:58px"] {
+    grid-template-columns: 52px minmax(0, 1fr) !important;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Installierte iOS-/PWA-Web-App: eigene Shell. Die mobile Website behält
+ * weiterhin den bisherigen oberen Registerheader und kann getrennt verfeinert werden.
+ */
+@media (max-width: 820px) {
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign main {
+    padding-bottom: calc(104px + env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-shell {
+    position: sticky;
+    top: 0;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    min-height: 0;
+    margin-bottom: 0;
+    padding:
+      max(12px, env(safe-area-inset-top))
+      18px
+      12px;
+    background: #15222c;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-shell::after {
+    display: none;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-brand {
+    gap: 10px;
+    padding: 0;
+    font-size: 1.15rem;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-mark {
+    transform: none;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-brand-title {
+    font-size: 1.15rem;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-brand-library,
+  html[data-bk-display-mode="standalone"] .bk-tabs,
+  html[data-bk-display-mode="standalone"] .bk-shell-actions {
+    display: none !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    position: fixed;
+    z-index: 8000;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns:
+      minmax(54px, .82fr)
+      minmax(74px, 1.18fr)
+      minmax(54px, .82fr)
+      minmax(92px, 1.28fr)
+      50px;
+    align-items: stretch;
+    gap: 2px;
+    padding:
+      8px
+      8px
+      max(7px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--bk-line);
+    background: color-mix(in srgb, var(--bk-surface) 97%, transparent);
+    box-shadow: 0 -10px 28px rgb(18 32 51 / .08);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    position: relative;
+    min-width: 0;
+    min-height: 54px;
+    border: 0 !important;
+    border-radius: 12px !important;
+    background: transparent !important;
+    color: var(--bk-muted) !important;
+    text-decoration: none;
+    display: grid;
+    grid-template-rows: 25px auto;
+    place-items: center;
+    align-content: center;
+    gap: 2px;
+    padding: 4px 3px !important;
+    font-size: .68rem;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg {
+    width: 23px;
+    height: 23px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item.active {
+    color: var(--bk-ink) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item.active::before {
+    content: "";
+    position: absolute;
+    top: -8px;
+    left: 12px;
+    right: 12px;
+    height: 3px;
+    border-radius: 3px;
+    background: var(--bk-area-accent);
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item[data-area="import"] .bk-pwa-icon {
+    color: var(--bk-red);
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item[data-area="workspace"] .bk-pwa-icon {
+    color: var(--bk-blue);
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item[data-area="archive"] .bk-pwa-icon {
+    color: #c98d00;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--bk-line) !important;
+    background: var(--bk-surface) !important;
+    padding-inline: 8px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-icon {
+    width: 23px;
+    height: 23px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--bk-green);
+    color: #10251b;
+    font-size: .78rem;
+    font-weight: 900;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-count {
+    min-width: 21px;
+    height: 21px;
+    border-radius: 999px;
+    display: inline-grid;
+    place-items: center;
+    padding: 0 5px;
+    background: var(--bk-yellow);
+    color: #202020;
+    font-size: .72rem;
+    font-weight: 850;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    grid-template-rows: 1fr;
+    border: 1px solid var(--bk-line) !important;
+    background: var(--bk-surface) !important;
+    color: var(--bk-ink) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle .bk-pwa-label {
+    display: none;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-page-heading {
+    width: auto;
+    margin: 18px 16px 8px;
+    padding: 0;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-page-heading h1 {
+    font-size: clamp(1.95rem, 8.5vw, 2.25rem);
+    line-height: 1;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-page-heading p {
+    margin-top: 7px;
+    font-size: .92rem;
+    line-height: 1.35;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-workspace-subnav {
+    margin-top: 8px;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    top: auto !important;
+    right: 12px !important;
+    bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+    left: 12px !important;
+    width: auto !important;
+    max-height: min(62dvh, 520px) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign section {
+    scroll-margin-top: 86px;
+  }
+}
+"""
+
+
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 (() => {
+  const isStandalone = Boolean(
+    window.matchMedia?.("(display-mode: standalone)")?.matches
+    || window.navigator.standalone === true
+  );
+  document.documentElement.dataset.bkDisplayMode = isStandalone ? "standalone" : "browser";
+
   const pageUrl = new URL(window.location.href);
   const libraryId = pageUrl.searchParams.get("library") || "main";
   window.__bkLibraryId = libraryId;
@@ -2730,7 +3132,7 @@ BIBLIOTHEKAR_JS = r"""
   let structureTaskAutoOpened = false;
 
   async function refreshTasks() {
-    const countNode = document.getElementById("bk-task-count");
+    const countNodes = document.querySelectorAll("[data-bk-task-count]");
     const panel = document.getElementById("bk-task-panel");
     try {
       const response = await fetch("/api/tasks", {cache: "no-store"});
@@ -2738,7 +3140,7 @@ BIBLIOTHEKAR_JS = r"""
       const data = await response.json();
       const tasks = data.tasks || [];
       const count = Number(data.count || 0);
-      if (countNode) countNode.textContent = String(count);
+      countNodes.forEach(node => { node.textContent = String(count); });
       if (panel) {
         panel.innerHTML = count
           ? '<strong style="display:block;padding:7px 9px">Offene Aufgaben · ' + count + '</strong>' +
@@ -2757,7 +3159,7 @@ BIBLIOTHEKAR_JS = r"""
         if (taskPanel?.hasAttribute("hidden")) openTaskPanel();
       }
     } catch (_) {
-      if (countNode) countNode.textContent = "–";
+      countNodes.forEach(node => { node.textContent = "–"; });
     }
   }
   refreshTasks();
@@ -2921,7 +3323,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     <button id="bk-task-button" class="bk-shell-button bk-task-button" type="button">
       <span class="bk-task-dot">✓</span>
       <span class="bk-task-label">Aufgaben</span>
-      <span id="bk-task-count" class="bk-task-count">0</span>
+      <span id="bk-task-count" class="bk-task-count" data-bk-task-count>0</span>
     </button>
     <a class="bk-shell-button bk-assistant-button{' active' if active == 'assistant' else ''}" href="/assistant" aria-label="Bibliothekar Assistent" title="Bibliothekar Assistent">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
@@ -2943,6 +3345,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5M16.5 13.5l2 2M18.5 13.5l-2 2"/></svg></span>
         <span>Metadatenkorrektion</span>
       </a>
+      <a href="/assistant">
+        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg></span>
+        <span>Assistent</span>
+      </a>
       <div class="bk-menu-separator"></div>
       <button type="button" data-bk-open-about>
         <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7h.01"/></svg></span>
@@ -2951,6 +3357,31 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     </div>
   </div>
 </header>
+
+<nav class="bk-pwa-dock" aria-label="Web-App-Navigation">
+  <a class="bk-pwa-nav-item${' active' if active == 'import' else ''}" data-area="import" href="/">
+    <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="12" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg></span>
+    <span class="bk-pwa-label">Import</span>
+  </a>
+  <a class="bk-pwa-nav-item${' active' if active == 'workspace' else ''}" data-area="workspace" href="/workspace">
+    <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/></svg></span>
+    <span class="bk-pwa-label">Arbeitsbereich</span>
+  </a>
+  <a class="bk-pwa-nav-item${' active' if active == 'archive' else ''}" data-area="archive" href="/transfer">
+    <span class="bk-pwa-icon" aria-hidden="true"><path></path><svg viewBox="0 0 24 24"><path d="M5 8h14v11H5z"/><path d="M8 8V5h8v3M9 12h6"/></svg></span>
+    <span class="bk-pwa-label">Archiv</span>
+  </a>
+  <button class="bk-pwa-nav-item bk-pwa-task-toggle" type="button" aria-label="Aufgaben öffnen" onclick="document.getElementById('bk-task-button')?.click()">
+    <span class="bk-pwa-icon" aria-hidden="true">✓</span>
+    <span class="bk-pwa-label">Aufgaben</span>
+    <span class="bk-pwa-task-count" data-bk-task-count>0</span>
+  </button>
+  <button class="bk-pwa-nav-item bk-pwa-menu-toggle" type="button" aria-label="Menü öffnen" onclick="document.getElementById('bk-menu-button')?.click()">
+    <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></span>
+    <span class="bk-pwa-label">Menü</span>
+  </button>
+</nav>
+
 {subnav}
 {heading}
 
@@ -3108,7 +3539,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.34.0 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.0 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -3122,7 +3553,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         "</head>",
         f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
