@@ -4853,6 +4853,29 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
         # einer Ereignisänderung stammen (diese besitzen oben ihre eigene
         # Neu-Zuordnungsaufgabe). So entstehen keine Doppelmeldungen.
         for row in connection.execute(
+            """SELECT id,area,status,source_filename,proposed_datetime,error_message
+               FROM metadata_corrections
+               WHERE status IN ('pending_review','prepared','writing','blocked')
+               ORDER BY created_at"""
+        ).fetchall():
+            state = str(row["status"])
+            detail = (
+                ("Allgemein" if str(row["area"]) == "general" else "Bibliothek")
+                + " · "
+                + str(row["source_filename"])
+            )
+            if state == "blocked" and row["error_message"]:
+                detail += " · blockiert"
+            tasks.append({
+                "kind": "metadata_correction",
+                "metadata_correction_id": row["id"],
+                "title": "Metadatenkorrektur",
+                "detail": detail,
+                "count": 1,
+                "href": f"/metadata-correction?task=metadata:{row['id']}",
+            })
+
+        for row in connection.execute(
             """SELECT ff.job_id, COALESCE(j.source_volume_label,ff.job_id) AS label, COUNT(*) AS n
                FROM file_families ff JOIN jobs j ON j.id=ff.job_id
                WHERE ff.selected_capture_time IS NOT NULL
