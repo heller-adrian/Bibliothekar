@@ -656,6 +656,36 @@ def update_library_display_name(
     return result
 
 
+def update_library_settings(
+    registry_path: Path,
+    library_id: str,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    existing = get_library(registry_path, library_id, active_only=False)
+    if existing is None or not existing.get("is_registered", True):
+        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
+
+    current = dict(existing.get("settings") or {})
+    for key, value in dict(updates or {}).items():
+        if value is None:
+            current.pop(str(key), None)
+        else:
+            current[str(key)] = value
+
+    return register_library(
+        registry_path,
+        library_id=str(existing["library_id"]),
+        display_name=str(existing["display_name"]),
+        database_path=Path(str(existing["database_path"])),
+        workspace_root=Path(str(existing["workspace_root"])),
+        work_root=Path(str(existing["work_root"])),
+        archive_root=Path(str(existing["archive_root"])),
+        is_main=bool(existing["is_main"]),
+        is_active=bool(existing["is_active"]),
+        settings=current,
+    )
+
+
 def update_library_database_path(
     registry_path: Path,
     library_id: str,
