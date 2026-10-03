@@ -16,8 +16,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .meta-paths{display:grid;gap:5px;font-size:.9rem;margin:9px 0 0}
 .meta-groups{display:grid;gap:14px;margin-top:14px}
 .meta-files{display:grid;gap:8px}
-.meta-file{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;width:100%;border:1px solid var(--bk-line,#ccd2d8);border-radius:12px;padding:11px 13px;background:var(--bk-surface,#fff);color:inherit;cursor:pointer}
-.meta-file.active{outline:2px solid var(--bk-blue,#1976d2)}
+.meta-file{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;width:100%;border:1px solid var(--bk-line,#ccd2d8);border-radius:12px;padding:11px 13px;background:var(--bk-surface,#fff);color:inherit;cursor:pointer;user-select:none;-webkit-user-select:none}
+.meta-file.active{border-color:var(--bk-blue,#1976d2);box-shadow:inset 0 0 0 1px var(--bk-blue,#1976d2)}
 .meta-file.selected{border-color:var(--bk-blue,#1976d2);background:var(--bk-surface-2,#f5f5f5)}
 .meta-file-check{width:19px;height:19px;min-height:auto;accent-color:var(--bk-blue,#1976d2)}
 .meta-file strong,.meta-file small{display:block}
@@ -69,9 +69,9 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   </div>
 
   <section id="meta-multiple-placeholder" class="meta-card meta-placeholder" hidden>
-    <strong>Mehrfachkorrektur · vorgesehen für 0.34.0</strong>
+    <strong>Mehrfachkorrektur · in Vorbereitung</strong>
     <p class="muted">Hier wird eine Referenzaufnahme mit dem korrekten Datum und der korrekten Uhrzeit versehen. Bibliothekar überträgt anschließend denselben Zeitversatz auf die zusammengehörigen Kameraaufnahmen, ohne deren zeitliche Abstände zu verändern.</p>
-    <p class="muted">Der vorgesehene verwaltete Ordner ist <code id="meta-multiple-path">/workspace/Metadatenkorrektur/Mehrfachkorrektur</code>. Er wird erst mit der Funktion in 0.34.0 aktiviert.</p>
+    <p class="muted">Der vorgesehene verwaltete Ordner ist <code id="meta-multiple-path">/workspace/Metadatenkorrektur/Mehrfachkorrektur</code>.</p>
   </section>
 </main>
 <script>
@@ -186,6 +186,9 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     $("meta-files").innerHTML='<div class="meta-files">'+files.map(fileRow).join("")+'</div>';
     document.querySelectorAll("[data-meta-file]").forEach(row=>{
       const index=Number(row.dataset.metaFile);
+      row.addEventListener("mousedown",event=>{
+        if(event.shiftKey && !event.target.closest("input,button"))event.preventDefault();
+      });
       row.addEventListener("click",event=>{
         if(event.target.closest("[data-meta-check]"))return;
         state.selected=index;
@@ -219,10 +222,14 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     });
     updateSelectAllButton();
   }
-  function selectedReadyFiles(){
+  function selectedFiles(){
     const files=state.scan?.files||[];
     const indices=state.selectedSet.size?[...state.selectedSet]:(Number.isInteger(state.selected)?[state.selected]:[]);
-    return indices.map(index=>files[index]).filter(file=>file&&file.reintegration_ready);
+    return indices.map(index=>files[index]).filter(Boolean);
+  }
+  function selectedReadyFiles(){
+    const files=selectedFiles();
+    return files.length&&files.every(file=>file.reintegration_ready)?files:[];
   }
   function renderDetails(){
     const file=(state.scan?.files||[])[state.selected];
@@ -232,10 +239,12 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       ? '<span>Familie</span><span>'+esc(file.member_count||1)+' Dateien</span>'
       :"";
     const selectionNote=state.selectedSet.size>1
-      ? '<div class="meta-selection-note"><strong>'+state.selectedSet.size+' Einträge ausgewählt.</strong> Mit Umschalt (Shift) können Sie zusammenhängende Bereiche wählen. Die Mehrfachauswahl dient in 0.33.5 zum gemeinsamen Einsortieren; die Zeitversatz-Korrektur folgt separat in 0.34.0.</div>'
+      ? '<div class="meta-selection-note"><strong>'+state.selectedSet.size+' Einträge ausgewählt.</strong></div>'
       :"";
     const ready=state.area==="library"&&file.reintegration_ready;
+    const chosenFiles=selectedFiles();
     const readyFiles=selectedReadyFiles();
+    const correctionCount=chosenFiles.length||1;
     const sortButton=state.area==="library"&&readyFiles.length
       ? '<button id="meta-reintegrate" type="button" class="primary">In Tagesbestand einsortieren'+(readyFiles.length>1?" ("+readyFiles.length+")":"")+'</button>'
       :"";
@@ -246,12 +255,9 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       +'<span>Dateiname</span><span>'+(filename?(esc(filename.date)+(filename.time?" "+esc(filename.time):" · Uhrzeit fehlt")):"kein Datum erkannt")+'</span></div>'
       +'<label><span>Datum</span><input id="meta-date" type="date" value="'+esc(suggested.date)+'"></label>'
       +'<label><span>Uhrzeit</span><input id="meta-time" type="time" step="1" value="'+esc(suggested.time)+'"></label>'
-      +'<button id="meta-prepare" type="button" class="primary">'+(ready?"Metadaten erneut ändern":"Metadaten ändern")+'</button>'
-      +sortButton
-      +'<div class="muted">'+(state.area==="library"
-        ?"Metadaten werden sicher auf Arbeitskopien geschrieben und geprüft. Die Familie bleibt danach bewusst in Ohne_Datum, bis Sie das Einsortieren separat auslösen."
-        :"Bibliothekar schreibt die Änderung zuerst in eine Arbeitskopie, liest und prüft die Metadaten erneut und ersetzt die Datei erst danach atomar am selben Ort.")+'</div></div>';
-    $("meta-prepare").addEventListener("click",()=>correct(file));
+      +'<button id="meta-prepare" type="button" class="primary">'+(ready?"Metadaten erneut ändern":"Metadaten ändern")+(correctionCount>1?" ("+correctionCount+")":"")+'</button>'
+      +sortButton+'</div>';
+    $("meta-prepare").addEventListener("click",()=>correctSelected(file));
     if($("meta-reintegrate"))$("meta-reintegrate").addEventListener("click",reintegrateSelected);
   }
   function selectionKeys(){
@@ -269,26 +275,30 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     state.selected=snapshot.primary&&byKey.has(snapshot.primary)?byKey.get(snapshot.primary):null;
     state.lastSelected=snapshot.last&&byKey.has(snapshot.last)?byKey.get(snapshot.last):state.selected;
   }
-  async function correct(file){
+  async function correctSelected(file){
     const date=$("meta-date").value,time=$("meta-time").value;
     if(!date||!time){setStatus("Datum und Uhrzeit müssen vollständig angegeben werden.",true);return;}
+    const files=selectedFiles().length?selectedFiles():[file];
     const button=$("meta-prepare");
     if(button)button.disabled=true;
-    setStatus(state.area==="library"
-      ?"Metadaten werden familienweise geschrieben und geprüft …"
-      :"Metadaten werden geschrieben und vollständig geprüft …");
+    setStatus(files.length===1?"Metadaten werden geändert …":files.length+" Einträge werden geändert …");
+    let completed=0;
     try{
-      const payload={area:state.area,relative_path:file.relative_path,proposed_datetime:date+"T"+time};
-      if(state.area==="library"){payload.library_id=file.library_id;payload.family_id=file.family_id;}
-      await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      for(const item of files){
+        const payload={area:state.area,relative_path:item.relative_path,proposed_datetime:date+"T"+time};
+        if(state.area==="library"){payload.library_id=item.library_id;payload.family_id=item.family_id;}
+        await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+        completed+=1;
+      }
       await scan(false,true);
       await loadTasks(true);
-      setStatus(state.area==="library"
-        ?"Korrektur vollständig geschrieben und geprüft. Die Familie bleibt in Ohne_Datum und kann jetzt separat einsortiert werden."
-        :"Korrektur vollständig geschrieben und geprüft.");
+      setStatus(files.length===1
+        ?"Metadaten geändert. Bereit zum Einsortieren."
+        :files.length+" Einträge geändert. Bereit zum Einsortieren.");
     }catch(error){
-      setStatus(error.message,true);
+      await scan(false,true);
       await loadTasks(true);
+      setStatus((completed?completed+" von "+files.length+" Einträgen geändert. ":"")+error.message,true);
     }finally{
       const current=$("meta-prepare");
       if(current)current.disabled=false;
