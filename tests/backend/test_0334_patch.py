@@ -71,7 +71,7 @@ def _insert_imported_family(database: Path, job_id: str) -> tuple[str, int]:
                    created_at,updated_at
                ) VALUES (
                    ?,?,?,?,?,?,?,?,?,?,?,?,'high','not_required',
-                   'not_requested','central_stock',?,?
+                   'not_requested','shared_workspace',?,?
                )""",
             (
                 job_id,
