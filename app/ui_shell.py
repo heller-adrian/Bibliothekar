@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+import re
 
 
 BIBLIOTHEKAR_CSS = r"""
@@ -1801,6 +1802,97 @@ BIBLIOTHEKAR_0311_CSS = r"""
 .bk-settings-panel {
   min-width: 0;
 }
+
+.bk-settings-card {
+  margin-top: 12px;
+  border: 1px solid var(--bk-line);
+  border-radius: 14px;
+  background: var(--bk-surface);
+  overflow: hidden;
+}
+.bk-settings-card > summary,
+.bk-library-card > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  font-weight: 800;
+}
+.bk-settings-card > summary::-webkit-details-marker,
+.bk-library-card > summary::-webkit-details-marker { display:none; }
+.bk-settings-card > summary::before,
+.bk-library-card > summary::before {
+  content:"▸";
+  flex:0 0 auto;
+  transition:transform .16s ease;
+}
+.bk-settings-card[open] > summary::before,
+.bk-library-card[open] > summary::before { transform:rotate(90deg); }
+.bk-settings-card-body { padding: 0 14px 14px; }
+.bk-compact-toggle {
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  white-space:nowrap;
+  font-size:.92rem;
+}
+#bk-event-naming-settings input[type="checkbox"],
+.bk-compact-toggle input[type="checkbox"] {
+  width:18px !important;
+  min-width:18px !important;
+  height:18px !important;
+  min-height:18px !important;
+  padding:0 !important;
+  margin:0 !important;
+  flex:0 0 18px;
+  border-radius:4px !important;
+}
+.bk-settings-preview {
+  margin-top:12px;
+  border:1px solid var(--bk-line);
+  border-radius:14px;
+  background:var(--bk-surface);
+  padding:14px;
+}
+.bk-settings-preview-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  margin-top:10px;
+}
+.bk-settings-preview-case {
+  border:1px solid var(--bk-line);
+  border-radius:11px;
+  background:var(--bk-surface-2);
+  padding:11px;
+  min-width:0;
+}
+.bk-settings-preview-case pre {
+  margin:8px 0 0;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  font: .86rem/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+#bk-library-management-list .bk-library-card {
+  padding:0 !important;
+  display:block !important;
+}
+.bk-library-card > summary .bk-library-card-head {
+  flex:1 1 auto;
+  min-width:0;
+}
+.bk-library-card-body {
+  display:grid;
+  gap:9px;
+  padding:0 12px 12px;
+}
+@media (max-width:700px) {
+  .bk-settings-preview-grid { grid-template-columns:1fr; }
+}
+
 @media (max-width: 700px) {
   #bk-settings-dialog {
     width: calc(100vw - 18px);
@@ -2107,14 +2199,15 @@ BIBLIOTHEKAR_JS = r"""
     }
   }
 
-  function bkLibraryCard(row) {
+  function bkLibraryCard(row, open=false) {
     const id = String(row.library_id || "");
     const inactive = !row.is_active;
-    return '<div class="bk-library-card" data-bk-library-card="'+bkEscape(id)+'">'
-      +'<div class="bk-library-card-head"><div><strong>'+bkEscape(row.display_name || id)+'</strong>'
+    return '<details class="bk-library-card" data-bk-library-card="'+bkEscape(id)+'" '+(open?'open':'')+'>'
+      +'<summary><div class="bk-library-card-head"><div><strong>'+bkEscape(row.display_name || id)+'</strong>'
       +'<div style="color:var(--bk-muted);font-size:.84rem;margin-top:3px">'+(row.is_main?'Hauptbibliothek':'Bibliothek')
       +(inactive?' · deaktiviert':' · aktiv')+'</div></div>'
-      +'<span class="badge '+(!inactive?'success':'')+'">'+(!inactive?'Aktiv':'Inaktiv')+'</span></div>'
+      +'<span class="badge '+(!inactive?'success':'')+'">'+(!inactive?'Aktiv':'Inaktiv')+'</span></div></summary>'
+      +'<div class="bk-library-card-body">'
       +'<label style="display:grid;gap:5px"><span>Anzeigename</span>'
       +'<input data-bk-library-name value="'+bkEscape(row.display_name || id)+'"></label>'
       +'<label style="display:grid;gap:5px"><span>Arbeitsbereich · RW</span>'
@@ -2132,16 +2225,22 @@ BIBLIOTHEKAR_JS = r"""
           : '<button type="button" data-bk-library-deactivate>Deaktivieren</button>'
       ))
       +(row.is_main?'':'<button type="button" data-bk-library-unregister class="danger-button">Abmelden</button>')
-      +'</div><div class="bk-library-status" data-bk-library-status></div></div>';
+      +'</div><div class="bk-library-status" data-bk-library-status></div></div></details>';
   }
 
   async function bkRefreshLibraryManagement() {
     const host = document.getElementById("bk-library-management-list");
     if (!host) return;
+    const openIds = new Set(
+      [...host.querySelectorAll("[data-bk-library-card][open]")]
+        .map(card => String(card.dataset.bkLibraryCard || ""))
+    );
     host.innerHTML = '<div style="color:var(--bk-muted)">Bibliotheken werden geladen …</div>';
     try {
       const data = await bkJson("/api/libraries?include_inactive=true");
-      host.innerHTML = (data.libraries || []).map(bkLibraryCard).join("");
+      host.innerHTML = (data.libraries || []).map(row => (
+        bkLibraryCard(row, openIds.has(String(row.library_id || "")))
+      )).join("");
       bindLibraryManagementActions(host);
     } catch (error) {
       host.innerHTML = '<div style="color:var(--bk-danger)">'+bkEscape(error.message)+'</div>';
@@ -2307,7 +2406,6 @@ BIBLIOTHEKAR_JS = r"""
     setValue("bk-storage-backup-name", data.backup_directory_name);
     setValue("bk-storage-workspaces-name", data.workspaces_directory_name);
     setValue("bk-storage-metadata-name", data.metadata_directory_name);
-    setValue("bk-metadata-general-root", data.metadata_general_root || "");
     setText("bk-storage-workspace-root", data.workspace_root || "/workspace");
     setText("bk-storage-backup-preview", "SD-Kartensicherungen: " + String(data.backup_root || ""));
     setText("bk-storage-workspaces-preview", "Arbeitsbereiche: " + String(data.workspaces_root || ""));
@@ -2337,13 +2435,6 @@ BIBLIOTHEKAR_JS = r"""
           backup_directory_name:document.getElementById("bk-storage-backup-name")?.value || "",
           workspaces_directory_name:document.getElementById("bk-storage-workspaces-name")?.value || "",
           metadata_directory_name:document.getElementById("bk-storage-metadata-name")?.value || "",
-        }),
-      });
-      await bkJson("/api/settings/metadata-correction", {
-        method:"PUT",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          general_root:document.getElementById("bk-metadata-general-root")?.value || "",
         }),
       });
       const refreshed=await bkJson("/api/settings/storage-paths");
@@ -2441,6 +2532,7 @@ BIBLIOTHEKAR_JS = r"""
     host.querySelectorAll('input[name="bk-input-folder"]').forEach(radio=>radio.addEventListener("change",()=>{
       if(radio.checked){folderLayoutState.input_path=radio.value;bkRenderFolderLayout();}
     }));
+    bkUpdateSettingsPreview();
   }
 
   async function bkLoadFolderLayout() {
@@ -2458,6 +2550,7 @@ BIBLIOTHEKAR_JS = r"""
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadFolderLayout);
   document.getElementById("bk-folder-layout-enabled")?.addEventListener("change",event=>{
     if(folderLayoutState)folderLayoutState.structure_enabled=Boolean(event.target.checked);
+    bkUpdateSettingsPreview();
   });
   document.getElementById("bk-folder-export-node")?.addEventListener("change",event=>{
     if(!folderLayoutState)return;
@@ -2466,6 +2559,7 @@ BIBLIOTHEKAR_JS = r"""
       if(String(item.node?.role||"").toLowerCase()==="export")delete item.node.role;
       if(selected && String(item.node?.id||"")===selected)item.node.role="export";
     }
+    bkUpdateSettingsPreview();
   });
   document.getElementById("bk-folder-add-root")?.addEventListener("click",()=>{
     if(!folderLayoutState)return;
@@ -2500,28 +2594,65 @@ BIBLIOTHEKAR_JS = r"""
     if (!eventNamingSettings || !data) return;
     eventNamingState = data;
     const label=document.getElementById("bk-no-event-label");
-    const mode=document.getElementById("bk-event-date-mode");
+    const range=document.getElementById("bk-event-date-range");
     const year=document.getElementById("bk-event-include-year");
     const time=document.getElementById("bk-event-include-time");
+    const collectionYear=document.getElementById("bk-no-event-include-year");
     if(label)label.value=String(data.no_event_label||"Ohne Ereignis");
-    if(mode)mode.value=String(data.date_mode||"start");
+    if(range)range.checked=String(data.date_mode||"start")==="range";
     if(year)year.checked=Boolean(data.include_year);
     if(time)time.checked=Boolean(data.include_time);
-    bkUpdateEventNamingPreview();
+    if(collectionYear)collectionYear.checked=Boolean(data.no_event_include_year);
+    bkUpdateSettingsPreview();
   }
 
-  function bkUpdateEventNamingPreview() {
-    if(!eventNamingSettings)return;
+  function bkPreviewStructure(parentFolder) {
+    const enabled=Boolean(folderLayoutState?.structure_enabled);
+    const nodes=folderLayoutState?.layout?.nodes||[];
+    const inputPath=String(folderLayoutState?.input_path||"");
+    const lines=["2026"];
+    const parentInput=enabled && !inputPath ? "  [Input]" : "";
+    lines.push("└── "+parentFolder+parentInput);
+    if(!enabled || !nodes.length)return lines.join("\n");
+
+    function walk(items,prefix,pathPrefix){
+      (items||[]).forEach((node,index)=>{
+        const last=index===items.length-1;
+        const path=pathPrefix ? pathPrefix+"/"+node.name : node.name;
+        const roles=[];
+        if(path===inputPath)roles.push("Input");
+        if(String(node.role||"").toLowerCase()==="export")roles.push("Export");
+        lines.push(prefix+(last?"└── ":"├── ")+String(node.name||"Ordner")+(roles.length?"  ["+roles.join(", ")+"]":""));
+        walk(node.children||[],prefix+(last?"    ":"│   "),path);
+      });
+    }
+    walk(nodes,"    ","");
+    return lines.join("\n");
+  }
+
+  function bkUpdateSettingsPreview() {
+    const preview=document.getElementById("bk-event-naming-preview");
+    if(!preview)return;
     const label=String(document.getElementById("bk-no-event-label")?.value||"Ohne Ereignis").trim()||"Ohne Ereignis";
-    const range=document.getElementById("bk-event-date-mode")?.value==="range";
+    const range=Boolean(document.getElementById("bk-event-date-range")?.checked);
     const year=Boolean(document.getElementById("bk-event-include-year")?.checked);
     const time=Boolean(document.getElementById("bk-event-include-time")?.checked);
+    const collectionYear=Boolean(document.getElementById("bk-no-event-include-year")?.checked);
     const d1=year?"2026-07-20":"07-20";
     const d2=year?"2026-07-21":"07-21";
-    let normal=range ? d1+"–"+d2 : d1;
-    if(time) normal=range ? d1+" 14-00–"+d2+" 18-30" : normal+" · 14-00–18-30";
-    const preview=document.getElementById("bk-event-naming-preview");
-    if(preview)preview.textContent="Beispiel: "+normal+" - Urlaub · 07 - "+label;
+    let datePart=range ? d1+"–"+d2 : d1;
+    if(time){
+      datePart=range
+        ? d1+" 14-00–"+d2+" 18-30"
+        : d1+" · 14-00–18-30";
+    }
+    const normal=datePart+" - Urlaub";
+    const collection=(collectionYear?"2026-07":"07")+" - "+label;
+    preview.innerHTML=
+      '<div class="bk-settings-preview-grid">'
+      +'<div class="bk-settings-preview-case"><strong>Normales Ereignis</strong><pre>'+bkEscape(bkPreviewStructure(normal))+'</pre></div>'
+      +'<div class="bk-settings-preview-case"><strong>Sammelordner</strong><pre>'+bkEscape(bkPreviewStructure(collection))+'</pre></div>'
+      +'</div>';
   }
 
   async function bkLoadEventNaming() {
@@ -2534,9 +2665,9 @@ BIBLIOTHEKAR_JS = r"""
     }catch(error){if(status)status.textContent=error.message;}
   }
 
-  ["bk-no-event-label","bk-event-date-mode","bk-event-include-year","bk-event-include-time"].forEach(id=>{
-    document.getElementById(id)?.addEventListener("input",bkUpdateEventNamingPreview);
-    document.getElementById(id)?.addEventListener("change",bkUpdateEventNamingPreview);
+  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year"].forEach(id=>{
+    document.getElementById(id)?.addEventListener("input",bkUpdateSettingsPreview);
+    document.getElementById(id)?.addEventListener("change",bkUpdateSettingsPreview);
   });
   document.getElementById("bk-event-naming-save")?.addEventListener("click",async()=>{
     const status=document.getElementById("bk-event-naming-status");
@@ -2546,14 +2677,15 @@ BIBLIOTHEKAR_JS = r"""
         method:"PUT",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           no_event_label:document.getElementById("bk-no-event-label")?.value||"",
-          date_mode:document.getElementById("bk-event-date-mode")?.value||"start",
+          date_mode:Boolean(document.getElementById("bk-event-date-range")?.checked)?"range":"start",
           include_year:Boolean(document.getElementById("bk-event-include-year")?.checked),
           include_time:Boolean(document.getElementById("bk-event-include-time")?.checked),
+          no_event_include_year:Boolean(document.getElementById("bk-no-event-include-year")?.checked),
         })
       });
       bkRenderEventNaming(data);
       document.dispatchEvent(new CustomEvent("bibliothekar:event-naming-updated",{detail:data}));
-      if(status)status.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse.";
+      if(status)status.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse und Sammelordner.";
     }catch(error){if(status)status.textContent=error.message;}
   });
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadEventNaming);
@@ -2722,6 +2854,18 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         )
 
     subnav = ""
+    if active == "metadata":
+        metadata_area = subarea or "library"
+        subnav = f"""
+<div class="bk-workspace-subnav bk-metadata-subnav" data-bk-metadata-area="{escape(metadata_area)}" aria-label="Metadatenkorrektur">
+  <div class="bk-workspace-links">
+    <a href="/metadata-correction?area=library" class="{'active' if metadata_area == 'library' else ''}">Bibliothek</a>
+    <a href="/metadata-correction?area=general" class="{'active' if metadata_area == 'general' else ''}">Allgemein</a>
+    <a href="/metadata-correction?area=multiple" class="{'active' if metadata_area == 'multiple' else ''}">Mehrfachkorrektur</a>
+  </div>
+</div>
+"""
+
     if active == "workspace":
         dock_slot = (
             '<div id="bk-workspace-dock" class="bk-workspace-dock"></div>'
@@ -2846,44 +2990,56 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     </div>
 
     <div class="bk-settings-panel" data-bk-settings-panel="folders" hidden>
-      <section class="bk-settings-group" id="bk-folder-layout-settings">
-        <div class="bk-folder-layout-heading">
-          <div><strong>Ereignisordner</strong><div style="color:var(--bk-muted);margin-top:4px">Vorlage nur für neue Ereignisse</div></div>
-          <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
-        </div>
-        <div id="bk-folder-layout-tree" style="display:grid;gap:7px;margin-top:12px"></div>
-        <label style="display:grid;gap:6px;margin-top:11px">
-          <span><strong>Exportordner</strong> <span style="color:var(--bk-muted)">· optional</span></span>
-          <select id="bk-folder-export-node">
-            <option value="">Kein Ordner fest als Exportordner klassifiziert</option>
-          </select>
-          <span style="color:var(--bk-muted);font-size:.86rem;line-height:1.35">Dateien in diesem Ordner gelten als Exporte, auch wenn der Ordner z. B. „Master“ heißt. Die Einstellung wird wie die Ordnerstruktur für neue Ereignisse eingefroren.</span>
-        </label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-          <button id="bk-folder-add-root" type="button">＋ Ordner</button>
-          <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
-        </div>
-        <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
-      </section>
-      <section class="bk-settings-group" id="bk-event-naming-settings">
-        <div><strong>Benennung neuer Ereignisse</strong><div style="color:var(--bk-muted);margin-top:4px">Bibliotheksspezifisch · bestehende Ereignisse behalten ihren Ordnernamen</div></div>
-        <div class="bk-library-form" style="margin-top:12px">
-          <label><span>Bezeichnung für „Ohne Ereignis“</span><input id="bk-no-event-label" value="Ohne Ereignis"></label>
-          <label><span>Datum im Ereignisordner</span>
-            <select id="bk-event-date-mode">
-              <option value="start">Nur Startdatum</option>
-              <option value="range">Von–bis bei mehreren Tagen</option>
-            </select>
-          </label>
-        </div>
-        <div class="bk-choice-row" style="margin-top:10px">
-          <label><input id="bk-event-include-year" type="checkbox"> Jahr einbeziehen</label>
-          <label><input id="bk-event-include-time" type="checkbox"> Uhrzeit einbeziehen</label>
-        </div>
-        <div id="bk-event-naming-preview" class="bk-language-note"></div>
-        <div class="bk-library-actions"><button id="bk-event-naming-save" type="button" class="bk-positive-action">Benennung speichern</button></div>
-        <div id="bk-event-naming-status" class="bk-library-status"></div>
-      </section>
+      <div id="bk-event-naming-settings">
+        <details class="bk-settings-card" id="bk-folder-layout-settings">
+          <summary><span>Ordnerstruktur</span><span style="color:var(--bk-muted);font-weight:600">Vorlage für neue Ereignisse</span></summary>
+          <div class="bk-settings-card-body">
+            <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
+            <div id="bk-folder-layout-tree" style="display:grid;gap:7px;margin-top:12px"></div>
+            <label style="display:grid;gap:6px;margin-top:11px">
+              <span><strong>Exportordner</strong> <span style="color:var(--bk-muted)">· optional</span></span>
+              <select id="bk-folder-export-node">
+                <option value="">Kein Ordner fest als Exportordner klassifiziert</option>
+              </select>
+              <span style="color:var(--bk-muted);font-size:.86rem;line-height:1.35">Dateien in diesem Ordner gelten als Exporte. Die Einstellung wird für neue Ereignisse eingefroren.</span>
+            </label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+              <button id="bk-folder-add-root" type="button">＋ Ordner</button>
+              <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
+            </div>
+            <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
+          </div>
+        </details>
+
+        <details class="bk-settings-card">
+          <summary><span>Normale Ereignisse</span><span style="color:var(--bk-muted);font-weight:600">Standardbenennung</span></summary>
+          <div class="bk-settings-card-body">
+            <div style="display:flex;gap:14px;flex-wrap:wrap">
+              <label class="bk-compact-toggle"><input id="bk-event-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-event-include-time" type="checkbox"> <span>Uhrzeit einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-event-date-range" type="checkbox"> <span>Von–bis im Namen</span></label>
+            </div>
+            <div class="bk-language-note">Der eingegebene Ereignisname bleibt Bestandteil des Ordnernamens. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand.</div>
+          </div>
+        </details>
+
+        <details class="bk-settings-card">
+          <summary><span>Sammelordner</span><span style="color:var(--bk-muted);font-weight:600">bisher „Ohne Ereignis“</span></summary>
+          <div class="bk-settings-card-body">
+            <label style="display:grid;gap:6px"><span>Bezeichnung für Sammelordner</span><input id="bk-no-event-label" value="Ohne Ereignis"></label>
+            <label class="bk-compact-toggle" style="margin-top:10px"><input id="bk-no-event-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
+            <div class="bk-language-note">Sammelordner werden monatsweise gebildet. Von–bis und Uhrzeit gehören deshalb nicht in ihre Ordnerbenennung.</div>
+          </div>
+        </details>
+
+        <section class="bk-settings-preview">
+          <strong>Vorschau</strong>
+          <div style="color:var(--bk-muted);font-size:.86rem;margin-top:4px">So sehen Ordnerstruktur und Standardbenennung für neue Inhalte aus.</div>
+          <div id="bk-event-naming-preview"></div>
+          <div class="bk-library-actions" style="margin-top:11px"><button id="bk-event-naming-save" type="button" class="bk-positive-action">Benennung speichern</button></div>
+          <div id="bk-event-naming-status" class="bk-library-status"></div>
+        </section>
+      </div>
     </div>
 
     <div class="bk-settings-panel" data-bk-settings-panel="paths" hidden>
@@ -2897,14 +3053,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <label><span>SD-Kartensicherungen</span><input id="bk-storage-backup-name" value="SD-Kartensicherungen"></label>
           <label><span>Bibliotheks-Arbeitsbereiche</span><input id="bk-storage-workspaces-name" value="Arbeitsbereiche"></label>
           <label><span>Metadatenkorrektur</span><input id="bk-storage-metadata-name" value="Metadatenkorrektur"></label>
-          <label><span>Metadatenkorrektur „Allgemein“ · separater RW-Host-Path</span><input id="bk-metadata-general-root" placeholder="/metadata-general"></label>
         </div>
         <div class="bk-library-meta" style="margin-top:10px">
           <span id="bk-storage-backup-preview"></span>
           <span id="bk-storage-workspaces-preview"></span>
           <span id="bk-storage-metadata-preview"></span>
         </div>
-        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Eigene TrueNAS-Datasets oder zusätzliche Host Paths werden weiterhin in TrueNAS eingebunden und anschließend bei der jeweiligen Bibliothek als benutzerdefinierter Pfad gewählt.</p>
+        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Metadatenkorrektur → Allgemein liegt automatisch im Unterordner <code>Allgemein</code>; dafür ist kein zusätzlicher TrueNAS-Host-Path nötig.</p>
         <div class="bk-library-actions"><button id="bk-storage-save" type="button" class="bk-positive-action">Pfade speichern</button></div>
         <div id="bk-storage-status" class="bk-library-status"></div>
       </section>
@@ -2970,21 +3125,22 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
-    if "<body>" in result:
-        result = result.replace(
-            "<body>",
-            f'<body class="bibliothekar-redesign" data-bk-area="{area}">',
-            1,
-        )
-    elif "<body " in result:
-        result = result.replace(
-            "<body ",
-            f'<body class="bibliothekar-redesign" data-bk-area="{area}" ',
-            1,
-        )
+
+    body_match = re.search(r"<body(?:\s[^>]*)?>", result, flags=re.IGNORECASE)
+    if body_match is None:
+        return result
+    original_body = body_match.group(0)
+    class_match = re.search(r'class=["\']([^"\']*)["\']', original_body, flags=re.IGNORECASE)
+    classes = []
+    if class_match:
+        classes = [value for value in class_match.group(1).split() if value]
+    if "bibliothekar-redesign" not in classes:
+        classes.append("bibliothekar-redesign")
+    replacement_body = f'<body class="{" ".join(classes)}" data-bk-area="{area}">'
+    result = result[:body_match.start()] + replacement_body + result[body_match.end():]
     result = result.replace(
-        f'<body class="bibliothekar-redesign" data-bk-area="{area}">',
-        f'<body class="bibliothekar-redesign" data-bk-area="{area}">\n'
+        replacement_body,
+        replacement_body + "\n"
         + f"<script>{BIBLIOTHEKAR_BOOTSTRAP_JS}</script>\n"
         + _shell_markup(area, subarea),
         1,
@@ -2995,4 +3151,3 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         1,
     )
     return result
-
