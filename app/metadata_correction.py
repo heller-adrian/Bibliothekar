@@ -310,9 +310,7 @@ def _scan_library_undated(
                     FROM file_families ff
                     JOIN files f
                       ON f.family_id=ff.id AND f.job_id=ff.job_id
-                    WHERE ff.selected_capture_time IS NULL
-                      AND f.selected_capture_time IS NULL
-                      AND f.current_root_kind='shared_workspace'
+                    WHERE f.current_root_kind='shared_workspace'
                       AND (
                         f.current_relative_path='Ohne_Datum'
                         OR f.current_relative_path LIKE 'Ohne_Datum/%'
@@ -362,6 +360,11 @@ def _scan_library_undated(
         filename_hint = detect_filename_datetime(filename)
         metadata_hint = _metadata_suggestion(observed)
         preferred = metadata_hint or filename_hint
+        stored_capture = str(anchor.get("family_capture_time") or "").strip()
+        reintegration_ready = bool(stored_capture) and all(
+            str(member.get("selected_capture_time") or "").strip()
+            for member in members
+        )
         records.append({
             **observed,
             "family_id": family_id,
@@ -370,13 +373,25 @@ def _scan_library_undated(
             "filename": filename,
             "relative_path": str(anchor["current_relative_path"]),
             "media_type": str(anchor["media_type"]),
-            "selected_capture_time": observed.get("selected_capture_time"),
-            "selected_capture_source": observed.get("selected_capture_source"),
-            "capture_time_confidence": str(observed.get("capture_time_confidence") or "missing"),
-            "review_required": True,
+            "selected_capture_time": (
+                stored_capture
+                or observed.get("selected_capture_time")
+            ),
+            "selected_capture_source": (
+                "metadata_correction"
+                if reintegration_ready
+                else observed.get("selected_capture_source")
+            ),
+            "capture_time_confidence": (
+                str(anchor.get("family_confidence") or "high")
+                if reintegration_ready
+                else str(observed.get("capture_time_confidence") or "missing")
+            ),
+            "review_required": not reintegration_ready,
+            "reintegration_ready": reintegration_ready,
             "filename_suggestion": filename_hint,
             "preferred_suggestion": preferred,
-            "needs_attention": True,
+            "needs_attention": not reintegration_ready,
             "member_count": len(members),
             "members": [
                 {
@@ -407,7 +422,8 @@ def _scan_library_undated(
         "summary": {
             "file_count": sum(int(row.get("member_count") or 1) for row in records),
             "family_count": len(records),
-            "needs_attention": len(records),
+            "needs_attention": sum(not bool(row.get("reintegration_ready")) for row in records),
+            "ready_to_reintegrate": sum(bool(row.get("reintegration_ready")) for row in records),
             "filename_suggestions": sum(row.get("filename_suggestion") is not None for row in records),
         },
         "files": records,
@@ -968,6 +984,12 @@ def _apply_library_metadata_correction(
     workspace_root: Path,
     library_id: str,
 ) -> dict[str, Any]:
+    """Write and verify one undated family, but keep it in Ohne_Datum.
+
+    0.33.5 deliberately separates metadata editing from physical
+    reintegration.  The user can inspect the corrected family and move it into
+    the canonical day stock with a second explicit action.
+    """
     detected = dict(task.get("detected") or {})
     family_id = int(detected.get("family_id") or 0)
     job_id = str(detected.get("job_id") or "")
@@ -992,39 +1014,56 @@ def _apply_library_metadata_correction(
     work.mkdir(parents=True, exist_ok=False)
 
     prepared: list[dict[str, Any]] = []
+    replaced: list[tuple[Path, Path]] = []
+    incoming_paths: list[Path] = []
     _mark_task_writing(database_path, str(task["id"]))
-    placed: list[Path] = []
-    retired: list[tuple[Path, Path]] = []
 
     try:
         for member in frozen_members:
             current_relative = _safe_relative(str(member.get("current_relative_path") or ""))
-            source = (central_root / current_relative).resolve(strict=False)
-            if not _is_relative_to(source, central_root) or not source.is_file() or source.is_symlink():
+            if not current_relative.parts or current_relative.parts[0] != "Ohne_Datum":
                 raise MetadataCorrectionError(
-                    "Eine eingefrorene Ohne-Datum-Datei fehlt: " + str(current_relative)
+                    "Die Dateifamilie liegt nicht mehr im Ohne-Datum-Bestand."
                 )
-            expected_sha = str(member.get("sha256_current") or member.get("sha256_original") or "")
+            source = (central_root / current_relative).resolve(strict=False)
+            if (
+                not _is_relative_to(source, central_root)
+                or not source.is_file()
+                or source.is_symlink()
+            ):
+                raise MetadataCorrectionError(
+                    "Eine eingefrorene Ohne-Datum-Datei fehlt: "
+                    + str(current_relative)
+                )
+            expected_sha = str(
+                member.get("sha256_current")
+                or member.get("sha256_original")
+                or ""
+            )
             if not expected_sha or _sha256(source) != expected_sha:
                 raise MetadataCorrectionError(
                     "Eine Ohne-Datum-Datei hat sich seit der Vorbereitung verändert: "
                     + str(current_relative)
                 )
 
-            original_relative = _safe_relative(str(member.get("original_relative_path") or ""))
+            original_relative = _safe_relative(
+                str(member.get("original_relative_path") or "")
+            )
             temp = (work / original_relative).resolve(strict=False)
             if not _is_relative_to(temp, work):
                 raise MetadataCorrectionError("Unsicherer Arbeitskopiepfad.")
             temp.parent.mkdir(parents=True, exist_ok=True)
-            # Arbeitskopien übernehmen bewusst keine ACL-/Ownership-Metadaten
-            # aus dem globalen Bestand; die Zielordnerrechte sollen erben.
             shutil.copyfile(source, temp)
             if _sha256(temp) != expected_sha:
                 raise MetadataCorrectionError(
                     "Arbeitskopie stimmt nicht mit der eingefrorenen Datei überein."
                 )
             media_type = str(member.get("media_type") or classify_media(temp))
-            write_metadata_datetime(temp, media_type, str(task["proposed_datetime"]))
+            write_metadata_datetime(
+                temp,
+                media_type,
+                str(task["proposed_datetime"]),
+            )
             verification = verify_metadata_datetime(
                 temp,
                 str(task["proposed_datetime"]),
@@ -1037,14 +1076,266 @@ def _apply_library_metadata_correction(
                 "verification": verification,
                 "output_sha": _sha256(temp),
                 "output_size": int(temp.stat().st_size),
+                "current_relative": current_relative.as_posix(),
+            })
+
+        # Replace every visible source only after all family members were
+        # written and verified successfully.  The old bytes stay adjacent and
+        # recoverable until SQLite commits the new metadata state.
+        for item in prepared:
+            source = Path(item["source"])
+            incoming = source.parent / (
+                "." + source.name + ".metadata-" + uuid.uuid4().hex
+            )
+            backup = source.parent / (
+                "." + source.name + ".metadata-before-" + uuid.uuid4().hex
+            )
+            incoming_paths.append(incoming)
+            shutil.copyfile(Path(item["temp"]), incoming)
+            if _sha256(incoming) != str(item["output_sha"]):
+                raise MetadataCorrectionError(
+                    "Korrigierte Arbeitsdatei stimmt vor dem Austausch nicht überein."
+                )
+            os.replace(source, backup)
+            _fsync_directory(source.parent)
+            try:
+                os.replace(incoming, source)
+                _fsync_directory(source.parent)
+            except Exception:
+                if backup.exists() and not source.exists():
+                    os.replace(backup, source)
+                    _fsync_directory(source.parent)
+                raise
+            replaced.append((source, backup))
+            item["backup"] = backup
+
+        proposed = str(task["proposed_datetime"])[:19]
+        now = _now()
+        with database_connection(database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            family = connection.execute(
+                "SELECT id,job_id,family_key FROM file_families WHERE id=?",
+                (family_id,),
+            ).fetchone()
+            if (
+                family is None
+                or str(family["job_id"]) != job_id
+                or str(family["family_key"]) != family_key
+            ):
+                raise MetadataCorrectionError(
+                    "Dateifamilie wurde während der Korrektur verändert."
+                )
+
+            connection.execute(
+                """UPDATE file_families
+                   SET selected_capture_time=?,
+                       capture_time_confidence='high',
+                       status='complete'
+                   WHERE id=?""",
+                (proposed, family_id),
+            )
+            for item in prepared:
+                file_id = int(item["file_id"])
+                cursor = connection.execute(
+                    """UPDATE files
+                       SET source_size_bytes=COALESCE(source_size_bytes,size_bytes),
+                           size_bytes=?,
+                           sha256_current=?,
+                           selected_capture_time=?,
+                           selected_capture_source='metadata_correction',
+                           capture_time_confidence='high',
+                           review_status='corrected',
+                           metadata_write_status='written',
+                           updated_at=?
+                       WHERE id=? AND family_id=? AND job_id=?
+                         AND current_relative_path=?""",
+                    (
+                        int(item["output_size"]),
+                        str(item["output_sha"]),
+                        proposed,
+                        now,
+                        file_id,
+                        family_id,
+                        job_id,
+                        str(item["current_relative"]),
+                    ),
+                )
+                if int(cursor.rowcount or 0) != 1:
+                    raise MetadataCorrectionError(
+                        "Dateipfad wurde während der Metadatenkorrektur verändert."
+                    )
+            connection.commit()
+
+        for _source, backup in replaced:
+            backup.unlink(missing_ok=True)
+            _fsync_directory(backup.parent)
+        shutil.rmtree(work, ignore_errors=True)
+
+        first = prepared[0]
+        verification = {
+            "family_id": family_id,
+            "job_id": job_id,
+            "family_key": family_key,
+            "proposed_datetime": proposed,
+            "reintegration_pending": True,
+            "members": [
+                {
+                    "file_id": int(item["file_id"]),
+                    "output_path": str(item["source"]),
+                    "output_relative_path": str(item["current_relative"]),
+                    "output_sha256": str(item["output_sha"]),
+                    "output_size_bytes": int(item["output_size"]),
+                    "metadata": item["verification"],
+                }
+                for item in prepared
+            ],
+        }
+        return _complete_task(
+            database_path,
+            str(task["id"]),
+            output_path=Path(first["source"]),
+            output_size=sum(int(item["output_size"]) for item in prepared),
+            output_sha=str(first["output_sha"]),
+            verification=verification,
+        )
+
+    except Exception as error:
+        for incoming in incoming_paths:
+            try:
+                incoming.unlink(missing_ok=True)
+            except OSError:
+                pass
+        for source, backup in reversed(replaced):
+            try:
+                if backup.exists():
+                    if source.exists():
+                        source.unlink()
+                    os.replace(backup, source)
+                    _fsync_directory(source.parent)
+            except OSError:
+                pass
+        shutil.rmtree(work, ignore_errors=True)
+        _mark_task_blocked(database_path, str(task["id"]), error)
+        if isinstance(error, MetadataCorrectionError):
+            raise
+        raise MetadataCorrectionError(str(error)) from error
+
+
+def reintegrate_library_metadata_family(
+    database_path: Path,
+    *,
+    workspace_root: Path,
+    library_id: str,
+    family_id: int,
+) -> dict[str, Any]:
+    """Move one already corrected family from Ohne_Datum into day stock."""
+    paths = metadata_area_paths(
+        area="library",
+        workspace_root=workspace_root,
+        library_id=library_id,
+        create=True,
+    )
+    central_root = paths["output_root"]
+    metadata_root = storage_paths(workspace_root)["metadata_root"].resolve(strict=False)
+
+    with database_connection(database_path) as connection:
+        family = connection.execute(
+            """SELECT id,job_id,family_key,selected_capture_time,
+                      capture_time_confidence
+               FROM file_families
+               WHERE id=?""",
+            (int(family_id),),
+        ).fetchone()
+        if family is None:
+            raise MetadataCorrectionError("Dateifamilie wurde nicht gefunden.")
+        proposed = str(family["selected_capture_time"] or "").strip()
+        if not proposed:
+            raise MetadataCorrectionError(
+                "Die Dateifamilie besitzt noch kein bestätigtes Aufnahmedatum."
+            )
+        rows = [
+            dict(row)
+            for row in connection.execute(
+                """SELECT id AS file_id,job_id,original_relative_path,
+                          current_relative_path,original_filename,media_type,
+                          size_bytes,COALESCE(source_size_bytes,size_bytes) AS source_size_bytes,
+                          sha256_original,COALESCE(sha256_current,sha256_original) AS sha256_current,
+                          selected_capture_time,selected_capture_source,
+                          capture_time_confidence,review_status,
+                          metadata_write_status
+                   FROM files
+                   WHERE family_id=? AND job_id=?
+                   ORDER BY id""",
+                (int(family_id), str(family["job_id"])),
+            ).fetchall()
+        ]
+
+    if not rows:
+        raise MetadataCorrectionError("Die Dateifamilie enthält keine Dateien.")
+
+    work = (
+        metadata_root
+        / ".reintegrate"
+        / ("META_SORT_" + uuid.uuid4().hex.upper())
+    ).resolve(strict=False)
+    work.mkdir(parents=True, exist_ok=False)
+    moved: list[tuple[Path, Path]] = []
+
+    try:
+        prepared: list[dict[str, Any]] = []
+        for row in rows:
+            current_relative = _safe_relative(str(row.get("current_relative_path") or ""))
+            if not current_relative.parts or current_relative.parts[0] != "Ohne_Datum":
+                raise MetadataCorrectionError(
+                    "Die Dateifamilie liegt nicht vollständig im Ohne-Datum-Bestand."
+                )
+            source = (central_root / current_relative).resolve(strict=False)
+            if (
+                not _is_relative_to(source, central_root)
+                or not source.is_file()
+                or source.is_symlink()
+            ):
+                raise MetadataCorrectionError(
+                    "Eine korrigierte Ohne-Datum-Datei fehlt: "
+                    + current_relative.as_posix()
+                )
+            expected_sha = str(row.get("sha256_current") or "")
+            if not expected_sha or _sha256(source) != expected_sha:
+                raise MetadataCorrectionError(
+                    "Eine korrigierte Datei hat sich seit der Prüfung verändert: "
+                    + current_relative.as_posix()
+                )
+            stored_capture = str(row.get("selected_capture_time") or "").strip()
+            if not stored_capture or stored_capture[:19] != proposed[:19]:
+                raise MetadataCorrectionError(
+                    "Die korrigierten Familienmitglieder besitzen keinen einheitlichen Zeitstempel."
+                )
+            verification = verify_metadata_datetime(source, proposed)
+
+            original_relative = _safe_relative(str(row["original_relative_path"]))
+            temp = (work / original_relative).resolve(strict=False)
+            if not _is_relative_to(temp, work):
+                raise MetadataCorrectionError("Unsicherer Reintegration-Arbeitspfad.")
+            temp.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, temp)
+            if _sha256(temp) != expected_sha:
+                raise MetadataCorrectionError(
+                    "Reintegration-Arbeitskopie stimmt nicht mit der Quelle überein."
+                )
+            prepared.append({
+                **row,
+                "source": source,
+                "current_relative": current_relative.as_posix(),
+                "temp": temp,
+                "verification": verification,
             })
 
         analysis = analyze_tree(work, include_other=False)
         entries = [
             {
                 "relative_path": Path(str(item["original_relative_path"])).as_posix(),
-                "size_bytes": int(item["output_size"]),
-                "sha256": str(item["output_sha"]),
+                "size_bytes": int(item["size_bytes"]),
+                "sha256": str(item["sha256_current"]),
             }
             for item in prepared
         ]
@@ -1078,9 +1369,10 @@ def _apply_library_metadata_correction(
         }
         if set(plan_by_source) != set(prepared_by_source):
             raise MetadataCorrectionError(
-                "Korrekturplan und eingefrorene Familie stimmen nicht überein."
+                "Reintegrationsplan und korrigierte Familie stimmen nicht überein."
             )
 
+        # Preflight every destination before moving the first file.
         for source_relative, plan_row in plan_by_source.items():
             item = prepared_by_source[source_relative]
             destination_relative = _safe_relative(
@@ -1088,142 +1380,94 @@ def _apply_library_metadata_correction(
             )
             destination = (central_root / destination_relative).resolve(strict=False)
             if not _is_relative_to(destination, central_root):
-                raise MetadataCorrectionError("Korrekturziel verlässt den Zentralbestand.")
+                raise MetadataCorrectionError(
+                    "Reintegrationsziel verlässt den Zentralbestand."
+                )
             if destination.exists() or destination.is_symlink():
                 raise MetadataCorrectionError(
-                    "Korrekturziel ist bereits belegt: " + destination_relative.as_posix()
+                    "Reintegrationsziel ist bereits belegt: "
+                    + destination_relative.as_posix()
                 )
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            incoming = destination.parent / (
-                "." + destination.stem + ".metadata-" + uuid.uuid4().hex + destination.suffix
-            )
-            # Auch die verifizierte Zieldatei kopiert nur Nutzdaten. Das
-            # verhindert TrueNAS-EPERM durch shutil.copy2()/copystat.
-            shutil.copyfile(Path(item["temp"]), incoming)
-            if _sha256(incoming) != str(item["output_sha"]):
-                incoming.unlink(missing_ok=True)
-                raise MetadataCorrectionError("Korrigierte Zieldatei stimmt nicht mit der Arbeitskopie überein.")
-            os.replace(incoming, destination)
-            _fsync_directory(destination.parent)
-            placed.append(destination)
             item["destination"] = destination
             item["destination_relative"] = destination_relative.as_posix()
 
-        # Remove old visible paths reversibly before SQLite switches to the new
-        # canonical day stock. Each rename stays on the same directory/filesystem.
         for item in prepared:
             source = Path(item["source"])
-            hidden = source.parent / (
-                "." + source.name + ".metadata-retired-" + uuid.uuid4().hex
-            )
-            os.replace(source, hidden)
+            destination = Path(item["destination"])
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, destination)
             _fsync_directory(source.parent)
-            retired.append((source, hidden))
-            item["retired"] = hidden
+            _fsync_directory(destination.parent)
+            moved.append((source, destination))
 
-        proposed = str(task["proposed_datetime"])[:19]
         now = _now()
         with database_connection(database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            family = connection.execute(
-                "SELECT id,job_id,family_key FROM file_families WHERE id=?",
-                (family_id,),
+            live_family = connection.execute(
+                "SELECT job_id,family_key,selected_capture_time FROM file_families WHERE id=?",
+                (int(family_id),),
             ).fetchone()
             if (
-                family is None
-                or str(family["job_id"]) != job_id
-                or str(family["family_key"]) != family_key
+                live_family is None
+                or str(live_family["job_id"]) != str(family["job_id"])
+                or str(live_family["family_key"]) != str(family["family_key"])
+                or str(live_family["selected_capture_time"] or "")[:19] != proposed[:19]
             ):
-                raise MetadataCorrectionError("Dateifamilie wurde während der Korrektur verändert.")
-
-            connection.execute(
-                """UPDATE file_families
-                   SET selected_capture_time=?,capture_time_confidence='high',status='complete'
-                   WHERE id=?""",
-                (proposed, family_id),
-            )
+                raise MetadataCorrectionError(
+                    "Dateifamilie wurde während der Einsortierung verändert."
+                )
             for item in prepared:
-                file_id = int(item["file_id"])
-                connection.execute(
+                cursor = connection.execute(
                     """UPDATE files
-                       SET current_relative_path=?,
-                           source_size_bytes=COALESCE(source_size_bytes,size_bytes),
-                           size_bytes=?,
-                           sha256_current=?,
-                           selected_capture_time=?,
-                           selected_capture_source='metadata_correction',
-                           capture_time_confidence='high',
-                           review_status='corrected',
-                           metadata_write_status='written',
-                           updated_at=?
-                       WHERE id=? AND family_id=? AND job_id=?""",
+                       SET current_relative_path=?,updated_at=?
+                       WHERE id=? AND family_id=? AND job_id=?
+                         AND current_relative_path=?""",
                     (
                         str(item["destination_relative"]),
-                        int(item["output_size"]),
-                        str(item["output_sha"]),
-                        proposed,
                         now,
-                        file_id,
-                        family_id,
-                        job_id,
+                        int(item["file_id"]),
+                        int(family_id),
+                        str(family["job_id"]),
+                        str(item["current_relative"]),
                     ),
                 )
+                if int(cursor.rowcount or 0) != 1:
+                    raise MetadataCorrectionError(
+                        "Dateipfad wurde während der Einsortierung verändert."
+                    )
             connection.commit()
 
-        for _source, hidden in retired:
-            hidden.unlink(missing_ok=True)
-            _fsync_directory(hidden.parent)
         shutil.rmtree(work, ignore_errors=True)
-
-        first = prepared[0]
-        verification = {
-            "family_id": family_id,
-            "job_id": job_id,
-            "family_key": family_key,
-            "proposed_datetime": proposed,
-            "members": [
+        return {
+            "family_id": int(family_id),
+            "job_id": str(family["job_id"]),
+            "family_key": str(family["family_key"]),
+            "selected_capture_time": proposed[:19],
+            "file_count": len(prepared),
+            "files": [
                 {
                     "file_id": int(item["file_id"]),
-                    "output_path": str(item["destination"]),
-                    "output_relative_path": str(item["destination_relative"]),
-                    "output_sha256": str(item["output_sha"]),
-                    "output_size_bytes": int(item["output_size"]),
-                    "metadata": item["verification"],
+                    "source_relative_path": str(item["current_relative"]),
+                    "destination_relative_path": str(item["destination_relative"]),
                 }
                 for item in prepared
             ],
         }
-        return _complete_task(
-            database_path,
-            str(task["id"]),
-            output_path=Path(first["destination"]),
-            output_size=sum(int(item["output_size"]) for item in prepared),
-            output_sha=str(first["output_sha"]),
-            verification=verification,
-        )
 
     except Exception as error:
-        # If SQLite did not commit, restore every old path that was hidden.
-        for source, hidden in reversed(retired):
+        for source, destination in reversed(moved):
             try:
-                if hidden.exists() and not source.exists():
-                    os.replace(hidden, source)
+                if destination.exists() and not source.exists():
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(destination, source)
+                    _fsync_directory(destination.parent)
+                    _fsync_directory(source.parent)
             except OSError:
                 pass
-        # New destinations are safe to remove only while the old sources were
-        # restored. If restoration failed, keep them for manual recovery.
-        if all(source.exists() for source, _hidden in retired) or not retired:
-            for destination in reversed(placed):
-                try:
-                    destination.unlink(missing_ok=True)
-                except OSError:
-                    pass
         shutil.rmtree(work, ignore_errors=True)
-        _mark_task_blocked(database_path, str(task["id"]), error)
         if isinstance(error, MetadataCorrectionError):
             raise
         raise MetadataCorrectionError(str(error)) from error
-
 
 def apply_metadata_correction(
     database_path: Path,
