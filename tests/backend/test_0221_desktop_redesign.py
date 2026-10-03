@@ -72,8 +72,10 @@ def test_0221_assistant_and_metadata_correction_are_real_pages():
     assert 'Der KI-Assistent ist in diesem Designstand noch nicht verbunden.' in assistant
 
     assert 'data-bk-area="metadata"' in metadata
-    assert 'Metadatenkorrektion' in metadata
-    assert 'href="/metadata-correction"' in metadata
+    assert 'Metadatenkorrektur' in metadata
+    assert 'id="meta-scan"' in metadata
+    assert 'Bibliothek' in metadata
+    assert 'Allgemein' in metadata
 
 
 def test_0221_shell_has_shared_typography_wider_canvas_and_left_brand_space():
