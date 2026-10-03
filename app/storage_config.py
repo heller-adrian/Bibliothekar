@@ -169,3 +169,87 @@ def default_library_work_root(workspace_root: Path, library_id: str) -> Path:
     ):
         raise StorageSettingsError("Ungültige Bibliotheks-ID für den Arbeitsbereich.")
     return storage_paths(workspace_root)["workspaces_root"] / clean_id
+
+
+def load_metadata_correction_settings() -> dict[str, str]:
+    """Global settings for the independent „Allgemein“ metadata host path."""
+    path = _config_path()
+    data: dict[str, Any] = {}
+    try:
+        if path.is_file():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = raw
+    except Exception as exc:
+        raise StorageSettingsError(
+            "Die Anwendungskonfiguration ist nicht lesbar: " + str(exc)
+        ) from exc
+
+    section = data.get("metadata_correction")
+    if not isinstance(section, dict):
+        section = {}
+
+    raw_root = str(section.get("general_root") or "").strip()
+    if raw_root:
+        root = Path(raw_root).expanduser()
+        if not root.is_absolute():
+            raise StorageSettingsError(
+                "Der Host-Path für die allgemeine Metadatenkorrektur muss absolut sein."
+            )
+        raw_root = str(root.resolve(strict=False))
+
+    return {"general_root": raw_root}
+
+
+def save_metadata_correction_settings(values: dict[str, Any]) -> dict[str, str]:
+    current = load_metadata_correction_settings()
+    raw_root = str(values.get("general_root", current["general_root"]) or "").strip()
+
+    if raw_root:
+        root = Path(raw_root).expanduser()
+        if not root.is_absolute():
+            raise StorageSettingsError(
+                "Der Host-Path für die allgemeine Metadatenkorrektur muss absolut sein."
+            )
+        raw_root = str(root.resolve(strict=False))
+
+    path = _config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, Any] = {}
+    if path.is_file():
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise StorageSettingsError(
+                "Die Anwendungskonfiguration muss ein JSON-Objekt sein."
+            )
+        data = raw
+
+    section = data.get("metadata_correction")
+    if not isinstance(section, dict):
+        section = {}
+    data["metadata_correction"] = {
+        **section,
+        "general_root": raw_root,
+    }
+
+    encoded = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    descriptor, temp_name = tempfile.mkstemp(
+        prefix=".settings-",
+        suffix=".json",
+        dir=str(path.parent),
+        text=True,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
+
+    return {"general_root": raw_root}
