@@ -2,9 +2,9 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.33.6**
+Aktueller Entwicklungsstand: **0.34.0**
 
-Aktuelle TrueNAS-/Container-Ausgabe: **0.33.6**  
+Aktuelle TrueNAS-/Container-Ausgabe: **0.34.0**  
 Stabiler fachlicher Kamerakern als Basis: **0.32.11**
 
 ## Ziel
@@ -31,15 +31,15 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.33.6
+## TrueNAS Custom App 0.34.0
 
-0.33.6 stabilisiert die mit 0.33.0 eingeführte Ereignisbenennung und
-Metadatenkorrektur auf der Mehrbibliotheks- und Sicherheitsarchitektur von
-0.32.x. Die Einzelkorrektur schreibt nach dem bewussten Klick direkt über den
-bestehenden Arbeitskopie-/ExifTool-/Verifikationsweg; ein separater
-Vorbereitungsauftrag ist im normalen Ablauf nicht mehr nötig. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand;
-neue Ereignisse und Sammelordner verwenden die bibliotheksspezifischen
-Standardvorlagen.
+0.34.0 aktiviert die Mehrfachkorrektur auf der stabilen 0.33.x-
+Metadatenarchitektur. Eine Aufnahme dient als Referenz: Aus ihrer vorhandenen
+Aufnahmezeit und der vom Nutzer eingetragenen tatsächlichen Zeit berechnet
+Bibliothekar einen konstanten Zeitversatz und zeigt vor jeder Änderung eine
+vollständige Alt→Neu-Vorschau für den gesamten verwalteten Ordner. Erst nach
+Bestätigung werden die Dateien über Arbeitskopien mit ExifTool geschrieben und
+erneut verifiziert.
 
 ### Gemeinsamer Kamera-Arbeitsbereich
 
@@ -50,6 +50,7 @@ als `/workspace` ein. Bibliothekar verwaltet darunter standardmäßig:
 - `/workspace/Arbeitsbereiche` – Stamm für frei benannte Bibliotheks-Arbeitsbereiche
 - `/workspace/Metadatenkorrektur` – verwalteter Stamm für Metadatenkorrekturen
 - `/workspace/Metadatenkorrektur/Allgemein` – allgemeine Einzeldatei-Korrektur
+- `/workspace/Metadatenkorrektur/Mehrfachkorrektur` – unabhängige Korrektur zusammengehöriger Aufnahmen mit konstantem Zeitversatz
 
 Ein technischer Bibliotheks-Identifier wie `main` ist **kein**
 Dateisystempfad. Bibliothekar erzeugt daraus weder
@@ -89,7 +90,7 @@ Von–bis- oder Uhrzeit-Darstellung; optional kann das Jahr vor dem Monat stehen
 Die Einstellungsseite zeigt eine gemeinsame Vorschau für normales Ereignis und
 Sammelordner einschließlich der aktuell gewählten Unterordnerstruktur.
 
-### Metadatenkorrektur 0.33.6
+### Metadatenkorrektur 0.34.0
 
 Die Seite **Metadatenkorrektur** besitzt den normalen Bibliothekar-Header und
 einen zweiten Reiterheader mit:
@@ -98,8 +99,9 @@ einen zweiten Reiterheader mit:
   gemeinsame Liste, unabhängig davon, aus welcher Bibliothek der Kameraimport stammt.
 - **Allgemein** – verwendet direkt
   `/workspace/Metadatenkorrektur/Allgemein`.
-- **Mehrfachkorrektur** – in 0.33.6 bereits als geplanter Reiter sichtbar;
-  die Funktion folgt mit 0.34.0.
+- **Mehrfachkorrektur** – verwendet direkt
+  `/workspace/Metadatenkorrektur/Mehrfachkorrektur` und korrigiert alle
+  enthaltenen unterstützten Mediendateien relativ zu einer Referenzaufnahme.
 
 Für **Allgemein** gibt es keinen Eingang/Ausgang. Ein Klick auf
 **Metadaten ändern** friert den Ausgangszustand ein, arbeitet auf einer
@@ -125,15 +127,28 @@ Die Bibliotheks-Metadatenkorrektur erzeugt insbesondere **keine** Ordner
 dürfen automatisch entfernt werden; enthalten sie Dateien, werden sie niemals
 automatisch gelöscht.
 
-### 0.34.0 – vorgemerkte Mehrfachkorrektur
+### Mehrfachkorrektur
 
-Für zusammengehörige Kameraaufnahmen mit falsch eingestellter Kamera-Uhr ist
-`/workspace/Metadatenkorrektur/Mehrfachkorrektur` vorgesehen. In 0.34.0 wird
-eine Referenzaufnahme ein korrektes Datum mit Uhrzeit erhalten; derselbe
-Zeitversatz wird anschließend auf die übrigen Aufnahmen übertragen, sodass
-deren zeitliche Abstände erhalten bleiben. Vor dem Schreiben wird eine
-vollständige Alt→Neu-Vorschau gezeigt. Diese Funktion ist in 0.33.6 noch nicht
-aktiv.
+Der Ordner `/workspace/Metadatenkorrektur/Mehrfachkorrektur` wird beim
+Anwendungsstart automatisch angelegt. Der Workflow ist bewusst unabhängig von
+einer Bibliothek:
+
+1. Dateien in den Ordner legen und **Bestand prüfen**.
+2. Eine Datei als Referenzaufnahme wählen und ihr tatsächliches Datum mit
+   Uhrzeit eintragen.
+3. **Vorschau berechnen** zeigt für jede Datei den bisherigen und den neuen
+   Zeitstempel. Der Abstand zwischen den Aufnahmen bleibt unverändert.
+4. **Anwenden** schreibt die Korrektur sicher in die Dateien; sie bleiben im
+   Ordner und können anschließend auch außerhalb von Bibliothekar verwendet
+   oder verschoben werden.
+5. **Anwenden und in Tagesbestand übernehmen** führt dieselbe geprüfte
+   Korrektur aus und übergibt den Ordner anschließend an den verifizierten
+   zentralen Import. Nach erfolgreicher Übernahme werden nur die tatsächlich
+   importierten Quelldateien aus dem Mehrfachkorrektur-Ordner entfernt; der
+   Ordner selbst bleibt bestehen.
+
+Zwischen Vorschau und Anwendung werden Dateigröße und SHA-256 erneut geprüft.
+Hat sich der Bestand verändert, muss die Vorschau neu berechnet werden.
 
 ### Basis-Containerpfade
 
