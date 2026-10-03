@@ -169,7 +169,7 @@ def _database_family_rows(
                 j.source_path,
                 f.id AS file_id,
                 f.original_relative_path,
-                f.size_bytes,
+                COALESCE(f.source_size_bytes, f.size_bytes) AS size_bytes,
                 f.sha256_original,
                 f.media_type
             FROM file_families ff
