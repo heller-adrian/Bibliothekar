@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 0.33.5 – Prüffall-Workflow, Auswahl und kompakter Importverlauf
+
+- Der globale `Ohne_Datum`-Bestand wird in der Metadatenkorrektur als eine gemeinsame Liste dargestellt; die frühere sichtbare Gruppierung nach Main Library, Business und Testbibliothek entfällt.
+- Metadatenkorrektur und physische Reintegration sind bewusst getrennt. **Metadaten ändern** schreibt und verifiziert die vollständige Familie atomar, lässt sie danach aber in `Ohne_Datum`. Erst **In Tagesbestand einsortieren** verschiebt sie in den kanonischen Tagesbestand und vergibt dabei den normalen Bibliothekar-Dateinamen.
+- Korrigierte Familien bleiben in `Ohne_Datum` sichtbar und tragen den Status **Bereit zum Einsortieren**. Mehrere bereits korrigierte Familien können ausgewählt und gemeinsam einsortiert werden.
+- Der globale Aufgabenbereich erzeugt eine einzige fachliche Aufgabe für `Ohne_Datum`: **Prüffälle bearbeiten** bzw. **Korrigierte Aufnahmen einsortieren**. Der Link führt direkt zu `Metadatenkorrektur → Bibliothek`; technische Einzelaufträge werden dort nicht doppelt gezählt.
+- Korrigierte, aber noch nicht einsortierte Familien erscheinen nicht parallel als **Noch nicht zugeordnet**.
+- Die Metadatenliste unterstützt Mehrfachauswahl über Checkboxen, **Alle auswählen** und Umschalt/Shift-Bereichsauswahl. Die Auswahl kann bereits für gemeinsame Reintegration genutzt werden; die eigentliche Zeitversatz-Mehrfachkorrektur bleibt wie geplant 0.34.0 vorbehalten.
+- Tagesgruppen im Arbeitsbereich unterstützen ebenfalls **Alle auswählen/Auswahl aufheben** und Shift-Bereichsauswahl.
+- Der Import- und Prüfverlauf zeigt zunächst höchstens fünf Einträge. Weitere Einträge werden über **Mehr anzeigen** in Fünferblöcken eingeblendet.
+- Regressionstests sichern den zweistufigen Ohne-Datum-Ablauf, die Aufgabenbündelung, Auswahlbedienung und den kompakten Importverlauf ab.
+
 ### 0.33.4 – Startup-Backfill und Import-Worker stabilisieren
 
 - Der globale Main-Import bleibt beim Registry-Backfill `source_kind="import"`; nur Projektionen in weitere Bibliotheksdatenbanken werden als `existing_library` registriert.
