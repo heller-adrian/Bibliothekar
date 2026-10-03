@@ -1756,6 +1756,18 @@ def _event_payload_with_folder_layout(
     result.setdefault("create_subfolders", bool(state["structure_enabled"]))
     return result
 
+def _naming_snapshot_from_event_context(context: dict[str, Any]) -> dict[str, Any]:
+    event = dict(context.get("event") or {})
+    snapshot = event.get("folder_naming")
+    if isinstance(snapshot, dict) and snapshot:
+        return snapshot
+    return {
+        "mode": "locked",
+        "locked_folder_name": str(event.get("folder_name") or ""),
+        "no_event_label": str(event.get("name") or "Ohne Ereignis"),
+    }
+
+
 def _canonical_membership_preflight(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], JSONResponse | None]:
@@ -5173,6 +5185,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
                     "end_time": target_end[11:16],
                     "uses_time_range": bool(target["uses_time_range"]),
                     "preserve_day_folders": bool(target["preserve_day_folders"]),
+                    "folder_naming": _naming_snapshot_from_event_context(context),
                     "subevents": [
                         {
                             "id": child.get("id"),
@@ -5367,6 +5380,7 @@ def api_create_event(
                 "end_time": extension["new_end"][11:16],
                 "uses_time_range": True,
                 "preserve_day_folders": bool(archived_target["preserve_day_folders"]),
+                "folder_naming": _naming_snapshot_from_event_context(context),
                 "subevents": [
                     *[
                         {
@@ -6793,9 +6807,10 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
             preview = build_event_preview(
                 {
                     "event_kind": "no_event",
-                    "event_name": "Ohne Ereignis",
+                    "event_name": str(target_row["name"] or "Ohne Ereignis"),
                     "no_event_segments": combined_segments,
                     "preserve_day_folders": bool(target_row["preserve_day_folders"]),
+                    "folder_naming": _naming_snapshot_from_event_context(context),
                     "uses_time_range": False,
                     "start_date": combined_segments[0]["day_key"],
                     "end_date": combined_segments[-1]["day_key"],
@@ -6812,7 +6827,7 @@ def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
                     target_job_id,
                     target_event_id,
                     preview,
-                    event_name="Ohne Ereignis",
+                    event_name=str(target_row["name"] or "Ohne Ereignis"),
                     notes=str(target_row["notes"] or ""),
                     archive_root=current_archive_root(),
                     workspace_path=current_workspace_root(),
