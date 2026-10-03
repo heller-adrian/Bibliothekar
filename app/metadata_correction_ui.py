@@ -30,6 +30,10 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .meta-task{border-top:1px solid var(--bk-line,#ccd2d8);padding-top:12px;margin-top:12px}
 .meta-placeholder{padding:28px 18px;text-align:center}
 .meta-selection-note{font-size:.85rem;padding:8px 10px;border-radius:10px;background:var(--bk-surface-2,#f5f5f5)}
+.multi-preview{display:grid;gap:8px;margin-top:12px}
+.multi-preview-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(130px,.8fr) auto minmax(130px,.8fr);gap:10px;align-items:center;border:1px solid var(--bk-line,#ccd2d8);border-radius:10px;padding:9px 11px}
+.multi-offset{font-variant-numeric:tabular-nums}
+@media(max-width:820px){.multi-preview-row{grid-template-columns:1fr}.multi-preview-row .arrow{display:none}}
 @media(max-width:820px){main{padding:14px 14px 60px}.meta-grid{grid-template-columns:1fr}.meta-kv{grid-template-columns:105px minmax(0,1fr)}}
 </style>
 </head>
@@ -68,10 +72,33 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     </aside>
   </div>
 
-  <section id="meta-multiple-placeholder" class="meta-card meta-placeholder" hidden>
-    <strong>Mehrfachkorrektur · in Vorbereitung</strong>
-    <p class="muted">Hier wird eine Referenzaufnahme mit dem korrekten Datum und der korrekten Uhrzeit versehen. Bibliothekar überträgt anschließend denselben Zeitversatz auf die zusammengehörigen Kameraaufnahmen, ohne deren zeitliche Abstände zu verändern.</p>
-    <p class="muted">Der vorgesehene verwaltete Ordner ist <code id="meta-multiple-path">/workspace/Metadatenkorrektur/Mehrfachkorrektur</code>.</p>
+  <section id="meta-multiple-workspace" hidden>
+    <div class="meta-grid">
+      <section class="meta-card">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+          <strong>Dateien im Ordner Mehrfachkorrektur</strong>
+          <span id="multi-summary" class="muted">Noch nicht geprüft</span>
+        </div>
+        <div id="multi-files" class="meta-groups"><div class="muted">Bestand prüfen.</div></div>
+      </section>
+      <aside class="meta-card">
+        <strong>Referenzaufnahme</strong>
+        <div id="multi-details" class="muted" style="margin-top:12px">Links die Aufnahme auswählen, deren tatsächliche Zeit bekannt ist.</div>
+      </aside>
+    </div>
+    <section id="multi-preview-card" class="meta-card" style="margin-top:16px" hidden>
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+        <div>
+          <strong>Vorschau</strong>
+          <div id="multi-offset" class="muted multi-offset" style="margin-top:4px"></div>
+        </div>
+        <div class="meta-actions">
+          <button id="multi-apply" type="button">Anwenden</button>
+          <button id="multi-apply-import" type="button" class="primary">Anwenden und in Tagesbestand übernehmen</button>
+        </div>
+      </div>
+      <div id="multi-preview" class="multi-preview"></div>
+    </section>
   </section>
 </main>
 <script>
@@ -80,7 +107,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   const requested=String(params.get("area")||"library");
   const state={
     area:["library","general","multiple"].includes(requested)?requested:"library",
-    scan:null,selected:null,selectedSet:new Set(),lastSelected:null,tasks:[],areas:null
+    scan:null,selected:null,selectedSet:new Set(),lastSelected:null,tasks:[],areas:null,
+    multipleReference:null,multiplePreview:null
   };
   const $=id=>document.getElementById(id);
   const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
@@ -119,9 +147,10 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       : general
         ?"Unabhängige Dateien direkt im verwalteten Ordner Allgemein korrigieren."
         :"Zeitlich zusammengehörige Kameraaufnahmen gemeinsam verschieben.";
-    $("meta-scan").hidden=multiple;
+    $("meta-scan").hidden=false;
+    $("meta-scan").textContent=multiple?"Bestand prüfen":"Bestand prüfen";
     $("meta-workspace").hidden=multiple;
-    $("meta-multiple-placeholder").hidden=!multiple;
+    $("meta-multiple-workspace").hidden=!multiple;
     $("meta-list-title").textContent=library?"Ohne-Datum-Bestand":"Dateien im Ordner Allgemein";
   }
   async function loadAreas(){
@@ -133,8 +162,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       }else if(state.area==="general"){
         $("meta-paths").innerHTML='<span>Ordner: <code>'+esc(area.root||"")+'</code></span><span class="muted">Kein Eingang/Ausgang: die geprüfte Datei wird nach erfolgreicher Verifikation atomar am selben Ort ersetzt.</span>';
       }else{
-        $("meta-paths").innerHTML="";
-        $("meta-multiple-path").textContent=area.root||"/workspace/Metadatenkorrektur/Mehrfachkorrektur";
+        $("meta-paths").innerHTML='<span>Ordner: <code>'+esc(area.root||"/workspace/Metadatenkorrektur/Mehrfachkorrektur")+'</code></span><span class="muted">Eine Referenzaufnahme festlegen, Vorschau prüfen und den Zeitversatz anschließend auf den gesamten Ordner anwenden.</span>';
       }
     }catch(error){setStatus(error.message,true);}
   }
@@ -365,8 +393,134 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     try{await json("/api/metadata-correction/tasks/"+encodeURIComponent(id)+"/cancel",{method:"POST"});await loadTasks();}
     catch(error){setStatus(error.message,true);}
   }
+  function renderMultipleFiles(){
+    const files=state.scan?.files||[];
+    $("multi-summary").textContent=files.length+" Datei"+(files.length===1?"":"en");
+    if(!files.length){
+      $("multi-files").innerHTML='<div class="muted">Der Ordner ist leer.</div>';
+      $("multi-details").innerHTML='<div class="muted">Dateien in den verwalteten Ordner legen und erneut prüfen.</div>';
+      $("multi-preview-card").hidden=true;
+      return;
+    }
+    $("multi-files").innerHTML='<div class="meta-files">'+files.map((file,index)=>{
+      const active=state.multipleReference===index;
+      const confidence=String(file.capture_time_confidence||"missing");
+      const badge=file.usable_time?(confidence==="high"?"Metadaten sicher":"Zeit vorhanden"):"Keine Aufnahmezeit";
+      const cls=file.usable_time?(confidence==="high"?"good":"warn"):"danger";
+      return '<div class="meta-file '+(active?"active selected":"")+'" data-multi-file="'+index+'" role="button" tabindex="0">'
+        +'<span style="width:19px;text-align:center">'+(active?"●":"○")+'</span>'
+        +'<span><strong>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+'</small>'
+        +'<small class="muted">Aktuell: '+esc(file.selected_capture_time||"keine Aufnahmezeit")+'</small></span>'
+        +'<span class="badge '+cls+'">'+esc(badge)+'</span></div>';
+    }).join("")+'</div>';
+    document.querySelectorAll("[data-multi-file]").forEach(row=>{
+      const index=Number(row.dataset.multiFile);
+      row.addEventListener("click",()=>{
+        state.multipleReference=index;
+        state.multiplePreview=null;
+        $("multi-preview-card").hidden=true;
+        renderMultipleFiles();
+        renderMultipleDetails();
+      });
+    });
+    renderMultipleDetails();
+  }
+  function renderMultipleDetails(){
+    const file=(state.scan?.files||[])[state.multipleReference];
+    if(!file){
+      $("multi-details").innerHTML='<div class="muted">Links die Aufnahme auswählen, deren tatsächliche Zeit bekannt ist.</div>';
+      return;
+    }
+    const current=String(file.selected_capture_time||"");
+    const date=current.slice(0,10),time=current.slice(11,19);
+    $("multi-details").innerHTML='<div class="meta-form"><div class="meta-kv">'
+      +'<span>Datei</span><strong>'+esc(file.filename)+'</strong>'
+      +'<span>Aktuell</span><span>'+esc(current||"keine Aufnahmezeit")+'</span>'
+      +'<span>Vertrauen</span><span>'+esc(file.capture_time_confidence||"")+'</span></div>'
+      +'<label><span>Tatsächliches Datum</span><input id="multi-date" type="date" value="'+esc(date)+'"></label>'
+      +'<label><span>Tatsächliche Uhrzeit</span><input id="multi-time" type="time" step="1" value="'+esc(time)+'"></label>'
+      +'<button id="multi-preview-button" type="button" class="primary">Vorschau berechnen</button></div>';
+    $("multi-preview-button").addEventListener("click",previewMultiple);
+  }
+  function formatOffset(seconds){
+    const sign=seconds<0?"−":"+";
+    let rest=Math.abs(Number(seconds)||0);
+    const days=Math.floor(rest/86400);rest-=days*86400;
+    const hours=Math.floor(rest/3600);rest-=hours*3600;
+    const minutes=Math.floor(rest/60);const secs=rest-minutes*60;
+    const parts=[];
+    if(days)parts.push(days+" T");
+    parts.push(String(hours).padStart(2,"0")+":"+String(minutes).padStart(2,"0")+":"+String(secs).padStart(2,"0"));
+    return sign+" "+parts.join(" ");
+  }
+  function renderMultiplePreview(){
+    const preview=state.multiplePreview;
+    if(!preview){$("multi-preview-card").hidden=true;return;}
+    $("multi-preview-card").hidden=false;
+    $("multi-offset").textContent="Zeitversatz: "+formatOffset(preview.offset_seconds)+" · "+preview.file_count+" Dateien";
+    $("multi-preview").innerHTML=(preview.files||[]).map(row=>
+      '<div class="multi-preview-row"><strong>'+esc(row.filename)+'</strong>'
+      +'<span>'+esc(row.old_datetime)+'</span><span class="arrow">→</span><span><strong>'+esc(row.new_datetime)+'</strong></span></div>'
+    ).join("");
+  }
+  async function previewMultiple(){
+    const file=(state.scan?.files||[])[state.multipleReference];
+    const date=$("multi-date")?.value||"",time=$("multi-time")?.value||"";
+    if(!file||!date||!time){setStatus("Referenzdatei, Datum und Uhrzeit müssen vollständig angegeben werden.",true);return;}
+    setStatus("Vorschau wird berechnet …");
+    try{
+      const data=await json("/api/metadata-correction/multiple/preview",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({reference_relative_path:file.relative_path,proposed_datetime:date+"T"+time})
+      });
+      state.multiplePreview=data.preview;
+      renderMultiplePreview();
+      setStatus("Vorschau berechnet. Es wurde noch nichts verändert.");
+    }catch(error){state.multiplePreview=null;renderMultiplePreview();setStatus(error.message,true);}
+  }
+  async function applyMultiple(mode){
+    const preview=state.multiplePreview;
+    if(!preview){setStatus("Bitte zuerst eine Vorschau berechnen.",true);return;}
+    const buttons=[$("multi-apply"),$("multi-apply-import")].filter(Boolean);
+    buttons.forEach(button=>button.disabled=true);
+    setStatus(mode==="apply_and_import"?"Korrektur wird angewendet und die Übernahme vorbereitet …":"Korrektur wird angewendet …");
+    try{
+      const data=await json("/api/metadata-correction/multiple/apply",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          mode,
+          reference_relative_path:preview.reference_relative_path,
+          proposed_datetime:preview.reference_new_datetime,
+          preview_fingerprint:preview.preview_fingerprint
+        })
+      });
+      state.multiplePreview=null;
+      await scanMultiple(false);
+      if(mode==="apply_and_import"){
+        setStatus("Korrektur angewendet. Die Übernahme in den Tagesbestand läuft im Hintergrund.");
+      }else{
+        setStatus("Korrektur vollständig angewendet. Die Dateien bleiben im Ordner Mehrfachkorrektur.");
+      }
+    }catch(error){setStatus(error.message,true);}
+    finally{buttons.forEach(button=>button.disabled=false);}
+  }
+  async function scanMultiple(announce=true){
+    if(announce)setStatus("Ordner und Metadaten werden gelesen …");
+    try{
+      state.scan=await json("/api/metadata-correction/scan?area=multiple");
+      state.multiplePreview=null;
+      if(
+        state.multipleReference===null
+        || state.multipleReference>=((state.scan?.files||[]).length)
+      )state.multipleReference=null;
+      renderMultipleFiles();
+      renderMultiplePreview();
+      if(announce)setStatus("Prüfung abgeschlossen. Es wurde noch nichts verändert.");
+      return true;
+    }catch(error){if(announce)setStatus(error.message,true);return false;}
+  }
   async function scan(announce=true,preserve=true){
-    if(state.area==="multiple")return false;
+    if(state.area==="multiple")return scanMultiple(announce);
     const snapshot=preserve?selectionKeys():{keys:new Set(),primary:null,last:null};
     if(announce)setStatus(state.area==="library"?"Ohne-Datum-Bestand wird gelesen …":"Ordner und Metadaten werden gelesen …");
     try{
@@ -391,6 +545,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     renderFiles();renderDetails();
   });
   $("meta-scan").addEventListener("click",()=>scan(true,true));
+  $("multi-apply").addEventListener("click",()=>applyMultiple("apply"));
+  $("multi-apply-import").addEventListener("click",()=>applyMultiple("apply_and_import"));
   configureArea();
   updateSelectAllButton();
   loadAreas();
