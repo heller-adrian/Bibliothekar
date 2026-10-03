@@ -138,6 +138,30 @@ def test_0331_empty_legacy_metadata_tree_is_removed_but_user_file_is_kept(tmp_pa
     assert protected.read_bytes() == b"user-data"
 
 
+def test_0331_compose_has_no_separate_metadata_general_mount():
+    compose = Path("compose.example.yaml").read_text(encoding="utf-8")
+    assert "KAMERA_METADATA_GENERAL_ROOT" not in compose
+    assert "BIBLIOTHEKAR_METADATA_GENERAL_DIR" not in compose
+    assert "/metadata-general" not in compose
+
+
+def test_0331_settings_use_collapsed_cards_and_compact_naming_controls():
+    from app import ui_shell
+
+    shell = ui_shell._shell_markup("workspace", "captures")
+    assert '<details class="bk-settings-card" id="bk-folder-layout-settings">' in shell
+    assert "<span>Normale Ereignisse</span>" in shell
+    assert "<span>Sammelordner</span>" in shell
+    assert 'id="bk-event-date-range" type="checkbox"' in shell
+    assert 'id="bk-event-include-year" type="checkbox"' in shell
+    assert 'id="bk-event-include-time" type="checkbox"' in shell
+    assert 'id="bk-no-event-include-year" type="checkbox"' in shell
+    assert "Bezeichnung für Sammelordner" in shell
+    assert 'id="bk-event-naming-preview"' in shell
+    assert '<details class="bk-library-card"' in ui_shell.BIBLIOTHEKAR_JS
+    assert "bkUpdateSettingsPreview();" in ui_shell.BIBLIOTHEKAR_JS
+
+
 def test_0331_metadata_page_uses_shell_and_second_header():
     html = apply_shell(
         METADATA_CORRECTION_HTML,
