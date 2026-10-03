@@ -2,10 +2,10 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.28.1-ui1**
+Aktueller Entwicklungsstand: **0.33.0**
 
-Aktuelle TrueNAS-/Container-Ausgabe: **0.31.0**  
-Stabiler fachlicher Kamerakern: **0.28.7**
+Aktuelle TrueNAS-/Container-Ausgabe: **0.33.0**  
+Stabiler fachlicher Kamerakern als Basis: **0.32.11**
 
 ## Ziel
 
@@ -31,11 +31,12 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.32.8
+## TrueNAS Custom App 0.33.0
 
-0.32.8 vereinfacht die Speicherarchitektur der Mehrbibliotheks-Nutzung, ohne
-bestehende Bibliotheken automatisch zu verschieben. Der fachliche Kamerakern
-bleibt kompatibel; neue Speicherpfade werden zentral aufgelöst.
+0.33.0 baut auf der Mehrbibliotheks- und Sicherheitsarchitektur von 0.32.x auf.
+Neu sind bibliotheksspezifische Ereignisbenennung sowie die kontrollierte
+Metadatenkorrektur für Problemdateien. Bestehende Ereignisse und Archive werden
+durch neue Benennungseinstellungen nicht automatisch umbenannt.
 
 ### Gemeinsamer Kamera-Arbeitsbereich
 
@@ -47,7 +48,7 @@ Bibliothekar verwaltet darunter standardmäßig:
 
 - `/workspace/SD-Kartensicherungen` – globaler Sicherungs- und Rückkehrbestand
 - `/workspace/Arbeitsbereiche` – Stamm für Bibliotheks-Arbeitsbereiche
-- `/workspace/Metadatenkorrektur` – vorbereiteter allgemeiner Arbeitsbereich
+- `/workspace/Metadatenkorrektur` – Stamm für bibliotheksspezifische Metadatenkorrektur
 - `/workspace/Arbeitsbereiche/main` – Standard-Arbeitsbereich der Main Library
 
 Die Namen der drei von Bibliothekar verwalteten Stammordner können unter
@@ -106,12 +107,36 @@ ausdrücklich die Wahl **Kopieren** oder **Verschieben**.
 Ein gemeinsamer `/workspace`-Mount erleichtert Hardlinks, garantiert sie aber
 nicht, wenn darunter wiederum unterschiedliche ZFS-Datasets eingehängt sind.
 
+
+### Metadatenkorrektur 0.33.0
+
+Die Seite **Metadatenkorrektur** besitzt zwei getrennte Bereiche:
+
+- **Bibliothek** – verwendet pro Bibliothek
+  `/workspace/Metadatenkorrektur/Bibliothek/<bibliotheks-id>/Eingang`
+  und `Ausgang`.
+- **Allgemein** – verwendet bewusst einen **separaten read-write Host Path**,
+  zum Beispiel `/metadata-general`. Dieser Mount wird in TrueNAS angelegt und
+  anschließend unter **Einstellungen → Pfade** eingetragen.
+
+Bibliothekar schreibt nie direkt über die Quelldatei. Eine Korrektur friert
+zuerst Pfad, Größe und SHA-256 ein, erzeugt anschließend eine Arbeitskopie,
+schreibt mit ExifTool, liest die geschriebenen Werte erneut und prüft sie. Erst
+wenn diese Prüfung erfolgreich war, wird die fertige Datei atomar in den
+Ausgang übernommen und die Eingangsdatei entfernt. Bei Fehlern bleibt die
+Eingangsdatei erhalten und der Auftrag sichtbar.
+
+Neben eingebetteten EXIF-/XMP-/QuickTime-Zeiten werden auch bekannte
+Dateinamensmuster ausgewertet. Datumsnamen ohne Uhrzeit liefern nur das Datum;
+eine Uhrzeit wird nicht geraten.
+
 ### Basis-Containerpfade
 
 - `/config` – Anwendungskonfiguration
 - `/database` – Main-SQLite, globale Registry und Bibliotheksdatenbanken
 - `/logs` – Protokolle
 - `/workspace` – gemeinsamer Kamera-Arbeitsbereich, read-write
+- `/metadata-general` – optionaler separater read-write Host Path für Metadatenkorrektur „Allgemein“
 - `/main-library` – Main-Archiv, read-only
 - weitere Bibliotheksarchive – jeweils eigener read-only Host Path
 - optionale externe Bibliotheks-Arbeitsbereiche – eigener read-write Host Path
@@ -152,15 +177,17 @@ Bibliotheksfundament mit globaler Registry und getrennten Bibliothekskontexten.
 Mehrere Bibliotheken mit eigener SQLite-Datenbank, eigener Archivzuordnung, globalen Familien-Claims und tab-sicherem Bibliothekskontext.
 
 ### 0.32
-TrueNAS-Discover-Härtung und Katalogstruktur.
+Mehrbibliotheks-Lifecycle, zentraler freier Bestand und TrueNAS-/Archiv-Härtung.
+
+### 0.33
+Bibliotheksspezifische Ereignisbenennung sowie sichere Metadatenkorrektur mit
+Dateinamenerkennung, getrennten Bereichen „Bibliothek“/„Allgemein“ und
+verifiziertem Schreibworkflow.
 
 ### 1.0.0
-Stabiler Kamera-Kern ohne Immich, Problembilder und KI-Vorsortierung.
+Stabiler Kamera-Kern ohne Immich und ohne KI-Vorsortierung.
 
-### 2.0
-Problembilder / Metadaten-Reparatur für WhatsApp, Signal und ähnliche Quellen.
-
-### 3.0
+### danach
 Manuell startbare KI-Vorsortierung mit Open-Weight-Modell auf dem GX10.
 
 ### später
