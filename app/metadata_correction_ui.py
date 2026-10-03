@@ -306,7 +306,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   }
   async function reintegrateSelected(){
     const files=selectedReadyFiles();
-    if(!files.length){setStatus("Keine korrigierte Familie zum Einsortieren ausgewählt.",true);return;}
+    if(!files.length){setStatus("Bitte zuerst alle ausgewählten Einträge korrigieren.",true);return;}
     const button=$("meta-reintegrate");
     if(button)button.disabled=true;
     setStatus(files.length===1?"Korrigierte Familie wird einsortiert …":files.length+" korrigierte Familien werden einsortiert …");
