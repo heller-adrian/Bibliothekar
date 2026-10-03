@@ -2627,6 +2627,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function updateDaySelectAllButton() {
+      if (typeof daySelectAllButton === "undefined" || !daySelectAllButton) return;
       const keys = selectableDayKeys();
       const allSelected = keys.length > 0 && keys.every(key => selectedDays.has(key));
       daySelectAllButton.textContent = allSelected ? "Auswahl aufheben" : "Alle auswählen";
@@ -3035,21 +3036,6 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       );
     }
-
-
-    daySelectAllButton.addEventListener("click", () => {
-      const keys = selectableDayKeys();
-      const allSelected = keys.length > 0 && keys.every(key => selectedDays.has(key));
-      if (allSelected) {
-        for (const key of keys) selectedDays.delete(key);
-        lastSelectedDayKey = null;
-      } else {
-        for (const key of keys) selectedDays.add(key);
-        lastSelectedDayKey = keys[keys.length - 1] || null;
-      }
-      renderDays();
-      renderSelection();
-    });
 
 
     function renderSelection() {
@@ -4245,6 +4231,20 @@ WORKSPACE_HTML = r"""<!doctype html>
         eventSuggestionStatus.textContent = error.message;
         button.disabled = false;
       }
+    });
+
+    daySelectAllButton.addEventListener("click", () => {
+      const keys = selectableDayKeys();
+      const allSelected = keys.length > 0 && keys.every(key => selectedDays.has(key));
+      if (allSelected) {
+        for (const key of keys) selectedDays.delete(key);
+        lastSelectedDayKey = null;
+      } else {
+        for (const key of keys) selectedDays.add(key);
+        lastSelectedDayKey = keys[keys.length - 1] || null;
+      }
+      renderDays();
+      renderSelection();
     });
 
     loadJobs().then(async () => {
