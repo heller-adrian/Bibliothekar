@@ -1115,6 +1115,7 @@ def _apply_library_metadata_correction(
                 connection.execute(
                     """UPDATE files
                        SET current_relative_path=?,
+                           source_size_bytes=COALESCE(source_size_bytes,size_bytes),
                            size_bytes=?,
                            sha256_current=?,
                            selected_capture_time=?,
