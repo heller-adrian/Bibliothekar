@@ -593,6 +593,10 @@ def apply_metadata_correction(
     output_root = paths["output_root"]
     if not _is_relative_to(source, input_root) or not source.is_file():
         raise MetadataCorrectionError("Die eingefrorene Eingangsdatei fehlt.")
+    if source.is_symlink():
+        raise MetadataCorrectionError(
+            "Symbolische Links werden in der Metadatenkorrektur nicht verändert."
+        )
 
     relative = _safe_relative(str(task["source_relative_path"]))
     destination = (output_root / relative).resolve(strict=False)
@@ -610,8 +614,15 @@ def apply_metadata_correction(
         raise MetadataCorrectionError("Die SHA-256-Summe der Eingangsdatei hat sich verändert.")
 
     destination.parent.mkdir(parents=True, exist_ok=True)
+    # ExifTool determines the media format from the extension. Keep the real
+    # extension on the temporary file; a generic .tmp suffix would make RAW,
+    # JPEG and XMP writes fail as an unknown file type.
     temp = destination.parent / (
-        "." + destination.name + ".bibliothekar-" + uuid.uuid4().hex + ".tmp"
+        "."
+        + destination.stem
+        + ".bibliothekar-"
+        + uuid.uuid4().hex
+        + destination.suffix
     )
 
     with database_connection(database_path) as connection:
