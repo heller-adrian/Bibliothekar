@@ -2,9 +2,9 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.33.4**
+Aktueller Entwicklungsstand: **0.33.5**
 
-Aktuelle TrueNAS-/Container-Ausgabe: **0.33.4**  
+Aktuelle TrueNAS-/Container-Ausgabe: **0.33.5**  
 Stabiler fachlicher Kamerakern als Basis: **0.32.11**
 
 ## Ziel
@@ -31,9 +31,9 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.33.4
+## TrueNAS Custom App 0.33.5
 
-0.33.4 stabilisiert die mit 0.33.0 eingeführte Ereignisbenennung und
+0.33.5 stabilisiert die mit 0.33.0 eingeführte Ereignisbenennung und
 Metadatenkorrektur auf der Mehrbibliotheks- und Sicherheitsarchitektur von
 0.32.x. Die Einzelkorrektur schreibt nach dem bewussten Klick direkt über den
 bestehenden Arbeitskopie-/ExifTool-/Verifikationsweg; ein separater
@@ -89,7 +89,7 @@ Von–bis- oder Uhrzeit-Darstellung; optional kann das Jahr vor dem Monat stehen
 Die Einstellungsseite zeigt eine gemeinsame Vorschau für normales Ereignis und
 Sammelordner einschließlich der aktuell gewählten Unterordnerstruktur.
 
-### Metadatenkorrektur 0.33.4
+### Metadatenkorrektur 0.33.5
 
 Die Seite **Metadatenkorrektur** besitzt den normalen Bibliothekar-Header und
 einen zweiten Reiterheader mit:
@@ -98,7 +98,7 @@ einen zweiten Reiterheader mit:
   gruppiert nach der Bibliothek, aus deren Kameraimport die Familie stammt.
 - **Allgemein** – verwendet direkt
   `/workspace/Metadatenkorrektur/Allgemein`.
-- **Mehrfachkorrektur** – in 0.33.4 bereits als geplanter Reiter sichtbar;
+- **Mehrfachkorrektur** – in 0.33.5 bereits als geplanter Reiter sichtbar;
   die Funktion folgt mit 0.34.0.
 
 Für **Allgemein** gibt es keinen Eingang/Ausgang. Ein Klick auf
@@ -130,7 +130,7 @@ Für zusammengehörige Kameraaufnahmen mit falsch eingestellter Kamera-Uhr ist
 eine Referenzaufnahme ein korrektes Datum mit Uhrzeit erhalten; derselbe
 Zeitversatz wird anschließend auf die übrigen Aufnahmen übertragen, sodass
 deren zeitliche Abstände erhalten bleiben. Vor dem Schreiben wird eine
-vollständige Alt→Neu-Vorschau gezeigt. Diese Funktion ist in 0.33.4 noch nicht
+vollständige Alt→Neu-Vorschau gezeigt. Diese Funktion ist in 0.33.5 noch nicht
 aktiv.
 
 ### Basis-Containerpfade
