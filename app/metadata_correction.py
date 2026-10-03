@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 import hashlib
@@ -122,7 +122,7 @@ def metadata_area_paths(
     create: bool = True,
 ) -> dict[str, Path]:
     kind = str(area or "").strip().lower()
-    if kind not in {"library", "general"}:
+    if kind not in {"library", "general", "multiple"}:
         raise MetadataCorrectionError("Unbekannter Metadatenbereich.")
 
     paths = storage_paths(workspace_root)
@@ -142,17 +142,18 @@ def metadata_area_paths(
             "output_root": central_root,
         }
 
-    general = (metadata_root / "Allgemein").resolve(strict=False)
-    if not _is_relative_to(general, metadata_root):
+    folder_name = "Allgemein" if kind == "general" else "Mehrfachkorrektur"
+    target = (metadata_root / folder_name).resolve(strict=False)
+    if not _is_relative_to(target, metadata_root):
         raise MetadataCorrectionError("Metadatenpfad verlässt den konfigurierten Stamm.")
     if create:
-        general.mkdir(parents=True, exist_ok=True)
-    if general.exists() and not general.is_dir():
-        raise MetadataCorrectionError("Metadatenpfad ist kein Ordner: " + str(general))
+        target.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not target.is_dir():
+        raise MetadataCorrectionError("Metadatenpfad ist kein Ordner: " + str(target))
     return {
-        "root": general,
-        "input_root": general,
-        "output_root": general,
+        "root": target,
+        "input_root": target,
+        "output_root": target,
     }
 
 
@@ -453,6 +454,12 @@ def scan_metadata_area(
             allowed_job_ids=allowed_job_ids,
         )
 
+    if kind == "multiple":
+        return _multiple_scan(
+            workspace_root=workspace_root,
+            library_id=library_id,
+        )
+
     paths = metadata_area_paths(
         area="general",
         workspace_root=workspace_root,
@@ -510,6 +517,339 @@ def scan_metadata_area(
         },
         "files": records,
     }
+
+
+def _multiple_scan(
+    *,
+    workspace_root: Path,
+    library_id: str,
+) -> dict[str, Any]:
+    paths = metadata_area_paths(
+        area="multiple",
+        workspace_root=workspace_root,
+        library_id=library_id,
+        create=True,
+    )
+    root = paths["input_root"]
+    visible_files = [
+        path for path in root.rglob("*")
+        if path.is_file() and not any(part.startswith(".") for part in path.relative_to(root).parts)
+    ]
+    if not visible_files:
+        return {
+            "area": "multiple",
+            "paths": {key: str(value) for key, value in paths.items()},
+            "summary": {
+                "file_count": 0,
+                "usable_time_count": 0,
+                "missing_time_count": 0,
+            },
+            "files": [],
+        }
+
+    analysis = analyze_tree(root, include_other=False)
+    records: list[dict[str, Any]] = []
+    for record in analysis.get("files") or []:
+        media_type = str(record.get("media_type") or "")
+        if media_type not in SUPPORTED_MEDIA:
+            continue
+        relative = _safe_relative(str(record.get("relative_path") or ""))
+        source = (root / relative).resolve(strict=False)
+        if not _is_relative_to(source, root) or not source.is_file() or source.is_symlink():
+            continue
+        item = dict(record)
+        item["relative_path"] = relative.as_posix()
+        item["filename"] = str(record.get("filename") or relative.name)
+        item["size_bytes"] = int(source.stat().st_size)
+        item["sha256"] = _sha256(source)
+        item["usable_time"] = bool(str(record.get("selected_capture_time") or "").strip())
+        records.append(item)
+
+    records.sort(key=lambda row: str(row.get("relative_path") or ""))
+    return {
+        "area": "multiple",
+        "paths": {key: str(value) for key, value in paths.items()},
+        "summary": {
+            "file_count": len(records),
+            "usable_time_count": sum(bool(row["usable_time"]) for row in records),
+            "missing_time_count": sum(not bool(row["usable_time"]) for row in records),
+        },
+        "files": records,
+    }
+
+
+def _naive_capture_datetime(value: Any) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        raise MetadataCorrectionError("Aufnahmezeit fehlt.")
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as error:
+        raise MetadataCorrectionError(
+            "Eine Aufnahmezeit ist ungültig: " + raw
+        ) from error
+    return parsed.replace(tzinfo=None, microsecond=0)
+
+
+def preview_multiple_metadata_correction(
+    *,
+    workspace_root: Path,
+    library_id: str,
+    reference_relative_path: str,
+    proposed_datetime: Any,
+) -> dict[str, Any]:
+    proposed = _normalize_manual_datetime(proposed_datetime)
+    scan = _multiple_scan(
+        workspace_root=workspace_root,
+        library_id=library_id,
+    )
+    records = list(scan.get("files") or [])
+    if not records:
+        raise MetadataCorrectionError(
+            "Der Ordner Mehrfachkorrektur enthält keine unterstützten Medien."
+        )
+
+    reference_relative = _safe_relative(reference_relative_path).as_posix()
+    reference = next(
+        (
+            row for row in records
+            if str(row.get("relative_path") or "") == reference_relative
+        ),
+        None,
+    )
+    if reference is None:
+        raise MetadataCorrectionError("Die Referenzdatei wurde nicht gefunden.")
+    reference_old = str(reference.get("selected_capture_time") or "").strip()
+    if not reference_old:
+        raise MetadataCorrectionError(
+            "Die Referenzdatei besitzt keine belastbare Aufnahmezeit."
+        )
+
+    missing = [
+        str(row.get("relative_path") or "")
+        for row in records
+        if not str(row.get("selected_capture_time") or "").strip()
+    ]
+    if missing:
+        raise MetadataCorrectionError(
+            "Für die Mehrfachkorrektur benötigen alle Dateien eine vorhandene "
+            "Aufnahmezeit. Ohne Aufnahmezeit: " + ", ".join(missing[:10])
+        )
+
+    delta = (
+        _naive_capture_datetime(proposed)
+        - _naive_capture_datetime(reference_old)
+    )
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        old = _naive_capture_datetime(record["selected_capture_time"])
+        new = old + delta
+        rows.append({
+            "relative_path": str(record["relative_path"]),
+            "filename": str(record.get("filename") or Path(str(record["relative_path"])).name),
+            "media_type": str(record.get("media_type") or ""),
+            "capture_time_confidence": str(record.get("capture_time_confidence") or "missing"),
+            "old_datetime": old.isoformat(timespec="seconds"),
+            "new_datetime": new.isoformat(timespec="seconds"),
+            "size_bytes": int(record["size_bytes"]),
+            "sha256": str(record["sha256"]),
+        })
+
+    fingerprint_payload = json.dumps(
+        {
+            "reference_relative_path": reference_relative,
+            "reference_old_datetime": _naive_capture_datetime(reference_old).isoformat(timespec="seconds"),
+            "reference_new_datetime": proposed,
+            "offset_seconds": int(delta.total_seconds()),
+            "files": [
+                {
+                    key: row[key]
+                    for key in (
+                        "relative_path",
+                        "old_datetime",
+                        "new_datetime",
+                        "size_bytes",
+                        "sha256",
+                    )
+                }
+                for row in rows
+            ],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    preview_fingerprint = hashlib.sha256(
+        fingerprint_payload.encode("utf-8")
+    ).hexdigest()
+    return {
+        "area": "multiple",
+        "reference_relative_path": reference_relative,
+        "reference_old_datetime": _naive_capture_datetime(reference_old).isoformat(timespec="seconds"),
+        "reference_new_datetime": proposed,
+        "offset_seconds": int(delta.total_seconds()),
+        "preview_fingerprint": preview_fingerprint,
+        "file_count": len(rows),
+        "files": rows,
+    }
+
+
+def apply_multiple_metadata_correction(
+    *,
+    workspace_root: Path,
+    library_id: str,
+    reference_relative_path: str,
+    proposed_datetime: Any,
+    expected_preview_fingerprint: str,
+) -> dict[str, Any]:
+    preview = preview_multiple_metadata_correction(
+        workspace_root=workspace_root,
+        library_id=library_id,
+        reference_relative_path=reference_relative_path,
+        proposed_datetime=proposed_datetime,
+    )
+    expected = str(expected_preview_fingerprint or "").strip()
+    if not expected or expected != str(preview["preview_fingerprint"]):
+        raise MetadataCorrectionError(
+            "Der Bestand hat sich seit der Vorschau verändert. Bitte die Vorschau neu berechnen."
+        )
+
+    paths = metadata_area_paths(
+        area="multiple",
+        workspace_root=workspace_root,
+        library_id=library_id,
+        create=True,
+    )
+    root = paths["root"]
+    metadata_root = storage_paths(workspace_root)["metadata_root"].resolve(strict=False)
+    work = (
+        metadata_root / ".multiple-work" / ("MULTI_" + uuid.uuid4().hex.upper())
+    ).resolve(strict=False)
+    work.mkdir(parents=True, exist_ok=False)
+
+    prepared: list[dict[str, Any]] = []
+    replaced: list[tuple[Path, Path]] = []
+    incoming_paths: list[Path] = []
+    try:
+        for row in preview["files"]:
+            relative = _safe_relative(str(row["relative_path"]))
+            source = (root / relative).resolve(strict=False)
+            if (
+                not _is_relative_to(source, root)
+                or not source.is_file()
+                or source.is_symlink()
+            ):
+                raise MetadataCorrectionError(
+                    "Eine Datei der Vorschau fehlt: " + relative.as_posix()
+                )
+            if (
+                int(source.stat().st_size) != int(row["size_bytes"])
+                or _sha256(source) != str(row["sha256"])
+            ):
+                raise MetadataCorrectionError(
+                    "Eine Datei wurde seit der Vorschau verändert: "
+                    + relative.as_posix()
+                )
+
+            temp = (work / relative).resolve(strict=False)
+            if not _is_relative_to(temp, work):
+                raise MetadataCorrectionError("Unsicherer Mehrfachkorrektur-Arbeitspfad.")
+            temp.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, temp)
+            if _sha256(temp) != str(row["sha256"]):
+                raise MetadataCorrectionError(
+                    "Arbeitskopie stimmt nicht mit der Vorschau überein: "
+                    + relative.as_posix()
+                )
+            media_type = str(row.get("media_type") or classify_media(temp))
+            write_metadata_datetime(
+                temp,
+                media_type,
+                str(row["new_datetime"]),
+            )
+            verification = verify_metadata_datetime(
+                temp,
+                str(row["new_datetime"]),
+            )
+            prepared.append({
+                **row,
+                "source": source,
+                "temp": temp,
+                "verification": verification,
+                "output_sha256": _sha256(temp),
+                "output_size_bytes": int(temp.stat().st_size),
+            })
+
+        for item in prepared:
+            source = Path(item["source"])
+            incoming = source.parent / (
+                "." + source.name + ".multiple-" + uuid.uuid4().hex
+            )
+            backup = source.parent / (
+                "." + source.name + ".multiple-before-" + uuid.uuid4().hex
+            )
+            incoming_paths.append(incoming)
+            shutil.copyfile(Path(item["temp"]), incoming)
+            if _sha256(incoming) != str(item["output_sha256"]):
+                raise MetadataCorrectionError(
+                    "Korrigierte Arbeitsdatei stimmt vor dem Austausch nicht überein."
+                )
+            os.replace(source, backup)
+            _fsync_directory(source.parent)
+            try:
+                os.replace(incoming, source)
+                _fsync_directory(source.parent)
+            except Exception:
+                if backup.exists() and not source.exists():
+                    os.replace(backup, source)
+                    _fsync_directory(source.parent)
+                raise
+            replaced.append((source, backup))
+
+        for _source, backup in replaced:
+            try:
+                backup.unlink(missing_ok=True)
+                _fsync_directory(backup.parent)
+            except OSError:
+                pass
+        shutil.rmtree(work, ignore_errors=True)
+        return {
+            "status": "completed",
+            "file_count": len(prepared),
+            "offset_seconds": int(preview["offset_seconds"]),
+            "reference_relative_path": str(preview["reference_relative_path"]),
+            "preview_fingerprint": str(preview["preview_fingerprint"]),
+            "files": [
+                {
+                    "relative_path": str(item["relative_path"]),
+                    "old_datetime": str(item["old_datetime"]),
+                    "new_datetime": str(item["new_datetime"]),
+                    "output_size_bytes": int(item["output_size_bytes"]),
+                    "output_sha256": str(item["output_sha256"]),
+                    "verification": item["verification"],
+                }
+                for item in prepared
+            ],
+        }
+    except Exception as error:
+        for incoming in incoming_paths:
+            try:
+                incoming.unlink(missing_ok=True)
+            except OSError:
+                pass
+        for source, backup in reversed(replaced):
+            try:
+                if backup.exists():
+                    if source.exists():
+                        source.unlink()
+                    os.replace(backup, source)
+                    _fsync_directory(source.parent)
+            except OSError:
+                pass
+        shutil.rmtree(work, ignore_errors=True)
+        if isinstance(error, MetadataCorrectionError):
+            raise
+        raise MetadataCorrectionError(str(error)) from error
 
 
 def _normalize_manual_datetime(value: Any) -> str:
