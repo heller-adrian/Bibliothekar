@@ -2,9 +2,9 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.33.0**
+Aktueller Entwicklungsstand: **0.33.1**
 
-Aktuelle TrueNAS-/Container-Ausgabe: **0.33.0**  
+Aktuelle TrueNAS-/Container-Ausgabe: **0.33.1**  
 Stabiler fachlicher Kamerakern als Basis: **0.32.11**
 
 ## Ziel
@@ -31,123 +31,116 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.33.0
+## TrueNAS Custom App 0.33.1
 
-0.33.0 baut auf der Mehrbibliotheks- und Sicherheitsarchitektur von 0.32.x auf.
-Neu sind bibliotheksspezifische Ereignisbenennung sowie die kontrollierte
-Metadatenkorrektur für Problemdateien. Bestehende Ereignisse und Archive werden
-durch neue Benennungseinstellungen nicht automatisch umbenannt.
+0.33.1 stabilisiert die mit 0.33.0 eingeführte Ereignisbenennung und
+Metadatenkorrektur auf der Mehrbibliotheks- und Sicherheitsarchitektur von
+0.32.x. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand;
+neue Ereignisse und Sammelordner verwenden die bibliotheksspezifischen
+Standardvorlagen.
 
 ### Gemeinsamer Kamera-Arbeitsbereich
 
 TrueNAS bindet standardmäßig genau **einen** gemeinsamen read-write Host Path
-als `/workspace` ein. Das kann ein eigenes Dataset oder auch ein normaler Ordner
-innerhalb eines vorhandenen Datasets sein.
+als `/workspace` ein. Bibliothekar verwaltet darunter standardmäßig:
 
-Bibliothekar verwaltet darunter standardmäßig:
+- `/workspace/SD-Kartensicherungen` – globaler Sicherungs- und freier Kamerabestand
+- `/workspace/Arbeitsbereiche` – Stamm für frei benannte Bibliotheks-Arbeitsbereiche
+- `/workspace/Metadatenkorrektur` – verwalteter Stamm für Metadatenkorrekturen
+- `/workspace/Metadatenkorrektur/Allgemein` – allgemeine Einzeldatei-Korrektur
 
-- `/workspace/SD-Kartensicherungen` – globaler Sicherungs- und Rückkehrbestand
-- `/workspace/Arbeitsbereiche` – Stamm für Bibliotheks-Arbeitsbereiche
-- `/workspace/Metadatenkorrektur` – Stamm für bibliotheksspezifische Metadatenkorrektur
-- `/workspace/Arbeitsbereiche/main` – Standard-Arbeitsbereich der Main Library
+Ein technischer Bibliotheks-Identifier wie `main` ist **kein**
+Dateisystempfad. Bibliothekar erzeugt daraus weder
+`/workspace/Arbeitsbereiche/main` noch
+`/workspace/Metadatenkorrektur/Bibliothek/main`. Maßgeblich sind immer die
+vom Nutzer gespeicherten Arbeitsbereichs- und Archivpfade.
 
-Die Namen der drei von Bibliothekar verwalteten Stammordner können unter
-**Einstellungen → Pfade** geändert werden. Dabei werden ausschließlich
-App-eigene Ordner innerhalb des bereits gemounteten `/workspace` verwaltet.
-TrueNAS-Datasets oder Host-Path-Mounts werden niemals von Bibliothekar erzeugt
-oder umgehängt.
-
-Bestehende Installationen mit einem echten `/workspace/Arbeitsbereich` werden
-nicht automatisch verschoben. Auf frischen Installationen existiert dieser Name
-nur als Kompatibilitätsalias auf `/workspace/Arbeitsbereiche/main`.
+Die Namen der drei verwalteten Stammordner können unter
+**Einstellungen → Pfade** geändert werden. Eigene TrueNAS-Datasets oder
+Host-Path-Mounts werden von Bibliothekar weder erzeugt noch umgehängt.
 
 ### Bibliotheken
 
-Jede zusätzliche Bibliothek erhält weiterhin eine eigene SQLite-Datenbank unter
-`/database/libraries/<interne-id>.sqlite3`.
+Jede Bibliothek besitzt eine eigene SQLite-Datenbank und einen explizit
+gespeicherten Arbeitsbereich. Der Arbeitsbereich kann innerhalb von
+`/workspace/Arbeitsbereiche` oder als eigener RW-Host-Path liegen. Sein Name
+ist frei wählbar; eine Hauptbibliothek muss nicht `main` heißen.
 
-Standardmäßig erzeugt Bibliothekar ihren Arbeitsbereich selbst unter:
+Archive werden pro Bibliothek separat als read-only Host Path eingebunden. Das
+Archiv bleibt für Bibliothekar read-only; physische Archivänderungen bleiben
+kontrollierte Nutzeraktionen.
 
-`/workspace/Arbeitsbereiche/<interne-id>`
+### Ereignisordner und Benennung
 
-Damit ist für einen normalen zusätzlichen Bibliotheks-Arbeitsbereich kein
-weiterer TrueNAS Host Path nötig.
+Die Ordnerstruktur für neue Ereignisse ist konfigurierbar und wird beim
+Erstellen pro Ereignis eingefroren. Für normale Ereignisse sind optional:
 
-Soll eine Bibliothek bewusst auf einem anderen Dataset oder an einem anderen
-Speicherort arbeiten, wird dieser Ort zuerst in TrueNAS als zusätzlicher
-read-write Host Path in den Container eingebunden. Anschließend kann der
-Containerpfad unter **Einstellungen → Bibliotheken** als Arbeitsbereich
-eingetragen werden. Pfadänderungen verschieben keine Dateien automatisch.
+- Jahr im Ordnernamen
+- Uhrzeit im Ordnernamen
+- Von–bis-Darstellung bei mehrtägigen Ereignissen
 
-### Archive
+Sammelordner (intern weiterhin `no_event`) besitzen eine frei wählbare
+sichtbare Bezeichnung, standardmäßig `Ohne Ereignis`. Da sie mehrere
+getrennte Zeitsegmente eines Monats enthalten können, gibt es dort keine
+Von–bis- oder Uhrzeit-Darstellung; optional kann das Jahr vor dem Monat stehen.
 
-Archive werden absichtlich **nicht** unter einem gemeinsamen Archiv-Mount
-zentralisiert. Jede Bibliothek erhält in TrueNAS ihren eigenen read-only Host
-Path. Dadurch kann jedes Archiv unabhängig auf einem anderen Dataset, Pool oder
-Ordner liegen.
+Die Einstellungsseite zeigt eine gemeinsame Vorschau für normales Ereignis und
+Sammelordner einschließlich der aktuell gewählten Unterordnerstruktur.
 
-Beispiel:
+### Metadatenkorrektur 0.33.1
 
-- Host-Archiv A → `/main-library` (RO)
-- Host-Archiv B → `/libraries/test/archive` (RO)
+Die Seite **Metadatenkorrektur** besitzt den normalen Bibliothekar-Header und
+einen zweiten Reiterheader mit:
 
-Den jeweiligen Containerpfad speichert Bibliothekar pro Bibliothek. Die
-Bibliotheksverwaltung erlaubt Anzeigename, Arbeitsbereich und Archivpfad später
-erneut zu prüfen und anzupassen. Das Archiv bleibt für Bibliothekar read-only;
-physische Archivänderungen bleiben kontrollierte Nutzeraktionen.
+- **Bibliothek** – zeigt den globalen freien `Ohne_Datum`-Bestand,
+  gruppiert nach der Bibliothek, aus deren Kameraimport die Familie stammt.
+- **Allgemein** – verwendet direkt
+  `/workspace/Metadatenkorrektur/Allgemein`.
+- **Mehrfachkorrektur** – in 0.33.1 bereits als geplanter Reiter sichtbar;
+  die Funktion folgt mit 0.34.0.
 
-### Hardlinks
+Für **Allgemein** gibt es keinen Eingang/Ausgang. Bibliothekar arbeitet auf
+einer geprüften Arbeitskopie und ersetzt die Originaldatei erst nach
+erfolgreichem Schreiben und erneutem Metadatenlesen atomar am selben Ort.
 
-Bibliothekar entscheidet nicht anhand des Pfadnamens, ob ein Hardlink möglich
-sein müsste. Entscheidend ist das tatsächliche Dateisystem. Liegen globaler
-Bestand und Bibliotheks-Arbeitsbereich auf demselben Dateisystem, wird ein
-Hardlink verwendet. Meldet das Betriebssystem `EXDEV`, zeigt Bibliothekar
-ausdrücklich die Wahl **Kopieren** oder **Verschieben**.
+Bei **Bibliothek** wird eine komplette Ohne-Datum-Dateifamilie eingefroren.
+Bibliothekar schreibt die korrigierte Aufnahmezeit auf Arbeitskopien, liest und
+prüft die Metadaten erneut, berechnet anschließend denselben kanonischen
+Tages-/Zeitbestand wie beim Kameraimport und übernimmt die geprüfte Familie
+dorthin. Erst nach erfolgreicher Zielprüfung verschwindet der alte
+`Ohne_Datum`-Pfad. Dateipfade, aktuelle SHA-256-Werte und Aufnahmezeiten
+werden danach in alle Bibliotheksprojektionen gespiegelt; der ursprüngliche
+Quellfingerprint bleibt erhalten.
 
-Ein gemeinsamer `/workspace`-Mount erleichtert Hardlinks, garantiert sie aber
-nicht, wenn darunter wiederum unterschiedliche ZFS-Datasets eingehängt sind.
+Die Bibliotheks-Metadatenkorrektur erzeugt insbesondere **keine** Ordner
+`Bibliothek/main/Eingang/Ausgang`. Leere Überreste dieses 0.33.0-Entwurfs
+dürfen automatisch entfernt werden; enthalten sie Dateien, werden sie niemals
+automatisch gelöscht.
 
+### 0.34.0 – vorgemerkte Mehrfachkorrektur
 
-### Metadatenkorrektur 0.33.0
-
-Die Seite **Metadatenkorrektur** besitzt zwei getrennte Bereiche:
-
-- **Bibliothek** – verwendet pro Bibliothek
-  `/workspace/Metadatenkorrektur/Bibliothek/<bibliotheks-id>/Eingang`
-  und `Ausgang`.
-- **Allgemein** – verwendet bewusst einen **separaten read-write Host Path**,
-  zum Beispiel `/metadata-general`. Dieser Mount wird in TrueNAS angelegt und
-  anschließend unter **Einstellungen → Pfade** eingetragen.
-
-Bibliothekar schreibt nie direkt über die Quelldatei. Eine Korrektur friert
-zuerst Pfad, Größe und SHA-256 ein, erzeugt anschließend eine Arbeitskopie,
-schreibt mit ExifTool, liest die geschriebenen Werte erneut und prüft sie. Erst
-wenn diese Prüfung erfolgreich war, wird die fertige Datei atomar in den
-Ausgang übernommen und die Eingangsdatei entfernt. Bei Fehlern bleibt die
-Eingangsdatei erhalten und der Auftrag sichtbar.
-
-Neben eingebetteten EXIF-/XMP-/QuickTime-Zeiten werden auch bekannte
-Dateinamensmuster ausgewertet. Datumsnamen ohne Uhrzeit liefern nur das Datum;
-eine Uhrzeit wird nicht geraten.
+Für zusammengehörige Kameraaufnahmen mit falsch eingestellter Kamera-Uhr ist
+`/workspace/Metadatenkorrektur/Mehrfachkorrektur` vorgesehen. In 0.34.0 wird
+eine Referenzaufnahme ein korrektes Datum mit Uhrzeit erhalten; derselbe
+Zeitversatz wird anschließend auf die übrigen Aufnahmen übertragen, sodass
+deren zeitliche Abstände erhalten bleiben. Vor dem Schreiben wird eine
+vollständige Alt→Neu-Vorschau gezeigt. Diese Funktion ist in 0.33.1 noch nicht
+aktiv.
 
 ### Basis-Containerpfade
 
 - `/config` – Anwendungskonfiguration
-- `/database` – Main-SQLite, globale Registry und Bibliotheksdatenbanken
+- `/database` – Bibliotheksdatenbanken und globale Registry
 - `/logs` – Protokolle
 - `/workspace` – gemeinsamer Kamera-Arbeitsbereich, read-write
-- `/metadata-general` – optionaler separater read-write Host Path für Metadatenkorrektur „Allgemein“
-- `/main-library` – Main-Archiv, read-only
-- weitere Bibliotheksarchive – jeweils eigener read-only Host Path
+- Bibliotheksarchive – jeweils eigener read-only Host Path
 - optionale externe Bibliotheks-Arbeitsbereiche – eigener read-write Host Path
 - `/sources/import` – zusätzliche allgemeine Importquelle, read-only
 - `/sources/nas` – NAS-Quellen, read-only
-- `/sources/removable` – Mountpunkt für direkt bereitgestellte Wechselmedien
+- `/sources/removable` – Mountpunkt für Wechselmedien
 - `/tmp` – flüchtiges tmpfs
 
-`compose.example.yaml` enthält die Ein-Container-Vorlage. Die detaillierte
-Speicherarchitektur für 0.32.8 ist in `docs/truenas-storage-0.32.8.md`
-beschrieben.
+`compose.example.yaml` enthält die Ein-Container-Vorlage.
 
 ## Projektstruktur
 
