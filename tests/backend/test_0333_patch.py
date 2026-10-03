@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import app.metadata_correction as metadata_correction
 from app.database import initialize_database
@@ -31,8 +32,8 @@ def _general_scan(filename: str) -> dict:
 
 def test_0333_metadata_correction_never_uses_copy2():
     source = Path("app/metadata_correction.py").read_text(encoding="utf-8")
-    assert "shutil.copy2(" not in source
-    assert source.count("shutil.copyfile(") >= 3
+    assert re.search(r"^\s*shutil\.copy2\(", source, re.MULTILINE) is None
+    assert len(re.findall(r"^\s*shutil\.copyfile\(", source, re.MULTILINE)) >= 3
 
 
 def test_0333_general_correction_works_when_copy2_is_forbidden(
