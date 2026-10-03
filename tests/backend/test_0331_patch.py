@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import app.metadata_correction as metadata_correction
-from app.database import create_job, database_connection, initialize_database, list_imported_media_origins
+from app.database import create_job, database_connection, initialize_database, list_imported_media_origins, store_metadata_analysis
 from app.event_naming import normalize_event_naming, render_no_event_folder_name
 from app.global_stock import propagate_corrected_family
 from app.metadata_correction import (
@@ -391,4 +391,59 @@ def test_0331_reimport_duplicate_origin_keeps_original_source_size(tmp_path: Pat
     assert len(origins) == 1
     assert origins[0]["size_bytes"] == len(b"original-size")
     assert origins[0]["sha256"] == "SOURCE-HASH"
+
+def test_0331_new_import_persists_original_source_size(tmp_path: Path):
+    database = tmp_path / "kamera.sqlite3"
+    initialize_database(database)
+    create_job(
+        database,
+        job_id="IMPORT",
+        kind="sd_import",
+        trigger_type="manual",
+        operation="folder_import",
+    )
+    with database_connection(database) as connection:
+        connection.execute(
+            """UPDATE jobs
+               SET state='backup_verified',stage='backup_verified',
+                   updated_at='2026-10-03T12:00:00+00:00'
+               WHERE id='IMPORT'"""
+        )
+
+    store_metadata_analysis(
+        database,
+        "IMPORT",
+        {
+            "families": [{
+                "family_key": "DCIM/IMG_0002",
+                "status": "complete",
+                "selected_capture_time": "2026-07-20T14:15:30",
+                "capture_time_confidence": "high",
+            }],
+            "files": [{
+                "relative_path": "DCIM/IMG_0002.JPG",
+                "family_key": "DCIM/IMG_0002",
+                "filename": "IMG_0002.JPG",
+                "extension": ".JPG",
+                "media_type": "jpeg",
+                "size_bytes": 12345,
+                "selected_capture_time": "2026-07-20T14:15:30",
+                "selected_capture_source": "EXIF:DateTimeOriginal",
+                "capture_time_confidence": "high",
+                "review_required": False,
+                "metadata_candidates": [],
+            }],
+        },
+        {"DCIM/IMG_0002.JPG": "SOURCE-SHA"},
+        finalize_job=False,
+    )
+
+    with database_connection(database) as connection:
+        row = connection.execute(
+            """SELECT size_bytes,source_size_bytes,sha256_original
+               FROM files WHERE job_id='IMPORT'"""
+        ).fetchone()
+    assert row["size_bytes"] == 12345
+    assert row["source_size_bytes"] == 12345
+    assert row["sha256_original"] == "SOURCE-SHA"
 
