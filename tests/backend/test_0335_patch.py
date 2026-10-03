@@ -111,13 +111,25 @@ def test_0335_metadata_ui_is_flat_selectable_and_two_step():
     assert "event.shiftKey" in METADATA_CORRECTION_HTML
     assert "/api/metadata-correction/reintegrate" in METADATA_CORRECTION_HTML
     assert "In Tagesbestand einsortieren" in METADATA_CORRECTION_HTML
-    assert "bleibt danach bewusst in Ohne_Datum" in METADATA_CORRECTION_HTML
+    assert "selectedFiles()" in METADATA_CORRECTION_HTML
+    assert "files.every(file=>file.reintegration_ready)" in METADATA_CORRECTION_HTML
+    assert "for(const item of files)" in METADATA_CORRECTION_HTML
+    assert "Einträge ausgewählt.</strong></div>" in METADATA_CORRECTION_HTML
+    assert "0.34.0" not in METADATA_CORRECTION_HTML
+    assert "Metadaten werden sicher auf Arbeitskopien geschrieben" not in METADATA_CORRECTION_HTML
+    assert "outline:2px" not in METADATA_CORRECTION_HTML
+    assert "box-shadow:inset" in METADATA_CORRECTION_HTML
+    assert "user-select:none" in METADATA_CORRECTION_HTML
 
 
 def test_0335_workspace_supports_shift_range_and_select_all():
     assert 'id="day-select-all"' in WORKSPACE_HTML
     assert "event.shiftKey && lastSelectedDayKey" in WORKSPACE_HTML
     assert "selectDayRange" in WORKSPACE_HTML
+    assert "user-select: none" in WORKSPACE_HTML
+    assert 'id="select-all-button"' not in WORKSPACE_HTML
+    assert 'id="clear-selection-button"' not in WORKSPACE_HTML
+    assert "Alle auswählen" in WORKSPACE_HTML
     assert "Auswahl aufheben" in WORKSPACE_HTML
 
 
