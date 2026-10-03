@@ -1,6 +1,6 @@
 services:
   bibliothekar:
-    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:patch-0.32.11}
+    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:patch-0.33.0}
     restart: unless-stopped
     user: "0:0"
     privileged: true
@@ -9,6 +9,7 @@ services:
       TZ: ${TZ:-Europe/Berlin}
       KAMERA_CONFIG: /config/settings.json
       KAMERA_WORKSPACE: /workspace
+      KAMERA_METADATA_GENERAL_ROOT: /metadata-general
       KAMERA_DATABASE_DIR: /database
       KAMERA_REGISTRY_DATABASE: /database/bibliothekar-global.sqlite3
       KAMERA_LOG_DIR: /logs
@@ -32,6 +33,7 @@ services:
       - ${BIBLIOTHEKAR_DATABASE_DIR}:/database
       - ${BIBLIOTHEKAR_LOG_DIR}:/logs
       - ${BIBLIOTHEKAR_WORKSPACE_DIR}:/workspace
+      - ${BIBLIOTHEKAR_METADATA_GENERAL_DIR:-./metadata-general}:/metadata-general
       - ${BIBLIOTHEKAR_MAIN_LIBRARY_DIR}:/main-library:ro
       - ${BIBLIOTHEKAR_IMPORT_SOURCE_DIR}:/sources/import:ro
       - ${BIBLIOTHEKAR_NAS_SOURCE_DIR}:/sources/nas:ro
