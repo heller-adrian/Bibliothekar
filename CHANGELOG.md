@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 0.34.0 – Mehrfachkorrektur mit konstantem Zeitversatz
+
+- Der verwaltete Ordner `/workspace/Metadatenkorrektur/Mehrfachkorrektur` wird beim Startup automatisch neben `Allgemein` angelegt.
+- Die Mehrfachkorrektur ist als eigenständiges Werkzeug aktiviert: Eine beliebige enthaltene Aufnahme kann als Referenz gewählt und auf das tatsächliche Datum mit Uhrzeit gesetzt werden.
+- Aus Referenz alt → Referenz neu wird ein konstanter Zeitversatz berechnet und auf alle unterstützten Dateien im Ordner übertragen. Die zeitlichen Abstände zwischen den Aufnahmen bleiben erhalten.
+- Vor jeder Änderung wird eine vollständige Vorschau mit bisherigem und künftigem Zeitstempel je Datei angezeigt. Vorschau und Anwendung sind über SHA-256, Dateigröße und einen Plan-Fingerprint gekoppelt; ein zwischenzeitlich veränderter Bestand muss neu geprüft werden.
+- **Anwenden** arbeitet vollständig unabhängig vom Bibliotheksbestand: Alle Dateien werden zunächst auf Arbeitskopien geändert und mit ExifTool verifiziert und erst danach atomar am bisherigen Ort ersetzt.
+- **Anwenden und in Tagesbestand übernehmen** führt dieselbe Korrektur aus und legt danach einen verifizierten globalen Importauftrag an. Der bestehende Kamera-Importpfad übernimmt Familienbildung, kanonische Tagesordner, Dateinamen, Duplikatprüfung, Registry und Projektionen.
+- Der verwaltete Mehrfachkorrektur-Import darf als eng begrenzte Ausnahme aus dem Workspace lesen. Andere verschachtelte Importquellen bleiben weiterhin gesperrt.
+- Nach erfolgreicher Übernahme in den Tagesbestand werden ausschließlich die tatsächlich importierten und erneut per SHA-256 bestätigten Quelldateien aus `Mehrfachkorrektur` entfernt; der Ordner selbst bleibt bestehen. Nicht unterstützte Dateien werden nicht gelöscht.
+- Regressionstests sichern Ordneranlage, konstante Offset-Berechnung, Vorschau-ohne-Schreibzugriff, atomare Anwendung, Fingerprint-Invalidierung und den verwalteten Tagesbestand-Import ab.
+
 ### 0.33.6 – Reintegration von Prüffällen und Auswahl-Feinschliff
 
 - Korrigierte Prüffälle verwenden beim Einsortieren jetzt den explizit bestätigten Zeitstempel als autoritative Quelle. Sekundäre, noch widersprüchliche EXIF-/XMP-Felder können dadurch nicht mehr dazu führen, dass eine bereits korrigierte Familie erneut unter `Ohne_Datum` landet.
