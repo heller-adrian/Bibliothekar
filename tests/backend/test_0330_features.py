@@ -15,6 +15,7 @@ from app.database import (
     list_global_tasks,
 )
 from app.event_naming import (
+    legacy_naming_for_existing_event,
     render_event_folder_name,
     render_no_event_folder_name,
 )
@@ -78,6 +79,33 @@ def test_0330_custom_event_folder_naming():
         "2026-07",
         {"no_event_label": "Nicht zugeordnet"},
     ) == "07 - Nicht zugeordnet"
+
+
+def test_0330_legacy_events_keep_old_policy_but_remain_editable():
+    normal_policy = legacy_naming_for_existing_event(
+        event_kind="event",
+        folder_name="07-20 - Alt",
+        event_name="Alt",
+    )
+    assert render_event_folder_name(
+        event_name="Neu",
+        start_date="2026-07-21",
+        end_date="2026-07-21",
+        start_time="12:00",
+        end_time="14:00",
+        uses_time_range=True,
+        naming=normal_policy,
+    ) == "07-21 - Neu"
+
+    no_event_policy = legacy_naming_for_existing_event(
+        event_kind="no_event",
+        folder_name="07 - Ohne Ereignis",
+        event_name="07 - Ohne Ereignis",
+    )
+    assert render_no_event_folder_name(
+        "2026-08",
+        no_event_policy,
+    ) == "08 - Ohne Ereignis"
 
 
 def test_0330_no_event_preview_uses_library_label():
