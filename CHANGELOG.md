@@ -4,7 +4,7 @@
 
 ### 0.33.0 – Ereignisbenennung und sichere Metadatenkorrektur
 
-- „Ohne Ereignis“ erhält pro Bibliothek eine frei wählbare sichtbare Bezeichnung. Die Bezeichnung wird beim Erstellen in Button, Monats-Sammlung und Ordnername verwendet; bereits bestehende Ereignisse behalten ihren eingefrorenen Namen und werden durch spätere Einstellungsänderungen nicht still umbenannt.
+- „Ohne Ereignis“ erhält pro Bibliothek eine frei wählbare sichtbare Bezeichnung. Die Bezeichnung wird beim Erstellen in Button, Monats-Sammlung und Ordnername verwendet; bereits bestehende Ereignisse übernehmen keine neue Vorlage rückwirkend. Vor 0.33 angelegte Ereignisse behalten bei späteren bewussten Bearbeitungen ihre bisherige Benennungslogik.
 - Die Benennung neuer normaler Ereignisordner ist bibliotheksspezifisch konfigurierbar: nur Startdatum oder Von–bis, optional mit Jahr sowie optional mit Uhrzeit. Jede neue Planung speichert dafür einen eigenen Benennungs-Snapshot.
 - Der Bereich „Metadatenkorrektur“ ist als echte Oberfläche verfügbar und trennt „Bibliothek“ von „Allgemein“. Bibliotheksdateien verwenden einen eigenen Eingang/Ausgang unter dem Bibliothekskontext; „Allgemein“ verlangt einen separaten read-write TrueNAS-Host-Path.
 - Dateinamen werden zusätzlich zu EXIF/XMP/QuickTime-Metadaten ausgewertet. Unterstützt werden unter anderem kameraartige `YYYYMMDD_HHMMSS`-Namen, ISO-artige Zeitstempel sowie WhatsApp-/Signal-nahe Datumsnamen. Ein Dateiname mit nur Datum führt bewusst nicht zu einer geratenen Uhrzeit.
