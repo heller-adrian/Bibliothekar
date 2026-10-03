@@ -98,6 +98,7 @@ from app.metadata_correction import (
     get_metadata_correction,
     list_metadata_corrections,
     metadata_area_paths,
+    reintegrate_library_metadata_family,
     scan_metadata_area,
 )
 from app.event_naming import (
@@ -256,7 +257,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.33.4"
+DEPLOYMENT_VERSION = "0.33.5"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -7291,7 +7292,7 @@ def api_metadata_correction_areas() -> dict[str, Any]:
         "areas": {
             "library": {
                 "available": True,
-                "grouped_by_library": True,
+                "grouped_by_library": False,
                 "source_root": str(library_paths["input_root"]),
                 "destination_root": str(library_paths["output_root"]),
             },
@@ -7355,6 +7356,8 @@ def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
 
         return {
             "area": "library",
+            # groups remains as a compatibility field for older clients, but
+            # 0.33.5 presents the shared Ohne_Datum stock as one list.
             "groups": groups,
             "files": flat,
             "summary": {
@@ -7362,6 +7365,14 @@ def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
                 "family_count": len(flat),
                 "file_count": sum(
                     int(group.get("summary", {}).get("file_count") or 0)
+                    for group in groups
+                ),
+                "needs_attention": sum(
+                    int(group.get("summary", {}).get("needs_attention") or 0)
+                    for group in groups
+                ),
+                "ready_to_reintegrate": sum(
+                    int(group.get("summary", {}).get("ready_to_reintegrate") or 0)
                     for group in groups
                 ),
             },
@@ -7422,6 +7433,81 @@ def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     except (
         MetadataCorrectionError,
         MetadataError,
+        GlobalStockError,
+        LibraryRegistryError,
+        ValueError,
+        OSError,
+    ) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/metadata-correction/reintegrate", tags=["Metadatenkorrektur"])
+def api_reintegrate_metadata_families(payload: dict[str, Any]) -> dict[str, Any]:
+    """Explicitly move corrected Ohne_Datum families into canonical day stock."""
+    raw_items = payload.get("items")
+    if isinstance(raw_items, list):
+        items = raw_items
+    else:
+        items = [payload]
+
+    normalized: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        library_id = str(raw.get("library_id") or "").strip()
+        family_id = int(raw.get("family_id") or 0)
+        key = (library_id, family_id)
+        if not library_id or not family_id or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+
+    if not normalized:
+        raise HTTPException(
+            status_code=422,
+            detail="Keine korrigierte Dateifamilie zum Einsortieren ausgewählt.",
+        )
+
+    try:
+        results: list[dict[str, Any]] = []
+        touched: list[tuple[LibraryContext, dict[str, Any]]] = []
+        for library_id, family_id in normalized:
+            context = resolve_library_context(REGISTRY_DATABASE_FILE, library_id)
+            ensure_library_database_schema(context)
+            result = reintegrate_library_metadata_family(
+                context.database_path,
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                family_id=family_id,
+            )
+            results.append(result)
+            touched.append((context, result))
+
+        databases = [
+            Path(str(row["database_path"]))
+            for row in list_libraries(
+                REGISTRY_DATABASE_FILE,
+                active_only=False,
+                registered_only=True,
+            )
+            if str(row.get("database_path") or "").strip()
+        ]
+        for context, result in touched:
+            propagate_corrected_family(
+                context.database_path,
+                databases,
+                job_id=str(result["job_id"]),
+                family_key=str(result["family_key"]),
+            )
+        synchronize_global_central_stock()
+        return {
+            "results": results,
+            "family_count": len(results),
+            "file_count": sum(int(row.get("file_count") or 0) for row in results),
+        }
+    except (
+        MetadataCorrectionError,
         GlobalStockError,
         LibraryRegistryError,
         ValueError,
