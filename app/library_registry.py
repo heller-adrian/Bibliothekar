@@ -985,10 +985,48 @@ def register_source_backup(
             existing_identity = str(existing["source_identity"])
             existing_path = str(existing["backup_path"])
             if existing_kind != clean_kind:
-                raise LibraryRegistryError(
-                    "Eine bestehende Backup-ID darf nicht auf einen anderen "
-                    "Quellentyp umgebunden werden."
+                metadata_library = str((metadata or {}).get("library_id") or "")
+                physical_identity = str(
+                    (metadata or {}).get("physical_source_identity") or ""
                 )
+                safe_main_import_upgrade = (
+                    existing_kind == "existing_library"
+                    and clean_kind == "import"
+                    and metadata_library == MAIN_LIBRARY_ID
+                    and physical_identity
+                    and clean_identity == physical_identity
+                    and existing_path == clean_path
+                    and existing_identity in {
+                        physical_identity,
+                        metadata_library + ":" + physical_identity,
+                    }
+                )
+                if not safe_main_import_upgrade:
+                    raise LibraryRegistryError(
+                        "Eine bestehende Backup-ID darf nicht auf einen anderen "
+                        "Quellentyp umgebunden werden."
+                    )
+                # 0.33.4: Vor der globalen Import-Registry konnte auch die
+                # Main Library beim Backfill als existing_library landen.
+                # Genau dieser eng eingegrenzte Altfall wird wieder als
+                # physischer Import markiert; andere Quellentypwechsel bleiben
+                # weiterhin strikt verboten.
+                connection.execute(
+                    """
+                    UPDATE source_backups
+                    SET source_kind=?, source_identity=?, metadata_json=?, updated_at=?
+                    WHERE backup_id=?
+                    """,
+                    (
+                        clean_kind,
+                        clean_identity,
+                        serialized,
+                        now,
+                        clean_backup_id,
+                    ),
+                )
+                existing_kind = clean_kind
+                existing_identity = clean_identity
             if existing_identity != clean_identity:
                 metadata_library = str((metadata or {}).get("library_id") or "")
                 physical_identity = str(
