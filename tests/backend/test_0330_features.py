@@ -109,7 +109,7 @@ def test_0330_no_event_preview_uses_library_label():
             _family(2, "2026-07-19T22:00:00"),
         ],
     )
-    assert preview["event_name"] == "Nicht zugeordnet"
+    assert preview["event_name"] == "07 - Nicht zugeordnet"
     assert preview["parent_folder"] == "07 - Nicht zugeordnet"
     assert len(preview["no_event_segments"]) == 2
     # Two logical time segments still share one physical day folder.
