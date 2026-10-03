@@ -4862,6 +4862,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
             """SELECT area,
                       COUNT(*) AS n,
                       SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END) AS blocked_n,
+                      MIN(id) AS single_id,
                       MIN(created_at) AS first_created
                FROM metadata_corrections
                WHERE status IN ('pending_review','prepared','writing','blocked')
@@ -4883,6 +4884,9 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
             tasks.append({
                 "kind": "metadata_correction",
                 "metadata_area": area,
+                "metadata_correction_id": (
+                    str(row["single_id"]) if count == 1 else None
+                ),
                 "title": f"Metadatenkorrektur · {label}",
                 "detail": detail,
                 "count": 1,
