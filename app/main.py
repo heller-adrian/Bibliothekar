@@ -104,6 +104,10 @@ from app.planning import (
     list_job_planning_overview,
     list_global_released_archive_groups,
 )
+from app.free_stock_layout import (
+    FreeStockLayoutError,
+    canonical_free_directory,
+)
 from app.sort_plan import (
     SortPlanError,
     build_event_sort_plan,
@@ -228,7 +232,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.32.9"
+DEPLOYMENT_VERSION = "0.32.10"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1034,6 +1038,23 @@ def process_claimed_job(
                     entries=entries,
                 )
 
+            def central_destination_directory(capture_value: str) -> Path | None:
+                """Use the current physical timeline for newly imported free stock.
+
+                If a capture already belongs to an applied/archived interval,
+                it intentionally stays in the neutral day folder until the
+                existing event-suggestion workflow is confirmed.
+                """
+                try:
+                    with database_connection(database_file) as connection:
+                        return Path(str(canonical_free_directory(
+                            connection,
+                            capture_value,
+                            physical=True,
+                        )))
+                except FreeStockLayoutError:
+                    return None
+
             result = run_folder_import_job(
                 source=source,
                 workspace=workspace_path,
@@ -1054,6 +1075,7 @@ def process_claimed_job(
                 duplicate_origins=duplicate_origins,
                 import_history_callback=persist_import_history,
                 family_admission_callback=admit_families,
+                destination_directory_callback=central_destination_directory,
                 work_root=work_root,
                 central_stock=True,
             )
@@ -2728,7 +2750,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             is_main=first_library,
             is_active=True,
             settings={
-                "created_by": "bibliothekar-0.32.9",
+                "created_by": "bibliothekar-0.32.10",
                 "projected_imports": projection,
                 "managed_default_work_root": bool(
                     checked.get("managed_default_work_root")

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 0.32.10 – Kanonischer Tagesbestand über mehrere Sicherungen
+
+- Beim ersten Anwenden eines Teilzeit-Ereignisses wird der freie zentrale Tagesbestand jetzt sicherungsübergreifend normalisiert. Freie Dateien aus weiteren Sicherungen desselben Tages werden in die tatsächlichen Randintervalle verschoben; ein paralleler unspezifischer Ganztagesordner bleibt nicht mehr zurück.
+- Später importierte freie Aufnahmen werden bereits beim Import gegen die physische Ereignis-Timeline eingeordnet. Liegen sie außerhalb eines angewendeten/archivierten Ereignisses, landen sie direkt im passenden kanonischen freien Zeitordner statt erneut in einem vollständigen Tagesordner.
+- Liegt eine später importierte Aufnahme innerhalb eines bereits belegten Zeitraums, bleibt die bestehende Ereignis-Vorschlags-/Bestätigungslogik maßgeblich; die Datei wird nicht ungefragt einem Ereignis zugeordnet.
+- Regressionstests decken den Mehrsicherungs-Apply, den späteren Import in bestehende Randintervalle und die Zuordnungsvorschläge für tatsächlich in den Ereigniszeitraum fallende Folgeaufnahmen ab.
+
+
 ### 0.28.1-ui1 – Deep-Test UI/Workflow-Zwischenpatch
 
 - Eine aktive Ereignis-Unterordnerstruktur benötigt jetzt serverseitig zwingend einen vorhandenen Input-Ordner; ohne Unterordner ist „Direkt im Ereignis“ der kanonische Input.

@@ -866,7 +866,10 @@ def build_event_sort_plan(
             connection,
             affected_days,
             job_id=job_id,
-            shared_library=allow_reapply,
+            # Central free stock is library-wide across import jobs. Initial
+            # apply must therefore renormalize free files from every backup on
+            # the affected day, not only the event's anchor job.
+            shared_library=True,
         ):
             if int(free_row["id"]) not in known_file_ids:
                 file_rows.append(free_row)

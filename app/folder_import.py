@@ -41,6 +41,7 @@ PathCallback = Callable[[list[dict[str, Any]]], None]
 IdentityCallback = Callable[[str, str], None]
 ImportHistoryCallback = Callable[[list[dict[str, Any]]], None]
 FamilyAdmissionCallback = Callable[[dict[str, Any], dict[str, str], dict[str, int]], dict[str, Any]]
+DestinationDirectoryCallback = Callable[[str], Path | None]
 
 
 
@@ -176,6 +177,7 @@ def build_folder_import_plan(
     entries: list[dict[str, Any]],
     analysis: dict[str, Any],
     shared_root: Path,
+    destination_directory_callback: DestinationDirectoryCallback | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     entry_by_path = {
         str(entry["relative_path"]): entry
@@ -276,13 +278,28 @@ def build_folder_import_plan(
         day = capture.strftime("%Y-%m-%d")
         year = capture.strftime("%Y")
         base = capture.strftime("%Y%m%d_%H%M%S") + "_" + device_token
+        destination_directory = Path(year) / day
+        if destination_directory_callback is not None:
+            resolved_directory = destination_directory_callback(
+                str(capture_value)[:19]
+            )
+            if resolved_directory is not None:
+                candidate_directory = Path(resolved_directory)
+                if (
+                    candidate_directory.is_absolute()
+                    or ".." in candidate_directory.parts
+                ):
+                    raise PipelineError(
+                        "Unsicherer kanonischer Zielordner für Import: "
+                        + str(candidate_directory)
+                    )
+                destination_directory = candidate_directory
 
         suffix_index = 0
         while True:
             family_base = base if suffix_index == 0 else f"{base}_{suffix_index:03d}"
             relative_paths = [
-                Path(year)
-                / day
+                destination_directory
                 / (family_base + Path(str(member["filename"])).suffix)
                 for member in members
             ]
@@ -475,6 +492,7 @@ def run_folder_import_job(
     duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
     import_history_callback: ImportHistoryCallback | None = None,
     family_admission_callback: FamilyAdmissionCallback | None = None,
+    destination_directory_callback: DestinationDirectoryCallback | None = None,
     work_root: Path | None = None,
     central_stock: bool = False,
 ) -> dict[str, Any]:
@@ -741,6 +759,7 @@ def run_folder_import_job(
             entries,
             analysis,
             work_root,
+            destination_directory_callback=destination_directory_callback,
         )
         if not plan and not admission.get("blocked_families"):
             raise PipelineError("Die Quelle enthält keine unterstützten Medien.")
