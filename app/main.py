@@ -1910,6 +1910,7 @@ def _available_families_for_event_payload(
 
 def _storage_settings_state() -> dict[str, Any]:
     names = load_storage_settings()
+    metadata_correction = load_metadata_correction_settings()
     paths = storage_paths(WORKSPACE_PATH)
     libraries = []
     for row in list_libraries(
@@ -1936,6 +1937,7 @@ def _storage_settings_state() -> dict[str, Any]:
         "backup_root": str(paths["backup_root"]),
         "workspaces_root": str(paths["workspaces_root"]),
         "metadata_root": str(paths["metadata_root"]),
+        "metadata_general_root": str(metadata_correction.get("general_root") or ""),
         "libraries": libraries,
     }
 
@@ -2151,6 +2153,79 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
                 "nicht durch Bibliothekar umbenannt."
             )
         raise HTTPException(status_code=422, detail=detail) from error
+
+
+@app.get("/api/settings/metadata-correction", tags=["Einstellungen"])
+def api_get_metadata_correction_settings() -> dict[str, Any]:
+    settings = load_metadata_correction_settings()
+    raw = str(settings.get("general_root") or "")
+    available = False
+    writable = False
+    if raw:
+        root = Path(raw)
+        available = root.is_dir()
+        writable = available and os.access(root, os.R_OK | os.W_OK | os.X_OK)
+    return {
+        **settings,
+        "available": available,
+        "writable": writable,
+    }
+
+
+@app.put("/api/settings/metadata-correction", tags=["Einstellungen"])
+def api_set_metadata_correction_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        settings = save_metadata_correction_settings(payload)
+    except StorageSettingsError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    raw = str(settings.get("general_root") or "")
+    if raw:
+        root = Path(raw)
+        if not root.is_dir():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Der Host-Path für „Allgemein“ ist nicht verfügbar. "
+                    "Bitte den RW-Host-Path zuerst in TrueNAS mounten."
+                ),
+            )
+        if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
+            raise HTTPException(
+                status_code=422,
+                detail="Der Host-Path für „Allgemein“ ist nicht vollständig beschreibbar.",
+            )
+    return api_get_metadata_correction_settings()
+
+
+@app.get("/api/settings/event-naming", tags=["Einstellungen"])
+def api_get_event_naming() -> dict[str, Any]:
+    context = current_library_context()
+    return {
+        "library_id": context.library_id,
+        **naming_from_library_settings(context.settings),
+    }
+
+
+@app.put("/api/settings/event-naming", tags=["Einstellungen"])
+def api_set_event_naming(payload: dict[str, Any]) -> dict[str, Any]:
+    context = current_library_context()
+    try:
+        naming = normalize_event_naming(payload)
+        row = update_library_settings(
+            REGISTRY_DATABASE_FILE,
+            context.library_id,
+            {"event_naming": naming},
+        )
+    except (EventNamingError, LibraryRegistryError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    # Existing events keep their persisted/locked naming snapshot. Only
+    # future events read this library default.
+    return {
+        "library_id": context.library_id,
+        **naming_from_library_settings(row.get("settings") or {}),
+    }
 
 
 @app.get("/api/settings/event-folder-layout", tags=["Einstellungen"])
