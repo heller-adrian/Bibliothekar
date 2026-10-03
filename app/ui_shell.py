@@ -2307,6 +2307,7 @@ BIBLIOTHEKAR_JS = r"""
     setValue("bk-storage-backup-name", data.backup_directory_name);
     setValue("bk-storage-workspaces-name", data.workspaces_directory_name);
     setValue("bk-storage-metadata-name", data.metadata_directory_name);
+    setValue("bk-metadata-general-root", data.metadata_general_root || "");
     setText("bk-storage-workspace-root", data.workspace_root || "/workspace");
     setText("bk-storage-backup-preview", "SD-Kartensicherungen: " + String(data.backup_root || ""));
     setText("bk-storage-workspaces-preview", "Arbeitsbereiche: " + String(data.workspaces_root || ""));
@@ -2338,7 +2339,15 @@ BIBLIOTHEKAR_JS = r"""
           metadata_directory_name:document.getElementById("bk-storage-metadata-name")?.value || "",
         }),
       });
-      bkRenderStorageSettings(data);
+      await bkJson("/api/settings/metadata-correction", {
+        method:"PUT",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          general_root:document.getElementById("bk-metadata-general-root")?.value || "",
+        }),
+      });
+      const refreshed=await bkJson("/api/settings/storage-paths");
+      bkRenderStorageSettings(refreshed);
       if(status){status.textContent="Gespeichert. App-eigene Ordner wurden sicher aktualisiert; externe TrueNAS-Mounts bleiben unverändert.";status.className="bk-library-status is-ok";}
       await bkRefreshLibraryManagement();
     } catch(error) {
@@ -2483,6 +2492,71 @@ BIBLIOTHEKAR_JS = r"""
       status.textContent="Gespeichert. Bestehende Ereignisse bleiben unverändert.";
     }catch(error){status.textContent=error.message;}
   });
+
+  const eventNamingSettings = document.getElementById("bk-event-naming-settings");
+  let eventNamingState = null;
+
+  function bkRenderEventNaming(data) {
+    if (!eventNamingSettings || !data) return;
+    eventNamingState = data;
+    const label=document.getElementById("bk-no-event-label");
+    const mode=document.getElementById("bk-event-date-mode");
+    const year=document.getElementById("bk-event-include-year");
+    const time=document.getElementById("bk-event-include-time");
+    if(label)label.value=String(data.no_event_label||"Ohne Ereignis");
+    if(mode)mode.value=String(data.date_mode||"start");
+    if(year)year.checked=Boolean(data.include_year);
+    if(time)time.checked=Boolean(data.include_time);
+    bkUpdateEventNamingPreview();
+  }
+
+  function bkUpdateEventNamingPreview() {
+    if(!eventNamingSettings)return;
+    const label=String(document.getElementById("bk-no-event-label")?.value||"Ohne Ereignis").trim()||"Ohne Ereignis";
+    const range=document.getElementById("bk-event-date-mode")?.value==="range";
+    const year=Boolean(document.getElementById("bk-event-include-year")?.checked);
+    const time=Boolean(document.getElementById("bk-event-include-time")?.checked);
+    const d1=year?"2026-07-20":"07-20";
+    const d2=year?"2026-07-21":"07-21";
+    let normal=range ? d1+"–"+d2 : d1;
+    if(time) normal=range ? d1+" 14-00–"+d2+" 18-30" : normal+" · 14-00–18-30";
+    const preview=document.getElementById("bk-event-naming-preview");
+    if(preview)preview.textContent="Beispiel: "+normal+" - Urlaub · 07 - "+label;
+  }
+
+  async function bkLoadEventNaming() {
+    if(!eventNamingSettings)return;
+    const status=document.getElementById("bk-event-naming-status");
+    try{
+      const data=await bkJson("/api/settings/event-naming");
+      bkRenderEventNaming(data);
+      if(status)status.textContent="";
+    }catch(error){if(status)status.textContent=error.message;}
+  }
+
+  ["bk-no-event-label","bk-event-date-mode","bk-event-include-year","bk-event-include-time"].forEach(id=>{
+    document.getElementById(id)?.addEventListener("input",bkUpdateEventNamingPreview);
+    document.getElementById(id)?.addEventListener("change",bkUpdateEventNamingPreview);
+  });
+  document.getElementById("bk-event-naming-save")?.addEventListener("click",async()=>{
+    const status=document.getElementById("bk-event-naming-status");
+    if(status)status.textContent="Benennung wird gespeichert …";
+    try{
+      const data=await bkJson("/api/settings/event-naming",{
+        method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          no_event_label:document.getElementById("bk-no-event-label")?.value||"",
+          date_mode:document.getElementById("bk-event-date-mode")?.value||"start",
+          include_year:Boolean(document.getElementById("bk-event-include-year")?.checked),
+          include_time:Boolean(document.getElementById("bk-event-include-time")?.checked),
+        })
+      });
+      bkRenderEventNaming(data);
+      document.dispatchEvent(new CustomEvent("bibliothekar:event-naming-updated",{detail:data}));
+      if(status)status.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse.";
+    }catch(error){if(status)status.textContent=error.message;}
+  });
+  document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadEventNaming);
 
   // Quellenwahl 0.22.1: drei gleichwertige Quellkarten im Importbereich.
   const sourcePicker = document.getElementById("bk-source-picker");
@@ -2791,6 +2865,25 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         </div>
         <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
       </section>
+      <section class="bk-settings-group" id="bk-event-naming-settings">
+        <div><strong>Benennung neuer Ereignisse</strong><div style="color:var(--bk-muted);margin-top:4px">Bibliotheksspezifisch · bestehende Ereignisse behalten ihren Ordnernamen</div></div>
+        <div class="bk-library-form" style="margin-top:12px">
+          <label><span>Bezeichnung für „Ohne Ereignis“</span><input id="bk-no-event-label" value="Ohne Ereignis"></label>
+          <label><span>Datum im Ereignisordner</span>
+            <select id="bk-event-date-mode">
+              <option value="start">Nur Startdatum</option>
+              <option value="range">Von–bis bei mehreren Tagen</option>
+            </select>
+          </label>
+        </div>
+        <div class="bk-choice-row" style="margin-top:10px">
+          <label><input id="bk-event-include-year" type="checkbox"> Jahr einbeziehen</label>
+          <label><input id="bk-event-include-time" type="checkbox"> Uhrzeit einbeziehen</label>
+        </div>
+        <div id="bk-event-naming-preview" class="bk-language-note"></div>
+        <div class="bk-library-actions"><button id="bk-event-naming-save" type="button" class="bk-positive-action">Benennung speichern</button></div>
+        <div id="bk-event-naming-status" class="bk-library-status"></div>
+      </section>
     </div>
 
     <div class="bk-settings-panel" data-bk-settings-panel="paths" hidden>
@@ -2804,6 +2897,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <label><span>SD-Kartensicherungen</span><input id="bk-storage-backup-name" value="SD-Kartensicherungen"></label>
           <label><span>Bibliotheks-Arbeitsbereiche</span><input id="bk-storage-workspaces-name" value="Arbeitsbereiche"></label>
           <label><span>Metadatenkorrektur</span><input id="bk-storage-metadata-name" value="Metadatenkorrektur"></label>
+          <label><span>Metadatenkorrektur „Allgemein“ · separater RW-Host-Path</span><input id="bk-metadata-general-root" placeholder="/metadata-general"></label>
         </div>
         <div class="bk-library-meta" style="margin-top:10px">
           <span id="bk-storage-backup-preview"></span>
