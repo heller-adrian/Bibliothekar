@@ -3359,16 +3359,16 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 </header>
 
 <nav class="bk-pwa-dock" aria-label="Web-App-Navigation">
-  <a class="bk-pwa-nav-item${' active' if active == 'import' else ''}" data-area="import" href="/">
+  <a class="bk-pwa-nav-item{' active' if active == 'import' else ''}" data-area="import" href="/">
     <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="12" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg></span>
     <span class="bk-pwa-label">Import</span>
   </a>
-  <a class="bk-pwa-nav-item${' active' if active == 'workspace' else ''}" data-area="workspace" href="/workspace">
+  <a class="bk-pwa-nav-item{' active' if active == 'workspace' else ''}" data-area="workspace" href="/workspace">
     <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/></svg></span>
     <span class="bk-pwa-label">Arbeitsbereich</span>
   </a>
-  <a class="bk-pwa-nav-item${' active' if active == 'archive' else ''}" data-area="archive" href="/transfer">
-    <span class="bk-pwa-icon" aria-hidden="true"><path></path><svg viewBox="0 0 24 24"><path d="M5 8h14v11H5z"/><path d="M8 8V5h8v3M9 12h6"/></svg></span>
+  <a class="bk-pwa-nav-item{' active' if active == 'archive' else ''}" data-area="archive" href="/transfer">
+    <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 8h14v11H5z"/><path d="M8 8V5h8v3M9 12h6"/></svg></span>
     <span class="bk-pwa-label">Archiv</span>
   </a>
   <button class="bk-pwa-nav-item bk-pwa-task-toggle" type="button" aria-label="Aufgaben öffnen" onclick="document.getElementById('bk-task-button')?.click()">
