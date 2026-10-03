@@ -1055,6 +1055,51 @@ def _canonical_for_source_family(
     return str(row["canonical_family_id"]) if row else None
 
 
+def list_library_import_job_ids(
+    registry_path: Path,
+    library_id: str,
+) -> list[str]:
+    """Return camera-import jobs that physically originated in one library.
+
+    Projected copies in other library databases use source_kind
+    existing_library and are deliberately excluded. This gives global
+    workflows one stable owner for otherwise shared central-stock rows.
+    """
+    clean_id = str(library_id or "").strip()
+    if not clean_id:
+        return []
+
+    connection = _connect(registry_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT backup_id, metadata_json
+            FROM source_backups
+            WHERE source_kind='import'
+            ORDER BY created_at, backup_id
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    result: list[str] = []
+    for row in rows:
+        try:
+            metadata = json.loads(str(row["metadata_json"] or "{}"))
+        except (TypeError, ValueError):
+            metadata = {}
+        if str(metadata.get("library_id") or "") != clean_id:
+            continue
+        job_id = str(metadata.get("job_id") or "").strip()
+        if not job_id:
+            backup_id = str(row["backup_id"] or "")
+            prefix = clean_id + ":"
+            if backup_id.startswith(prefix):
+                job_id = backup_id[len(prefix):]
+        if job_id and job_id not in result:
+            result.append(job_id)
+    return result
+
 def register_source_family(
     registry_path: Path,
     *,
