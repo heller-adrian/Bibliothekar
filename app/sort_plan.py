@@ -855,6 +855,7 @@ def build_event_sort_plan(
             )
 
         from app.free_stock_layout import (
+            FreeStockLayoutError,
             affected_days_for_event,
             canonical_free_directory,
             free_file_rows,
@@ -907,15 +908,24 @@ def build_event_sort_plan(
                     if record_family_id is not None
                     else None
                 )
-                record["_free_directory"] = str(
-                    released_directory
-                    or canonical_free_directory(
-                        connection,
-                        capture_value,
-                        physical=True,
-                        include_event_ids=(event_id,) if not allow_reapply else (),
+                try:
+                    record["_free_directory"] = str(
+                        released_directory
+                        or canonical_free_directory(
+                            connection,
+                            capture_value,
+                            physical=True,
+                            include_event_ids=(event_id,) if not allow_reapply else (),
+                        )
                     )
-                )
+                except FreeStockLayoutError as error:
+                    # This indicates a broken canonical membership state: a
+                    # physically free family lies inside time now occupied by
+                    # the edited applied event. Do not crash the read-only plan
+                    # (which previously left the UI looking frozen). Surface a
+                    # deterministic blocker instead.
+                    record["_free_directory"] = ""
+                    record["_free_layout_error"] = str(error)
             normalized_file_rows.append(record)
         file_rows = normalized_file_rows
         file_rows_by_id = {
@@ -1426,8 +1436,25 @@ def build_event_sort_plan(
         )
         file_preserve_day_folders = preserve_day_folders
         if is_free_stock:
-            free_directory = PurePosixPath(str(file_record["_free_directory"]))
-            destination_parts = list(free_directory.parts)
+            free_directory_value = str(file_record.get("_free_directory") or "")
+            if not free_directory_value:
+                blockers.append({
+                    "code": "free_stock_inside_occupied_range",
+                    "file_id": file_id,
+                    "family_id": family_id,
+                    "message": (
+                        "Freier Bestand liegt innerhalb des neu belegten "
+                        "Ereigniszeitraums, ist dem Ereignis aber nicht "
+                        "zugeordnet. Bitte die Ereignisänderung erneut speichern: "
+                        + str(file_record.get("_free_layout_error") or "")
+                    ),
+                })
+                # Keep the current physical parent as a diagnostic-only target;
+                # readiness is false, so this path is never executed.
+                destination_parts = list(source_relative.parent.parts)
+            else:
+                free_directory = PurePosixPath(free_directory_value)
+                destination_parts = list(free_directory.parts)
             child_folder = None
             file_preserve_day_folders = False
         elif reassignment:

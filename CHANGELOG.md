@@ -9,6 +9,8 @@
 - Strukturelle Ereignisänderungen reservieren neu hinzukommende Familien atomar in der globalen Registry, bevor SQLite verändert wird. Damit kann eine zwischen UI-Anzeige und Speichern entstandene Reservierung einer anderen Bibliothek nicht zu einer inkonsistenten Applied-Änderung führen.
 - Die Archiv-Lösch-/Änderungswege bleiben getrennt: Erst nach SHA-verifizierter Rückholung in „Freigewordene Archivdateien“ und bestätigtem Abschluss werden dort Besitz-Claims freigegeben.
 - Neue Regressionstests durchlaufen eine Sekundärbibliothek vollständig: Apply → Verkleinern → Central Stock → Erweitern → Bibliotheks-Arbeitsbereich → Löschen → vollständiger freier Tagesbestand sowie Claim-Erhalt bis zum physischen Abschluss.
+- Der Bearbeiten-Kontext ist jetzt bibliotheksweit statt sicherungsbezogen. Eine Erweiterung eines angewendeten Ereignisses kann deshalb freie Familien aus einer anderen SD-Kartensicherung desselben Bibliotheksbestands aufnehmen; dasselbe gilt für neue Tagessegmente von „Ohne Ereignis“.
+- Ein inkonsistenter Altzustand mit freiem Bestand innerhalb eines bereits belegten Ereigniszeitraums lässt den Nachsortierdialog nicht mehr scheinbar hängen: der Read-only-Plan liefert einen eindeutigen Blocker und die Oberfläche zeigt den Fehler sichtbar an.
 
 
 ### 0.32.10 – Kanonischer Tagesbestand über mehrere Sicherungen

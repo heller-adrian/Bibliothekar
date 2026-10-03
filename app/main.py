@@ -5502,7 +5502,23 @@ def api_event_edit_context(job_id: str, event_id: str) -> dict[str, Any]:
         event_id=event_id,
     )
     try:
-        return get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
+        context = get_event_edit_context(
+            current_database_file(),
+            job_id,
+            event_id,
+            workspace_path=current_workspace_root(),
+        )
+        globally_blocked = blocked_family_ids(
+            REGISTRY_DATABASE_FILE,
+            database_path=current_database_file(),
+            library_id=current_library_context().library_id,
+        )
+        for family in context.get("families") or []:
+            family_id = int(family.get("family_id") or 0)
+            if family_id in globally_blocked and not family.get("assigned_here"):
+                family["assigned_elsewhere"] = True
+                family["blocked_by_other_library"] = True
+        return context
     except ValueError as error:
         raise HTTPException(status_code=404 if "nicht gefunden" in str(error) else 409, detail=str(error)) from error
 

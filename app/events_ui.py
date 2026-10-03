@@ -3425,12 +3425,19 @@ EVENTS_HTML = r"""<!doctype html>
       sortPlanSubtitle.textContent = "Alte und neue Pfade werden rein lesend geprüft …";
       sortPlanBody.textContent = "Dateien, Ziele und Konflikte werden geprüft …";
       if (!sortPlanDialog.open) sortPlanDialog.showModal();
-      const plan = await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reconcile-plan`);
-      plan._job_id = jobId;
-      plan._reapply = true;
-      plan._reconcile = true;
-      plan._mandatory = Boolean(mandatoryMutationContext);
-      renderSortPlan(plan);
+      try {
+        const plan = await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reconcile-plan`);
+        plan._job_id = jobId;
+        plan._reapply = true;
+        plan._reconcile = true;
+        plan._mandatory = Boolean(mandatoryMutationContext);
+        renderSortPlan(plan);
+      } catch (error) {
+        sortPlanSubtitle.textContent = "Änderungsplan konnte nicht berechnet werden.";
+        sortPlanBody.innerHTML = `<div class="card"><strong class="danger-text">Nachsortierung blockiert</strong><p class="muted" style="margin-top:7px">${escapeHtml(error.message)}</p></div>`;
+        setStatus(error.message, true);
+        throw error;
+      }
     }
 
     async function loadSortPlan(eventId, jobId) {

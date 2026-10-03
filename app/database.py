@@ -3453,7 +3453,12 @@ def get_event_edit_context(
     event_id: str,
     workspace_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Return one parent event plus all same-job families for safe editing."""
+    """Return one parent event plus all library families for safe editing.
+
+    Import jobs are provenance only. Structural edits of applied events and
+    „Ohne Ereignis“ must therefore be able to absorb free families from every
+    backup projected into this library, not only from the anchor job.
+    """
     with database_connection(database_path) as connection:
         event = connection.execute(
             "SELECT * FROM events WHERE id = ? AND job_id = ?",
@@ -3499,8 +3504,9 @@ def get_event_edit_context(
 
         family_rows = connection.execute(
             """
-            SELECT ff.id AS family_id, ff.family_key, ff.original_stem, ff.selected_capture_time,
-                   ff.capture_time_confidence, COUNT(DISTINCT f.id) AS file_count,
+            SELECT ff.id AS family_id, ff.job_id, ff.family_key, ff.original_stem,
+                   ff.selected_capture_time, ff.capture_time_confidence,
+                   COUNT(DISTINCT f.id) AS file_count,
                    COALESCE(SUM(f.size_bytes), 0) AS total_size_bytes,
                    COALESCE(SUM(CASE WHEN f.review_status = 'required' THEN 1 ELSE 0 END), 0) AS review_required_count,
                    GROUP_CONCAT(DISTINCT COALESCE(linked_target.name, root.name, assigned.name)) AS assigned_event_names,
@@ -3526,26 +3532,10 @@ def get_event_edit_context(
             LEFT JOIN events assigned ON assigned.id = ea.event_id AND assigned.status IN ('draft','planned','applied','archived')
             LEFT JOIN events root ON root.id = assigned.parent_event_id
             LEFT JOIN events linked_target ON linked_target.id = COALESCE(root.linked_event_id, assigned.linked_event_id)
-            WHERE ff.job_id = ?
-               OR EXISTS (
-                    SELECT 1
-                    FROM event_assignments linked_ea
-                    JOIN events linked_assigned ON linked_assigned.id=linked_ea.event_id
-                    LEFT JOIN events linked_root ON linked_root.id=linked_assigned.parent_event_id
-                    WHERE linked_ea.family_id=ff.id
-                      AND (
-                           COALESCE(linked_root.id, linked_assigned.id)=?
-                           OR (
-                                COALESCE(linked_root.linked_event_id, linked_assigned.linked_event_id)=?
-                                AND COALESCE(linked_root.linkage_kind, linked_assigned.linkage_kind)='archived_manual'
-                                AND COALESCE(linked_root.status, linked_assigned.status)='archived'
-                              )
-                          )
-               )
             GROUP BY ff.id
             ORDER BY ff.selected_capture_time, ff.id
             """,
-            (event_id, event_id, event_id, event_id, job_id, event_id, event_id),
+            (event_id, event_id, event_id, event_id),
         ).fetchall()
 
         from app.event_access import event_source_jobs
