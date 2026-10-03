@@ -152,6 +152,25 @@ def ensure_workspace_layout(
                 + str(directory)
             )
 
+    # Metadatenwerkzeuge besitzen feste, globale Arbeitsordner innerhalb des
+    # konfigurierbaren Metadaten-Stamms. Sie werden beim Startup angelegt, damit
+    # sie auch im Finder bereits vor dem ersten Aufruf der Seite verfügbar sind.
+    for metadata_child in ("Allgemein", "Mehrfachkorrektur"):
+        target = metadata / metadata_child
+        if target.exists() and not target.is_dir():
+            raise WorkspaceLayoutError(
+                "Ein benötigter Metadatenpfad ist kein Ordner: " + str(target)
+            )
+        if not target.exists():
+            target.mkdir(mode=0o775, parents=True)
+            _fsync_directory(target.parent)
+            created.append(str(target))
+        if not os.access(target, os.R_OK | os.W_OK | os.X_OK):
+            raise WorkspaceLayoutError(
+                "Ein Metadatenordner ist nicht vollständig zugreifbar: "
+                + str(target)
+            )
+
     if main_work is not None:
         if main_work.exists() and not main_work.is_dir():
             raise WorkspaceLayoutError(
