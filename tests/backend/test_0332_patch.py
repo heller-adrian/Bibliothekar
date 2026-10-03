@@ -194,7 +194,7 @@ def test_0332_metadata_api_expected_error_is_not_internal_server_error(monkeypat
     )
     monkeypatch.setattr(main, "current_library_context", lambda: context)
 
-    def fail(**kwargs):
+    def fail(*args, **kwargs):
         raise MetadataCorrectionError("gezielter Testfehler")
 
     monkeypatch.setattr(main, "create_metadata_correction", fail)
