@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from app.workspace_ui import WORKSPACE_HTML
 from app.events_ui import EVENTS_HTML
 from app.transfer_ui import TRANSFER_HTML
+from app.metadata_correction_ui import METADATA_CORRECTION_HTML
 from app.ui_shell import apply_shell
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
@@ -86,6 +87,20 @@ from app.database import (
     store_imported_source_files,
 )
 from app.metadata import analyze_tree
+from app.metadata_correction import (
+    MetadataCorrectionError,
+    apply_metadata_correction,
+    cancel_metadata_correction,
+    create_metadata_correction,
+    list_metadata_corrections,
+    metadata_area_paths,
+    scan_metadata_area,
+)
+from app.event_naming import (
+    EventNamingError,
+    naming_from_library_settings,
+    normalize_event_naming,
+)
 from app.pipeline import (
     recover_cross_device_protocol_failures,
     run_simulated_job,
@@ -157,6 +172,8 @@ from app.storage_config import (
     normalize_storage_settings,
     save_storage_settings,
     storage_paths,
+    load_metadata_correction_settings,
+    save_metadata_correction_settings,
 )
 
 from app.library_registry import (
@@ -172,6 +189,7 @@ from app.library_registry import (
     update_library_display_name,
     update_library_database_path,
     update_library_paths,
+    update_library_settings,
     set_library_active,
     remove_library_registration,
     unregister_library,
@@ -232,7 +250,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.32.11"
+DEPLOYMENT_VERSION = "0.33.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -2750,7 +2768,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
             is_main=first_library,
             is_active=True,
             settings={
-                "created_by": "bibliothekar-0.32.11",
+                "created_by": "bibliothekar-0.33.0",
                 "projected_imports": projection,
                 "managed_default_work_root": bool(
                     checked.get("managed_default_work_root")
