@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 0.33.1 – Einstellungs-UX und Metadaten-Reintegration
+
+- Die Ereignisordner-Einstellungen sind in einklappbare Bereiche für Ordnerstruktur, normale Ereignisse und Sammelordner getrennt. Normale Ereignisse können Jahr, Uhrzeit und Von–bis im Namen unabhängig aktivieren; Sammelordner erhalten eine eigene Bezeichnung sowie optional das Jahr.
+- Eine gemeinsame Live-Vorschau zeigt normales Ereignis und Sammelordner mit der aktuell gewählten Unterordnerstruktur. Die Benennungs-Checkboxen verwenden wieder kompakte Steuerelemente.
+- Bibliothekskarten in den Einstellungen sind standardmäßig eingeklappt und behalten ihren geöffneten Zustand bei Speichern/Prüfen.
+- Die Metadatenkorrektur verwendet wieder die vollständige Bibliothekar-Shell. Bibliothek, Allgemein und die für 0.34.0 vorgemerkte Mehrfachkorrektur liegen im normalen zweiten Reiterheader.
+- Der 0.33.0-Entwurf mit `Metadatenkorrektur/Bibliothek/<id>/Eingang/Ausgang` und separatem Allgemein-Host-Path ist verworfen. `Allgemein` liegt verwaltet unter `/workspace/Metadatenkorrektur/Allgemein`; technische IDs wie `main` erzeugen keine Dateisystemordner.
+- Der Bereich Bibliothek liest freie Kamera-Familien direkt aus dem globalen `Ohne_Datum`-Bestand und gruppiert sie nach ihrer Herkunftsbibliothek. Korrekturen werden familienweise auf Arbeitskopien geschrieben, erneut gelesen und geprüft und anschließend in den kanonischen Tages-/Zeitbestand zurückgeführt.
+- Metadatenkorrekturen aktualisieren aktuelle Dateigröße, SHA-256, Aufnahmezeit und Pfad in sämtlichen Bibliotheksprojektionen, während der ursprüngliche Quellfingerprint über die neue persistente `source_size_bytes`-Spalte stabil bleibt.
+- Leere 0.33.0-Metadaten-Unterordner dürfen automatisch bereinigt werden; Ordner mit Nutzerdateien werden niemals automatisch gelöscht.
+- Migration 045 konserviert die ursprüngliche Quellgröße für spätere Metadatenänderungen. 0.34.0 bleibt für die Mehrfachkorrektur mit Referenzaufnahme und konstantem Zeitversatz reserviert.
+
 ### 0.33.0 – Ereignisbenennung und sichere Metadatenkorrektur
 
 - „Ohne Ereignis“ erhält pro Bibliothek eine frei wählbare sichtbare Bezeichnung. Die Bezeichnung wird beim Erstellen in Button, Monats-Sammlung und Ordnername verwendet; bereits bestehende Ereignisse übernehmen keine neue Vorlage rückwirkend. Vor 0.33 angelegte Ereignisse behalten bei späteren bewussten Bearbeitungen ihre bisherige Benennungslogik.
