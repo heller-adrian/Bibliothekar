@@ -1,4 +1,4 @@
-<!doctype html>
+METADATA_CORRECTION_HTML = r"""<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
@@ -217,4 +217,4 @@ main{width:min(1180px,100%);margin:0 auto;padding:26px 30px 70px}
 })();
 </script>
 </body>
-</html>
+</html>"""
