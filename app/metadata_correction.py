@@ -18,10 +18,9 @@ from app.metadata import (
     classify_media,
     parse_exiftool_datetime,
 )
-from app.storage_config import (
-    load_metadata_correction_settings,
-    storage_paths,
-)
+from app.storage_config import storage_paths
+from app.folder_import import build_folder_import_plan
+from app.free_stock_layout import canonical_free_directory
 
 
 class MetadataCorrectionError(RuntimeError):
@@ -90,6 +89,31 @@ def _safe_relative(value: str) -> Path:
     return relative
 
 
+def _cleanup_empty_legacy_metadata_tree(metadata_root: Path) -> None:
+    """Remove only empty 0.33.0 compatibility folders.
+
+    Never delete a file supplied by the user. The obsolete Bibliothek/<id>/
+    Eingang/Ausgang tree disappears automatically only when every directory is
+    empty.
+    """
+    legacy = metadata_root / "Bibliothek"
+    if not legacy.exists() or not legacy.is_dir() or legacy.is_symlink():
+        return
+    for path in sorted(
+        (item for item in legacy.rglob("*") if item.is_dir() and not item.is_symlink()),
+        key=lambda item: len(item.parts),
+        reverse=True,
+    ):
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+    try:
+        legacy.rmdir()
+    except OSError:
+        pass
+
+
 def metadata_area_paths(
     *,
     area: str,
@@ -101,48 +125,34 @@ def metadata_area_paths(
     if kind not in {"library", "general"}:
         raise MetadataCorrectionError("Unbekannter Metadatenbereich.")
 
+    paths = storage_paths(workspace_root)
+    metadata_root = paths["metadata_root"].resolve(strict=False)
+    if create:
+        metadata_root.mkdir(parents=True, exist_ok=True)
+    _cleanup_empty_legacy_metadata_tree(metadata_root)
+
     if kind == "library":
-        root = (
-            storage_paths(workspace_root)["metadata_root"]
-            / "Bibliothek"
-            / _safe_library_id(library_id)
-        ).resolve(strict=False)
-    else:
-        configured = load_metadata_correction_settings()
-        raw = str(configured.get("general_root") or "").strip()
-        if not raw:
-            raise MetadataCorrectionError(
-                "Für „Allgemein“ ist noch kein eigener TrueNAS-Host-Path konfiguriert."
-            )
-        root = Path(raw).expanduser().resolve(strict=False)
-        if not root.exists() or not root.is_dir():
-            raise MetadataCorrectionError(
-                "Der konfigurierte Host-Path für „Allgemein“ ist nicht verfügbar: "
-                + str(root)
-            )
-        if not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-            raise MetadataCorrectionError(
-                "Der Host-Path für „Allgemein“ ist nicht vollständig beschreibbar: "
-                + str(root)
-            )
+        # Undated camera material is global free stock. The technical library
+        # id must never become a filesystem directory.
+        central_root = paths["backup_root"].resolve(strict=False)
+        undated = (central_root / "Ohne_Datum").resolve(strict=False)
+        return {
+            "root": central_root,
+            "input_root": undated,
+            "output_root": central_root,
+        }
 
-    incoming = (root / "Eingang").resolve(strict=False)
-    outgoing = (root / "Ausgang").resolve(strict=False)
-
-    for candidate in (incoming, outgoing):
-        if not _is_relative_to(candidate, root):
-            raise MetadataCorrectionError("Metadatenpfad verlässt den konfigurierten Stamm.")
-        if create:
-            candidate.mkdir(parents=True, exist_ok=True)
-        if candidate.exists() and not candidate.is_dir():
-            raise MetadataCorrectionError(
-                "Metadatenpfad ist kein Ordner: " + str(candidate)
-            )
-
+    general = (metadata_root / "Allgemein").resolve(strict=False)
+    if not _is_relative_to(general, metadata_root):
+        raise MetadataCorrectionError("Metadatenpfad verlässt den konfigurierten Stamm.")
+    if create:
+        general.mkdir(parents=True, exist_ok=True)
+    if general.exists() and not general.is_dir():
+        raise MetadataCorrectionError("Metadatenpfad ist kein Ordner: " + str(general))
     return {
-        "root": root,
-        "input_root": incoming,
-        "output_root": outgoing,
+        "root": general,
+        "input_root": general,
+        "output_root": general,
     }
 
 
@@ -231,23 +241,213 @@ def _metadata_suggestion(record: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _analysis_by_relative(root: Path) -> dict[str, dict[str, Any]]:
+    if not root.exists() or not root.is_dir():
+        return {}
+    try:
+        analysis = analyze_tree(root, include_other=False)
+    except MetadataError:
+        return {}
+    return {
+        str(row.get("relative_path") or ""): dict(row)
+        for row in (analysis.get("files") or [])
+        if str(row.get("relative_path") or "")
+    }
+
+
+def _scan_library_undated(
+    *,
+    database_path: Path,
+    workspace_root: Path,
+    library_id: str,
+    library_name: str | None,
+    allowed_job_ids: set[str] | None,
+) -> dict[str, Any]:
+    paths = metadata_area_paths(
+        area="library",
+        workspace_root=workspace_root,
+        library_id=library_id,
+        create=True,
+    )
+    input_root = paths["input_root"]
+    central_root = paths["output_root"]
+    jobs = sorted({str(value) for value in (allowed_job_ids or set()) if str(value)})
+    if allowed_job_ids is not None and not jobs:
+        rows = []
+    else:
+        job_sql = ""
+        params: list[Any] = []
+        if jobs:
+            placeholders = ",".join("?" for _ in jobs)
+            job_sql = f" AND ff.job_id IN ({placeholders})"
+            params.extend(jobs)
+        with database_connection(database_path) as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    f"""
+                    SELECT
+                        ff.id AS family_id,
+                        ff.job_id,
+                        ff.family_key,
+                        ff.original_stem,
+                        ff.selected_capture_time AS family_capture_time,
+                        ff.capture_time_confidence AS family_confidence,
+                        f.id AS file_id,
+                        f.original_relative_path,
+                        f.current_relative_path,
+                        f.original_filename,
+                        f.extension,
+                        f.media_type,
+                        f.size_bytes,
+                        COALESCE(f.source_size_bytes, f.size_bytes) AS source_size_bytes,
+                        f.sha256_original,
+                        COALESCE(f.sha256_current, f.sha256_original) AS sha256_current,
+                        f.selected_capture_time,
+                        f.selected_capture_source,
+                        f.capture_time_confidence,
+                        f.review_status
+                    FROM file_families ff
+                    JOIN files f
+                      ON f.family_id=ff.id AND f.job_id=ff.job_id
+                    WHERE ff.selected_capture_time IS NULL
+                      AND f.selected_capture_time IS NULL
+                      AND f.current_root_kind='shared_workspace'
+                      AND (
+                        f.current_relative_path='Ohne_Datum'
+                        OR f.current_relative_path LIKE 'Ohne_Datum/%'
+                      )
+                      {job_sql}
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM event_assignments ea
+                        JOIN events e ON e.id=ea.event_id
+                        WHERE ea.family_id=ff.id
+                          AND e.status IN ('draft','planned','applied','archived')
+                      )
+                    ORDER BY ff.job_id, ff.id, f.id
+                    """,
+                    tuple(params),
+                ).fetchall()
+            ]
+
+    analyzed = _analysis_by_relative(input_root)
+    by_family: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        current = Path(str(row.get("current_relative_path") or ""))
+        if not current.parts or current.parts[0] != "Ohne_Datum":
+            continue
+        relative_inside = Path(*current.parts[1:]).as_posix()
+        source = (central_root / current).resolve(strict=False)
+        if not _is_relative_to(source, central_root) or not source.is_file() or source.is_symlink():
+            continue
+        item = dict(row)
+        item["physical_path"] = str(source)
+        item["relative_inside_undated"] = relative_inside
+        item["analysis"] = analyzed.get(relative_inside) or {}
+        by_family.setdefault(int(row["family_id"]), []).append(item)
+
+    records: list[dict[str, Any]] = []
+    for family_id, members in by_family.items():
+        members = sorted(members, key=lambda row: (str(row["media_type"]), int(row["file_id"])))
+        anchor = next(
+            (
+                row for row in members
+                if str(row.get("media_type") or "") in {"raw", "jpeg", "image", "video"}
+            ),
+            members[0],
+        )
+        observed = dict(anchor.get("analysis") or {})
+        filename = str(anchor.get("original_filename") or Path(str(anchor["physical_path"])).name)
+        filename_hint = detect_filename_datetime(filename)
+        metadata_hint = _metadata_suggestion(observed)
+        preferred = metadata_hint or filename_hint
+        records.append({
+            **observed,
+            "family_id": family_id,
+            "job_id": str(anchor["job_id"]),
+            "family_key": str(anchor["family_key"]),
+            "filename": filename,
+            "relative_path": str(anchor["current_relative_path"]),
+            "media_type": str(anchor["media_type"]),
+            "selected_capture_time": observed.get("selected_capture_time"),
+            "selected_capture_source": observed.get("selected_capture_source"),
+            "capture_time_confidence": str(observed.get("capture_time_confidence") or "missing"),
+            "review_required": True,
+            "filename_suggestion": filename_hint,
+            "preferred_suggestion": preferred,
+            "needs_attention": True,
+            "member_count": len(members),
+            "members": [
+                {
+                    key: row.get(key)
+                    for key in (
+                        "file_id",
+                        "original_relative_path",
+                        "current_relative_path",
+                        "original_filename",
+                        "media_type",
+                        "size_bytes",
+                        "source_size_bytes",
+                        "sha256_original",
+                        "sha256_current",
+                    )
+                }
+                for row in members
+            ],
+            "library_id": library_id,
+            "library_name": library_name or library_id,
+        })
+
+    return {
+        "area": "library",
+        "library_id": library_id,
+        "library_name": library_name or library_id,
+        "paths": {key: str(value) for key, value in paths.items()},
+        "summary": {
+            "file_count": sum(int(row.get("member_count") or 1) for row in records),
+            "family_count": len(records),
+            "needs_attention": len(records),
+            "filename_suggestions": sum(row.get("filename_suggestion") is not None for row in records),
+        },
+        "files": records,
+    }
+
+
 def scan_metadata_area(
     *,
     area: str,
     workspace_root: Path,
     library_id: str,
+    database_path: Path | None = None,
+    library_name: str | None = None,
+    allowed_job_ids: set[str] | None = None,
 ) -> dict[str, Any]:
+    kind = str(area or "").strip().lower()
+    if kind == "library":
+        if database_path is None:
+            raise MetadataCorrectionError(
+                "Für den Bibliotheksbestand fehlt die zugehörige Datenbank."
+            )
+        return _scan_library_undated(
+            database_path=database_path,
+            workspace_root=workspace_root,
+            library_id=library_id,
+            library_name=library_name,
+            allowed_job_ids=allowed_job_ids,
+        )
+
     paths = metadata_area_paths(
-        area=area,
+        area="general",
         workspace_root=workspace_root,
         library_id=library_id,
         create=True,
     )
     input_root = paths["input_root"]
 
-    if not any(path.is_file() for path in input_root.rglob("*")):
+    if not any(path.is_file() and not path.name.startswith(".") for path in input_root.rglob("*")):
         return {
-            "area": area,
+            "area": "general",
             "paths": {key: str(value) for key, value in paths.items()},
             "summary": {
                 "file_count": 0,
@@ -266,10 +466,6 @@ def scan_metadata_area(
         filename = str(record.get("filename") or "")
         filename_hint = detect_filename_datetime(filename)
         metadata_hint = _metadata_suggestion(record)
-
-        # Filename evidence is especially useful when metadata is missing,
-        # low-confidence or conflicting. Strong embedded metadata remains
-        # visible but is not silently replaced.
         preferred = metadata_hint
         if (
             filename_hint is not None
@@ -287,7 +483,7 @@ def scan_metadata_area(
         })
 
     return {
-        "area": area,
+        "area": "general",
         "paths": {key: str(value) for key, value in paths.items()},
         "summary": {
             "file_count": len(records),
@@ -321,23 +517,50 @@ def _find_scan_record(
     relative_path: str,
     workspace_root: Path,
     library_id: str,
+    database_path: Path,
+    family_id: int | None = None,
+    library_name: str | None = None,
+    allowed_job_ids: set[str] | None = None,
 ) -> tuple[dict[str, Any], Path, dict[str, Path]]:
-    relative = _safe_relative(relative_path)
     paths = metadata_area_paths(
         area=area,
         workspace_root=workspace_root,
         library_id=library_id,
         create=True,
     )
-    source = (paths["input_root"] / relative).resolve(strict=False)
-    if not _is_relative_to(source, paths["input_root"]) or not source.is_file():
-        raise MetadataCorrectionError("Die ausgewählte Eingangsdatei wurde nicht gefunden.")
-
     scan = scan_metadata_area(
         area=area,
         workspace_root=workspace_root,
         library_id=library_id,
+        database_path=database_path,
+        library_name=library_name,
+        allowed_job_ids=allowed_job_ids,
     )
+
+    if str(area) == "library":
+        wanted = int(family_id or 0)
+        row = next(
+            (
+                item for item in (scan.get("files") or [])
+                if int(item.get("family_id") or 0) == wanted
+            ),
+            None,
+        )
+        if row is None:
+            raise MetadataCorrectionError(
+                "Die ausgewählte Ohne-Datum-Familie wurde nicht gefunden."
+            )
+        source = (
+            paths["output_root"] / _safe_relative(str(row["relative_path"]))
+        ).resolve(strict=False)
+        if not _is_relative_to(source, paths["output_root"]) or not source.is_file():
+            raise MetadataCorrectionError("Die ausgewählte Kameradatei wurde nicht gefunden.")
+        return row, source, paths
+
+    relative = _safe_relative(relative_path)
+    source = (paths["input_root"] / relative).resolve(strict=False)
+    if not _is_relative_to(source, paths["input_root"]) or not source.is_file():
+        raise MetadataCorrectionError("Die ausgewählte Datei wurde nicht gefunden.")
     row = next(
         (
             item
@@ -361,12 +584,19 @@ def create_metadata_correction(
     proposed_datetime: Any,
     workspace_root: Path,
     library_id: str,
+    family_id: int | None = None,
+    library_name: str | None = None,
+    allowed_job_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     row, source, _ = _find_scan_record(
         area=area,
         relative_path=relative_path,
         workspace_root=workspace_root,
         library_id=library_id,
+        database_path=database_path,
+        family_id=family_id,
+        library_name=library_name,
+        allowed_job_ids=allowed_job_ids,
     )
     proposed = _normalize_manual_datetime(proposed_datetime)
     stat = source.stat()
@@ -387,7 +617,17 @@ def create_metadata_correction(
         "capture_time_confidence": row.get("capture_time_confidence"),
         "metadata_candidates": row.get("metadata_candidates") or [],
         "filename_suggestion": filename_hint,
+        "library_id": library_id,
+        "library_name": library_name or library_id,
     }
+    if str(area) == "library":
+        detected.update({
+            "family_id": int(row["family_id"]),
+            "job_id": str(row["job_id"]),
+            "family_key": str(row["family_key"]),
+            "members": list(row.get("members") or []),
+        })
+
     with database_connection(database_path) as connection:
         connection.execute(
             """
@@ -569,6 +809,389 @@ def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
     }
 
 
+def _mark_task_writing(database_path: Path, correction_id: str) -> None:
+    with database_connection(database_path) as connection:
+        connection.execute(
+            "UPDATE metadata_corrections SET status='writing',updated_at=?,error_message=NULL WHERE id=?",
+            (_now(), correction_id),
+        )
+
+
+def _mark_task_blocked(
+    database_path: Path,
+    correction_id: str,
+    error: Exception,
+) -> None:
+    with database_connection(database_path) as connection:
+        connection.execute(
+            """UPDATE metadata_corrections
+               SET status='blocked',error_message=?,updated_at=?
+               WHERE id=?""",
+            (str(error), _now(), correction_id),
+        )
+
+
+def _complete_task(
+    database_path: Path,
+    correction_id: str,
+    *,
+    output_path: Path,
+    output_size: int,
+    output_sha: str,
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    now = _now()
+    with database_connection(database_path) as connection:
+        connection.execute(
+            """UPDATE metadata_corrections
+               SET status='completed',output_path=?,output_size_bytes=?,
+                   output_sha256=?,verification_json=?,error_message=NULL,
+                   updated_at=?,completed_at=?
+               WHERE id=?""",
+            (
+                str(output_path),
+                int(output_size),
+                str(output_sha),
+                json.dumps(verification, ensure_ascii=False, sort_keys=True),
+                now,
+                now,
+                correction_id,
+            ),
+        )
+    return get_metadata_correction(database_path, correction_id)
+
+
+def _apply_general_metadata_correction(
+    database_path: Path,
+    task: dict[str, Any],
+    *,
+    workspace_root: Path,
+    library_id: str,
+) -> dict[str, Any]:
+    paths = metadata_area_paths(
+        area="general",
+        workspace_root=workspace_root,
+        library_id=library_id,
+        create=True,
+    )
+    source = Path(str(task["source_path"])).resolve(strict=False)
+    root = paths["root"]
+    if not _is_relative_to(source, root) or not source.is_file():
+        raise MetadataCorrectionError("Die eingefrorene Datei fehlt.")
+    if source.is_symlink():
+        raise MetadataCorrectionError("Symbolische Links werden nicht verändert.")
+
+    stat = source.stat()
+    if int(stat.st_size) != int(task["source_size_bytes"]):
+        raise MetadataCorrectionError("Die Datei hat sich seit der Vorbereitung verändert.")
+    if _sha256(source) != str(task["source_sha256"]):
+        raise MetadataCorrectionError("Die SHA-256-Summe der Datei hat sich verändert.")
+
+    temp = source.parent / (
+        "." + source.stem + ".bibliothekar-" + uuid.uuid4().hex + source.suffix
+    )
+    _mark_task_writing(database_path, str(task["id"]))
+    try:
+        shutil.copy2(source, temp)
+        if _sha256(temp) != str(task["source_sha256"]):
+            raise MetadataCorrectionError(
+                "Die Arbeitskopie stimmt vor dem Schreiben nicht mit der Quelle überein."
+            )
+        write_metadata_datetime(
+            temp,
+            str(task["media_type"]),
+            str(task["proposed_datetime"]),
+        )
+        verification = verify_metadata_datetime(
+            temp,
+            str(task["proposed_datetime"]),
+        )
+        output_size = int(temp.stat().st_size)
+        output_sha = _sha256(temp)
+        os.replace(temp, source)
+        _fsync_directory(source.parent)
+        if int(source.stat().st_size) != output_size or _sha256(source) != output_sha:
+            raise MetadataCorrectionError(
+                "Die Datei hat sich nach dem atomaren Abschluss verändert."
+            )
+        return _complete_task(
+            database_path,
+            str(task["id"]),
+            output_path=source,
+            output_size=output_size,
+            output_sha=output_sha,
+            verification=verification,
+        )
+    except Exception as error:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        _mark_task_blocked(database_path, str(task["id"]), error)
+        if isinstance(error, MetadataCorrectionError):
+            raise
+        raise MetadataCorrectionError(str(error)) from error
+
+
+def _apply_library_metadata_correction(
+    database_path: Path,
+    task: dict[str, Any],
+    *,
+    workspace_root: Path,
+    library_id: str,
+) -> dict[str, Any]:
+    detected = dict(task.get("detected") or {})
+    family_id = int(detected.get("family_id") or 0)
+    job_id = str(detected.get("job_id") or "")
+    family_key = str(detected.get("family_key") or "")
+    frozen_members = list(detected.get("members") or [])
+    if not family_id or not job_id or not family_key or not frozen_members:
+        raise MetadataCorrectionError(
+            "Der Metadatenauftrag enthält keine vollständige Dateifamilie."
+        )
+
+    paths = metadata_area_paths(
+        area="library",
+        workspace_root=workspace_root,
+        library_id=library_id,
+        create=True,
+    )
+    central_root = paths["output_root"]
+    metadata_root = storage_paths(workspace_root)["metadata_root"].resolve(strict=False)
+    work = (metadata_root / ".work" / str(task["id"])).resolve(strict=False)
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True, exist_ok=False)
+
+    prepared: list[dict[str, Any]] = []
+    _mark_task_writing(database_path, str(task["id"]))
+    placed: list[Path] = []
+    retired: list[tuple[Path, Path]] = []
+
+    try:
+        for member in frozen_members:
+            current_relative = _safe_relative(str(member.get("current_relative_path") or ""))
+            source = (central_root / current_relative).resolve(strict=False)
+            if not _is_relative_to(source, central_root) or not source.is_file() or source.is_symlink():
+                raise MetadataCorrectionError(
+                    "Eine eingefrorene Ohne-Datum-Datei fehlt: " + str(current_relative)
+                )
+            expected_sha = str(member.get("sha256_current") or member.get("sha256_original") or "")
+            if not expected_sha or _sha256(source) != expected_sha:
+                raise MetadataCorrectionError(
+                    "Eine Ohne-Datum-Datei hat sich seit der Vorbereitung verändert: "
+                    + str(current_relative)
+                )
+
+            original_relative = _safe_relative(str(member.get("original_relative_path") or ""))
+            temp = (work / original_relative).resolve(strict=False)
+            if not _is_relative_to(temp, work):
+                raise MetadataCorrectionError("Unsicherer Arbeitskopiepfad.")
+            temp.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, temp)
+            if _sha256(temp) != expected_sha:
+                raise MetadataCorrectionError(
+                    "Arbeitskopie stimmt nicht mit der eingefrorenen Datei überein."
+                )
+            media_type = str(member.get("media_type") or classify_media(temp))
+            write_metadata_datetime(temp, media_type, str(task["proposed_datetime"]))
+            verification = verify_metadata_datetime(
+                temp,
+                str(task["proposed_datetime"]),
+            )
+            prepared.append({
+                **member,
+                "source": source,
+                "temp": temp,
+                "media_type": media_type,
+                "verification": verification,
+                "output_sha": _sha256(temp),
+                "output_size": int(temp.stat().st_size),
+            })
+
+        analysis = analyze_tree(work, include_other=False)
+        entries = [
+            {
+                "relative_path": Path(str(item["original_relative_path"])).as_posix(),
+                "size_bytes": int(item["output_size"]),
+                "sha256": str(item["output_sha"]),
+            }
+            for item in prepared
+        ]
+
+        def destination_directory(capture_value: str) -> Path:
+            with database_connection(database_path) as connection:
+                return Path(str(canonical_free_directory(
+                    connection,
+                    capture_value,
+                    physical=True,
+                )))
+
+        plan, excluded, _summary = build_folder_import_plan(
+            entries,
+            analysis,
+            central_root,
+            destination_directory_callback=destination_directory,
+        )
+        if excluded or len(plan) != len(prepared):
+            raise MetadataCorrectionError(
+                "Die korrigierte Dateifamilie konnte nicht vollständig neu eingeordnet werden."
+            )
+
+        plan_by_source = {
+            str(row["source_relative_path"]): dict(row)
+            for row in plan
+        }
+        prepared_by_source = {
+            Path(str(row["original_relative_path"])).as_posix(): row
+            for row in prepared
+        }
+        if set(plan_by_source) != set(prepared_by_source):
+            raise MetadataCorrectionError(
+                "Korrekturplan und eingefrorene Familie stimmen nicht überein."
+            )
+
+        for source_relative, plan_row in plan_by_source.items():
+            item = prepared_by_source[source_relative]
+            destination_relative = _safe_relative(
+                str(plan_row["destination_relative_path"])
+            )
+            destination = (central_root / destination_relative).resolve(strict=False)
+            if not _is_relative_to(destination, central_root):
+                raise MetadataCorrectionError("Korrekturziel verlässt den Zentralbestand.")
+            if destination.exists() or destination.is_symlink():
+                raise MetadataCorrectionError(
+                    "Korrekturziel ist bereits belegt: " + destination_relative.as_posix()
+                )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            incoming = destination.parent / (
+                "." + destination.stem + ".metadata-" + uuid.uuid4().hex + destination.suffix
+            )
+            shutil.copy2(Path(item["temp"]), incoming)
+            if _sha256(incoming) != str(item["output_sha"]):
+                incoming.unlink(missing_ok=True)
+                raise MetadataCorrectionError("Korrigierte Zieldatei stimmt nicht mit der Arbeitskopie überein.")
+            os.replace(incoming, destination)
+            _fsync_directory(destination.parent)
+            placed.append(destination)
+            item["destination"] = destination
+            item["destination_relative"] = destination_relative.as_posix()
+
+        # Remove old visible paths reversibly before SQLite switches to the new
+        # canonical day stock. Each rename stays on the same directory/filesystem.
+        for item in prepared:
+            source = Path(item["source"])
+            hidden = source.parent / (
+                "." + source.name + ".metadata-retired-" + uuid.uuid4().hex
+            )
+            os.replace(source, hidden)
+            _fsync_directory(source.parent)
+            retired.append((source, hidden))
+            item["retired"] = hidden
+
+        proposed = str(task["proposed_datetime"])[:19]
+        now = _now()
+        with database_connection(database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            family = connection.execute(
+                "SELECT id,job_id,family_key FROM file_families WHERE id=?",
+                (family_id,),
+            ).fetchone()
+            if (
+                family is None
+                or str(family["job_id"]) != job_id
+                or str(family["family_key"]) != family_key
+            ):
+                raise MetadataCorrectionError("Dateifamilie wurde während der Korrektur verändert.")
+
+            connection.execute(
+                """UPDATE file_families
+                   SET selected_capture_time=?,capture_time_confidence='high',status='complete'
+                   WHERE id=?""",
+                (proposed, family_id),
+            )
+            for item in prepared:
+                file_id = int(item["file_id"])
+                connection.execute(
+                    """UPDATE files
+                       SET current_relative_path=?,
+                           size_bytes=?,
+                           sha256_current=?,
+                           selected_capture_time=?,
+                           selected_capture_source='metadata_correction',
+                           capture_time_confidence='high',
+                           review_status='corrected',
+                           metadata_write_status='written',
+                           updated_at=?
+                       WHERE id=? AND family_id=? AND job_id=?""",
+                    (
+                        str(item["destination_relative"]),
+                        int(item["output_size"]),
+                        str(item["output_sha"]),
+                        proposed,
+                        now,
+                        file_id,
+                        family_id,
+                        job_id,
+                    ),
+                )
+            connection.commit()
+
+        for _source, hidden in retired:
+            hidden.unlink(missing_ok=True)
+            _fsync_directory(hidden.parent)
+        shutil.rmtree(work, ignore_errors=True)
+
+        first = prepared[0]
+        verification = {
+            "family_id": family_id,
+            "job_id": job_id,
+            "family_key": family_key,
+            "proposed_datetime": proposed,
+            "members": [
+                {
+                    "file_id": int(item["file_id"]),
+                    "output_path": str(item["destination"]),
+                    "output_relative_path": str(item["destination_relative"]),
+                    "output_sha256": str(item["output_sha"]),
+                    "output_size_bytes": int(item["output_size"]),
+                    "metadata": item["verification"],
+                }
+                for item in prepared
+            ],
+        }
+        return _complete_task(
+            database_path,
+            str(task["id"]),
+            output_path=Path(first["destination"]),
+            output_size=sum(int(item["output_size"]) for item in prepared),
+            output_sha=str(first["output_sha"]),
+            verification=verification,
+        )
+
+    except Exception as error:
+        # If SQLite did not commit, restore every old path that was hidden.
+        for source, hidden in reversed(retired):
+            try:
+                if hidden.exists() and not source.exists():
+                    os.replace(hidden, source)
+            except OSError:
+                pass
+        # New destinations are safe to remove only while the old sources were
+        # restored. If restoration failed, keep them for manual recovery.
+        if all(source.exists() for source, _hidden in retired) or not retired:
+            for destination in reversed(placed):
+                try:
+                    destination.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        shutil.rmtree(work, ignore_errors=True)
+        _mark_task_blocked(database_path, str(task["id"]), error)
+        if isinstance(error, MetadataCorrectionError):
+            raise
+        raise MetadataCorrectionError(str(error)) from error
+
+
 def apply_metadata_correction(
     database_path: Path,
     correction_id: str,
@@ -581,120 +1204,17 @@ def apply_metadata_correction(
         raise MetadataCorrectionError(
             "Der Metadatenauftrag ist nicht zum Schreiben bereit."
         )
-
-    paths = metadata_area_paths(
-        area=str(task["area"]),
+    if str(task.get("area") or "") == "library":
+        return _apply_library_metadata_correction(
+            database_path,
+            task,
+            workspace_root=workspace_root,
+            library_id=library_id,
+        )
+    return _apply_general_metadata_correction(
+        database_path,
+        task,
         workspace_root=workspace_root,
         library_id=library_id,
-        create=True,
-    )
-    source = Path(str(task["source_path"])).resolve(strict=False)
-    input_root = paths["input_root"]
-    output_root = paths["output_root"]
-    if not _is_relative_to(source, input_root) or not source.is_file():
-        raise MetadataCorrectionError("Die eingefrorene Eingangsdatei fehlt.")
-    if source.is_symlink():
-        raise MetadataCorrectionError(
-            "Symbolische Links werden in der Metadatenkorrektur nicht verändert."
-        )
-
-    relative = _safe_relative(str(task["source_relative_path"]))
-    destination = (output_root / relative).resolve(strict=False)
-    if not _is_relative_to(destination, output_root):
-        raise MetadataCorrectionError("Ausgabepfad verlässt den sicheren Bereich.")
-    if destination.exists():
-        raise MetadataCorrectionError(
-            "Im Ausgang existiert bereits eine Datei mit demselben Pfad. Es wird nichts überschrieben."
-        )
-
-    stat = source.stat()
-    if int(stat.st_size) != int(task["source_size_bytes"]):
-        raise MetadataCorrectionError("Die Eingangsdatei hat sich seit der Vorbereitung verändert.")
-    if _sha256(source) != str(task["source_sha256"]):
-        raise MetadataCorrectionError("Die SHA-256-Summe der Eingangsdatei hat sich verändert.")
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    # ExifTool determines the media format from the extension. Keep the real
-    # extension on the temporary file; a generic .tmp suffix would make RAW,
-    # JPEG and XMP writes fail as an unknown file type.
-    temp = destination.parent / (
-        "."
-        + destination.stem
-        + ".bibliothekar-"
-        + uuid.uuid4().hex
-        + destination.suffix
     )
 
-    with database_connection(database_path) as connection:
-        connection.execute(
-            "UPDATE metadata_corrections SET status='writing',updated_at=?,error_message=NULL WHERE id=?",
-            (_now(), correction_id),
-        )
-
-    try:
-        shutil.copy2(source, temp)
-        if _sha256(temp) != str(task["source_sha256"]):
-            raise MetadataCorrectionError(
-                "Die Arbeitskopie stimmt vor dem Schreiben nicht mit der Quelle überein."
-            )
-
-        write_metadata_datetime(
-            temp,
-            str(task["media_type"]),
-            str(task["proposed_datetime"]),
-        )
-        verification = verify_metadata_datetime(
-            temp,
-            str(task["proposed_datetime"]),
-        )
-        output_size = int(temp.stat().st_size)
-        output_sha = _sha256(temp)
-
-        os.replace(temp, destination)
-        _fsync_directory(destination.parent)
-
-        # Source is removed only after the fully written output has been
-        # verified and atomically placed. A write/verify failure therefore
-        # never destroys the input file.
-        if _sha256(destination) != output_sha:
-            raise MetadataCorrectionError(
-                "Die Ausgabe hat sich nach dem atomaren Abschluss verändert."
-            )
-        source.unlink()
-        _fsync_directory(source.parent)
-
-        now = _now()
-        with database_connection(database_path) as connection:
-            connection.execute(
-                """UPDATE metadata_corrections
-                   SET status='completed',output_path=?,output_size_bytes=?,
-                       output_sha256=?,verification_json=?,error_message=NULL,
-                       updated_at=?,completed_at=?
-                   WHERE id=?""",
-                (
-                    str(destination),
-                    output_size,
-                    output_sha,
-                    json.dumps(verification, ensure_ascii=False, sort_keys=True),
-                    now,
-                    now,
-                    correction_id,
-                ),
-            )
-        return get_metadata_correction(database_path, correction_id)
-
-    except Exception as error:
-        try:
-            temp.unlink(missing_ok=True)
-        except OSError:
-            pass
-        with database_connection(database_path) as connection:
-            connection.execute(
-                """UPDATE metadata_corrections
-                   SET status='blocked',error_message=?,updated_at=?
-                   WHERE id=?""",
-                (str(error), _now(), correction_id),
-            )
-        if isinstance(error, MetadataCorrectionError):
-            raise
-        raise MetadataCorrectionError(str(error)) from error
