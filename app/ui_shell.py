@@ -2321,6 +2321,89 @@ BIBLIOTHEKAR_0350_CSS = r"""
   html[data-bk-display-mode="standalone"] body.bibliothekar-redesign section {
     scroll-margin-top: 86px;
   }
+
+  /* Arbeitsbereich der Web-App: kompakte Informationsdichte wie in Referenz 1. */
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .grid.summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+    margin-bottom: 14px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .grid.summary .card {
+    min-height: 0;
+    padding: 9px 8px !important;
+    border-radius: 12px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .grid.summary .muted {
+    font-size: .68rem;
+    white-space: nowrap;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .grid.summary .number {
+    margin-top: 3px;
+    font-size: 1.18rem;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin-bottom: 12px !important;
+    padding: 9px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-summary {
+    font-size: .82rem;
+    line-height: 1.15;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+    width: 100%;
+    margin-top: 0 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-actions button {
+    min-height: 42px !important;
+    padding: 7px 8px !important;
+    font-size: .82rem;
+    white-space: nowrap;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-top-button {
+    display: none !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card {
+    grid-template-columns: auto minmax(0, 1fr) auto !important;
+    gap: 8px !important;
+    padding: 10px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card > .badge {
+    grid-column: auto !important;
+    margin: 0 !important;
+    font-size: .7rem;
+    padding: 4px 7px;
+    white-space: nowrap;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-name {
+    margin-bottom: 3px;
+    font-size: .92rem;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-meta {
+    gap: 3px 8px;
+    font-size: .74rem;
+  }
 }
 """
 
