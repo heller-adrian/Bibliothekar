@@ -2076,7 +2076,7 @@ def event_display(connection, row):
             result['end_datetime']=segments[-1]['end_datetime']
         a=str(result['start_datetime'])[:10];b=str(result['end_datetime'])[:10]
         def de(day): return '.'.join(reversed(day.split('-')))
-        result['display_title']=de(a)+(('–'+de(b)) if a!=b else '')+' · Ohne Ereignis'
+        result['display_title']=de(a)+(('–'+de(b)) if a!=b else '')+' · '+str(result.get('name') or 'Ohne Ereignis')
         result['time_segment_count']=len(segments)
     return result
 
