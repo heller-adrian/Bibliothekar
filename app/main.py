@@ -98,6 +98,7 @@ from app.metadata_correction import (
 )
 from app.event_naming import (
     EventNamingError,
+    legacy_naming_for_existing_event,
     naming_from_library_settings,
     normalize_event_naming,
 )
@@ -1731,13 +1732,14 @@ def _event_payload_with_folder_layout(
             if snapshot:
                 naming = snapshot
             elif event_row is not None:
-                # 0.32.x events have no naming snapshot. Lock their physical
-                # folder so changing 0.33 settings never renames old events.
-                naming = {
-                    "mode": "locked",
-                    "locked_folder_name": str(event_row["folder_name"] or ""),
-                    "no_event_label": str(event_row["name"] or "Ohne Ereignis"),
-                }
+                # 0.32.x events keep the pre-0.33 naming convention instead
+                # of adopting the current library template. Intentional later
+                # edits may still rename/re-date the folder exactly as before.
+                naming = legacy_naming_for_existing_event(
+                    event_kind=event_row["event_kind"],
+                    folder_name=event_row["folder_name"],
+                    event_name=event_row["name"],
+                )
             else:
                 naming = naming_from_library_settings(
                     current_library_context().settings
@@ -1761,11 +1763,11 @@ def _naming_snapshot_from_event_context(context: dict[str, Any]) -> dict[str, An
     snapshot = event.get("folder_naming")
     if isinstance(snapshot, dict) and snapshot:
         return snapshot
-    return {
-        "mode": "locked",
-        "locked_folder_name": str(event.get("folder_name") or ""),
-        "no_event_label": str(event.get("name") or "Ohne Ereignis"),
-    }
+    return legacy_naming_for_existing_event(
+        event_kind=event.get("event_kind"),
+        folder_name=event.get("folder_name"),
+        event_name=event.get("name"),
+    )
 
 
 def _canonical_membership_preflight(
