@@ -1180,10 +1180,20 @@ WORKSPACE_HTML = r"""<!doctype html>
         <div class="section-header">
           <h2>Tagesordner</h2>
 
-          <span
-            id="day-count-label"
-            class="muted"
-          ></span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+            <span
+              id="day-count-label"
+              class="muted"
+            ></span>
+            <button
+              id="day-select-all"
+              type="button"
+              title="Mit Umschalt (Shift) lassen sich zusammenhängende Tagesgruppen auswählen."
+              style="min-height:34px;padding:6px 10px"
+            >
+              Alle auswählen
+            </button>
+          </div>
         </div>
 
         <div
@@ -1458,6 +1468,9 @@ WORKSPACE_HTML = r"""<!doctype html>
     const dayList =
       document.getElementById("day-list");
 
+    const daySelectAllButton =
+      document.getElementById("day-select-all");
+
     const selectionBar =
       document.getElementById("selection-bar");
     const selectionSummary=selectionBar?.querySelector(".selection-summary");
@@ -1681,6 +1694,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     let workspace = null;
     let selectedJobIds = new Set();
     let selectedDays = new Set();
+    let lastSelectedDayKey = null;
     let selectedPreviewEventId = null;
     let dialogMode = "event";
 
@@ -2606,6 +2620,37 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function selectableDayKeys() {
+      return availableDayGroups().map(
+        group => group.card_key || group.day_key || "__without_date__"
+      );
+    }
+
+    function updateDaySelectAllButton() {
+      const keys = selectableDayKeys();
+      const allSelected = keys.length > 0 && keys.every(key => selectedDays.has(key));
+      daySelectAllButton.textContent = allSelected ? "Auswahl aufheben" : "Alle auswählen";
+      daySelectAllButton.disabled = keys.length === 0;
+    }
+
+    function selectDayRange(targetKey, checked) {
+      const keys = selectableDayKeys();
+      const targetIndex = keys.indexOf(targetKey);
+      const anchorIndex = keys.indexOf(lastSelectedDayKey);
+      if (targetIndex < 0 || anchorIndex < 0) {
+        if (checked) selectedDays.add(targetKey);
+        else selectedDays.delete(targetKey);
+        return;
+      }
+      const start = Math.min(anchorIndex, targetIndex);
+      const end = Math.max(anchorIndex, targetIndex);
+      for (let index = start; index <= end; index += 1) {
+        if (checked) selectedDays.add(keys[index]);
+        else selectedDays.delete(keys[index]);
+      }
+    }
+
+
     function renderDays() {
       dayList.innerHTML = "";
 
@@ -2628,6 +2673,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           + "Alle Aufnahmen sind zugeordnet und archiviert oder durch den Sicherungsfilter ausgeblendet."
           + "</div>";
 
+        updateDaySelectAllButton();
         return;
       }
 
@@ -2824,13 +2870,17 @@ WORKSPACE_HTML = r"""<!doctype html>
           selectedDays.has(key);
 
         checkbox.addEventListener(
-          "change",
-          async () => {
-            if (checkbox.checked) {
+          "click",
+          async event => {
+            event.stopPropagation();
+            if (event.shiftKey && lastSelectedDayKey) {
+              selectDayRange(key, checkbox.checked);
+            } else if (checkbox.checked) {
               selectedDays.add(key);
             } else {
               selectedDays.delete(key);
             }
+            lastSelectedDayKey = key;
 
             renderDays();
             renderSelection();
@@ -2959,6 +3009,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         card.appendChild(badge);
         dayList.appendChild(card);
       }
+      updateDaySelectAllButton();
     }
 
 
@@ -2984,6 +3035,21 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       );
     }
+
+
+    daySelectAllButton.addEventListener("click", () => {
+      const keys = selectableDayKeys();
+      const allSelected = keys.length > 0 && keys.every(key => selectedDays.has(key));
+      if (allSelected) {
+        for (const key of keys) selectedDays.delete(key);
+        lastSelectedDayKey = null;
+      } else {
+        for (const key of keys) selectedDays.add(key);
+        lastSelectedDayKey = keys[keys.length - 1] || null;
+      }
+      renderDays();
+      renderSelection();
+    });
 
 
     function renderSelection() {
