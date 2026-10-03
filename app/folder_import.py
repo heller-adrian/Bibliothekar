@@ -495,6 +495,7 @@ def run_folder_import_job(
     destination_directory_callback: DestinationDirectoryCallback | None = None,
     work_root: Path | None = None,
     central_stock: bool = False,
+    allow_workspace_source: bool = False,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).astimezone()
 
@@ -512,10 +513,12 @@ def run_folder_import_job(
         raise PipelineError(f"Importquelle fehlt: {source}")
     source_resolved = source.resolve()
     workspace_resolved = workspace.resolve()
+    source_inside_workspace = workspace_resolved in source_resolved.parents
+    workspace_inside_source = source_resolved in workspace_resolved.parents
     if (
         source_resolved == workspace_resolved
-        or workspace_resolved in source_resolved.parents
-        or source_resolved in workspace_resolved.parents
+        or workspace_inside_source
+        or (source_inside_workspace and not allow_workspace_source)
     ):
         raise PipelineError(
             "Importquelle und Arbeitsbereich dürfen nicht ineinander liegen."
@@ -851,6 +854,14 @@ def run_folder_import_job(
                 **organization_summary,
                 "destinations": [
                     str(item["destination_relative_path"])
+                    for item in plan
+                ],
+                "imported_source_files": [
+                    {
+                        "relative_path": str(item["source_relative_path"]),
+                        "size_bytes": int(item["size_bytes"]),
+                        "sha256": str(item["sha256"]),
+                    }
                     for item in plan
                 ],
             },
