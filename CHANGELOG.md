@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.33.4 – Startup-Backfill und Import-Worker stabilisieren
+
+- Der globale Main-Import bleibt beim Registry-Backfill `source_kind="import"`; nur Projektionen in weitere Bibliotheksdatenbanken werden als `existing_library` registriert.
+- Bereits korrekt registrierte Main-Importe können beim Neustart nicht mehr mit derselben Backup-ID als anderer Quellentyp kollidieren. Der beobachtete Startup-Fehler „Eine bestehende Backup-ID darf nicht auf einen anderen Quellentyp umgebunden werden.“ ist damit behoben.
+- Ältere Main-Registry-Einträge, die vor der globalen Importarchitektur noch als `existing_library` angelegt wurden, werden nur unter eng geprüften Bedingungen auf `import` migriert; die allgemeine Schutzregel gegen Quellentypwechsel bleibt bestehen.
+- Ein fehlgeschlagener Startup oder ein nicht laufender Hintergrund-Worker führt bei neuen Ordnerimporten nun zu HTTP 503 statt zu einem dauerhaft auf `queued` stehenden Auftrag.
+- Regressionstests reproduzieren den realen Ablauf Importregistrierung → Neustart-Backfill → Queue-Übernahme und sichern den Degraded-/Worker-Guard ab.
+- Bereits vor dem Update sauber gespeicherte `queued`-Ordnerimporte bleiben erhalten und werden nach erfolgreichem Neustart vom Worker übernommen.
+
 ### 0.33.3 – TrueNAS-sichere Metadaten-Arbeitskopien
 
 - Die Metadatenkorrektur verwendet für ihre drei internen Kopierstellen ausschließlich `shutil.copyfile()` statt `shutil.copy2()`. Damit werden auf TrueNAS/ZFS keine Modus-, ACL- oder Ownership-Metadaten der Quelldatei auf temporäre Arbeitsdateien übertragen.
