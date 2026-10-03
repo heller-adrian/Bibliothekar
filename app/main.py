@@ -98,6 +98,8 @@ from app.metadata_correction import (
     get_metadata_correction,
     list_metadata_corrections,
     metadata_area_paths,
+    preview_multiple_metadata_correction,
+    apply_multiple_metadata_correction,
     reintegrate_library_metadata_family,
     scan_metadata_area,
 )
@@ -831,6 +833,10 @@ def process_claimed_job(
             "legacy_simulation",
         )
     )
+    is_import_operation = operation in {
+        "folder_import",
+        "metadata_multiple_import",
+    }
 
     try:
         settings = load_settings()
@@ -893,7 +899,7 @@ def process_claimed_job(
 
         lifecycle_backend = (
             "verification_receipt"
-            if operation == "folder_import"
+            if is_import_operation
             else "simulation_receipt"
         )
 
@@ -934,13 +940,13 @@ def process_claimed_job(
                 temporary_backup_path=str(
                     workspace_path
                     / BACKUP_DIRECTORY_NAME
-                    / (".incoming" if operation == "folder_import" else "")
+                    / (".incoming" if is_import_operation else "")
                     / job_id
                     / "Original"
                 ),
                 workspace_path=str(
                     workspace_backup_root(workspace_path)
-                    if operation == "folder_import"
+                    if is_import_operation
                     else work_root
                 ),
                 protocol_path=str(
@@ -966,11 +972,12 @@ def process_claimed_job(
                 completed=stage == "completed",
             )
 
-        if operation == "folder_import":
+        if is_import_operation:
             source_value = job.get("source_path")
             if not source_value:
                 raise RuntimeError("Ordnerimport besitzt keinen Quellpfad.")
             source = Path(str(source_value))
+            managed_multiple_import = operation == "metadata_multiple_import"
 
             def persist_metadata(
                 analysis: dict[str, Any],
@@ -1103,6 +1110,7 @@ def process_claimed_job(
                 destination_directory_callback=central_destination_directory,
                 work_root=work_root,
                 central_stock=True,
+                allow_workspace_source=managed_multiple_import,
             )
             organization = result.get("organization", {})
             if str(job.get("trigger_type") or "") in {"approved_sd", "usb_key"}:
@@ -1111,7 +1119,67 @@ def process_claimed_job(
                     job_id,
                     folder_import_display_label(job, organization),
                 )
-            completion_prefix = "Ordnerimport erfolgreich abgeschlossen."
+            if managed_multiple_import:
+                cleanup_removed = 0
+                cleanup_errors: list[str] = []
+                for entry in list(
+                    (result.get("organization") or {}).get(
+                        "imported_source_files"
+                    ) or []
+                ):
+                    try:
+                        relative = Path(str(entry.get("relative_path") or ""))
+                        if (
+                            relative.is_absolute()
+                            or ".." in relative.parts
+                            or not relative.parts
+                        ):
+                            raise RuntimeError("Unsicherer Quellpfad.")
+                        candidate = (source / relative).resolve(strict=False)
+                        candidate.relative_to(source.resolve(strict=False))
+                        if not candidate.is_file() or candidate.is_symlink():
+                            continue
+                        if (
+                            int(candidate.stat().st_size)
+                            != int(entry.get("size_bytes") or 0)
+                            or sha256_file(candidate)
+                            != str(entry.get("sha256") or "")
+                        ):
+                            raise RuntimeError(
+                                "Quelldatei stimmt nach der Übernahme nicht mehr mit dem verifizierten Import überein."
+                            )
+                        candidate.unlink()
+                        cleanup_removed += 1
+                    except Exception as cleanup_error:
+                        cleanup_errors.append(
+                            str(entry.get("relative_path") or "")
+                            + ": "
+                            + str(cleanup_error)
+                        )
+
+                # Leere Unterordner entfernen, der verwaltete Stamm bleibt bestehen.
+                for directory in sorted(
+                    (
+                        path
+                        for path in source.rglob("*")
+                        if path.is_dir() and not path.is_symlink()
+                    ),
+                    key=lambda path: len(path.parts),
+                    reverse=True,
+                ):
+                    try:
+                        directory.rmdir()
+                    except OSError:
+                        pass
+                result["source_cleanup"] = {
+                    "removed_file_count": cleanup_removed,
+                    "errors": cleanup_errors,
+                }
+                completion_prefix = (
+                    "Mehrfachkorrektur wurde in den Tagesbestand übernommen."
+                )
+            else:
+                completion_prefix = "Ordnerimport erfolgreich abgeschlossen."
         else:
             result = run_simulated_job(
                 workspace=workspace_path,
@@ -1141,7 +1209,7 @@ def process_claimed_job(
             temporary_backup_path=str(
                 workspace_path
                 / BACKUP_DIRECTORY_NAME
-                / (".incoming" if operation == "folder_import" else "")
+                / (".incoming" if is_import_operation else "")
                 / job_id
                 / "Original"
             ),
@@ -1181,7 +1249,7 @@ def process_claimed_job(
             ),
         )
 
-        if operation == "folder_import":
+        if is_import_operation:
             if database_file.resolve(strict=False) != DATABASE_FILE.resolve(strict=False):
                 raise RuntimeError(
                     "Globaler Kameraimport wurde unerwartet außerhalb der Main-Datenbank verarbeitet."
@@ -1237,13 +1305,13 @@ def process_claimed_job(
                     temporary_backup_path=str(
                         workspace_path
                         / BACKUP_DIRECTORY_NAME
-                        / (".incoming" if operation == "folder_import" else "")
+                        / (".incoming" if is_import_operation else "")
                         / job_id
                         / "Original"
                     ),
                     workspace_path=str(
                         workspace_backup_root(workspace_path)
-                        if operation == "folder_import"
+                        if is_import_operation
                         else work_root
                     ),
                     protocol_path=str(
@@ -1251,7 +1319,7 @@ def process_claimed_job(
                     ),
                     snapshot_backend=(
                         "verification_receipt"
-                        if operation == "folder_import"
+                        if is_import_operation
                         else "simulation_receipt"
                     ),
                     error_message=str(error),
