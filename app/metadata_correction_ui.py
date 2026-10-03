@@ -174,7 +174,17 @@ main{width:min(1180px,100%);margin:0 auto;padding:26px 30px 70px}
     }catch(error){setStatus(error.message,true);}
   }
   async function loadTasks(){
-    try{const data=await json("/api/metadata-correction/tasks");state.tasks=data.tasks||[];renderTasks();}
+    try{
+      const data=await json("/api/metadata-correction/tasks");
+      state.tasks=data.tasks||[];
+      const requested=String(new URLSearchParams(location.search).get("task")||"");
+      if(requested.startsWith("metadata:")){
+        const id=requested.slice("metadata:".length);
+        const task=state.tasks.find(item=>String(item.id)===id);
+        if(task && task.area!==state.area)setArea(String(task.area));
+      }
+      renderTasks();
+    }
     catch(error){setStatus(error.message,true);}
   }
   function renderTasks(){
