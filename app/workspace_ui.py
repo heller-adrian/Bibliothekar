@@ -262,6 +262,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       border-radius: 15px;
       background: var(--surface);
       padding: 14px;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .day-card.selected {
@@ -1088,20 +1090,6 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       <div class="selection-actions">
         <button
-          id="select-all-button"
-          type="button"
-        >
-          Alle Tage
-        </button>
-
-        <button
-          id="clear-selection-button"
-          type="button"
-        >
-          Auswahl aufheben
-        </button>
-
-        <button
           id="no-event-button"
           class="warning-button"
           type="button"
@@ -1552,14 +1540,6 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     const selectionLabel =
       document.getElementById("selection-label");
-
-    const selectAllButton =
-      document.getElementById("select-all-button");
-
-    const clearSelectionButton =
-      document.getElementById(
-        "clear-selection-button"
-      );
 
     const structurePreview =
       document.getElementById(
@@ -2888,6 +2868,28 @@ WORKSPACE_HTML = r"""<!doctype html>
           }
         );
 
+        card.addEventListener("mousedown", event => {
+          if (event.shiftKey && event.target !== checkbox) {
+            event.preventDefault();
+          }
+        });
+
+        card.addEventListener("click", event => {
+          if (event.target === checkbox) return;
+          event.preventDefault();
+          const nextChecked = event.shiftKey ? true : !selectedDays.has(key);
+          if (event.shiftKey && lastSelectedDayKey) {
+            selectDayRange(key, nextChecked);
+          } else if (nextChecked) {
+            selectedDays.add(key);
+          } else {
+            selectedDays.delete(key);
+          }
+          lastSelectedDayKey = key;
+          renderDays();
+          renderSelection();
+        });
+
         const main =
           document.createElement(
             "span"
@@ -3991,36 +3993,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       renderBackupFilter();
       loadWorkspace().catch(error=>setStatus(error.message,true));
     });
-
-    selectAllButton.addEventListener(
-      "click",
-      () => {
-        selectedDays.clear();
-
-        for (
-          const group
-          of availableDayGroups()
-        ) {
-          if (group.has_date) {
-            selectedDays.add(
-              group.card_key || group.day_key
-            );
-          }
-        }
-
-        renderDays();
-        renderSelection();
-      }
-    );
-
-    clearSelectionButton.addEventListener(
-      "click",
-      () => {
-        selectedDays.clear();
-        renderDays();
-        renderSelection();
-      }
-    );
 
     newEventButton.addEventListener(
       "click",
