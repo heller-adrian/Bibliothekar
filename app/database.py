@@ -4958,6 +4958,16 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                FROM file_families ff JOIN jobs j ON j.id=ff.job_id
                WHERE ff.selected_capture_time IS NOT NULL
                  AND NOT EXISTS (
+                   SELECT 1 FROM files undated_file
+                   WHERE undated_file.family_id=ff.id
+                     AND undated_file.job_id=ff.job_id
+                     AND undated_file.current_root_kind='shared_workspace'
+                     AND (
+                       undated_file.current_relative_path='Ohne_Datum'
+                       OR undated_file.current_relative_path LIKE 'Ohne_Datum/%'
+                     )
+                 )
+                 AND NOT EXISTS (
                    SELECT 1 FROM event_assignments ea JOIN events e ON e.id=ea.event_id
                    WHERE ea.family_id=ff.id
                      AND e.status IN ('draft','planned','applied','archived')
