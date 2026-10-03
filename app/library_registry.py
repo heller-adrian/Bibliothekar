@@ -912,6 +912,38 @@ def unregister_library(
     return result
 
 
+def get_source_backup(
+    registry_path: Path,
+    backup_id: str,
+) -> dict[str, Any] | None:
+    clean_backup_id = str(backup_id or "").strip()
+    if not clean_backup_id:
+        return None
+
+    connection = _connect(registry_path)
+    try:
+        row = connection.execute(
+            """
+            SELECT *
+            FROM source_backups
+            WHERE backup_id = ?
+            """,
+            (clean_backup_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    if row is None:
+        return None
+
+    result = dict(row)
+    try:
+        result["metadata"] = json.loads(str(result.get("metadata_json") or "{}"))
+    except (TypeError, ValueError):
+        result["metadata"] = {}
+    return result
+
+
 def register_source_backup(
     registry_path: Path,
     *,
