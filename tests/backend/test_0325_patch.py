@@ -283,8 +283,8 @@ def test_0325_late_resolved_library_database_gets_current_schema(
 
 
 def test_0325_ui_and_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.33.6"
-    assert "0.33.6 · Kamerakern 0.32.11" in ui_shell._shell_markup(
+    assert main.DEPLOYMENT_VERSION == "0.34.0"
+    assert "0.34.0 · Kamerakern 0.32.11" in ui_shell._shell_markup(
         "workspace",
         "events",
     )
