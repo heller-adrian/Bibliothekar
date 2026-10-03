@@ -126,6 +126,38 @@ def render_no_event_folder_name(month_key: str, naming: Any) -> str:
     return f"{month[5:7]} - {normalized['no_event_label']}"
 
 
+def legacy_naming_for_existing_event(
+    *,
+    event_kind: Any,
+    folder_name: Any,
+    event_name: Any,
+) -> dict[str, Any]:
+    """Return the pre-0.33 naming policy for an existing event.
+
+    Existing 0.32.x events must not suddenly adopt a newly configured 0.33
+    naming template. They must, however, keep the old behaviour when the user
+    intentionally edits name/date: legacy normal events still use MM-DD -
+    Name, and legacy no-event collections keep their historical label.
+    """
+    if str(event_kind or "event") != "no_event":
+        return normalize_event_naming({})
+
+    folder = str(folder_name or "").strip()
+    name = str(event_name or "").strip()
+    match = re.match(r"^\d{2}\s*-\s*(.+)$", folder)
+    if match and match.group(1).strip():
+        label = match.group(1).strip()
+    else:
+        match = re.match(r"^\d{2}\s*-\s*(.+)$", name)
+        label = (
+            match.group(1).strip()
+            if match and match.group(1).strip()
+            else (name or DEFAULT_NO_EVENT_LABEL)
+        )
+
+    return normalize_event_naming({"no_event_label": label})
+
+
 def naming_snapshot_for_new_event(naming: Any) -> dict[str, Any]:
     """Return a stable per-event snapshot.
 
