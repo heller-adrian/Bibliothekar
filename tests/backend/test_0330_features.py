@@ -216,7 +216,7 @@ def test_0330_filename_datetime_detection():
 
 def _fake_scan(relative_path: str) -> dict:
     return {
-        "area": "library",
+        "area": "general",
         "paths": {},
         "summary": {"file_count": 1},
         "files": [{
@@ -242,14 +242,7 @@ def _fake_scan(relative_path: str) -> dict:
 
 
 def _metadata_input(workspace: Path, filename: str) -> Path:
-    source = (
-        workspace
-        / "Metadatenkorrektur"
-        / "Bibliothek"
-        / "main"
-        / "Eingang"
-        / filename
-    )
+    source = workspace / "Metadatenkorrektur" / "Allgemein" / filename
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(b"original-image-payload")
     return source
@@ -272,7 +265,7 @@ def test_0330_metadata_correction_writes_only_verified_output(
     )
     task = create_metadata_correction(
         database,
-        area="library",
+        area="general",
         relative_path=source.name,
         proposed_datetime="2026-07-20T14:15:30",
         workspace_root=workspace,
@@ -303,7 +296,8 @@ def test_0330_metadata_correction_writes_only_verified_output(
     assert completed["status"] == "completed"
     assert output.is_file()
     assert output.suffix == ".JPG"
-    assert not source.exists()
+    assert source.exists()
+    assert output == source
     assert output.read_bytes() == b"original-image-payload"
 
 
@@ -324,7 +318,7 @@ def test_0330_metadata_write_failure_keeps_input_and_becomes_task(
     )
     task = create_metadata_correction(
         database,
-        area="library",
+        area="general",
         relative_path=source.name,
         proposed_datetime="2026-07-20T14:15:30",
         workspace_root=workspace,
@@ -347,16 +341,6 @@ def test_0330_metadata_write_failure_keeps_input_and_becomes_task(
     blocked = get_metadata_correction(database, str(task["id"]))
     assert blocked["status"] == "blocked"
     assert source.is_file()
-    output = (
-        workspace
-        / "Metadatenkorrektur"
-        / "Bibliothek"
-        / "main"
-        / "Ausgang"
-        / source.name
-    )
-    assert not output.exists()
-
     tasks = list_global_tasks(database)
     assert any(
         item.get("kind") == "metadata_correction"
