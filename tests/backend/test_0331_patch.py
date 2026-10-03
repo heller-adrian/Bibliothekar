@@ -199,7 +199,9 @@ def test_0331_library_correction_reintegrates_family_into_day_stock(
     digest = metadata_correction._sha256(source)
     with database_connection(database) as connection:
         connection.execute(
-            "UPDATE files SET sha256_original=?,sha256_current=? WHERE id=?",
+            """UPDATE files
+               SET sha256_original=?,sha256_current=?,source_size_bytes=NULL
+               WHERE id=?""",
             (digest, digest, file_id),
         )
 
