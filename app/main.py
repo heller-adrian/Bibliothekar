@@ -8525,6 +8525,9 @@ def index() -> str:
     const jobsElement =
       document.getElementById("jobs");
 
+    let jobHistoryLimit = 5;
+    let jobHistoryJobs = [];
+
     const noticeElement =
       document.getElementById("notice");
 
@@ -9372,6 +9375,26 @@ def index() -> str:
       }
     }
 
+    function renderJobHistory(openDetails = new Set()) {
+      const shown = jobHistoryJobs.slice(0, jobHistoryLimit);
+      const remaining = Math.max(0, jobHistoryJobs.length - shown.length);
+      jobsElement.innerHTML =
+        shown.map(renderJob).join("")
+        + (remaining
+          ? `<div style="display:flex;justify-content:center;margin-top:12px">
+               <button class="secondary" id="jobs-more-button" type="button">
+                 Mehr anzeigen (${remaining})
+               </button>
+             </div>`
+          : "");
+      restoreOpenJobDetails(openDetails);
+      document.getElementById("jobs-more-button")?.addEventListener("click", () => {
+        const open = openJobDetailKeys();
+        jobHistoryLimit += 5;
+        renderJobHistory(open);
+      });
+    }
+
     async function loadJobs() {
       const openDetails = openJobDetailKeys();
 
@@ -9389,9 +9412,9 @@ def index() -> str:
       }
 
       const data = await response.json();
-      const jobs = data.jobs || [];
+      jobHistoryJobs = data.jobs || [];
 
-      if (jobs.length === 0) {
+      if (jobHistoryJobs.length === 0) {
         jobsElement.innerHTML = `
           <div class="empty">
             Noch keine Datenbankaufträge vorhanden.
@@ -9400,9 +9423,7 @@ def index() -> str:
         return;
       }
 
-      jobsElement.innerHTML =
-        jobs.map(renderJob).join("");
-      restoreOpenJobDetails(openDetails);
+      renderJobHistory(openDetails);
     }
 
     async function refreshAll() {
