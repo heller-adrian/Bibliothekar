@@ -259,7 +259,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.34.0"
+DEPLOYMENT_VERSION = "0.35.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -9171,17 +9171,19 @@ def index() -> str:
         ? "var(--success)"
         : "var(--danger)";
 
+      const schemaVersions = (database.schema_versions || [])
+        .map(value => Number(value))
+        .filter(value => Number.isFinite(value))
+        .sort((left, right) => left - right);
+      const schemaSummary = schemaVersions.length > 1
+        ? schemaVersions[0] + "–" + schemaVersions[schemaVersions.length - 1]
+        : (schemaVersions.length ? String(schemaVersions[0]) : "–");
+
       document.getElementById(
         "database-detail"
       ).textContent =
         database.initialized
-        ? (
-          "Schema "
-          + (
-            database.schema_versions
-            || []
-          ).join(", ")
-        )
+        ? ("Schema " + schemaSummary)
         : (
           database.error
           || "Keine Verbindung"
