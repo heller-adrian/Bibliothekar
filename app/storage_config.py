@@ -189,7 +189,10 @@ def load_metadata_correction_settings() -> dict[str, str]:
     if not isinstance(section, dict):
         section = {}
 
-    raw_root = str(section.get("general_root") or "").strip()
+    if "general_root" in section:
+        raw_root = str(section.get("general_root") or "").strip()
+    else:
+        raw_root = str(os.environ.get("KAMERA_METADATA_GENERAL_ROOT", "") or "").strip()
     if raw_root:
         root = Path(raw_root).expanduser()
         if not root.is_absolute():
