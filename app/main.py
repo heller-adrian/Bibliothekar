@@ -7331,7 +7331,7 @@ def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
             )
         if kind != "library":
             raise MetadataCorrectionError(
-                "Mehrfachkorrektur wird mit Version 0.34.0 aktiviert."
+                "Mehrfachkorrektur ist noch nicht aktiviert."
             )
 
         groups: list[dict[str, Any]] = []
@@ -7425,7 +7425,7 @@ def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
             )
         else:
             raise MetadataCorrectionError(
-                "Mehrfachkorrektur wird mit Version 0.34.0 aktiviert."
+                "Mehrfachkorrektur ist noch nicht aktiviert."
             )
 
         task = _sync_completed_library_metadata_correction(context, task)
@@ -7576,7 +7576,7 @@ def api_prepare_metadata_correction(payload: dict[str, Any]) -> dict[str, Any]:
             )
         else:
             raise MetadataCorrectionError(
-                "Mehrfachkorrektur wird mit Version 0.34.0 aktiviert."
+                "Mehrfachkorrektur ist noch nicht aktiviert."
             )
     except (MetadataCorrectionError, MetadataError, LibraryRegistryError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
