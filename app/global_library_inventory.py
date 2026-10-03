@@ -7,6 +7,7 @@ import json
 
 from app.database import database_connection
 from app.library_registry import (
+    MAIN_LIBRARY_ID,
     LibraryRegistryError,
     claim_source_family,
     get_source_family_claim,
@@ -213,19 +214,24 @@ def backfill_library_inventory(
                 or first.get("source_path")
                 or job_id
             )
-            # "existing_library" beschreibt keine zweite physische
-            # Sicherung, sondern die bibliotheksspezifische Projektion eines
-            # bereits bekannten Importjobs. Die Backup-ID war schon immer
-            # bibliotheksspezifisch; die Quellenidentität muss deshalb dieselbe
-            # Dimension enthalten. Sonst kollidieren zwei Bibliotheken, die
-            # denselben globalen Import projizieren, an der absichtlichen
-            # UNIQUE(source_kind, source_identity, backup_path)-Grenze.
-            projection_identity = f"{library_id}:{identity}"
+            # Die Main-Datenbank ist der physische Ursprung des
+            # globalen Kameraimports. Ihr Backfill muss deshalb denselben
+            # source_kind="import" verwenden wie register_analysis_inventory().
+            # Nur Projektionen in weitere Bibliotheksdatenbanken werden als
+            # existing_library registriert und bekommen eine namespaced
+            # Quellenidentität.
+            is_main_import = library_id == MAIN_LIBRARY_ID
+            source_kind = "import" if is_main_import else "existing_library"
+            source_identity = (
+                identity
+                if is_main_import
+                else f"{library_id}:{identity}"
+            )
             register_source_backup(
                 registry_path,
                 backup_id=backup_id,
-                source_kind="existing_library",
-                source_identity=projection_identity,
+                source_kind=source_kind,
+                source_identity=source_identity,
                 backup_path=str(first.get("source_path") or job_id),
                 metadata={
                     "library_id": library_id,
