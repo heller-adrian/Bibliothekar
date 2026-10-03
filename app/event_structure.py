@@ -238,7 +238,7 @@ def _build_no_event_preview(
 
     return {
         "event_kind": "no_event",
-        "event_name": no_event_label,
+        "event_name": parent_folder,
         "parent_folder": parent_folder,
         "child_folder": None,
         "child_event_name": None,
