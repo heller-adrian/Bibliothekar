@@ -24,7 +24,8 @@ def test_no_event_target_returns_existing_segments(tmp_path):
 def test_workspace_unifies_no_event_entry_point():
     assert 'id="existing-no-event-button" type="button" hidden' in WORKSPACE_HTML
     assert 'autoAttachExistingNoEventCollection' in WORKSPACE_HTML
-    assert '„Ohne Ereignis“ fortführen' in WORKSPACE_HTML
+    assert 'loadEventNamingSettings' in WORKSPACE_HTML
+    assert 'noEventLabel' in WORKSPACE_HTML
     assert 'data-locked' in WORKSPACE_HTML
     assert '· NEU' in WORKSPACE_HTML
     assert 'activeNoEventTarget ? newSegments : allSegments' in WORKSPACE_HTML
