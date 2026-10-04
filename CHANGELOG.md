@@ -12,7 +12,7 @@
 - Import: „Quelle auswählen …“ liegt nun im vorhandenen Hilfe-Button; „Diagnose & Test“ und der künstliche Testimport wurden aus der Oberfläche entfernt. Lange Statuswerte wie „Beschreibbar“ werden kleiner gesetzt statt abgeschnitten.
 - Arbeitsbereich: der Sicherungsfilter besitzt nun ein Filter-Icon. Neutrale Beispiele lauten „Urlaub“ und „Tag 1“ statt persönlicher Bezeichnungen.
 - Ereignisse: die große Erklärungskarte „Planung, Prüfung und bestätigte Sortierung“ entfällt.
-- Metadatenkorrektion wird in einem Folgeschritt dieses Patches auf die gleiche kompakte Hilfe- und Pfadlogik angepasst.
+- Metadatenkorrektion: Reiter wieder in der Reihenfolge Bibliothek · Allgemein · Mehrfachkorrektur; Bereichserklärungen liegen im Fragezeichen, lange Ordnerpfade umbrechen sicher und versteckte Bereichskarten bleiben wirklich ausgeblendet.
 - Der bisherige Dateiname in der Zielstruktur-Vorschau bleibt in diesem Patch bewusst unverändert.
 
 

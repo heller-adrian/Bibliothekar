@@ -5,6 +5,7 @@ METADATA_CORRECTION_HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Metadatenkorrektur</title>
 <style>
+[hidden]{display:none!important}
 main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .muted{color:var(--bk-muted,#738091)}
 .meta-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -12,8 +13,10 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .primary{background:var(--bk-blue,#1976d2)!important;color:#fff!important;border-color:var(--bk-blue,#1976d2)!important}
 .meta-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(330px,.8fr);gap:16px;align-items:start}
 .meta-card{border:1px solid var(--bk-line,#ccd2d8);border-radius:15px;background:var(--bk-surface,#fff);padding:16px}
-.meta-overview{margin-bottom:16px}
-.meta-paths{display:grid;gap:5px;font-size:.9rem;margin:9px 0 0}
+.meta-overview{margin-bottom:18px}
+.meta-title-with-help{display:flex;align-items:center;gap:8px}
+.meta-paths{display:grid;gap:5px;font-size:.86rem;margin:9px 0 0;min-width:0}
+.meta-paths span,.meta-paths code{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
 .meta-groups{display:grid;gap:14px;margin-top:14px}
 .meta-files{display:grid;gap:8px}
 .meta-file{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;width:100%;box-sizing:border-box;border:1px solid var(--bk-line,#ccd2d8);border-radius:12px;padding:11px 13px;background:var(--bk-surface,#fff);color:inherit;cursor:pointer;user-select:none;-webkit-user-select:none}
@@ -34,16 +37,16 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .multi-preview-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(130px,.8fr) auto minmax(130px,.8fr);gap:10px;align-items:center;border:1px solid var(--bk-line,#ccd2d8);border-radius:10px;padding:9px 11px}
 .multi-offset{font-variant-numeric:tabular-nums}
 @media(max-width:820px){.multi-preview-row{grid-template-columns:1fr}.multi-preview-row .arrow{display:none}}
-@media(max-width:820px){main{padding:14px 14px 60px}.meta-grid{grid-template-columns:1fr}.meta-kv{grid-template-columns:105px minmax(0,1fr)}}
+@media(max-width:820px){main{padding:14px 14px 60px}.meta-grid{grid-template-columns:1fr;gap:18px}.meta-kv{grid-template-columns:105px minmax(0,1fr)}.meta-card{padding:14px}.meta-paths{font-size:.78rem}}
 </style>
 </head>
 <body>
 <main>
   <section class="meta-card meta-overview">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
-      <div>
+      <div class="meta-title-with-help">
         <strong id="meta-area-title">Bibliothek</strong>
-        <div id="meta-area-help" class="muted" style="margin-top:4px"></div>
+        <button id="meta-area-help" class="bk-help" type="button" aria-label="Hilfe zum Bereich" data-help="">?</button>
       </div>
       <div class="meta-actions">
         <button id="meta-scan" type="button" class="primary">Bestand prüfen</button>
@@ -142,11 +145,13 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   function configureArea(){
     const library=state.area==="library", general=state.area==="general", multiple=state.area==="multiple";
     $("meta-area-title").textContent=library?"Bibliothek":general?"Allgemein":"Mehrfachkorrektur";
-    $("meta-area-help").textContent=library
+    const areaHelp=library
       ?"Gemeinsamer Ohne-Datum-Bestand aller Kamerasicherungen: erst Metadaten prüfen oder korrigieren, danach bewusst einsortieren."
       : general
         ?"Unabhängige Dateien direkt im verwalteten Ordner Allgemein korrigieren."
-        :"Zeitlich zusammengehörige Kameraaufnahmen gemeinsam verschieben.";
+        :"Zeitlich zusammengehörige Kameraaufnahmen gemeinsam verschieben. Eine Referenzaufnahme festlegen, Vorschau prüfen und den Zeitversatz anschließend auf den gesamten Ordner anwenden.";
+    $("meta-area-help").dataset.help=areaHelp;
+    $("meta-area-help").setAttribute("aria-label","Hilfe zu "+(library?"Bibliothek":general?"Allgemein":"Mehrfachkorrektur"));
     $("meta-scan").hidden=false;
     $("meta-scan").textContent=multiple?"Bestand prüfen":"Bestand prüfen";
     $("meta-workspace").hidden=multiple;
@@ -158,11 +163,11 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       state.areas=(await json("/api/metadata-correction/areas")).areas||{};
       const area=state.areas[state.area]||{};
       if(state.area==="library"){
-        $("meta-paths").innerHTML='<span>Quelle: <code>'+esc(area.source_root||"Ohne_Datum")+'</code></span><span class="muted">Metadatenänderungen bleiben zunächst in Ohne_Datum. Erst „In Tagesbestand einsortieren“ verschiebt die geprüfte Familie in den kanonischen Tagesordner.</span>';
+        $("meta-paths").innerHTML='<span>Quelle: <code>'+esc(area.source_root||"Ohne_Datum")+'</code></span>';
       }else if(state.area==="general"){
-        $("meta-paths").innerHTML='<span>Ordner: <code>'+esc(area.root||"")+'</code></span><span class="muted">Kein Eingang/Ausgang: die geprüfte Datei wird nach erfolgreicher Verifikation atomar am selben Ort ersetzt.</span>';
+        $("meta-paths").innerHTML='<span>Ordner: <code>'+esc(area.root||"")+'</code></span>';
       }else{
-        $("meta-paths").innerHTML='<span>Ordner: <code>'+esc(area.root||"/workspace/Metadatenkorrektur/Mehrfachkorrektur")+'</code></span><span class="muted">Eine Referenzaufnahme festlegen, Vorschau prüfen und den Zeitversatz anschließend auf den gesamten Ordner anwenden.</span>';
+        $("meta-paths").innerHTML='<span>Ordner: <code>'+esc(area.root||"/workspace/Metadatenkorrektur/Mehrfachkorrektur")+'</code></span>';
       }
     }catch(error){setStatus(error.message,true);}
   }
