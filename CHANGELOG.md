@@ -1,6 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+### 0.35.4 – Aufnahmen-Kennzahlen wie im Archiv
+
+- Aufnahmen: die vier Kennzahlen Tage, Dateien, Familien und Prüffälle stehen auf dem Handy jetzt stabil direkt unter dem Titel Aufnahmen und oberhalb des Sicherungsfilters.
+- Die mobile Seitenüberschrift wird ausdrücklich aus dem Desktop-Zweispaltenraster gelöst; dadurch können die Karten nicht mehr nach rechts aus dem sichtbaren Bereich rutschen.
+- Größe, 2×2-Anordnung, Abstände, Innenabstände und Typografie der vier Karten entsprechen der kompakten Archivdarstellung.
+
 ### 0.35.3 – letzte Web-App-Feinarbeiten
 
 - Web-App-Dock auf allen Bereichen vereinheitlicht: weniger Höhe, weniger Leerraum unter der Leiste und kleinere, gleich hohe Rahmen für Aufgaben und Menü, damit abgerundete iPhone-Ecken nichts abschneiden.

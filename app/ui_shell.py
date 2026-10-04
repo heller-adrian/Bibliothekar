@@ -3115,6 +3115,70 @@ BIBLIOTHEKAR_0353_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0354_CSS = r"""
+/* 0.35.4: Aufnahmen-Kennzahlen auf schmalen Displays exakt wie Archiv.
+ * Der ältere Desktop-Grid der Seitenüberschrift darf auf dem Handy nicht
+ * nachträglich die mobile Blockanordnung überschreiben.
+ */
+@media (max-width: 700px) {
+  body[data-bk-area="workspace"] .bk-page-heading.bk-capture-heading {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    grid-template-columns: none !important;
+    gap: 0 !important;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-heading-copy,
+  body[data-bk-area="workspace"] .bk-capture-summary-slot {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-summary-slot {
+    margin: 10px 0 0 !important;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary {
+    display: grid !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    margin: 0 !important;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .card {
+    min-width: 0 !important;
+    min-height: 40px !important;
+    display: flex !important;
+    align-items: baseline !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+    padding: 7px 9px !important;
+    border-radius: 10px !important;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .muted {
+    font-size: .68rem !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .number {
+    display: inline !important;
+    margin: 0 !important;
+    font-size: 1rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+}
+"""
+
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 (() => {
   const isStandalone = Boolean(
@@ -4394,7 +4458,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.3 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.4 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -4412,7 +4476,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0351_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0352_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0353_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0353_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0354_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
