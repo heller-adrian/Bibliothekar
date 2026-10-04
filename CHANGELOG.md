@@ -5,7 +5,8 @@
 
 - Aufnahmen: die vier Kennzahlen Tage, Dateien, Familien und Prüffälle stehen auf dem Handy jetzt stabil direkt unter dem Titel Aufnahmen und oberhalb des Sicherungsfilters.
 - Die mobile Seitenüberschrift wird ausdrücklich aus dem Desktop-Zweispaltenraster gelöst; dadurch können die Karten nicht mehr nach rechts aus dem sichtbaren Bereich rutschen.
-- Größe, 2×2-Anordnung, Abstände, Innenabstände und Typografie der vier Karten entsprechen der kompakten Archivdarstellung.
+- Größe, 2×2-Anordnung, Abstände, Innenabstände und Typografie der vier Karten entsprechen der kompakten Archivdarstellung. Bezeichnung und Zahl stehen in einer Zeile; die Karten sind fest auf 42 px Höhe verdichtet.
+- Der einheitliche Web-App-Dock erhält auf allen Seiten 4 px mehr unteren Abstand, damit Aufgaben- und Menürahmen auch an stärker abgerundeten iPhone-Ecken vollständig sichtbar bleiben.
 
 ### 0.35.3 – letzte Web-App-Feinarbeiten
 

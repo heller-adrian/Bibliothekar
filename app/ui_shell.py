@@ -3152,29 +3152,51 @@ BIBLIOTHEKAR_0354_CSS = r"""
     margin: 0 !important;
   }
 
-  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .card {
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .card,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] .bk-page-heading.bk-capture-heading .bk-capture-summary-slot section.grid.summary > .card {
     min-width: 0 !important;
-    min-height: 40px !important;
+    min-height: 42px !important;
+    height: 42px !important;
+    max-height: 42px !important;
     display: flex !important;
-    align-items: baseline !important;
+    flex-direction: row !important;
+    align-items: center !important;
     justify-content: space-between !important;
     gap: 6px !important;
     padding: 7px 9px !important;
     border-radius: 10px !important;
   }
 
-  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .muted {
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .muted,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] .bk-page-heading.bk-capture-heading .bk-capture-summary-slot section.grid.summary > .card > .muted {
+    display: inline !important;
+    margin: 0 !important;
     font-size: .68rem !important;
-    line-height: 1.1 !important;
+    line-height: 1 !important;
     white-space: nowrap !important;
   }
 
-  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .number {
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .number,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] .bk-page-heading.bk-capture-heading .bk-capture-summary-slot section.grid.summary > .card > .number {
     display: inline !important;
     margin: 0 !important;
     font-size: 1rem !important;
     line-height: 1 !important;
     white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 820px) {
+  /* Gleicher Dock auf jeder Seite, nur wenige Pixel weiter über der iPhone-Rundung. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    padding-bottom: 10px !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-bottom: 58px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom: 56px !important;
   }
 }
 """

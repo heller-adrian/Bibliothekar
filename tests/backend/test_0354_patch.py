@@ -35,8 +35,18 @@ def test_0354_capture_cards_match_archive_compact_2x2_geometry():
     css = BIBLIOTHEKAR_0354_CSS
     assert "grid-template-columns: repeat(2, minmax(0, 1fr)) !important;" in css
     assert "gap: 6px !important;" in css
-    assert "min-height: 40px !important;" in css
+    assert "min-height: 42px !important;" in css
+    assert "height: 42px !important;" in css
+    assert "flex-direction: row !important;" in css
+    assert "align-items: center !important;" in css
     assert "padding: 7px 9px !important;" in css
     assert "border-radius: 10px !important;" in css
     assert "font-size: .68rem !important;" in css
     assert "font-size: 1rem !important;" in css
+
+
+def test_0354_pwa_dock_has_small_uniform_bottom_clearance():
+    css = BIBLIOTHEKAR_0354_CSS
+    assert "padding-bottom: 10px !important;" in css
+    assert "padding-bottom: 58px !important;" in css
+    assert "bottom: 56px !important;" in css
