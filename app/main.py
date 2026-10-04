@@ -267,7 +267,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.40.0"
+DEPLOYMENT_VERSION = "0.40.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -8666,6 +8666,23 @@ def index() -> str:
     .global-task-panel { position:fixed; right:18px; bottom:78px; z-index:1199; width:min(390px,calc(100vw - 36px)); max-height:60vh; overflow:auto; padding:14px; border-radius:14px; border:1px solid #3b424a; background:#181c20; box-shadow:0 14px 44px rgba(0,0,0,.5); display:none; }
     .global-task-panel.open { display:block; }
     .global-task-item { display:block; padding:10px; margin-top:8px; border-radius:10px; border:1px solid #333a42; background:#20252b; color:inherit; text-decoration:none; }
+
+    /* 0.40.1: lange Duplikatpfade bleiben auf schmalen Displays im Kartenrahmen. */
+    .duplicate-file-list,
+    .duplicate-file-list li {
+      min-width:0;
+      max-width:100%;
+    }
+    .duplicate-file-list code,
+    .duplicate-file-list .muted {
+      max-width:100%;
+      white-space:normal;
+      overflow-wrap:anywhere;
+      word-break:break-word;
+    }
+    .duplicate-file-list code {
+      display:inline;
+    }
 </style>
 </head>
 
@@ -9226,7 +9243,7 @@ def index() -> str:
           <details class="message" data-job-detail-key="${escapeHtml(jobId)}:duplicates" style="border:1px solid var(--border);border-radius:10px;padding:9px 11px">
             <summary><strong>${duplicateCount} ${duplicateCount === 1 ? "Duplikat" : "Duplikate"} übersprungen</strong></summary>
             <p class="muted" style="margin:8px 0">Nur Dateien mit identischer Größe und identischem SHA-256 werden automatisch übersprungen.</p>
-            <ul style="margin:0;padding-left:20px">
+            <ul class="duplicate-file-list" style="margin:0;padding-left:20px">
               ${duplicateFiles.map(file => `
                 <li style="margin:6px 0">
                   <code>${escapeHtml(file.relative_path || "")}</code>
