@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 0.40.0 – Import abbrechen und Sicherungen sicher löschen
+
+- Laufende Kameraimporte von SD-Karte, USB-Laufwerk oder Ordner können bis zum Abschluss abgebrochen werden. Der Abbruch erfolgt kooperativ und räumt temporäre bzw. bereits verschobene Importdateien nur nach sicherer Prüfung wieder auf.
+- Abgeschlossene Sicherungen können vollständig gelöscht werden, solange sie noch vollständig und unverändert im zentralen Arbeitsbestand liegen und in keiner Bibliothek bereits von einem Ereignis verwendet werden. Vor dem Löschen werden Dateigröße und SHA-256 erneut geprüft; die Oberfläche verlangt zusätzlich eine Browser-Bestätigung.
+- Bei „Quelle sichern“ weist die Oberfläche sichtbar und in der Hilfe darauf hin, dass Sicherungen als Kopie angelegt werden, Daten geschrieben werden und zusätzlicher Speicherplatz benötigt wird.
+- Das spätere gezielte Verwerfen einzelner Tage oder Dateien innerhalb einer Sicherung gehört ausdrücklich nicht zu 0.40.0.
+
 ### 0.35.7 – Erststart-Bibliothek wieder bedienbar
 
 - Die Onboarding-Seite „Erste Bibliothek einrichten“ rendert den Zeilenumbruch in Fehlermeldungen wieder als gültiges JavaScript-Escape statt als echten Zeilenumbruch innerhalb eines String-Literals.
