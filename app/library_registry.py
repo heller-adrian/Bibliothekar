@@ -1000,23 +1000,6 @@ def remove_source_backup(
             for row in canonical_rows
         ]
 
-        if canonical_ids:
-            placeholders = ",".join("?" for _ in canonical_ids)
-            claim = connection.execute(
-                f"""
-                SELECT 1
-                FROM family_claims
-                WHERE canonical_family_id IN ({placeholders})
-                LIMIT 1
-                """,
-                tuple(canonical_ids),
-            ).fetchone()
-            if claim is not None:
-                raise LibraryRegistryError(
-                    "Die Sicherung kann nicht gelöscht werden, weil mindestens "
-                    "eine ihrer Dateifamilien noch einer Bibliothek zugeordnet ist."
-                )
-
         cursor = connection.execute(
             "DELETE FROM source_backups WHERE backup_id = ?",
             (clean_backup_id,),
