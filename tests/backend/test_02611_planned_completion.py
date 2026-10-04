@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
 from app.database import (
@@ -72,7 +73,7 @@ def _preview(family_ids, *, end_time: str):
 
 
 def test_02611_version():
-    assert APP_VERSION == "0.27.5"
+    assert APP_VERSION == PACKAGE_VERSION
 
 
 def test_02611_planned_shrink_is_complete_and_can_expand_again(tmp_path: Path):

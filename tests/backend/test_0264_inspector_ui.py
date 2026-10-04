@@ -8,9 +8,13 @@ def source(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_version_is_0264():
-    assert 'APP_VERSION = "0.27.5"' in source("app/main.py")
-    assert "Aktueller Entwicklungsstand: **0.34.0**" in source("README.md")
+def test_version_sources_are_consistent():
+    from app import __version__ as package_version
+
+    main_source = source("app/main.py")
+    assert "from app import __version__" in main_source
+    assert "APP_VERSION = __version__" in main_source
+    assert f"Aktuelle veröffentlichte Version: **{package_version}**" in source("README.md")
 
 
 def test_workspace_preview_preserves_tree_and_db_facts():

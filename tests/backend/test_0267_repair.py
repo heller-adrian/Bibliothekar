@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 import subprocess
 import textwrap
 
@@ -13,7 +14,7 @@ def _js_block(start_marker: str, end_marker: str) -> str:
 
 
 def test_0267_version_and_planning_helpers_are_present():
-    assert APP_VERSION == "0.27.5"
+    assert APP_VERSION == PACKAGE_VERSION
     assert "function planningOverview()" in WORKSPACE_HTML
     assert "function availableDayGroups()" in WORKSPACE_HTML
 

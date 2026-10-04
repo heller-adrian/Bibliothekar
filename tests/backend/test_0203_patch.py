@@ -1,10 +1,11 @@
+from app import __version__ as PACKAGE_VERSION
 from app.main import APP_VERSION
 from app.workspace_ui import WORKSPACE_HTML
 from app.events_ui import EVENTS_HTML
 
 
 def test_0203_version():
-    assert APP_VERSION == "0.27.5"
+    assert APP_VERSION == PACKAGE_VERSION
 
 
 def test_no_event_continuation_uses_only_day_segments_and_locks_existing():

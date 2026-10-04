@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
 from app.database import initialize_database, database_connection, list_global_tasks
@@ -21,7 +22,7 @@ def seed(db: Path):
 
 
 def test_version_0202():
-    assert APP_VERSION == '0.27.5'
+    assert APP_VERSION == PACKAGE_VERSION
 
 
 def test_stale_pending_reassignment_disappears_when_family_is_assigned_again(tmp_path):

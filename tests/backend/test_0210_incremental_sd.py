@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 import hashlib
 import json
@@ -21,7 +22,7 @@ def _sha(data: bytes) -> str:
 
 
 def test_0210_version_and_schema(tmp_path: Path):
-    assert main.APP_VERSION == "0.27.5"
+    assert main.APP_VERSION == PACKAGE_VERSION
     assert main.RELEASE_VERSION == "0.28.7"
     db = tmp_path / "kamera.sqlite3"
     status = initialize_database(db)

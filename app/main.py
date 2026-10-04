@@ -19,6 +19,7 @@ from PIL import Image, ImageOps
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from app import __version__
 from app.workspace_ui import WORKSPACE_HTML
 from app.events_ui import EVENTS_HTML
 from app.transfer_ui import TRANSFER_HTML
@@ -265,7 +266,7 @@ from app.archive_reassignment import (
 )
 
 
-APP_VERSION = "0.27.5"
+APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
 DEPLOYMENT_VERSION = "0.40.1"
 

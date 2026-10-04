@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 from app.events_ui import EVENTS_HTML
 
@@ -42,7 +43,7 @@ def test_0212_event_ui_has_atomic_reassignment_and_segment_delete():
 def test_0212_version_and_sd_idle_copy():
     from app.main import APP_VERSION, index
 
-    assert APP_VERSION == "0.27.5"
+    assert APP_VERSION == PACKAGE_VERSION
     html = index().body.decode() if hasattr(index(), "body") else str(index())
     assert "Keine neuen Dateien" in html
     assert "Verwaltungsdateien ignoriert" in html

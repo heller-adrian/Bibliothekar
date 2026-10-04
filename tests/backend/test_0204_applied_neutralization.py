@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 import hashlib
 
@@ -96,7 +97,7 @@ def _assert_removed_family_stays_in_place(db, workspace, family_id, expected_pat
 
 
 def test_version_0204():
-    assert APP_VERSION == '0.27.5'
+    assert APP_VERSION == PACKAGE_VERSION
 
 
 def test_applied_normal_event_removed_family_stays_at_old_path_until_reconcile(tmp_path):
