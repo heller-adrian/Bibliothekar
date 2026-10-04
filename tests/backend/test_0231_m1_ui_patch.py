@@ -1,9 +1,10 @@
+from app import __version__ as PACKAGE_VERSION
 from app import main
 from app.ui_shell import BIBLIOTHEKAR_CSS
 
 
 def test_0231_version():
-    assert main.APP_VERSION == "0.27.5"
+    assert main.APP_VERSION == PACKAGE_VERSION
 
 
 def test_0231_workspace_main_actions_are_blue_and_card_is_aligned():
