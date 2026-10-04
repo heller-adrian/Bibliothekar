@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 0.40.2 – mobile Von–Bis-Eingabe vervollständigen
+
+- Tagessegmente von „Ohne Ereignis“ zeigen auf Handybreite nur noch eine gemeinsame Überschrift „Von–Bis“ statt der störenden Einzelbeschriftungen „Tag“, „Von“ und „Bis“.
+- Darunter stehen zwei vollständige Zeilen: jeweils Tag, Monat/Jahr und Uhrzeit. Das Enddatum wird als ausgegraute Spiegelzeile des gewählten Tages angezeigt und folgt einer Tagesänderung automatisch.
+- Die Darstellung gilt sowohl beim Erstellen/Fortführen von „Ohne Ereignis“ im Arbeitsbereich als auch bei der späteren Ereignisbearbeitung.
+- 0.40.2 ist ein reiner Darstellungs-Patch auf Basis von 0.40.1; Ereignislogik und Dateizuordnung bleiben unverändert.
+
 ### 0.40.1 – mobile Import- und Ereignisansicht nachschärfen
 
 - Lange Dateipfade und Sicherungsnamen in der Liste übersprungener Importduplikate umbrechen innerhalb ihrer Karte und laufen auf schmalen Displays nicht mehr über den Rahmen.

@@ -1309,6 +1309,66 @@ EVENTS_HTML = r"""<!doctype html>
         font-size:clamp(.59rem,2.72vw,.7rem);
       }
     }
+
+    /* 0.40.2: mobile No-Event-Zeitsegmente mit zwei vollständigen Datums-/Zeitzeilen. */
+    .no-event-mobile-range-title,
+    .no-event-end-date-mirror {
+      display:none;
+    }
+    @media (max-width:820px) {
+      .no-event-segment-fields {
+        grid-template-columns:minmax(0,1fr) minmax(96px,.42fr);
+        gap:8px;
+        align-items:end;
+      }
+      .no-event-mobile-range-title {
+        display:block;
+        grid-column:1 / -1;
+        grid-row:1;
+        font-weight:700;
+        line-height:1.15;
+        margin:0 0 1px;
+      }
+      .no-event-day-field {
+        grid-column:1;
+        grid-row:2;
+        min-width:0;
+      }
+      .no-event-start-field {
+        grid-column:2;
+        grid-row:2;
+        min-width:0;
+      }
+      .no-event-end-date-mirror {
+        display:grid;
+        grid-column:1;
+        grid-row:3;
+        grid-template-columns:76px minmax(0,1fr);
+        gap:6px;
+        min-width:0;
+      }
+      .no-event-end-date-mirror input {
+        width:100%;
+        min-width:0;
+      }
+      .no-event-end-field {
+        display:block;
+        grid-column:2;
+        grid-row:3;
+        min-width:0;
+      }
+      .no-event-segment-fields .no-event-desktop-caption {
+        display:none;
+      }
+      .no-event-segment-remove {
+        grid-column:1 / -1;
+        grid-row:4;
+        width:auto;
+        min-width:0;
+        justify-self:end;
+        padding:7px 10px;
+      }
+    }
 </style>
 </head>
 
@@ -2824,7 +2884,7 @@ EVENTS_HTML = r"""<!doctype html>
         ? String(monthKey)
         : String(day||"").slice(0,7);
       if (!/^\d{4}-\d{2}$/.test(fixedMonth)) {
-        return `<label class="edit-field no-event-day-field"><span>Tag</span><select data-segment-day ${structural?"":"disabled"}><option value="${escapeHtml(day)}">${escapeHtml(String(day||"").slice(8,10)||"—")}</option></select></label>`;
+        return `<label class="edit-field no-event-day-field"><span class="no-event-desktop-caption">Tag</span><select data-segment-day ${structural?"":"disabled"}><option value="${escapeHtml(day)}">${escapeHtml(String(day||"").slice(8,10)||"—")}</option></select></label>`;
       }
       const maxDay=new Date(Number(fixedMonth.slice(0,4)),Number(fixedMonth.slice(5,7)),0).getDate();
       const current=String(day||"").startsWith(fixedMonth+"-") ? String(day) : `${fixedMonth}-01`;
@@ -2833,8 +2893,24 @@ EVENTS_HTML = r"""<!doctype html>
         const value=`${fixedMonth}-${number}`;
         return `<option value="${escapeHtml(value)}" ${value===current?"selected":""}>${number}</option>`;
       }).join("");
-      return `<label class="edit-field no-event-day-field"><span>Tag</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select data-segment-day data-locked-month="${escapeHtml(fixedMonth)}" ${structural?"":"disabled"}>${options}</select><input type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+      return `<label class="edit-field no-event-day-field"><span class="no-event-desktop-caption">Tag</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select data-segment-day data-locked-month="${escapeHtml(fixedMonth)}" ${structural?"":"disabled"}>${options}</select><input type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
     }
+    function noEventDateMirror(day) {
+      const value=String(day||"");
+      return `<div class="no-event-end-date-mirror" aria-label="Enddatum"><input type="text" data-segment-end-day-display value="${escapeHtml(value.slice(8,10)||"—")}" disabled aria-label="Tag"><input type="text" data-segment-end-month-year-display value="${escapeHtml(monthYearForIso(value))}" disabled aria-label="Monat und Jahr"></div>`;
+    }
+
+    function syncNoEventDateMirror(row) {
+      if(!row)return;
+      const control=row.querySelector("[data-segment-day]");
+      if(!control)return;
+      const value=String(control.value||"");
+      const dayDisplay=row.querySelector("[data-segment-end-day-display]");
+      const monthDisplay=row.querySelector("[data-segment-end-month-year-display]");
+      if(dayDisplay)dayDisplay.value=value.slice(8,10)||"—";
+      if(monthDisplay)monthDisplay.value=monthYearForIso(value);
+    }
+
     function contiguousDayRangesFromValues(values) {
       const days=[...new Set(values.filter(Boolean))].sort();
       const ranges=[];
@@ -3047,9 +3123,11 @@ EVENTS_HTML = r"""<!doctype html>
         return `<details class="no-event-segment card collapse-card" data-segment-row style="display:block;padding:8px 10px;margin:6px 0">
           <summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>${escapeHtml(day)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
           <div class="no-event-segment-fields">
+            <div class="no-event-mobile-range-title">Von–Bis</div>
             ${noEventDayControl(fixedNoEventMonth, day, structural)}
-            <label class="edit-field no-event-start-field"><span>Von</span><input type="time" data-segment-start value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
-            <label class="edit-field no-event-end-field"><span>Bis</span><input type="time" data-segment-end value="${escapeHtml(end)}" ${structural ? "" : "disabled"}></label>
+            <label class="edit-field no-event-start-field"><span class="no-event-desktop-caption">Von</span><input type="time" data-segment-start value="${escapeHtml(start)}" aria-label="Von" ${structural ? "" : "disabled"}></label>
+            ${noEventDateMirror(day)}
+            <label class="edit-field no-event-end-field"><span class="no-event-desktop-caption">Bis</span><input type="time" data-segment-end value="${escapeHtml(end)}" aria-label="Bis" ${structural ? "" : "disabled"}></label>
             ${structural ? `<button type="button" data-remove-segment="${index}" class="danger-button no-event-segment-remove">Entfernen</button>` : ""}
           </div>
         </details>`;
@@ -3290,13 +3368,15 @@ EVENTS_HTML = r"""<!doctype html>
                 if(!input.value.startsWith(month+"-"))input.value=input.dataset.lastValid||min;
               }
               input.dataset.lastValid=input.value||"";
+              syncNoEventDateMirror(input.closest("[data-segment-row]"));
             };
+            syncNoEventDateMirror(input.closest("[data-segment-row]"));
           });
         };
         bindNoEventRows();
         document.getElementById("add-no-event-segment")?.addEventListener("click",()=>{
           const row=document.createElement("details");row.className="no-event-segment card collapse-card";row.dataset.segmentRow="1";row.open=true;row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
-          row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>Neues Tagessegment</strong><span class="muted">· 00:00–23:59</span></summary><div class="no-event-segment-fields">${noEventDayControl(fixedNoEventMonth,"",true)}<label class="edit-field no-event-start-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field no-event-end-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button no-event-segment-remove">Entfernen</button></div>`;
+          row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>Neues Tagessegment</strong><span class="muted">· 00:00–23:59</span></summary><div class="no-event-segment-fields"><div class="no-event-mobile-range-title">Von–Bis</div>${noEventDayControl(fixedNoEventMonth,"",true)}<label class="edit-field no-event-start-field"><span class="no-event-desktop-caption">Von</span><input type="time" data-segment-start value="00:00" aria-label="Von"></label>${noEventDateMirror(fixedNoEventMonth ? fixedNoEventMonth+"-01" : "")}<label class="edit-field no-event-end-field"><span class="no-event-desktop-caption">Bis</span><input type="time" data-segment-end value="23:59" aria-label="Bis"></label><button type="button" data-remove-segment class="danger-button no-event-segment-remove">Entfernen</button></div>`;
           container.appendChild(row);bindNoEventRows();row.querySelector("[data-segment-day]")?.focus();
         });
       }

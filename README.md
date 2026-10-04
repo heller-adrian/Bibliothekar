@@ -2,17 +2,17 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktuelle veröffentlichte Version: **0.40.1**
+Aktuelle veröffentlichte Version: **0.40.2**
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
-Fester Rollback-Tag: **`ghcr.io/heller-adrian/bibliothekar:0.40.1`**
+Fester Rollback-Tag: **`ghcr.io/heller-adrian/bibliothekar:0.40.2`**
 
 ## Updates
 
 Für normale Installationen wird in TrueNAS als Image-Version **`latest`** verwendet. `latest` zeigt ausschließlich auf den zuletzt freigegebenen Stand von `main`.
 
-Ein Update besteht damit nur noch daraus, in TrueNAS nach einem neuen Image zu suchen bzw. die App zu aktualisieren. Für reproduzierbare Installationen und Rollbacks bleiben zusätzlich feste Versionstags wie `0.40.1` erhalten.
+Ein Update besteht damit nur noch daraus, in TrueNAS nach einem neuen Image zu suchen bzw. die App zu aktualisieren. Für reproduzierbare Installationen und Rollbacks bleiben zusätzlich feste Versionstags wie `0.40.2` erhalten.
 
 Entwicklungsstände auf `patch/*` werden weiterhin separat als Testimages veröffentlicht, verändern aber **niemals** `latest`.
 

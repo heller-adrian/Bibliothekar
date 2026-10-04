@@ -1084,6 +1084,66 @@ WORKSPACE_HTML = r"""<!doctype html>
         grid-template-columns:76px minmax(0,1fr);
       }
     }
+
+    /* 0.40.2: mobile Tagessegmente als zwei vollständige Von–Bis-Zeilen. */
+    .no-event-mobile-range-title,
+    .no-event-end-date-mirror {
+      display:none;
+    }
+    @media (max-width:820px) {
+      .no-event-segment-fields {
+        grid-template-columns:minmax(0,1fr) minmax(96px,.42fr);
+        gap:8px;
+        align-items:end;
+      }
+      .no-event-mobile-range-title {
+        display:block;
+        grid-column:1 / -1;
+        grid-row:1;
+        font-weight:700;
+        line-height:1.15;
+        margin:0 0 1px;
+      }
+      .no-event-day-field {
+        grid-column:1;
+        grid-row:2;
+        min-width:0;
+      }
+      .no-event-start-field {
+        grid-column:2;
+        grid-row:2;
+        min-width:0;
+      }
+      .no-event-end-date-mirror {
+        display:grid;
+        grid-column:1;
+        grid-row:3;
+        grid-template-columns:76px minmax(0,1fr);
+        gap:6px;
+        min-width:0;
+      }
+      .no-event-end-date-mirror input {
+        width:100%;
+        min-width:0;
+      }
+      .no-event-end-field {
+        display:block;
+        grid-column:2;
+        grid-row:3;
+        min-width:0;
+      }
+      .no-event-segment-fields .no-event-desktop-caption {
+        display:none;
+      }
+      .no-event-segment-remove {
+        grid-column:1 / -1;
+        grid-row:4;
+        width:auto;
+        min-width:0;
+        justify-self:end;
+        padding:7px 10px;
+      }
+    }
   </style>
 </head>
 
@@ -3236,7 +3296,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     function lockedMonthDayControls(dayKey, locked) {
       const monthKey=activeNoEventMonthKey(dayKey) || String(dayKey||"").slice(0,7);
       if (!/^\d{4}-\d{2}$/.test(monthKey)) {
-        return `<label class="no-event-day-field"><span>Tag</span><select data-segment-day ${locked?"disabled":""}><option value="${escapeHtml(dayKey)}">${escapeHtml(String(dayKey||"").slice(8,10)||"—")}</option></select></label>`;
+        return `<label class="no-event-day-field"><span class="no-event-desktop-caption">Tag</span><select data-segment-day ${locked?"disabled":""}><option value="${escapeHtml(dayKey)}">${escapeHtml(String(dayKey||"").slice(8,10)||"—")}</option></select></label>`;
       }
       const maxDay=daysInMonth(monthKey);
       const fallback=`${monthKey}-01`;
@@ -3246,14 +3306,32 @@ WORKSPACE_HTML = r"""<!doctype html>
         const value=`${monthKey}-${day}`;
         return `<option value="${escapeHtml(value)}" ${value===current?"selected":""}>${day}</option>`;
       }).join("");
-      return `<label class="no-event-day-field"><span>Tag</span><span class="no-event-day-controls"><select data-segment-day data-locked-month="${escapeHtml(monthKey)}" ${locked?"disabled":""}>${options}</select><input type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+      return `<label class="no-event-day-field"><span class="no-event-desktop-caption">Tag</span><span class="no-event-day-controls"><select data-segment-day data-locked-month="${escapeHtml(monthKey)}" ${locked?"disabled":""}>${options}</select><input type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+    }
+
+    function noEventDateMirror(dayKey) {
+      const value=String(dayKey||"");
+      const day=value.slice(8,10)||"—";
+      const monthYear=monthYearForIso(value);
+      return `<div class="no-event-end-date-mirror" aria-label="Enddatum"><input type="text" data-segment-end-day-display value="${escapeHtml(day)}" disabled aria-label="Tag"><input type="text" data-segment-end-month-year-display value="${escapeHtml(monthYear)}" disabled aria-label="Monat und Jahr"></div>`;
+    }
+
+    function syncNoEventDateMirror(row) {
+      if(!row)return;
+      const control=row.querySelector("[data-segment-day]");
+      if(!control)return;
+      const value=String(control.value||"");
+      const dayDisplay=row.querySelector("[data-segment-end-day-display]");
+      const monthDisplay=row.querySelector("[data-segment-end-month-year-display]");
+      if(dayDisplay)dayDisplay.value=value.slice(8,10)||"—";
+      if(monthDisplay)monthDisplay.value=monthYearForIso(value);
     }
 
     function segmentRowHtml(day) {
       const dayKey=day.day_key||"",start=day.start_time||"00:00",end=day.end_time||"23:59",count=Number(day.family_count||0);
       const existing=Boolean(day._existing||day.existing_segment||day._locked||day.locked),isNew=Boolean(day._new||day.new_segment);
       if(existing)return `<div data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="1" data-new-segment="0" data-existing-segment="1" class="existing-segment-static"><strong>${escapeHtml(dayKey)} · BESTEHEND</strong><span class="muted">${escapeHtml(start)}–${escapeHtml(end)}${count?` · ${count} Familien`:""}</span></div>`;
-      return `<details data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="0" data-new-segment="${isNew?"1":"0"}" data-existing-segment="0" class="card collapse-card" style="padding:8px 10px;${isNew?"border:2px solid currentColor;":""}"><summary style="display:flex;justify-content:space-between;gap:8px;align-items:center;cursor:pointer"><strong>${escapeHtml(dayKey||"Neues Segment")}${isNew?" · NEU":""}</strong><span class="muted">${escapeHtml(start)}–${escapeHtml(end)}${count?` · ${count} freie Familien`:""}</span></summary><div class="no-event-segment-fields">${lockedMonthDayControls(dayKey,false)}<label class="no-event-start-field"><span>Von</span><input data-segment-start type="time" value="${escapeHtml(start)}"></label><label class="no-event-end-field"><span>Bis</span><input data-segment-end type="time" value="${escapeHtml(end)}"></label><button type="button" class="danger-button no-event-segment-remove" data-remove-no-event-segment>Entfernen</button></div></details>`;
+      return `<details data-no-event-segment data-day-key="${escapeHtml(dayKey)}" data-start-time="${escapeHtml(start)}" data-end-time="${escapeHtml(end)}" data-locked="0" data-new-segment="${isNew?"1":"0"}" data-existing-segment="0" class="card collapse-card" style="padding:8px 10px;${isNew?"border:2px solid currentColor;":""}"><summary style="display:flex;justify-content:space-between;gap:8px;align-items:center;cursor:pointer"><strong>${escapeHtml(dayKey||"Neues Segment")}${isNew?" · NEU":""}</strong><span class="muted">${escapeHtml(start)}–${escapeHtml(end)}${count?` · ${count} freie Familien`:""}</span></summary><div class="no-event-segment-fields"><div class="no-event-mobile-range-title">Von–Bis</div>${lockedMonthDayControls(dayKey,false)}<label class="no-event-start-field"><span class="no-event-desktop-caption">Von</span><input data-segment-start type="time" value="${escapeHtml(start)}" aria-label="Von"></label>${noEventDateMirror(dayKey)}<label class="no-event-end-field"><span class="no-event-desktop-caption">Bis</span><input data-segment-end type="time" value="${escapeHtml(end)}" aria-label="Bis"></label><button type="button" class="danger-button no-event-segment-remove" data-remove-no-event-segment>Entfernen</button></div></details>`;
     }
 
     function syncNoEventRangeDisplayFromSegments(){
@@ -3304,8 +3382,10 @@ WORKSPACE_HTML = r"""<!doctype html>
           input.dataset.lastValid=input.value||"";
           const row=input.closest("[data-no-event-segment]");
           if(row && input.value) row.dataset.dayKey=input.value;
+          syncNoEventDateMirror(row);
           syncNoEventRangeDisplayFromSegments();
         };
+        syncNoEventDateMirror(input.closest("[data-no-event-segment]"));
       });
       noEventSegmentList.querySelectorAll("[data-segment-start],[data-segment-end]").forEach(input => {
         input.onchange = () => syncNoEventRangeDisplayFromSegments();

@@ -1,15 +1,14 @@
 """0.40.1: mobile Import- und Ereignisansicht."""
 from pathlib import Path
 
-from app import main
+from app import __version__ as PACKAGE_VERSION
+from app import main, source_helper
 
 
 def test_0401_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.40.1"
-    assert 'version="0.40.1"' in Path("app/source_helper.py").read_text(encoding="utf-8")
-    assert '"version": "0.40.1"' in Path("app/source_helper.py").read_text(encoding="utf-8")
-    assert "patch-0.40.1" in Path("compose.example.yaml").read_text(encoding="utf-8")
-    assert "0.40.1 · Kamerakern 0.32.11" in Path("app/ui_shell.py").read_text(encoding="utf-8")
+    assert main.DEPLOYMENT_VERSION == PACKAGE_VERSION
+    assert source_helper.app.version == PACKAGE_VERSION
+    assert source_helper.healthz()["version"] == PACKAGE_VERSION
 
 
 def test_0401_duplicate_paths_wrap_inside_import_card():
