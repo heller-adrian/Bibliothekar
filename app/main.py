@@ -115,6 +115,8 @@ from app.pipeline import (
     sha256_file,
 )
 from app.folder_import import (
+    ImportCancelled,
+    cleanup_completed_folder_import,
     run_folder_import_job,
     quick_source_signature,
 )
@@ -153,6 +155,11 @@ from app.workspace_reconcile import (
 from app.backup_lifecycle import (
     list_backup_lifecycles,
     upsert_backup_lifecycle,
+)
+from app.backup_management import (
+    BackupDeletionError,
+    backup_deletion_status,
+    delete_backup,
 )
 from app.archive_transfer import (
     ArchiveVerificationError,
@@ -202,6 +209,7 @@ from app.library_registry import (
     remove_library_registration,
     unregister_library,
     list_library_import_job_ids,
+    remove_source_backup,
 )
 from app.library_context import (
     LibraryContext,
@@ -259,7 +267,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.35.7"
+DEPLOYMENT_VERSION = "0.40.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -529,6 +537,47 @@ def _requested_library_id(request: Request) -> str:
 
 WORKER_STOP = Event()
 WORKER_THREAD: Thread | None = None
+IMPORT_CANCEL_LOCK = Lock()
+IMPORT_CANCEL_REQUESTS: set[str] = set()
+
+
+def _request_import_cancel(job_id: str) -> None:
+    with IMPORT_CANCEL_LOCK:
+        IMPORT_CANCEL_REQUESTS.add(str(job_id))
+
+
+def _import_cancel_requested(job_id: str) -> bool:
+    with IMPORT_CANCEL_LOCK:
+        return str(job_id) in IMPORT_CANCEL_REQUESTS
+
+
+def _clear_import_cancel(job_id: str) -> None:
+    with IMPORT_CANCEL_LOCK:
+        IMPORT_CANCEL_REQUESTS.discard(str(job_id))
+
+
+def _remove_cancelled_import_job(job_id: str) -> None:
+    """Remove only DB/registry traces after the file pipeline rolled back safely."""
+    remove_source_backup(
+        REGISTRY_DATABASE_FILE,
+        f"{MAIN_LIBRARY_ID}:{job_id}",
+    )
+    with database_connection(DATABASE_FILE) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "DELETE FROM imported_source_files WHERE imported_job_id = ?",
+            (job_id,),
+        )
+        connection.execute(
+            "DELETE FROM jobs WHERE id = ?",
+            (job_id,),
+        )
+        connection.commit()
+    shutil.rmtree(LOG_PATH / "backups" / job_id, ignore_errors=True)
+    try:
+        _thumbnail_path(job_id).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _thumbnail_path(
@@ -1122,7 +1171,18 @@ def process_claimed_job(
                 work_root=work_root,
                 central_stock=True,
                 allow_workspace_source=managed_multiple_import,
+                cancellation_callback=(
+                    (lambda: _import_cancel_requested(job_id))
+                    if operation == "folder_import"
+                    else None
+                ),
             )
+            if operation == "folder_import" and _import_cancel_requested(job_id):
+                cleanup_completed_folder_import(
+                    result,
+                    Path(str((result.get("organization") or {}).get("working_root") or workspace_backup_root(workspace_path))),
+                )
+                raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
             organization = result.get("organization", {})
             if str(job.get("trigger_type") or "") in {"approved_sd", "usb_key"}:
                 set_job_source_volume_label(
@@ -1305,7 +1365,31 @@ def process_claimed_job(
                     flush=True,
                 )
 
+    except ImportCancelled:
+        try:
+            _remove_cancelled_import_job(job_id)
+        except Exception as cleanup_error:
+            print(
+                "Abgebrochener Import konnte nicht vollständig bereinigt werden:",
+                cleanup_error,
+                flush=True,
+            )
+            try:
+                fail_job(
+                    database_file,
+                    job_id,
+                    error_message=(
+                        "Import wurde abgebrochen; Bereinigung fehlgeschlagen: "
+                        + str(cleanup_error)
+                    ),
+                )
+            except Exception:
+                pass
+        finally:
+            _clear_import_cancel(job_id)
+        return
     except Exception as error:
+        _clear_import_cancel(job_id)
         try:
             if operation != "metadata_fixture_analysis":
                 upsert_backup_lifecycle(
@@ -3570,10 +3654,138 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
 )
 def api_jobs() -> dict[str, Any]:
     jobs = list_jobs()
+    central_root = workspace_backup_root(WORKSPACE_PATH)
+    for job in jobs:
+        if (
+            str(job.get("kind") or "") == "sd_import"
+            and str(job.get("operation") or "") == "folder_import"
+            and str(job.get("state") or "") == "completed"
+        ):
+            try:
+                deletion = backup_deletion_status(
+                    DATABASE_FILE,
+                    REGISTRY_DATABASE_FILE,
+                    central_root,
+                    str(job.get("id") or job.get("job_id") or ""),
+                )
+            except Exception as error:
+                deletion = {
+                    "allowed": False,
+                    "reason": str(error),
+                }
+            job["backup_delete_allowed"] = bool(deletion.get("allowed"))
+            job["backup_delete_reason"] = str(deletion.get("reason") or "")
+        else:
+            job["backup_delete_allowed"] = False
+            job["backup_delete_reason"] = ""
 
     return {
         "count": len(jobs),
         "jobs": jobs,
+    }
+
+
+@app.post(
+    "/api/jobs/{job_id}/cancel",
+    tags=["Import"],
+    status_code=202,
+)
+def api_cancel_import(job_id: str) -> JSONResponse:
+    job = get_job(DATABASE_FILE, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Import wurde nicht gefunden.")
+    if (
+        str(job.get("kind") or "") != "sd_import"
+        or str(job.get("operation") or "") != "folder_import"
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Nur laufende Kameraimporte können hier abgebrochen werden.",
+        )
+
+    state = str(job.get("state") or "")
+    if state == "queued":
+        with database_connection(DATABASE_FILE) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                "DELETE FROM jobs WHERE id = ? AND state = 'queued'",
+                (job_id,),
+            )
+            connection.commit()
+        if cursor.rowcount == 1:
+            _clear_import_cancel(job_id)
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "accepted": True,
+                    "cancelled": True,
+                    "message": "Import wurde vor dem Start abgebrochen.",
+                },
+            )
+        job = get_job(DATABASE_FILE, job_id)
+        state = str((job or {}).get("state") or "")
+
+    if state in {
+        "copying",
+        "verifying",
+        "backup_verified",
+        "analyzing_metadata",
+        "organizing",
+    }:
+        _request_import_cancel(job_id)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "accepted": True,
+                "cancelled": False,
+                "message": "Abbruch wurde angefordert. Der Import wird sicher zurückgerollt.",
+            },
+        )
+
+    if state == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Der Import ist bereits abgeschlossen und kann nicht mehr abgebrochen werden.",
+        )
+    raise HTTPException(
+        status_code=409,
+        detail="Dieser Import kann in seinem aktuellen Zustand nicht abgebrochen werden.",
+    )
+
+
+@app.delete(
+    "/api/backups/{job_id}",
+    tags=["Sicherungen"],
+)
+def api_delete_backup(job_id: str) -> dict[str, Any]:
+    library_ids = [
+        str(row.get("library_id") or MAIN_LIBRARY_ID)
+        for row in list_libraries(
+            REGISTRY_DATABASE_FILE,
+            active_only=False,
+            registered_only=False,
+        )
+    ]
+    try:
+        result = delete_backup(
+            DATABASE_FILE,
+            REGISTRY_DATABASE_FILE,
+            workspace_backup_root(WORKSPACE_PATH),
+            job_id,
+        )
+    except BackupDeletionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    shutil.rmtree(LOG_PATH / "backups" / job_id, ignore_errors=True)
+    for library_id in set([MAIN_LIBRARY_ID, *library_ids]):
+        try:
+            _thumbnail_path(job_id, library_id=library_id).unlink()
+        except FileNotFoundError:
+            pass
+
+    return {
+        "deleted": True,
+        **result,
     }
 
 
@@ -8133,6 +8345,31 @@ def index() -> str:
       font-size: 1.2rem;
     }
 
+    .bk-import-head {
+      display:flex;
+      align-items:center;
+      flex-wrap:wrap;
+      gap:0.55rem;
+    }
+
+    .bk-copy-warning {
+      color:var(--warning);
+      font-size:0.82rem;
+      line-height:1.35;
+    }
+
+    .bk-job-actions {
+      display:flex;
+      flex-wrap:wrap;
+      gap:0.55rem;
+      margin-top:0.8rem;
+    }
+
+    .bk-job-actions button {
+      min-height:38px;
+      padding:0.45rem 0.75rem;
+    }
+
     .import-controls {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -8503,7 +8740,8 @@ def index() -> str:
     <section class="card import-panel">
       <div class="bk-import-head">
         <h2>Quelle sichern</h2>
-        <button class="bk-help" type="button" aria-label="Hilfe zur Quellenwahl" data-help="Quelle auswählen und anschließend sicher einlesen. Wähle SD-Karte, externes Laufwerk oder einen Ordner.">?</button>
+        <button class="bk-help" type="button" aria-label="Hilfe zur Quellenwahl" data-help="Quelle auswählen und anschließend sicher einlesen. Wähle SD-Karte, externes Laufwerk oder einen Ordner. Achtung: Jede Sicherung wird als vollständige Kopie angelegt; dabei werden Daten in den Arbeitsbestand geschrieben und zusätzlicher Speicherplatz benötigt.">?</button>
+        <span class="bk-copy-warning"><strong>Achtung:</strong> Sicherungen werden als Kopie angelegt und belegen zusätzlichen Speicherplatz.</span>
       </div>
 
       <div id="bk-source-picker" class="bk-source-picker" aria-label="Importquelle wählen">
@@ -8930,9 +9168,13 @@ def index() -> str:
 
     function renderJob(job) {
       const state =
-        stateLabels[job.state]
-        || job.state
-        || "Unbekannt";
+        job.stage === "cancelled"
+        ? "Abgebrochen"
+        : (
+          stateLabels[job.state]
+          || job.state
+          || "Unbekannt"
+        );
 
       const presentation =
         jobPresentation(job);
@@ -9002,6 +9244,31 @@ def index() -> str:
         ? `<div class="bk-job-thumb"><img src="/api/jobs/${encodeURIComponent(jobId)}/thumbnail" alt="" loading="lazy" onerror="this.remove();this.parentElement.textContent='▣'"></div>`
         : `<div class="bk-job-thumb" aria-hidden="true">▣</div>`;
 
+      const cancellable =
+        job.operation === "folder_import"
+        && (job.state === "queued" || activeStates.has(job.state));
+      const completedBackup =
+        job.operation === "folder_import"
+        && job.kind === "sd_import"
+        && job.state === "completed";
+      const backupActions = (cancellable || completedBackup)
+        ? `
+          <div class="bk-job-actions">
+            ${cancellable
+              ? `<button class="secondary" type="button" data-cancel-import="${escapeHtml(jobId)}">Import abbrechen</button>`
+              : ""}
+            ${completedBackup
+              ? `<button class="danger" type="button"
+                    data-delete-backup="${escapeHtml(jobId)}"
+                    ${job.backup_delete_allowed ? "" : "disabled"}
+                    title="${escapeHtml(job.backup_delete_allowed ? "Sicherung vollständig löschen" : (job.backup_delete_reason || "Sicherung kann nicht gelöscht werden."))}">
+                    Sicherung löschen
+                 </button>`
+              : ""}
+          </div>
+        `
+        : "";
+
       return `
         <article class="job">
           ${thumbnail}
@@ -9070,6 +9337,8 @@ def index() -> str:
               ${escapeHtml(job.stage || "—")}
             </span>
           </div>
+
+          ${backupActions}
 
           <details data-job-detail-key="${escapeHtml(jobId)}:technical">
             <summary>
@@ -9544,6 +9813,61 @@ def index() -> str:
         jobHistoryLimit += 5;
         renderJobHistory(open);
       });
+
+      for (const button of jobsElement.querySelectorAll("[data-cancel-import]")) {
+        button.addEventListener("click", async () => {
+          const jobId = String(button.dataset.cancelImport || "");
+          if (!jobId) return;
+          button.disabled = true;
+          try {
+            const response = await fetch(
+              `/api/jobs/${encodeURIComponent(jobId)}/cancel`,
+              {method:"POST"}
+            );
+            const data = await response.json();
+            if (!response.ok) {
+              throw new Error(data.detail || "Import konnte nicht abgebrochen werden.");
+            }
+            noticeElement.classList.remove("error-text");
+            noticeElement.textContent = data.message || "Abbruch wurde angefordert.";
+            await loadJobs();
+          } catch (error) {
+            showError(error);
+            button.disabled = false;
+          }
+        });
+      }
+
+      for (const button of jobsElement.querySelectorAll("[data-delete-backup]")) {
+        button.addEventListener("click", async () => {
+          const jobId = String(button.dataset.deleteBackup || "");
+          if (!jobId) return;
+          const confirmed = window.confirm(
+            "Diese Sicherung wird vollständig aus dem Arbeitsbestand gelöscht. "
+            + "Die zugehörigen Dateien werden unwiderruflich gelöscht. "
+            + "Möchtest du wirklich fortfahren?"
+          );
+          if (!confirmed) return;
+          button.disabled = true;
+          try {
+            const response = await fetch(
+              `/api/backups/${encodeURIComponent(jobId)}`,
+              {method:"DELETE"}
+            );
+            const data = await response.json();
+            if (!response.ok) {
+              throw new Error(data.detail || "Sicherung konnte nicht gelöscht werden.");
+            }
+            noticeElement.classList.remove("error-text");
+            noticeElement.textContent =
+              `Sicherung gelöscht: ${data.deleted_file_count || 0} Dateien.`;
+            await Promise.all([loadJobs(), loadSources()]);
+          } catch (error) {
+            showError(error);
+            await loadJobs().catch(() => null);
+          }
+        });
+      }
     }
 
     async function loadJobs() {
