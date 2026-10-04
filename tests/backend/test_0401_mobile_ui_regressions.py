@@ -21,14 +21,16 @@ def test_0401_duplicate_paths_wrap_inside_import_card():
 
 
 def test_0401_no_event_segment_has_mobile_two_row_layout():
-    source = Path("app/events_ui.py").read_text(encoding="utf-8")
-    assert 'class="no-event-segment-fields"' in source
-    assert "no-event-day-field" in source
-    assert "no-event-start-field" in source
-    assert "no-event-end-field" in source
-    assert ".no-event-end-field {" in source
-    assert "grid-column:1 / -1;" in source
-    assert "grid-row:2;" in source
+    event_source = Path("app/events_ui.py").read_text(encoding="utf-8")
+    workspace_source = Path("app/workspace_ui.py").read_text(encoding="utf-8")
+    for source in (event_source, workspace_source):
+        assert 'class="no-event-segment-fields"' in source
+        assert "no-event-day-field" in source
+        assert "no-event-start-field" in source
+        assert "no-event-end-field" in source
+        assert ".no-event-end-field {" in source
+        assert "grid-column:1 / -1;" in source
+        assert "grid-row:2;" in source
 
 
 def test_0401_mobile_event_summary_is_three_compact_cards_in_one_row():
