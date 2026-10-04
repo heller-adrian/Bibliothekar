@@ -1,9 +1,10 @@
+from app import __version__ as PACKAGE_VERSION
 from app.main import APP_VERSION
 from app.events_ui import EVENTS_HTML
 
 
 def test_0207_version():
-    assert APP_VERSION == "0.27.5"
+    assert APP_VERSION == PACKAGE_VERSION
 
 
 def test_reassignment_warning_is_spaced_from_event_details():
