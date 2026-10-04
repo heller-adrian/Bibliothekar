@@ -12,7 +12,6 @@ from app.library_registry import (
     MAIN_LIBRARY_ID,
     list_libraries,
     remove_source_backup,
-    source_backup_claim_count,
 )
 from app.pipeline import sha256_file
 
@@ -198,16 +197,6 @@ def backup_deletion_status(
                 "reason": (
                     "Die Sicherung wird bereits von mindestens einem Ereignis "
                     "verwendet und kann deshalb nicht mehr vollständig gelöscht werden."
-                ),
-            }
-
-        backup_id = f"{str(library.get('library_id') or MAIN_LIBRARY_ID)}:{job_id}"
-        if source_backup_claim_count(registry_path, backup_id) > 0:
-            return {
-                "allowed": False,
-                "reason": (
-                    "Mindestens eine Dateifamilie der Sicherung ist bereits "
-                    "einer Bibliothek vorbehalten."
                 ),
             }
 
