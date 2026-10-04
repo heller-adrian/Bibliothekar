@@ -2950,7 +2950,8 @@ BIBLIOTHEKAR_JS = r"""
     if (menuHome) menuHome.insertBefore(menu, menuHomeNext);
   }
 
-  function openMenu(anchor=menuButton) {
+  function openMenu() {
+    const anchor = arguments[0] || menuButton;
     if (!menu || !anchor) return;
     const rect=anchor.getBoundingClientRect();
     document.body.appendChild(menu);
@@ -2970,7 +2971,8 @@ BIBLIOTHEKAR_JS = r"""
     if (taskPanelHome) taskPanelHome.insertBefore(taskPanel, taskPanelHomeNext);
   }
 
-  function openTaskPanel(anchor=tasksButton) {
+  function openTaskPanel() {
+    const anchor = arguments[0] || tasksButton;
     if (!taskPanel || !anchor) return;
     const rect=anchor.getBoundingClientRect();
     document.body.appendChild(taskPanel);

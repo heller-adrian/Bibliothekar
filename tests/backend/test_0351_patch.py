@@ -18,8 +18,10 @@ def test_0351_pwa_popovers_use_visible_triggers():
     assert 'id="bk-pwa-menu-button"' in html
     assert "pwaTasksButton?.addEventListener" in BIBLIOTHEKAR_JS
     assert "pwaMenuButton?.addEventListener" in BIBLIOTHEKAR_JS
-    assert "openTaskPanel(anchor=tasksButton)" in BIBLIOTHEKAR_JS
-    assert "openMenu(anchor=menuButton)" in BIBLIOTHEKAR_JS
+    assert "function openTaskPanel()" in BIBLIOTHEKAR_JS
+    assert "const anchor = arguments[0] || tasksButton" in BIBLIOTHEKAR_JS
+    assert "function openMenu()" in BIBLIOTHEKAR_JS
+    assert "const anchor = arguments[0] || menuButton" in BIBLIOTHEKAR_JS
 
 
 def test_0351_standalone_header_is_fixed_compact_and_shows_library():
