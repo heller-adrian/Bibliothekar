@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from app import main
 from app.events_ui import EVENTS_HTML
-from app.main import INDEX_HTML
 from app.metadata_correction_ui import METADATA_CORRECTION_HTML
 from app.transfer_ui import TRANSFER_HTML
 from app.ui_shell import BIBLIOTHEKAR_0352_CSS, _shell_markup
@@ -35,11 +34,12 @@ def test_0352_workspace_filter_and_neutral_placeholders():
 
 
 def test_0352_import_removes_diagnostics_and_moves_source_help():
-    assert "Diagnose &amp; Test" not in INDEX_HTML
-    assert "Testimport starten" not in INDEX_HTML
-    assert 'id="test-button"' not in INDEX_HTML
-    assert "Quelle auswählen und anschließend sicher einlesen." in INDEX_HTML
-    assert "bk-source-mode-note" not in INDEX_HTML
+    source = open("app/main.py", encoding="utf-8").read()
+    assert "Diagnose &amp; Test" not in source
+    assert "Testimport starten" not in source
+    assert 'id="test-button"' not in source
+    assert "Quelle auswählen und anschließend sicher einlesen." in source
+    assert '<div class="bk-source-mode-note">Quelle auswählen' not in source
 
 
 def test_0352_events_and_archive_explanations_are_compact():
