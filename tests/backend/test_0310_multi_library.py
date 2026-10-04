@@ -156,9 +156,9 @@ def _main_foundation(tmp_path: Path):
 
 
 def test_0310_versions_and_frozen_css_contract():
-    assert main.DEPLOYMENT_VERSION == "0.35.4"
-    assert source_helper.app.version == "0.35.4"
-    assert source_helper.healthz()["version"] == "0.35.4"
+    assert main.DEPLOYMENT_VERSION == "0.35.5"
+    assert source_helper.app.version == "0.35.5"
+    assert source_helper.healthz()["version"] == "0.35.5"
     assert len(ui_shell.BIBLIOTHEKAR_CSS) == 43515
     assert ".bk-library-card" not in ui_shell.BIBLIOTHEKAR_CSS
     assert ".bk-library-card" in ui_shell.BIBLIOTHEKAR_0310_CSS
