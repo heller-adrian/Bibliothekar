@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -8,9 +9,16 @@ def source(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_version_is_0264():
-    assert 'APP_VERSION = "0.27.5"' in source("app/main.py")
-    assert "Aktueller Entwicklungsstand: **0.34.0**" in source("README.md")
+def test_version_sources_are_consistent():
+    init_source = source("app/__init__.py")
+    match = re.search(r'__version__\\s*=\\s*"([^"]+)"', init_source)
+    assert match is not None
+    version = match.group(1)
+
+    main_source = source("app/main.py")
+    assert "from app import __version__" in main_source
+    assert "APP_VERSION = __version__" in main_source
+    assert f"Aktuelle veröffentlichte Version: **{version}**" in source("README.md")
 
 
 def test_workspace_preview_preserves_tree_and_db_facts():
