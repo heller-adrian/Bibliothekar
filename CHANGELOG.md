@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### 0.35.2 – Kompaktere Web-App und reduzierte Hilfetexte
+
+- Web-App-Kopf weiter verkleinert; aktive Bibliothek steht rechts neben „Bibliothekar“ statt darunter.
+- Untere Web-App-Navigation auf allen Seiten vereinheitlicht und etwas kompakter. Der grüne Aufgaben-Haken entfällt; Aufgabenname und Zähler bleiben, der Menübutton erhält mehr Abstand zu abgerundeten Geräteecken.
+- Aufnahmen: Kennzahlen bleiben auf dem Handy wieder im Dokumentfluss und erscheinen als vier sehr kompakte Kacheln in einer Zeile. Die Aktionszeile im Sekundärheader ist enger und an den beiden Bereichsreitern ausgerichtet.
+- Archiv: vier Kennzahlen sind auf dem Handy deutlich kompakter; erklärende Abschnittstexte wurden in Fragezeichen-Hilfen verschoben.
+- Seitenuntertitel von Import, Aufnahmen, Ereignisse, Archiv und Metadatenkorrektion wurden durch Fragezeichen-Hilfen ersetzt.
+- Import: „Quelle auswählen …“ liegt nun im vorhandenen Hilfe-Button; „Diagnose & Test“ und der künstliche Testimport wurden aus der Oberfläche entfernt. Lange Statuswerte wie „Beschreibbar“ werden kleiner gesetzt statt abgeschnitten.
+- Arbeitsbereich: der Sicherungsfilter besitzt nun ein Filter-Icon. Neutrale Beispiele lauten „Urlaub“ und „Tag 1“ statt persönlicher Bezeichnungen.
+- Ereignisse: die große Erklärungskarte „Planung, Prüfung und bestätigte Sortierung“ entfällt.
+- Metadatenkorrektion wird in einem Folgeschritt dieses Patches auf die gleiche kompakte Hilfe- und Pfadlogik angepasst.
+- Der bisherige Dateiname in der Zielstruktur-Vorschau bleibt in diesem Patch bewusst unverändert.
+
+
 ### 0.35.1 – Mobile Header, Sekundärnavigation und Dichte
 
 - Aufgaben- und Hamburger-Menü verwenden in Web-App und normaler Website eigene echte Trigger. Das bisherige Weiterreichen eines PWA-Klicks an einen versteckten Desktop-Button entfällt; Popover werden am tatsächlich sichtbaren Auslöser positioniert und nicht sofort wieder geschlossen.

@@ -132,12 +132,12 @@ TRANSFER_HTML = r'''<!doctype html>
   </div>
 
   <section>
-    <div class="section-head"><div><h2>Zur Archivprüfung</h2><p class="muted">Neu angewendete Ereignisse werden hier geprüft und anschließend von der SSD freigegeben. Neueste Ereignisse stehen zuerst.</p></div></div>
+    <div class="section-head"><div class="bk-section-title-row"><h2>Zur Archivprüfung</h2><button class="bk-help" type="button" aria-label="Hilfe zur Archivprüfung" data-help="Neu angewendete Ereignisse werden hier geprüft und anschließend von der SSD freigegeben. Neueste Ereignisse stehen zuerst.">?</button></div></div>
     <div id="archive-notice" class="notice" hidden></div>
     <div id="archive-list" class="list"><div class="empty">Wird geladen …</div></div>
   </section>
   <section>
-    <div class="section-head"><div><h2>Archivverlauf</h2><p class="muted">Freigegebene Ereignisse bleiben hier nachvollziehbar. Neueste Ereignisse stehen zuerst.</p></div></div>
+    <div class="section-head"><div class="bk-section-title-row"><h2>Archivverlauf</h2><button class="bk-help" type="button" aria-label="Hilfe zum Archivverlauf" data-help="Freigegebene Ereignisse bleiben hier nachvollziehbar. Neueste Ereignisse stehen zuerst.">?</button></div></div>
     <div id="history-list" class="list"><div class="empty">Wird geladen …</div></div>
   </section>
 </main>

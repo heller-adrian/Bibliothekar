@@ -1224,16 +1224,6 @@ EVENTS_HTML = r"""<!doctype html>
       aria-live="polite"
     ></p>
 
-    <div class="intro">
-      <strong>Planung, Prüfung und bestätigte Sortierung</strong>
-      <div class="muted">
-        Der Sortierplan bleibt zunächst vollständig lesend. Erst nach
-        einer zusätzlichen ausdrücklichen Bestätigung werden die Dateien
-        im SSD-Arbeitsbereich vollständig per SHA-256 geprüft und anschließend
-        ohne Überschreiben verschoben. Die Kamerabibliothek bleibt unberührt.
-      </div>
-    </div>
-
     <section
       id="summary"
       class="summary"

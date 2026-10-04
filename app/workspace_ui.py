@@ -338,10 +338,12 @@ WORKSPACE_HTML = r"""<!doctype html>
     .suggestion-files { margin-top:10px; }
     .suggestion-files code { white-space:normal; overflow-wrap:anywhere; }
     .backup-filter { min-width:min(620px,100%); }
-    .backup-filter > summary { display:flex;align-items:center;justify-content:space-between;gap:18px;padding:11px 14px;border:1px solid var(--border);border-radius:12px;background:var(--panel-soft);cursor:pointer; }
+    .backup-filter > summary { display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:center;gap:9px;padding:11px 14px;border:1px solid var(--border);border-radius:12px;background:var(--panel-soft);cursor:pointer; }
     .backup-filter > summary::marker { content:""; }
+    .backup-filter-icon{width:19px;height:19px;display:grid;place-items:center;color:var(--text)}
+    .backup-filter-icon svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
     .backup-filter-label { color:var(--muted);font-weight:500; }
-    .backup-filter-value { font-weight:750; }
+    .backup-filter-value { font-weight:750;justify-self:end;text-align:right;min-width:0; }
     .backup-filter-panel { margin-top:8px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);display:grid;gap:10px; }
     .backup-filter-list { display:grid;gap:7px; }
     .backup-filter-choice { display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:8px 9px;border:1px solid var(--border);border-radius:10px;background:var(--panel-soft); }
@@ -1041,6 +1043,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       <div class="bk-workspace-job-picker">
         <details id="backup-filter" class="backup-filter">
           <summary>
+            <span class="backup-filter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16l-6.2 7.1v5.1l-3.6 1.8v-6.9z"/></svg></span>
             <span class="backup-filter-label">Sicherungsfilter</span>
             <strong id="backup-filter-value" class="backup-filter-value">Alle aktiven Sicherungen</strong>
           </summary>
@@ -1248,7 +1251,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           <input
             id="event-name"
             type="text"
-            placeholder="Zum Beispiel Israel"
+            placeholder="Zum Beispiel Urlaub"
           >
         </label>
 
@@ -1522,10 +1525,6 @@ WORKSPACE_HTML = r"""<!doctype html>
         if(selectionBar.parentNode!==selectionDockTarget) selectionDockTarget.appendChild(selectionBar);
         selectionBar.classList.add("is-header-docked");
         document.querySelector(".bk-workspace-subnav")?.classList.add("has-selection-dock");
-        if(summarySection && captureSummarySlot && summarySection.parentNode!==captureSummarySlot){
-          captureSummarySlot.appendChild(summarySection);
-        }
-        summarySection?.classList.add("compact-heading-summary");
         requestAnimationFrame(alignHeaderSelectionSummary);
       } else {
         if(selectionBar.parentNode!==selectionBarAnchor.parentNode){
@@ -1534,6 +1533,13 @@ WORKSPACE_HTML = r"""<!doctype html>
         selectionBar.classList.remove("is-header-docked");
         selectionSummary?.style.removeProperty("left");
         document.querySelector(".bk-workspace-subnav")?.classList.remove("has-selection-dock");
+      }
+      if(workspaceStaticDesktop()){
+        if(summarySection && captureSummarySlot && summarySection.parentNode!==captureSummarySlot){
+          captureSummarySlot.appendChild(summarySection);
+        }
+        summarySection?.classList.add("compact-heading-summary");
+      } else {
         if(summarySection && summaryHomeParent && summarySection.parentNode!==summaryHomeParent){
           summaryHomeParent.insertBefore(summarySection,summaryHomeNext);
         }
@@ -3638,7 +3644,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const defaultEnd=String(defaults.end_time||(
         ed===bounds.maxDate ? bounds.maxTime : "23:59"
       )||"23:59");
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Konzert"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       const syncDayDisplays=()=>{
         for(const [selector,displaySelector] of [

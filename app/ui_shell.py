@@ -2815,6 +2815,187 @@ BIBLIOTHEKAR_0351_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0352_CSS = r"""
+/* 0.35.2: zweite mobile Abnahme – kompaktere Informationsarchitektur,
+ * einheitlicher Web-App-Dock und robuste kleine Status-/Summenkarten.
+ */
+.bk-page-title-row,
+.bk-section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.bk-page-title-row h1,
+.bk-section-title-row h2 { min-width: 0; margin-bottom: 0; }
+.bk-page-help { flex: 0 0 25px; }
+
+@media (max-width: 700px) {
+  body.bibliothekar-redesign main { padding-inline: 14px !important; }
+
+  .bk-status-card .status-value {
+    font-size: clamp(.58rem, 2.55vw, .68rem) !important;
+    letter-spacing: -.015em;
+  }
+  .bk-status-card #workspace-status {
+    font-size: clamp(.54rem, 2.32vw, .64rem) !important;
+  }
+
+  body[data-bk-area="workspace"] .grid.summary {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 5px !important;
+    margin: 8px 0 12px !important;
+  }
+  body[data-bk-area="workspace"] .grid.summary .card {
+    min-height: 34px !important;
+    display: flex !important;
+    align-items: baseline !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    padding: 6px 5px !important;
+    border-radius: 9px !important;
+  }
+  body[data-bk-area="workspace"] .grid.summary .muted {
+    font-size: .58rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+  body[data-bk-area="workspace"] .grid.summary .number {
+    display: inline !important;
+    margin: 0 !important;
+    font-size: .88rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+
+  body[data-bk-area="archive"] .grid.summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    margin-bottom: 14px !important;
+  }
+  body[data-bk-area="archive"] .grid.summary .card {
+    min-height: 40px !important;
+    display: flex !important;
+    align-items: baseline !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+    padding: 7px 9px !important;
+    border-radius: 10px !important;
+  }
+  body[data-bk-area="archive"] .grid.summary .muted {
+    font-size: .68rem !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important;
+  }
+  body[data-bk-area="archive"] .grid.summary strong {
+    margin: 0 !important;
+    font-size: 1rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 820px) {
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-top: var(--bk-shell-sticky-height, 54px) !important;
+    padding-bottom: calc(62px + env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-shell {
+    padding: max(4px, env(safe-area-inset-top)) 12px 5px;
+  }
+  html[data-bk-display-mode="standalone"] .bk-brand { gap: 6px; min-height: 26px; }
+  html[data-bk-display-mode="standalone"] .bk-mark { width: 20px; height: 20px; flex-basis: 20px; }
+  html[data-bk-display-mode="standalone"] .bk-mark span { width: 12px; height: 12px; }
+  html[data-bk-display-mode="standalone"] .bk-brand-copy {
+    display: flex; flex-direction: row; align-items: baseline; gap: 7px; min-width: 0;
+  }
+  html[data-bk-display-mode="standalone"] .bk-brand-title {
+    font-size: .86rem; line-height: 1; white-space: nowrap;
+  }
+  html[data-bk-display-mode="standalone"] .bk-brand-library {
+    display: block !important;
+    max-width: 46vw;
+    min-width: 0;
+    font-size: .60rem;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  html[data-bk-display-mode="standalone"] .bk-page-heading { margin-top: 11px; }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    grid-template-columns: minmax(44px,.78fr) minmax(64px,1.12fr) minmax(44px,.78fr) minmax(88px,1.28fr) 40px;
+    gap: 2px;
+    padding: 5px 10px max(10px, env(safe-area-inset-bottom));
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    min-height: 44px;
+    grid-template-rows: 20px auto;
+    padding: 2px !important;
+    font-size: .61rem;
+    border-radius: 9px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg { width: 19px; height: 19px; }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    padding-inline: 7px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-label {
+    display: block; min-width: 0; font-size: .68rem;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-count {
+    min-width: 20px; height: 20px; flex: 0 0 auto; font-size: .68rem;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    width: 40px; min-width: 40px; min-height: 44px;
+    justify-self: end; border-radius: 9px !important; padding: 0 !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .bk-workspace-subnav {
+    gap: 8px;
+    padding: 4px 10px 7px;
+  }
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .bk-workspace-links {
+    width: calc(100% - 38px);
+    margin-right: 38px;
+  }
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .bk-workspace-links a {
+    padding: 6px 7px 8px;
+    font-size: .76rem;
+  }
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar.is-header-docked,
+  html[data-bk-display-mode="standalone"][data-bk-theme="light"] body[data-bk-area="workspace"] .selection-bar.is-header-docked {
+    grid-template-columns: minmax(0, 1fr) 32px !important;
+    gap: 6px !important;
+  }
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-actions button {
+    min-height: 30px !important;
+    height: 30px !important;
+    padding-inline: 6px !important;
+    font-size: .70rem !important;
+    border-radius: 9px !important;
+  }
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-top-button {
+    width: 32px !important; min-width: 32px !important;
+    height: 30px !important; min-height: 30px !important;
+    border-radius: 9px !important;
+  }
+}
+"""
+
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 (() => {
   const isStandalone = Boolean(
@@ -3772,9 +3953,9 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         subnav = f"""
 <div class="bk-workspace-subnav bk-metadata-subnav" data-bk-metadata-area="{escape(metadata_area)}" aria-label="Metadatenkorrektur">
   <div class="bk-workspace-links">
-    <a href="/metadata-correction?area=multiple" class="{'active' if metadata_area == 'multiple' else ''}">Mehrfachkorrektur</a>
-    <a href="/metadata-correction?area=general" class="{'active' if metadata_area == 'general' else ''}">Allgemein</a>
     <a href="/metadata-correction?area=library" class="{'active' if metadata_area == 'library' else ''}">Bibliothek</a>
+    <a href="/metadata-correction?area=general" class="{'active' if metadata_area == 'general' else ''}">Allgemein</a>
+    <a href="/metadata-correction?area=multiple" class="{'active' if metadata_area == 'multiple' else ''}">Mehrfachkorrektur</a>
   </div>
 </div>
 """
@@ -3795,12 +3976,22 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 </div>
 """
 
+    compact_help_areas = {"import", "workspace", "archive", "metadata"}
+    heading_help = (
+        f'<button class="bk-help bk-page-help" type="button" '
+        f'aria-label="Hilfe zu {escape(heading_title)}" '
+        f'data-help="{escape(heading_subtitle)}">?</button>'
+        if active in compact_help_areas
+        else ""
+    )
+    heading_subtitle_markup = "" if active in compact_help_areas else f"<p>{escape(heading_subtitle)}</p>"
+
     if active == "workspace" and subarea == "captures":
         heading = f"""
 <section class="bk-page-heading bk-capture-heading">
   <div class="bk-capture-heading-copy">
-    <h1>{escape(heading_title)}</h1>
-    <p>{escape(heading_subtitle)}</p>
+    <div class="bk-page-title-row"><h1>{escape(heading_title)}</h1>{heading_help}</div>
+    {heading_subtitle_markup}
   </div>
   <div id="bk-capture-summary-slot" class="bk-capture-summary-slot"></div>
 </section>
@@ -3808,8 +3999,8 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     else:
         heading = f"""
 <section class="bk-page-heading">
-  <h1>{escape(heading_title)}</h1>
-  <p>{escape(heading_subtitle)}</p>
+  <div class="bk-page-title-row"><h1>{escape(heading_title)}</h1>{heading_help}</div>
+  {heading_subtitle_markup}
 </section>
 """
 
@@ -3882,7 +4073,6 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     <span class="bk-pwa-label">Archiv</span>
   </a>
   <button id="bk-pwa-task-button" class="bk-pwa-nav-item bk-pwa-task-toggle" type="button" aria-label="Aufgaben öffnen">
-    <span class="bk-pwa-icon" aria-hidden="true">✓</span>
     <span class="bk-pwa-label">Aufgaben</span>
     <span class="bk-pwa-task-count" data-bk-task-count>0</span>
   </button>
@@ -4049,7 +4239,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.1 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.2 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -4065,7 +4255,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0351_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0351_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0352_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"

@@ -259,7 +259,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.35.1"
+DEPLOYMENT_VERSION = "0.35.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -8503,9 +8503,8 @@ def index() -> str:
     <section class="card import-panel">
       <div class="bk-import-head">
         <h2>Quelle sichern</h2>
-        <button class="bk-help" type="button" aria-label="Hilfe zur Quellenwahl" data-help="Wähle SD-Karte, externes Laufwerk oder einen Ordner. Die vorhandenen Importwege bleiben unverändert erhalten.">?</button>
+        <button class="bk-help" type="button" aria-label="Hilfe zur Quellenwahl" data-help="Quelle auswählen und anschließend sicher einlesen. Wähle SD-Karte, externes Laufwerk oder einen Ordner.">?</button>
       </div>
-      <div class="bk-source-mode-note">Quelle auswählen und anschließend sicher einlesen.</div>
 
       <div id="bk-source-picker" class="bk-source-picker" aria-label="Importquelle wählen">
         <button type="button" class="bk-source-option active" data-source-mode="sd">
@@ -8645,19 +8644,6 @@ def index() -> str:
       ></div>
     </div>
 
-    <details class="diagnostics">
-      <summary>Diagnose &amp; Test</summary>
-      <div class="diagnostics-content">
-        <p class="section-description">
-          Der künstliche Testimport bleibt für technische Kontrollen erhalten,
-          gehört aber nicht zum normalen Arbeitsablauf.
-        </p>
-        <button class="secondary" id="test-button" type="button">
-          Testimport starten
-        </button>
-      </div>
-    </details>
-
     <section>
       <div class="bk-import-head">
         <h2>Import- und Prüfverlauf</h2>
@@ -8699,9 +8685,6 @@ def index() -> str:
 
     const importButton =
       document.getElementById("import-button");
-
-    const testButton =
-      document.getElementById("test-button");
 
     const sourceSelect =
       document.getElementById("source-select");
@@ -9805,55 +9788,9 @@ def index() -> str:
       await startFolderImportSelection(rootKey, relativePath);
     }
 
-    async function startSimulation() {
-      testButton.disabled = true;
-      noticeElement.classList.remove(
-        "error-text"
-      );
-      noticeElement.textContent =
-        "Auftrag wird angelegt …";
-
-      try {
-        const response = await fetch(
-          "/api/jobs/simulated",
-          {
-            method: "POST"
-          }
-        );
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data.detail
-            || "Auftrag konnte nicht gestartet werden."
-          );
-        }
-
-        noticeElement.textContent =
-          "Auftrag wurde angenommen.";
-
-        await loadJobs();
-      } catch (error) {
-        noticeElement.textContent =
-          error.message;
-
-        noticeElement.classList.add(
-          "error-text"
-        );
-      } finally {
-        testButton.disabled = false;
-      }
-    }
-
     importButton.addEventListener(
       "click",
       startFolderImport
-    );
-
-    testButton.addEventListener(
-      "click",
-      startSimulation
     );
 
     sourceSelect.addEventListener(
