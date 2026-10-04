@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 0.40.1 – mobile Import- und Ereignisansicht nachschärfen
+
+- Lange Dateipfade und Sicherungsnamen in der Liste übersprungener Importduplikate umbrechen innerhalb ihrer Karte und laufen auf schmalen Displays nicht mehr über den Rahmen.
+- „Ohne Ereignis“-Tagessegmente verwenden auf Handybreite eine eigene zweizeilige Eingabe: Tag und Beginn bleiben zusammen sichtbar, „Bis“ erhält eine vollständige zweite Zeile; alle Felder bleiben bedienbar.
+- Die drei Ereignis-Kennzahlen „Angezeigte Ereignisse“, „Zugeordnete Familien“ und „Löschbare Planungen“ stehen auf dem Handy kompakt nebeneinander, mit dem Zahlenwert rechts in derselben Karte.
+- Die Aktionen aufgeklappter Ereignisse bleiben auf dem Handy in einer Zeile. Die Schaltflächen verkleinern Abstand, Innenabstand und Schrift dynamisch, statt in eine zweite Zeile umzubrechen.
+- Desktopdarstellung und Ereignis-/Importlogik bleiben unverändert; 0.40.1 ist ein reiner Darstellungs-Patch auf Basis von 0.40.0.
+
 ### 0.40.0 – Import abbrechen und Sicherungen sicher löschen
 
 - Laufende Kameraimporte von SD-Karte, USB-Laufwerk oder Ordner können bis zum Abschluss abgebrochen werden. Der Abbruch erfolgt kooperativ und räumt temporäre bzw. bereits verschobene Importdateien nur nach sicherer Prüfung wieder auf.
