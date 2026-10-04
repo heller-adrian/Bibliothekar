@@ -9,10 +9,10 @@ from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0352_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.35.2"
+    assert main.DEPLOYMENT_VERSION == "0.35.3"
 
 
-def test_0352_page_subtitles_are_help_buttons():
+def test_0352_page_subtitles_remain_compact_help():
     for area, subarea in [
         ("import", None),
         ("workspace", "captures"),
@@ -21,7 +21,7 @@ def test_0352_page_subtitles_are_help_buttons():
         ("metadata", "library"),
     ]:
         html = _shell_markup(area, subarea)
-        assert "bk-page-help" in html
+        assert "data-bk-title-help" in html
     assert "Freie Aufnahmen ordnen und Ereignisse aus dem Arbeitsbestand bilden.</p>" not in _shell_markup("workspace", "captures")
 
 
@@ -44,8 +44,8 @@ def test_0352_import_removes_diagnostics_and_moves_source_help():
 
 def test_0352_events_and_archive_explanations_are_compact():
     assert "Planung, Prüfung und bestätigte Sortierung" not in EVENTS_HTML
-    assert 'aria-label="Hilfe zur Archivprüfung"' in TRANSFER_HTML
-    assert 'aria-label="Hilfe zum Archivverlauf"' in TRANSFER_HTML
+    assert 'data-help="Neu angewendete Ereignisse werden hier geprüft' in TRANSFER_HTML
+    assert 'data-help="Freigegebene Ereignisse bleiben hier nachvollziehbar.' in TRANSFER_HTML
 
 
 def test_0352_metadata_order_hidden_contract_and_path_wrapping():
@@ -53,7 +53,8 @@ def test_0352_metadata_order_hidden_contract_and_path_wrapping():
     assert html.index("Bibliothek</a>") < html.index("Allgemein</a>") < html.index("Mehrfachkorrektur</a>")
     assert "[hidden]{display:none!important}" in METADATA_CORRECTION_HTML
     assert "overflow-wrap:anywhere" in METADATA_CORRECTION_HTML
-    assert 'id="meta-area-help"' in METADATA_CORRECTION_HTML
+    assert 'id="meta-area-title"' in METADATA_CORRECTION_HTML
+    assert "data-bk-title-help" in METADATA_CORRECTION_HTML
 
 
 def test_0352_web_app_dock_and_compact_stats_contract():
@@ -67,9 +68,9 @@ def test_0352_web_app_dock_and_compact_stats_contract():
     assert 'width: calc(100% - 38px);' in css
 
 
-def test_0352_mobile_summary_stays_out_of_capture_header():
+def test_0352_mobile_summary_uses_capture_header_slot():
     source = WORKSPACE_HTML
     marker = "function positionWorkspaceChrome()"
     body = source[source.index(marker):source.index("window.addEventListener", source.index(marker))]
-    assert "if(workspaceStaticDesktop())" in body
     assert "captureSummarySlot.appendChild(summarySection)" in body
+    assert 'classList.toggle("compact-heading-summary", workspaceStaticDesktop())' in body

@@ -9,7 +9,7 @@ from app.ui_shell import (
 
 
 def test_0351_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.35.2"
+    assert main.DEPLOYMENT_VERSION == "0.35.3"
 
 
 def test_0351_pwa_popovers_use_visible_triggers():
