@@ -253,7 +253,7 @@ def test_0311_settings_contract_has_four_tabs_scroll_and_rounding():
     assert "scrollbar-gutter: stable" in css
     assert "#bk-settings-dialog input" in css
     assert "border-radius: 11px" in css
-    assert main.DEPLOYMENT_VERSION == "0.35.5"
+    assert main.DEPLOYMENT_VERSION == "0.35.6"
 
 
 
