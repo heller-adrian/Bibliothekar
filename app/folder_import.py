@@ -8,6 +8,7 @@ import math
 import os
 import re
 import hashlib
+import shutil
 
 from app.metadata import analyze_tree
 from app.source_filter import should_ignore_source_path
@@ -42,6 +43,11 @@ IdentityCallback = Callable[[str, str], None]
 ImportHistoryCallback = Callable[[list[dict[str, Any]]], None]
 FamilyAdmissionCallback = Callable[[dict[str, Any], dict[str, str], dict[str, int]], dict[str, Any]]
 DestinationDirectoryCallback = Callable[[str], Path | None]
+CancellationCallback = Callable[[], bool]
+
+
+class ImportCancelled(PipelineError):
+    pass
 
 
 
@@ -406,6 +412,7 @@ def move_import_into_workspace(
     plan: list[dict[str, Any]],
     *,
     post_move_callback: PathCallback | None = None,
+    cancellation_callback: CancellationCallback | None = None,
 ) -> None:
     if not temporary_original.is_dir():
         raise PipelineError(
@@ -421,6 +428,8 @@ def move_import_into_workspace(
     moved: list[tuple[Path, Path]] = []
     try:
         for item in plan:
+            if cancellation_callback is not None and cancellation_callback():
+                raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
             source = temporary_original / str(item["source_relative_path"])
             destination = shared_root / str(item["destination_relative_path"])
             if not source.is_file():
@@ -432,6 +441,8 @@ def move_import_into_workspace(
             moved.append((source, destination))
 
         for item in plan:
+            if cancellation_callback is not None and cancellation_callback():
+                raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
             destination = shared_root / str(item["destination_relative_path"])
             if not destination.is_file():
                 raise PipelineError(f"Zieldatei fehlt: {destination}")
@@ -456,6 +467,8 @@ def move_import_into_workspace(
         # SQLite wird erst nach vollständig geprüfter Dateibewegung
         # aktualisiert. Scheitert die Transaktion, stellt der folgende
         # Except-Block alle Dateien an ihren Sicherungspfad zurück.
+        if cancellation_callback is not None and cancellation_callback():
+            raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
         if post_move_callback is not None:
             post_move_callback(plan)
     except Exception:
@@ -496,8 +509,13 @@ def run_folder_import_job(
     work_root: Path | None = None,
     central_stock: bool = False,
     allow_workspace_source: bool = False,
+    cancellation_callback: CancellationCallback | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).astimezone()
+
+    def check_cancelled() -> None:
+        if cancellation_callback is not None and cancellation_callback():
+            raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
 
     def progress(
         state: str,
@@ -506,6 +524,7 @@ def run_folder_import_job(
         total: int,
         message: str,
     ) -> None:
+        check_cancelled()
         if progress_callback is not None:
             progress_callback(state, stage, current, total, message)
 
@@ -543,6 +562,7 @@ def run_folder_import_job(
     status_path = temporary_protocol / "status.json"
     manifest_path = temporary_protocol / "manifest.json"
     snapshot_path = temporary_protocol / "snapshot.json"
+    plan: list[dict[str, Any]] = []
 
     if temporary_job_root.exists():
         raise PipelineError(f"Temporärer Sicherungsbestand existiert bereits: {temporary_job_root}")
@@ -803,6 +823,7 @@ def run_folder_import_job(
             work_root,
             plan,
             post_move_callback=path_callback,
+            cancellation_callback=cancellation_callback,
         )
 
         if import_history_callback is not None:
@@ -913,6 +934,55 @@ def run_folder_import_job(
             ),
         )
         return status
+    except ImportCancelled:
+        cleanup_errors: list[str] = []
+        for item in plan:
+            destination = work_root / str(item["destination_relative_path"])
+            try:
+                if not destination.exists():
+                    continue
+                if not destination.is_file() or destination.is_symlink():
+                    raise PipelineError(
+                        "Unerwarteter Eintrag beim Abbruch: " + str(destination)
+                    )
+                if (
+                    destination.stat().st_size != int(item["size_bytes"])
+                    or sha256_file(destination) != str(item["sha256"])
+                ):
+                    raise PipelineError(
+                        "Datei hat sich während des Abbruchs verändert: "
+                        + str(destination)
+                    )
+                destination.unlink()
+                _remove_empty_directories(destination.parent)
+            except Exception as cleanup_error:
+                cleanup_errors.append(str(cleanup_error))
+
+        if temporary_job_root.exists():
+            try:
+                shutil.rmtree(temporary_job_root)
+            except Exception as cleanup_error:
+                cleanup_errors.append(str(cleanup_error))
+        if permanent_protocol.exists():
+            try:
+                shutil.rmtree(permanent_protocol)
+            except Exception as cleanup_error:
+                cleanup_errors.append(str(cleanup_error))
+
+        if cleanup_errors:
+            raise PipelineError(
+                "Import wurde abgebrochen, aber die Bereinigung war unvollständig: "
+                + " | ".join(cleanup_errors)
+            )
+
+        append_log(log_dir, {
+            "time": datetime.now(timezone.utc).astimezone().isoformat(),
+            "job_id": job_id,
+            "state": "cancelled",
+            "stage": "cancelled",
+            "import_mode": "folder",
+        })
+        raise
     except Exception as error:
         failed_at = datetime.now(timezone.utc).astimezone().isoformat()
         status.update({
@@ -937,3 +1007,50 @@ def run_folder_import_job(
             "error": str(error),
         })
         raise
+
+
+
+def cleanup_completed_folder_import(
+    result: dict[str, Any],
+    destination_root: Path,
+) -> None:
+    """Remove a just-finished import when a cancellation wins the final race."""
+    organization = dict(result.get("organization") or {})
+    destinations = list(organization.get("destinations") or [])
+    imported = list(organization.get("imported_source_files") or [])
+    if len(destinations) != len(imported):
+        raise PipelineError(
+            "Abbruchbereinigung kann die importierten Zieldateien nicht eindeutig zuordnen."
+        )
+
+    root = destination_root.resolve(strict=False)
+    checked: list[Path] = []
+    for destination_value, entry in zip(destinations, imported, strict=True):
+        relative = Path(str(destination_value or ""))
+        if not relative.parts or relative.is_absolute() or ".." in relative.parts:
+            raise PipelineError("Unsicherer Zielpfad in Abbruchbereinigung.")
+        path = (root / relative).resolve(strict=False)
+        try:
+            path.relative_to(root)
+        except ValueError as error:
+            raise PipelineError("Zielpfad liegt außerhalb des Arbeitsbestands.") from error
+        if not path.is_file() or path.is_symlink():
+            raise PipelineError("Importziel fehlt bei Abbruchbereinigung: " + str(relative))
+        if (
+            path.stat().st_size != int(entry.get("size_bytes") or 0)
+            or sha256_file(path) != str(entry.get("sha256") or "")
+        ):
+            raise PipelineError(
+                "Importziel stimmt bei Abbruchbereinigung nicht mehr: " + str(relative)
+            )
+        checked.append(path)
+
+    for path in checked:
+        path.unlink()
+        parent = path.parent
+        while parent != root:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
