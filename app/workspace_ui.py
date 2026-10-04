@@ -1534,17 +1534,10 @@ WORKSPACE_HTML = r"""<!doctype html>
         selectionSummary?.style.removeProperty("left");
         document.querySelector(".bk-workspace-subnav")?.classList.remove("has-selection-dock");
       }
-      if(workspaceStaticDesktop()){
-        if(summarySection && captureSummarySlot && summarySection.parentNode!==captureSummarySlot){
-          captureSummarySlot.appendChild(summarySection);
-        }
-        summarySection?.classList.add("compact-heading-summary");
-      } else {
-        if(summarySection && summaryHomeParent && summarySection.parentNode!==summaryHomeParent){
-          summaryHomeParent.insertBefore(summarySection,summaryHomeNext);
-        }
-        summarySection?.classList.remove("compact-heading-summary");
+      if(summarySection && captureSummarySlot && summarySection.parentNode!==captureSummarySlot){
+        captureSummarySlot.appendChild(summarySection);
       }
+      summarySection?.classList.toggle("compact-heading-summary", workspaceStaticDesktop());
       fitTreeText(document);
     }
 

@@ -1,6 +1,15 @@
 # Changelog
 
 ## [Unreleased]
+### 0.35.3 – letzte Web-App-Feinarbeiten
+
+- Web-App-Dock auf allen Bereichen vereinheitlicht: weniger Höhe, weniger Leerraum unter der Leiste und kleinere, gleich hohe Rahmen für Aufgaben und Menü, damit abgerundete iPhone-Ecken nichts abschneiden.
+- Sichtbare Fragezeichen an Seiten- und Abschnittstiteln entfallen. Die Erklärung hängt jetzt direkt am Titel: Desktop per Hover/Fokus, Touch/Web-App per Antippen.
+- Das gilt für Import & Prüfung, Aufnahmen, Ereignisse, Archiv, Metadatenkorrektion sowie Zur Archivprüfung und Archivverlauf.
+- Aufnahmen übernimmt für Tage, Dateien, Familien und Prüffälle exakt die kompakte 2×2-Logik des Archivs.
+- Die vier Aufnahmen-Kennzahlen stehen direkt unter dem Titel Aufnahmen; der Sicherungsfilter folgt darunter.
+- Die bestehende Hilfe bei Quelle sichern bleibt erhalten.
+
 
 ### 0.35.2 – Kompaktere Web-App und reduzierte Hilfetexte
 

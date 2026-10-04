@@ -14,7 +14,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .meta-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(330px,.8fr);gap:16px;align-items:start}
 .meta-card{border:1px solid var(--bk-line,#ccd2d8);border-radius:15px;background:var(--bk-surface,#fff);padding:16px}
 .meta-overview{margin-bottom:18px}
-.meta-title-with-help{display:flex;align-items:center;gap:8px}
+.meta-title-with-help{display:flex;align-items:center;gap:8px;min-width:0}
 .meta-paths{display:grid;gap:5px;font-size:.86rem;margin:9px 0 0;min-width:0}
 .meta-paths span,.meta-paths code{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
 .meta-groups{display:grid;gap:14px;margin-top:14px}
@@ -45,8 +45,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   <section class="meta-card meta-overview">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
       <div class="meta-title-with-help">
-        <strong id="meta-area-title">Bibliothek</strong>
-        <button id="meta-area-help" class="bk-help" type="button" aria-label="Hilfe zum Bereich" data-help="">?</button>
+        <strong id="meta-area-title" class="bk-title-help" tabindex="0" role="button" aria-expanded="false" data-bk-title-help data-help="">Bibliothek</strong>
       </div>
       <div class="meta-actions">
         <button id="meta-scan" type="button" class="primary">Bestand prüfen</button>
@@ -150,8 +149,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       : general
         ?"Unabhängige Dateien direkt im verwalteten Ordner Allgemein korrigieren."
         :"Zeitlich zusammengehörige Kameraaufnahmen gemeinsam verschieben. Eine Referenzaufnahme festlegen, Vorschau prüfen und den Zeitversatz anschließend auf den gesamten Ordner anwenden.";
-    $("meta-area-help").dataset.help=areaHelp;
-    $("meta-area-help").setAttribute("aria-label","Hilfe zu "+(library?"Bibliothek":general?"Allgemein":"Mehrfachkorrektur"));
+    $("meta-area-title").dataset.help=areaHelp;
+    $("meta-area-title").setAttribute("aria-label","Hilfe zu "+(library?"Bibliothek":general?"Allgemein":"Mehrfachkorrektur"));
     $("meta-scan").hidden=false;
     $("meta-scan").textContent=multiple?"Bestand prüfen":"Bestand prüfen";
     $("meta-workspace").hidden=multiple;

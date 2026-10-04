@@ -2996,6 +2996,125 @@ BIBLIOTHEKAR_0352_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0353_CSS = r"""
+/* 0.35.3: letzte mobile Verdichtung aus der iPhone-Abnahme.
+ * Hilfen hängen am Titel selbst; der Web-App-Dock bleibt auf allen Seiten
+ * identisch und die Aufnahmen-Kennzahlen folgen der Archiv-Dichte.
+ */
+.bk-title-help {
+  width: fit-content;
+  max-width: 100%;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  cursor: help;
+}
+.bk-title-help::after {
+  content: attr(data-help);
+  display: none;
+  max-width: min(620px, 62vw);
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border: 1px solid var(--bk-line);
+  border-radius: 9px;
+  background: var(--bk-surface);
+  color: var(--bk-muted);
+  box-shadow: var(--bk-shadow);
+  font-size: .78rem;
+  font-weight: 520;
+  line-height: 1.3;
+  letter-spacing: 0;
+  white-space: normal;
+}
+@media (hover: hover) and (pointer: fine) {
+  .bk-title-help:hover::after,
+  .bk-title-help:focus-visible::after {
+    display: inline-block;
+  }
+}
+.bk-title-help.is-open::after {
+  display: inline-block;
+}
+
+@media (max-width: 700px) {
+  .bk-title-help { cursor: pointer; }
+  .bk-title-help.is-open::after {
+    flex-basis: 100%;
+    max-width: min(100%, 520px);
+    margin-top: 1px;
+  }
+
+  /* Aufnahmen wie Archiv: 2 × 2, klein und direkt unter dem Seitentitel. */
+  body[data-bk-area="workspace"] .bk-capture-summary-slot {
+    margin-top: 9px !important;
+  }
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    margin: 0 !important;
+  }
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .card {
+    min-height: 40px !important;
+    display: flex !important;
+    align-items: baseline !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+    padding: 7px 9px !important;
+    border-radius: 10px !important;
+  }
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .muted {
+    font-size: .68rem !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important;
+  }
+  body[data-bk-area="workspace"] .bk-capture-summary-slot .grid.summary .number {
+    display: inline !important;
+    margin: 0 !important;
+    font-size: 1rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 820px) {
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-bottom: 54px !important;
+  }
+
+  /* Ein einziger kompakter Dock für Import, Arbeitsbereich, Archiv und Unterseiten. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    padding: 4px 8px 6px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    min-height: 40px !important;
+    grid-template-rows: 18px auto;
+    padding-block: 1px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle,
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    min-height: 38px !important;
+    height: 38px !important;
+    align-self: center;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    width: 38px !important;
+    min-width: 38px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle {
+    border-radius: 8px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    border-radius: 8px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom: 52px !important;
+  }
+}
+"""
+
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 (() => {
   const isStandalone = Boolean(
@@ -3065,6 +3184,43 @@ BIBLIOTHEKAR_JS = r"""
 
   document.querySelectorAll('a[href^="/"]').forEach(link => {
     link.setAttribute("href", bkLibraryHref(link.getAttribute("href")));
+  });
+
+  const bkTitleHelpMedia = window.matchMedia?.("(hover: none), (pointer: coarse)");
+  const bkTitleHelpTriggers = [...document.querySelectorAll("[data-bk-title-help]")];
+
+  function bkCloseTitleHelps(except=null) {
+    bkTitleHelpTriggers.forEach(trigger => {
+      if (trigger === except) return;
+      trigger.classList.remove("is-open");
+      trigger.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function bkToggleTitleHelp(trigger) {
+    if (!trigger) return;
+    const opening = !trigger.classList.contains("is-open");
+    bkCloseTitleHelps(opening ? trigger : null);
+    trigger.classList.toggle("is-open", opening);
+    trigger.setAttribute("aria-expanded", opening ? "true" : "false");
+  }
+
+  bkTitleHelpTriggers.forEach(trigger => {
+    trigger.addEventListener("click", event => {
+      if (!(bkTitleHelpMedia?.matches || root.dataset.bkDisplayMode === "standalone")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      bkToggleTitleHelp(trigger);
+    });
+    trigger.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      bkToggleTitleHelp(trigger);
+    });
+  });
+
+  document.addEventListener("click", event => {
+    if (!event.target.closest("[data-bk-title-help]")) bkCloseTitleHelps();
   });
 
   const currentLibraryName = document.getElementById("bk-current-library-name");
@@ -3977,12 +4133,11 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 """
 
     compact_help_areas = {"import", "workspace", "archive", "metadata"}
-    heading_help = (
-        f'<button class="bk-help bk-page-help" type="button" '
-        f'aria-label="Hilfe zu {escape(heading_title)}" '
-        f'data-help="{escape(heading_subtitle)}">?</button>'
+    heading_title_markup = (
+        f'<h1 class="bk-title-help" tabindex="0" role="button" aria-expanded="false" '
+        f'data-bk-title-help data-help="{escape(heading_subtitle)}">{escape(heading_title)}</h1>'
         if active in compact_help_areas
-        else ""
+        else f"<h1>{escape(heading_title)}</h1>"
     )
     heading_subtitle_markup = "" if active in compact_help_areas else f"<p>{escape(heading_subtitle)}</p>"
 
@@ -3990,7 +4145,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         heading = f"""
 <section class="bk-page-heading bk-capture-heading">
   <div class="bk-capture-heading-copy">
-    <div class="bk-page-title-row"><h1>{escape(heading_title)}</h1>{heading_help}</div>
+    <div class="bk-page-title-row">{heading_title_markup}</div>
     {heading_subtitle_markup}
   </div>
   <div id="bk-capture-summary-slot" class="bk-capture-summary-slot"></div>
@@ -3999,7 +4154,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     else:
         heading = f"""
 <section class="bk-page-heading">
-  <div class="bk-page-title-row"><h1>{escape(heading_title)}</h1>{heading_help}</div>
+  <div class="bk-page-title-row">{heading_title_markup}</div>
   {heading_subtitle_markup}
 </section>
 """
@@ -4239,7 +4394,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.2 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.3 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -4256,7 +4411,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0351_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0352_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0352_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0353_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
