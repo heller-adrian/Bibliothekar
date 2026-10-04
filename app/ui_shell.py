@@ -3201,6 +3201,73 @@ BIBLIOTHEKAR_0354_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0355_CSS = r"""
+/* 0.35.5: iPhone-Feinschliff.
+ * Die Aufnahmen-Zusammenfassung heißt im Quellmarkup nur "summary" und nicht
+ * "grid summary". Deshalb wird sie hier direkt angesprochen und exakt wie
+ * die kompakte Archiv-Zusammenfassung aufgebaut.
+ */
+@media (max-width: 700px) {
+  body[data-bk-area="workspace"] .bk-capture-summary-slot > section.summary {
+    display: grid !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    margin: 0 !important;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-summary-slot > section.summary > .card {
+    min-width: 0 !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    max-height: 40px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+    padding: 7px 9px !important;
+    border-radius: 10px !important;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-summary-slot > section.summary > .card > .muted {
+    display: inline !important;
+    margin: 0 !important;
+    font-size: .68rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+
+  body[data-bk-area="workspace"] .bk-capture-summary-slot > section.summary > .card > .number {
+    display: inline !important;
+    margin: 0 !important;
+    font-size: 1rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (max-width: 820px) {
+  /* Der komplette Web-App-Dock bleibt auf allen Seiten identisch, sitzt aber
+   * etwas weiter über der unteren Gerätekante. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    padding-bottom: 16px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-bottom: 64px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom: 62px !important;
+  }
+}
+"""
+
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 (() => {
   const isStandalone = Boolean(
@@ -4480,7 +4547,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.4 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.5 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -4499,7 +4566,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0351_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0352_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0353_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0354_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0354_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0355_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"

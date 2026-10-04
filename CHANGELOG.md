@@ -1,6 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+### 0.35.5 – kompakte Aufnahmen-Karten und mehr Safe-Area-Abstand
+
+- Aufnahmen: die vier Kennzahlen werden nun über den tatsächlich verwendeten `section.summary`-Selektor angesprochen. Dadurch greifen die kompakten Regeln zuverlässig: 2×2, 40 px Höhe, kleinere Beschriftung und Zahl in derselben Zeile.
+- Der Web-App-Dock bleibt auf allen Seiten identisch, erhält aber deutlich mehr unteren Abstand, damit Aufgaben- und Hamburger-Rahmen auch bei stark abgerundeten iPhone-Ecken vollständig sichtbar bleiben.
+- Sicherungsfilter: lange Sicherungsnamen dürfen innerhalb der Auswahlkarte umbrechen und können nicht mehr über den rechten Kartenrand hinausragen.
+
 ### 0.35.4 – Aufnahmen-Kennzahlen wie im Archiv
 
 - Aufnahmen: die vier Kennzahlen Tage, Dateien, Familien und Prüffälle stehen auf dem Handy jetzt stabil direkt unter dem Titel Aufnahmen und oberhalb des Sicherungsfilters.

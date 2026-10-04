@@ -346,8 +346,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     .backup-filter-value { font-weight:750;justify-self:end;text-align:right;min-width:0; }
     .backup-filter-panel { margin-top:8px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);display:grid;gap:10px; }
     .backup-filter-list { display:grid;gap:7px; }
-    .backup-filter-choice { display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:8px 9px;border:1px solid var(--border);border-radius:10px;background:var(--panel-soft); }
-    .backup-filter-choice small { color:var(--muted); }
+    .backup-filter-choice { display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:8px 9px;border:1px solid var(--border);border-radius:10px;background:var(--panel-soft); }
+    .backup-filter-choice > span:nth-child(2) { min-width:0; }
+    .backup-filter-choice strong { display:block;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word; }
+    .backup-filter-choice small { color:var(--muted);white-space:normal;overflow-wrap:anywhere; }
     .backup-filter-actions { display:flex;gap:8px;flex-wrap:wrap; }
     .backup-filter-archived > summary { color:var(--muted);font-weight:650;cursor:pointer; }
 
