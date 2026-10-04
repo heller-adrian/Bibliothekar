@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 from app.main import APP_VERSION, _event_edit_payload_within_new_range
 from app.event_structure import build_event_preview
 import inspect
@@ -19,7 +20,7 @@ def _family(fid, capture):
 
 
 def test_version_0206():
-    assert APP_VERSION == "0.27.5"
+    assert APP_VERSION == PACKAGE_VERSION
 
 
 def test_multisegment_shrink_derives_union_without_requiring_old_membership():
