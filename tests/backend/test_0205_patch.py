@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
 from app.database import database_connection, get_event_edit_context, initialize_database
@@ -9,7 +10,7 @@ NOW='2026-09-10T20:00:00+00:00'
 
 
 def test_version_0205():
-    assert APP_VERSION == '0.27.5'
+    assert APP_VERSION == PACKAGE_VERSION
 
 
 def test_editor_context_returns_all_child_time_segments(tmp_path: Path):
