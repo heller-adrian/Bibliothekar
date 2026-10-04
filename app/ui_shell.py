@@ -3268,6 +3268,180 @@ BIBLIOTHEKAR_0355_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0356_CSS = r"""
+/* 0.35.6: ausschließlich mobile Website / schmale Browserfenster.
+ * Die installierte Web-App bleibt unverändert.
+ */
+
+/* Unterhalb dieses Punktes fällt die Desktop-Anordnung Titel + Kennzahlen
+ * in einen bündigen 2×2-Block. Beim weiteren Verkleinern skaliert nur noch
+ * die kompakte Blockgeometrie. */
+@media (max-width: 920px) {
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-page-heading.bk-capture-heading {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    grid-template-columns: none !important;
+    gap: 0 !important;
+    width: 100% !important;
+    margin: 18px 0 6px !important;
+    padding-inline: clamp(14px, 2vw, 16px) !important;
+    box-sizing: border-box !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-capture-heading-copy,
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-capture-summary-slot {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-capture-summary-slot {
+    margin: 10px 0 0 !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-capture-summary-slot > section.summary {
+    display: grid !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: clamp(5px, .9vw, 7px) !important;
+    margin: 0 !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-capture-summary-slot > section.summary > .card {
+    min-width: 0 !important;
+    min-height: clamp(36px, 5.2vw, 40px) !important;
+    height: clamp(36px, 5.2vw, 40px) !important;
+    max-height: 40px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+    padding: clamp(6px, .9vw, 7px) clamp(8px, 1.2vw, 10px) !important;
+    border-radius: 10px !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-capture-summary-slot > section.summary > .card > .muted {
+    display: inline !important;
+    margin: 0 !important;
+    font-size: clamp(.60rem, 1.35vw, .68rem) !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-capture-summary-slot > section.summary > .card > .number {
+    display: inline !important;
+    margin: 0 !important;
+    font-size: clamp(.90rem, 2vw, 1rem) !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+}
+
+/* Im Hochformat / sehr schmalen Browser wird der Arbeitsbereich-Kopf genau
+ * wie in der Web-App aufgebaut: Reiter oben, Aktionen direkt darunter.
+ * Die bisherige separate Karte "0 Gruppen ausgewählt" verschwindet dadurch. */
+@media (max-width: 700px) {
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-workspace-subnav {
+    position: sticky !important;
+    top: var(--bk-shell-sticky-height, 96px) !important;
+    z-index: 4700 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 4px 10px 7px !important;
+    border-radius: 0 !important;
+    background: color-mix(in srgb, var(--bk-page-bg) 98%, transparent) !important;
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-workspace-links {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: calc(100% - 38px) !important;
+    margin-right: 38px !important;
+    gap: 0 !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-workspace-links a {
+    padding: 6px 7px 8px !important;
+    text-align: center !important;
+    font-size: .76rem !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-workspace-dock {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .selection-bar.is-header-docked,
+  html[data-bk-display-mode="browser"][data-bk-theme="light"] body[data-bk-area="workspace"] .selection-bar.is-header-docked {
+    position: static !important;
+    z-index: auto !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 32px !important;
+    gap: 6px !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    overflow: visible !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-summary {
+    display: none !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    width: 100% !important;
+    margin: 0 !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-actions button {
+    min-width: 0 !important;
+    min-height: 30px !important;
+    height: 30px !important;
+    padding: 0 6px !important;
+    border-radius: 9px !important;
+    font-size: .70rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-top-button {
+    position: static !important;
+    display: grid !important;
+    place-items: center !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 9px !important;
+    transform: none !important;
+  }
+}
+"""
+
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 (() => {
   const isStandalone = Boolean(
@@ -4547,7 +4721,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.5 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.6 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -4567,7 +4741,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0352_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0353_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0354_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0355_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0355_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0356_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"

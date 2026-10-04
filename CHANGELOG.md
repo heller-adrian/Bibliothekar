@@ -1,6 +1,14 @@
 # Changelog
 
 ## [Unreleased]
+### 0.35.6 – mobile Website im Hochformat
+
+- Die Web-App bleibt unverändert; alle neuen Layoutregeln sind ausdrücklich auf den Browsermodus begrenzt.
+- Arbeitsbereich/Aufnahmen auf der Handy-Website erhält denselben kompakten Sekundärheader wie die Web-App: Aufnahmen/Ereignisse oben, darunter Ohne Ereignis/Ereignis und der Pfeil. Die separate Karte „0 Gruppen ausgewählt“ entfällt auf schmalen Browserfenstern.
+- Titel „Aufnahmen“ und der 2×2-Kennzahlenblock sind links und rechts bündig mit Sicherungsfilter und den übrigen Inhaltskarten.
+- Responsive Website: bis 920 px fällt die breite Desktop-Anordnung in den kompakten 2×2-Block; bei weiterer Verkleinerung skalieren Abstände, Kartenhöhe und Typografie innerhalb dieses Blocks, ohne die Anordnung erneut zu ändern.
+- Desktop in normaler Breite und die installierte Web-App bleiben von diesen Regeln unberührt.
+
 ### 0.35.5 – kompakte Aufnahmen-Karten und mehr Safe-Area-Abstand
 
 - Aufnahmen: die vier Kennzahlen werden nun über den tatsächlich verwendeten `section.summary`-Selektor angesprochen. Dadurch greifen die kompakten Regeln zuverlässig: 2×2, 40 px Höhe, kleinere Beschriftung und Zahl in derselben Zeile.

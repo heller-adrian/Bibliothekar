@@ -1486,8 +1486,15 @@ WORKSPACE_HTML = r"""<!doctype html>
       );
     }
 
+    function workspaceBrowserPortrait(){
+      return (
+        document.documentElement.dataset.bkDisplayMode === "browser"
+        && window.matchMedia("(max-width: 700px)").matches
+      );
+    }
+
     function workspaceHeaderDock(){
-      return workspaceStaticDesktop() || workspaceStandaloneMobile();
+      return workspaceStaticDesktop() || workspaceStandaloneMobile() || workspaceBrowserPortrait();
     }
 
     function alignHeaderSelectionSummary(){
