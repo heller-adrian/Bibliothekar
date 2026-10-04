@@ -215,4 +215,4 @@ def test_0340_worker_supports_managed_multiple_import():
 
 
 def test_0340_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.35.7"
+    assert main.DEPLOYMENT_VERSION == "0.40.0"
