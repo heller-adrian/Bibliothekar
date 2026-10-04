@@ -3286,7 +3286,7 @@ BIBLIOTHEKAR_0356_CSS = r"""
     gap: 0 !important;
     width: 100% !important;
     margin: 18px 0 6px !important;
-    padding-inline: clamp(14px, 2vw, 16px) !important;
+    padding-inline: 18px !important;
     box-sizing: border-box !important;
   }
 
@@ -3343,10 +3343,19 @@ BIBLIOTHEKAR_0356_CSS = r"""
   }
 }
 
+@media (max-width: 820px) {
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-page-heading.bk-capture-heading {
+    padding-inline: 16px !important;
+  }
+}
+
 /* Im Hochformat / sehr schmalen Browser wird der Arbeitsbereich-Kopf genau
  * wie in der Web-App aufgebaut: Reiter oben, Aktionen direkt darunter.
  * Die bisherige separate Karte "0 Gruppen ausgewählt" verschwindet dadurch. */
-@media (max-width: 700px) {
+@media (max-width: 700px) and (orientation: portrait) {
+  html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-page-heading.bk-capture-heading {
+    padding-inline: 14px !important;
+  }
   html[data-bk-display-mode="browser"] body[data-bk-area="workspace"] .bk-workspace-subnav {
     position: sticky !important;
     top: var(--bk-shell-sticky-height, 96px) !important;

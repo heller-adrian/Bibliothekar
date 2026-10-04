@@ -1489,7 +1489,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     function workspaceBrowserPortrait(){
       return (
         document.documentElement.dataset.bkDisplayMode === "browser"
-        && window.matchMedia("(max-width: 700px)").matches
+        && window.matchMedia("(max-width: 700px) and (orientation: portrait)").matches
       );
     }
 
