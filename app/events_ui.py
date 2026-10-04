@@ -1193,7 +1193,123 @@ EVENTS_HTML = r"""<!doctype html>
     .event-details > summary::before { content:none !important; display:none !important; }
     button.plan-button, .plan-button, button.bk-positive-action, button[type=submit], #save-event-button, #calculate-preview-button { background:#2563eb !important; border-color:#2563eb !important; color:white !important; }
     button.danger-button, .danger-button { background:#b42318 !important; border-color:#b42318 !important; color:white !important; }
-  </style>
+  
+    /* 0.40.1: mobile Ereignisansicht kompakt und vollständig bedienbar. */
+    .no-event-segment-fields {
+      display:grid;
+      grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;
+      gap:8px;
+      align-items:end;
+      margin-top:8px;
+      width:100%;
+      box-sizing:border-box;
+    }
+    .no-event-segment-remove {
+      width:100%;
+      min-width:0;
+      align-self:end;
+      white-space:nowrap;
+    }
+
+    @media (max-width:820px) {
+      section.summary {
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        gap:6px;
+        margin-bottom:12px;
+      }
+      section.summary .card {
+        min-height:40px;
+        padding:6px 7px;
+        border-radius:11px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:4px;
+      }
+      section.summary .card .muted {
+        min-width:0;
+        font-size:clamp(.56rem,2.15vw,.72rem);
+        line-height:1.05;
+      }
+      section.summary .card .number {
+        flex:0 0 auto;
+        margin:0;
+        font-size:clamp(.95rem,4vw,1.2rem);
+        line-height:1;
+        text-align:right;
+        white-space:nowrap;
+      }
+
+      .event-card-actions {
+        display:flex;
+        flex-wrap:nowrap;
+        gap:4px;
+      }
+      .event-card-actions > button,
+      .event-card-actions > a {
+        flex:1 1 0;
+        min-width:0;
+        min-height:34px;
+        padding:6px 3px !important;
+        font-size:clamp(.62rem,2.65vw,.78rem);
+        line-height:1.05;
+        white-space:nowrap;
+        justify-content:center;
+        text-align:center;
+      }
+
+      .no-event-segment-fields {
+        grid-template-columns:minmax(0,1.65fr) minmax(88px,.7fr);
+        gap:8px;
+      }
+      .no-event-day-field {
+        grid-column:1;
+        grid-row:1;
+        min-width:0;
+      }
+      .no-event-start-field {
+        grid-column:2;
+        grid-row:1;
+        min-width:0;
+      }
+      .no-event-end-field {
+        grid-column:1 / -1;
+        grid-row:2;
+        display:grid;
+        grid-template-columns:minmax(0,1.65fr) minmax(88px,.7fr);
+        gap:8px;
+        align-items:end;
+      }
+      .no-event-end-field > span {
+        align-self:center;
+      }
+      .no-event-segment-remove {
+        grid-column:1 / -1;
+        grid-row:3;
+        width:auto;
+        min-width:0;
+        justify-self:end;
+        padding:7px 10px;
+      }
+    }
+
+    @media (max-width:430px) {
+      section.summary .card {
+        padding-inline:6px;
+      }
+      section.summary .card .muted {
+        font-size:clamp(.54rem,2.35vw,.66rem);
+      }
+      .event-card-actions {
+        gap:3px;
+      }
+      .event-card-actions > button,
+      .event-card-actions > a {
+        padding-inline:2px !important;
+        font-size:clamp(.59rem,2.72vw,.7rem);
+      }
+    }
+</style>
 </head>
 
 <body>
@@ -2708,7 +2824,7 @@ EVENTS_HTML = r"""<!doctype html>
         ? String(monthKey)
         : String(day||"").slice(0,7);
       if (!/^\d{4}-\d{2}$/.test(fixedMonth)) {
-        return `<label class="edit-field"><span>Tag</span><select data-segment-day ${structural?"":"disabled"}><option value="${escapeHtml(day)}">${escapeHtml(String(day||"").slice(8,10)||"—")}</option></select></label>`;
+        return `<label class="edit-field no-event-day-field"><span>Tag</span><select data-segment-day ${structural?"":"disabled"}><option value="${escapeHtml(day)}">${escapeHtml(String(day||"").slice(8,10)||"—")}</option></select></label>`;
       }
       const maxDay=new Date(Number(fixedMonth.slice(0,4)),Number(fixedMonth.slice(5,7)),0).getDate();
       const current=String(day||"").startsWith(fixedMonth+"-") ? String(day) : `${fixedMonth}-01`;
@@ -2717,7 +2833,7 @@ EVENTS_HTML = r"""<!doctype html>
         const value=`${fixedMonth}-${number}`;
         return `<option value="${escapeHtml(value)}" ${value===current?"selected":""}>${number}</option>`;
       }).join("");
-      return `<label class="edit-field"><span>Tag</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select data-segment-day data-locked-month="${escapeHtml(fixedMonth)}" ${structural?"":"disabled"}>${options}</select><input type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+      return `<label class="edit-field no-event-day-field"><span>Tag</span><span style="display:grid;grid-template-columns:88px minmax(0,1fr);gap:6px"><select data-segment-day data-locked-month="${escapeHtml(fixedMonth)}" ${structural?"":"disabled"}>${options}</select><input type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
     }
     function contiguousDayRangesFromValues(values) {
       const days=[...new Set(values.filter(Boolean))].sort();
@@ -2930,11 +3046,11 @@ EVENTS_HTML = r"""<!doctype html>
         const end=segment.end_time || isoTime(segment.end_datetime,"23:59");
         return `<details class="no-event-segment card collapse-card" data-segment-row style="display:block;padding:8px 10px;margin:6px 0">
           <summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>${escapeHtml(day)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
-          <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">
+          <div class="no-event-segment-fields">
             ${noEventDayControl(fixedNoEventMonth, day, structural)}
-            <label class="edit-field"><span>Von</span><input type="time" data-segment-start value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
-            <label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="${escapeHtml(end)}" ${structural ? "" : "disabled"}></label>
-            ${structural ? `<button type="button" data-remove-segment="${index}" class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button>` : ""}
+            <label class="edit-field no-event-start-field"><span>Von</span><input type="time" data-segment-start value="${escapeHtml(start)}" ${structural ? "" : "disabled"}></label>
+            <label class="edit-field no-event-end-field"><span>Bis</span><input type="time" data-segment-end value="${escapeHtml(end)}" ${structural ? "" : "disabled"}></label>
+            ${structural ? `<button type="button" data-remove-segment="${index}" class="danger-button no-event-segment-remove">Entfernen</button>` : ""}
           </div>
         </details>`;
       }).join("");
@@ -3180,7 +3296,7 @@ EVENTS_HTML = r"""<!doctype html>
         bindNoEventRows();
         document.getElementById("add-no-event-segment")?.addEventListener("click",()=>{
           const row=document.createElement("details");row.className="no-event-segment card collapse-card";row.dataset.segmentRow="1";row.open=true;row.style.cssText="display:block;padding:8px 10px;margin:6px 0";
-          row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>Neues Tagessegment</strong><span class="muted">· 00:00–23:59</span></summary><div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 120px;gap:8px;align-items:end;margin-top:8px;width:100%;box-sizing:border-box">${noEventDayControl(fixedNoEventMonth,"",true)}<label class="edit-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button" style="width:100%;min-width:0;align-self:end;white-space:nowrap">Entfernen</button></div>`;
+          row.innerHTML=`<summary style="cursor:pointer;display:flex;align-items:center;gap:6px"><strong>Neues Tagessegment</strong><span class="muted">· 00:00–23:59</span></summary><div class="no-event-segment-fields">${noEventDayControl(fixedNoEventMonth,"",true)}<label class="edit-field no-event-start-field"><span>Von</span><input type="time" data-segment-start value="00:00"></label><label class="edit-field no-event-end-field"><span>Bis</span><input type="time" data-segment-end value="23:59"></label><button type="button" data-remove-segment class="danger-button no-event-segment-remove">Entfernen</button></div>`;
           container.appendChild(row);bindNoEventRows();row.querySelector("[data-segment-day]")?.focus();
         });
       }
