@@ -944,6 +944,111 @@ def get_source_backup(
     return result
 
 
+
+def source_backup_claim_count(
+    registry_path: Path,
+    backup_id: str,
+) -> int:
+    clean_backup_id = str(backup_id or "").strip()
+    if not clean_backup_id:
+        return 0
+
+    connection = _connect(registry_path)
+    try:
+        row = connection.execute(
+            """
+            SELECT COUNT(DISTINCT claims.canonical_family_id) AS n
+            FROM source_families AS families
+            JOIN family_claims AS claims
+              ON claims.canonical_family_id = families.canonical_family_id
+            WHERE families.backup_id = ?
+            """,
+            (clean_backup_id,),
+        ).fetchone()
+        return int(row["n"] or 0) if row is not None else 0
+    finally:
+        connection.close()
+
+
+def remove_source_backup(
+    registry_path: Path,
+    backup_id: str,
+) -> bool:
+    """Remove one source-backup occurrence when no library still claims it.
+
+    Source-family/media rows are removed by foreign-key cascades. Canonical
+    families are retained when another source occurrence still references them
+    and are otherwise cleaned up once they are truly orphaned.
+    """
+    clean_backup_id = str(backup_id or "").strip()
+    if not clean_backup_id:
+        return False
+
+    connection = _connect(registry_path)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        canonical_rows = connection.execute(
+            """
+            SELECT DISTINCT canonical_family_id
+            FROM source_families
+            WHERE backup_id = ?
+            """,
+            (clean_backup_id,),
+        ).fetchall()
+        canonical_ids = [
+            str(row["canonical_family_id"])
+            for row in canonical_rows
+        ]
+
+        if canonical_ids:
+            placeholders = ",".join("?" for _ in canonical_ids)
+            claim = connection.execute(
+                f"""
+                SELECT 1
+                FROM family_claims
+                WHERE canonical_family_id IN ({placeholders})
+                LIMIT 1
+                """,
+                tuple(canonical_ids),
+            ).fetchone()
+            if claim is not None:
+                raise LibraryRegistryError(
+                    "Die Sicherung kann nicht gelöscht werden, weil mindestens "
+                    "eine ihrer Dateifamilien noch einer Bibliothek zugeordnet ist."
+                )
+
+        cursor = connection.execute(
+            "DELETE FROM source_backups WHERE backup_id = ?",
+            (clean_backup_id,),
+        )
+
+        for canonical_id in canonical_ids:
+            connection.execute(
+                """
+                DELETE FROM canonical_families
+                WHERE canonical_family_id = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM source_families
+                      WHERE canonical_family_id = ?
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM family_claims
+                      WHERE canonical_family_id = ?
+                  )
+                """,
+                (canonical_id, canonical_id, canonical_id),
+            )
+
+        connection.commit()
+        return cursor.rowcount == 1
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
 def register_source_backup(
     registry_path: Path,
     *,
