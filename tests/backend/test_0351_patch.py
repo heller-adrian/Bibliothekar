@@ -9,7 +9,7 @@ from app.ui_shell import (
 
 
 def test_0351_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.35.1"
+    assert main.DEPLOYMENT_VERSION == "0.35.2"
 
 
 def test_0351_pwa_popovers_use_visible_triggers():
@@ -45,10 +45,10 @@ def test_0351_workspace_actions_dock_in_mobile_web_app():
 
 def test_0351_metadata_second_header_order_and_mobile_status_layout():
     html = _shell_markup("metadata", "multiple")
-    assert html.index("Mehrfachkorrektur</a>") < html.index("Allgemein</a>") < html.index("Bibliothek</a>")
+    assert html.index("Bibliothek</a>") < html.index("Allgemein</a>") < html.index("Mehrfachkorrektur</a>")
     css = BIBLIOTHEKAR_0351_CSS
     assert ".bk-metadata-subnav" in css
     assert ".bk-status-card .status-label" in css
     assert "grid-column: 1 / -1;" in css
-    assert ".bk-pwa-task-toggle .bk-pwa-icon" in css
-    assert "flex: 0 0 21px;" in css
+    assert ".bk-pwa-task-toggle" in css
+    assert ".bk-pwa-task-count" in css
