@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
 from app.event_structure import build_event_preview
@@ -15,7 +16,7 @@ def _source(relative: str) -> str:
 
 
 def test_0269_version():
-    assert APP_VERSION == "0.27.5"
+    assert APP_VERSION == PACKAGE_VERSION
 
 
 def test_0269_empty_subevent_is_detected_and_kept_in_preview_structure():
