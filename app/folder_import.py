@@ -589,9 +589,8 @@ def run_folder_import_job(
     }
     atomic_json(status_path, status)
 
-    progress("copying", "starting", 0, 0, "Ordnerimport wird vorbereitet.")
-
     try:
+        progress("copying", "starting", 0, 0, "Ordnerimport wird vorbereitet.")
         progress(
             "copying",
             "source_manifest",
