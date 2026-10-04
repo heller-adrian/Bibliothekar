@@ -2408,6 +2408,413 @@ BIBLIOTHEKAR_0350_CSS = r"""
 """
 
 
+
+BIBLIOTHEKAR_0351_CSS = r"""
+/* 0.35.1: mobile Feinkorrekturen nach der ersten iPhone-Abnahme. */
+@media (max-width: 700px) {
+  body.bibliothekar-redesign main {
+    padding: 10px 14px 88px !important;
+  }
+
+  body.bibliothekar-redesign .card,
+  body.bibliothekar-redesign .job,
+  body.bibliothekar-redesign .event-card,
+  body.bibliothekar-redesign .selection-bar,
+  body.bibliothekar-redesign .source-device-card,
+  body.bibliothekar-redesign .result,
+  body.bibliothekar-redesign .child-event,
+  body.bibliothekar-redesign .suggestion-card {
+    border-radius: 12px !important;
+  }
+
+  body.bibliothekar-redesign .import-panel {
+    padding: 14px !important;
+  }
+
+  body.bibliothekar-redesign .job {
+    padding: 10px 11px !important;
+    grid-template-columns: 48px minmax(0, 1fr) !important;
+    column-gap: 9px !important;
+  }
+
+  body.bibliothekar-redesign .bk-job-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 9px;
+  }
+
+  body.bibliothekar-redesign .job .message,
+  body.bibliothekar-redesign .job details,
+  body.bibliothekar-redesign .section-description,
+  body.bibliothekar-redesign .source-detail,
+  body.bibliothekar-redesign .source-device-card {
+    font-size: .88rem;
+    line-height: 1.35;
+  }
+
+  .bk-source-picker {
+    margin: 11px 0 14px;
+  }
+
+  .bk-source-option {
+    min-height: 64px !important;
+    padding: 7px 5px !important;
+  }
+
+  .bk-source-option-icon {
+    width: 31px;
+    height: 31px;
+  }
+
+  .bk-source-option-icon svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  .bk-source-option strong {
+    font-size: .72rem;
+  }
+
+  .bk-action-tile {
+    min-height: 52px !important;
+    font-size: .86rem;
+  }
+
+  .bk-status-card {
+    display: grid !important;
+    grid-template-columns: 24px minmax(0, 1fr) !important;
+    grid-template-rows: auto auto auto !important;
+    align-items: center !important;
+    column-gap: 6px !important;
+    row-gap: 3px !important;
+    min-height: 72px !important;
+    padding: 7px !important;
+  }
+
+  .bk-status-card > div:last-child {
+    display: contents;
+  }
+
+  .bk-status-card .status-label {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-width: 0;
+    font-size: .52rem;
+    line-height: 1;
+    letter-spacing: .025em;
+    white-space: nowrap;
+    text-align: left;
+  }
+
+  .bk-status-card .bk-status-icon {
+    grid-column: 1;
+    grid-row: 2;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+  }
+
+  .bk-status-card .bk-status-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .bk-status-card .status-value {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    margin: 0;
+    font-size: .72rem;
+    line-height: 1.05;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  .bk-status-card .status-detail {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    min-width: 0;
+    margin: 0;
+    font-size: .60rem;
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+  }
+
+  .bk-page-heading h1 {
+    font-size: clamp(1.72rem, 7.6vw, 2.02rem);
+  }
+
+  .bk-page-heading p {
+    font-size: .88rem;
+    line-height: 1.32;
+  }
+}
+
+@media (max-width: 820px) {
+  .bk-workspace-subnav {
+    position: sticky;
+    top: var(--bk-shell-sticky-height, 96px);
+    z-index: 4700;
+    background: color-mix(in srgb, var(--bk-page-bg) 98%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+
+  html[data-bk-display-mode="standalone"] {
+    background: #15222c;
+    overscroll-behavior-y: none;
+  }
+
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-top: var(--bk-shell-sticky-height, 62px) !important;
+    padding-bottom: calc(68px + env(safe-area-inset-bottom)) !important;
+    overscroll-behavior-y: none;
+  }
+
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign main {
+    padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-shell {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    display: flex;
+    align-items: center;
+    padding:
+      max(6px, env(safe-area-inset-top))
+      14px
+      7px;
+    min-height: 0;
+    margin: 0;
+    background: #15222c;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-brand {
+    gap: 8px;
+    padding: 0;
+    min-height: 32px;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-mark {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    transform: none;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-mark span {
+    width: 14px;
+    height: 14px;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-brand-copy {
+    gap: 0;
+    line-height: 1;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-brand-title {
+    font-size: .98rem;
+    line-height: 1.02;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-brand-library {
+    display: block !important;
+    max-width: min(230px, 62vw);
+    color: rgba(248, 244, 233, .72);
+    font-size: .64rem;
+    line-height: 1.08;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-page-heading {
+    margin: 13px 14px 7px;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-page-heading h1 {
+    font-size: clamp(1.75rem, 7.7vw, 2rem);
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-page-heading p {
+    margin-top: 5px;
+    font-size: .86rem;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    grid-template-columns:
+      minmax(48px, .82fr)
+      minmax(68px, 1.18fr)
+      minmax(48px, .82fr)
+      minmax(82px, 1.24fr)
+      46px;
+    gap: 2px;
+    padding:
+      5px
+      7px
+      max(5px, env(safe-area-inset-bottom));
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    min-height: 48px;
+    grid-template-rows: 22px auto;
+    gap: 1px;
+    padding: 3px 2px !important;
+    font-size: .62rem;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle {
+    gap: 5px;
+    padding-inline: 6px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-icon {
+    width: 21px;
+    min-width: 21px;
+    height: 21px;
+    flex: 0 0 21px;
+    font-size: .72rem;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-count {
+    min-width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    padding: 0 5px;
+    font-size: .68rem;
+  }
+
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom: calc(68px + env(safe-area-inset-bottom)) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .bk-workspace-subnav {
+    top: var(--bk-shell-sticky-height, 62px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    width: 100%;
+    margin: 0 !important;
+    padding: 3px 10px 6px;
+    border-radius: 0;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .bk-workspace-links {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 0;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .bk-workspace-links a {
+    padding: 7px 7px;
+    text-align: center;
+    font-size: .78rem;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .bk-workspace-dock {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar.is-header-docked,
+  html[data-bk-display-mode="standalone"][data-bk-theme="light"] body[data-bk-area="workspace"] .selection-bar.is-header-docked {
+    position: static !important;
+    z-index: auto !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 32px !important;
+    gap: 6px !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    overflow: visible !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-summary {
+    display: none !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    width: 100%;
+    margin: 0 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-actions button {
+    min-width: 0 !important;
+    min-height: 32px !important;
+    height: 32px !important;
+    padding: 0 7px !important;
+    font-size: .72rem !important;
+    line-height: 1 !important;
+    white-space: nowrap;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .selection-bar.is-header-docked .selection-top-button {
+    position: static !important;
+    display: grid !important;
+    place-items: center;
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .grid.summary.compact-heading-summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 5px !important;
+    margin: 8px 0 0 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .grid.summary.compact-heading-summary .card {
+    padding: 7px 5px !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .grid.summary.compact-heading-summary .muted {
+    font-size: .60rem;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .grid.summary.compact-heading-summary .number {
+    margin-top: 2px;
+    font-size: 1rem;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .bk-metadata-subnav {
+    top: var(--bk-shell-sticky-height, 62px);
+    width: 100%;
+    margin: 0 !important;
+    padding: 0 8px;
+    border-radius: 0;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .bk-metadata-subnav .bk-workspace-links a {
+    padding: 8px 1px;
+    font-size: clamp(.60rem, 2.45vw, .70rem);
+  }
+}
+"""
+
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 (() => {
   const isStandalone = Boolean(
@@ -2525,6 +2932,8 @@ BIBLIOTHEKAR_JS = r"""
   const menuButton = document.getElementById("bk-menu-button");
   const menu = document.getElementById("bk-menu");
   const tasksButton = document.getElementById("bk-task-button");
+  const pwaMenuButton = document.getElementById("bk-pwa-menu-button");
+  const pwaTasksButton = document.getElementById("bk-pwa-task-button");
   const taskPanel = document.getElementById("bk-task-panel");
   const taskPanelHome = taskPanel?.parentNode || null;
   const taskPanelHomeNext = taskPanel?.nextSibling || null;
@@ -2541,9 +2950,9 @@ BIBLIOTHEKAR_JS = r"""
     if (menuHome) menuHome.insertBefore(menu, menuHomeNext);
   }
 
-  function openMenu() {
-    if (!menu || !menuButton) return;
-    const rect=menuButton.getBoundingClientRect();
+  function openMenu(anchor=menuButton) {
+    if (!menu || !anchor) return;
+    const rect=anchor.getBoundingClientRect();
     document.body.appendChild(menu);
     menu.classList.add("bk-menu-portaled");
     menu.style.top=Math.round(rect.bottom + 8)+"px";
@@ -2561,9 +2970,9 @@ BIBLIOTHEKAR_JS = r"""
     if (taskPanelHome) taskPanelHome.insertBefore(taskPanel, taskPanelHomeNext);
   }
 
-  function openTaskPanel() {
-    if (!taskPanel || !tasksButton) return;
-    const rect=tasksButton.getBoundingClientRect();
+  function openTaskPanel(anchor=tasksButton) {
+    if (!taskPanel || !anchor) return;
+    const rect=anchor.getBoundingClientRect();
     document.body.appendChild(taskPanel);
     taskPanel.classList.add("bk-task-panel-portaled");
     taskPanel.style.top=Math.round(rect.bottom + 8)+"px";
@@ -2576,22 +2985,35 @@ BIBLIOTHEKAR_JS = r"""
     if (except !== taskPanel) restoreTaskPanel();
   }
 
-  menuButton?.addEventListener("click", (event) => {
-    event.stopPropagation();
+  function toggleMenu(event, anchor) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
     const willOpen = menu?.hasAttribute("hidden");
     closePopovers(willOpen ? menu : null);
-    if (willOpen) openMenu(); else restoreMenu();
-  });
+    if (willOpen) openMenu(anchor); else restoreMenu();
+  }
 
-  tasksButton?.addEventListener("click", (event) => {
-    event.stopPropagation();
+  function toggleTaskPanel(event, anchor) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
     const willOpen = taskPanel?.hasAttribute("hidden");
     closePopovers(willOpen ? taskPanel : null);
-    if (willOpen) openTaskPanel(); else restoreTaskPanel();
-  });
+    if (willOpen) openTaskPanel(anchor); else restoreTaskPanel();
+  }
+
+  menuButton?.addEventListener("click", event => toggleMenu(event, menuButton));
+  tasksButton?.addEventListener("click", event => toggleTaskPanel(event, tasksButton));
+  pwaMenuButton?.addEventListener("click", event => toggleMenu(event, pwaMenuButton));
+  pwaTasksButton?.addEventListener("click", event => toggleTaskPanel(event, pwaTasksButton));
 
   document.addEventListener("click", (event) => {
-    if (!event.target.closest(".bk-shell-actions") && !event.target.closest(".bk-task-panel") && !event.target.closest(".bk-menu")) closePopovers(null);
+    if (
+      !event.target.closest(".bk-shell-actions")
+      && !event.target.closest(".bk-pwa-task-toggle")
+      && !event.target.closest(".bk-pwa-menu-toggle")
+      && !event.target.closest(".bk-task-panel")
+      && !event.target.closest(".bk-menu")
+    ) closePopovers(null);
   });
 
   function openDialog(id) {
@@ -3251,7 +3673,10 @@ BIBLIOTHEKAR_JS = r"""
   function syncShellStickyHeight() {
     const shell=document.querySelector(".bk-shell");
     if(!shell)return;
-    const bridge=parseFloat(getComputedStyle(shell).getPropertyValue("--bk-page-bridge-height"))||0;
+    const standalone=root.dataset.bkDisplayMode === "standalone";
+    const bridge=standalone
+      ? 0
+      : (parseFloat(getComputedStyle(shell).getPropertyValue("--bk-page-bridge-height"))||0);
     root.style.setProperty("--bk-shell-sticky-height", Math.ceil(shell.getBoundingClientRect().height + bridge) + "px");
   }
   syncShellStickyHeight();
@@ -3345,9 +3770,9 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         subnav = f"""
 <div class="bk-workspace-subnav bk-metadata-subnav" data-bk-metadata-area="{escape(metadata_area)}" aria-label="Metadatenkorrektur">
   <div class="bk-workspace-links">
-    <a href="/metadata-correction?area=library" class="{'active' if metadata_area == 'library' else ''}">Bibliothek</a>
-    <a href="/metadata-correction?area=general" class="{'active' if metadata_area == 'general' else ''}">Allgemein</a>
     <a href="/metadata-correction?area=multiple" class="{'active' if metadata_area == 'multiple' else ''}">Mehrfachkorrektur</a>
+    <a href="/metadata-correction?area=general" class="{'active' if metadata_area == 'general' else ''}">Allgemein</a>
+    <a href="/metadata-correction?area=library" class="{'active' if metadata_area == 'library' else ''}">Bibliothek</a>
   </div>
 </div>
 """
@@ -3454,12 +3879,12 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 8h14v11H5z"/><path d="M8 8V5h8v3M9 12h6"/></svg></span>
     <span class="bk-pwa-label">Archiv</span>
   </a>
-  <button class="bk-pwa-nav-item bk-pwa-task-toggle" type="button" aria-label="Aufgaben öffnen" onclick="document.getElementById('bk-task-button')?.click()">
+  <button id="bk-pwa-task-button" class="bk-pwa-nav-item bk-pwa-task-toggle" type="button" aria-label="Aufgaben öffnen">
     <span class="bk-pwa-icon" aria-hidden="true">✓</span>
     <span class="bk-pwa-label">Aufgaben</span>
     <span class="bk-pwa-task-count" data-bk-task-count>0</span>
   </button>
-  <button class="bk-pwa-nav-item bk-pwa-menu-toggle" type="button" aria-label="Menü öffnen" onclick="document.getElementById('bk-menu-button')?.click()">
+  <button id="bk-pwa-menu-button" class="bk-pwa-nav-item bk-pwa-menu-toggle" type="button" aria-label="Menü öffnen">
     <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg></span>
     <span class="bk-pwa-label">Menü</span>
   </button>
@@ -3622,7 +4047,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.0 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.35.1 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -3637,7 +4062,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0351_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"

@@ -1474,6 +1474,17 @@ WORKSPACE_HTML = r"""<!doctype html>
       return window.matchMedia("(min-width: 821px)").matches;
     }
 
+    function workspaceStandaloneMobile(){
+      return (
+        document.documentElement.dataset.bkDisplayMode === "standalone"
+        && window.matchMedia("(max-width: 820px)").matches
+      );
+    }
+
+    function workspaceHeaderDock(){
+      return workspaceStaticDesktop() || workspaceStandaloneMobile();
+    }
+
     function alignHeaderSelectionSummary(){
       if(!workspaceStaticDesktop() || !selectionSummary || !workspaceTab || !selectionBar)return;
       const tabRect=workspaceTab.getBoundingClientRect();
@@ -1507,7 +1518,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     function positionWorkspaceChrome(){
       if(!selectionBar || !selectionBarAnchor)return;
-      if(workspaceStaticDesktop() && selectionDockTarget){
+      if(workspaceHeaderDock() && selectionDockTarget){
         if(selectionBar.parentNode!==selectionDockTarget) selectionDockTarget.appendChild(selectionBar);
         selectionBar.classList.add("is-header-docked");
         document.querySelector(".bk-workspace-subnav")?.classList.add("has-selection-dock");

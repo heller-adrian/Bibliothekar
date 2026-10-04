@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### 0.35.1 – Mobile Header, Sekundärnavigation und Dichte
+
+- Aufgaben- und Hamburger-Menü verwenden in Web-App und normaler Website eigene echte Trigger. Das bisherige Weiterreichen eines PWA-Klicks an einen versteckten Desktop-Button entfällt; Popover werden am tatsächlich sichtbaren Auslöser positioniert und nicht sofort wieder geschlossen.
+- Der Web-App-Kopf ist kompakter, zeigt wieder die aktive Bibliothek und ist auf iOS fest verankert. Die gemessene Headerhöhe enthält im Standalone-Modus keinen unsichtbaren Seiten-Bridge-Abstand mehr; Pull-to-Overscroll kann dadurch keine helle Lücke oberhalb des Headers erzeugen oder den Kopf teilweise wegziehen.
+- Auf Handy bleibt der Sekundärheader sticky. Im Arbeitsbereich werden in der installierten Web-App „Ohne Ereignis“, „Ereignis“ und der Nach-oben-Pfeil aus der bisherigen Auswahlkarte in diesen Header gedockt; die doppelte Karte im Inhalt entfällt.
+- Die Metadatenkorrektur nutzt denselben sticky Sekundärheader. Die Bereiche stehen von links nach rechts als „Mehrfachkorrektur · Allgemein · Bibliothek“.
+- Die drei Import-Statuskarten sind nochmals verdichtet: ihre Überschrift nutzt die volle Kartenbreite linksbündig über dem Symbol, Statuswerte bleiben einzeilig und die Typografie ist kleiner.
+- Mobile Karten, Importquellen, Verlaufszeilen, Überschriften und die untere Web-App-Navigation sind moderat verkleinert, damit mehr Inhalt gleichzeitig sichtbar bleibt.
+- Der grüne Aufgaben-Haken in der unteren Web-App-Navigation besitzt eine feste Flex-Breite und kann nicht mehr zusammengedrückt werden.
+- Regressionstests sichern Popover-Trigger, Standalone-Kopf, sticky Sekundärnavigation, mobiles Arbeitsbereich-Docking, Metadatenreihenfolge und Versionsvertrag ab.
+
+
 ### 0.35.0 – Eigene Handy-Web-App und responsive Fenster
 
 - Die installierte Handy-Web-App und die normale Website im mobilen Browser erhalten erstmals getrennte Darstellungsmodi. Der Modus wird über `display-mode: standalone` mit iOS-`navigator.standalone`-Fallback erkannt.
