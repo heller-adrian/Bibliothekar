@@ -47,4 +47,4 @@ def test_0336_reintegration_code_never_accepts_ohne_datum_destination():
 
 
 def test_0336_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.35.6"
+    assert main.DEPLOYMENT_VERSION == "0.35.7"
