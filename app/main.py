@@ -259,7 +259,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = "0.27.5"
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.35.6"
+DEPLOYMENT_VERSION = "0.35.7"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -676,7 +676,7 @@ button.addEventListener("click",async()=>{{button.disabled=true;statusEl.classNa
 const payload={{display_name:nameEl.value,work_root:workEl.value,archive_root:archiveEl.value}};
 const managedName=String(payload.display_name||"Bibliothek").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,32)||"bibliothek";
 const check=await json("/api/libraries/check",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{work_root:payload.work_root,archive_root:payload.archive_root,default_library_id:payload.work_root?"":managedName}})}});
-if(!check.valid)throw new Error((check.errors||[]).join("\n"));
+if(!check.valid)throw new Error((check.errors||[]).join("\\n"));
 await json("/api/libraries",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(payload)}});
 statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";location.assign("/");
 }}catch(e){{statusEl.className="error";statusEl.textContent=e.message;button.disabled=false;}}}});

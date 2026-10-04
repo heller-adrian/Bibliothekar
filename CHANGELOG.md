@@ -1,6 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+
+### 0.35.7 – Erststart-Bibliothek wieder bedienbar
+
+- Die Onboarding-Seite „Erste Bibliothek einrichten“ rendert den Zeilenumbruch in Fehlermeldungen wieder als gültiges JavaScript-Escape statt als echten Zeilenumbruch innerhalb eines String-Literals.
+- Dadurch wird der Click-Handler des Buttons „Bibliothek prüfen und anlegen“ wieder registriert; Pfadprüfung, sichtbare Fehlermeldungen und anschließende Bibliotheksanlage können beim ersten Start tatsächlich ausgeführt werden.
+- Ein Regressionstest prüft den gerenderten Onboarding-HTML/JavaScript-Block ausdrücklich auf den korrekten Escape und schützt diesen nur beim Erststart sichtbaren Codepfad vor einem erneuten stillen Ausfall.
+
 ### 0.35.6 – mobile Website im Hochformat
 
 - Die Web-App bleibt unverändert; alle neuen Layoutregeln sind ausdrücklich auf den Browsermodus begrenzt.
