@@ -142,4 +142,4 @@ def test_0335_import_history_starts_with_five_and_can_expand():
 
 
 def test_0335_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.35.7"
+    assert main.DEPLOYMENT_VERSION == "0.40.0"
