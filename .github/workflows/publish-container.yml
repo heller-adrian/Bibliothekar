@@ -44,6 +44,7 @@ jobs:
           BIBLIOTHEKAR_NAS_SOURCE_DIR: /tmp/bibliothekar/nas-source
           BIBLIOTHEKAR_REMOVABLE_DIR: /tmp/bibliothekar/removable
         run: docker compose -f compose.example.yaml config -q
+
       - name: Complete QA before publishing
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -52,6 +53,21 @@ jobs:
           python -m compileall -q app qa
           bash -n qa/archive_e2e/*.sh
           pytest -q -o addopts='' tests/backend
+
+      - name: Read application version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(python - <<'PY'
+          from app import __version__
+          print(__version__)
+          PY
+          )"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Ungültige App-Version: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -71,6 +87,8 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=tag
+            type=raw,value=${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=v${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push image
@@ -85,90 +103,42 @@ jobs:
       - name: Record published digest
         run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Synchronize existing prerelease
-        if: startsWith(github.ref, 'refs/heads/patch/')
+      - name: Publish stable GitHub release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
           IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
         run: |
           set -euo pipefail
 
-          VERSION="${GITHUB_REF_NAME#patch/}"
           TAG="v${VERSION}"
-
-          # Ein älterer Lauf darf niemals einen neueren Patch-HEAD wieder
-          # zurücktaggen. Der Branch-HEAD wird unmittelbar vor Release-/Tag-
-          # Mutation erneut vom Remote gelesen.
-          CURRENT_HEAD="$(git ls-remote origin "refs/heads/${GITHUB_REF_NAME}" | awk '{print $1}')"
-          if [ -z "${CURRENT_HEAD}" ] || [ "${CURRENT_HEAD}" != "${GITHUB_SHA}" ]; then
-            echo "Publish-Lauf ist veraltet: ${GITHUB_SHA}; aktueller Branch-HEAD: ${CURRENT_HEAD:-unbekannt}."
-            echo "Tag und Prerelease werden nicht verändert."
-            exit 0
-          fi
-
-          RELEASE_JSON=""
-          if RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null)"; then
-            RELEASE_EXISTS=true
-          else
-            RELEASE_EXISTS=false
-            RELEASE_JSON=""
-          fi
-
-          if [ "${RELEASE_EXISTS}" = "true" ]; then
-            printf '%s' "${RELEASE_JSON}" | jq -r '.body // ""' > /tmp/release-body.md
-          else
-            : > /tmp/release-body.md
-          fi
-
-          export VERSION
-          python - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          path = Path("/tmp/release-body.md")
-          body = path.read_text()
-          digest = os.environ["IMAGE_DIGEST"]
-          sha = os.environ["GITHUB_SHA"]
-          version = os.environ["VERSION"]
-
-          if not body.strip():
-              body = (
-                  f"Bibliothekar v{version} Prerelease.\n\n"
-                  "Teststand des aktiven Patch-Branches."
-              )
-
-          body, digest_count = re.subn(
-              r"(Digest:\s*\n)(?:`?sha256:[0-9a-f]+`?)",
-              lambda m: m.group(1) + digest,
-              body,
-              count=1,
-          )
-          if digest_count == 0:
-              body = body.rstrip() + "\n\nDigest:\n" + digest + "\n"
-
-          body, commit_count = re.subn(
-              r"(Source commit:\s*\n)(?:`?[0-9a-f]{40}`?)",
-              lambda m: m.group(1) + sha,
-              body,
-              count=1,
-          )
-          if commit_count == 0:
-              body = body.rstrip() + "\n\nSource commit:\n" + sha + "\n"
-
-          path.write_text(body)
-          PY
 
           git tag -f "${TAG}" "${GITHUB_SHA}"
           git push origin "refs/tags/${TAG}" --force
 
-          if [ "${RELEASE_EXISTS}" = "true" ]; then
+          cat > /tmp/release-body.md <<EOF
+          Bibliothekar ${TAG}
+
+          Container:
+          - ghcr.io/${GITHUB_REPOSITORY_OWNER}/bibliothekar:latest
+          - ghcr.io/${GITHUB_REPOSITORY_OWNER}/bibliothekar:${VERSION}
+          - ghcr.io/${GITHUB_REPOSITORY_OWNER}/bibliothekar:${TAG}
+
+          Digest:
+          ${IMAGE_DIGEST}
+
+          Source commit:
+          ${GITHUB_SHA}
+          EOF
+
+          if RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null)"; then
             RELEASE_ID="$(printf '%s' "${RELEASE_JSON}" | jq -r '.id')"
-            gh api               --method PATCH               "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"               -f target_commitish="${GITHUB_SHA}"               -F prerelease=true               --raw-field make_latest=false               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
-            echo "Updated prerelease ${TAG}."
+            gh api               --method PATCH               "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"               -f target_commitish="${GITHUB_SHA}"               -F draft=false               -F prerelease=false               --raw-field make_latest=true               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
+            echo "Updated stable release ${TAG}."
           else
-            gh api               --method POST               "repos/${GITHUB_REPOSITORY}/releases"               -f tag_name="${TAG}"               -f target_commitish="${GITHUB_SHA}"               -f name="${TAG}"               -F draft=false               -F prerelease=true               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
-            echo "Created prerelease ${TAG}."
+            gh api               --method POST               "repos/${GITHUB_REPOSITORY}/releases"               -f tag_name="${TAG}"               -f target_commitish="${GITHUB_SHA}"               -f name="${TAG}"               -F draft=false               -F prerelease=false               --raw-field make_latest=true               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
+            echo "Created stable release ${TAG}."
           fi
 
-          echo "Synchronized prerelease ${TAG} to ${GITHUB_SHA} with digest ${IMAGE_DIGEST}."
+          echo "Stable release ${TAG} points to ${GITHUB_SHA}."
