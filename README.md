@@ -2,10 +2,19 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktueller Entwicklungsstand: **0.34.0**
+Aktuelle veröffentlichte Version: **0.40.1**
 
-Aktuelle TrueNAS-/Container-Ausgabe: **0.34.0**  
-Stabiler fachlicher Kamerakern als Basis: **0.32.11**
+Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
+
+Fester Rollback-Tag: **`ghcr.io/heller-adrian/bibliothekar:0.40.1`**
+
+## Updates
+
+Für normale Installationen wird in TrueNAS als Image-Version **`latest`** verwendet. `latest` zeigt ausschließlich auf den zuletzt freigegebenen Stand von `main`.
+
+Ein Update besteht damit nur noch daraus, in TrueNAS nach einem neuen Image zu suchen bzw. die App zu aktualisieren. Für reproduzierbare Installationen und Rollbacks bleiben zusätzlich feste Versionstags wie `0.40.1` erhalten.
+
+Entwicklungsstände auf `patch/*` werden weiterhin separat als Testimages veröffentlicht, verändern aber **niemals** `latest`.
 
 ## Ziel
 
@@ -31,7 +40,7 @@ Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
 - offene Neu-Zuordnungen vor Abschluss sichtbar halten
 - wiederverwendete SD-Karten inkrementell verarbeiten
 
-## TrueNAS Custom App 0.34.0
+## TrueNAS Custom App
 
 0.34.0 aktiviert die Mehrfachkorrektur auf der stabilen 0.33.x-
 Metadatenarchitektur. Eine Aufnahme dient als Referenz: Aus ihrer vorhandenen
