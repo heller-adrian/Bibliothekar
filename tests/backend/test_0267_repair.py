@@ -110,7 +110,7 @@ def test_0267_selection_summary_is_aligned_to_workspace_tab_from_start():
 def test_0267_metrics_move_into_capture_heading_on_desktop():
     assert 'getElementById("bk-capture-summary-slot")' in WORKSPACE_HTML
     assert 'captureSummarySlot.appendChild(summarySection)' in WORKSPACE_HTML
-    assert 'summarySection?.classList.add("compact-heading-summary")' in WORKSPACE_HTML
+    assert 'summarySection?.classList.toggle("compact-heading-summary", workspaceStaticDesktop())' in WORKSPACE_HTML
     assert ".summary.compact-heading-summary" in WORKSPACE_HTML
 
 
