@@ -103,7 +103,7 @@ def _job_is_used_by_events(database_path: Path, job_id: str) -> bool:
                 """
                 SELECT 1
                 FROM event_source_jobs
-                WHERE source_job_id = ?
+                WHERE job_id = ?
                 LIMIT 1
                 """,
                 (job_id,),
