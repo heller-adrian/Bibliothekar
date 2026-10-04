@@ -1,3 +1,4 @@
+from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
 from app import main
@@ -5,7 +6,7 @@ from app.pipeline import copy_and_verify, source_manifest
 
 
 def test_0220_version_and_app_shell():
-    assert main.APP_VERSION == "0.27.5"
+    assert main.APP_VERSION == PACKAGE_VERSION
 
     html = main.index()
     assert "Bibliothekar" in html
