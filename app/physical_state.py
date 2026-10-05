@@ -6,6 +6,7 @@ from typing import Any
 import json
 
 from app.event_layout import layout_paths
+from app.external_changes import record_notice, resolve_notice_key
 
 
 def _now() -> str:
@@ -232,10 +233,97 @@ def reconcile_missing_files(
                WHERE event_id=? AND root_kind=? AND file_id=?""",
             (event_id, root_kind, file_id),
         )
+        resolve_notice_key(
+            connection,
+            f"cross-event:{event_id}:{file_id}",
+            now=timestamp,
+        )
 
     confirmed: list[int] = []
     pending: list[int] = []
     for file_id in sorted(missing):
+        file_identity = connection.execute(
+            """SELECT f.id,f.job_id,f.family_id,f.original_filename,
+                      f.current_relative_path,f.size_bytes,
+                      COALESCE(f.sha256_current,f.sha256_original,'') AS sha256
+               FROM files f
+               WHERE f.id=?""",
+            (file_id,),
+        ).fetchone()
+        cross_matches = []
+        if file_identity is not None and str(file_identity["sha256"] or ""):
+            cross_matches = connection.execute(
+                """SELECT inv.event_id,inv.relative_path,inv.filename,
+                          e.name AS event_name
+                   FROM event_inventory_files inv
+                   JOIN events e ON e.id=inv.event_id
+                   WHERE inv.root_kind=?
+                     AND inv.event_id<>?
+                     AND inv.size_bytes=?
+                     AND inv.sha256=?
+                     AND inv.filename=?
+                   ORDER BY inv.event_id,inv.relative_path""",
+                (
+                    root_kind,
+                    event_id,
+                    int(file_identity["size_bytes"] or 0),
+                    str(file_identity["sha256"]),
+                    str(file_identity["original_filename"] or ""),
+                ),
+            ).fetchall()
+
+        if cross_matches:
+            observed = dict(cross_matches[0])
+            connection.execute(
+                """DELETE FROM event_missing_file_observations
+                   WHERE event_id=? AND root_kind=? AND file_id=?""",
+                (event_id, root_kind, file_id),
+            )
+            detail = (
+                f"{file_identity['original_filename']} wurde aus "
+                f"„{event.get('name') or event_id}“ nach "
+                f"„{observed.get('event_name') or observed.get('event_id')}“ verschoben."
+            )
+            if root_kind == "camera_archive":
+                detail += (
+                    " Das Archiv ist schreibgeschützt; bitte die Datei manuell "
+                    "an ihren ursprünglichen Ort zurückverschieben."
+                )
+            record_notice(
+                connection,
+                notice_key=f"cross-event:{event_id}:{file_id}",
+                kind="cross_event_move",
+                root_kind=root_kind,
+                title="Datei zwischen Ereignissen verschoben",
+                detail=detail,
+                job_id=str(file_identity["job_id"]),
+                event_id=event_id,
+                file_id=file_id,
+                relative_path=str(observed.get("relative_path") or ""),
+                repairable=root_kind == "shared_workspace",
+                details={
+                    "source_event_id": event_id,
+                    "target_event_id": str(observed.get("event_id") or ""),
+                    "target_event_name": str(observed.get("event_name") or ""),
+                    "expected_relative_path": str(
+                        file_identity["current_relative_path"] or ""
+                    ),
+                    "observed_relative_path": str(
+                        observed.get("relative_path") or ""
+                    ),
+                    "size_bytes": int(file_identity["size_bytes"] or 0),
+                    "sha256": str(file_identity["sha256"] or ""),
+                },
+                now=timestamp,
+            )
+            pending.append(file_id)
+            continue
+
+        resolve_notice_key(
+            connection,
+            f"cross-event:{event_id}:{file_id}",
+            now=timestamp,
+        )
         count = prior.get(file_id, 0) + 1
         if file_id in prior:
             connection.execute(

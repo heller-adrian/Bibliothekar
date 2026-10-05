@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import time
 
 from PIL import Image, ImageOps
 
@@ -34,6 +35,20 @@ from app.global_stock import (
     project_import_job,
     propagate_corrected_family,
     synchronize_central_stock_projections,
+)
+from app.central_stock_reconcile import reconcile_central_free_stock
+from app.external_changes import (
+    ExternalChangeError,
+    dismiss_external_notice,
+    repair_external_notice,
+)
+from app.operation_batches import (
+    OperationBatchError,
+    create_apply_batch,
+    execute_apply_batch,
+    get_operation_batch,
+    list_active_operation_batches,
+    recover_operation_batches,
 )
 from app.canonical_membership import resolve_payload_membership
 from app.event_layout import (
@@ -268,7 +283,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.40.3"
+DEPLOYMENT_VERSION = "0.41.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -378,6 +393,9 @@ MAIN_LIBRARY_CONTEXT = build_main_library_context()
 # verwendeten DBs migriert hat.
 _LIBRARY_SCHEMA_LOCK = Lock()
 _LIBRARY_SCHEMA_READY: set[str] = set()
+_CENTRAL_RECONCILE_LOCK = Lock()
+_CENTRAL_RECONCILE_LAST = 0.0
+_CENTRAL_RECONCILE_RESULT: dict[str, Any] = {}
 
 
 def ensure_library_database_schema(context: LibraryContext) -> dict[str, Any] | None:
@@ -834,6 +852,73 @@ def synchronize_global_central_stock() -> dict[str, Any]:
     )
 
 
+def reconcile_global_central_stock_state(
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    global _CENTRAL_RECONCILE_LAST
+    global _CENTRAL_RECONCILE_RESULT
+
+    with _CENTRAL_RECONCILE_LOCK:
+        now_monotonic = time.monotonic()
+        if (
+            not force
+            and _CENTRAL_RECONCILE_LAST > 0
+            and now_monotonic - _CENTRAL_RECONCILE_LAST < 20.0
+        ):
+            return dict(_CENTRAL_RECONCILE_RESULT)
+
+        results: dict[str, Any] = {}
+        changed = False
+        rows = list_libraries(
+            REGISTRY_DATABASE_FILE,
+            active_only=False,
+            registered_only=True,
+        )
+        for row in rows:
+            library_id = str(row.get("library_id") or "")
+            database_path = Path(str(row.get("database_path") or ""))
+            if not library_id or not database_path.is_file():
+                continue
+            try:
+                context = resolve_library_context(
+                    REGISTRY_DATABASE_FILE,
+                    library_id,
+                )
+                ensure_library_database_schema(context)
+                blocked = blocked_family_ids(
+                    REGISTRY_DATABASE_FILE,
+                    database_path=database_path,
+                    library_id=library_id,
+                )
+                state = reconcile_central_free_stock(
+                    database_path,
+                    WORKSPACE_PATH,
+                    library_id=library_id,
+                    excluded_family_ids=blocked,
+                )
+                results[library_id] = state
+                if int(state.get("deleted_file_count") or 0):
+                    changed = True
+                    backfill_library_claims(
+                        REGISTRY_DATABASE_FILE,
+                        database_path=database_path,
+                        library_id=library_id,
+                    )
+            except Exception as error:
+                results[library_id] = {
+                    "ready": False,
+                    "error": str(error),
+                }
+
+        _CENTRAL_RECONCILE_LAST = now_monotonic
+        _CENTRAL_RECONCILE_RESULT = {
+            "libraries": results,
+            "changed": changed,
+        }
+        return dict(_CENTRAL_RECONCILE_RESULT)
+
+
 def folder_import_display_label(
     job: dict[str, Any],
     organization: dict[str, Any],
@@ -953,6 +1038,8 @@ def process_claimed_job(
             else "simulation_receipt"
         )
 
+        known_total_files = 0
+
         def report_progress(
             state: str,
             stage: str,
@@ -960,13 +1047,54 @@ def process_claimed_job(
             total: int,
             message: str,
         ) -> None:
+            nonlocal known_total_files
+            if total > 0 and stage in {
+                "source_manifest",
+                "copying",
+                "backup_verification",
+                "metadata_analysis",
+                "organization_planning",
+                "workspace_moving",
+                "workspace_verification",
+            }:
+                known_total_files = max(
+                    known_total_files,
+                    int(total),
+                )
+
+            stage_ranges = {
+                "starting": (0, 5),
+                "source_manifest": (5, 120),
+                "copying": (120, 430),
+                "backup_verification": (430, 620),
+                "snapshot_created": (620, 630),
+                "metadata_analysis": (630, 850),
+                "organization_planning": (850, 900),
+                "workspace_moving": (900, 970),
+                "workspace_verification": (970, 995),
+                "completed": (1000, 1000),
+            }
+            lower, upper = stage_ranges.get(stage, (0, 995))
+            if stage == "completed":
+                overall_current = 1000
+            elif total > 0:
+                ratio = max(
+                    0.0,
+                    min(1.0, float(current) / float(total)),
+                )
+                overall_current = int(
+                    round(lower + (upper - lower) * ratio)
+                )
+            else:
+                overall_current = int(lower)
+
             update_job_progress(
                 database_file,
                 job_id,
                 state=state,
                 stage=stage,
-                current=current,
-                total=total,
+                current=overall_current,
+                total=1000,
                 message=message,
             )
 
@@ -1003,7 +1131,7 @@ def process_claimed_job(
                     LOG_PATH / "backups" / job_id
                 ),
                 snapshot_backend=lifecycle_backend,
-                file_count=total if total > 0 else None,
+                file_count=known_total_files or None,
                 moved_file_count=(
                     current
                     if stage in {
@@ -1842,6 +1970,42 @@ def startup_database() -> None:
                 daemon=True,
             )
             WORKER_THREAD.start()
+
+        # 0.41.1: Persistente Mehrfach-Anwendungen und Sortierjournale
+        # werden nach einem Neustart auch in sekundären Bibliotheken
+        # wiederentdeckt.
+        try:
+            for context in list_active_library_contexts(
+                REGISTRY_DATABASE_FILE
+            ):
+                ensure_library_database_schema(
+                    context
+                )
+                if (
+                    context.database_path.resolve(strict=False)
+                    != DATABASE_FILE.resolve(strict=False)
+                ):
+                    mark_incomplete_sort_runs_interrupted(
+                        context.database_path
+                    )
+                    recover_interrupted_sort_runs(
+                        context.database_path
+                    )
+                for batch_id in recover_operation_batches(
+                    context.database_path
+                ):
+                    Thread(
+                        target=_apply_batch_thread_target,
+                        args=(batch_id, context),
+                        name=f"kamera-batch-recovery-{batch_id}",
+                        daemon=True,
+                    ).start()
+        except Exception as batch_error:
+            print(
+                "Persistente Server-Batches konnten nicht vollständig "
+                f"wiederaufgenommen werden: {batch_error}",
+                flush=True,
+            )
 
     except Exception as error:
         DATABASE_INITIALIZATION = None
@@ -3654,6 +3818,15 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     tags=["Aufträge"],
 )
 def api_jobs() -> dict[str, Any]:
+    try:
+        reconcile_global_central_stock_state(
+            force=False
+        )
+    except Exception as error:
+        print(
+            f"Zentralbestands-Abgleich übersprungen: {error}",
+            flush=True,
+        )
     jobs = list_jobs()
     central_root = workspace_backup_root(WORKSPACE_PATH)
     for job in jobs:
@@ -6523,6 +6696,34 @@ def api_delete_event(
     }
 
 
+def _apply_batch_thread_target(
+    batch_id: str,
+    library_context: LibraryContext,
+) -> None:
+    try:
+        def after_run() -> None:
+            backfill_library_claims(
+                REGISTRY_DATABASE_FILE,
+                database_path=library_context.database_path,
+                library_id=library_context.library_id,
+            )
+            synchronize_global_central_stock()
+
+        execute_apply_batch(
+            library_context.database_path,
+            batch_id,
+            compatibility_workspace_root(
+                library_context
+            ),
+            after_run=after_run,
+        )
+    except Exception as error:
+        print(
+            f"Server-Batch {batch_id} beendet mit Fehler: {error}",
+            flush=True,
+        )
+
+
 def _sort_run_thread_target(
     run_id: str,
     library_context: LibraryContext,
@@ -6570,6 +6771,77 @@ def _reconcile_run_thread_target(
         synchronize_global_central_stock()
     except Exception as error:
         print(f"Arbeitsbereich-Abgleich {run_id} beendet mit Fehler: {error}", flush=True)
+
+
+@app.post(
+    "/api/operation-batches/apply-events",
+    tags=["Sortierung"],
+    status_code=202,
+)
+def api_create_apply_batch(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        batch = create_apply_batch(
+            current_database_file(),
+            list(payload.get("items") or []),
+            confirmation_phrase=str(
+                payload.get("confirmation_phrase") or ""
+            ),
+        )
+    except OperationBatchError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+    thread = Thread(
+        target=_apply_batch_thread_target,
+        args=(
+            str(batch["id"]),
+            current_library_context(),
+        ),
+        name=f"kamera-batch-{batch['id']}",
+        daemon=True,
+    )
+    thread.start()
+    return {
+        "status": "queued",
+        "batch": batch,
+    }
+
+
+@app.get(
+    "/api/operation-batches/active",
+    tags=["Sortierung"],
+)
+def api_active_operation_batches() -> dict[str, Any]:
+    batches = list_active_operation_batches(
+        current_database_file()
+    )
+    return {
+        "batches": batches,
+        "count": len(batches),
+    }
+
+
+@app.get(
+    "/api/operation-batches/{batch_id}",
+    tags=["Sortierung"],
+)
+def api_operation_batch(
+    batch_id: str,
+) -> dict[str, Any]:
+    try:
+        return get_operation_batch(
+            current_database_file(),
+            batch_id,
+        )
+    except OperationBatchError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        ) from error
 
 
 @app.get(
@@ -7307,6 +7579,52 @@ def api_global_tasks() -> dict[str, Any]:
     return {"tasks": tasks, "count": sum(int(t.get("count", 1)) for t in tasks)}
 
 
+@app.post(
+    "/api/external-change-notices/{notice_id}/repair",
+    tags=["Aufgaben"],
+)
+def api_repair_external_change(
+    notice_id: str,
+) -> dict[str, Any]:
+    try:
+        result = repair_external_notice(
+            current_database_file(),
+            notice_id,
+            central_root=storage_paths(
+                WORKSPACE_PATH
+            )["backup_root"],
+            library_work_root=current_library_context().work_root,
+        )
+        reconcile_global_central_stock_state(
+            force=True
+        )
+        return result
+    except ExternalChangeError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+
+@app.post(
+    "/api/external-change-notices/{notice_id}/dismiss",
+    tags=["Aufgaben"],
+)
+def api_dismiss_external_change(
+    notice_id: str,
+) -> dict[str, Any]:
+    try:
+        return dismiss_external_notice(
+            current_database_file(),
+            notice_id,
+        )
+    except ExternalChangeError as error:
+        raise HTTPException(
+            status_code=404,
+            detail=str(error),
+        ) from error
+
+
 @app.get("/api/jobs/{job_id}/event-mutations/active", tags=["Ereignisse"])
 def api_active_event_mutation(job_id: str) -> dict[str, Any]:
     from app.event_mutation import get_active_mutation
@@ -7349,6 +7667,9 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
 @app.get("/api/workspace/summary", tags=["Arbeitsbereich"])
 def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
     """Canonical workspace projection for the selected library."""
+    reconcile_global_central_stock_state(
+        force=True
+    )
     selected = [
         part.strip()
         for part in str(jobs or "").split(",")
@@ -7367,6 +7688,11 @@ def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
         current_archive_root(),
     )
     detect_all_event_structure_changes(current_database_file())
+    backfill_library_claims(
+        REGISTRY_DATABASE_FILE,
+        database_path=current_database_file(),
+        library_id=current_library_context().library_id,
+    )
 
     excluded_by_job = {
         job_id: blocked_family_ids(

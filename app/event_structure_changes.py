@@ -21,6 +21,7 @@ from app.event_access import event_file_rows
 from app.event_inventory import scan_event_inventory, EventInventoryError
 from app.event_layout import get_event_layout, layout_paths, layout_role_paths, update_event_layout
 from app.event_document import build_event_document_from_db, EVENT_DOCUMENT_FILENAME
+from app.external_changes import record_notice
 from app.workspace_layout import WORK_DIRECTORY_NAME
 
 
@@ -369,7 +370,71 @@ def detect_event_structure_change(
                     )
                 return None
             if missing_state["confirmed_deleted"]:
-                snapshot = _snapshot_from_inventory(connection, event, layout_state, root_kind)
+                remaining_inventory = int(
+                    connection.execute(
+                        """SELECT COUNT(*) FROM event_inventory_files
+                           WHERE event_id=? AND root_kind=?""",
+                        (event_id, root_kind),
+                    ).fetchone()[0]
+                    or 0
+                )
+                remaining_directories = int(
+                    connection.execute(
+                        """SELECT COUNT(*) FROM event_inventory_directories
+                           WHERE event_id=? AND root_kind=?""",
+                        (event_id, root_kind),
+                    ).fetchone()[0]
+                    or 0
+                )
+                remaining_assignments = int(
+                    connection.execute(
+                        """SELECT COUNT(*) FROM event_assignments ea
+                           JOIN events assigned ON assigned.id=ea.event_id
+                           WHERE COALESCE(assigned.parent_event_id,assigned.id)=?""",
+                        (event_id,),
+                    ).fetchone()[0]
+                    or 0
+                )
+                if (
+                    remaining_inventory == 0
+                    and remaining_directories == 0
+                    and remaining_assignments == 0
+                ):
+                    record_notice(
+                        connection,
+                        notice_key=f"event-root-deleted:{event_id}",
+                        kind="event_root_deleted",
+                        root_kind=root_kind,
+                        title="Ereignisordner extern gelöscht",
+                        detail=(
+                            f"„{event.get('name') or event_id}“ wurde außerhalb "
+                            "von Bibliothekar vollständig entfernt und aus dem "
+                            "aktiven Bestand übernommen."
+                        ),
+                        job_id=str(event.get("job_id") or ""),
+                        event_id=event_id,
+                        relative_path=str(event.get("folder_name") or ""),
+                        repairable=False,
+                        details={
+                            "event_name": str(event.get("name") or ""),
+                            "folder_name": str(event.get("folder_name") or ""),
+                            "deleted_file_count": len(
+                                missing_state["confirmed_deleted"]
+                            ),
+                        },
+                        now=now,
+                    )
+                    connection.execute(
+                        "DELETE FROM events WHERE id=?",
+                        (event_id,),
+                    )
+                    return None
+                snapshot = _snapshot_from_inventory(
+                    connection,
+                    event,
+                    layout_state,
+                    root_kind,
+                )
         else:
             from app.physical_state import reconcile_missing_files
             reconcile_missing_files(connection, event, root_kind, [], now=now)
