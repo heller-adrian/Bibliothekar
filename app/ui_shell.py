@@ -4730,7 +4730,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.40.2 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.40.3 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -4742,6 +4742,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     result = html
     result = result.replace(
         "</head>",
+        '<link rel="manifest" href="/manifest.webmanifest">\n'
+        '<meta name="apple-mobile-web-app-capable" content="yes">\n'
         f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n"
