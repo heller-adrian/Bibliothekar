@@ -10,7 +10,7 @@ import subprocess
 
 from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="Kamera-Quellen-Helfer", version="0.40.3")
+app = FastAPI(title="Kamera-Quellen-Helfer", version="0.41.1")
 MOUNT_ROOT = Path(
     os.environ.get(
         "KAMERA_REMOVABLE_MOUNT_ROOT",
@@ -362,7 +362,7 @@ def selected_device(path: str) -> dict[str, Any]:
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "version": "0.40.3", "mount_root": str(MOUNT_ROOT), "device_node_root": str(DEVICE_NODE_ROOT), "mode": "direct"}
+    return {"status": "ok", "version": "0.41.1", "mount_root": str(MOUNT_ROOT), "device_node_root": str(DEVICE_NODE_ROOT), "mode": "direct"}
 
 
 @app.get("/devices")
