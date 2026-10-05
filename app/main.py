@@ -268,7 +268,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.40.2"
+DEPLOYMENT_VERSION = "0.40.3"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -8167,6 +8167,39 @@ def api_run_simulated_job() -> JSONResponse:
                 "in die Warteschlange aufgenommen."
             ),
             "job": job,
+        },
+    )
+
+
+@app.get(
+    "/manifest.webmanifest",
+    include_in_schema=False,
+)
+def web_app_manifest(request: Request) -> JSONResponse:
+    """Web-App-Manifest mit iPhone-spezifischer Hochformatsperre.
+
+    iPad/Tablet bleibt absichtlich frei, damit dessen eigenes Layout später
+    unabhängig gestaltet werden kann. Die normale Browser-Website wird durch
+    das Manifest nicht in ihrer Ausrichtung eingeschränkt.
+    """
+    user_agent = request.headers.get("user-agent", "").lower()
+    is_iphone = "iphone" in user_agent or "ipod" in user_agent
+    return JSONResponse(
+        content={
+            "id": "/",
+            "name": "Bibliothekar",
+            "short_name": "Bibliothekar",
+            "start_url": "/",
+            "scope": "/",
+            "display": "standalone",
+            "orientation": "portrait-primary" if is_iphone else "any",
+            "theme_color": "#15222c",
+            "background_color": "#15222c",
+        },
+        media_type="application/manifest+json",
+        headers={
+            "Cache-Control": "no-cache",
+            "Vary": "User-Agent",
         },
     )
 
