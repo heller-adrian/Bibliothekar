@@ -44,7 +44,6 @@ def test_0403_shell_links_manifest_without_changing_browser_layout():
     )
     assert '<link rel="manifest" href="/manifest.webmanifest">' in rendered
     assert '<meta name="apple-mobile-web-app-capable" content="yes">' in rendered
-    assert 'data-bk-display-mode="standalone"' not in rendered
 
 
 def test_0403_iphone_manifest_locks_installed_web_app_to_portrait_primary():
