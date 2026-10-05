@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.40.3 – iPhone-Web-App im Hochformat fixieren
+
+- Die installierte Web-App erhält ein echtes Web-App-Manifest. Auf iPhone/iPod wird die bevorzugte App-Ausrichtung auf `portrait-primary` gesetzt, sodass Drehen des Geräts die Web-App nicht mehr in die Querformatansicht umschaltet.
+- iPad und andere Tablets bleiben ausdrücklich ungesperrt (`orientation: any`); deren eigene responsive Gestaltung wird weiterhin separat behandelt.
+- Die normale mobile Website im Browser bleibt von der Ausrichtungssperre unberührt.
+- Manifest-Antworten variieren nach User-Agent und werden nicht dauerhaft gecacht, damit iPhone und iPad dieselbe Bibliothekar-Installation mit unterschiedlicher Ausrichtungsregel verwenden können.
+- 0.40.3 ist ein reiner Web-App-/Darstellungs-Patch; Ereignis-, Import-, Archiv- und Dateilogik bleiben unverändert.
+
+
 ### 0.40.2 – mobile Von–Bis-Eingabe vervollständigen
 
 - Tagessegmente von „Ohne Ereignis“ zeigen auf Handybreite nur noch eine gemeinsame Überschrift „Von–Bis“ statt der störenden Einzelbeschriftungen „Tag“, „Von“ und „Bis“.
