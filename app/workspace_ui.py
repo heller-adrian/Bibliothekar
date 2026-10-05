@@ -4235,49 +4235,141 @@ WORKSPACE_HTML = r"""<!doctype html>
       scheduleDialogPreview();
     });
 
-    async function applyPlannedEvents() {
-      const selectedInputs=[...plannedEventSelection.querySelectorAll("input[data-planned-event]:checked")];
-      const components=[];
-      const seen=new Set();
-      for(const input of selectedInputs){
-        let rows=[];
-        try{rows=JSON.parse(input.dataset.plannedComponents||"[]");}catch(_){}
-        for(const row of rows){
-          const key=`${row.job_id}:${row.event_id}`;
-          if(!row.job_id||!row.event_id||seen.has(key))continue;
-          seen.add(key);components.push(row);
-        }
-      }
-      if(!components.length)throw new Error("Keine geplanten Ereignisse ausgewählt.");
-      applySavedEventButton.disabled=true;
-      applySavedEventStatus.textContent="Alle ausgewählten Pläne werden geprüft …";
-      const plans=[];
-      for(const component of components){
-        const plan=await getJson(`/api/jobs/${encodeURIComponent(component.job_id)}/events/${encodeURIComponent(component.event_id)}/sort-plan`);
-        if(!plan.summary?.ready)throw new Error(`${plan.event?.name||component.event_id}: ${plan.summary?.blocker_count||1} Blocker.`);
-        plans.push({component,plan});
-      }
-      const familyCount=plans.reduce((sum,item)=>sum+Number(item.plan.summary.family_count||0),0);
-      const fileCount=plans.reduce((sum,item)=>sum+Number(item.plan.summary.file_count||0),0);
-      const ok=window.confirm(`${selectedInputs.length} Ereignis${selectedInputs.length===1?"":"se"} mit ${familyCount} Familien und ${fileCount} Dateien jetzt anwenden?`);
-      if(!ok){applySavedEventButton.disabled=false;applySavedEventStatus.textContent="Nicht angewendet.";return;}
-      for(let index=0;index<plans.length;index+=1){
-        const {component,plan}=plans[index];
-        applySavedEventStatus.textContent=`Teil ${index+1} von ${plans.length} wird angewendet …`;
-        const response=await postJson(
-          `/api/jobs/${encodeURIComponent(component.job_id)}/events/${encodeURIComponent(component.event_id)}/apply-sort`,
-          {plan_token:plan.plan_token,confirmation_phrase:plan.apply_confirmation_phrase}
+    let activeApplyBatchId = "";
+
+    async function pollApplyBatch(batchId) {
+      activeApplyBatchId = String(batchId || "");
+      applySavedEventButton.disabled = true;
+      while (activeApplyBatchId === String(batchId || "")) {
+        const batch = await getJson(
+          `/api/operation-batches/${encodeURIComponent(batchId)}`
         );
-        let run=response.run;
-        while(!run.terminal){
-          applySavedEventStatus.textContent=`Teil ${index+1} von ${plans.length} · ${run.progress_percent||0} %`;
-          await new Promise(resolve=>setTimeout(resolve,800));
-          run=await getJson(`/api/jobs/${encodeURIComponent(component.job_id)}/sort-runs/${encodeURIComponent(run.id)}`);
+        const total = Number(batch.item_count || 0);
+        const done = Number(batch.completed_item_count || 0);
+        const percent = Number(batch.progress_percent || 0);
+        applySavedEventStatus.textContent =
+          `Servervorgang · ${done} von ${total} Ereignissen · ${percent} %`;
+
+        if (batch.terminal) {
+          activeApplyBatchId = "";
+          applySavedEventButton.disabled = false;
+          if (batch.status !== "applied") {
+            throw new Error(
+              batch.error_message
+              || "Mehrfach-Anwendung wurde nicht abgeschlossen."
+            );
+          }
+          applySavedEventStatus.textContent =
+            "Alle ausgewählten Ereignisse wurden serverseitig vollständig angewendet und geprüft.";
+          await loadWorkspace();
+          return batch;
         }
-        if(run.status!=="applied")throw new Error(run.error_message||`Teil ${index+1} wurde nicht abgeschlossen.`);
+
+        await new Promise(resolve => setTimeout(resolve, 800));
       }
-      applySavedEventStatus.textContent="Alle ausgewählten Ereignisbestandteile wurden vollständig angewendet und geprüft.";
-      await loadWorkspace();
+      return null;
+    }
+
+    async function resumeActiveApplyBatch() {
+      if (activeApplyBatchId) return;
+      const data = await getJson("/api/operation-batches/active");
+      const batch = (data.batches || [])[0];
+      if (!batch) return;
+      applySavedEventStatus.textContent =
+        "Laufender Servervorgang wurde wieder aufgenommen …";
+      pollApplyBatch(batch.id).catch(error => {
+        applySavedEventStatus.textContent = error.message;
+        applySavedEventButton.disabled = false;
+      });
+    }
+
+    async function applyPlannedEvents() {
+      const selectedInputs = [
+        ...plannedEventSelection.querySelectorAll(
+          "input[data-planned-event]:checked"
+        )
+      ];
+      const components = [];
+      const seen = new Set();
+
+      for (const input of selectedInputs) {
+        let rows = [];
+        try {
+          rows = JSON.parse(
+            input.dataset.plannedComponents || "[]"
+          );
+        } catch (_) {}
+        for (const row of rows) {
+          const key = `${row.job_id}:${row.event_id}`;
+          if (
+            !row.job_id
+            || !row.event_id
+            || seen.has(key)
+          ) continue;
+          seen.add(key);
+          components.push(row);
+        }
+      }
+
+      if (!components.length) {
+        throw new Error(
+          "Keine geplanten Ereignisse ausgewählt."
+        );
+      }
+
+      applySavedEventButton.disabled = true;
+      applySavedEventStatus.textContent =
+        "Alle ausgewählten Pläne werden geprüft …";
+
+      const plans = [];
+      for (const component of components) {
+        const plan = await getJson(
+          `/api/jobs/${encodeURIComponent(component.job_id)}/events/${encodeURIComponent(component.event_id)}/sort-plan`
+        );
+        if (!plan.summary?.ready) {
+          throw new Error(
+            `${plan.event?.name || component.event_id}: ${plan.summary?.blocker_count || 1} Blocker.`
+          );
+        }
+        plans.push({component, plan});
+      }
+
+      const familyCount = plans.reduce(
+        (sum, item) =>
+          sum + Number(item.plan.summary.family_count || 0),
+        0
+      );
+      const fileCount = plans.reduce(
+        (sum, item) =>
+          sum + Number(item.plan.summary.file_count || 0),
+        0
+      );
+
+      const ok = window.confirm(
+        `${selectedInputs.length} Ereignis${selectedInputs.length === 1 ? "" : "se"} mit ${familyCount} Familien und ${fileCount} Dateien jetzt anwenden? Der Server führt den Vorgang auch weiter, wenn diese Seite geschlossen wird.`
+      );
+      if (!ok) {
+        applySavedEventButton.disabled = false;
+        applySavedEventStatus.textContent =
+          "Nicht angewendet.";
+        return;
+      }
+
+      const response = await postJson(
+        "/api/operation-batches/apply-events",
+        {
+          confirmation_phrase:
+            plans[0]?.plan?.apply_confirmation_phrase
+            || "SORTIERUNG ANWENDEN",
+          items: plans.map(({component, plan}) => ({
+            job_id: component.job_id,
+            event_id: component.event_id,
+            plan_token: plan.plan_token
+          }))
+        }
+      );
+
+      await pollApplyBatch(response.batch.id);
     }
 
     document.addEventListener("bibliothekar:folder-layout-updated", event => {
@@ -4382,9 +4474,30 @@ WORKSPACE_HTML = r"""<!doctype html>
     });
 
     loadJobs().then(async () => {
+      await resumeActiveApplyBatch();
       const params = new URLSearchParams(location.search);
       const task = params.get("task") || "";
-      if (task.startsWith("reassign:")) {
+      if (task.startsWith("batch:")) {
+        const wanted = task.slice("batch:".length);
+        const batch = await getJson(
+          `/api/operation-batches/${encodeURIComponent(wanted)}`
+        );
+        if (
+          !batch.terminal
+          && !activeApplyBatchId
+        ) {
+          pollApplyBatch(batch.id).catch(error => {
+            applySavedEventStatus.textContent =
+              error.message;
+            applySavedEventButton.disabled = false;
+          });
+        }
+        postSaveAction.hidden = false;
+        postSaveAction?.scrollIntoView({
+          behavior: "smooth",
+          block: "center"
+        });
+      } else if (task.startsWith("reassign:")) {
         await openTaskReassignment(task.slice("reassign:".length));
       } else if (task.startsWith("planned:")) {
         const wanted=task.slice("planned:".length);

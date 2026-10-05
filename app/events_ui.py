@@ -5161,7 +5161,28 @@ EVENTS_HTML = r"""<!doctype html>
       const params = new URLSearchParams(location.search);
       const task = params.get("task") || "";
       const jobId = params.get("job") || "";
-      if (task.startsWith("structure:")) {
+      if (
+        task.startsWith("run:")
+        && jobId
+      ) {
+        const runId = task.slice("run:".length);
+        const run = await requestJson(
+          `/api/jobs/${encodeURIComponent(jobId)}/sort-runs/${encodeURIComponent(runId)}`
+        );
+        sortPlanTitle.textContent =
+          "Laufender Vorgang";
+        sortPlanSubtitle.textContent =
+          run.phase || "Sortierlauf";
+        sortPlanBody.innerHTML =
+          '<div id="sort-run-status"></div>';
+        if (!sortPlanDialog.open) {
+          sortPlanDialog.showModal();
+        }
+        renderSortRunProgress(run);
+        if (!run.terminal) {
+          await pollSortRun(jobId, runId);
+        }
+      } else if (task.startsWith("structure:")) {
         await showStructureChange(task.slice("structure:".length));
       } else if (task.startsWith("legacy:")) {
         await showLegacyMaintenance(task.slice("legacy:".length));

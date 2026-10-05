@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from app.source_filter import should_ignore_source_path
 from zoneinfo import ZoneInfo
 import json
@@ -217,10 +217,11 @@ def candidate_definition(
 
 def run_exiftool(
     source_root: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[dict[str, Any]]:
-    command = [
+    common = [
         "exiftool",
-        "-r",
         "-json",
         "-G0:1",
         "-a",
@@ -244,87 +245,101 @@ def run_exiftool(
         "-FileModifyDate",
         "-FileName",
         "-Directory",
-        "-ext",
-        "RAF",
-        "-ext",
-        "DNG",
-        "-ext",
-        "CR2",
-        "-ext",
-        "CR3",
-        "-ext",
-        "NEF",
-        "-ext",
-        "ARW",
-        "-ext",
-        "ORF",
-        "-ext",
-        "RW2",
-        "-ext",
-        "JPG",
-        "-ext",
-        "JPEG",
-        "-ext",
-        "PNG",
-        "-ext",
-        "TIF",
-        "-ext",
-        "TIFF",
-        "-ext",
-        "HEIC",
-        "-ext",
-        "HEIF",
-        "-ext",
-        "MOV",
-        "-ext",
-        "MP4",
-        "-ext",
-        "M4V",
-        "-ext",
-        "AVI",
-        "-ext",
-        "MTS",
-        "-ext",
-        "M2TS",
-        "-ext",
-        "XMP",
-        str(source_root),
     ]
 
-    result = subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    def execute(
+        command: list[str],
+    ) -> list[dict[str, Any]]:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode not in {0, 1}:
+            raise MetadataError(
+                "ExifTool konnte nicht ausgeführt werden: "
+                + result.stderr.strip()
+            )
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise MetadataError(
+                "ExifTool lieferte ungültiges JSON."
+            ) from error
+        if not isinstance(data, list):
+            raise MetadataError(
+                "ExifTool-Ausgabe besitzt ein unerwartetes Format."
+            )
+        return data
 
-    if result.returncode not in {
-        0,
-        1,
-    }:
-        raise MetadataError(
-            "ExifTool konnte nicht ausgeführt werden: "
-            + result.stderr.strip()
+    if progress_callback is None:
+        command = [
+            *common,
+            "-r",
+            "-ext", "RAF",
+            "-ext", "DNG",
+            "-ext", "CR2",
+            "-ext", "CR3",
+            "-ext", "NEF",
+            "-ext", "ARW",
+            "-ext", "ORF",
+            "-ext", "RW2",
+            "-ext", "JPG",
+            "-ext", "JPEG",
+            "-ext", "PNG",
+            "-ext", "TIF",
+            "-ext", "TIFF",
+            "-ext", "HEIC",
+            "-ext", "HEIF",
+            "-ext", "MOV",
+            "-ext", "MP4",
+            "-ext", "M4V",
+            "-ext", "AVI",
+            "-ext", "MTS",
+            "-ext", "M2TS",
+            "-ext", "XMP",
+            str(source_root),
+        ]
+        return execute(command)
+
+    paths = [
+        path
+        for path in sorted(source_root.rglob("*"))
+        if path.is_file()
+        and classify_media(path) != "other"
+        and not should_ignore_source_path(
+            source_root,
+            path,
+        )
+    ]
+    total = len(paths)
+    if not paths:
+        progress_callback(0, 0)
+        return []
+
+    entries: list[dict[str, Any]] = []
+    # Ein Chunk begrenzt die Prozesszahl, liefert aber bei großen Karten
+    # trotzdem sichtbaren, echten Fortschritt während der ExifTool-Phase.
+    chunk_size = 160
+    for offset in range(0, total, chunk_size):
+        chunk = paths[
+            offset : offset + chunk_size
+        ]
+        entries.extend(
+            execute(
+                [
+                    *common,
+                    *(str(path) for path in chunk),
+                ]
+            )
+        )
+        progress_callback(
+            min(offset + len(chunk), total),
+            total,
         )
 
-    try:
-        data = json.loads(
-            result.stdout
-        )
-
-    except json.JSONDecodeError as error:
-        raise MetadataError(
-            "ExifTool lieferte ungültiges JSON."
-        ) from error
-
-    if not isinstance(data, list):
-        raise MetadataError(
-            "ExifTool-Ausgabe besitzt ein "
-            "unerwartetes Format."
-        )
-
-    return data
-
+    return entries
 
 def _candidate_rule(
     tag_name: str,
@@ -521,6 +536,7 @@ def analyze_tree(
     source_root: Path,
     *,
     include_other: bool = True,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     if not source_root.is_dir():
         raise MetadataError(
@@ -528,7 +544,8 @@ def analyze_tree(
         )
 
     exif_entries = run_exiftool(
-        source_root
+        source_root,
+        progress_callback=progress_callback,
     )
 
     metadata_by_path: dict[str, dict[str, Any]] = {}

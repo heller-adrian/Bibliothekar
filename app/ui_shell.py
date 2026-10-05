@@ -4322,16 +4322,115 @@ BIBLIOTHEKAR_JS = r"""
       const count = Number(data.count || 0);
       countNodes.forEach(node => { node.textContent = String(count); });
       if (panel) {
+        const escTask = value => String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll('"', "&quot;");
+
+        const taskEntry = task => {
+          if (task.kind === "external_change") {
+            const repair = task.repairable
+              ? '<button type="button" class="bk-positive-action" data-bk-notice-repair="' +
+                escTask(task.notice_id) +
+                '">Rückgängig machen</button>'
+              : "";
+            return '<div class="bk-task-entry" style="display:block;padding:10px;border-radius:10px">' +
+              '<strong style="display:block">' +
+              escTask(task.title || "Externe Änderung") +
+              '</strong><span style="display:block;color:var(--bk-muted);font-size:.9rem;margin-top:3px">' +
+              escTask(task.detail || "") +
+              '</span><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">' +
+              repair +
+              '<button type="button" data-bk-notice-dismiss="' +
+              escTask(task.notice_id) +
+              '">Hinweis schließen</button></div></div>';
+          }
+
+          return '<a class="bk-task-entry" href="' +
+            bkLibraryHref(task.href || "/events")
+              .replaceAll("&", "&amp;")
+              .replaceAll('"', "&quot;") +
+            '" style="display:block;padding:10px;border-radius:10px;color:inherit;text-decoration:none"><strong style="display:block">' +
+            escTask(task.title || "Aufgabe") +
+            '</strong><span style="color:var(--bk-muted);font-size:.9rem">' +
+            escTask(task.detail || "") +
+            '</span></a>';
+        };
+
         panel.innerHTML = count
-          ? '<strong style="display:block;padding:7px 9px">Offene Aufgaben · ' + count + '</strong>' +
-            tasks.map(task => '<a class="bk-task-entry" href="' +
-              bkLibraryHref(task.href || "/events").replaceAll("&", "&amp;").replaceAll('"', "&quot;") +
-              '" style="display:block;padding:10px;border-radius:10px;color:inherit;text-decoration:none"><strong style="display:block">' +
-              String(task.title || "Aufgabe").replaceAll("<", "&lt;") +
-              '</strong><span style="color:var(--bk-muted);font-size:.9rem">' +
-              String(task.detail || "").replaceAll("<", "&lt;") +
-              '</span></a>').join("")
+          ? '<strong style="display:block;padding:7px 9px">Offene Aufgaben · ' +
+            count +
+            '</strong>' +
+            tasks.map(taskEntry).join("")
           : '<div style="padding:10px"><strong>Keine offenen Aufgaben</strong><div style="color:var(--bk-muted);margin-top:5px">Alles erledigt.</div></div>';
+
+        panel.querySelectorAll(
+          "[data-bk-notice-repair]"
+        ).forEach(button => {
+          button.addEventListener(
+            "click",
+            async event => {
+              event.preventDefault();
+              button.disabled = true;
+              try {
+                const response = await fetch(
+                  "/api/external-change-notices/" +
+                  encodeURIComponent(
+                    button.dataset.bkNoticeRepair
+                  ) +
+                  "/repair",
+                  {method: "POST"}
+                );
+                const data = await response.json()
+                  .catch(() => ({}));
+                if (!response.ok) {
+                  throw new Error(
+                    data.detail
+                    || "Externe Änderung konnte nicht zurückgesetzt werden."
+                  );
+                }
+                window.location.reload();
+              } catch (error) {
+                button.disabled = false;
+                alert(error.message);
+              }
+            }
+          );
+        });
+
+        panel.querySelectorAll(
+          "[data-bk-notice-dismiss]"
+        ).forEach(button => {
+          button.addEventListener(
+            "click",
+            async event => {
+              event.preventDefault();
+              button.disabled = true;
+              try {
+                const response = await fetch(
+                  "/api/external-change-notices/" +
+                  encodeURIComponent(
+                    button.dataset.bkNoticeDismiss
+                  ) +
+                  "/dismiss",
+                  {method: "POST"}
+                );
+                const data = await response.json()
+                  .catch(() => ({}));
+                if (!response.ok) {
+                  throw new Error(
+                    data.detail
+                    || "Hinweis konnte nicht geschlossen werden."
+                  );
+                }
+                await refreshTasks();
+              } catch (error) {
+                button.disabled = false;
+                alert(error.message);
+              }
+            }
+          );
+        });
       }
       const hasStructureTask = tasks.some(task => task.kind === "event_structure_change");
       if (hasStructureTask && !structureTaskAutoOpened) {
@@ -4343,7 +4442,7 @@ BIBLIOTHEKAR_JS = r"""
     }
   }
   refreshTasks();
-  setInterval(refreshTasks, 30000);
+  setInterval(refreshTasks, 5000);
 
   function syncShellStickyHeight() {
     const shell=document.querySelector(".bk-shell");
@@ -4730,7 +4829,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.40.3 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.41.1 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 

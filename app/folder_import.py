@@ -733,7 +733,20 @@ def run_folder_import_job(
             len(entries),
             "ExifTool analysiert Aufnahmezeit, Zeitzone und Aufnahmegerät.",
         )
-        analysis = analyze_tree(temporary_original, include_other=False)
+        analysis = analyze_tree(
+            temporary_original,
+            include_other=False,
+            progress_callback=lambda current, total: progress(
+                "analyzing_metadata",
+                "metadata_analysis",
+                current,
+                max(total, 1),
+                (
+                    "ExifTool analysiert Aufnahmezeit, Zeitzone und "
+                    f"Aufnahmegerät ({current}/{max(total, 1)})."
+                ),
+            ),
+        )
         checksum_by_path = {
             str(entry["relative_path"]): str(entry["sha256"])
             for entry in entries
