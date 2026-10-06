@@ -4632,6 +4632,16 @@ BIBLIOTHEKAR_JS = r"""
     forceRequired: externalTaskRequested
   }).catch(() => {});
 
+  // Der eigentliche Dateisystemscan läuft seitenbezogen (z. B. beim Laden
+  // des Arbeitsbestands). Deshalb wird der Hinweiszustand kurz danach noch
+  // einmal beobachtet: ein beim selben Reload neu erkannter Ordnerverlust
+  // oder Zuordnungskonflikt erscheint ohne einen zweiten Browser-Reload.
+  setInterval(() => {
+    if (!externalChangeDialog?.open) {
+      bkRenderExternalChanges().catch(() => {});
+    }
+  }, 2500);
+
   function syncShellStickyHeight() {
     const shell=document.querySelector(".bk-shell");
     if(!shell)return;
