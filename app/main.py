@@ -287,7 +287,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.41.1"
+DEPLOYMENT_VERSION = "0.41.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1975,7 +1975,7 @@ def startup_database() -> None:
             )
             WORKER_THREAD.start()
 
-        # 0.41.1: Persistente Mehrfach-Anwendungen und Sortierjournale
+        # 0.41.2: Persistente Mehrfach-Anwendungen und Sortierjournale
         # werden nach einem Neustart auch in sekundären Bibliotheken
         # wiederentdeckt.
         try:
