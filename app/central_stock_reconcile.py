@@ -554,8 +554,8 @@ def reconcile_central_free_stock(
             digest = digest_for(item)
             known = connection.execute(
                 """SELECT f.id AS file_id,f.job_id,f.family_id,
-                          f.current_relative_path,f.original_filename,
-                          f.size_bytes,
+                          f.current_relative_path,f.current_root_kind,
+                          f.original_filename,f.size_bytes,
                           COALESCE(f.sha256_current,f.sha256_original,'') AS sha256
                    FROM files f
                    WHERE f.size_bytes=?
@@ -583,21 +583,34 @@ def reconcile_central_free_stock(
             known_row = dict(known[0])
             file_id = int(known_row["file_id"])
             observed = str(item["relative_path"])
+            expected_kind = str(
+                known_row.get("current_root_kind")
+                or "shared_workspace"
+            )
+            archived_source = expected_kind == "camera_archive"
             _record_placement_conflict(
                 connection,
                 row=known_row,
                 observed_root_kind="central_stock",
                 observed_relative_path=observed,
-                expected_root_kind="shared_workspace",
+                expected_root_kind=expected_kind,
                 expected_relative_path=str(
                     known_row.get("current_relative_path") or ""
                 ),
                 timestamp=timestamp,
-                repairable=True,
+                repairable=not archived_source,
                 detail=(
                     f"{known_row.get('original_filename') or Path(observed).name} "
-                    "wurde aus einem Ereignis in den Tagesbestand verschoben, "
-                    "ohne dass die Ereigniszuordnung geändert wurde."
+                    + (
+                        "wurde aus dem Archiv in den Tagesbestand verschoben. "
+                        "Das Archiv ist schreibgeschützt; bitte die Datei manuell "
+                        "an ihren fachlich passenden Archivort zurückverschieben."
+                        if archived_source
+                        else (
+                            "wurde aus einem Ereignis in den Tagesbestand verschoben, "
+                            "ohne dass die Ereigniszuordnung geändert wurde."
+                        )
+                    )
                 ),
             )
             matched_central_paths.add(observed)
