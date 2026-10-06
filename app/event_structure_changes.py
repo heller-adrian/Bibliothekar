@@ -124,6 +124,14 @@ def _in_flight(connection: Any, event: dict[str, Any]) -> bool:
         (event_id,),
     ).fetchone():
         return True
+    if connection.execute(
+        """SELECT 1 FROM event_ssd_releases
+           WHERE event_id=?
+             AND status IN ('verifying','deleting','finalizing','interrupted')
+           LIMIT 1""",
+        (event_id,),
+    ).fetchone():
+        return True
     return False
 
 
@@ -192,6 +200,112 @@ def _split_org_path(relative: str, leaves: list[str]) -> tuple[str, str] | None:
     return None
 
 
+def _is_within_prefix(
+    relative_path: str,
+    prefix: str,
+) -> bool:
+    path = PurePosixPath(_safe_rel(relative_path))
+    expected = PurePosixPath(_safe_rel(prefix))
+    try:
+        path.relative_to(expected)
+        return True
+    except ValueError:
+        return False
+
+
+def _expected_file_prefix(
+    connection: Any,
+    event: dict[str, Any],
+    file_id: int,
+) -> str:
+    """Return the fachlich erlaubte strukturelle Wurzel einer Kameradatei.
+
+    Organisationsordner (Input/Export/Unterordnerlayout) dürfen sich innerhalb
+    dieser Wurzel ändern. Ein Wechsel in einen anderen Tag, ein anderes
+    Unterereignis oder ein anderes Ereignis ist dagegen eine echte
+    Zuordnungsabweichung.
+    """
+    event_id = str(event["id"])
+    file_row = connection.execute(
+        """SELECT f.family_id,ff.selected_capture_time
+           FROM files f
+           LEFT JOIN file_families ff ON ff.id=f.family_id
+           WHERE f.id=?""",
+        (int(file_id),),
+    ).fetchone()
+    if file_row is None:
+        return ""
+
+    family_id = (
+        int(file_row["family_id"])
+        if file_row["family_id"] is not None
+        else None
+    )
+    assignment = connection.execute(
+        """SELECT assigned.id,assigned.parent_event_id,assigned.folder_name
+           FROM event_assignments ea
+           JOIN events assigned ON assigned.id=ea.event_id
+           WHERE (
+                 ea.file_id=?
+                 OR (
+                     ea.file_id IS NULL
+                     AND ea.family_id=?
+                 )
+               )
+             AND COALESCE(assigned.parent_event_id,assigned.id)=?
+           ORDER BY CASE WHEN ea.file_id=? THEN 0 ELSE 1 END,
+                    assigned.start_datetime,assigned.id
+           LIMIT 1""",
+        (
+            int(file_id),
+            family_id,
+            event_id,
+            int(file_id),
+        ),
+    ).fetchone()
+
+    start = str(event.get("start_datetime") or "")
+    year = start[:4]
+    folder = str(event.get("folder_name") or "").strip()
+    parts: list[str] = []
+    if len(year) == 4 and year.isdigit():
+        parts.append(year)
+    if folder:
+        parts.append(folder)
+
+    if assignment is not None and assignment["parent_event_id"] is not None:
+        child = str(assignment["folder_name"] or "").strip()
+        if child:
+            parts.append(child)
+
+    if bool(event.get("preserve_day_folders")):
+        day = str(file_row["selected_capture_time"] or "")[:10]
+        if len(day) == 10:
+            parts.append(day)
+
+    return PurePosixPath(*parts).as_posix() if parts else ""
+
+
+def _open_placement_expected_path(
+    connection: Any,
+    file_id: int,
+) -> str | None:
+    row = connection.execute(
+        """SELECT details_json FROM external_change_notices
+           WHERE notice_key=? AND status='open'
+           LIMIT 1""",
+        (f"placement:{int(file_id)}",),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(str(row["details_json"] or "{}"))
+    except Exception:
+        return None
+    value = str(payload.get("expected_relative_path") or "").strip()
+    return value or None
+
+
 def _snapshot_from_inventory(
     connection: Any,
     event: dict[str, Any],
@@ -232,12 +346,31 @@ def _snapshot_from_inventory(
     duplicate_ids = sorted(file_id for file_id, count in known_counts.items() if count != 1)
 
     file_moves = []
+    placement_conflicts = []
     for file_id, observed in observed_known.items():
         expected = expected_files.get(file_id)
         if expected is None:
             continue
         old = _safe_rel(expected.get("current_relative_path"))
         new = _safe_rel(observed.get("relative_path"))
+        expected_prefix = _expected_file_prefix(
+            connection,
+            event,
+            file_id,
+        )
+        if expected_prefix and not _is_within_prefix(
+            new,
+            expected_prefix,
+        ):
+            placement_conflicts.append({
+                "file_id": file_id,
+                "family_id": observed.get("family_id"),
+                "old_path": old,
+                "new_path": new,
+                "expected_prefix": expected_prefix,
+                "sha256": str(observed.get("sha256") or ""),
+                "size_bytes": int(observed.get("size_bytes") or 0),
+            })
         if old != new:
             file_moves.append({
                 "file_id": file_id,
@@ -316,6 +449,7 @@ def _snapshot_from_inventory(
         "directory_added": directory_added,
         "directory_removed": directory_removed,
         "file_moves": file_moves,
+        "placement_conflicts": placement_conflicts,
         "missing_file_ids": missing_ids,
         "duplicate_file_ids": duplicate_ids,
         "unclassified_directories": unclassified,
@@ -415,6 +549,8 @@ def detect_event_structure_change(
                         event_id=event_id,
                         relative_path=str(event.get("folder_name") or ""),
                         repairable=False,
+                        action_required=False,
+                        group_key="deletion_notice",
                         details={
                             "event_name": str(event.get("name") or ""),
                             "folder_name": str(event.get("folder_name") or ""),
@@ -439,36 +575,109 @@ def detect_event_structure_change(
             from app.physical_state import reconcile_missing_files
             reconcile_missing_files(connection, event, root_kind, [], now=now)
 
-        # Reine Dateibewegungen innerhalb der bereits bekannten Ordnerstruktur
-        # sind normaler Benutzer-IST-Zustand. Sie werden ohne Aufgabe in SQLite
-        # nachgeführt; nur echte Ordner-/Strukturänderungen benötigen den
-        # manuellen Strukturworkflow.
-        placement_only = bool(snapshot.get("file_moves")) and not any((
-            snapshot.get("directory_added"),
-            snapshot.get("directory_removed"),
-            snapshot.get("missing_file_ids"),
-            snapshot.get("duplicate_file_ids"),
-            snapshot.get("unclassified_directories"),
-            snapshot.get("inconsistent_leaf_layouts"),
-        ))
-        if placement_only:
+        # Bekannte Kameradateien dürfen innerhalb ihres fachlich erlaubten
+        # Ereignis-/Unterereignis-/Tagesblatts frei in Organisationsordnern
+        # verschoben werden. Ein Wechsel über diese Grenze bleibt dagegen als
+        # eine gebündelte Konsistenzaufgabe offen.
+        conflicts_by_id = {
+            int(item["file_id"]): item
+            for item in (snapshot.get("placement_conflicts") or [])
+        }
+        moves = list(snapshot.get("file_moves") or [])
+
+        for item in snapshot.get("placement_conflicts") or []:
+            file_id = int(item["file_id"])
+            observed = str(item.get("new_path") or "")
+            expected_path = (
+                _open_placement_expected_path(
+                    connection,
+                    file_id,
+                )
+                or str(item.get("old_path") or "")
+            )
+            file_row = connection.execute(
+                """SELECT f.job_id,f.original_filename,f.size_bytes,
+                          COALESCE(f.sha256_current,f.sha256_original,'') AS sha256
+                   FROM files f WHERE f.id=?""",
+                (file_id,),
+            ).fetchone()
+            if file_row is None:
+                continue
+            detail = (
+                f"{file_row['original_filename']} liegt unter „{observed}“. "
+                f"Die fachliche Zuordnung erlaubt nur „{item.get('expected_prefix') or ''} …“."
+            )
+            if root_kind == "camera_archive":
+                detail += (
+                    " Das Archiv ist schreibgeschützt; bitte die Datei manuell "
+                    "in den passenden Ereignis-/Unterereignisbereich zurückverschieben."
+                )
+            record_notice(
+                connection,
+                notice_key=f"placement:{file_id}",
+                kind="placement_conflict",
+                root_kind=root_kind,
+                title="Datei falsch zugeordnet",
+                detail=detail,
+                job_id=str(file_row["job_id"]),
+                event_id=event_id,
+                file_id=file_id,
+                relative_path=observed,
+                repairable=root_kind == "shared_workspace",
+                action_required=True,
+                group_key="placement_conflict",
+                details={
+                    "expected_root_kind": root_kind,
+                    "observed_root_kind": root_kind,
+                    "expected_relative_path": expected_path,
+                    "observed_relative_path": observed,
+                    "expected_prefix": str(item.get("expected_prefix") or ""),
+                    "size_bytes": int(file_row["size_bytes"] or 0),
+                    "sha256": str(file_row["sha256"] or ""),
+                },
+                now=now,
+            )
+
+        # SQLite bildet den tatsächlich beobachteten Pfad ab. Das fachliche
+        # SOLL bleibt bei falscher Ablage separat in external_change_notices.
+        if moves:
             from app.physical_state import sync_placement_moves
             sync_placement_moves(
                 connection,
                 event,
                 layout_state,
                 root_kind,
-                list(snapshot.get("file_moves") or []),
+                moves,
                 now=now,
             )
-            if current is not None and str(current["status"]) in {"pending", "blocked"}:
-                connection.execute(
-                    """UPDATE event_structure_changes
-                       SET status='cancelled',updated_at=?,completed_at=?
-                       WHERE id=?""",
-                    (now, now, current["id"]),
-                )
-            return None
+
+        observed_file_ids = {
+            int(row["known_file_id"])
+            for row in connection.execute(
+                """SELECT known_file_id FROM event_inventory_files
+                   WHERE event_id=? AND root_kind=?
+                     AND known_file_id IS NOT NULL""",
+                (event_id, root_kind),
+            ).fetchall()
+        }
+        for file_id in observed_file_ids - set(conflicts_by_id):
+            resolve_notice_key(
+                connection,
+                f"placement:{file_id}",
+                now=now,
+            )
+
+        # Dateibewegungen werden separat oben behandelt und dürfen den
+        # Strukturassistenten nicht aufblasen.
+        snapshot["file_moves"] = []
+        structural_changed = any((
+            snapshot.get("directory_added"),
+            snapshot.get("directory_removed"),
+            snapshot.get("duplicate_file_ids"),
+            snapshot.get("unclassified_directories"),
+            snapshot.get("inconsistent_leaf_layouts"),
+        ))
+        snapshot["changed"] = bool(structural_changed)
 
         if not snapshot["changed"]:
             if current is not None and str(current["status"]) in {"pending", "blocked"}:
