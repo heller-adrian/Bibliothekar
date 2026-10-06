@@ -21,7 +21,7 @@ from app.event_access import event_file_rows
 from app.event_inventory import scan_event_inventory, EventInventoryError
 from app.event_layout import get_event_layout, layout_paths, layout_role_paths, update_event_layout
 from app.event_document import build_event_document_from_db, EVENT_DOCUMENT_FILENAME
-from app.external_changes import record_notice
+from app.external_changes import record_notice, resolve_notice_key
 from app.workspace_layout import WORK_DIRECTORY_NAME
 
 
