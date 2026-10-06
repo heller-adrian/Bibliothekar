@@ -395,3 +395,106 @@ def test_0412_shell_has_single_consistency_dialog_contract():
     assert "/api/external-change-notices/repair-all" in source
     assert "Die Aufgabe „Dateizuordnung prüfen“ bleibt offen" in source
     assert "data-bk-notice-repair" not in source
+
+
+def test_0412_ohne_datum_is_a_legal_manual_correction_route(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    initialize_database(db)
+    layout = ensure_workspace_layout(workspace)
+    central = Path(layout["backup_root"])
+
+    _family_id, file_id, relative = _seed_free_file(
+        db,
+        family_key="UNDATED-ROUNDTRIP",
+        filename="ROUNDTRIP.JPG",
+        day="2026-10-05",
+        data=b"undated-roundtrip",
+    )
+    source = central / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"undated-roundtrip")
+    reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+
+    undated = central / "Ohne_Datum" / "ROUNDTRIP.JPG"
+    undated.parent.mkdir(parents=True, exist_ok=True)
+    source.replace(undated)
+    reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+    with database_connection(db) as connection:
+        row = connection.execute(
+            "SELECT current_relative_path FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert str(row["current_relative_path"]) == "Ohne_Datum/ROUNDTRIP.JPG"
+    assert list_external_change_state(db)["required_count"] == 0
+
+    source.parent.mkdir(parents=True, exist_ok=True)
+    undated.replace(source)
+    reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+    with database_connection(db) as connection:
+        row = connection.execute(
+            "SELECT current_relative_path FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert str(row["current_relative_path"]) == relative
+    assert list_external_change_state(db)["required_count"] == 0
+
+
+def test_0412_archived_file_moved_to_day_stock_stays_read_only(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    initialize_database(db)
+    layout = ensure_workspace_layout(workspace)
+    central = Path(layout["backup_root"])
+
+    family_id, file_id, _relative = _seed_free_file(
+        db,
+        family_key="ARCHIVE-READONLY",
+        filename="ARCHIVE.JPG",
+        day="2026-10-05",
+        data=b"archive-readonly",
+    )
+    planned = create_planned_event(
+        db,
+        "J",
+        _event_preview(family_id, "2026-10-05"),
+    )
+    event_id = str(planned["parent_event"]["id"])
+    archive_relative = "2026/10.05 - Testereignis/ARCHIVE.JPG"
+    with database_connection(db) as connection:
+        connection.execute(
+            """UPDATE events
+               SET status='archived',applied_at=?,archived_at=?,updated_at=?
+               WHERE id=?""",
+            (NOW, NOW, NOW, event_id),
+        )
+        connection.execute(
+            """UPDATE files
+               SET current_relative_path=?,
+                   current_root_kind='camera_archive',
+                   updated_at=?
+               WHERE id=?""",
+            (archive_relative, NOW, file_id),
+        )
+
+    wrong = central / "2026/2026-10-06/ARCHIVE.JPG"
+    wrong.parent.mkdir(parents=True, exist_ok=True)
+    wrong.write_bytes(b"archive-readonly")
+    reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+
+    state = list_external_change_state(db)
+    assert state["required_count"] == 1
+    conflict = state["required"][0]
+    assert conflict["repairable"] is False
+    assert conflict["details"]["expected_root_kind"] == "camera_archive"
+    assert conflict["details"]["observed_root_kind"] == "central_stock"
