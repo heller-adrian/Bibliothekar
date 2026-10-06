@@ -232,7 +232,33 @@ TRANSFER_HTML = r'''<!doctype html>
     const archive=await getJson('/api/archive/summary');
     renderArchive(archive);
   }
-  load().catch(error=>{archiveList.innerHTML=`<div class="notice">${escapeHtml(error.message)}</div>`;historyList.innerHTML='';});
+
+  async function autoVerifyFromLocation(){
+    const params=new URLSearchParams(location.search);
+    const job=params.get('verify_job')||'';
+    const eventId=params.get('verify_event')||'';
+    if(!job||!eventId)return;
+    archiveNotice.hidden=false;
+    archiveNotice.textContent='Archivprüfung läuft …';
+    try{
+      const data=await postJson(
+        `/api/jobs/${encodeURIComponent(job)}/events/${encodeURIComponent(eventId)}/archive-verify`
+      );
+      archiveNotice.hidden=false;
+      archiveNotice.textContent=data.manual_archive_finalized
+        ? data.message
+        : `${data.message} ${data.verified_file_count}/${data.file_count} Dateien bestätigt.`;
+      await load();
+      history.replaceState({},'',location.pathname);
+    }catch(error){
+      archiveNotice.hidden=false;
+      archiveNotice.textContent=error.message;
+    }
+  }
+
+  load()
+    .then(autoVerifyFromLocation)
+    .catch(error=>{archiveList.innerHTML=`<div class="notice">${escapeHtml(error.message)}</div>`;historyList.innerHTML='';});
 </script>
 </body>
 </html>'''

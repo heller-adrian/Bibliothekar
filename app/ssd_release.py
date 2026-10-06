@@ -611,6 +611,223 @@ def _finalize_release(
     return result
 
 
+def finalize_manually_moved_event_if_verified(
+    database_path: Path,
+    workspace_path: Path,
+    archive_root: Path,
+    job_id: str,
+    event_id: str,
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    """Finalize an applied event that was physically moved to the archive.
+
+    This is intentionally narrower than the normal SSD release: it runs only
+    when the archive verification is fully green and the event has no physical
+    files left in its workspace tree. The completed release journal therefore
+    records an already-released source instead of deleting anything.
+    """
+    if not bool(verification.get("verified")):
+        return {
+            **verification,
+            "manual_archive_finalized": False,
+        }
+
+    event, files = _event_and_files(
+        database_path,
+        job_id,
+        event_id,
+    )
+    if str(event.get("status") or "") != "applied":
+        return {
+            **verification,
+            "manual_archive_finalized": False,
+        }
+
+    work_root = shared_work_root(
+        workspace_path
+    ).resolve(strict=False)
+    archive_root = archive_root.expanduser().resolve(
+        strict=False
+    )
+
+    try:
+        workspace_inventory = scan_event_inventory(
+            database_path,
+            work_root,
+            job_id,
+            event_id,
+            root_kind="shared_workspace",
+            persist=True,
+            update_known_file_locations=False,
+            fast_refresh=False,
+        )
+        archive_inventory = scan_event_inventory(
+            database_path,
+            archive_root,
+            job_id,
+            event_id,
+            root_kind="camera_archive",
+            persist=True,
+            update_known_file_locations=False,
+            fast_refresh=False,
+        )
+    except EventInventoryError as exc:
+        raise SsdReleaseError(str(exc)) from exc
+
+    # Sobald noch irgendeine reale Ereignisdatei im Arbeitsbereich liegt,
+    # bleibt der normale zweistufige Workflow "prüfen -> SSD freigeben" aktiv.
+    if list(workspace_inventory.get("files") or []):
+        return {
+            **verification,
+            "manual_archive_finalized": False,
+        }
+
+    archive_by_file_id = {
+        int(item["known_file_id"]): item
+        for item in (archive_inventory.get("files") or [])
+        if item.get("known_file_id") is not None
+    }
+    prepared: list[dict[str, Any]] = []
+    for row in files:
+        file_id = int(row["file_id"])
+        observed = archive_by_file_id.get(file_id)
+        if observed is None:
+            raise SsdReleaseError(
+                "Manuelle Archivübernahme kann nicht abgeschlossen werden: "
+                f"Datei {row.get('original_filename') or file_id} fehlt im Archiv."
+            )
+        expected_size = int(row.get("size_bytes") or 0)
+        expected_sha = _expected_hash(row)
+        if (
+            int(observed.get("size_bytes") or -1) != expected_size
+            or str(observed.get("sha256") or "") != expected_sha
+        ):
+            raise SsdReleaseError(
+                "Manuelle Archivübernahme kann nicht abgeschlossen werden: "
+                f"Datei {row.get('original_filename') or file_id} weicht im Archiv ab."
+            )
+        prepared.append({
+            "file_id": file_id,
+            "relative": _safe_relative(
+                row.get("current_relative_path")
+                or row.get("original_relative_path")
+            ),
+            "archive_relative": _safe_relative(
+                observed.get("relative_path")
+            ),
+            "source": work_root.joinpath(
+                *_safe_relative(
+                    row.get("current_relative_path")
+                    or row.get("original_relative_path")
+                ).parts
+            ),
+            "size_bytes": expected_size,
+            "expected_sha256": expected_sha,
+            "asset_kind": "camera_original",
+        })
+
+    if not prepared:
+        raise SsdReleaseError(
+            "Manuelle Archivübernahme enthält keine prüfbaren Kameraoriginale."
+        )
+
+    completed = _latest_completed_release(
+        database_path,
+        job_id,
+        event_id,
+    )
+    if completed is not None:
+        return {
+            **verification,
+            **completed,
+            "manual_archive_finalized": True,
+        }
+
+    release_id = _create_release_run(
+        database_path,
+        job_id,
+        event_id,
+        str(verification["id"]),
+        work_root,
+        archive_root,
+        prepared,
+        [],
+    )
+    now = _now()
+    with database_connection(database_path) as connection:
+        for row in prepared:
+            connection.execute(
+                """UPDATE event_ssd_release_files
+                   SET status='already_released',
+                       actual_source_size_bytes=NULL,
+                       actual_source_sha256=NULL,
+                       actual_archive_size_bytes=?,
+                       actual_archive_sha256=?,
+                       verified_at=?,
+                       deleted_at=?,
+                       error_message=NULL
+                   WHERE release_id=? AND file_id=?""",
+                (
+                    int(row["size_bytes"]),
+                    str(row["expected_sha256"]),
+                    now,
+                    now,
+                    release_id,
+                    int(row["file_id"]),
+                ),
+            )
+        connection.execute(
+            """UPDATE event_ssd_releases
+               SET status='finalizing',
+                   verified_source_count=0,
+                   verified_archive_count=?,
+                   deleted_file_count=0,
+                   deleted_size_bytes=0,
+                   details_json=?,
+                   updated_at=?
+               WHERE id=?""",
+            (
+                len(prepared),
+                json.dumps(
+                    {
+                        "manual_archive_move": True,
+                        "source_already_absent": True,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                now,
+                release_id,
+            ),
+        )
+
+    final = _finalize_release(
+        database_path,
+        release_id,
+        job_id,
+        event_id,
+        [],
+    )
+    with database_connection(database_path) as connection:
+        from app.external_changes import resolve_notice_key
+        resolve_notice_key(
+            connection,
+            f"archive-transfer:{event_id}",
+            now=_now(),
+        )
+
+    return {
+        **verification,
+        **final,
+        "manual_archive_finalized": True,
+        "message": (
+            "Archiv vollständig per Größe und SHA-256 geprüft. "
+            "Der bereits manuell verschobene Ereignisbestand wurde als "
+            "archiviert übernommen."
+        ),
+    }
+
+
 def release_event_ssd(
     database_path: Path,
     workspace_path: Path,

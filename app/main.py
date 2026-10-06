@@ -187,6 +187,7 @@ from app.archive_transfer import (
 )
 from app.ssd_release import (
     SsdReleaseError,
+    finalize_manually_moved_event_if_verified,
     release_event_ssd,
 )
 from app.workspace_layout import (
@@ -4042,14 +4043,24 @@ def api_archive_verify(
     event_id: str,
 ) -> dict[str, Any]:
     try:
-        return verify_event_archive(
+        verification = verify_event_archive(
             current_database_file(),
             current_archive_root(),
             job_id,
             event_id,
             workspace_path=current_workspace_root(),
         )
-    except ArchiveVerificationError as error:
+        if verification.get("verified"):
+            return finalize_manually_moved_event_if_verified(
+                current_database_file(),
+                current_workspace_root(),
+                current_archive_root(),
+                job_id,
+                event_id,
+                verification,
+            )
+        return verification
+    except (ArchiveVerificationError, SsdReleaseError) as error:
         message = str(error)
         status_code = 404 if "nicht gefunden" in message else 409
         raise HTTPException(
