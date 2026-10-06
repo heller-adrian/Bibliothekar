@@ -4953,102 +4953,34 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 "href": f"/metadata-correction?area={area}",
             })
 
-        for row in connection.execute(
-            """SELECT id,kind,root_kind,job_id,event_id,file_id,relative_path,
-                      title,detail,repairable,created_at
+        placement = connection.execute(
+            """SELECT COUNT(*) AS n,
+                      SUM(CASE WHEN repairable=1 THEN 1 ELSE 0 END) AS repairable_n,
+                      SUM(CASE WHEN root_kind='camera_archive' THEN 1 ELSE 0 END) AS archive_n
                FROM external_change_notices
-               WHERE status='open'
-               ORDER BY created_at,id"""
-        ).fetchall():
-            tasks.append({
-                "kind": "external_change",
-                "notice_id": str(row["id"]),
-                "external_kind": str(row["kind"]),
-                "job_id": row["job_id"],
-                "event_id": row["event_id"],
-                "title": str(row["title"]),
-                "detail": str(row["detail"]),
-                "repairable": bool(row["repairable"]),
-                "root_kind": str(row["root_kind"]),
-                "count": 1,
-                "href": "/workspace?task=external:" + str(row["id"]),
-            })
-
-        for row in connection.execute(
-            """SELECT id,status,item_count,completed_item_count,current_index,
-                      error_message,created_at
-               FROM operation_batches
-               WHERE status IN ('queued','running','interrupted')
-               ORDER BY created_at"""
-        ).fetchall():
-            tasks.append({
-                "kind": "operation_batch",
-                "batch_id": str(row["id"]),
-                "title": "Ereignisse werden angewendet",
-                "detail": (
-                    f"{int(row['completed_item_count'] or 0)} von "
-                    f"{int(row['item_count'] or 0)} abgeschlossen"
-                    + (
-                        f" · {row['error_message']}"
-                        if row["error_message"] else ""
-                    )
-                ),
-                "count": 1,
-                "href": "/workspace?task=batch:" + str(row["id"]),
-            })
-
-        for row in connection.execute(
-            """SELECT sr.id,sr.job_id,sr.event_id,sr.status,sr.phase,
-                      sr.file_count,sr.verified_file_count,
-                      sr.move_count,sr.moved_file_count,sr.run_kind
-               FROM sort_runs sr
-               WHERE sr.status IN (
-                   'queued','verifying','moving','finalizing',
-                   'rolling_back','interrupted'
-               )
-                 AND NOT EXISTS (
-                     SELECT 1 FROM operation_batch_items bi
-                     WHERE bi.sort_run_id=sr.id
-                 )
-               ORDER BY sr.created_at"""
-        ).fetchall():
-            file_count = int(row["file_count"] or 0)
-            move_count = int(row["move_count"] or 0)
-            if str(row["status"]) == "verifying" and file_count:
-                percent = min(
-                    49,
-                    round(
-                        int(row["verified_file_count"] or 0)
-                        / file_count
-                        * 49
-                    ),
+               WHERE status='open' AND action_required=1"""
+        ).fetchone()
+        placement_n = int(placement["n"] or 0)
+        if placement_n:
+            detail = (
+                f"{placement_n} Abweichung"
+                + ("" if placement_n == 1 else "en")
+                + " zwischen physischem Bestand und fachlicher Zuordnung"
+            )
+            archive_n = int(placement["archive_n"] or 0)
+            if archive_n:
+                detail += (
+                    f" · {archive_n} im schreibgeschützten Archiv"
                 )
-            elif str(row["status"]) in {"moving","finalizing"}:
-                percent = 50 + (
-                    round(
-                        int(row["moved_file_count"] or 0)
-                        / move_count
-                        * 45
-                    )
-                    if move_count else 45
-                )
-            else:
-                percent = 0
             tasks.append({
-                "kind": "running_sort",
-                "run_id": str(row["id"]),
-                "job_id": str(row["job_id"]),
-                "event_id": str(row["event_id"]),
-                "title": (
-                    "Nachsortierung läuft"
-                    if str(row["run_kind"] or "initial") == "reapply"
-                    else "Sortierung läuft"
-                ),
-                "detail": f"{percent} % · {row['phase']}",
+                "kind": "placement_conflicts",
+                "title": "Dateizuordnung prüfen",
+                "detail": detail,
                 "count": 1,
-                "href": (
-                    f"/events?job={row['job_id']}&task=run:{row['id']}"
-                ),
+                "conflict_count": placement_n,
+                "repairable_count": int(placement["repairable_n"] or 0),
+                "archive_count": archive_n,
+                "href": "/workspace?task=placement-conflicts",
             })
 
         for row in connection.execute(

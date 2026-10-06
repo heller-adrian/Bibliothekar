@@ -39,7 +39,10 @@ from app.global_stock import (
 from app.central_stock_reconcile import reconcile_central_free_stock
 from app.external_changes import (
     ExternalChangeError,
+    acknowledge_external_notices,
     dismiss_external_notice,
+    list_external_change_state,
+    repair_external_conflicts,
     repair_external_notice,
 )
 from app.operation_batches import (
@@ -7177,7 +7180,12 @@ def api_search_events(q: str = "", limit: int = 25, offset: int = 0) -> dict[str
         current_workspace_root(),
         current_archive_root(),
     )
-    detect_all_event_structure_changes(current_database_file())
+    reconcile_global_central_stock_state(
+        force=True
+    )
+    detect_all_event_structure_changes(
+        current_database_file()
+    )
     return search_events(current_database_file(), query=q, limit=limit, offset=offset)
 
 
@@ -7579,6 +7587,68 @@ def api_global_tasks() -> dict[str, Any]:
     return {"tasks": tasks, "count": sum(int(t.get("count", 1)) for t in tasks)}
 
 
+@app.get(
+    "/api/external-change-notices/state",
+    tags=["Aufgaben"],
+)
+def api_external_change_state() -> dict[str, Any]:
+    return list_external_change_state(
+        current_database_file()
+    )
+
+
+@app.post(
+    "/api/external-change-notices/acknowledge",
+    tags=["Aufgaben"],
+)
+def api_acknowledge_external_changes(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return acknowledge_external_notices(
+        current_database_file(),
+        [
+            str(value)
+            for value in (payload.get("notice_ids") or [])
+            if str(value)
+        ],
+    )
+
+
+@app.post(
+    "/api/external-change-notices/repair-all",
+    tags=["Aufgaben"],
+)
+def api_repair_all_external_changes() -> dict[str, Any]:
+    try:
+        result = repair_external_conflicts(
+            current_database_file(),
+            central_root=storage_paths(
+                WORKSPACE_PATH
+            )["backup_root"],
+            library_work_root=current_library_context().work_root,
+        )
+        refresh_live_event_inventories(
+            current_database_file(),
+            current_workspace_root(),
+            current_archive_root(),
+        )
+        reconcile_global_central_stock_state(
+            force=True
+        )
+        detect_all_event_structure_changes(
+            current_database_file()
+        )
+        result["state"] = list_external_change_state(
+            current_database_file()
+        )
+        return result
+    except ExternalChangeError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=str(error),
+        ) from error
+
+
 @app.post(
     "/api/external-change-notices/{notice_id}/repair",
     tags=["Aufgaben"],
@@ -7595,8 +7665,16 @@ def api_repair_external_change(
             )["backup_root"],
             library_work_root=current_library_context().work_root,
         )
+        refresh_live_event_inventories(
+            current_database_file(),
+            current_workspace_root(),
+            current_archive_root(),
+        )
         reconcile_global_central_stock_state(
             force=True
+        )
+        detect_all_event_structure_changes(
+            current_database_file()
         )
         return result
     except ExternalChangeError as error:
@@ -7667,9 +7745,6 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
 @app.get("/api/workspace/summary", tags=["Arbeitsbereich"])
 def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
     """Canonical workspace projection for the selected library."""
-    reconcile_global_central_stock_state(
-        force=True
-    )
     selected = [
         part.strip()
         for part in str(jobs or "").split(",")
@@ -7687,7 +7762,12 @@ def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
         current_workspace_root(),
         current_archive_root(),
     )
-    detect_all_event_structure_changes(current_database_file())
+    reconcile_global_central_stock_state(
+        force=True
+    )
+    detect_all_event_structure_changes(
+        current_database_file()
+    )
     backfill_library_claims(
         REGISTRY_DATABASE_FILE,
         database_path=current_database_file(),
