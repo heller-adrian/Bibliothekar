@@ -235,6 +235,11 @@ def reconcile_missing_files(
         )
         resolve_notice_key(
             connection,
+            f"placement:{file_id}",
+            now=timestamp,
+        )
+        resolve_notice_key(
+            connection,
             f"cross-event:{event_id}:{file_id}",
             now=timestamp,
         )
@@ -244,28 +249,29 @@ def reconcile_missing_files(
     for file_id in sorted(missing):
         file_identity = connection.execute(
             """SELECT f.id,f.job_id,f.family_id,f.original_filename,
-                      f.current_relative_path,f.size_bytes,
+                      f.current_relative_path,f.current_root_kind,
+                      f.size_bytes,
                       COALESCE(f.sha256_current,f.sha256_original,'') AS sha256
                FROM files f
                WHERE f.id=?""",
             (file_id,),
         ).fetchone()
+
         cross_matches = []
         if file_identity is not None and str(file_identity["sha256"] or ""):
             cross_matches = connection.execute(
-                """SELECT inv.event_id,inv.relative_path,inv.filename,
-                          e.name AS event_name
+                """SELECT inv.event_id,inv.root_kind,inv.relative_path,
+                          inv.filename,e.name AS event_name
                    FROM event_inventory_files inv
                    JOIN events e ON e.id=inv.event_id
-                   WHERE inv.root_kind=?
-                     AND inv.event_id<>?
+                   WHERE (inv.event_id<>? OR inv.root_kind<>?)
                      AND inv.size_bytes=?
                      AND inv.sha256=?
                      AND inv.filename=?
-                   ORDER BY inv.event_id,inv.relative_path""",
+                   ORDER BY inv.root_kind,inv.event_id,inv.relative_path""",
                 (
-                    root_kind,
                     event_id,
+                    root_kind,
                     int(file_identity["size_bytes"] or 0),
                     str(file_identity["sha256"]),
                     str(file_identity["original_filename"] or ""),
@@ -273,49 +279,198 @@ def reconcile_missing_files(
             ).fetchall()
 
         if cross_matches:
-            observed = dict(cross_matches[0])
-            connection.execute(
-                """DELETE FROM event_missing_file_observations
-                   WHERE event_id=? AND root_kind=? AND file_id=?""",
-                (event_id, root_kind, file_id),
-            )
-            detail = (
-                f"{file_identity['original_filename']} wurde aus "
-                f"„{event.get('name') or event_id}“ nach "
-                f"„{observed.get('event_name') or observed.get('event_id')}“ verschoben."
-            )
-            if root_kind == "camera_archive":
-                detail += (
-                    " Das Archiv ist schreibgeschützt; bitte die Datei manuell "
-                    "an ihren ursprünglichen Ort zurückverschieben."
+            unique = {
+                (
+                    str(row["root_kind"]),
+                    str(row["event_id"]),
+                    str(row["relative_path"]),
+                ): dict(row)
+                for row in cross_matches
+            }
+            matches = list(unique.values())
+
+            # Ein vollständig aus dem angewendeten Arbeitsbestand ins Archiv
+            # verschobenes Ereignis ist kein Zuordnungsfehler. Es wird als
+            # mögliche manuelle Archivübernahme angeboten und erst nach
+            # SHA-Prüfung fachlich abgeschlossen.
+            archive_same_event = [
+                row
+                for row in matches
+                if (
+                    root_kind == "shared_workspace"
+                    and str(row["root_kind"]) == "camera_archive"
+                    and str(row["event_id"]) == event_id
                 )
+            ]
+            if len(archive_same_event) == 1:
+                observed = archive_same_event[0]
+                connection.execute(
+                    """DELETE FROM event_missing_file_observations
+                       WHERE event_id=? AND root_kind=? AND file_id=?""",
+                    (event_id, root_kind, file_id),
+                )
+                record_notice(
+                    connection,
+                    notice_key=f"archive-transfer:{event_id}",
+                    kind="archive_transfer_candidate",
+                    root_kind="camera_archive",
+                    title="Mögliche Archivübernahme erkannt",
+                    detail=(
+                        f"Für „{event.get('name') or event_id}“ wurden Dateien "
+                        "aus dem Arbeitsbereich im Archiv wiedergefunden. "
+                        "Bitte den Archivbestand prüfen."
+                    ),
+                    job_id=str(file_identity["job_id"]),
+                    event_id=event_id,
+                    file_id=None,
+                    relative_path=str(observed.get("relative_path") or ""),
+                    repairable=False,
+                    action_required=False,
+                    group_key="archive_candidate",
+                    details={
+                        "event_id": event_id,
+                        "job_id": str(file_identity["job_id"]),
+                        "event_name": str(event.get("name") or ""),
+                    },
+                    now=timestamp,
+                )
+                pending.append(file_id)
+                continue
+
+            if len(matches) == 1:
+                observed = matches[0]
+                observed_kind = str(observed["root_kind"])
+                observed_path = str(observed["relative_path"])
+                expected_path = str(
+                    file_identity["current_relative_path"] or ""
+                )
+                expected_kind = str(
+                    file_identity["current_root_kind"]
+                    or root_kind
+                )
+                detail = (
+                    f"{file_identity['original_filename']} wurde aus "
+                    f"„{event.get('name') or event_id}“ nach "
+                    f"„{observed.get('event_name') or observed.get('event_id')}“ "
+                    "verschoben, ohne dass die fachliche Zuordnung geändert wurde."
+                )
+                if (
+                    observed_kind == "camera_archive"
+                    or expected_kind == "camera_archive"
+                ):
+                    detail += (
+                        " Das Archiv ist schreibgeschützt; die Datei muss "
+                        "manuell an einen fachlich passenden Ort zurück."
+                    )
+                record_notice(
+                    connection,
+                    notice_key=f"placement:{file_id}",
+                    kind="placement_conflict",
+                    root_kind=observed_kind,
+                    title="Datei falsch zugeordnet",
+                    detail=detail,
+                    job_id=str(file_identity["job_id"]),
+                    event_id=event_id,
+                    file_id=file_id,
+                    relative_path=observed_path,
+                    repairable=(
+                        observed_kind != "camera_archive"
+                        and expected_kind != "camera_archive"
+                    ),
+                    action_required=True,
+                    group_key="placement_conflict",
+                    details={
+                        "source_event_id": event_id,
+                        "target_event_id": str(observed.get("event_id") or ""),
+                        "target_event_name": str(observed.get("event_name") or ""),
+                        "expected_root_kind": expected_kind,
+                        "observed_root_kind": observed_kind,
+                        "expected_relative_path": expected_path,
+                        "observed_relative_path": observed_path,
+                        "size_bytes": int(file_identity["size_bytes"] or 0),
+                        "sha256": str(file_identity["sha256"] or ""),
+                    },
+                    now=timestamp,
+                )
+                # SQLite folgt dem realen IST, die fachliche Abweichung bleibt
+                # separat als offene Aufgabe erhalten.
+                connection.execute(
+                    """UPDATE files
+                       SET current_relative_path=?,
+                           current_root_kind=?,
+                           updated_at=?
+                       WHERE id=?""",
+                    (
+                        observed_path,
+                        observed_kind,
+                        timestamp,
+                        file_id,
+                    ),
+                )
+                connection.execute(
+                    """DELETE FROM event_missing_file_observations
+                       WHERE event_id=? AND root_kind=? AND file_id=?""",
+                    (event_id, root_kind, file_id),
+                )
+                pending.append(file_id)
+                continue
+
+            # Mehrere identische physische Kandidaten: nicht löschen und nicht
+            # automatisch entscheiden.
+            first = matches[0]
             record_notice(
                 connection,
-                notice_key=f"cross-event:{event_id}:{file_id}",
-                kind="cross_event_move",
-                root_kind=root_kind,
-                title="Datei zwischen Ereignissen verschoben",
-                detail=detail,
+                notice_key=f"placement:{file_id}",
+                kind="placement_conflict",
+                root_kind=str(first["root_kind"]),
+                title="Dateiposition ist mehrdeutig",
+                detail=(
+                    f"{file_identity['original_filename']} fehlt am erwarteten "
+                    "Ort; mehrere byte-identische Positionen wurden gefunden."
+                ),
                 job_id=str(file_identity["job_id"]),
                 event_id=event_id,
                 file_id=file_id,
-                relative_path=str(observed.get("relative_path") or ""),
-                repairable=root_kind == "shared_workspace",
+                relative_path=str(first["relative_path"]),
+                repairable=False,
+                action_required=True,
+                group_key="placement_conflict",
                 details={
-                    "source_event_id": event_id,
-                    "target_event_id": str(observed.get("event_id") or ""),
-                    "target_event_name": str(observed.get("event_name") or ""),
+                    "expected_root_kind": str(
+                        file_identity["current_root_kind"] or root_kind
+                    ),
+                    "observed_root_kind": str(first["root_kind"]),
                     "expected_relative_path": str(
                         file_identity["current_relative_path"] or ""
                     ),
-                    "observed_relative_path": str(
-                        observed.get("relative_path") or ""
-                    ),
+                    "observed_relative_path": str(first["relative_path"]),
+                    "candidate_paths": [
+                        {
+                            "root_kind": str(row["root_kind"]),
+                            "event_id": str(row["event_id"]),
+                            "relative_path": str(row["relative_path"]),
+                        }
+                        for row in matches
+                    ],
                     "size_bytes": int(file_identity["size_bytes"] or 0),
                     "sha256": str(file_identity["sha256"] or ""),
                 },
                 now=timestamp,
             )
+            pending.append(file_id)
+            continue
+
+        # Ein Konflikt kann in einem anderen verwalteten Bereich (z. B.
+        # Tagesbestand) bereits erkannt worden sein. Solange er offen ist,
+        # darf die fehlende Ereignisdatei nicht als echte Löschung verbucht
+        # werden.
+        active_conflict = connection.execute(
+            """SELECT 1 FROM external_change_notices
+               WHERE notice_key=? AND status='open' AND action_required=1
+               LIMIT 1""",
+            (f"placement:{file_id}",),
+        ).fetchone()
+        if active_conflict is not None:
             pending.append(file_id)
             continue
 
