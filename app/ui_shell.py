@@ -4328,24 +4328,6 @@ BIBLIOTHEKAR_JS = r"""
           .replaceAll('"', "&quot;");
 
         const taskEntry = task => {
-          if (task.kind === "external_change") {
-            const repair = task.repairable
-              ? '<button type="button" class="bk-positive-action" data-bk-notice-repair="' +
-                escTask(task.notice_id) +
-                '">Rückgängig machen</button>'
-              : "";
-            return '<div class="bk-task-entry" style="display:block;padding:10px;border-radius:10px">' +
-              '<strong style="display:block">' +
-              escTask(task.title || "Externe Änderung") +
-              '</strong><span style="display:block;color:var(--bk-muted);font-size:.9rem;margin-top:3px">' +
-              escTask(task.detail || "") +
-              '</span><div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:8px">' +
-              repair +
-              '<button type="button" data-bk-notice-dismiss="' +
-              escTask(task.notice_id) +
-              '">Hinweis schließen</button></div></div>';
-          }
-
           return '<a class="bk-task-entry" href="' +
             bkLibraryHref(task.href || "/events")
               .replaceAll("&", "&amp;")
@@ -4364,73 +4346,6 @@ BIBLIOTHEKAR_JS = r"""
             tasks.map(taskEntry).join("")
           : '<div style="padding:10px"><strong>Keine offenen Aufgaben</strong><div style="color:var(--bk-muted);margin-top:5px">Alles erledigt.</div></div>';
 
-        panel.querySelectorAll(
-          "[data-bk-notice-repair]"
-        ).forEach(button => {
-          button.addEventListener(
-            "click",
-            async event => {
-              event.preventDefault();
-              button.disabled = true;
-              try {
-                const response = await fetch(
-                  "/api/external-change-notices/" +
-                  encodeURIComponent(
-                    button.dataset.bkNoticeRepair
-                  ) +
-                  "/repair",
-                  {method: "POST"}
-                );
-                const data = await response.json()
-                  .catch(() => ({}));
-                if (!response.ok) {
-                  throw new Error(
-                    data.detail
-                    || "Externe Änderung konnte nicht zurückgesetzt werden."
-                  );
-                }
-                window.location.reload();
-              } catch (error) {
-                button.disabled = false;
-                alert(error.message);
-              }
-            }
-          );
-        });
-
-        panel.querySelectorAll(
-          "[data-bk-notice-dismiss]"
-        ).forEach(button => {
-          button.addEventListener(
-            "click",
-            async event => {
-              event.preventDefault();
-              button.disabled = true;
-              try {
-                const response = await fetch(
-                  "/api/external-change-notices/" +
-                  encodeURIComponent(
-                    button.dataset.bkNoticeDismiss
-                  ) +
-                  "/dismiss",
-                  {method: "POST"}
-                );
-                const data = await response.json()
-                  .catch(() => ({}));
-                if (!response.ok) {
-                  throw new Error(
-                    data.detail
-                    || "Hinweis konnte nicht geschlossen werden."
-                  );
-                }
-                await refreshTasks();
-              } catch (error) {
-                button.disabled = false;
-                alert(error.message);
-              }
-            }
-          );
-        });
       }
       const hasStructureTask = tasks.some(task => task.kind === "event_structure_change");
       if (hasStructureTask && !structureTaskAutoOpened) {
@@ -4443,6 +4358,279 @@ BIBLIOTHEKAR_JS = r"""
   }
   refreshTasks();
   setInterval(refreshTasks, 5000);
+
+  const externalChangeDialog = document.getElementById("bk-external-change-dialog");
+  const externalChangeTitle = document.getElementById("bk-external-change-title");
+  const externalChangeLead = document.getElementById("bk-external-change-lead");
+  const externalChangeList = document.getElementById("bk-external-change-list");
+  const externalChangeActions = document.getElementById("bk-external-change-actions");
+
+  function bkEscapeNotice(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  async function bkExternalState() {
+    const response = await fetch(
+      "/api/external-change-notices/state",
+      {cache: "no-store"}
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Dateisystemhinweise konnten nicht geladen werden."
+      );
+    }
+    return data;
+  }
+
+  async function bkAcknowledgeNotices(ids) {
+    const response = await fetch(
+      "/api/external-change-notices/acknowledge",
+      {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({notice_ids: ids})
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Hinweis konnte nicht bestätigt werden."
+      );
+    }
+    return data;
+  }
+
+  function bkNoticeRows(rows, required) {
+    if (!rows.length) return "";
+    const visible = rows.slice(0, 8);
+    const items = visible.map(row => {
+      const detail = bkEscapeNotice(row.detail || "");
+      const archiveButton = (
+        !required
+        && row.kind === "archive_transfer_candidate"
+        && row.details?.event_id
+        && row.details?.job_id
+      ) ? (
+        '<button type="button" class="bk-positive-action" ' +
+        'data-bk-archive-review="' +
+        bkEscapeNotice(row.id) +
+        '" data-bk-archive-job="' +
+        bkEscapeNotice(row.details.job_id) +
+        '" data-bk-archive-event="' +
+        bkEscapeNotice(row.details.event_id) +
+        '">Archiv prüfen</button>'
+      ) : "";
+      return (
+        '<div style="padding:10px 0;border-bottom:1px solid var(--bk-line)">' +
+        '<strong style="display:block">' +
+        bkEscapeNotice(row.title || (required ? "Zuordnungsfehler" : "Hinweis")) +
+        '</strong>' +
+        '<span style="display:block;color:var(--bk-muted);font-size:.9rem;line-height:1.4;margin-top:3px">' +
+        detail +
+        '</span>' +
+        (archiveButton
+          ? '<div style="margin-top:8px">' + archiveButton + '</div>'
+          : '') +
+        '</div>'
+      );
+    }).join("");
+    if (rows.length <= visible.length) return items;
+    return (
+      items +
+      '<details style="margin-top:8px"><summary>' +
+      (rows.length - visible.length) +
+      ' weitere anzeigen</summary><div style="margin-top:6px">' +
+      rows.slice(visible.length).map(row => (
+        '<div style="padding:7px 0;color:var(--bk-muted);font-size:.9rem">' +
+        bkEscapeNotice(row.detail || row.title || "") +
+        '</div>'
+      )).join("") +
+      '</div></details>'
+    );
+  }
+
+  async function bkRenderExternalChanges({
+    forceRequired = false
+  } = {}) {
+    if (!externalChangeDialog) return;
+    const state = await bkExternalState();
+    const requiredRows = state.required || [];
+    const unseenRequired = state.unseen_required || [];
+    const infoRows = state.unseen_informational || [];
+
+    let mode = "";
+    let rows = [];
+    if (
+      forceRequired
+      || unseenRequired.length
+    ) {
+      if (requiredRows.length) {
+        mode = "required";
+        rows = requiredRows;
+      }
+    } else if (infoRows.length) {
+      mode = "info";
+      rows = infoRows;
+    }
+
+    if (!mode || !rows.length) {
+      if (externalChangeDialog.open) {
+        externalChangeDialog.close();
+      }
+      return;
+    }
+
+    externalChangeTitle.textContent = (
+      mode === "required"
+        ? "Dateizuordnung prüfen"
+        : (
+          rows.some(row => row.kind === "archive_transfer_candidate")
+            ? "Änderung im Dateibestand erkannt"
+            : "Dateibestand aktualisiert"
+        )
+    );
+    externalChangeLead.textContent = (
+      mode === "required"
+        ? (
+          rows.length === 1
+            ? "Eine Datei liegt an einem fachlich unpassenden Ort. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als Aufgabe offen."
+            : rows.length + " Dateien liegen an fachlich unpassenden Orten. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als eine Aufgabe offen."
+        )
+        : (
+          rows.length === 1
+            ? "Bibliothekar hat eine externe Änderung übernommen."
+            : "Bibliothekar hat " + rows.length + " externe Änderungen übernommen."
+        )
+    );
+    externalChangeList.innerHTML = bkNoticeRows(
+      rows,
+      mode === "required"
+    );
+
+    if (mode === "required") {
+      const repairable = rows.some(row => row.repairable);
+      externalChangeActions.innerHTML =
+        (repairable
+          ? '<button type="button" class="bk-positive-action" id="bk-external-repair-all">Änderungen rückgängig machen</button>'
+          : '') +
+        '<button type="button" id="bk-external-ignore">Ignorieren</button>';
+
+      document.getElementById("bk-external-repair-all")?.addEventListener(
+        "click",
+        async event => {
+          event.currentTarget.disabled = true;
+          try {
+            const response = await fetch(
+              "/api/external-change-notices/repair-all",
+              {method: "POST"}
+            );
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(
+                data.detail || "Die Änderungen konnten nicht vollständig zurückgesetzt werden."
+              );
+            }
+            await refreshTasks();
+            await bkRenderExternalChanges({forceRequired: true});
+          } catch (error) {
+            event.currentTarget.disabled = false;
+            alert(error.message);
+          }
+        }
+      );
+
+      document.getElementById("bk-external-ignore")?.addEventListener(
+        "click",
+        async event => {
+          const ok = window.confirm(
+            "Die physische Ablage bleibt damit vorerst bestehen. " +
+            "Die Aufgabe „Dateizuordnung prüfen“ bleibt offen, bis die " +
+            "Dateien wieder fachlich passend liegen. Wirklich ignorieren?"
+          );
+          if (!ok) return;
+          event.currentTarget.disabled = true;
+          try {
+            await bkAcknowledgeNotices(
+              rows.map(row => row.id)
+            );
+            externalChangeDialog.close();
+            await refreshTasks();
+            // Nach dem verpflichtenden Konfliktdialog darf ein einmaliger
+            // Lösch-/Archivhinweis desselben Scans noch folgen.
+            setTimeout(
+              () => bkRenderExternalChanges().catch(() => {}),
+              120
+            );
+          } catch (error) {
+            event.currentTarget.disabled = false;
+            alert(error.message);
+          }
+        }
+      );
+    } else {
+      externalChangeActions.innerHTML =
+        '<button type="button" class="bk-positive-action" id="bk-external-info-close">Hinweis schließen</button>';
+      document.getElementById("bk-external-info-close")?.addEventListener(
+        "click",
+        async event => {
+          event.currentTarget.disabled = true;
+          try {
+            await bkAcknowledgeNotices(
+              rows.map(row => row.id)
+            );
+            externalChangeDialog.close();
+          } catch (error) {
+            event.currentTarget.disabled = false;
+            alert(error.message);
+          }
+        }
+      );
+    }
+
+    externalChangeList.querySelectorAll(
+      "[data-bk-archive-review]"
+    ).forEach(button => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await bkAcknowledgeNotices(
+            rows.map(row => row.id)
+          );
+        } catch (_) {}
+        const job = button.dataset.bkArchiveJob || "";
+        const eventId = button.dataset.bkArchiveEvent || "";
+        const target = bkLibraryHref(
+          "/transfer?verify_job=" +
+          encodeURIComponent(job) +
+          "&verify_event=" +
+          encodeURIComponent(eventId)
+        );
+        window.location.assign(target);
+      });
+    });
+
+    externalChangeDialog.addEventListener(
+      "cancel",
+      event => event.preventDefault(),
+      {once: true}
+    );
+    if (!externalChangeDialog.open) {
+      externalChangeDialog.showModal();
+    }
+  }
+
+  const externalTaskRequested = (
+    new URLSearchParams(location.search).get("task")
+    === "placement-conflicts"
+  );
+  bkRenderExternalChanges({
+    forceRequired: externalTaskRequested
+  }).catch(() => {});
 
   function syncShellStickyHeight() {
     const shell=document.querySelector(".bk-shell");
@@ -4674,6 +4862,19 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
 {subnav}
 {heading}
+
+<dialog id="bk-external-change-dialog" class="bk-dialog">
+  <div class="bk-dialog-body" style="max-width:720px">
+    <div class="bk-dialog-head">
+      <div>
+        <h2 id="bk-external-change-title">Dateibestand</h2>
+        <div id="bk-external-change-lead" style="color:var(--bk-muted);margin-top:5px;line-height:1.45"></div>
+      </div>
+    </div>
+    <div id="bk-external-change-list" style="margin-top:12px;max-height:min(52vh,520px);overflow:auto"></div>
+    <div id="bk-external-change-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"></div>
+  </div>
+</dialog>
 
 <dialog id="bk-settings-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
