@@ -667,9 +667,15 @@ def detect_event_structure_change(
                 now=now,
             )
 
-        # Dateibewegungen werden separat oben behandelt und dürfen den
-        # Strukturassistenten nicht aufblasen.
-        snapshot["file_moves"] = []
+        # Nur fachlich falsche Platzierungen werden aus dem normalen
+        # Strukturworkflow herausgehalten. Legitime Dateibewegungen, die zu
+        # einer echten Ordneränderung gehören (z. B. Ordner umbenannt), bleiben
+        # Teil des erkannten Strukturzustands und werden wie bisher übernommen.
+        snapshot["file_moves"] = [
+            move
+            for move in moves
+            if int(move["file_id"]) not in conflicts_by_id
+        ]
         structural_changed = any((
             snapshot.get("directory_added"),
             snapshot.get("directory_removed"),
