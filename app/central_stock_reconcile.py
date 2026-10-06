@@ -59,6 +59,16 @@ def _expected_free_relative(
     capture = str(row.get("selected_capture_time") or "").strip()
     family_id = row.get("family_id")
 
+    # Ohne_Datum ist ein bewusst manueller Korrekturbereich. Eine bekannte
+    # Aufnahme darf dorthin zurückgelegt werden, ohne dass Bibliothekar dies als
+    # falschen Tagesordner interpretiert; die Metadatenkorrektur übernimmt von
+    # dort wieder die kontrollierte Reintegration.
+    if (
+        current == "Ohne_Datum"
+        or current.startswith("Ohne_Datum/")
+    ):
+        return current
+
     if not filename or not capture:
         return current
 
@@ -479,6 +489,60 @@ def reconcile_central_free_stock(
                     "DELETE FROM central_missing_file_observations WHERE file_id=?",
                     (file_id,),
                 )
+
+                observed_is_undated = (
+                    observed == "Ohne_Datum"
+                    or observed.startswith("Ohne_Datum/")
+                )
+                current_is_undated = (
+                    current == "Ohne_Datum"
+                    or current.startswith("Ohne_Datum/")
+                )
+                canonical_dated = ""
+                if current_is_undated and str(row.get("selected_capture_time") or ""):
+                    try:
+                        canonical_dated = (
+                            canonical_free_directory(
+                                connection,
+                                str(row["selected_capture_time"]),
+                                physical=True,
+                            )
+                            / filename
+                        ).as_posix()
+                    except FreeStockLayoutError:
+                        canonical_dated = ""
+
+                # Bewusster Metadaten-Korrekturweg:
+                # Tagesbestand -> Ohne_Datum ist immer zulässig.
+                # Ohne_Datum -> Tagesbestand ist zulässig, wenn der Zielpfad zur
+                # bekannten Aufnahmezeit passt. In beiden Fällen folgt SQLite
+                # ohne Warnung dem echten IST.
+                if (
+                    observed_kind == "central_stock"
+                    and (
+                        observed_is_undated
+                        or (
+                            current_is_undated
+                            and canonical_dated
+                            and observed == canonical_dated
+                        )
+                    )
+                ):
+                    connection.execute(
+                        """UPDATE files
+                           SET current_relative_path=?,
+                               current_root_kind='shared_workspace',
+                               updated_at=?
+                           WHERE id=?""",
+                        (observed, timestamp, file_id),
+                    )
+                    resolve_notice_key(
+                        connection,
+                        f"placement:{file_id}",
+                        now=timestamp,
+                    )
+                    continue
+
                 _record_placement_conflict(
                     connection,
                     row=row,
