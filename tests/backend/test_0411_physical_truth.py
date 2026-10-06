@@ -107,7 +107,7 @@ def test_0411_moved_free_file_is_not_misread_as_deletion(tmp_path: Path):
             (file_id,),
         ).fetchone()
     assert notice is not None
-    assert str(notice["kind"]) == "central_file_misplaced"
+    assert str(notice["kind"]) == "placement_conflict"
     assert int(notice["repairable"]) == 1
 
 
