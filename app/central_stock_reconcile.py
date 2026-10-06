@@ -10,6 +10,11 @@ import stat
 
 from app.database import database_connection
 from app.external_changes import record_notice, resolve_notice_key
+from app.free_stock_layout import (
+    FreeStockLayoutError,
+    canonical_free_directory,
+    released_origin_directory,
+)
 from app.storage_config import storage_paths
 
 
@@ -42,7 +47,48 @@ def _safe_relative(value: Any) -> Path | None:
     return path
 
 
-def _free_rows(connection: Any, excluded_family_ids: set[int]) -> list[dict[str, Any]]:
+def _expected_free_relative(
+    connection: Any,
+    row: dict[str, Any],
+) -> str:
+    current = str(row.get("current_relative_path") or "").replace("\\", "/").strip("/")
+    filename = Path(
+        current
+        or str(row.get("original_filename") or "")
+    ).name
+    capture = str(row.get("selected_capture_time") or "").strip()
+    family_id = row.get("family_id")
+
+    if not filename or not capture:
+        return current
+
+    try:
+        directory = None
+        if (
+            current == "Freigewordene Archivdateien"
+            or current.startswith("Freigewordene Archivdateien/")
+        ) and family_id is not None:
+            directory = released_origin_directory(
+                connection,
+                int(family_id),
+                capture,
+                physical=True,
+            )
+        if directory is None:
+            directory = canonical_free_directory(
+                connection,
+                capture,
+                physical=True,
+            )
+        return (directory / filename).as_posix()
+    except FreeStockLayoutError:
+        return current
+
+
+def _free_rows(
+    connection: Any,
+    excluded_family_ids: set[int],
+) -> list[dict[str, Any]]:
     params: list[Any] = []
     excluded_sql = ""
     if excluded_family_ids:
@@ -52,8 +98,8 @@ def _free_rows(connection: Any, excluded_family_ids: set[int]) -> list[dict[str,
 
     rows = connection.execute(
         f"""SELECT f.id AS file_id,f.job_id,f.family_id,
-                   f.current_relative_path,f.original_filename,
-                   f.size_bytes,
+                   f.current_relative_path,f.original_relative_path,
+                   f.original_filename,f.size_bytes,
                    COALESCE(f.sha256_current,f.sha256_original,'') AS sha256,
                    ff.family_key,ff.selected_capture_time
             FROM files f
@@ -78,10 +124,21 @@ def _free_rows(connection: Any, excluded_family_ids: set[int]) -> list[dict[str,
             ORDER BY f.job_id,f.id""",
         tuple(params),
     ).fetchall()
-    return [dict(row) for row in rows]
+    result: list[dict[str, Any]] = []
+    for raw in rows:
+        row = dict(raw)
+        row["expected_relative_path"] = _expected_free_relative(
+            connection,
+            row,
+        )
+        result.append(row)
+    return result
 
 
-def _ensure_root_identity(central_root: Path, rows: list[dict[str, Any]]) -> tuple[bool, str]:
+def _ensure_root_identity(
+    central_root: Path,
+    rows: list[dict[str, Any]],
+) -> tuple[bool, str]:
     if not central_root.is_dir():
         return False, "Der zentrale Sicherungsbestand ist nicht erreichbar."
     sentinel = central_root / SENTINEL_NAME
@@ -92,11 +149,15 @@ def _ensure_root_identity(central_root: Path, rows: list[dict[str, Any]]) -> tup
 
     found_known = False
     for row in rows[:256]:
-        relative = _safe_relative(row.get("current_relative_path"))
-        if relative is None:
-            continue
-        if (central_root / relative).is_file():
-            found_known = True
+        for value in (
+            row.get("expected_relative_path"),
+            row.get("current_relative_path"),
+        ):
+            relative = _safe_relative(value)
+            if relative is not None and (central_root / relative).is_file():
+                found_known = True
+                break
+        if found_known:
             break
     if not found_known:
         return (
@@ -113,7 +174,8 @@ def _actual_files(central_root: Path) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for dirpath, dirnames, filenames in os.walk(central_root):
         dirnames[:] = [
-            name for name in dirnames
+            name
+            for name in dirnames
             if name not in IGNORED_TOP_LEVEL and not name.startswith(".")
         ]
         directory = Path(dirpath)
@@ -146,7 +208,101 @@ def _directory_group(relative_path: str) -> str:
         return "Ohne_Datum"
     if len(parts) >= 3 and len(parts[0]) == 4 and parts[0].isdigit():
         return PurePosixPath(parts[0], parts[1]).as_posix()
-    return PurePosixPath(*parts[:-1]).as_posix() if len(parts) > 1 else parts[0]
+    return (
+        PurePosixPath(*parts[:-1]).as_posix()
+        if len(parts) > 1
+        else parts[0]
+    )
+
+
+def _inventory_matches(
+    connection: Any,
+    *,
+    size_bytes: int,
+    sha256: str,
+    filename: str,
+) -> list[dict[str, Any]]:
+    if not sha256:
+        return []
+    rows = connection.execute(
+        """SELECT inv.event_id,inv.job_id,inv.root_kind,inv.relative_path,
+                  inv.filename,e.name AS event_name
+           FROM event_inventory_files inv
+           JOIN events e ON e.id=inv.event_id
+           WHERE inv.size_bytes=?
+             AND inv.sha256=?
+             AND inv.filename=?
+           ORDER BY inv.root_kind,inv.event_id,inv.relative_path""",
+        (int(size_bytes), str(sha256), str(filename)),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _record_placement_conflict(
+    connection: Any,
+    *,
+    row: dict[str, Any],
+    observed_root_kind: str,
+    observed_relative_path: str,
+    expected_root_kind: str,
+    expected_relative_path: str,
+    timestamp: str,
+    title: str = "Datei falsch zugeordnet",
+    detail: str | None = None,
+    repairable: bool = True,
+) -> None:
+    file_id = int(row["file_id"])
+    observed_kind = str(observed_root_kind)
+    expected_kind = str(expected_root_kind)
+    observed = str(observed_relative_path)
+    expected = str(expected_relative_path)
+    message = detail or (
+        f"{row.get('original_filename') or Path(observed).name} liegt unter "
+        f"„{observed}“, fachlich erwartet wird „{expected}“."
+    )
+    record_notice(
+        connection,
+        notice_key=f"placement:{file_id}",
+        kind="placement_conflict",
+        root_kind=observed_kind,
+        title=title,
+        detail=message,
+        job_id=str(row.get("job_id") or ""),
+        file_id=file_id,
+        relative_path=observed,
+        repairable=bool(repairable and observed_kind != "camera_archive"),
+        action_required=True,
+        group_key="placement_conflict",
+        details={
+            "expected_root_kind": expected_kind,
+            "observed_root_kind": observed_kind,
+            "expected_relative_path": expected,
+            "observed_relative_path": observed,
+            "size_bytes": int(row.get("size_bytes") or 0),
+            "sha256": str(row.get("sha256") or ""),
+            "family_id": row.get("family_id"),
+        },
+        now=timestamp,
+    )
+    # SQLite folgt immer dem physischen IST. Das fachliche SOLL bleibt im
+    # offenen Konflikt gespeichert, damit Sortierungen weiterlaufen können.
+    connection.execute(
+        """UPDATE files
+           SET current_relative_path=?,
+               current_root_kind=?,
+               updated_at=?
+           WHERE id=?""",
+        (
+            observed,
+            (
+                "shared_workspace"
+                if observed_kind == "central_stock"
+                else observed_kind
+            ),
+            timestamp,
+            file_id,
+        ),
+    )
 
 
 def reconcile_central_free_stock(
@@ -173,32 +329,19 @@ def reconcile_central_free_stock(
             "deleted_file_count": 0,
             "misplaced_file_count": 0,
         }
-    if not rows:
-        return {
-            "ready": True,
-            "expected_file_count": 0,
-            "pending_missing_count": 0,
-            "deleted_file_count": 0,
-            "misplaced_file_count": 0,
-        }
 
     actual = _actual_files(central_root)
-    actual_by_relative = {str(item["relative_path"]): item for item in actual}
-    expected_paths = {
-        str(row.get("current_relative_path") or "").replace("\\", "/").strip("/")
-        for row in rows
+    actual_by_relative = {
+        str(item["relative_path"]): item
+        for item in actual
     }
-    untracked_by_size: dict[int, list[dict[str, Any]]] = {}
-    for item in actual:
-        if str(item["relative_path"]) in expected_paths:
-            continue
-        untracked_by_size.setdefault(int(item["size_bytes"]), []).append(item)
-    hash_cache: dict[str, str] = {}
 
+    hash_cache: dict[str, str] = {}
     deleted_rows: list[dict[str, Any]] = []
     pending: list[int] = []
     misplaced = 0
     modified = 0
+    matched_central_paths: set[str] = set()
 
     with database_connection(database_path) as connection:
         prior_rows = connection.execute(
@@ -209,112 +352,173 @@ def reconcile_central_free_stock(
             for row in prior_rows
         }
 
+        def digest_for(item: dict[str, Any]) -> str:
+            key = str(item["path"])
+            digest = hash_cache.get(key)
+            if digest is None:
+                digest = _sha256_file(Path(item["path"]))
+                hash_cache[key] = digest
+            return digest
+
         for row in rows:
             file_id = int(row["file_id"])
             job_id = str(row["job_id"])
-            relative = str(row.get("current_relative_path") or "").replace("\\", "/").strip("/")
+            expected = str(
+                row.get("expected_relative_path")
+                or row.get("current_relative_path")
+                or ""
+            ).replace("\\", "/").strip("/")
+            current = str(
+                row.get("current_relative_path")
+                or ""
+            ).replace("\\", "/").strip("/")
+            filename = Path(
+                expected
+                or current
+                or str(row.get("original_filename") or "")
+            ).name
             expected_size = int(row.get("size_bytes") or 0)
             expected_sha = str(row.get("sha256") or "")
-            actual_item = actual_by_relative.get(relative)
 
-            if actual_item is not None:
-                if int(actual_item["size_bytes"]) != expected_size:
+            expected_item = actual_by_relative.get(expected)
+            if expected_item is not None:
+                matched_central_paths.add(expected)
+                if int(expected_item["size_bytes"]) != expected_size:
+                    # Eine externe Metadaten-/Dateiänderung im fachlich richtigen
+                    # Ordner wird als neuer IST-Inhalt übernommen, nicht als
+                    # Benutzeraufgabe.
+                    new_sha = digest_for(expected_item)
                     connection.execute(
-                        "DELETE FROM central_missing_file_observations WHERE file_id=?",
-                        (file_id,),
+                        """UPDATE files
+                           SET current_relative_path=?,
+                               current_root_kind='shared_workspace',
+                               size_bytes=?,sha256_current=?,updated_at=?
+                           WHERE id=?""",
+                        (
+                            expected,
+                            int(expected_item["size_bytes"]),
+                            new_sha,
+                            timestamp,
+                            file_id,
+                        ),
                     )
-                    record_notice(
-                        connection,
-                        notice_key=f"central-modified:{job_id}:{file_id}",
-                        kind="central_file_modified",
-                        root_kind="central_stock",
-                        title="Datei im Tagesbestand verändert",
-                        detail=f"{relative} besitzt nicht mehr die erwartete Dateigröße.",
-                        job_id=job_id,
-                        file_id=file_id,
-                        relative_path=relative,
-                        repairable=False,
-                        details={
-                            "expected_relative_path": relative,
-                            "expected_size_bytes": expected_size,
-                            "actual_size_bytes": int(actual_item["size_bytes"]),
-                        },
-                        now=timestamp,
-                    )
+                    row["size_bytes"] = int(expected_item["size_bytes"])
+                    row["sha256"] = new_sha
                     modified += 1
-                    continue
+                elif current != expected:
+                    connection.execute(
+                        """UPDATE files
+                           SET current_relative_path=?,
+                               current_root_kind='shared_workspace',
+                               updated_at=?
+                           WHERE id=?""",
+                        (expected, timestamp, file_id),
+                    )
+
                 connection.execute(
                     "DELETE FROM central_missing_file_observations WHERE file_id=?",
                     (file_id,),
                 )
-                resolve_notice_key(connection, f"central-misplaced:{job_id}:{file_id}", now=timestamp)
-                resolve_notice_key(connection, f"central-modified:{job_id}:{file_id}", now=timestamp)
-                resolve_notice_key(connection, f"central-ambiguous:{job_id}:{file_id}", now=timestamp)
+                resolve_notice_key(
+                    connection,
+                    f"placement:{file_id}",
+                    now=timestamp,
+                )
                 continue
 
-            matches: list[dict[str, Any]] = []
+            central_matches: list[dict[str, Any]] = []
             if expected_sha:
-                for candidate in untracked_by_size.get(expected_size, []):
-                    key = str(candidate["path"])
-                    digest = hash_cache.get(key)
-                    if digest is None:
-                        digest = _sha256_file(Path(candidate["path"]))
-                        hash_cache[key] = digest
-                    if digest == expected_sha:
-                        matches.append(candidate)
+                for candidate in actual:
+                    if (
+                        str(candidate["relative_path"]) in matched_central_paths
+                        or int(candidate["size_bytes"]) != expected_size
+                    ):
+                        continue
+                    if digest_for(candidate) == expected_sha:
+                        central_matches.append(candidate)
 
-            if len(matches) == 1:
-                observed = str(matches[0]["relative_path"])
+            inventory_matches = _inventory_matches(
+                connection,
+                size_bytes=expected_size,
+                sha256=expected_sha,
+                filename=filename,
+            )
+
+            locations: list[dict[str, Any]] = [
+                {
+                    "root_kind": "central_stock",
+                    "relative_path": str(item["relative_path"]),
+                }
+                for item in central_matches
+            ] + [
+                {
+                    "root_kind": str(item["root_kind"]),
+                    "relative_path": str(item["relative_path"]),
+                    "event_id": str(item["event_id"]),
+                    "event_name": str(item.get("event_name") or ""),
+                }
+                for item in inventory_matches
+            ]
+
+            unique_locations = {
+                (
+                    str(item["root_kind"]),
+                    str(item["relative_path"]),
+                ): item
+                for item in locations
+            }
+            locations = list(unique_locations.values())
+
+            if len(locations) == 1:
+                location = locations[0]
+                observed_kind = str(location["root_kind"])
+                observed = str(location["relative_path"])
+                if observed_kind == "central_stock":
+                    matched_central_paths.add(observed)
                 connection.execute(
                     "DELETE FROM central_missing_file_observations WHERE file_id=?",
                     (file_id,),
                 )
-                record_notice(
+                _record_placement_conflict(
                     connection,
-                    notice_key=f"central-misplaced:{job_id}:{file_id}",
-                    kind="central_file_misplaced",
-                    root_kind="central_stock",
-                    title="Datei außerhalb ihres Tagesordners",
-                    detail=f"{Path(relative).name} liegt unter „{observed}“ statt unter „{relative}“.",
-                    job_id=job_id,
-                    file_id=file_id,
-                    relative_path=observed,
-                    repairable=True,
-                    details={
-                        "expected_relative_path": relative,
-                        "observed_relative_path": observed,
-                        "size_bytes": expected_size,
-                        "sha256": expected_sha,
-                    },
-                    now=timestamp,
+                    row=row,
+                    observed_root_kind=observed_kind,
+                    observed_relative_path=observed,
+                    expected_root_kind="central_stock",
+                    expected_relative_path=expected,
+                    timestamp=timestamp,
+                    repairable=observed_kind != "camera_archive",
+                    detail=(
+                        f"{filename} befindet sich unter „{observed}“. "
+                        f"Nach Aufnahmezeit und Zuordnung gehört die Datei nach "
+                        f"„{expected}“."
+                    ),
                 )
                 misplaced += 1
                 continue
 
-            if len(matches) > 1:
+            if len(locations) > 1:
                 connection.execute(
                     "DELETE FROM central_missing_file_observations WHERE file_id=?",
                     (file_id,),
                 )
-                record_notice(
+                first = locations[0]
+                _record_placement_conflict(
                     connection,
-                    notice_key=f"central-ambiguous:{job_id}:{file_id}",
-                    kind="central_file_ambiguous",
-                    root_kind="central_stock",
-                    title="Dateiposition ist mehrdeutig",
-                    detail=f"{Path(relative).name} fehlt am erwarteten Ort; mehrere byte-identische Kandidaten wurden gefunden.",
-                    job_id=job_id,
-                    file_id=file_id,
-                    relative_path=relative,
+                    row=row,
+                    observed_root_kind=str(first["root_kind"]),
+                    observed_relative_path=str(first["relative_path"]),
+                    expected_root_kind="central_stock",
+                    expected_relative_path=expected,
+                    timestamp=timestamp,
                     repairable=False,
-                    details={
-                        "expected_relative_path": relative,
-                        "candidate_paths": [str(item["relative_path"]) for item in matches],
-                        "size_bytes": expected_size,
-                        "sha256": expected_sha,
-                    },
-                    now=timestamp,
+                    title="Dateiposition ist mehrdeutig",
+                    detail=(
+                        f"{filename} fehlt am fachlich erwarteten Ort; "
+                        "mehrere byte-identische physische Kandidaten wurden gefunden."
+                    ),
                 )
+                misplaced += 1
                 continue
 
             count = prior.get(file_id, 0) + 1
@@ -337,39 +541,125 @@ def reconcile_central_free_stock(
                 continue
             deleted_rows.append({**row, "confirmed_after_scans": count})
 
+        # Dateien, die aus einem Ereignis manuell in den zentralen Tagesbestand
+        # verschoben wurden, gehören nicht zu den freien Sollzeilen oben. Nur
+        # die wenigen physisch unbeanspruchten Zentraldateien werden deshalb
+        # gegen bekannte Ereignisdateien geprüft.
+        unmatched_actual = [
+            item
+            for item in actual
+            if str(item["relative_path"]) not in matched_central_paths
+        ]
+        for item in unmatched_actual:
+            digest = digest_for(item)
+            known = connection.execute(
+                """SELECT f.id AS file_id,f.job_id,f.family_id,
+                          f.current_relative_path,f.original_filename,
+                          f.size_bytes,
+                          COALESCE(f.sha256_current,f.sha256_original,'') AS sha256
+                   FROM files f
+                   WHERE f.size_bytes=?
+                     AND COALESCE(f.sha256_current,f.sha256_original,'')=?
+                     AND EXISTS (
+                         SELECT 1 FROM event_assignments ea
+                         JOIN events assigned ON assigned.id=ea.event_id
+                         JOIN events root ON root.id=COALESCE(
+                             assigned.parent_event_id,assigned.id
+                         )
+                         WHERE (
+                             ea.file_id=f.id
+                             OR (
+                                 ea.file_id IS NULL
+                                 AND ea.family_id=f.family_id
+                             )
+                         )
+                           AND root.status IN ('draft','planned','applied','archived')
+                     )
+                   ORDER BY f.id""",
+                (int(item["size_bytes"]), digest),
+            ).fetchall()
+            if len(known) != 1:
+                continue
+            known_row = dict(known[0])
+            file_id = int(known_row["file_id"])
+            observed = str(item["relative_path"])
+            _record_placement_conflict(
+                connection,
+                row=known_row,
+                observed_root_kind="central_stock",
+                observed_relative_path=observed,
+                expected_root_kind="shared_workspace",
+                expected_relative_path=str(
+                    known_row.get("current_relative_path") or ""
+                ),
+                timestamp=timestamp,
+                repairable=True,
+                detail=(
+                    f"{known_row.get('original_filename') or Path(observed).name} "
+                    "wurde aus einem Ereignis in den Tagesbestand verschoben, "
+                    "ohne dass die Ereigniszuordnung geändert wurde."
+                ),
+            )
+            matched_central_paths.add(observed)
+            misplaced += 1
+
         groups: dict[str, list[dict[str, Any]]] = {}
         expected_by_group: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            expected_by_group.setdefault(
-                _directory_group(str(row.get("current_relative_path") or "")),
-                [],
-            ).append(row)
+            group = _directory_group(
+                str(
+                    row.get("expected_relative_path")
+                    or row.get("current_relative_path")
+                    or ""
+                )
+            )
+            expected_by_group.setdefault(group, []).append(row)
         for row in deleted_rows:
-            groups.setdefault(
-                _directory_group(str(row.get("current_relative_path") or "")),
-                [],
-            ).append(row)
+            group = _directory_group(
+                str(
+                    row.get("expected_relative_path")
+                    or row.get("current_relative_path")
+                    or ""
+                )
+            )
+            groups.setdefault(group, []).append(row)
 
         directory_notice_file_ids: set[int] = set()
         for group, removed in groups.items():
             expected_group = expected_by_group.get(group) or []
             group_path = central_root / group if group else central_root
-            if group and not group_path.exists() and len(removed) == len(expected_group) and len(removed) >= 2:
-                directory_notice_file_ids.update(int(row["file_id"]) for row in removed)
+            if (
+                group
+                and not group_path.exists()
+                and len(removed) == len(expected_group)
+            ):
+                directory_notice_file_ids.update(
+                    int(row["file_id"])
+                    for row in removed
+                )
                 record_notice(
                     connection,
-                    notice_key=f"central-directory-deleted:{library_id}:{group}",
+                    notice_key=(
+                        f"central-directory-deleted:{library_id}:{group}:"
+                        + timestamp[:19]
+                    ),
                     kind="central_directory_deleted",
                     root_kind="central_stock",
-                    title="Tages-/Zeitordner extern gelöscht",
-                    detail=f"„{group}“ wurde außerhalb von Bibliothekar gelöscht · {len(removed)} Dateien.",
+                    title="Tages-/Zeitordner gelöscht",
+                    detail=(
+                        f"„{group}“ wurde außerhalb von Bibliothekar gelöscht. "
+                        f"{len(removed)} Datei"
+                        + ("" if len(removed) == 1 else "en")
+                        + " wurden aus dem Bestand übernommen."
+                    ),
                     job_id=str(removed[0]["job_id"]),
                     relative_path=group,
                     repairable=False,
+                    action_required=False,
+                    group_key="deletion_notice",
                     details={
                         "directory": group,
                         "deleted_file_count": len(removed),
-                        "deleted_files": [str(row.get("current_relative_path") or "") for row in removed],
                     },
                     now=timestamp,
                 )
@@ -377,8 +667,16 @@ def reconcile_central_free_stock(
         for row in deleted_rows:
             file_id = int(row["file_id"])
             job_id = str(row["job_id"])
-            family_id = int(row["family_id"]) if row.get("family_id") is not None else None
-            relative = str(row.get("current_relative_path") or "")
+            family_id = (
+                int(row["family_id"])
+                if row.get("family_id") is not None
+                else None
+            )
+            relative = str(
+                row.get("current_relative_path")
+                or row.get("expected_relative_path")
+                or ""
+            )
             connection.execute(
                 """INSERT INTO audit_log(
                        job_id,action,entity_type,entity_id,details_json,created_at)
@@ -393,7 +691,9 @@ def reconcile_central_free_stock(
                             "family_key": str(row.get("family_key") or ""),
                             "last_relative_path": relative,
                             "sha256": str(row.get("sha256") or ""),
-                            "confirmed_after_scans": int(row["confirmed_after_scans"]),
+                            "confirmed_after_scans": int(
+                                row["confirmed_after_scans"]
+                            ),
                         },
                         ensure_ascii=False,
                         sort_keys=True,
@@ -401,33 +701,26 @@ def reconcile_central_free_stock(
                     timestamp,
                 ),
             )
-            if file_id not in directory_notice_file_ids:
-                record_notice(
-                    connection,
-                    notice_key=f"central-file-deleted:{job_id}:{file_id}",
-                    kind="central_file_deleted",
-                    root_kind="central_stock",
-                    title="Datei extern gelöscht",
-                    detail=f"„{relative}“ wurde außerhalb von Bibliothekar gelöscht.",
-                    job_id=job_id,
-                    file_id=file_id,
-                    relative_path=relative,
-                    repairable=False,
-                    details={
-                        "deleted_relative_path": relative,
-                        "size_bytes": int(row.get("size_bytes") or 0),
-                        "sha256": str(row.get("sha256") or ""),
-                    },
-                    now=timestamp,
-                )
-            connection.execute("DELETE FROM files WHERE id=?", (file_id,))
+            # Einzeldateilöschungen sind ab 0.41.2 kein sichtbarer Hinweis.
+            resolve_notice_key(
+                connection,
+                f"placement:{file_id}",
+                now=timestamp,
+            )
+            connection.execute(
+                "DELETE FROM files WHERE id=?",
+                (file_id,),
+            )
             if family_id is not None:
                 remaining = connection.execute(
                     "SELECT COUNT(*) FROM files WHERE family_id=?",
                     (family_id,),
                 ).fetchone()[0]
                 if int(remaining or 0) == 0:
-                    connection.execute("DELETE FROM file_families WHERE id=?", (family_id,))
+                    connection.execute(
+                        "DELETE FROM file_families WHERE id=?",
+                        (family_id,),
+                    )
 
     return {
         "ready": True,

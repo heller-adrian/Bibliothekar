@@ -340,13 +340,31 @@ def repair_external_notice(
     timestamp = _now()
     with database_connection(database_path) as connection:
         if notice.get("file_id") is not None:
+            file_id = int(notice["file_id"])
             connection.execute(
                 "DELETE FROM central_missing_file_observations WHERE file_id=?",
-                (int(notice["file_id"]),),
+                (file_id,),
             )
             connection.execute(
                 "DELETE FROM event_missing_file_observations WHERE file_id=?",
-                (int(notice["file_id"]),),
+                (file_id,),
+            )
+            connection.execute(
+                """UPDATE files
+                   SET current_relative_path=?,
+                       current_root_kind=?,
+                       updated_at=?
+                   WHERE id=?""",
+                (
+                    expected_rel.as_posix(),
+                    (
+                        "shared_workspace"
+                        if expected_kind == "central_stock"
+                        else expected_kind
+                    ),
+                    timestamp,
+                    file_id,
+                ),
             )
         connection.execute(
             """UPDATE external_change_notices
