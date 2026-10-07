@@ -3797,6 +3797,35 @@ BIBLIOTHEKAR_0424_CSS = r"""
 }
 """
 
+BIBLIOTHEKAR_0425_CSS = r"""
+@media (max-width: 820px) {
+  /* 0.42.5: Selectable cards must not stay permanently promoted to their
+   * own compositor layer. On iOS standalone this caused 1px card borders
+   * to be raster-clipped at viewport/sticky-layer boundaries even while
+   * no wobble animation was running. Promote only for the short animation.
+   */
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {
+    will-change: auto;
+  }
+
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
+    will-change: transform;
+  }
+
+  /* A non-modal selection sheet must never make the last metadata rows
+   * unreachable. JS writes the measured sheet height into the CSS variable.
+   */
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"].bk-meta-selection-sheet-open main {
+    padding-bottom:
+      calc(
+        90px
+        + env(safe-area-inset-bottom)
+        + var(--bk-meta-selection-sheet-height, 44dvh)
+        + 18px
+      ) !important;
+  }
+}
+
 BIBLIOTHEKAR_JS = r"""
 (() => {
   const root = document.documentElement;
@@ -5664,7 +5693,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.42.4 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.42.5 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -5689,7 +5718,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0355_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0356_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0423_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0424_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0424_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0425_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
