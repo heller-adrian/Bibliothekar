@@ -1018,17 +1018,25 @@ def create_metadata_correction(
     library_name: str | None = None,
     allowed_job_ids: set[str] | None = None,
     proposal_source_tag: str | None = None,
+    _prevalidated_row: dict[str, Any] | None = None,
+    _prevalidated_source: Path | None = None,
 ) -> dict[str, Any]:
-    row, source, _ = _find_scan_record(
-        area=area,
-        relative_path=relative_path,
-        workspace_root=workspace_root,
-        library_id=library_id,
-        database_path=database_path,
-        family_id=family_id,
-        library_name=library_name,
-        allowed_job_ids=allowed_job_ids,
-    )
+    if _prevalidated_row is not None and _prevalidated_source is not None:
+        row = dict(_prevalidated_row)
+        source = Path(_prevalidated_source).resolve(strict=False)
+        if not source.is_file() or source.is_symlink():
+            raise MetadataCorrectionError("Die vorgeprüfte Metadatendatei fehlt.")
+    else:
+        row, source, _ = _find_scan_record(
+            area=area,
+            relative_path=relative_path,
+            workspace_root=workspace_root,
+            library_id=library_id,
+            database_path=database_path,
+            family_id=family_id,
+            library_name=library_name,
+            allowed_job_ids=allowed_job_ids,
+        )
     proposed = _normalize_manual_datetime(proposed_datetime)
     stat = source.stat()
     digest = _sha256(source)
@@ -2038,6 +2046,8 @@ def execute_metadata_correction(
     library_name: str | None = None,
     allowed_job_ids: set[str] | None = None,
     proposal_source_tag: str | None = None,
+    _prevalidated_row: dict[str, Any] | None = None,
+    _prevalidated_source: Path | None = None,
 ) -> dict[str, Any]:
     """Create and execute one user-confirmed metadata correction.
 
@@ -2055,6 +2065,8 @@ def execute_metadata_correction(
         library_name=library_name,
         allowed_job_ids=allowed_job_ids,
         proposal_source_tag=proposal_source_tag,
+        _prevalidated_row=_prevalidated_row,
+        _prevalidated_source=_prevalidated_source,
     )
     return apply_metadata_correction(
         database_path,
