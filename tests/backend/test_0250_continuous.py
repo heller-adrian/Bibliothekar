@@ -61,10 +61,19 @@ def test_exact_cards_and_no_event_reload(tmp_path):
     assert list_job_planning_overview(db,'j')['available_day_groups']==[]
 
 
-def test_disjoint_normal_selection_rejected(tmp_path):
-    db=tmp_path/'db';event,cards=split_day(db)
-    with pytest.raises(EventPreviewError,match='durchgehend'):
-        create(db,payload('2026-07-23T00:00','2026-07-23T23:59',selected_intervals=cards))
+def test_disjoint_day_cards_do_not_define_normal_event_gaps(tmp_path):
+    db=tmp_path/'db'
+    setup(db,['2026-07-23T10:00:00','2026-07-23T14:00:00','2026-07-23T18:00:00'])
+    selected_intervals=[
+        {'start_datetime':'2026-07-23T09:00:00','end_datetime':'2026-07-23T11:00:00'},
+        {'start_datetime':'2026-07-23T17:00:00','end_datetime':'2026-07-23T19:00:00'},
+    ]
+    result=create(db,payload(
+        '2026-07-23T00:00','2026-07-23T23:59',
+        selected_intervals=selected_intervals,
+    ))
+    context=get_event_edit_context(db,'j',result['parent_event']['id'])
+    assert len(context['assigned_family_ids'])==3
 
 
 def test_extension_updates_parent_on_either_adjacent_side(tmp_path):
