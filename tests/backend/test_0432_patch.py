@@ -28,7 +28,7 @@ def test_0432_metadata_detail_sticks_below_secondary_header():
 
 
 def test_0432_import_ui_has_stage_and_overall_progress_plus_eta():
-    html = main.import_interface().body.decode("utf-8")
+    html = main.index()
     assert "function stageProgressPercent(job)" in html
     assert "function estimatedRemainingText(job)" in html
     assert "Aktuelle Stufe" in html
