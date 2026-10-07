@@ -133,6 +133,17 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     $("meta-status").textContent=message||"";
     $("meta-status").style.color=error?"var(--bk-danger,#d53d48)":"";
   }
+  function setScanBusy(busy){
+    const button=$("meta-scan");
+    const status=$("meta-status");
+    if(button){
+      button.disabled=Boolean(busy);
+      button.classList.toggle("bk-busy",Boolean(busy));
+      if(busy)button.setAttribute("aria-busy","true");
+      else button.removeAttribute("aria-busy");
+    }
+    if(status)status.classList.toggle("bk-loading-status",Boolean(busy));
+  }
   function fileKey(file){
     return state.area==="library"
       ? String(file.library_id||"")+"::"+String(file.family_id||"")
@@ -690,6 +701,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   }
   async function scanMultiple(announce=true){
     if(announce)setStatus("Ordner und Metadaten werden gelesen …");
+    setScanBusy(true);
     try{
       state.scan=await json("/api/metadata-correction/scan?area=multiple");
       state.multiplePreview=null;
@@ -701,12 +713,18 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       renderMultiplePreview();
       if(announce)setStatus("Prüfung abgeschlossen. Es wurde noch nichts verändert.");
       return true;
-    }catch(error){if(announce)setStatus(error.message,true);return false;}
+    }catch(error){
+      if(announce)setStatus(error.message,true);
+      return false;
+    }finally{
+      setScanBusy(false);
+    }
   }
   async function scan(announce=true,preserve=true){
     if(state.area==="multiple")return scanMultiple(announce);
     const snapshot=preserve?selectionKeys():{keys:new Set(),primary:null,last:null};
     if(announce)setStatus(state.area==="library"?"Ohne-Datum-Bestand wird gelesen …":"Ordner und Metadaten werden gelesen …");
+    setScanBusy(true);
     try{
       state.scan=await json("/api/metadata-correction/scan?area="+encodeURIComponent(state.area));
       restoreSelection(snapshot);
@@ -716,6 +734,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     }catch(error){
       if(announce)setStatus(error.message,true);
       return false;
+    }finally{
+      setScanBusy(false);
     }
   }
   $("meta-select-mode").addEventListener("click",()=>{
@@ -740,8 +760,12 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   $("multi-apply-import").addEventListener("click",()=>applyMultiple("apply_and_import"));
   configureArea();
   updateSelectionControls();
-  loadAreas();
-  loadTasks();
+  Promise.all([
+    loadAreas(),
+    loadTasks()
+  ]).finally(()=>{
+    scan(true,false);
+  });
 })();
 </script>
 </body>
