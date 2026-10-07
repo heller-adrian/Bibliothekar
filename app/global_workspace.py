@@ -196,6 +196,19 @@ def _visible_events(
     return events, groups
 
 
+def _workspace_group_sort_key(item: dict[str, Any]) -> tuple[int, str, int]:
+    """Keep undated review stock before the chronological event/day timeline."""
+    undated_day = (
+        str(item.get("group_type") or "") != "event"
+        and not bool(item.get("has_date"))
+    )
+    return (
+        0 if undated_day else 1,
+        str(item.get("start_datetime") or item.get("day_key") or "9999"),
+        0 if item.get("group_type") == "event" else 1,
+    )
+
+
 def _merge_available(items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for job_id, group in items:
@@ -228,7 +241,7 @@ def _merge_available(items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, 
         current["partially_assigned"] = bool(current.get("partially_assigned") or group.get("partially_assigned"))
     return sorted(
         merged.values(),
-        key=lambda item: str(item.get("start_datetime") or item.get("day_key") or "9999"),
+        key=_workspace_group_sort_key,
     )
 
 
@@ -281,10 +294,7 @@ def build_global_workspace_summary(
     available = _merge_available(available_items)
     timeline = sorted(
         [*event_groups, *available],
-        key=lambda item: (
-            str(item.get("start_datetime") or item.get("day_key") or "9999"),
-            0 if item.get("group_type") == "event" else 1,
-        ),
+        key=_workspace_group_sort_key,
     )
 
     day_keys: set[str] = set()
