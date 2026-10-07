@@ -354,6 +354,7 @@ def verify_event_archive(
     managed_asset_kinds = {"xmp", "export", "derived_media"}
     source_assets: list[dict[str, Any]] = []
     source_known_by_file_id: dict[int, dict[str, Any]] = {}
+    workspace_source_missing = False
     if workspace_path is not None and str(event.get("status") or "") == "applied":
         try:
             from app.workspace_layout import shared_work_root
@@ -367,18 +368,37 @@ def verify_event_archive(
                 update_known_file_locations=False,
                 fast_refresh=False,
             )
-        except (EventInventoryError, Exception) as exc:
-            if isinstance(exc, EventInventoryError):
+            source_rows = list(workspace_inventory["files"])
+        except EventInventoryError as exc:
+            # Der Anwender darf ein vollständig kopiertes/verschobenes
+            # Ereignis bereits aus dem Arbeitsbereich entfernt haben. Für die
+            # Archivprüfung bleibt dann der letzte persistierte IST-Snapshot
+            # zusammen mit den gespeicherten Kameraoriginal-SHA-Werten das
+            # sichere SOLL. Andere Inventarfehler werden weiterhin abgelehnt.
+            if "Ereignisordner wurde nicht gefunden" not in str(exc):
                 raise ArchiveVerificationError(str(exc)) from exc
-            raise
+            workspace_source_missing = True
+            with database_connection(database_path) as source_connection:
+                source_rows = [
+                    dict(row)
+                    for row in source_connection.execute(
+                        """SELECT known_file_id,family_id,relative_path,
+                                  event_relative_path,filename,extension,
+                                  asset_kind,size_bytes,sha256
+                           FROM event_inventory_files
+                           WHERE event_id=? AND root_kind='shared_workspace'
+                           ORDER BY event_relative_path,relative_path""",
+                        (event_id,),
+                    ).fetchall()
+                ]
         source_known_by_file_id = {
             int(item["known_file_id"]): item
-            for item in workspace_inventory["files"]
+            for item in source_rows
             if item.get("known_file_id") is not None
         }
         source_assets = [
             item
-            for item in workspace_inventory["files"]
+            for item in source_rows
             if item.get("known_file_id") is None
             and str(item.get("asset_kind") or "") in managed_asset_kinds
         ]
@@ -743,6 +763,7 @@ def verify_event_archive(
         "assets": asset_results,
         "ssd_release_ready": final_status == "verified",
         "ssd_release_available": True,
+        "workspace_source_missing": workspace_source_missing,
         "inventory_summary": inventory.get("summary"),
         "message": (
             "Kamerabibliothek vollständig identisch geprüft."
