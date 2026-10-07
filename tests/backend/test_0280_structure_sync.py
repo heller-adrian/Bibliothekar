@@ -329,7 +329,7 @@ def test_0413_applied_child_root_rename_is_one_structure_change(tmp_path: Path):
                    updated_at,event_kind,preserve_day_folders,revision,
                    applied_at,resort_required,time_model_version,timeline_model)
                VALUES ('c','j','e','child','A','2026-07-23T00:00:00',
-                       '2026-07-23T23:59:59',0,?,'applied',?,?, 'event',0,1,?,0,2,'continuous')""",
+                       '2026-07-23T23:59:59',1,?,'applied',?,?, 'event',0,1,?,0,2,'continuous')""",
             (old_child, NOW, NOW, NOW),
         )
         connection.execute(
