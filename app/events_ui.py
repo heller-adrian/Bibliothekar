@@ -1422,7 +1422,7 @@ EVENTS_HTML = r"""<!doctype html>
         id="event-list"
         class="event-list"
       >
-        <div class="empty">
+        <div class="empty bk-loading-status">
           Ereignisse werden geladen …
         </div>
       </div>
@@ -1980,8 +1980,14 @@ EVENTS_HTML = r"""<!doctype html>
     async function loadEvents({reset=false}={}) {
       if (reset) eventOffset = 0;
       setStatus("Ereignisse werden geladen …");
+      statusElement.classList.add("bk-loading-status");
       const q = eventSearch?.value?.trim() || "";
-      const data = await requestJson(`/api/events/search?q=${encodeURIComponent(q)}&limit=${eventLimit}&offset=${eventOffset}`);
+      let data;
+      try {
+        data = await requestJson(`/api/events/search?q=${encodeURIComponent(q)}&limit=${eventLimit}&offset=${eventOffset}`);
+      } finally {
+        statusElement.classList.remove("bk-loading-status");
+      }
       const page = (data.events||[]).map(event=>({
         ...event,
         _job_id:event.job_id,
