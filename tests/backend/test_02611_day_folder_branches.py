@@ -70,7 +70,7 @@ def test_02611_preview_reports_partial_empty_child_days_without_rendering_them()
     # Unterereigniszeitraums ist keine Lücke und braucht keine Bestätigung.
     assert preview["empty_subevent_days"] == []
     child = preview["structure_text"].split(
-        "07-20–07-21 - Test 2", 1
+        "07-20 - Test 2", 1
     )[1].split("\n\nZeitraum:", 1)[0]
     assert "2026-07-20" in child
     assert "2026-07-21" not in child
