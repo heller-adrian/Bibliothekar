@@ -205,9 +205,9 @@ def test_0430_membership_warns_only_for_hidden_active_backups(tmp_path: Path):
                 """INSERT INTO files(
                        job_id,family_id,original_relative_path,current_relative_path,
                        current_root_kind,original_filename,extension,media_type,
-                       size_bytes,selected_capture_time,capture_time_confidence,
+                       size_bytes,sha256_original,selected_capture_time,capture_time_confidence,
                        review_status,metadata_write_status,created_at,updated_at
-                   ) VALUES (?,?,?,?,'shared_workspace',?,'.JPG','jpeg',100,?,
+                   ) VALUES (?,?,?,?,'shared_workspace',?,'.JPG','jpeg',100,?,?,
                              'high','ok','not_requested','2026-07-20','2026-07-20')""",
                 (
                     job_id,
@@ -215,6 +215,7 @@ def test_0430_membership_warns_only_for_hidden_active_backups(tmp_path: Path):
                     f"{stem}.JPG",
                     f"2026/07-20/{stem}.JPG",
                     f"{stem}.JPG",
+                    (stem.lower()*64)[:64],
                     capture,
                 ),
             )
