@@ -14,6 +14,9 @@ def test_0424_quick_select_is_reversible_range_with_continuous_autoscroll():
     assert "window.requestAnimationFrame(bkPwaSelectionFrame)" in shell
     assert "window.scrollBy(0, speed)" in shell
     assert "bkPwaUpdateGesturePoint(gesture)" in shell
+    assert "function bkPwaSelectionSafeBounds()" in shell
+    assert "item.rect.top >= bounds.top" in shell
+    assert "item.rect.bottom <= bounds.bottom" in shell
 
 
 def test_0424_workspace_respects_select_and_deselect_from_range_gesture():
