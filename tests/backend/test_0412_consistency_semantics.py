@@ -4,6 +4,9 @@ from pathlib import Path
 import hashlib
 
 from app.central_stock_reconcile import reconcile_central_free_stock
+from app.archive_transfer import verify_event_archive
+from app.event_inventory import scan_event_inventory
+from app.live_inventory import refresh_live_event_inventories
 from app.database import (
     create_job,
     create_planned_event,
@@ -19,6 +22,7 @@ from app.external_changes import (
 from app.operation_batches import create_apply_batch
 from app.physical_state import reconcile_missing_files
 from app.sort_apply import CONFIRMATION_PHRASE
+from app.ssd_release import finalize_manually_moved_event_if_verified
 from app.workspace_layout import ensure_workspace_layout
 
 
@@ -543,3 +547,109 @@ def test_0413_planned_event_does_not_create_physical_placement_conflict(tmp_path
     assert result["misplaced_file_count"] == 0
     assert source.is_file()
     assert list_external_change_state(db)["required_count"] == 0
+
+
+def test_0413_real_manual_archive_move_is_detected_verified_and_finalized(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    workspace.mkdir()
+    archive.mkdir()
+    initialize_database(db)
+    layout = ensure_workspace_layout(workspace)
+    work_root = Path(layout["work_root"])
+
+    family_id, file_id, _relative = _seed_free_file(
+        db,
+        family_key="MANUAL-ARCHIVE",
+        filename="ARCHIVE-MOVE.JPG",
+        day="2026-10-05",
+        data=b"manual-archive-move",
+    )
+    planned = create_planned_event(
+        db,
+        "J",
+        _event_preview(family_id, "2026-10-05"),
+    )
+    event_id = str(planned["parent_event"]["id"])
+    with database_connection(db) as connection:
+        connection.execute(
+            """UPDATE events
+               SET status='applied',applied_at=?,updated_at=?
+               WHERE id=?""",
+            (NOW, NOW, event_id),
+        )
+        event = dict(connection.execute(
+            "SELECT * FROM events WHERE id=?",
+            (event_id,),
+        ).fetchone())
+        event_relative = f"2026/{event['folder_name']}/ARCHIVE-MOVE.JPG"
+        connection.execute(
+            """UPDATE files
+               SET current_relative_path=?,
+                   current_root_kind='shared_workspace',
+                   updated_at=?
+               WHERE id=?""",
+            (event_relative, NOW, file_id),
+        )
+
+    source_root = work_root / "2026" / str(event["folder_name"])
+    source_root.mkdir(parents=True, exist_ok=True)
+    (source_root / "ARCHIVE-MOVE.JPG").write_bytes(b"manual-archive-move")
+    scan_event_inventory(
+        db,
+        work_root,
+        "J",
+        event_id,
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+
+    archive_event_root = archive / "2026" / str(event["folder_name"])
+    archive_event_root.parent.mkdir(parents=True, exist_ok=True)
+    source_root.replace(archive_event_root)
+
+    refreshed = refresh_live_event_inventories(
+        db,
+        workspace,
+        archive,
+        event_id=event_id,
+    )
+    assert refreshed["events"][event_id]["archive_transfer_candidate"] is True
+    state = list_external_change_state(db)
+    assert state["unseen_informational_count"] == 1
+    assert state["unseen_informational"][0]["kind"] == "archive_transfer_candidate"
+
+    verification = verify_event_archive(
+        db,
+        archive,
+        "J",
+        event_id,
+        workspace_path=workspace,
+    )
+    assert verification["verified"] is True
+    assert verification["workspace_source_missing"] is True
+
+    final = finalize_manually_moved_event_if_verified(
+        db,
+        workspace,
+        archive,
+        "J",
+        event_id,
+        verification,
+    )
+    assert final["manual_archive_finalized"] is True
+    with database_connection(db) as connection:
+        event_row = connection.execute(
+            "SELECT status FROM events WHERE id=?",
+            (event_id,),
+        ).fetchone()
+        file_row = connection.execute(
+            "SELECT current_root_kind FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert str(event_row["status"]) == "archived"
+    assert str(file_row["current_root_kind"]) == "camera_archive"
+    assert (archive_event_root / "ARCHIVE-MOVE.JPG").is_file()
