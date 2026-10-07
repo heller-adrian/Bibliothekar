@@ -1232,20 +1232,20 @@ body.bibliothekar-redesign #sd-card-status {
 .bk-source-pane > h3:first-child {
   margin-top: 0;
 }
-body[data-bk-area="import"] main details > summary {
+body[data-bk-area="import"] details > summary {
   list-style: none !important;
   display: grid !important;
   grid-template-columns: 20px minmax(0,1fr) !important;
   align-items: center !important;
   gap: 7px !important;
 }
-body[data-bk-area="import"] main details > summary::-webkit-details-marker {
+body[data-bk-area="import"] details > summary::-webkit-details-marker {
   display: none !important;
 }
-body[data-bk-area="import"] main details > summary::marker {
+body[data-bk-area="import"] details > summary::marker {
   content: "" !important;
 }
-body[data-bk-area="import"] main details > summary::before {
+body[data-bk-area="import"] details > summary::before {
   content: "▸";
   display: block;
   width: 20px;
@@ -1254,7 +1254,7 @@ body[data-bk-area="import"] main details > summary::before {
   text-align: center;
   color: currentColor;
 }
-body[data-bk-area="import"] main details[open] > summary::before {
+body[data-bk-area="import"] details[open] > summary::before {
   content: "▾";
 }
 body[data-bk-area="import"] .drive-actions {
@@ -3449,6 +3449,28 @@ BIBLIOTHEKAR_0356_CSS = r"""
     transform: none !important;
   }
 }
+
+
+/* 0.41.3: Einstellungsdialog bleibt in allen Bereichen identisch.
+ * Import-spezifische details-Regeln dürfen die gemeinsamen Settings nicht
+ * überschreiben. */
+body[data-bk-area="import"] #bk-settings-dialog details > summary {
+  display:flex !important;
+  grid-template-columns:none !important;
+}
+body[data-bk-area="import"] #bk-settings-dialog details > summary::before {
+  content:"▸" !important;
+  display:inline-block !important;
+  width:auto !important;
+  margin-right:0 !important;
+  font-size:inherit !important;
+  line-height:inherit !important;
+  text-align:initial !important;
+}
+body[data-bk-area="import"] #bk-settings-dialog details[open] > summary::before {
+  content:"▸" !important;
+  transform:rotate(90deg) !important;
+}
 """
 
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
@@ -5040,7 +5062,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.41.2 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.41.3 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
