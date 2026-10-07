@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import date
 
 from app.event_naming import (
     DEFAULT_EVENT_NAMING,
@@ -98,6 +99,13 @@ def _validate_date(
         raise EventPreviewError(
             f"{field_name} ist ungültig."
         )
+
+    try:
+        date.fromisoformat(date_value)
+    except ValueError as error:
+        raise EventPreviewError(
+            f"{field_name} ist ungültig."
+        ) from error
 
     return date_value
 
