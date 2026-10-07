@@ -3919,7 +3919,55 @@ def api_jobs() -> dict[str, Any]:
         )
     jobs = list_jobs()
     central_root = workspace_backup_root(WORKSPACE_PATH)
+
+    lifecycle_by_job = {
+        str(item.get("job_id") or ""): item
+        for item in list_backup_lifecycles(DATABASE_FILE, limit=100)
+    }
+    stage_ranges = {
+        "starting": (0, 5),
+        "source_manifest": (5, 120),
+        "copying": (120, 430),
+        "backup_verification": (430, 620),
+        "snapshot_created": (620, 630),
+        "metadata_analysis": (630, 850),
+        "organization_planning": (850, 900),
+        "workspace_moving": (900, 970),
+        "workspace_verification": (970, 995),
+        "completed": (1000, 1000),
+    }
+
     for job in jobs:
+        job_id = str(job.get("id") or job.get("job_id") or "")
+        lifecycle = lifecycle_by_job.get(job_id) or {}
+        details = lifecycle.get("details") or {}
+        stage = str(details.get("stage") or job.get("stage") or "")
+        stage_current = max(0, int(details.get("progress_current") or 0))
+        stage_total = max(0, int(details.get("progress_total") or 0))
+        job["stage_progress_stage"] = stage
+        job["stage_progress_current"] = stage_current
+        job["stage_progress_total"] = stage_total
+
+        if str(job.get("state") or "") == "completed":
+            job["overall_progress_current"] = 1000
+            job["overall_progress_total"] = 1000
+        elif stage in stage_ranges:
+            lower, upper = stage_ranges[stage]
+            if stage_total > 0:
+                ratio = max(0.0, min(1.0, stage_current / stage_total))
+                overall = int(round(lower + (upper - lower) * ratio))
+            else:
+                overall = int(lower)
+            job["overall_progress_current"] = overall
+            job["overall_progress_total"] = 1000
+        else:
+            job["overall_progress_current"] = max(
+                0, int(job.get("progress_current") or 0)
+            )
+            job["overall_progress_total"] = max(
+                0, int(job.get("progress_total") or 0)
+            )
+
         if (
             str(job.get("kind") or "") == "sd_import"
             and str(job.get("operation") or "") == "folder_import"
