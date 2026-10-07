@@ -535,9 +535,44 @@ WORKSPACE_HTML = r"""<!doctype html>
     @media (max-width:460px){.event-boundary,.create-subevent-boundary{grid-template-columns:1fr}.create-subevent-name{min-width:0;flex:1 1 auto}}
 
     .preview {
-      position: sticky;
-      top: 88px;
       height: fit-content;
+    }
+
+    @media (min-width: 821px) {
+      .preview {
+        position: sticky;
+        top: calc(var(--bk-secondary-sticky-bottom, 141px) + 12px);
+        max-height: calc(100dvh - var(--bk-secondary-sticky-bottom, 141px) - 24px);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .preview-body {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .preview #structure-preview {
+        min-height: 0;
+        max-height: calc(100dvh - var(--bk-secondary-sticky-bottom, 141px) - 122px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
+      }
+    }
+
+    @media (max-width: 820px) {
+      .preview {
+        position: static;
+        max-height: none;
+        overflow: visible;
+      }
+      .preview-body,
+      .preview #structure-preview {
+        max-height: none;
+        overflow: visible;
+      }
     }
 
     .preview-toggle {
