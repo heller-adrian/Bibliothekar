@@ -9546,9 +9546,29 @@ def index() -> str:
       line-height: 1.4;
     }
 
+    .progress-stack {
+      display: grid;
+      gap: 0.58rem;
+      margin-top: 0.9rem;
+    }
+
+    .progress-row {
+      display: grid;
+      gap: 0.28rem;
+    }
+
+    .progress-caption {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.2;
+    }
+
     .progress {
       height: 9px;
-      margin-top: 0.9rem;
+      margin-top: 0;
       overflow: hidden;
       border-radius: 999px;
       background: #0d0f12;
@@ -10148,11 +10168,16 @@ def index() -> str:
         return 100;
       }
 
-      const current =
-        Number(job.progress_current || 0);
-
-      const total =
-        Number(job.progress_total || 0);
+      const current = Number(
+        job.overall_progress_current
+        ?? job.progress_current
+        ?? 0
+      );
+      const total = Number(
+        job.overall_progress_total
+        ?? job.progress_total
+        ?? 0
+      );
 
       if (total <= 0) {
         return 0;
@@ -10162,11 +10187,66 @@ def index() -> str:
         0,
         Math.min(
           100,
-          Math.round(
-            current / total * 100
-          )
+          Math.round(current / total * 100)
         )
       );
+    }
+
+    function stageProgressPercent(job) {
+      if (job.state === "completed") {
+        return 100;
+      }
+      const current = Number(job.stage_progress_current || 0);
+      const total = Number(job.stage_progress_total || 0);
+      if (total <= 0) {
+        return 0;
+      }
+      return Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(current / total * 100)
+        )
+      );
+    }
+
+    function estimatedRemainingText(job) {
+      if (job.state === "completed") {
+        return "fertig";
+      }
+
+      const current = Number(
+        job.overall_progress_current
+        ?? job.progress_current
+        ?? 0
+      );
+      const total = Number(
+        job.overall_progress_total
+        ?? job.progress_total
+        ?? 0
+      );
+      if (total <= 0 || current <= 0 || current >= total) {
+        return "—";
+      }
+
+      const started = new Date(job.started_at || job.created_at || "").getTime();
+      if (!Number.isFinite(started)) {
+        return "—";
+      }
+      const elapsed = Date.now() - started;
+      if (elapsed < 10000) {
+        return "—";
+      }
+
+      const ratio = Math.max(.001, Math.min(.999, current / total));
+      const remainingMs = elapsed * (1 - ratio) / ratio;
+      const minutes = Math.max(1, Math.round(remainingMs / 60000));
+      if (minutes < 60) {
+        return "ca. " + minutes + " Min.";
+      }
+      const hours = Math.floor(minutes / 60);
+      const rest = minutes % 60;
+      return "ca. " + hours + " Std." + (rest ? " " + rest + " Min." : "");
     }
 
     function badgeClass(state) {
@@ -10204,6 +10284,10 @@ def index() -> str:
 
       const percent =
         progressPercent(job);
+      const stagePercent =
+        stageProgressPercent(job);
+      const remaining =
+        estimatedRemainingText(job);
 
       const result =
         job.result || {};
@@ -10328,21 +10412,50 @@ def index() -> str:
           ${error}
           ${duplicateNotice}
 
-          <div class="progress">
-            <div
-              class="${
-                job.state === "completed"
-                ? "completed"
-                : ""
-              }"
-              style="width: ${percent}%"
-            ></div>
+          <div class="progress-stack">
+            <div class="progress-row">
+              <div class="progress-caption">
+                <span>Aktuelle Stufe</span>
+                <span>${stagePercent} %</span>
+              </div>
+              <div class="progress stage-progress">
+                <div
+                  class="${
+                    job.state === "completed"
+                    ? "completed"
+                    : ""
+                  }"
+                  style="width: ${stagePercent}%"
+                ></div>
+              </div>
+            </div>
+            <div class="progress-row">
+              <div class="progress-caption">
+                <span>Gesamt</span>
+                <span>${percent} %</span>
+              </div>
+              <div class="progress overall-progress">
+                <div
+                  class="${
+                    job.state === "completed"
+                    ? "completed"
+                    : ""
+                  }"
+                  style="width: ${percent}%"
+                ></div>
+              </div>
+            </div>
           </div>
 
           <div class="job-meta">
             <span>
-              Fortschritt:
+              Fortschritt gesamt:
               ${percent} %
+            </span>
+
+            <span>
+              Restzeit:
+              ${escapeHtml(remaining)}
             </span>
 
             <span>
