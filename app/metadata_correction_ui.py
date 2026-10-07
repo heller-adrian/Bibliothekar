@@ -470,29 +470,24 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       setStatus("Mindestens eine ausgewählte Datei besitzt diesen Metadaten-Quelltyp nicht mehr.",true);return;
     }
     const button=$("meta-bulk-apply");
-    if(button)button.disabled=true;
+    if(button){button.disabled=true;button.classList.add("bk-busy");button.setAttribute("aria-busy","true");}
     setStatus(files.length+" Einträge werden mit ihrem jeweiligen "+type+"-Wert korrigiert …");
-    let completed=0;
     try{
-      for(const item of prepared){
-        const candidate=item.candidate;
-        const payload={
-          area:state.area,
-          relative_path:item.file.relative_path,
-          proposed_datetime:String(candidate.normalized_datetime||"").slice(0,19),
-          proposal_source_tag:candidate.tag_name
-        };
-        if(state.area==="library"){payload.library_id=item.file.library_id;payload.family_id=item.file.family_id;}
-        await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-        completed+=1;
-      }
+      const items=files.map(file=>state.area==="library"
+        ? {library_id:file.library_id,family_id:file.family_id,relative_path:file.relative_path}
+        : {relative_path:file.relative_path});
+      const data=await json("/api/metadata-correction/correct-batch",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({area:state.area,source_type:type,items})
+      });
       await scan(false,true);await loadTasks(true);
-      setStatus(files.length+" Einträge mit ihren eigenen "+type+"-Werten korrigiert.");
+      setStatus(Number(data.count||files.length)+" Einträge mit ihren eigenen "+type+"-Werten korrigiert.");
     }catch(error){
       await scan(false,true);await loadTasks(true);
-      setStatus((completed?completed+" von "+files.length+" Einträgen geändert. ":"")+error.message,true);
+      setStatus(error.message,true);
     }finally{
-      $("meta-bulk-apply")?.removeAttribute("disabled");
+      const current=$("meta-bulk-apply");
+      if(current){current.disabled=false;current.classList.remove("bk-busy");current.removeAttribute("aria-busy");}
     }
   }
   async function reintegrateGeneralSelected(files){
