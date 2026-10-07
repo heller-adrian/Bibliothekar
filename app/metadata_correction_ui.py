@@ -19,7 +19,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .meta-paths span,.meta-paths code{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
 .meta-groups{display:grid;gap:14px;margin-top:14px}
 .meta-files{display:grid;gap:8px}
-.meta-file{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;width:100%;box-sizing:border-box;border:1px solid var(--bk-line,#ccd2d8);border-radius:12px;padding:11px 13px;background:var(--bk-surface,#fff);color:inherit;cursor:pointer;user-select:none;-webkit-user-select:none}
+.meta-file{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;width:100%;box-sizing:border-box;border:1px solid var(--bk-line,#ccd2d8);border-radius:12px;padding:11px 13px;background:var(--bk-surface,#fff);color:inherit;cursor:pointer;user-select:none;-webkit-user-select:none}
+.meta-file.selectable{grid-template-columns:auto minmax(0,1fr) auto}
 .meta-file.active{border-color:var(--bk-blue,#1976d2);box-shadow:inset 0 0 0 1px var(--bk-blue,#1976d2)}
 .meta-file.selected{border-color:var(--bk-blue,#1976d2);background:var(--bk-surface-2,#f5f5f5)}
 .meta-file-check{width:19px;height:19px;min-height:auto;accent-color:var(--bk-blue,#1976d2)}
@@ -33,6 +34,12 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .meta-task{border-top:1px solid var(--bk-line,#ccd2d8);padding-top:12px;margin-top:12px}
 .meta-placeholder{padding:28px 18px;text-align:center}
 .meta-selection-note{font-size:.85rem;padding:8px 10px;border-radius:10px;background:var(--bk-surface-2,#f5f5f5)}
+.meta-candidate{border:1px solid var(--bk-line,#ccd2d8);border-radius:11px;padding:10px 11px;display:grid;gap:5px;background:var(--bk-surface-2,#f5f5f5)}
+.meta-candidate-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.meta-candidate small{overflow-wrap:anywhere}
+.meta-candidate button{min-height:30px!important;padding:4px 9px!important;font-size:.82rem}
+.meta-candidate-list{display:grid;gap:8px}
+.meta-form select{min-height:40px;border:1px solid var(--bk-line,#ccd2d8);border-radius:10px;padding:8px 10px;background:var(--bk-surface-2,#fff);color:inherit}
 .multi-preview{display:grid;gap:8px;margin-top:12px}
 .multi-preview-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(130px,.8fr) auto minmax(130px,.8fr);gap:10px;align-items:center;border:1px solid var(--bk-line,#ccd2d8);border-radius:10px;padding:9px 11px}
 .multi-offset{font-variant-numeric:tabular-nums}
@@ -61,7 +68,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         <strong id="meta-list-title">Dateien</strong>
         <div class="meta-actions">
           <span id="meta-summary" class="muted">Noch nicht geprüft</span>
-          <button id="meta-select-all" type="button" title="Mehrere Einträge lassen sich auch mit Umschalt (Shift) auswählen.">Alle auswählen</button>
+          <button id="meta-select-mode" type="button">Auswählen</button>
+          <button id="meta-select-all" type="button" hidden title="Mehrere Einträge lassen sich auch mit Umschalt (Shift) auswählen.">Alle auswählen</button>
         </div>
       </div>
       <div id="meta-files" class="meta-groups"><div class="muted">Prüfung starten.</div></div>
@@ -109,7 +117,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   const requested=String(params.get("area")||"library");
   const state={
     area:["library","general","multiple"].includes(requested)?requested:"library",
-    scan:null,selected:null,selectedSet:new Set(),lastSelected:null,tasks:[],areas:null,
+    scan:null,selected:null,selectedSet:new Set(),lastSelected:null,selectionMode:false,tasks:[],areas:null,
     multipleReference:null,multiplePreview:null
   };
   const $=id=>document.getElementById(id);
@@ -140,6 +148,48 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   function splitSuggestion(hint){
     const dt=String(hint?.datetime||"");
     return {date:hint?.date||dt.slice(0,10)||"",time:(hint?.time||dt.slice(11,19)||"").slice(0,8)};
+  }
+  function usableCandidates(file){
+    return (file?.metadata_candidates||[])
+      .filter(candidate=>candidate&&candidate.usable&&candidate.normalized_datetime)
+      .sort((a,b)=>(Number(a.priority||999)-Number(b.priority||999))||String(a.tag_name||"").localeCompare(String(b.tag_name||"")));
+  }
+  function candidateSourceType(candidate){
+    return String(candidate?.source_type||candidate?.tag_name||"").split(":").pop();
+  }
+  function candidateLabel(candidate){
+    return String(candidate?.label_de||candidateSourceType(candidate)||"Metadaten");
+  }
+  function candidateForType(file,type){
+    return usableCandidates(file).find(candidate=>candidateSourceType(candidate)===type)||null;
+  }
+  function preferredMetadataCandidate(file){
+    const candidates=usableCandidates(file);
+    return candidates.find(candidate=>candidate.is_selected)||candidates[0]||null;
+  }
+  function commonSourceTypes(files){
+    if(!files.length)return [];
+    const maps=files.map(file=>{
+      const map=new Map();
+      for(const candidate of usableCandidates(file)){
+        const type=candidateSourceType(candidate);
+        if(type&&!map.has(type))map.set(type,candidate);
+      }
+      return map;
+    });
+    return [...maps[0].keys()]
+      .filter(type=>maps.every(map=>map.has(type)))
+      .map(type=>maps[0].get(type))
+      .sort((a,b)=>Number(a.priority||999)-Number(b.priority||999));
+  }
+  function formatCandidate(candidate){
+    if(!candidate)return "";
+    const trust=candidate.trust_label||candidate.confidence||"";
+    return '<div class="meta-candidate"><div class="meta-candidate-head"><strong>'+esc(candidateLabel(candidate))+'</strong>'
+      +'<button type="button" data-meta-use-candidate="'+esc(candidate.tag_name||"")+'">Übernehmen</button></div>'
+      +'<span>'+esc(String(candidate.normalized_datetime||"").slice(0,19))+'</span>'
+      +'<small class="muted">Vertrauen: '+esc(trust)+(candidate.trust_score!==undefined?" · "+esc(candidate.trust_score)+"/100":"")+'</small>'
+      +'<small class="muted"><code>'+esc(candidate.technical_tag||candidate.tag_name||"")+'</code></small></div>';
   }
   function configureArea(){
     const library=state.area==="library", general=state.area==="general", multiple=state.area==="multiple";
@@ -181,15 +231,20 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const [badge,cls]=fileBadge(file);
     const memberText=Number(file.member_count||0)>1 ? " · "+Number(file.member_count)+" Dateien" : "";
     const checked=state.selectedSet.has(index);
-    return '<div class="meta-file '+(state.selected===index?"active ":"")+(checked?"selected":"")+'" data-meta-file="'+index+'" role="button" tabindex="0">'
-      +'<input class="meta-file-check" data-meta-check="'+index+'" type="checkbox" '+(checked?"checked":"")+' aria-label="Datei auswählen">'
+    const checkbox=state.selectionMode
+      ? '<input class="meta-file-check" data-meta-check="'+index+'" type="checkbox" '+(checked?"checked":"")+' aria-label="Datei auswählen">'
+      : "";
+    return '<div class="meta-file '+(state.selectionMode?"selectable ":"")+(state.selected===index?"active ":"")+(checked?"selected":"")+'" data-meta-file="'+index+'" role="button" tabindex="0">'
+      +checkbox
       +'<span><strong>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+memberText+'</small>'
       +'<small class="muted">Aktuell: '+esc(file.selected_capture_time||"kein belastbares Datum")+'</small></span>'
       +'<span class="badge '+cls+'">'+esc(badge)+'</span></div>';
   }
-  function updateSelectAllButton(){
+  function updateSelectionControls(){
     const files=state.scan?.files||[];
     const all=files.length>0&&state.selectedSet.size===files.length;
+    $("meta-select-mode").textContent=state.selectionMode?"Auswahl beenden":"Auswählen";
+    $("meta-select-all").hidden=!state.selectionMode;
     $("meta-select-all").textContent=all?"Auswahl aufheben":"Alle auswählen";
     $("meta-select-all").disabled=!files.length;
   }
@@ -213,7 +268,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       : files.length+" Datei"+(files.length===1?"":"en")+chosen;
     if(!files.length){
       $("meta-files").innerHTML='<div class="muted">'+(state.area==="library"?"Keine Ohne-Datum-Familien vorhanden.":"Der Ordner ist leer.")+'</div>';
-      updateSelectAllButton();return;
+      updateSelectionControls();return;
     }
     $("meta-files").innerHTML='<div class="meta-files">'+files.map(fileRow).join("")+'</div>';
     document.querySelectorAll("[data-meta-file]").forEach(row=>{
@@ -224,12 +279,16 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       row.addEventListener("click",event=>{
         if(event.target.closest("[data-meta-check]"))return;
         state.selected=index;
-        if(event.shiftKey){
-          selectRange(index,true);
-        }else{
-          state.selectedSet.add(index);
+        if(state.selectionMode){
+          if(event.shiftKey){
+            selectRange(index,true);
+          }else if(state.selectedSet.has(index)){
+            state.selectedSet.delete(index);
+          }else{
+            state.selectedSet.add(index);
+          }
+          state.lastSelected=index;
         }
-        state.lastSelected=index;
         renderFiles();renderDetails();
       });
       row.addEventListener("keydown",event=>{
@@ -252,45 +311,89 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         renderFiles();renderDetails();
       });
     });
-    updateSelectAllButton();
+    updateSelectionControls();
   }
   function selectedFiles(){
     const files=state.scan?.files||[];
-    const indices=state.selectedSet.size?[...state.selectedSet]:(Number.isInteger(state.selected)?[state.selected]:[]);
+    const indices=state.selectionMode
+      ? [...state.selectedSet]
+      : (Number.isInteger(state.selected)?[state.selected]:[]);
     return indices.map(index=>files[index]).filter(Boolean);
   }
   function selectedReadyFiles(){
     const files=selectedFiles();
     return files.length&&files.every(file=>file.reintegration_ready)?files:[];
   }
+  function renderBulkDetails(files){
+    const sourceTypes=commonSourceTypes(files);
+    const options=sourceTypes.map(candidate=>
+      '<option value="'+esc(candidateSourceType(candidate))+'">'+esc(candidateLabel(candidate))+'</option>'
+    ).join("");
+    const readyFiles=state.area==="library"&&files.every(file=>file.reintegration_ready)?files:[];
+    $("meta-details").innerHTML='<div class="meta-form">'
+      +'<div class="meta-selection-note"><strong>'+files.length+' Einträge ausgewählt.</strong><div class="muted" style="margin-top:4px">Für jede Datei wird ihr eigener Wert des gewählten Metadaten-Tags verwendet.</div></div>'
+      +(sourceTypes.length
+        ? '<label><span>Gemeinsamer Metadaten-Quelltyp</span><select id="meta-bulk-source">'+options+'</select></label>'
+          +'<button id="meta-bulk-apply" type="button" class="primary">Metadatenquelle übernehmen ('+files.length+')</button>'
+        : '<div class="danger">Die ausgewählten Dateien besitzen keinen gemeinsamen nutzbaren Metadaten-Quelltyp.</div>')
+      +(readyFiles.length
+        ? '<button id="meta-reintegrate" type="button">In Tagesbestand einsortieren ('+readyFiles.length+')</button>'
+        : '')
+      +'</div>';
+    $("meta-bulk-apply")?.addEventListener("click",()=>correctSelectedBySource(files));
+    $("meta-reintegrate")?.addEventListener("click",reintegrateSelected);
+  }
   function renderDetails(){
-    const file=(state.scan?.files||[])[state.selected];
+    const chosen=selectedFiles();
+    if(state.selectionMode&&chosen.length>1){renderBulkDetails(chosen);return;}
+    const file=chosen[0]||(state.scan?.files||[])[state.selected];
     if(!file){$("meta-details").innerHTML='<div class="muted">Links eine Datei auswählen.</div>';return;}
     const hint=bestSuggestion(file), suggested=splitSuggestion(hint), filename=file.filename_suggestion;
     const familyLine=state.area==="library"
       ? '<span>Familie</span><span>'+esc(file.member_count||1)+' Dateien</span>'
       :"";
-    const selectionNote=state.selectedSet.size>1
-      ? '<div class="meta-selection-note"><strong>'+state.selectedSet.size+' Einträge ausgewählt.</strong></div>'
-      :"";
     const ready=state.area==="library"&&file.reintegration_ready;
-    const chosenFiles=selectedFiles();
     const readyFiles=selectedReadyFiles();
-    const correctionCount=chosenFiles.length||1;
+    const preferred=preferredMetadataCandidate(file);
+    const others=usableCandidates(file).filter(candidate=>!preferred||candidate.tag_name!==preferred.tag_name);
+    const firstOthers=others.slice(0,3);
+    const remaining=others.slice(3);
+    const original=file.original_metadata?.before_metadata||null;
+    const originalBlock=original
+      ? '<details><summary>Ursprüngliche Metadaten vor der Korrektur</summary><div class="meta-kv" style="margin-top:9px">'
+        +'<span>Aufnahmezeit</span><span>'+esc(original.selected_capture_time||"nicht vorhanden")+'</span>'
+        +'<span>Quelle</span><span>'+esc(original.selected_capture_source||"—")+'</span>'
+        +'<span>Vertrauen</span><span>'+esc(original.capture_time_confidence||"—")+'</span></div></details>'
+      : "";
+    const candidateBlock='<div><strong>Bevorzugter Metadatenkandidat</strong><div class="meta-candidate-list" style="margin-top:7px">'
+      +(preferred?formatCandidate(preferred):'<div class="muted">Kein nutzbarer Metadatenkandidat vorhanden.</div>')+'</div></div>'
+      +(firstOthers.length
+        ? '<details><summary>Weitere Metadaten</summary><div class="meta-candidate-list" style="margin-top:8px">'+firstOthers.map(formatCandidate).join("")+'</div>'
+          +(remaining.length?'<details style="margin-top:8px"><summary>Weitere anzeigen ('+remaining.length+')</summary><div class="meta-candidate-list" style="margin-top:8px">'+remaining.map(formatCandidate).join("")+'</div></details>':'')
+          +'</details>'
+        : '');
     const sortButton=state.area==="library"&&readyFiles.length
-      ? '<button id="meta-reintegrate" type="button" class="primary">In Tagesbestand einsortieren'+(readyFiles.length>1?" ("+readyFiles.length+")":"")+'</button>'
+      ? '<button id="meta-reintegrate" type="button">In Tagesbestand einsortieren</button>'
       :"";
-    $("meta-details").innerHTML='<div class="meta-form">'+selectionNote+'<div class="meta-kv">'
+    $("meta-details").innerHTML='<div class="meta-form"><div class="meta-kv">'
       +'<span>Datei</span><strong>'+esc(file.filename)+'</strong>'+familyLine
       +'<span>Metadaten</span><span>'+esc(file.selected_capture_time||"kein belastbares Datum")+' · '+esc(file.capture_time_confidence||"")+'</span>'
       +'<span>Status</span><span>'+(ready?"korrigiert · wartet auf Einsortierung":"Prüfung/Korrektur erforderlich")+'</span>'
       +'<span>Dateiname</span><span>'+(filename?(esc(filename.date)+(filename.time?" "+esc(filename.time):" · Uhrzeit fehlt")):"kein Datum erkannt")+'</span></div>'
+      +candidateBlock+originalBlock
       +'<label><span>Datum</span><input id="meta-date" type="date" value="'+esc(suggested.date)+'"></label>'
       +'<label><span>Uhrzeit</span><input id="meta-time" type="time" step="1" value="'+esc(suggested.time)+'"></label>'
-      +'<button id="meta-prepare" type="button" class="primary">'+(ready?"Metadaten erneut ändern":"Metadaten ändern")+(correctionCount>1?" ("+correctionCount+")":"")+'</button>'
+      +'<button id="meta-prepare" type="button" class="primary">'+(ready?"Metadaten erneut ändern":"Metadaten ändern")+'</button>'
       +sortButton+'</div>';
+    document.querySelectorAll("[data-meta-use-candidate]").forEach(button=>button.addEventListener("click",()=>{
+      const candidate=(file.metadata_candidates||[]).find(item=>String(item.tag_name||"")===String(button.dataset.metaUseCandidate||""));
+      if(!candidate)return;
+      const value=String(candidate.normalized_datetime||"").slice(0,19);
+      if($("meta-date"))$("meta-date").value=value.slice(0,10);
+      if($("meta-time"))$("meta-time").value=value.slice(11,19);
+    }));
     $("meta-prepare").addEventListener("click",()=>correctSelected(file));
-    if($("meta-reintegrate"))$("meta-reintegrate").addEventListener("click",reintegrateSelected);
+    $("meta-reintegrate")?.addEventListener("click",reintegrateSelected);
   }
   function selectionKeys(){
     const files=state.scan?.files||[];
@@ -308,32 +411,58 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     state.lastSelected=snapshot.last&&byKey.has(snapshot.last)?byKey.get(snapshot.last):state.selected;
   }
   async function correctSelected(file){
-    const date=$("meta-date").value,time=$("meta-time").value;
+    const date=$("meta-date")?.value||"",time=$("meta-time")?.value||"";
     if(!date||!time){setStatus("Datum und Uhrzeit müssen vollständig angegeben werden.",true);return;}
-    const files=selectedFiles().length?selectedFiles():[file];
     const button=$("meta-prepare");
     if(button)button.disabled=true;
-    setStatus(files.length===1?"Metadaten werden geändert …":files.length+" Einträge werden geändert …");
-    let completed=0;
+    setStatus("Metadaten werden geändert …");
     try{
-      for(const item of files){
-        const payload={area:state.area,relative_path:item.relative_path,proposed_datetime:date+"T"+time};
-        if(state.area==="library"){payload.library_id=item.library_id;payload.family_id=item.family_id;}
-        await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-        completed+=1;
-      }
+      const payload={area:state.area,relative_path:file.relative_path,proposed_datetime:date+"T"+time};
+      if(state.area==="library"){payload.library_id=file.library_id;payload.family_id=file.family_id;}
+      await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
       await scan(false,true);
       await loadTasks(true);
-      setStatus(files.length===1
-        ?"Metadaten geändert. Bereit zum Einsortieren."
-        :files.length+" Einträge geändert. Bereit zum Einsortieren.");
+      setStatus(state.area==="library"?"Metadaten geändert. Bereit zum Einsortieren.":"Metadaten geändert und geprüft.");
     }catch(error){
       await scan(false,true);
       await loadTasks(true);
-      setStatus((completed?completed+" von "+files.length+" Einträgen geändert. ":"")+error.message,true);
+      setStatus(error.message,true);
     }finally{
       const current=$("meta-prepare");
       if(current)current.disabled=false;
+    }
+  }
+  async function correctSelectedBySource(files){
+    const type=$("meta-bulk-source")?.value||"";
+    if(!type||!files.length)return;
+    const prepared=files.map(file=>({file,candidate:candidateForType(file,type)}));
+    if(prepared.some(item=>!item.candidate)){
+      setStatus("Mindestens eine ausgewählte Datei besitzt diesen Metadaten-Quelltyp nicht mehr.",true);return;
+    }
+    const button=$("meta-bulk-apply");
+    if(button)button.disabled=true;
+    setStatus(files.length+" Einträge werden mit ihrem jeweiligen "+type+"-Wert korrigiert …");
+    let completed=0;
+    try{
+      for(const item of prepared){
+        const candidate=item.candidate;
+        const payload={
+          area:state.area,
+          relative_path:item.file.relative_path,
+          proposed_datetime:String(candidate.normalized_datetime||"").slice(0,19),
+          proposal_source_tag:candidate.tag_name
+        };
+        if(state.area==="library"){payload.library_id=item.file.library_id;payload.family_id=item.file.family_id;}
+        await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+        completed+=1;
+      }
+      await scan(false,true);await loadTasks(true);
+      setStatus(files.length+" Einträge mit ihren eigenen "+type+"-Werten korrigiert.");
+    }catch(error){
+      await scan(false,true);await loadTasks(true);
+      setStatus((completed?completed+" von "+files.length+" Einträgen geändert. ":"")+error.message,true);
+    }finally{
+      $("meta-bulk-apply")?.removeAttribute("disabled");
     }
   }
   async function reintegrateSelected(){
@@ -538,7 +667,14 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       return false;
     }
   }
+  $("meta-select-mode").addEventListener("click",()=>{
+    state.selectionMode=!state.selectionMode;
+    state.selectedSet.clear();
+    state.lastSelected=null;
+    renderFiles();renderDetails();
+  });
   $("meta-select-all").addEventListener("click",()=>{
+    if(!state.selectionMode)return;
     const files=state.scan?.files||[];
     if(files.length&&state.selectedSet.size===files.length){
       state.selectedSet.clear();
@@ -552,7 +688,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   $("multi-apply").addEventListener("click",()=>applyMultiple("apply"));
   $("multi-apply-import").addEventListener("click",()=>applyMultiple("apply_and_import"));
   configureArea();
-  updateSelectAllButton();
+  updateSelectionControls();
   loadAreas();
   loadTasks();
 })();
