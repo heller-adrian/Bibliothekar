@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from app.database import database_connection, initialize_database
 from app.event_inventory import scan_event_inventory
@@ -235,3 +236,171 @@ def test_0280_structure_task_auto_opens_once_per_page():
     assert 'let structureTaskAutoOpened = false;' in source
     assert 'task.kind === "event_structure_change"' in source
     assert 'if (taskPanel?.hasAttribute("hidden")) openTaskPanel();' in source
+
+
+def test_0413_applied_event_root_rename_is_found_by_event_document(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
+    work_root = shared_work_root(workspace)
+
+    _family_id, file_id = _seed_event_with_legacy_layout(
+        db,
+        status="applied",
+        current_root_kind="shared_workspace",
+    )
+    event_root = _materialize_legacy_tree(work_root)
+    (event_root / "event.json").write_text(
+        json.dumps({"event": {"id": "e"}}),
+        encoding="utf-8",
+    )
+    scan_event_inventory(
+        db,
+        work_root,
+        "j",
+        "e",
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+
+    renamed = event_root.with_name("Urlaub Neu")
+    event_root.rename(renamed)
+    observed = scan_event_inventory(
+        db,
+        work_root,
+        "j",
+        "e",
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    assert observed["event_prefix"] == "2026/Urlaub Neu"
+
+    change = detect_event_structure_change(db, "e")
+    assert change is not None
+    assert change["status"] == "pending"
+    assert change["detected"]["root_rename"]["old_folder"] == "07-23 - Trip"
+    assert change["detected"]["root_rename"]["new_folder"] == "Urlaub Neu"
+    assert change["detected"]["placement_conflicts"] == []
+
+    confirmed = confirm_applied_structure_change(
+        db,
+        workspace,
+        change["id"],
+        input_path="Alle",
+        app_version="0.41.3",
+    )
+    assert confirmed["status"] == "completed"
+    with database_connection(db) as connection:
+        event = connection.execute(
+            "SELECT folder_name FROM events WHERE id='e'"
+        ).fetchone()
+        file_row = connection.execute(
+            "SELECT current_relative_path FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert str(event["folder_name"]) == "Urlaub Neu"
+    assert str(file_row["current_relative_path"]) == "2026/Urlaub Neu/Alle/A.JPG"
+    assert (renamed / "event.json").is_file()
+
+
+def test_0413_applied_child_root_rename_is_one_structure_change(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ensure_workspace_layout(workspace)
+    work_root = shared_work_root(workspace)
+
+    _family_id, file_id = _seed_event_with_legacy_layout(
+        db,
+        status="applied",
+        current_root_kind="shared_workspace",
+    )
+    old_child = "07-23 00-00 - 07-23 23-59 - A"
+    with database_connection(db) as connection:
+        connection.execute(
+            """INSERT INTO events(
+                   id,job_id,parent_event_id,event_level,name,start_datetime,
+                   end_datetime,uses_time_range,folder_name,status,created_at,
+                   updated_at,event_kind,preserve_day_folders,revision,
+                   applied_at,resort_required,time_model_version,timeline_model)
+               VALUES ('c','j','e','child','A','2026-07-23T00:00:00',
+                       '2026-07-23T23:59:59',0,?,'applied',?,?, 'event',0,1,?,0,2,'continuous')""",
+            (old_child, NOW, NOW, NOW),
+        )
+        connection.execute(
+            "UPDATE event_assignments SET event_id='c' WHERE event_id='e'"
+        )
+        connection.execute(
+            """UPDATE files
+               SET current_relative_path=?
+               WHERE id=?""",
+            (f"2026/07-23 - Trip/{old_child}/Alle/A.JPG", file_id),
+        )
+
+    event_root = work_root / "2026" / "07-23 - Trip"
+    child_root = event_root / old_child
+    for name in ("Alle", "Sortiert", "Export"):
+        (child_root / name).mkdir(parents=True, exist_ok=True)
+    (child_root / "Alle" / "A.JPG").write_bytes(b"camera-a")
+    (event_root / "event.json").write_text(
+        json.dumps({"event": {"id": "e"}}),
+        encoding="utf-8",
+    )
+
+    scan_event_inventory(
+        db,
+        work_root,
+        "j",
+        "e",
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    child_root.rename(event_root / "A")
+    scan_event_inventory(
+        db,
+        work_root,
+        "j",
+        "e",
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+
+    change = detect_event_structure_change(db, "e")
+    assert change is not None
+    assert change["status"] == "pending"
+    assert change["detected"]["placement_conflicts"] == []
+    assert change["detected"]["directory_added"] == []
+    assert change["detected"]["directory_removed"] == []
+    assert change["detected"]["child_renames"] == [{
+        "child_event_id": "c",
+        "old_folder": old_child,
+        "new_folder": "A",
+    }]
+
+    confirmed = confirm_applied_structure_change(
+        db,
+        workspace,
+        change["id"],
+        input_path="Alle",
+        app_version="0.41.3",
+    )
+    assert confirmed["status"] == "completed"
+    with database_connection(db) as connection:
+        child = connection.execute(
+            "SELECT folder_name FROM events WHERE id='c'"
+        ).fetchone()
+        file_row = connection.execute(
+            "SELECT current_relative_path FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert str(child["folder_name"]) == "A"
+    assert str(file_row["current_relative_path"]) == "2026/07-23 - Trip/A/Alle/A.JPG"
