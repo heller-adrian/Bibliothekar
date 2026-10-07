@@ -105,6 +105,9 @@ EVENTS_HTML = r"""<!doctype html>
     .edit-actions { display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; margin-top:16px; }
     .edit-boundaries { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;grid-column:1/-1; }
     .edit-boundary { display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:8px;align-items:end; }
+    .edit-date-entry{display:grid;grid-template-columns:minmax(0,1fr) 42px;gap:6px;align-items:center}
+    .edit-date-entry>input{min-width:0}
+    .edit-date-picker{width:42px;min-width:42px;padding:0;display:grid;place-items:center}
     .inspect-more { margin-top:9px; }
     @media (max-width:760px){.edit-boundaries{grid-template-columns:1fr}}
     @media (max-width:440px){.edit-boundary{grid-template-columns:1fr}}
@@ -1721,6 +1724,54 @@ EVENTS_HTML = r"""<!doctype html>
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
     }
+
+
+    function validEditableIsoDate(value){
+      const text=String(value||"").trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(text))return false;
+      const date=new Date(text+"T12:00:00");
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0,10)===text;
+    }
+
+    function openEditableDatePicker(input){
+      if(!input||input.disabled)return;
+      const picker=document.createElement("input");
+      picker.type="date";
+      picker.value=validEditableIsoDate(input.value)?input.value:"";
+      const min=String(input.dataset.dateMin||input.min||"");
+      const max=String(input.dataset.dateMax||input.max||"");
+      if(min)picker.min=min;
+      if(max)picker.max=max;
+      picker.style.cssText="position:fixed;left:50%;bottom:12px;width:2px;height:2px;opacity:.01;z-index:99999";
+      document.body.appendChild(picker);
+      let done=false;
+      const cleanup=()=>{if(done)return;done=true;setTimeout(()=>picker.remove(),0);};
+      picker.addEventListener("change",()=>{
+        if(picker.value){
+          input.value=picker.value;
+          input.dispatchEvent(new Event("change",{bubbles:true}));
+          input.dispatchEvent(new Event("input",{bubbles:true}));
+        }
+        cleanup();
+      },{once:true});
+      picker.addEventListener("blur",()=>setTimeout(cleanup,250),{once:true});
+      picker.focus({preventScroll:true});
+      try{
+        if(typeof picker.showPicker==="function")picker.showPicker();
+        else picker.click();
+      }catch(_){picker.click();}
+    }
+
+    document.addEventListener("click",event=>{
+      const button=event.target.closest?.("[data-edit-date-picker]");
+      if(!button)return;
+      event.preventDefault();
+      const id=String(button.dataset.editDatePicker||"");
+      const input=id
+        ? document.getElementById(id)
+        : button.parentElement?.querySelector("input[type='text']");
+      openEditableDatePicker(input);
+    });
 
 
     function setStatus(
