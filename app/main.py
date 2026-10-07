@@ -8374,6 +8374,22 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
             for row in list_imported_media_origins(DATABASE_FILE)
             if str(row.get("sha256") or "")
         }
+        # Eine bereits bekannte Aufnahme kann selbst schon einmal korrigiert
+        # worden sein. Dann unterscheiden sich sha256_original und der
+        # aktuelle physische Hash. Beide Identitäten verhindern, dass
+        # "Allgemein" daraus künstlich einen neuen Import erzeugt.
+        with database_connection(DATABASE_FILE) as main_connection:
+            known_current_sha = {
+                str(row["sha256"])
+                for row in main_connection.execute(
+                    """SELECT DISTINCT COALESCE(sha256_current,sha256_original) AS sha256
+                       FROM files
+                       WHERE COALESCE(TRIM(COALESCE(sha256_current,sha256_original)),'')<>''"""
+                ).fetchall()
+                if str(row["sha256"] or "")
+            }
+        known_camera_sha = known_original_sha | known_current_sha
+
         with database_connection(context.database_path) as connection:
             for relative, source, _row in selected:
                 current_sha = sha256_file(source)
@@ -8388,8 +8404,8 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                     (relative,),
                 ).fetchone()
                 original_sha = str(correction["source_sha256"] or "") if correction else ""
-                if current_sha in known_original_sha or (
-                    original_sha and original_sha in known_original_sha
+                if current_sha in known_camera_sha or (
+                    original_sha and original_sha in known_camera_sha
                 ):
                     raise MetadataCorrectionError(
                         "Diese Datei gehört bereits zu einem bekannten Kameraimport. "
