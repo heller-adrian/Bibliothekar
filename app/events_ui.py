@@ -3816,10 +3816,26 @@ EVENTS_HTML = r"""<!doctype html>
     changeRequestDialog.addEventListener("cancel", event => {
       if (mandatoryArchiveChangeContext) event.preventDefault();
     });
-    eventEditForm.addEventListener("submit", event => {
+    eventEditForm.addEventListener("submit", async event => {
       event.preventDefault();
       const old=document.getElementById("event-edit-inline-error");if(old)old.hidden=true;
-      saveEventEditor().catch(error => showEventEditError(error.message));
+      const submit=eventEditForm.querySelector('button[type="submit"]');
+      if(submit){
+        submit.disabled=true;
+        submit.classList.add("bk-busy");
+        submit.setAttribute("aria-busy","true");
+      }
+      try {
+        await saveEventEditor();
+      } catch (error) {
+        showEventEditError(error.message);
+      } finally {
+        if(submit){
+          submit.disabled=false;
+          submit.classList.remove("bk-busy");
+          submit.removeAttribute("aria-busy");
+        }
+      }
     });
 
     async function discardMandatoryMutation() {
