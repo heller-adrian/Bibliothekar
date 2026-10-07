@@ -349,7 +349,7 @@ def verify_event_archive(
     }
 
     # 0.27.7: XMP und Exporte sind nach dem Anwenden echter Ereignisbestand.
-    # Für die Archivprüfung wird deshalb zusätzlich der aktuelle SSD-Bestand
+    # Für die Archivprüfung wird deshalb zusätzlich der aktuelle Arbeitsbereich-Bestand
     # als SOLL gelesen. Unbekannte Fremddateien bleiben weiterhin nur Hinweis.
     managed_asset_kinds = {"xmp", "export", "derived_media"}
     source_assets: list[dict[str, Any]] = []
@@ -507,16 +507,16 @@ def verify_event_archive(
                 actual_sha256 = str(observed["sha256"])
                 if actual_size != expected_size:
                     status = "size_mismatch"
-                    error_message = "Dateigröße weicht vom aktuellen SSD-Bestand ab."
+                    error_message = "Dateigröße weicht vom aktuellen Arbeitsbereich-Bestand ab."
                     mismatched_count += 1
                 elif actual_sha256 != expected_sha256:
                     status = "sha256_mismatch"
-                    error_message = "SHA-256-Summe weicht vom aktuellen SSD-Bestand ab."
+                    error_message = "SHA-256-Summe weicht vom aktuellen Arbeitsbereich-Bestand ab."
                     mismatched_count += 1
                 elif actual_relative != expected_relative:
                     status = "missing"
                     error_message = (
-                        "Die Ordnerlage im Archiv stimmt nicht mit dem aktuellen SSD-Bestand überein. "
+                        "Die Ordnerlage im Archiv stimmt nicht mit dem aktuellen Arbeitsbereich-Bestand überein. "
                         f"Archiv: {actual_relative} · SSD-SOLL: {expected_relative}"
                     )
                     mismatched_count += 1
