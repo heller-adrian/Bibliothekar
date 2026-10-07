@@ -1449,11 +1449,11 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         <div id="event-boundaries" class="event-boundaries full-width">
           <div class="event-boundary">
-            <label><span>Beginn</span><span class="date-entry"><input id="event-start-date" type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" required><button type="button" class="date-picker-button" data-date-picker-target="event-start-date" aria-label="Beginn im Kalender wählen">📅</button></span></label>
+            <label><span>Beginn</span><input id="event-start-date" type="date" required></label>
             <label id="event-start-time-label"><span>Startzeit</span><input id="event-start-time" type="time" value="00:00"></label>
           </div>
           <div class="event-boundary">
-            <label><span>Ende</span><span class="date-entry"><input id="event-end-date" type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" required><button type="button" class="date-picker-button" data-date-picker-target="event-end-date" aria-label="Ende im Kalender wählen">📅</button></span></label>
+            <label><span>Ende</span><input id="event-end-date" type="date" required></label>
             <label id="event-end-time-label"><span>Endzeit</span><input id="event-end-time" type="time" value="23:59"></label>
           </div>
         </div>
@@ -1610,12 +1610,16 @@ WORKSPACE_HTML = r"""<!doctype html>
     const noEventButton =
       document.getElementById("no-event-button");
     let noEventLabel = "Ohne Ereignis";
-    let globalSubeventPrefixMode = "date_range";
+    let globalSubeventDateMode = "start";
+    let globalSubeventIncludeYear = false;
+    let globalSubeventIncludeTime = false;
     let globalSubeventPrefixEnabled = true;
 
     function applyEventNamingSettings(value={}) {
       noEventLabel = String(value.no_event_label || "Ohne Ereignis").trim() || "Ohne Ereignis";
-      globalSubeventPrefixMode = String(value.subevent_prefix_mode || "date_range");
+      globalSubeventDateMode = String(value.subevent_date_mode || "start");
+      globalSubeventIncludeYear = Boolean(value.subevent_include_year);
+      globalSubeventIncludeTime = Boolean(value.subevent_include_time);
       globalSubeventPrefixEnabled = value.subevent_prefix_enabled !== false;
       if (noEventButton) noEventButton.textContent = noEventLabel;
       if (existingNoEventButton) existingNoEventButton.textContent = "Zu bestehendem " + noEventLabel;
@@ -3961,7 +3965,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const bounds=subeventBounds();
       const days=subeventAllowedDays();
       const current=days.includes(selected) ? selected : (days[0]||selected||"");
-      return `<label><span>${escapeHtml(label)}</span><span class="date-entry"><input ${attribute} type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="[0-9]{4}-[0-9]{2}-[0-9]{2}" data-date-min="${escapeHtml(bounds.minDate||"")}" data-date-max="${escapeHtml(bounds.maxDate||"")}" value="${escapeHtml(current)}"><button type="button" class="date-picker-button" data-date-picker-inline aria-label="${escapeHtml(label)} im Kalender wählen">📅</button></span></label>`;
+      return `<label><span>${escapeHtml(label)}</span><input ${attribute} type="date" min="${escapeHtml(bounds.minDate||"")}" max="${escapeHtml(bounds.maxDate||"")}" value="${escapeHtml(current)}"></label>`;
     }
     function minuteAfter(value){
       const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
@@ -4023,8 +4027,8 @@ WORKSPACE_HTML = r"""<!doctype html>
         ]){
           const control=row.querySelector(selector);
           if(!control)continue;
-          control.dataset.dateMin=bounds.minDate;
-          control.dataset.dateMax=bounds.maxDate;
+          control.min=bounds.minDate;
+          control.max=bounds.maxDate;
           let value=String(control.value||"");
           if(!validIsoDateText(value) || value<bounds.minDate)value=bounds.minDate;
           else if(value>bounds.maxDate)value=bounds.maxDate;
@@ -4038,15 +4042,11 @@ WORKSPACE_HTML = r"""<!doctype html>
       subeventPrefixToggle.hidden=!visible;
       subeventPrefixToggle.textContent=dialogSubeventPrefixEnabled ? "Präfix: an" : "Präfix: aus";
       subeventPrefixToggle.setAttribute("aria-pressed",dialogSubeventPrefixEnabled ? "true" : "false");
-      const labels={
-        date:"Datum",
-        date_range:"Datumsbereich",
-        time:"Uhrzeit",
-        year:"Jahr",
-        none:"kein Präfix"
-      };
-      const mode=labels[globalSubeventPrefixMode] || "Standard";
-      subeventPrefixToggle.title="Namenspräfix für Unterereignisse · "+mode;
+      const parts=["Datum"];
+      if(globalSubeventDateMode==="range")parts.push("Von–bis");
+      if(globalSubeventIncludeTime)parts.push("Uhrzeit");
+      if(globalSubeventIncludeYear)parts.push("Jahr");
+      subeventPrefixToggle.title="Namenspräfix für Unterereignisse · "+parts.join(" · ");
     }
 
     function addCreateSubeventCard(value={}){
