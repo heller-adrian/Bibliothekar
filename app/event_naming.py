@@ -6,6 +6,17 @@ import re
 
 DEFAULT_NO_EVENT_LABEL = "Ohne Ereignis"
 
+# Public choices for new semantic subevent folders.  "legacy_datetime_range"
+# remains an internal compatibility mode for events created before 0.43.0.
+SUBEVENT_PREFIX_MODES = {
+    "date",
+    "date_range",
+    "time",
+    "year",
+    "none",
+    "legacy_datetime_range",
+}
+
 DEFAULT_EVENT_NAMING = {
     "no_event_label": DEFAULT_NO_EVENT_LABEL,
     # Normal events: start date by default; range/year/time are opt-in.
@@ -15,6 +26,9 @@ DEFAULT_EVENT_NAMING = {
     # Monthly collection folders have no coherent start/end time range.
     # They may optionally include the year before the month.
     "no_event_include_year": False,
+    # Semantic child folders use their own compact naming policy.
+    "subevent_prefix_mode": "date_range",
+    "subevent_prefix_enabled": True,
 }
 
 
@@ -51,12 +65,28 @@ def normalize_event_naming(value: Any) -> dict[str, Any]:
             "Datumsdarstellung muss „start“ oder „range“ sein."
         )
 
+    subevent_prefix_mode = str(
+        raw.get("subevent_prefix_mode")
+        or DEFAULT_EVENT_NAMING["subevent_prefix_mode"]
+    ).strip().lower()
+    if subevent_prefix_mode not in SUBEVENT_PREFIX_MODES:
+        raise EventNamingError(
+            "Unbekannter Namenspräfix für Unterereignisse."
+        )
+
     return {
         "no_event_label": no_event_label,
         "date_mode": date_mode,
         "include_year": bool(raw.get("include_year", False)),
         "include_time": bool(raw.get("include_time", False)),
         "no_event_include_year": bool(raw.get("no_event_include_year", False)),
+        "subevent_prefix_mode": subevent_prefix_mode,
+        "subevent_prefix_enabled": bool(
+            raw.get(
+                "subevent_prefix_enabled",
+                DEFAULT_EVENT_NAMING["subevent_prefix_enabled"],
+            )
+        ),
     }
 
 
@@ -104,8 +134,12 @@ def render_event_folder_name(
     normalized = normalize_event_naming(raw)
     name = _clean_component(event_name, field="Ereignisname")
 
-    start = _date_token(start_date, include_year=normalized["include_year"])
-    end = _date_token(end_date, include_year=normalized["include_year"])
+    # Even if years are normally omitted, a year-spanning event must remain
+    # unambiguous.  The event continues to live below its start-year root.
+    cross_year = str(start_date)[:4] != str(end_date)[:4]
+    include_year = normalized["include_year"] or cross_year
+    start = _date_token(start_date, include_year=include_year)
+    end = _date_token(end_date, include_year=include_year)
 
     if normalized["date_mode"] == "range" and end_date != start_date:
         date_part = f"{start}–{end}"
@@ -123,6 +157,63 @@ def render_event_folder_name(
     return f"{date_part} - {name}"
 
 
+def render_subevent_folder_name(
+    *,
+    event_name: str,
+    start_datetime: str,
+    end_datetime: str,
+    naming: Any,
+    parent_start_datetime: str | None = None,
+    parent_end_datetime: str | None = None,
+) -> str:
+    """Render one semantic child-event folder.
+
+    The human-entered name is always the semantic part.  A configurable
+    prefix may precede it.  The internal legacy mode reproduces the exact
+    pre-0.43.0 prefix for already existing events.
+    """
+    normalized = normalize_event_naming(naming)
+    name = _clean_component(event_name, field="Unterereignisname")
+    start = str(start_datetime or "")[:19]
+    end = str(end_datetime or "")[:19]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", start):
+        raise EventNamingError("Ungültiger Beginn für Unterereignis.")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", end):
+        raise EventNamingError("Ungültiges Ende für Unterereignis.")
+
+    mode = normalized["subevent_prefix_mode"]
+    if not normalized["subevent_prefix_enabled"] or mode == "none":
+        return name
+
+    if mode == "legacy_datetime_range":
+        return (
+            f"{start[5:16].replace('T', ' ').replace(':', '-')} - "
+            f"{end[5:16].replace('T', ' ').replace(':', '-')} - {name}"
+        )
+
+    parent_start = str(parent_start_datetime or start)[:19]
+    parent_end = str(parent_end_datetime or end)[:19]
+    cross_year = (
+        start[:4] != end[:4]
+        or parent_start[:4] != parent_end[:4]
+    )
+    start_date = _date_token(start[:10], include_year=cross_year)
+    end_date = _date_token(end[:10], include_year=cross_year)
+
+    if mode == "date":
+        prefix = start_date
+    elif mode == "date_range":
+        prefix = start_date if start[:10] == end[:10] else f"{start_date}–{end_date}"
+    elif mode == "time":
+        prefix = f"{_time_token(start[11:16])}–{_time_token(end[11:16])}"
+    elif mode == "year":
+        prefix = start[:4] if start[:4] == end[:4] else f"{start[:4]}–{end[:4]}"
+    else:
+        prefix = ""
+
+    return f"{prefix} - {name}" if prefix else name
+
+
 def render_no_event_folder_name(month_key: str, naming: Any) -> str:
     normalized = normalize_event_naming(naming)
     month = str(month_key or "").strip()
@@ -138,15 +229,12 @@ def legacy_naming_for_existing_event(
     folder_name: Any,
     event_name: Any,
 ) -> dict[str, Any]:
-    """Return the pre-0.33 naming policy for an existing event.
-
-    Existing 0.32.x events must not suddenly adopt a newly configured 0.33
-    naming template. They must, however, keep the old behaviour when the user
-    intentionally edits name/date: legacy normal events still use MM-DD -
-    Name, and legacy no-event collections keep their historical label.
-    """
+    """Return the pre-0.33 naming policy for an existing event."""
     if str(event_kind or "event") != "no_event":
-        return normalize_event_naming({})
+        naming = normalize_event_naming({})
+        naming["subevent_prefix_mode"] = "legacy_datetime_range"
+        naming["subevent_prefix_enabled"] = True
+        return naming
 
     folder = str(folder_name or "").strip()
     name = str(event_name or "").strip()
@@ -163,10 +251,13 @@ def legacy_naming_for_existing_event(
         else:
             label = name or DEFAULT_NO_EVENT_LABEL
 
-    return normalize_event_naming({
+    naming = normalize_event_naming({
         "no_event_label": label,
         "no_event_include_year": include_year,
     })
+    naming["subevent_prefix_mode"] = "legacy_datetime_range"
+    naming["subevent_prefix_enabled"] = True
+    return naming
 
 
 def naming_snapshot_for_new_event(naming: Any) -> dict[str, Any]:
