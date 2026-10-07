@@ -12,7 +12,7 @@ from app.event_naming import (
 )
 from app.event_structure import EventPreviewError, build_event_preview
 from app.subevents import normalize_subevents
-from app.ui_shell import _shell_markup
+from app.ui_shell import BIBLIOTHEKAR_JS, _shell_markup
 from app.workspace_ui import WORKSPACE_HTML
 from app.events_ui import EVENTS_HTML
 
@@ -254,7 +254,7 @@ def test_0430_settings_and_event_dialog_expose_subevent_prefix_policy():
     assert '<option value="year">Jahr</option>' in shell
     assert '<option value="none">Kein Präfix</option>' in shell
     assert 'id="bk-subevent-prefix-enabled"' in shell
-    assert "Stadtbesuch" in shell
+    assert "Stadtbesuch" in BIBLIOTHEKAR_JS
 
     assert 'id="subevent-prefix-toggle"' in WORKSPACE_HTML
     assert ">Präfix: an<" in WORKSPACE_HTML
