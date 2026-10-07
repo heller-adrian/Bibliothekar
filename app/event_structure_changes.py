@@ -834,6 +834,8 @@ def detect_event_structure_change(
         structural_changed = any((
             snapshot.get("directory_added"),
             snapshot.get("directory_removed"),
+            snapshot.get("root_rename"),
+            snapshot.get("child_renames"),
             snapshot.get("duplicate_file_ids"),
             snapshot.get("unclassified_directories"),
             snapshot.get("inconsistent_leaf_layouts"),
@@ -990,6 +992,56 @@ def _apply_confirmed_state(
     structure_enabled, clean_input = _validated_structure_input(
         detected, layout, input_path
     )
+
+    def _safe_single_folder(value: Any, label: str) -> str:
+        clean = str(value or "").strip()
+        path = PurePosixPath(clean)
+        if (
+            not clean
+            or path.is_absolute()
+            or len(path.parts) != 1
+            or path.parts[0] in {".", ".."}
+        ):
+            raise EventStructureChangeError(
+                f"{label} ist kein sicherer einzelner Ordnername."
+            )
+        return clean
+
+    root_rename = detected.get("root_rename") or None
+    if root_rename:
+        new_folder = _safe_single_folder(
+            root_rename.get("new_folder"),
+            "Neuer Ereignisordner",
+        )
+        connection.execute(
+            """UPDATE events
+               SET folder_name=?,updated_at=?,edited_at=?
+               WHERE id=? AND parent_event_id IS NULL""",
+            (new_folder, now, now, row["event_id"]),
+        )
+
+    for child_rename in detected.get("child_renames") or []:
+        child_id = str(child_rename.get("child_event_id") or "")
+        new_folder = _safe_single_folder(
+            child_rename.get("new_folder"),
+            "Neuer Unterereignisordner",
+        )
+        child = connection.execute(
+            """SELECT id FROM events
+               WHERE id=? AND parent_event_id=?""",
+            (child_id, row["event_id"]),
+        ).fetchone()
+        if child is None:
+            raise EventStructureChangeError(
+                "Das umbenannte Unterereignis gehört nicht mehr zu diesem Ereignis."
+            )
+        connection.execute(
+            """UPDATE events
+               SET folder_name=?,revision=revision+1,
+                   updated_at=?,edited_at=?
+               WHERE id=?""",
+            (new_folder, now, now, child_id),
+        )
 
     inventory = connection.execute(
         """SELECT known_file_id,relative_path FROM event_inventory_files
