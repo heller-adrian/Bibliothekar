@@ -167,6 +167,8 @@ def _build_no_event_preview(
     payload: dict[str, Any],
     available_families: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    if payload.get("subevents") or payload.get("child_segments"):
+        raise EventPreviewError("„Ohne Ereignis“ besitzt keine semantischen Unterereignisse.")
     from app.event_timeline import normalize_no_event_segments, EventTimelineError
     try:
         segments = normalize_no_event_segments(payload.get("no_event_segments") or [])
