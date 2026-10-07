@@ -206,7 +206,8 @@ def test_0420_ui_has_opt_in_selection_and_per_file_source_values():
     assert 'id="meta-bulk-source"' in html
     assert "Für jede Datei wird ihr eigener Wert des gewählten Metadaten-Tags verwendet." in html
     assert "candidateForType(file,type)" in html
-    assert "proposal_source_tag:candidate.tag_name" in html
+    assert "/api/metadata-correction/correct-batch" in html
+    assert "source_type:type" in html
     assert "Bevorzugter Metadatenkandidat" in html
     assert "data-meta-use-candidate" in html
     assert "Weitere Metadaten" in html
@@ -216,9 +217,58 @@ def test_0420_ui_has_opt_in_selection_and_per_file_source_values():
     assert "/api/metadata-correction/general/reintegrate" in html
 
 
+
+def test_0420_prevalidated_record_skips_second_full_scan(tmp_path: Path, monkeypatch):
+    database = tmp_path / "kamera.sqlite3"
+    workspace = tmp_path / "workspace"
+    source = workspace / "Metadatenkorrektur" / "Allgemein" / "B.JPG"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"photo-b")
+    initialize_database(database)
+
+    candidate = {
+        "tag_name": "EXIF:ExifIFD:DateTimeOriginal",
+        "source_type": "DateTimeOriginal",
+        "normalized_datetime": "2026-07-22T09:10:11",
+        "usable": True,
+        "confidence": "high",
+    }
+    row = {
+        "relative_path": "B.JPG",
+        "filename": "B.JPG",
+        "media_type": "jpeg",
+        "selected_capture_time": "2026-07-22T09:10:11",
+        "selected_capture_source": candidate["tag_name"],
+        "capture_time_confidence": "high",
+        "review_required": False,
+        "metadata_candidates": [candidate],
+        "filename_suggestion": None,
+    }
+    monkeypatch.setattr(
+        metadata_correction,
+        "scan_metadata_area",
+        lambda **_: (_ for _ in ()).throw(AssertionError("Vollscan darf nicht erneut laufen")),
+    )
+
+    task = create_metadata_correction(
+        database,
+        area="general",
+        relative_path="B.JPG",
+        proposed_datetime="2026-07-22T09:10:11",
+        proposal_source_tag=candidate["tag_name"],
+        workspace_root=workspace,
+        library_id="main",
+        _prevalidated_row=row,
+        _prevalidated_source=source,
+    )
+    assert task["status"] == "prepared"
+
+
 def test_0420_general_day_stock_reuses_managed_import_and_blocks_known_provenance():
     source = Path("app/main.py").read_text(encoding="utf-8")
 
+    assert '"/api/metadata-correction/correct-batch"' in source
+    assert "_prevalidated_row=row" in source
     assert '"metadata_general_import"' in source
     assert "managed_metadata_import = managed_multiple_import or managed_general_import" in source
     assert "allow_workspace_source=managed_metadata_import" in source
