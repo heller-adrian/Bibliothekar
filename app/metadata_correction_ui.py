@@ -89,7 +89,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
           <strong>Dateien im Ordner Mehrfachkorrektur</strong>
           <div class="meta-actions">
             <span id="multi-summary" class="muted">Noch nicht geprüft</span>
-            <button id="multi-clear-selection" type="button" hidden>Auswahl aufheben</button>
+            <button id="multi-select-mode" type="button">Auswählen</button>
+            <button id="multi-select-all" type="button" hidden>Alle auswählen</button>
           </div>
         </div>
         <div id="multi-files" class="meta-groups"><div class="muted">Bestand prüfen.</div></div>
@@ -129,16 +130,17 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   const state={
     area:["library","general","multiple"].includes(requested)?requested:"library",
     scan:null,selected:null,selectedSet:new Set(),lastSelected:null,selectionMode:false,tasks:[],areas:null,
-    multipleReference:null,multiplePreview:null,multipleSelectedSet:new Set()
+    multipleReference:null,multiplePreview:null,multipleSelectedSet:new Set(),multipleSelectionMode:false
   };
   const $=id=>document.getElementById(id);
   const isMobileWebApp=()=>(
     document.documentElement.dataset.bkDisplayMode==="standalone"
     && Boolean(window.matchMedia?.("(max-width: 820px)")?.matches)
   );
-  const mobileDetail={node:null,parent:null,next:null};
+  const mobileDetail={node:null,parent:null,next:null,mode:null,kind:null};
   function closeMobileDetail(){
     const dialog=$("meta-mobile-dialog");
+    if(dialog?.open)dialog.close();
     if(mobileDetail.node&&mobileDetail.parent){
       if(mobileDetail.next&&mobileDetail.next.parentNode===mobileDetail.parent){
         mobileDetail.parent.insertBefore(mobileDetail.node,mobileDetail.next);
@@ -147,23 +149,49 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       }
     }
     mobileDetail.node=null;mobileDetail.parent=null;mobileDetail.next=null;
-    if(dialog?.open)dialog.close();
+    mobileDetail.mode=null;mobileDetail.kind=null;
+    dialog?.classList.remove("full-detail","compact-selection");
   }
-  function openMobileDetail(kind){
+  function openMobileDetail(kind,mode="full"){
     if(!isMobileWebApp())return;
     const dialog=$("meta-mobile-dialog");
     const body=$("meta-mobile-dialog-body");
     const node=$(kind==="multiple"?"multi-detail-card":"meta-detail-card");
     if(!dialog||!body||!node)return;
-    if(mobileDetail.node&&mobileDetail.node!==node)closeMobileDetail();
+    const normalizedMode=mode==="compact"?"compact":"full";
+    if(
+      mobileDetail.node
+      && (
+        mobileDetail.node!==node
+        || mobileDetail.mode!==normalizedMode
+      )
+    )closeMobileDetail();
     if(!mobileDetail.node){
       mobileDetail.node=node;
       mobileDetail.parent=node.parentNode;
       mobileDetail.next=node.nextSibling;
+      mobileDetail.mode=normalizedMode;
+      mobileDetail.kind=kind;
       body.appendChild(node);
     }
-    $("meta-mobile-dialog-title").textContent=kind==="multiple"?"Referenzaufnahme":"Datei prüfen";
-    if(!dialog.open)dialog.showModal();
+    dialog.classList.toggle("full-detail",normalizedMode==="full");
+    dialog.classList.toggle("compact-selection",normalizedMode==="compact");
+    $("meta-mobile-dialog-title").textContent=normalizedMode==="compact"
+      ? (kind==="multiple"?"Auswahl · Referenzaufnahme":"Auswahl")
+      : (kind==="multiple"?"Referenzaufnahme":"Datei prüfen");
+    if(!dialog.open){
+      if(normalizedMode==="compact")dialog.show();
+      else dialog.showModal();
+    }
+  }
+  function syncMobileSelectionDetail(kind,count){
+    if(!isMobileWebApp())return;
+    const dialog=$("meta-mobile-dialog");
+    if(Number(count||0)>1){
+      openMobileDetail(kind,"compact");
+    }else if(dialog?.open&&dialog.classList.contains("compact-selection")){
+      closeMobileDetail();
+    }
   }
   const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
   async function json(url,options={}){
@@ -289,7 +317,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const checkbox=state.selectionMode
       ? '<input class="meta-file-check" data-meta-check="'+index+'" type="checkbox" '+(checked?"checked":"")+' aria-label="Datei auswählen">'
       : "";
-    return '<div class="meta-file '+(state.selectionMode?"selectable ":"")+(state.selected===index?"active ":"")+(checked?"selected":"")+'" data-meta-file="'+index+'" data-bk-pwa-select="metadata-file" role="button" tabindex="0">'
+    return '<div class="meta-file '+(state.selectionMode?"selectable ":"")+(state.selected===index?"active ":"")+(checked?"selected":"")+'" data-meta-file="'+index+'" data-bk-pwa-select="metadata-file" data-bk-pwa-key="'+esc(fileKey(file))+'" role="button" tabindex="0">'
       +checkbox
       +'<span><strong>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+memberText+'</small>'
       +'<small class="muted">Aktuell: '+esc(file.selected_capture_time||"kein belastbares Datum")+'</small></span>'
@@ -335,17 +363,31 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         const phase=String(event.detail?.phase||"");
         if(phase==="end"){
           renderFiles();renderDetails();
-          if(state.selectedSet.size)openMobileDetail("meta");
+          syncMobileSelectionDetail("meta",state.selectedSet.size);
           return;
         }
-        if(!state.selectionMode){
+        const desired=phase==="set"
+          ? Boolean(event.detail?.selected)
+          : true;
+        if(phase==="start"&&!state.selectionMode){
           state.selectionMode=true;
           state.selectedSet.clear();
+          state.selected=index;
+          state.lastSelected=index;
+          if(desired)state.selectedSet.add(index);
+          renderFiles();renderDetails();
+          return;
         }
-        state.selected=index;
+        if(desired)state.selectedSet.add(index);
+        else state.selectedSet.delete(index);
+        if(desired)state.selected=index;
         state.lastSelected=index;
-        state.selectedSet.add(index);
-        row.classList.add("selected","selectable");
+        const checkbox=row.querySelector("[data-meta-check]");
+        if(checkbox)checkbox.checked=desired;
+        row.classList.toggle("selected",desired);
+        row.classList.add("selectable");
+        updateSelectionControls();
+        renderDetails();
       });
       row.addEventListener("click",event=>{
         if(event.target.closest("[data-meta-check]"))return;
@@ -361,7 +403,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
           state.lastSelected=index;
         }
         renderFiles();renderDetails();
-        if(!state.selectionMode)openMobileDetail("meta");
+        if(!state.selectionMode)openMobileDetail("meta","full");
+        else syncMobileSelectionDetail("meta",state.selectedSet.size);
       });
       row.addEventListener("keydown",event=>{
         if(event.key==="Enter"||event.key===" "){event.preventDefault();row.click();}
@@ -652,12 +695,23 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     try{await json("/api/metadata-correction/tasks/"+encodeURIComponent(id)+"/cancel",{method:"POST"});await loadTasks();}
     catch(error){setStatus(error.message,true);}
   }
+  function updateMultipleSelectionControls(){
+    const files=state.scan?.files||[];
+    const all=files.length>0&&state.multipleSelectedSet.size===files.length;
+    $("multi-select-mode").textContent=state.multipleSelectionMode?"Auswahl beenden":"Auswählen";
+    $("multi-select-all").hidden=!state.multipleSelectionMode;
+    $("multi-select-all").textContent=all?"Auswahl aufheben":"Alle auswählen";
+    $("multi-select-all").disabled=!files.length;
+  }
   function renderMultipleFiles(){
     const files=state.scan?.files||[];
+    for(const index of [...state.multipleSelectedSet]){
+      if(index<0||index>=files.length)state.multipleSelectedSet.delete(index);
+    }
     const multipleChosen=state.multipleSelectedSet.size;
     $("multi-summary").textContent=files.length+" Datei"+(files.length===1?"":"en")
       +(multipleChosen?" · "+multipleChosen+" ausgewählt":"");
-    $("multi-clear-selection").hidden=!multipleChosen;
+    updateMultipleSelectionControls();
     if(!files.length){
       $("multi-files").innerHTML='<div class="muted">Der Ordner ist leer.</div>';
       $("multi-details").innerHTML='<div class="muted">Dateien in den verwalteten Ordner legen und erneut prüfen.</div>';
@@ -670,8 +724,11 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       const confidence=String(file.capture_time_confidence||"missing");
       const badge=file.usable_time?(confidence==="high"?"Metadaten sicher":"Zeit vorhanden"):"Keine Aufnahmezeit";
       const cls=file.usable_time?(confidence==="high"?"good":"warn"):"danger";
-      return '<div class="meta-file '+(active?"active ":"")+(quickSelected?"selected ":"")+'" data-multi-file="'+index+'" data-bk-pwa-select="metadata-multiple" role="button" tabindex="0">'
-        +'<span style="width:19px;text-align:center">'+(active?"●":quickSelected?"✓":"○")+'</span>'
+      const selector=state.multipleSelectionMode
+        ? '<input class="meta-file-check" data-multi-check="'+index+'" type="checkbox" '+(quickSelected?"checked":"")+' aria-label="Datei auswählen">'
+        : '<span style="width:19px;text-align:center">'+(active?"●":"○")+'</span>';
+      return '<div class="meta-file '+(state.multipleSelectionMode?"selectable ":"")+(active?"active ":"")+(quickSelected?"selected ":"")+'" data-multi-file="'+index+'" data-bk-pwa-select="metadata-multiple" data-bk-pwa-key="'+esc(file.relative_path||String(index))+'" role="button" tabindex="0">'
+        +selector
         +'<span><strong>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+'</small>'
         +'<small class="muted">Aktuell: '+esc(file.selected_capture_time||"keine Aufnahmezeit")+'</small></span>'
         +'<span class="badge '+cls+'">'+esc(badge)+'</span></div>';
@@ -683,23 +740,79 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         if(phase==="end"){
           renderMultipleFiles();
           renderMultipleDetails();
-          if(state.multipleSelectedSet.size)openMobileDetail("multiple");
+          syncMobileSelectionDetail("multiple",state.multipleSelectedSet.size);
           return;
         }
-        state.multipleSelectedSet.add(index);
-        if(phase==="start"||state.multipleReference===null)state.multipleReference=index;
+        const desired=phase==="set"
+          ? Boolean(event.detail?.selected)
+          : true;
+        if(phase==="start"&&!state.multipleSelectionMode){
+          state.multipleSelectionMode=true;
+          state.multipleSelectedSet.clear();
+          state.multipleReference=index;
+          if(desired)state.multipleSelectedSet.add(index);
+          state.multiplePreview=null;
+          $("multi-preview-card").hidden=true;
+          renderMultipleFiles();
+          renderMultipleDetails();
+          return;
+        }
+        if(desired)state.multipleSelectedSet.add(index);
+        else state.multipleSelectedSet.delete(index);
+        if(desired&&(state.multipleReference===null||phase==="start")){
+          state.multipleReference=index;
+        }
         state.multiplePreview=null;
         $("multi-preview-card").hidden=true;
-        row.classList.add("selected");
+        const checkbox=row.querySelector("[data-multi-check]");
+        if(checkbox)checkbox.checked=desired;
+        row.classList.toggle("selected",desired);
+        updateMultipleSelectionControls();
+        renderMultipleDetails();
       });
-      row.addEventListener("click",()=>{
+      row.addEventListener("click",event=>{
+        if(event.target.closest("[data-multi-check]"))return;
+        state.multiplePreview=null;
+        $("multi-preview-card").hidden=true;
+        if(state.multipleSelectionMode){
+          if(state.multipleSelectedSet.has(index)){
+            state.multipleSelectedSet.delete(index);
+            if(state.multipleReference===index){
+              state.multipleReference=[...state.multipleSelectedSet][0]??null;
+            }
+          }else{
+            state.multipleSelectedSet.add(index);
+            if(state.multipleReference===null)state.multipleReference=index;
+          }
+          renderMultipleFiles();
+          renderMultipleDetails();
+          syncMobileSelectionDetail("multiple",state.multipleSelectedSet.size);
+          return;
+        }
         state.multipleReference=index;
-        if(state.multipleSelectedSet.size)state.multipleSelectedSet.add(index);
+        renderMultipleFiles();
+        renderMultipleDetails();
+        openMobileDetail("multiple","full");
+      });
+    });
+    document.querySelectorAll("[data-multi-check]").forEach(check=>{
+      check.addEventListener("click",event=>{
+        event.stopPropagation();
+        const index=Number(check.dataset.multiCheck);
+        if(check.checked){
+          state.multipleSelectedSet.add(index);
+          if(state.multipleReference===null)state.multipleReference=index;
+        }else{
+          state.multipleSelectedSet.delete(index);
+          if(state.multipleReference===index){
+            state.multipleReference=[...state.multipleSelectedSet][0]??null;
+          }
+        }
         state.multiplePreview=null;
         $("multi-preview-card").hidden=true;
         renderMultipleFiles();
         renderMultipleDetails();
-        openMobileDetail("multiple");
+        syncMobileSelectionDetail("multiple",state.multipleSelectedSet.size);
       });
     });
     renderMultipleDetails();
@@ -793,6 +906,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       });
       state.multiplePreview=null;
       state.multipleSelectedSet.clear();
+      state.multipleSelectionMode=false;
       closeMobileDetail();
       await scanMultiple(false);
       if(mode==="apply_and_import"){
@@ -846,6 +960,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     state.selectionMode=!state.selectionMode;
     state.selectedSet.clear();
     state.lastSelected=null;
+    if(!state.selectionMode)closeMobileDetail();
     renderFiles();renderDetails();
   });
   $("meta-select-all").addEventListener("click",()=>{
@@ -858,14 +973,33 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       if(files.length&&state.selected===null)state.selected=0;
     }
     renderFiles();renderDetails();
+    syncMobileSelectionDetail("meta",state.selectedSet.size);
   });
   $("meta-scan").addEventListener("click",()=>scan(true,true));
-  $("multi-clear-selection").addEventListener("click",()=>{
+  $("multi-select-mode").addEventListener("click",()=>{
+    state.multipleSelectionMode=!state.multipleSelectionMode;
     state.multipleSelectedSet.clear();
+    state.multiplePreview=null;
+    $("multi-preview-card").hidden=true;
+    if(!state.multipleSelectionMode)closeMobileDetail();
+    renderMultipleFiles();
+    renderMultipleDetails();
+  });
+  $("multi-select-all").addEventListener("click",()=>{
+    if(!state.multipleSelectionMode)return;
+    const files=state.scan?.files||[];
+    if(files.length&&state.multipleSelectedSet.size===files.length){
+      state.multipleSelectedSet.clear();
+      state.multipleReference=null;
+    }else{
+      state.multipleSelectedSet=new Set(files.map((_,index)=>index));
+      if(files.length&&state.multipleReference===null)state.multipleReference=0;
+    }
     state.multiplePreview=null;
     $("multi-preview-card").hidden=true;
     renderMultipleFiles();
     renderMultipleDetails();
+    syncMobileSelectionDetail("multiple",state.multipleSelectedSet.size);
   });
   $("meta-mobile-dialog-close").addEventListener("click",closeMobileDetail);
   $("meta-mobile-dialog").addEventListener("cancel",event=>{
