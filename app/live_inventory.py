@@ -69,6 +69,61 @@ def refresh_live_event_inventories(
             )
             refreshed[current_event_id] = dict(inventory.get("summary") or {})
         except (EventInventoryError, WorkspaceLayoutError, OSError) as error:
+            # Ein angewendetes Ereignis kann vom Benutzer bereits vollständig
+            # ins Archiv verschoben worden sein. In diesem Sonderfall wird das
+            # Archiv read-only gescannt, damit reconcile_missing_files den
+            # vorhandenen Mechanismus „Mögliche Archivübernahme erkannt“
+            # tatsächlich aus einem realen Dateisystemzustand ableiten kann.
+            if (
+                str(row["status"]) == "applied"
+                and isinstance(error, EventInventoryError)
+                and "Ereignisordner wurde nicht gefunden" in str(error)
+            ):
+                try:
+                    archive_inventory = scan_event_inventory(
+                        database_path,
+                        archive_root,
+                        current_job_id,
+                        current_event_id,
+                        root_kind="camera_archive",
+                        persist=True,
+                        update_known_file_locations=False,
+                        fast_refresh=False,
+                    )
+                    archive_known = {
+                        int(item["known_file_id"])
+                        for item in archive_inventory.get("files") or []
+                        if item.get("known_file_id") is not None
+                    }
+                    if archive_known:
+                        from app.event_access import event_file_rows
+                        from app.physical_state import reconcile_missing_files
+                        with database_connection(database_path) as connection:
+                            event = connection.execute(
+                                "SELECT * FROM events WHERE id=?",
+                                (current_event_id,),
+                            ).fetchone()
+                            expected_ids = [
+                                int(item["file_id"])
+                                for item in event_file_rows(
+                                    connection,
+                                    current_event_id,
+                                )
+                            ]
+                            if event is not None and expected_ids:
+                                reconcile_missing_files(
+                                    connection,
+                                    dict(event),
+                                    "shared_workspace",
+                                    expected_ids,
+                                )
+                        refreshed[current_event_id] = {
+                            **dict(archive_inventory.get("summary") or {}),
+                            "archive_transfer_candidate": True,
+                        }
+                        continue
+                except (EventInventoryError, OSError):
+                    pass
             errors.append({
                 "event_id": current_event_id,
                 "job_id": current_job_id,
