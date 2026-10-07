@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.database import database_connection, initialize_database, list_global_tasks
 from app.workspace_ui import WORKSPACE_HTML
+from app.global_workspace import _workspace_group_sort_key
 
 NOW = "2026-10-07T17:10:00+02:00"
 
@@ -69,3 +70,28 @@ def test_0421_without_date_is_review_card_not_event_selection():
     assert 'data-open-metadata-review' in html
     assert "Nicht für Ereignisse auswählbar" in html
     assert "aUndated !== bUndated" in html
+
+
+def test_0421_server_workspace_puts_undated_review_stock_first():
+    dated = {
+        "group_type": "day",
+        "has_date": True,
+        "day_key": "2026-02-24",
+        "start_datetime": "2026-02-24T00:00:00",
+    }
+    event = {
+        "group_type": "event",
+        "start_datetime": "2026-02-23T00:00:00",
+    }
+    undated = {
+        "group_type": "day",
+        "has_date": False,
+        "day_key": None,
+        "start_datetime": None,
+    }
+
+    ordered = sorted([dated, event, undated], key=_workspace_group_sort_key)
+
+    assert ordered[0] is undated
+    assert ordered[1] is event
+    assert ordered[2] is dated
