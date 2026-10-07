@@ -108,14 +108,14 @@ def test_0431_preview_nests_subevent_in_normal_event_card():
 def test_0431_native_date_controls_restore_localized_browser_entry():
     assert 'id="event-start-date" type="date"' in WORKSPACE_HTML
     assert 'id="event-end-date" type="date"' in WORKSPACE_HTML
-    assert 'data-create-child-start-date type="date"' in WORKSPACE_HTML
-    assert 'data-create-child-end-date type="date"' in WORKSPACE_HTML
+    assert 'function subeventDayControl' in WORKSPACE_HTML
+    assert '${attribute} type="date"' in WORKSPACE_HTML
     assert "📅" not in WORKSPACE_HTML
 
     assert 'id="edit-start-date" type="date"' in EVENTS_HTML
     assert 'id="edit-end-date" type="date"' in EVENTS_HTML
-    assert 'data-child-start-date type="date"' in EVENTS_HTML
-    assert 'data-child-end-date type="date"' in EVENTS_HTML
+    assert 'function editSubeventDayControl' in EVENTS_HTML
+    assert '${attribute} type="date"' in EVENTS_HTML
     assert "📅" not in EVENTS_HTML
 
 
