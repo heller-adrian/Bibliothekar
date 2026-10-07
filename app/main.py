@@ -2126,7 +2126,17 @@ def _event_payload_with_folder_layout(
                 except (TypeError, ValueError):
                     snapshot = {}
             if snapshot:
-                naming = snapshot
+                naming = dict(snapshot)
+                if (
+                    str(event_row["event_kind"] or "event") == "event"
+                    and "subevent_prefix_mode" not in naming
+                ):
+                    # Existing 0.33–0.42 snapshots predate configurable
+                    # Unterereignis-Präfixe. Keep their physical child-folder
+                    # convention unless the event was explicitly created with
+                    # the new 0.43 policy.
+                    naming["subevent_prefix_mode"] = "legacy_datetime_range"
+                    naming["subevent_prefix_enabled"] = True
             elif event_row is not None:
                 # 0.32.x events keep the pre-0.33 naming convention instead
                 # of adopting the current library template. Intentional later
@@ -2158,7 +2168,14 @@ def _naming_snapshot_from_event_context(context: dict[str, Any]) -> dict[str, An
     event = dict(context.get("event") or {})
     snapshot = event.get("folder_naming")
     if isinstance(snapshot, dict) and snapshot:
-        return snapshot
+        result = dict(snapshot)
+        if (
+            str(event.get("event_kind") or "event") == "event"
+            and "subevent_prefix_mode" not in result
+        ):
+            result["subevent_prefix_mode"] = "legacy_datetime_range"
+            result["subevent_prefix_enabled"] = True
+        return result
     return legacy_naming_for_existing_event(
         event_kind=event.get("event_kind"),
         folder_name=event.get("folder_name"),
@@ -2177,15 +2194,15 @@ def _canonical_membership_preflight(
         "selected_family_ids": membership["canonical_family_ids"],
     }
     if (
-        membership["additional_family_count"]
+        membership.get("hidden_additional_family_count", membership["additional_family_count"])
         and not bool(payload.get("confirm_cross_backup_membership"))
     ):
         response = JSONResponse(
             status_code=409,
             content={
                 "detail": (
-                    "Weitere bereits vorhandene Aufnahmen liegen im gewählten "
-                    "Zeitraum und gehören deshalb zum selben Ereignis."
+                    "Weitere Aufnahmen aus einer ausgeblendeten aktiven Sicherung "
+                    "liegen im gewählten Zeitraum und gehören deshalb zum selben Ereignis."
                 ),
                 "confirmation_required": "cross_backup_membership",
                 "membership": membership,
@@ -5760,7 +5777,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
                     "end_time": target_end[11:16],
                     "uses_time_range": bool(target["uses_time_range"]),
                     "preserve_day_folders": bool(target["preserve_day_folders"]),
-                    "folder_naming": _naming_snapshot_from_event_context(context),
+                    "folder_naming": archived_naming,
                     "subevents": [
                         {
                             "id": child.get("id"),
@@ -5941,10 +5958,12 @@ def api_create_event(
                 if not family.get("assigned_elsewhere") or family.get("assigned_here")
             ]
             from app.subevents import normalize_subevents
+            archived_naming = _naming_snapshot_from_event_context(context)
             added_subevents = normalize_subevents(
                 payload.get("subevents") or [],
                 extension_start,
                 extension_end,
+                naming=archived_naming,
             )
             combined_payload = {
                 "event_kind": "event",
