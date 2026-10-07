@@ -1232,20 +1232,20 @@ body.bibliothekar-redesign #sd-card-status {
 .bk-source-pane > h3:first-child {
   margin-top: 0;
 }
-body[data-bk-area="import"] details > summary {
+body[data-bk-area="import"] main details > summary {
   list-style: none !important;
   display: grid !important;
   grid-template-columns: 20px minmax(0,1fr) !important;
   align-items: center !important;
   gap: 7px !important;
 }
-body[data-bk-area="import"] details > summary::-webkit-details-marker {
+body[data-bk-area="import"] main details > summary::-webkit-details-marker {
   display: none !important;
 }
-body[data-bk-area="import"] details > summary::marker {
+body[data-bk-area="import"] main details > summary::marker {
   content: "" !important;
 }
-body[data-bk-area="import"] details > summary::before {
+body[data-bk-area="import"] main details > summary::before {
   content: "▸";
   display: block;
   width: 20px;
@@ -1254,7 +1254,7 @@ body[data-bk-area="import"] details > summary::before {
   text-align: center;
   color: currentColor;
 }
-body[data-bk-area="import"] details[open] > summary::before {
+body[data-bk-area="import"] main details[open] > summary::before {
   content: "▾";
 }
 body[data-bk-area="import"] .drive-actions {
@@ -4463,62 +4463,73 @@ BIBLIOTHEKAR_JS = r"""
     const unseenRequired = state.unseen_required || [];
     const infoRows = state.unseen_informational || [];
 
-    let mode = "";
-    let rows = [];
-    if (
-      forceRequired
-      || unseenRequired.length
-    ) {
-      if (requiredRows.length) {
-        mode = "required";
-        rows = requiredRows;
-      }
-    } else if (infoRows.length) {
-      mode = "info";
-      rows = infoRows;
-    }
-
-    if (!mode || !rows.length) {
-      if (externalChangeDialog.open) {
-        externalChangeDialog.close();
-      }
+    const showRequired = Boolean(
+      requiredRows.length
+      && (forceRequired || unseenRequired.length)
+    );
+    const showInfo = Boolean(infoRows.length);
+    if (!showRequired && !showInfo) {
+      if (externalChangeDialog.open) externalChangeDialog.close();
       return;
     }
 
-    externalChangeTitle.textContent = (
-      mode === "required"
+    const displayedRequired = showRequired ? requiredRows : [];
+    const displayedInfo = showInfo ? infoRows : [];
+    const allRows = [...displayedRequired, ...displayedInfo];
+    const combined = displayedRequired.length && displayedInfo.length;
+
+    externalChangeTitle.textContent = combined
+      ? "Dateibestand und Zuordnung prüfen"
+      : displayedRequired.length
         ? "Dateizuordnung prüfen"
         : (
-          rows.some(row => row.kind === "archive_transfer_candidate")
+          displayedInfo.some(row => row.kind === "archive_transfer_candidate")
             ? "Änderung im Dateibestand erkannt"
             : "Dateibestand aktualisiert"
-        )
-    );
-    externalChangeLead.textContent = (
-      mode === "required"
+        );
+    externalChangeLead.textContent = combined
+      ? "Bibliothekar hat gleichzeitig fachliche Zuordnungsabweichungen und weitere externe Bestandsänderungen erkannt."
+      : displayedRequired.length
         ? (
-          rows.length === 1
+          displayedRequired.length === 1
             ? "Eine Datei liegt an einem fachlich unpassenden Ort. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als Aufgabe offen."
-            : rows.length + " Dateien liegen an fachlich unpassenden Orten. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als eine Aufgabe offen."
+            : displayedRequired.length + " Dateien liegen an fachlich unpassenden Orten. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als eine Aufgabe offen."
         )
         : (
-          rows.length === 1
+          displayedInfo.length === 1
             ? "Bibliothekar hat eine externe Änderung übernommen."
-            : "Bibliothekar hat " + rows.length + " externe Änderungen übernommen."
+            : "Bibliothekar hat " + displayedInfo.length + " externe Änderungen übernommen."
+        );
+
+    externalChangeList.innerHTML = (
+      displayedRequired.length
+        ? (
+          (combined ? '<div style="font-weight:800;margin:2px 0 4px">Zuordnung prüfen</div>' : '') +
+          bkNoticeRows(displayedRequired, true)
         )
-    );
-    externalChangeList.innerHTML = bkNoticeRows(
-      rows,
-      mode === "required"
+        : ""
+    ) + (
+      displayedInfo.length
+        ? (
+          (combined ? '<div style="font-weight:800;margin:14px 0 4px">Weitere Bestandsänderungen</div>' : '') +
+          bkNoticeRows(displayedInfo, false)
+        )
+        : ""
     );
 
-    if (mode === "required") {
-      const repairable = rows.some(row => row.repairable);
+    const forcedRepair = displayedRequired.some(
+      row => Boolean(row.details?.force_repair)
+    );
+
+    if (displayedRequired.length) {
+      const repairable = displayedRequired.some(row => row.repairable);
       externalChangeActions.innerHTML =
         (repairable
           ? '<button type="button" class="bk-positive-action" id="bk-external-repair-all">Änderungen rückgängig machen</button>'
           : '') +
-        '<button type="button" id="bk-external-ignore">Ignorieren</button>';
+        (!forcedRepair
+          ? '<button type="button" id="bk-external-ignore">Ignorieren</button>'
+          : '');
 
       document.getElementById("bk-external-repair-all")?.addEventListener(
         "click",
@@ -4535,8 +4546,11 @@ BIBLIOTHEKAR_JS = r"""
                 data.detail || "Die Änderungen konnten nicht vollständig zurückgesetzt werden."
               );
             }
+            if (displayedInfo.length) {
+              await bkAcknowledgeNotices(displayedInfo.map(row => row.id));
+            }
+            externalChangeDialog.close();
             await refreshTasks();
-            await bkRenderExternalChanges({forceRequired: true});
           } catch (error) {
             event.currentTarget.disabled = false;
             alert(error.message);
@@ -4555,17 +4569,9 @@ BIBLIOTHEKAR_JS = r"""
           if (!ok) return;
           event.currentTarget.disabled = true;
           try {
-            await bkAcknowledgeNotices(
-              rows.map(row => row.id)
-            );
+            await bkAcknowledgeNotices(allRows.map(row => row.id));
             externalChangeDialog.close();
             await refreshTasks();
-            // Nach dem verpflichtenden Konfliktdialog darf ein einmaliger
-            // Lösch-/Archivhinweis desselben Scans noch folgen.
-            setTimeout(
-              () => bkRenderExternalChanges().catch(() => {}),
-              120
-            );
           } catch (error) {
             event.currentTarget.disabled = false;
             alert(error.message);
@@ -4580,9 +4586,7 @@ BIBLIOTHEKAR_JS = r"""
         async event => {
           event.currentTarget.disabled = true;
           try {
-            await bkAcknowledgeNotices(
-              rows.map(row => row.id)
-            );
+            await bkAcknowledgeNotices(displayedInfo.map(row => row.id));
             externalChangeDialog.close();
           } catch (error) {
             event.currentTarget.disabled = false;
@@ -4598,9 +4602,7 @@ BIBLIOTHEKAR_JS = r"""
       button.addEventListener("click", async () => {
         button.disabled = true;
         try {
-          await bkAcknowledgeNotices(
-            rows.map(row => row.id)
-          );
+          await bkAcknowledgeNotices(allRows.map(row => row.id));
         } catch (_) {}
         const job = button.dataset.bkArchiveJob || "";
         const eventId = button.dataset.bkArchiveEvent || "";
@@ -4619,9 +4621,7 @@ BIBLIOTHEKAR_JS = r"""
       event => event.preventDefault(),
       {once: true}
     );
-    if (!externalChangeDialog.open) {
-      externalChangeDialog.showModal();
-    }
+    if (!externalChangeDialog.open) externalChangeDialog.showModal();
   }
 
   const externalTaskRequested = (
