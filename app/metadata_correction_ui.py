@@ -75,7 +75,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       <div id="meta-files" class="meta-groups"><div class="muted">Prüfung starten.</div></div>
     </section>
 
-    <aside class="meta-card">
+    <aside class="meta-card" id="meta-detail-card">
       <strong>Datei prüfen</strong>
       <div id="meta-details" class="muted" style="margin-top:12px">Links eine Datei auswählen.</div>
       <div id="meta-open-tasks" class="meta-task"></div>
@@ -87,11 +87,14 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       <section class="meta-card">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
           <strong>Dateien im Ordner Mehrfachkorrektur</strong>
-          <span id="multi-summary" class="muted">Noch nicht geprüft</span>
+          <div class="meta-actions">
+            <span id="multi-summary" class="muted">Noch nicht geprüft</span>
+            <button id="multi-clear-selection" type="button" hidden>Auswahl aufheben</button>
+          </div>
         </div>
         <div id="multi-files" class="meta-groups"><div class="muted">Bestand prüfen.</div></div>
       </section>
-      <aside class="meta-card">
+      <aside class="meta-card" id="multi-detail-card">
         <strong>Referenzaufnahme</strong>
         <div id="multi-details" class="muted" style="margin-top:12px">Links die Aufnahme auswählen, deren tatsächliche Zeit bekannt ist.</div>
       </aside>
@@ -110,6 +113,14 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       <div id="multi-preview" class="multi-preview"></div>
     </section>
   </section>
+
+  <dialog id="meta-mobile-dialog">
+    <div class="meta-mobile-dialog-head">
+      <strong id="meta-mobile-dialog-title">Datei prüfen</strong>
+      <button id="meta-mobile-dialog-close" class="meta-mobile-dialog-close" type="button">Schließen</button>
+    </div>
+    <div id="meta-mobile-dialog-body" class="meta-mobile-dialog-body"></div>
+  </dialog>
 </main>
 <script>
 (()=>{
@@ -118,9 +129,42 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   const state={
     area:["library","general","multiple"].includes(requested)?requested:"library",
     scan:null,selected:null,selectedSet:new Set(),lastSelected:null,selectionMode:false,tasks:[],areas:null,
-    multipleReference:null,multiplePreview:null
+    multipleReference:null,multiplePreview:null,multipleSelectedSet:new Set()
   };
   const $=id=>document.getElementById(id);
+  const isMobileWebApp=()=>(
+    document.documentElement.dataset.bkDisplayMode==="standalone"
+    && Boolean(window.matchMedia?.("(max-width: 820px)")?.matches)
+  );
+  const mobileDetail={node:null,parent:null,next:null};
+  function closeMobileDetail(){
+    const dialog=$("meta-mobile-dialog");
+    if(mobileDetail.node&&mobileDetail.parent){
+      if(mobileDetail.next&&mobileDetail.next.parentNode===mobileDetail.parent){
+        mobileDetail.parent.insertBefore(mobileDetail.node,mobileDetail.next);
+      }else{
+        mobileDetail.parent.appendChild(mobileDetail.node);
+      }
+    }
+    mobileDetail.node=null;mobileDetail.parent=null;mobileDetail.next=null;
+    if(dialog?.open)dialog.close();
+  }
+  function openMobileDetail(kind){
+    if(!isMobileWebApp())return;
+    const dialog=$("meta-mobile-dialog");
+    const body=$("meta-mobile-dialog-body");
+    const node=$(kind==="multiple"?"multi-detail-card":"meta-detail-card");
+    if(!dialog||!body||!node)return;
+    if(mobileDetail.node&&mobileDetail.node!==node)closeMobileDetail();
+    if(!mobileDetail.node){
+      mobileDetail.node=node;
+      mobileDetail.parent=node.parentNode;
+      mobileDetail.next=node.nextSibling;
+      body.appendChild(node);
+    }
+    $("meta-mobile-dialog-title").textContent=kind==="multiple"?"Referenzaufnahme":"Datei prüfen";
+    if(!dialog.open)dialog.showModal();
+  }
   const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
   async function json(url,options={}){
     const response=await fetch(url,options);
@@ -245,7 +289,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const checkbox=state.selectionMode
       ? '<input class="meta-file-check" data-meta-check="'+index+'" type="checkbox" '+(checked?"checked":"")+' aria-label="Datei auswählen">'
       : "";
-    return '<div class="meta-file '+(state.selectionMode?"selectable ":"")+(state.selected===index?"active ":"")+(checked?"selected":"")+'" data-meta-file="'+index+'" role="button" tabindex="0">'
+    return '<div class="meta-file '+(state.selectionMode?"selectable ":"")+(state.selected===index?"active ":"")+(checked?"selected":"")+'" data-meta-file="'+index+'" data-bk-pwa-select="metadata-file" role="button" tabindex="0">'
       +checkbox
       +'<span><strong>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+memberText+'</small>'
       +'<small class="muted">Aktuell: '+esc(file.selected_capture_time||"kein belastbares Datum")+'</small></span>'
@@ -287,6 +331,21 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       row.addEventListener("mousedown",event=>{
         if(event.shiftKey && !event.target.closest("input,button"))event.preventDefault();
       });
+      row.addEventListener("bk:pwa-select",event=>{
+        const phase=String(event.detail?.phase||"");
+        if(phase==="end"){
+          renderFiles();renderDetails();
+          return;
+        }
+        if(!state.selectionMode){
+          state.selectionMode=true;
+          state.selectedSet.clear();
+        }
+        state.selected=index;
+        state.lastSelected=index;
+        state.selectedSet.add(index);
+        row.classList.add("selected","selectable");
+      });
       row.addEventListener("click",event=>{
         if(event.target.closest("[data-meta-check]"))return;
         state.selected=index;
@@ -301,6 +360,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
           state.lastSelected=index;
         }
         renderFiles();renderDetails();
+        if(!state.selectionMode)openMobileDetail("meta");
       });
       row.addEventListener("keydown",event=>{
         if(event.key==="Enter"||event.key===" "){event.preventDefault();row.click();}
@@ -461,6 +521,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       if(sourceTag)payload.proposal_source_tag=sourceTag;
       if(state.area==="library"){payload.library_id=file.library_id;payload.family_id=file.family_id;}
       await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      closeMobileDetail();
       await scan(false,true);
       await loadTasks(true);
       setStatus(state.area==="library"?"Metadaten geändert. Bereit zum Einsortieren.":"Metadaten geändert und geprüft.");
@@ -518,6 +579,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({items:selected.map(file=>({relative_path:file.relative_path}))})
       });
+      closeMobileDetail();
       setStatus((data.file_count||selected.length)+" Datei"+((data.file_count||selected.length)===1?"":"en")+" zur verifizierten Übernahme in den Tagesbestand vorgemerkt.");
     }catch(error){
       setStatus(error.message,true);
@@ -538,6 +600,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({items:files.map(file=>({library_id:file.library_id,family_id:file.family_id}))})
       });
+      closeMobileDetail();
       state.selectedSet.clear();state.selected=null;state.lastSelected=null;
       await scan(false,false);
       await loadTasks(true);
@@ -590,7 +653,10 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   }
   function renderMultipleFiles(){
     const files=state.scan?.files||[];
-    $("multi-summary").textContent=files.length+" Datei"+(files.length===1?"":"en");
+    const multipleChosen=state.multipleSelectedSet.size;
+    $("multi-summary").textContent=files.length+" Datei"+(files.length===1?"":"en")
+      +(multipleChosen?" · "+multipleChosen+" ausgewählt":"");
+    $("multi-clear-selection").hidden=!multipleChosen;
     if(!files.length){
       $("multi-files").innerHTML='<div class="muted">Der Ordner ist leer.</div>';
       $("multi-details").innerHTML='<div class="muted">Dateien in den verwalteten Ordner legen und erneut prüfen.</div>';
@@ -599,23 +665,37 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     }
     $("multi-files").innerHTML='<div class="meta-files">'+files.map((file,index)=>{
       const active=state.multipleReference===index;
+      const quickSelected=state.multipleSelectedSet.has(index);
       const confidence=String(file.capture_time_confidence||"missing");
       const badge=file.usable_time?(confidence==="high"?"Metadaten sicher":"Zeit vorhanden"):"Keine Aufnahmezeit";
       const cls=file.usable_time?(confidence==="high"?"good":"warn"):"danger";
-      return '<div class="meta-file '+(active?"active selected":"")+'" data-multi-file="'+index+'" role="button" tabindex="0">'
-        +'<span style="width:19px;text-align:center">'+(active?"●":"○")+'</span>'
+      return '<div class="meta-file '+(active?"active ":"")+(quickSelected?"selected ":"")+'" data-multi-file="'+index+'" data-bk-pwa-select="metadata-multiple" role="button" tabindex="0">'
+        +'<span style="width:19px;text-align:center">'+(active?"●":quickSelected?"✓":"○")+'</span>'
         +'<span><strong>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+'</small>'
         +'<small class="muted">Aktuell: '+esc(file.selected_capture_time||"keine Aufnahmezeit")+'</small></span>'
         +'<span class="badge '+cls+'">'+esc(badge)+'</span></div>';
     }).join("")+'</div>';
     document.querySelectorAll("[data-multi-file]").forEach(row=>{
       const index=Number(row.dataset.multiFile);
+      row.addEventListener("bk:pwa-select",event=>{
+        const phase=String(event.detail?.phase||"");
+        if(phase==="end"){
+          renderMultipleFiles();
+          renderMultipleDetails();
+          return;
+        }
+        state.multipleSelectedSet.add(index);
+        if(state.multipleReference===null)state.multipleReference=index;
+        row.classList.add("selected");
+      });
       row.addEventListener("click",()=>{
         state.multipleReference=index;
+        if(state.multipleSelectedSet.size)state.multipleSelectedSet.add(index);
         state.multiplePreview=null;
         $("multi-preview-card").hidden=true;
         renderMultipleFiles();
         renderMultipleDetails();
+        openMobileDetail("multiple");
       });
     });
     renderMultipleDetails();
@@ -652,7 +732,15 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const preview=state.multiplePreview;
     if(!preview){$("multi-preview-card").hidden=true;return;}
     $("multi-preview-card").hidden=false;
-    $("multi-offset").textContent="Zeitversatz: "+formatOffset(preview.offset_seconds)+" · "+preview.file_count+" Dateien";
+    $("multi-offset").textContent="Zeitversatz: "+formatOffset(preview.offset_seconds)+" · "+preview.file_count+" Dateien"
+      +(preview.selection_is_subset?" · Auswahl aus "+preview.total_file_count:"");
+    const importButton=$("multi-apply-import");
+    if(importButton){
+      importButton.disabled=Boolean(preview.selection_is_subset);
+      importButton.title=preview.selection_is_subset
+        ?"Die direkte Übernahme in den Tagesbestand ist nur für den vollständig ausgewählten Mehrfachkorrektur-Ordner möglich."
+        :"";
+    }
     $("multi-preview").innerHTML=(preview.files||[]).map(row=>
       '<div class="multi-preview-row"><strong>'+esc(row.filename)+'</strong>'
       +'<span>'+esc(row.old_datetime)+'</span><span class="arrow">→</span><span><strong>'+esc(row.new_datetime)+'</strong></span></div>'
@@ -666,10 +754,17 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     try{
       const data=await json("/api/metadata-correction/multiple/preview",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({reference_relative_path:file.relative_path,proposed_datetime:date+"T"+time})
+        body:JSON.stringify({
+          reference_relative_path:file.relative_path,
+          proposed_datetime:date+"T"+time,
+          selected_relative_paths:[...state.multipleSelectedSet]
+            .map(index=>(state.scan?.files||[])[index]?.relative_path)
+            .filter(Boolean)
+        })
       });
       state.multiplePreview=data.preview;
       renderMultiplePreview();
+      closeMobileDetail();
       setStatus("Vorschau berechnet. Es wurde noch nichts verändert.");
     }catch(error){state.multiplePreview=null;renderMultiplePreview();setStatus(error.message,true);}
   }
@@ -686,10 +781,15 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
           mode,
           reference_relative_path:preview.reference_relative_path,
           proposed_datetime:preview.reference_new_datetime,
-          preview_fingerprint:preview.preview_fingerprint
+          preview_fingerprint:preview.preview_fingerprint,
+          selected_relative_paths:[...state.multipleSelectedSet]
+            .map(index=>(state.scan?.files||[])[index]?.relative_path)
+            .filter(Boolean)
         })
       });
       state.multiplePreview=null;
+      state.multipleSelectedSet.clear();
+      closeMobileDetail();
       await scanMultiple(false);
       if(mode==="apply_and_import"){
         setStatus("Korrektur angewendet. Die Übernahme in den Tagesbestand läuft im Hintergrund.");
@@ -756,6 +856,18 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     renderFiles();renderDetails();
   });
   $("meta-scan").addEventListener("click",()=>scan(true,true));
+  $("multi-clear-selection").addEventListener("click",()=>{
+    state.multipleSelectedSet.clear();
+    state.multiplePreview=null;
+    $("multi-preview-card").hidden=true;
+    renderMultipleFiles();
+    renderMultipleDetails();
+  });
+  $("meta-mobile-dialog-close").addEventListener("click",closeMobileDetail);
+  $("meta-mobile-dialog").addEventListener("cancel",event=>{
+    event.preventDefault();
+    closeMobileDetail();
+  });
   $("multi-apply").addEventListener("click",()=>applyMultiple("apply"));
   $("multi-apply-import").addEventListener("click",()=>applyMultiple("apply_and_import"));
   configureArea();
