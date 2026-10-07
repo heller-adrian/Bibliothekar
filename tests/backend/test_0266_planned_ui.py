@@ -66,7 +66,10 @@ def test_0266_inspector_pages_large_noevent_and_collapses_family_days():
 def test_0266_edit_errors_stay_inside_modal():
     assert 'id="event-edit-inline-error"' in EVENTS_HTML
     assert "function showEventEditError" in EVENTS_HTML
-    assert "saveEventEditor().catch(error => showEventEditError(error.message))" in EVENTS_HTML
+    assert 'eventEditForm.addEventListener("submit", async event =>' in EVENTS_HTML
+    assert "await saveEventEditor();" in EVENTS_HTML
+    assert "showEventEditError(error.message);" in EVENTS_HTML
+    assert 'submit.classList.add("bk-busy")' in EVENTS_HTML
 
 
 def test_0266_noevent_editor_has_only_segments():
