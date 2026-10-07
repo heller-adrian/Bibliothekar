@@ -335,6 +335,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         const phase=String(event.detail?.phase||"");
         if(phase==="end"){
           renderFiles();renderDetails();
+          if(state.selectedSet.size)openMobileDetail("meta");
           return;
         }
         if(!state.selectionMode){
@@ -682,10 +683,13 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         if(phase==="end"){
           renderMultipleFiles();
           renderMultipleDetails();
+          if(state.multipleSelectedSet.size)openMobileDetail("multiple");
           return;
         }
         state.multipleSelectedSet.add(index);
         if(state.multipleReference===null)state.multipleReference=index;
+        state.multiplePreview=null;
+        $("multi-preview-card").hidden=true;
         row.classList.add("selected");
       });
       row.addEventListener("click",()=>{
