@@ -194,6 +194,7 @@ def candidate_definition(
             ("QuickTime:Track1:MediaCreateDate", 60, "medium"),
             ("QuickTime:Track1:TrackCreateDate", 70, "medium"),
             ("XMP:XMP-xmp:CreateDate", 80, "medium"),
+            ("File:System:FileCreateDate", 850, "low"),
             ("File:System:FileModifyDate", 900, "low"),
         ]
 
@@ -209,6 +210,7 @@ def candidate_definition(
             ("EXIF:ExifIFD:CreateDate", 30, "high"),
             ("XMP:XMP-xmp:CreateDate", 40, "medium"),
             ("EXIF:IFD0:ModifyDate", 100, "low"),
+            ("File:System:FileCreateDate", 850, "low"),
             ("File:System:FileModifyDate", 900, "low"),
         ]
 
@@ -368,6 +370,8 @@ def _candidate_rule(
             return (70, "medium")
         if group == "XMP" and leaf == "CreateDate":
             return (80, "medium")
+        if group == "File" and leaf == "FileCreateDate":
+            return (850, "low")
         if group == "File" and leaf == "FileModifyDate":
             return (900, "low")
         return None
@@ -383,9 +387,42 @@ def _candidate_rule(
             return (40, "medium")
         if group == "EXIF" and leaf == "ModifyDate":
             return (100, "low")
+        if group == "File" and leaf == "FileCreateDate":
+            return (850, "low")
         if group == "File" and leaf == "FileModifyDate":
             return (900, "low")
     return None
+
+
+_CANDIDATE_LABELS_DE = {
+    "DateTimeOriginal": "Aufnahmezeit",
+    "CreateDate": "Erstellungszeit",
+    "CreationDate": "Aufnahme-/Erstellungszeit",
+    "MediaCreateDate": "Medien-Erstellungszeit",
+    "TrackCreateDate": "Spur-Erstellungszeit",
+    "ModifyDate": "Änderungszeit",
+    "FileCreateDate": "Datei-Erstellungszeit",
+    "FileModifyDate": "Datei-Änderungszeit",
+}
+
+
+def _candidate_display(tag_name: str, confidence: str, priority: int) -> dict[str, Any]:
+    leaf = str(tag_name).rsplit(":", 1)[-1]
+    label = _CANDIDATE_LABELS_DE.get(leaf, leaf)
+    trust = {"high": "hoch", "medium": "mittel", "low": "niedrig"}.get(
+        str(confidence), "nicht nutzbar"
+    )
+    base = {"high": 90, "medium": 70, "low": 35}.get(str(confidence), 0)
+    # Deterministisch: bei gleicher Vertrauensklasse gewinnt die etablierte
+    # Kandidatenpriorität. Kein Modell/Heuristikdienst ist beteiligt.
+    score = max(0, base - min(max(int(priority), 0), 999) // 100)
+    return {
+        "source_type": leaf,
+        "label_de": label,
+        "technical_tag": str(tag_name),
+        "trust_label": trust,
+        "trust_score": score,
+    }
 
 
 def build_candidates(
@@ -421,6 +458,7 @@ def build_candidates(
 
         parsed = parse_exiftool_datetime(raw_text)
 
+        effective_confidence = confidence if parsed is not None else "unusable"
         candidates.append({
             "metadata_group": str(tag_name).split(":", 1)[0],
             "tag_name": str(tag_name),
@@ -431,14 +469,11 @@ def build_candidates(
                 else None
             ),
             "priority": priority,
-            "confidence": (
-                confidence
-                if parsed is not None
-                else "unusable"
-            ),
+            "confidence": effective_confidence,
             "usable": parsed is not None,
             "is_selected": False,
             "conflicts_with_selected": False,
+            **_candidate_display(str(tag_name), effective_confidence, priority),
         })
 
     candidates.sort(
