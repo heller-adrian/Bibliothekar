@@ -975,6 +975,7 @@ def process_claimed_job(
     is_import_operation = operation in {
         "folder_import",
         "metadata_multiple_import",
+        "metadata_general_import",
     }
 
     try:
@@ -1160,6 +1161,8 @@ def process_claimed_job(
                 raise RuntimeError("Ordnerimport besitzt keinen Quellpfad.")
             source = Path(str(source_value))
             managed_multiple_import = operation == "metadata_multiple_import"
+            managed_general_import = operation == "metadata_general_import"
+            managed_metadata_import = managed_multiple_import or managed_general_import
             if managed_multiple_import:
                 expected_multiple_root = metadata_area_paths(
                     area="multiple",
@@ -1171,6 +1174,16 @@ def process_claimed_job(
                     raise RuntimeError(
                         "Mehrfachkorrektur-Import verweist auf einen unerwarteten Quellordner."
                     )
+            if managed_general_import:
+                metadata_root = storage_paths(workspace_path)["metadata_root"].resolve(strict=False)
+                expected_stage_root = (metadata_root / ".general-import").resolve(strict=False)
+                resolved_source = source.resolve(strict=False)
+                try:
+                    resolved_source.relative_to(expected_stage_root)
+                except ValueError as error:
+                    raise RuntimeError(
+                        "Allgemein-Import verweist auf einen unerwarteten Staging-Ordner."
+                    ) from error
 
             def persist_metadata(
                 analysis: dict[str, Any],
@@ -1315,7 +1328,7 @@ def process_claimed_job(
                 destination_directory_callback=central_destination_directory,
                 work_root=work_root,
                 central_stock=True,
-                allow_workspace_source=managed_multiple_import,
+                allow_workspace_source=managed_metadata_import,
                 cancellation_callback=(
                     (lambda: _import_cancel_requested(job_id))
                     if operation == "folder_import"
@@ -1335,9 +1348,19 @@ def process_claimed_job(
                     job_id,
                     folder_import_display_label(job, organization),
                 )
-            if managed_multiple_import:
+            if managed_metadata_import:
                 cleanup_removed = 0
                 cleanup_errors: list[str] = []
+                general_root = (
+                    metadata_area_paths(
+                        area="general",
+                        workspace_root=workspace_path,
+                        library_id=context.library_id,
+                        create=True,
+                    )["root"].resolve(strict=False)
+                    if managed_general_import
+                    else None
+                )
                 for entry in list(
                     (result.get("organization") or {}).get(
                         "imported_source_files"
@@ -1351,21 +1374,25 @@ def process_claimed_job(
                             or not relative.parts
                         ):
                             raise RuntimeError("Unsicherer Quellpfad.")
-                        candidate = (source / relative).resolve(strict=False)
-                        candidate.relative_to(source.resolve(strict=False))
-                        if not candidate.is_file() or candidate.is_symlink():
-                            continue
-                        if (
-                            int(candidate.stat().st_size)
-                            != int(entry.get("size_bytes") or 0)
-                            or sha256_file(candidate)
-                            != str(entry.get("sha256") or "")
-                        ):
-                            raise RuntimeError(
-                                "Quelldatei stimmt nach der Übernahme nicht mehr mit dem verifizierten Import überein."
-                            )
-                        candidate.unlink()
-                        cleanup_removed += 1
+                        candidates = [(source / relative).resolve(strict=False)]
+                        if general_root is not None:
+                            candidates.append((general_root / relative).resolve(strict=False))
+                        for candidate in candidates:
+                            base = source.resolve(strict=False) if candidate == candidates[0] else general_root
+                            candidate.relative_to(base)
+                            if not candidate.is_file() or candidate.is_symlink():
+                                continue
+                            if (
+                                int(candidate.stat().st_size)
+                                != int(entry.get("size_bytes") or 0)
+                                or sha256_file(candidate)
+                                != str(entry.get("sha256") or "")
+                            ):
+                                raise RuntimeError(
+                                    "Quelldatei stimmt nach der Übernahme nicht mehr mit dem verifizierten Import überein."
+                                )
+                            candidate.unlink()
+                            cleanup_removed += 1
                     except Exception as cleanup_error:
                         cleanup_errors.append(
                             str(entry.get("relative_path") or "")
@@ -1373,7 +1400,9 @@ def process_claimed_job(
                             + str(cleanup_error)
                         )
 
-                # Leere Unterordner entfernen, der verwaltete Stamm bleibt bestehen.
+                # Leere Unterordner entfernen. Der Mehrfachkorrektur-Stamm
+                # bleibt bestehen; ein Allgemein-Stagingordner wird komplett
+                # entfernt, sobald er leer ist.
                 for directory in sorted(
                     (
                         path
@@ -1387,12 +1416,19 @@ def process_claimed_job(
                         directory.rmdir()
                     except OSError:
                         pass
+                if managed_general_import:
+                    try:
+                        source.rmdir()
+                    except OSError:
+                        pass
                 result["source_cleanup"] = {
                     "removed_file_count": cleanup_removed,
                     "errors": cleanup_errors,
                 }
                 completion_prefix = (
                     "Mehrfachkorrektur wurde in den Tagesbestand übernommen."
+                    if managed_multiple_import
+                    else "Ausgewählte Allgemein-Dateien wurden in den Tagesbestand übernommen."
                 )
             else:
                 completion_prefix = "Ordnerimport erfolgreich abgeschlossen."
@@ -1644,6 +1680,11 @@ def worker_loop() -> None:
                 global_import = claim_next_job(
                     DATABASE_FILE,
                     operation="metadata_multiple_import",
+                )
+            if global_import is None:
+                global_import = claim_next_job(
+                    DATABASE_FILE,
+                    operation="metadata_general_import",
                 )
             if global_import is not None:
                 claimed = (MAIN_LIBRARY_CONTEXT, global_import)
