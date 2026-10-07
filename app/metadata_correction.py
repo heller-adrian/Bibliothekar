@@ -671,19 +671,47 @@ def preview_multiple_metadata_correction(
     library_id: str,
     reference_relative_path: str,
     proposed_datetime: Any,
+    selected_relative_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     proposed = _normalize_manual_datetime(proposed_datetime)
     scan = _multiple_scan(
         workspace_root=workspace_root,
         library_id=library_id,
     )
-    records = list(scan.get("files") or [])
-    if not records:
+    all_records = list(scan.get("files") or [])
+    if not all_records:
         raise MetadataCorrectionError(
             "Der Ordner Mehrfachkorrektur enthält keine unterstützten Medien."
         )
 
+    selected_relatives = {
+        _safe_relative(value).as_posix()
+        for value in (selected_relative_paths or [])
+        if str(value or "").strip()
+    }
+    if selected_relatives:
+        available_relatives = {
+            str(row.get("relative_path") or "")
+            for row in all_records
+        }
+        missing_selection = sorted(selected_relatives - available_relatives)
+        if missing_selection:
+            raise MetadataCorrectionError(
+                "Mindestens eine ausgewählte Datei wurde nicht gefunden: "
+                + ", ".join(missing_selection[:10])
+            )
+        records = [
+            row for row in all_records
+            if str(row.get("relative_path") or "") in selected_relatives
+        ]
+    else:
+        records = all_records
+
     reference_relative = _safe_relative(reference_relative_path).as_posix()
+    if selected_relatives and reference_relative not in selected_relatives:
+        raise MetadataCorrectionError(
+            "Die Referenzaufnahme muss Teil der ausgewählten Dateien sein."
+        )
     reference = next(
         (
             row for row in records
@@ -764,6 +792,15 @@ def preview_multiple_metadata_correction(
         "offset_seconds": int(delta.total_seconds()),
         "preview_fingerprint": preview_fingerprint,
         "file_count": len(rows),
+        "total_file_count": len(all_records),
+        "selection_is_subset": (
+            bool(selected_relatives)
+            and len(rows) < len(all_records)
+        ),
+        "selected_relative_paths": [
+            str(row["relative_path"])
+            for row in rows
+        ],
         "files": rows,
     }
 
@@ -775,12 +812,14 @@ def apply_multiple_metadata_correction(
     reference_relative_path: str,
     proposed_datetime: Any,
     expected_preview_fingerprint: str,
+    selected_relative_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     preview = preview_multiple_metadata_correction(
         workspace_root=workspace_root,
         library_id=library_id,
         reference_relative_path=reference_relative_path,
         proposed_datetime=proposed_datetime,
+        selected_relative_paths=selected_relative_paths,
     )
     expected = str(expected_preview_fingerprint or "").strip()
     if not expected or expected != str(preview["preview_fingerprint"]):
@@ -890,6 +929,8 @@ def apply_multiple_metadata_correction(
         return {
             "status": "completed",
             "file_count": len(prepared),
+            "total_file_count": int(preview["total_file_count"]),
+            "selection_is_subset": bool(preview["selection_is_subset"]),
             "offset_seconds": int(preview["offset_seconds"]),
             "reference_relative_path": str(preview["reference_relative_path"]),
             "preview_fingerprint": str(preview["preview_fingerprint"]),
