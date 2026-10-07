@@ -239,11 +239,22 @@ def acknowledge_external_notices(
     placeholders = ",".join("?" for _ in ids)
     with database_connection(database_path) as connection:
         rows = connection.execute(
-            f"""SELECT id,action_required FROM external_change_notices
+            f"""SELECT id,action_required,details_json FROM external_change_notices
                 WHERE id IN ({placeholders}) AND status='open'""",
             tuple(ids),
         ).fetchall()
         for row in rows:
+            try:
+                details = json.loads(str(row["details_json"] or "{}"))
+            except json.JSONDecodeError:
+                details = {}
+            if (
+                int(row["action_required"] or 0)
+                and bool(details.get("force_repair"))
+            ):
+                # Zwingende Konsistenzfehler dürfen nicht per „Ignorieren“
+                # versteckt werden.
+                continue
             if int(row["action_required"] or 0):
                 connection.execute(
                     """UPDATE external_change_notices
