@@ -123,7 +123,7 @@ def _free_rows(
                   JOIN events assigned ON assigned.id=ea.event_id
                   JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
                   WHERE ea.family_id=ff.id
-                    AND root.status IN ('draft','planned','applied','archived')
+                    AND root.status IN ('applied','archived')
               )
               AND NOT EXISTS (
                   SELECT 1 FROM event_reapply_removed_families r
@@ -260,6 +260,8 @@ def _record_placement_conflict(
     title: str = "Datei falsch zugeordnet",
     detail: str | None = None,
     repairable: bool = True,
+    force_repair: bool = False,
+    adopt_observed: bool = True,
 ) -> None:
     file_id = int(row["file_id"])
     observed_kind = str(observed_root_kind)
@@ -291,28 +293,32 @@ def _record_placement_conflict(
             "size_bytes": int(row.get("size_bytes") or 0),
             "sha256": str(row.get("sha256") or ""),
             "family_id": row.get("family_id"),
+            "force_repair": bool(force_repair),
         },
         now=timestamp,
     )
-    # SQLite folgt immer dem physischen IST. Das fachliche SOLL bleibt im
-    # offenen Konflikt gespeichert, damit Sortierungen weiterlaufen können.
-    connection.execute(
-        """UPDATE files
-           SET current_relative_path=?,
-               current_root_kind=?,
-               updated_at=?
-           WHERE id=?""",
-        (
-            observed,
+    # Im Normalfall folgt SQLite dem physischen IST. Für den bewusst
+    # einseitigen Korrekturweg Ohne_Datum -> Tagesbestand bleibt dagegen das
+    # logische SOLL unter Ohne_Datum stehen, bis die manuelle Bewegung
+    # rückgängig gemacht wurde.
+    if adopt_observed:
+        connection.execute(
+            """UPDATE files
+               SET current_relative_path=?,
+                   current_root_kind=?,
+                   updated_at=?
+               WHERE id=?""",
             (
-                "shared_workspace"
-                if observed_kind == "central_stock"
-                else observed_kind
+                observed,
+                (
+                    "shared_workspace"
+                    if observed_kind == "central_stock"
+                    else observed_kind
+                ),
+                timestamp,
+                file_id,
             ),
-            timestamp,
-            file_id,
-        ),
-    )
+        )
 
 
 def reconcile_central_free_stock(
@@ -513,20 +519,14 @@ def reconcile_central_free_stock(
                         canonical_dated = ""
 
                 # Bewusster Metadaten-Korrekturweg:
-                # Tagesbestand -> Ohne_Datum ist immer zulässig.
-                # Ohne_Datum -> Tagesbestand ist zulässig, wenn der Zielpfad zur
-                # bekannten Aufnahmezeit passt. In beiden Fällen folgt SQLite
-                # ohne Warnung dem echten IST.
+                # Tagesbestand -> Ohne_Datum ist zulässig und wird sofort als
+                # realer Korrekturbestand übernommen. Der umgekehrte manuelle
+                # Weg ist absichtlich gesperrt: Aus Ohne_Datum wird nur über
+                # Bibliothekars kontrollierte Metadaten-/Einsortierfunktion
+                # wieder ein Tagesbestand.
                 if (
                     observed_kind == "central_stock"
-                    and (
-                        observed_is_undated
-                        or (
-                            current_is_undated
-                            and canonical_dated
-                            and observed == canonical_dated
-                        )
-                    )
+                    and observed_is_undated
                 ):
                     connection.execute(
                         """UPDATE files
@@ -541,6 +541,33 @@ def reconcile_central_free_stock(
                         f"placement:{file_id}",
                         now=timestamp,
                     )
+                    continue
+
+                if (
+                    observed_kind == "central_stock"
+                    and current_is_undated
+                    and not observed_is_undated
+                ):
+                    _record_placement_conflict(
+                        connection,
+                        row=row,
+                        observed_root_kind=observed_kind,
+                        observed_relative_path=observed,
+                        expected_root_kind="central_stock",
+                        expected_relative_path=expected,
+                        timestamp=timestamp,
+                        title="Ohne Datum muss über Bibliothekar einsortiert werden",
+                        detail=(
+                            f"{filename} wurde manuell aus „Ohne_Datum“ nach "
+                            f"„{observed}“ verschoben. Bitte die Änderung "
+                            "rückgängig machen und die Datei anschließend über "
+                            "die Metadatenkorrektur einsortieren."
+                        ),
+                        repairable=True,
+                        force_repair=True,
+                        adopt_observed=False,
+                    )
+                    misplaced += 1
                     continue
 
                 _record_placement_conflict(
@@ -637,7 +664,7 @@ def reconcile_central_free_stock(
                                  AND ea.family_id=f.family_id
                              )
                          )
-                           AND root.status IN ('draft','planned','applied','archived')
+                           AND root.status IN ('applied','archived')
                      )
                    ORDER BY f.id""",
                 (int(item["size_bytes"]), digest),
