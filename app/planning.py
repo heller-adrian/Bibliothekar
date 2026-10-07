@@ -37,6 +37,17 @@ def _load_family_stats(
                 ff.selected_capture_time,
                 ff.capture_time_confidence,
 
+                MAX(
+                    CASE
+                        WHEN f.current_root_kind='shared_workspace'
+                         AND (
+                             f.current_relative_path='Ohne_Datum'
+                             OR f.current_relative_path LIKE 'Ohne_Datum/%'
+                         )
+                        THEN 1 ELSE 0
+                    END
+                ) AS physically_undated,
+
                 COUNT(f.id) AS file_count,
 
                 COALESCE(
@@ -86,6 +97,9 @@ def _load_family_stats(
             "capture_time_confidence": row[
                 "capture_time_confidence"
             ],
+            "physically_undated": bool(
+                row["physically_undated"]
+            ),
             "day_key": _day_key(
                 row["selected_capture_time"]
             ),
@@ -753,6 +767,32 @@ def list_job_planning_overview(
         if int(family["family_id"]) not in assigned_family_ids
         and int(family["family_id"]) not in released_archive_ids
     ]
+
+    # Der freie Aufnahmenbestand folgt dem physischen IST. Eine Familie unter
+    # Ohne_Datum darf trotz noch bekannter Aufnahmezeit nicht gleichzeitig
+    # weiter als normaler Tagesbestand erscheinen. Ereignisgruppen behalten
+    # dagegen ihre gespeicherte Aufnahmezeit.
+    available_families = [
+        (
+            {
+                **family,
+                "selected_capture_time": None,
+                "day_key": None,
+                "has_date": False,
+            }
+            if bool(family.get("physically_undated"))
+            else family
+        )
+        for family in available_families
+    ]
+    total_by_day = defaultdict(int)
+    for family in family_stats:
+        key = (
+            None
+            if bool(family.get("physically_undated"))
+            else family.get("day_key")
+        )
+        total_by_day[key] += 1
 
     available_day_groups = interval_cards(database_path, job_id, available_families, total_by_day)
 
