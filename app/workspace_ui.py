@@ -273,6 +273,48 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     .day-card.without-date {
       border-color: var(--warning);
+      background:
+        color-mix(
+          in srgb,
+          var(--warning) 12%,
+          var(--surface)
+        );
+    }
+
+    .day-card.review-card {
+      grid-template-columns: minmax(0, 1fr) auto;
+      cursor: pointer;
+    }
+
+    .day-card.review-card:hover {
+      border-color: var(--warning);
+      background:
+        color-mix(
+          in srgb,
+          var(--warning) 18%,
+          var(--surface)
+        );
+    }
+
+    .day-card.review-card:focus-visible {
+      outline: 3px solid var(--warning);
+      outline-offset: 3px;
+    }
+
+    .review-card-hint {
+      display: block;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .metadata-review-preview {
+      display: grid;
+      gap: 12px;
+    }
+
+    .metadata-review-preview .primary {
+      width: fit-content;
     }
 
     .day-check {
@@ -2294,6 +2336,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       const available=[...dayMap.values()].sort((a,b)=>String(a.start_datetime||a.day_key||"").localeCompare(String(b.start_datetime||b.day_key||"")));
       const visibleEvents=[...planningEvents.values()].sort((a,b)=>String(a.start_datetime||"").localeCompare(String(b.start_datetime||"")));
       const timeline=[...visibleEvents,...available].sort((a,b)=>{
+        const aUndated = a.group_type !== "event" && !a.has_date;
+        const bUndated = b.group_type !== "event" && !b.has_date;
+        if (aUndated !== bUndated) return aUndated ? -1 : 1;
         const aa=String(a.start_datetime||a.day_key||"9999");
         const bb=String(b.start_datetime||b.day_key||"9999");
         return aa.localeCompare(bb) || (a.group_type==="event"?-1:1);
@@ -2750,9 +2795,9 @@ WORKSPACE_HTML = r"""<!doctype html>
 
 
     function selectableDayKeys() {
-      return availableDayGroups().map(
-        group => group.card_key || group.day_key || "__without_date__"
-      );
+      return availableDayGroups()
+        .filter(group => group.has_date)
+        .map(group => group.card_key || group.day_key);
     }
 
     function updateDaySelectAllButton() {
@@ -2808,13 +2853,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
 
       const availableKeys =
-        new Set(
-          availableDayGroups().map(
-            group =>
-              group.card_key || group.day_key
-              || "__without_date__"
-          )
-        );
+        new Set(selectableDayKeys());
 
       for (
         const selectedKey
@@ -2956,6 +2995,102 @@ WORKSPACE_HTML = r"""<!doctype html>
             card
           );
 
+          continue;
+        }
+
+        if (!group.has_date) {
+          const card = document.createElement("article");
+          card.className = "day-card without-date review-card";
+          card.tabIndex = 0;
+          card.setAttribute("role", "button");
+          card.setAttribute(
+            "aria-label",
+            "Prüffälle ohne Datum – Metadatenkorrektur öffnen"
+          );
+
+          const main = document.createElement("span");
+          main.className = "day-main";
+
+          const name = document.createElement("span");
+          name.className = "day-name";
+          name.textContent = "Prüffälle · Ohne Datum";
+
+          const metadata = document.createElement("span");
+          metadata.className = "day-meta";
+          metadata.innerHTML = `
+            <span>${Number(group.file_count || 0)} Dateien</span>
+            <span>${Number(group.family_count || 0)} Familien</span>
+            <span>${formatBytes(Number(group.total_size_bytes || 0))}</span>
+          `;
+
+          const hint = document.createElement("span");
+          hint.className = "review-card-hint";
+          hint.textContent =
+            "Nicht für Ereignisse auswählbar · Doppelklick öffnet die Metadatenkorrektur";
+
+          main.appendChild(name);
+          main.appendChild(metadata);
+          main.appendChild(hint);
+
+          const reviewCount = Number(group.review_required_count || 0);
+          const badge = document.createElement("span");
+          badge.className = "badge warning";
+          badge.textContent =
+            reviewCount === 1
+              ? "1 Prüffall"
+              : `${reviewCount} Prüffälle`;
+
+          const showReviewPreview = () => {
+            selectedDays.clear();
+            lastSelectedDayKey = null;
+            setSelectedPreviewEvent(null);
+            renderDays();
+            renderSelection();
+
+            selectionLabel.textContent = "Prüffälle";
+            newEventButton.disabled = true;
+            noEventButton.disabled = true;
+            existingNoEventButton.disabled = true;
+
+            structurePreview.classList.add("rich-preview");
+            structurePreview.innerHTML = `
+              <div class="metadata-review-preview">
+                <div class="preview-root-title">Prüffälle · Ohne Datum</div>
+                <div class="preview-selection-note">
+                  Diese Dateien besitzen noch kein belastbares Aufnahmedatum
+                  und können deshalb keinem Ereignis zugeordnet werden.
+                </div>
+                <div class="preview-selection-note">
+                  <strong>${Number(group.file_count || 0)} Dateien ·
+                  ${Number(group.family_count || 0)} Familien</strong>
+                  ${reviewCount ? ` · ${reviewCount} Prüffälle` : ""}
+                </div>
+                <button type="button" class="primary" data-open-metadata-review>
+                  Metadatenkorrektur
+                </button>
+              </div>
+            `;
+            structurePreview
+              .querySelector("[data-open-metadata-review]")
+              ?.addEventListener("click", () => {
+                location.href = "/metadata-correction?area=library";
+              });
+          };
+
+          card.addEventListener("click", showReviewPreview);
+          card.addEventListener("dblclick", () => {
+            location.href = "/metadata-correction?area=library";
+          });
+          card.addEventListener("keydown", event => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              showReviewPreview();
+            }
+          });
+
+          card.appendChild(main);
+          card.appendChild(badge);
+          dayList.appendChild(card);
           continue;
         }
 
