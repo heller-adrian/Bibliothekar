@@ -661,6 +661,12 @@ def finalize_manually_moved_event_if_verified(
             update_known_file_locations=False,
             fast_refresh=False,
         )
+    except EventInventoryError as exc:
+        if "Ereignisordner wurde nicht gefunden" not in str(exc):
+            raise SsdReleaseError(str(exc)) from exc
+        workspace_inventory = {"files": []}
+
+    try:
         archive_inventory = scan_event_inventory(
             database_path,
             archive_root,
