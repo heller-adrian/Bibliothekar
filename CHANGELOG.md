@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.42.3 – Web-App-Interaktion für Aufnahmen und Metadaten
+
+- In der installierten Handy-Web-App bleibt der `x Prüffälle`-Badge der Ohne-Datum-Karte vollständig innerhalb der Aufnahmen-Karte.
+- Metadatenkarten brechen lange Dateinamen, Pfade und Badge-Texte auf kleinen Web-App-Bildschirmen sauber um, statt Inhalt über Status-Tags laufen zu lassen.
+- In `Bibliothek`, `Allgemein` und `Mehrfachkorrektur` öffnet ein normaler Dateiklick in der installierten Handy-Web-App die bestehende Detail-/Referenzansicht als eigenes Bottom-Sheet. Es gibt einen expliziten `Schließen`-Button; nach erfolgreicher Metadatenänderung bzw. Mehrfach-Vorschau schließt das Sheet automatisch.
+- Long-Press auf eine auswählbare Karte aktiviert ausschließlich in der installierten Handy-Web-App die Schnellauswahl. Gedrücktes Ziehen über weitere Karten fügt sie der Auswahl hinzu; jede neu erfasste Karte erhält ein kurzes Wobble-Feedback.
+- Die Schnellauswahl steht bei `Aufnahmen` sowie in den Metadatenbereichen `Bibliothek` und `Allgemein` zur Verfügung. In `Mehrfachkorrektur` begrenzt eine per Geste gewählte Teilmenge Preview und `Anwenden` tatsächlich auf diese Dateien.
+- Eine Teilmenge der Mehrfachkorrektur kann bewusst nicht direkt mit `Anwenden und in Tagesbestand übernehmen` importiert werden, weil dieser Importpfad weiterhin den vollständigen Mehrfachkorrektur-Ordner repräsentiert. Ohne Gestenauswahl bleibt das bisherige Verhalten unverändert.
+- Die neue Touch-Geste, Animation und mobile Detailansicht sind auf Standalone/Web-App und kleine Displays begrenzt; Desktop und mobile Browser-Website behalten ihr bisheriges Verhalten.
+
 ### 0.42.2 – Automatische Metadatenprüfung
 
 - Die Bereiche `Bibliothek`, `Allgemein` und `Mehrfachkorrektur` prüfen ihren jeweiligen Bestand jetzt automatisch beim Öffnen bzw. Reload der Metadatenkorrektur.
