@@ -9370,7 +9370,7 @@ def index() -> str:
         class="jobs"
         id="jobs"
       >
-        <div class="empty">
+        <div class="empty bk-loading-status">
           Aufträge werden geladen …
         </div>
       </div>
@@ -10381,6 +10381,10 @@ def index() -> str:
 
     async function refreshAll() {
       refreshButton.disabled = true;
+      refreshButton.classList.add("bk-busy");
+      refreshButton.setAttribute("aria-busy", "true");
+      noticeElement.classList.add("bk-loading-status");
+      noticeElement.textContent = "Import & Prüfung wird aktualisiert …";
 
       try {
         await Promise.all([
@@ -10405,6 +10409,9 @@ def index() -> str:
         );
       } finally {
         refreshButton.disabled = false;
+        refreshButton.classList.remove("bk-busy");
+        refreshButton.removeAttribute("aria-busy");
+        noticeElement.classList.remove("bk-loading-status");
       }
     }
 
@@ -10541,9 +10548,12 @@ def index() -> str:
       }
 
       importButton.disabled = true;
+      importButton.classList.add("bk-busy");
+      importButton.setAttribute("aria-busy", "true");
       deviceImportButton.disabled = true;
       driveFolderImportButton.disabled = true;
       noticeElement.classList.remove("error-text");
+      noticeElement.classList.add("bk-loading-status");
       noticeElement.textContent = "Ordnerimport wird angelegt …";
 
       try {
@@ -10574,6 +10584,9 @@ def index() -> str:
       } finally {
         await Promise.all([loadSources(), loadSourceDevices()]);
         updateDriveControls();
+        importButton.classList.remove("bk-busy");
+        importButton.removeAttribute("aria-busy");
+        noticeElement.classList.remove("bk-loading-status");
       }
     }
 
