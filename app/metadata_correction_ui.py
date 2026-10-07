@@ -330,6 +330,9 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       '<option value="'+esc(candidateSourceType(candidate))+'">'+esc(candidateLabel(candidate))+'</option>'
     ).join("");
     const readyFiles=state.area==="library"&&files.every(file=>file.reintegration_ready)?files:[];
+    const generalReady=state.area==="general"&&files.every(file=>
+      Boolean(file.selected_capture_time)&&["high","medium"].includes(String(file.capture_time_confidence||""))
+    );
     $("meta-details").innerHTML='<div class="meta-form">'
       +'<div class="meta-selection-note"><strong>'+files.length+' Einträge ausgewählt.</strong><div class="muted" style="margin-top:4px">Für jede Datei wird ihr eigener Wert des gewählten Metadaten-Tags verwendet.</div></div>'
       +(sourceTypes.length
@@ -339,9 +342,13 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       +(readyFiles.length
         ? '<button id="meta-reintegrate" type="button">In Tagesbestand einsortieren ('+readyFiles.length+')</button>'
         : '')
+      +(generalReady
+        ? '<button id="meta-general-reintegrate" type="button">In Tagesbestand übernehmen ('+files.length+')</button>'
+        : '')
       +'</div>';
     $("meta-bulk-apply")?.addEventListener("click",()=>correctSelectedBySource(files));
     $("meta-reintegrate")?.addEventListener("click",reintegrateSelected);
+    $("meta-general-reintegrate")?.addEventListener("click",()=>reintegrateGeneralSelected(files));
   }
   function renderDetails(){
     const chosen=selectedFiles();
@@ -375,6 +382,11 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const sortButton=state.area==="library"&&readyFiles.length
       ? '<button id="meta-reintegrate" type="button">In Tagesbestand einsortieren</button>'
       :"";
+    const generalSortButton=(
+      state.area==="general"
+      && file.selected_capture_time
+      && ["high","medium"].includes(String(file.capture_time_confidence||""))
+    ) ? '<button id="meta-general-reintegrate" type="button">In Tagesbestand übernehmen</button>' : "";
     $("meta-details").innerHTML='<div class="meta-form"><div class="meta-kv">'
       +'<span>Datei</span><strong>'+esc(file.filename)+'</strong>'+familyLine
       +'<span>Metadaten</span><span>'+esc(file.selected_capture_time||"kein belastbares Datum")+' · '+esc(file.capture_time_confidence||"")+'</span>'
@@ -384,7 +396,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       +'<label><span>Datum</span><input id="meta-date" type="date" value="'+esc(suggested.date)+'"></label>'
       +'<label><span>Uhrzeit</span><input id="meta-time" type="time" step="1" value="'+esc(suggested.time)+'"></label>'
       +'<button id="meta-prepare" type="button" class="primary">'+(ready?"Metadaten erneut ändern":"Metadaten ändern")+'</button>'
-      +sortButton+'</div>';
+      +sortButton+generalSortButton+'</div>';
     document.querySelectorAll("[data-meta-use-candidate]").forEach(button=>button.addEventListener("click",()=>{
       const candidate=(file.metadata_candidates||[]).find(item=>String(item.tag_name||"")===String(button.dataset.metaUseCandidate||""));
       if(!candidate)return;
@@ -394,6 +406,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     }));
     $("meta-prepare").addEventListener("click",()=>correctSelected(file));
     $("meta-reintegrate")?.addEventListener("click",reintegrateSelected);
+    $("meta-general-reintegrate")?.addEventListener("click",()=>reintegrateGeneralSelected([file]));
   }
   function selectionKeys(){
     const files=state.scan?.files||[];
@@ -465,6 +478,32 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       $("meta-bulk-apply")?.removeAttribute("disabled");
     }
   }
+  async function reintegrateGeneralSelected(files){
+    const selected=(files&&files.length)?files:selectedFiles();
+    if(!selected.length){setStatus("Bitte mindestens eine Allgemein-Datei auswählen.",true);return;}
+    const invalid=selected.filter(file=>
+      !file.selected_capture_time||!["high","medium"].includes(String(file.capture_time_confidence||""))
+    );
+    if(invalid.length){
+      setStatus("Vor der Übernahme müssen alle ausgewählten Dateien eine belastbare Aufnahmezeit besitzen.",true);return;
+    }
+    const button=$("meta-general-reintegrate");
+    if(button){button.disabled=true;button.classList.add("bk-busy");}
+    setStatus(selected.length===1?"Übernahme in den Tagesbestand wird vorbereitet …":selected.length+" Dateien werden für den Tagesbestand vorbereitet …");
+    try{
+      const data=await json("/api/metadata-correction/general/reintegrate",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({items:selected.map(file=>({relative_path:file.relative_path}))})
+      });
+      setStatus((data.file_count||selected.length)+" Datei"+((data.file_count||selected.length)===1?"":"en")+" zur verifizierten Übernahme in den Tagesbestand vorgemerkt.");
+    }catch(error){
+      setStatus(error.message,true);
+    }finally{
+      const current=$("meta-general-reintegrate");
+      if(current){current.disabled=false;current.classList.remove("bk-busy");}
+    }
+  }
+
   async function reintegrateSelected(){
     const files=selectedReadyFiles();
     if(!files.length){setStatus("Bitte zuerst alle ausgewählten Einträge korrigieren.",true);return;}
