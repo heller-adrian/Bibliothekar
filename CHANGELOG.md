@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### 0.42.5 – PWA-Auswahlabschluss und Metadaten-Sheet
+
+- In der installierten Handy-Web-App bleiben auswählbare Karten nicht mehr dauerhaft als eigene Transform-/Compositor-Layer vorgemerkt. Die Optimierung gilt nur während des kurzen Wobble-Effekts; dadurch werden die feinen Kartenrahmen auf iOS nicht mehr an Viewport- bzw. Sticky-Layer-Grenzen abgeschnitten.
+- Long-Press aus dem normalen Metadatenmodus aktiviert Bibliothek, Allgemein und Mehrfachkorrektur jetzt ohne DOM-Neuaufbau unter dem noch aufliegenden Finger. Der aktuelle Touch-Zielknoten bleibt bestehen, sodass dieselbe Geste unmittelbar in die echte Drag-/Autoscroll-Auswahl übergeht.
+- Das nicht-modale mobile Auswahlfenster misst seine tatsächliche Höhe und reserviert entsprechend zusätzlichen Scrollraum am Seitenende. Auch die letzten Metadatenkarten lassen sich dadurch oberhalb des Fensters erreichen und nachträglich aus- oder abwählen.
+
 ### 0.42.4 – Reversible PWA-Auswahl und mobile Metadatenfenster
 
 - Die Long-Press-Schnellauswahl arbeitet jetzt als zusammenhängende Range: Beim Zurückwischen werden nur die durch die laufende Geste hinzugekommenen Karten wieder abgewählt; bereits vorher ausgewählte Karten bleiben erhalten.
