@@ -77,8 +77,8 @@ def test_0423_mobile_metadata_detail_uses_real_detail_card_in_dialog():
     assert 'id="meta-mobile-dialog-close"' in html
     assert 'function openMobileDetail(kind,mode="full")' in html
     assert 'function closeMobileDetail()' in html
-    assert 'openMobileDetail("meta")' in html
-    assert 'openMobileDetail("multiple")' in html
+    assert 'openMobileDetail("meta","full")' in html
+    assert 'openMobileDetail("multiple","full")' in html
     assert "closeMobileDetail();\n      await scan(false,true);" in html
 
 
