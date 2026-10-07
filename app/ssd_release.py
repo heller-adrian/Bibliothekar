@@ -121,7 +121,7 @@ def _latest_completed_release(
     raw = result.pop("details_json", None)
     result["details"] = json.loads(raw) if raw else None
     result["released"] = True
-    result["message"] = "SSD-Bestand wurde bereits freigegeben."
+    result["message"] = "Arbeitsbereich-Bestand wurde bereits freigegeben."
     return result
 
 
@@ -194,7 +194,7 @@ def _validate_event_tree(
     for row in files:
         if str(row.get("current_root_kind")) != "shared_workspace":
             raise SsdReleaseError(
-                "Mindestens eine Datei liegt nicht mehr im SSD-Arbeitsbereich."
+                "Mindestens eine Datei liegt nicht mehr im Arbeitsbereich."
             )
 
         relative = _safe_relative(
@@ -246,7 +246,7 @@ def _validate_event_tree(
         sample = ", ".join(sorted(unexpected)[:5])
         raise SsdReleaseError(
             "Im Ereignisordner liegen nicht erfasste Dateien oder Einträge. "
-            "SSD-Freigabe wurde gesperrt: " + sample
+            "Arbeitsbereich-Freigabe wurde gesperrt: " + sample
         )
 
     missing = sorted(tracked - existing)
@@ -477,7 +477,7 @@ def _finalize_release(
         ).fetchone()
 
         if release is None:
-            raise SsdReleaseError("SSD-Freigabelauf wurde nicht gefunden.")
+            raise SsdReleaseError("Arbeitsbereich-Freigabelauf wurde nicht gefunden.")
 
         operations = connection.execute(
             """SELECT * FROM event_ssd_release_files
@@ -496,7 +496,7 @@ def _finalize_release(
             for row in all_operations
         ):
             raise SsdReleaseError(
-                "Nicht alle SSD-Dateien wurden sicher freigegeben."
+                "Nicht alle Arbeitsbereich-Dateien wurden sicher freigegeben."
             )
 
         file_ids = [int(row["file_id"]) for row in operations]
@@ -570,7 +570,7 @@ def _finalize_release(
             UPDATE jobs
             SET state = 'completed',
                 stage = 'event_ssd_released',
-                progress_message = 'SSD-Bestand vollständig freigegeben und geprüft.',
+                progress_message = 'Arbeitsbereich-Bestand vollständig freigegeben und geprüft.',
                 error_message = NULL,
                 updated_at = ?,
                 finished_at = COALESCE(finished_at, ?)
@@ -606,7 +606,7 @@ def _finalize_release(
     result["released"] = True
     result["message"] = (
         "Kamerabibliothek erneut vollständig geprüft und "
-        "SSD-Bestand einschließlich XMP/Export sicher freigegeben."
+        "Arbeitsbereich-Bestand einschließlich XMP/Export sicher freigegeben."
     )
     return result
 
@@ -675,7 +675,7 @@ def finalize_manually_moved_event_if_verified(
         raise SsdReleaseError(str(exc)) from exc
 
     # Sobald noch irgendeine reale Ereignisdatei im Arbeitsbereich liegt,
-    # bleibt der normale zweistufige Workflow "prüfen -> SSD freigeben" aktiv.
+    # bleibt der normale zweistufige Workflow "prüfen -> Arbeitsbereich freigeben" aktiv.
     if list(workspace_inventory.get("files") or []):
         return {
             **verification,
@@ -855,21 +855,21 @@ def release_event_ssd(
         ).fetchone()
     if int(pending["n"] or 0) > 0 or active_mutation is not None:
         raise SsdReleaseError(
-            "SSD-Freigabe gesperrt: In dieser Sicherung ist noch eine Ereignisänderung bzw. Neu-Zuordnung offen. "
+            "Arbeitsbereich-Freigabe gesperrt: In dieser Sicherung ist noch eine Ereignisänderung bzw. Neu-Zuordnung offen. "
             "Bitte zuerst alle freien Familien zuordnen und die Nachsortierung abschließen."
         )
 
     if int(event.get("resort_required") or 0):
         raise SsdReleaseError(
-            "SSD-Freigabe gesperrt: Für dieses Ereignis ist noch eine Nachsortierung offen."
+            "Arbeitsbereich-Freigabe gesperrt: Für dieses Ereignis ist noch eine Nachsortierung offen."
         )
     if str(event.get("status")) == "archived":
         raise SsdReleaseError(
-            "Ereignis ist bereits archiviert, aber ein abgeschlossener SSD-Freigabelauf fehlt."
+            "Ereignis ist bereits archiviert, aber ein abgeschlossener Arbeitsbereich-Freigabelauf fehlt."
         )
     if str(event.get("status")) != "applied":
         raise SsdReleaseError(
-            "Nur ein angewendetes Ereignis kann von der SSD freigegeben werden."
+            "Nur ein angewendetes Ereignis kann von der Arbeitsbereich freigegeben werden."
         )
 
     archive_root = archive_root.expanduser().resolve(strict=False)
