@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.43.2 – Sticky-Vorschauen, zweistufiger Importfortschritt und Speicher-Loader
+
+- Die Zielstruktur-Vorschau im Arbeitsbereich bleibt auf Desktop beim Scrollen direkt unter dem Secondary-Header. Ihre lange Tages-/Dateiliste besitzt einen eigenen vertikalen Scrollbereich, damit nicht die gesamte Seite verschoben werden muss.
+- „Datei prüfen“ und „Referenzaufnahme“ in der Metadatenkorrektur bleiben auf Desktop ebenfalls unter dem Metadaten-Secondary-Header sichtbar und scrollen bei langem Inhalt innerhalb ihres eigenen Panels.
+- Die Sticky-Unterkante wird aus tatsächlicher Shell- und Secondary-Header-Höhe berechnet und bei Größenänderungen automatisch aktualisiert.
+- Laufende Importe zeigen getrennt den Fortschritt der aktuellen Stufe und den Gesamtfortschritt. Der Stufenbalken beginnt bei jedem Verarbeitungsschritt neu; die Prozentangabe unterhalb der Balken bezieht sich ausschließlich auf den Gesamtfortschritt.
+- Zusätzlich wird aus Startzeit und gewichtetem Gesamtfortschritt eine geschätzte verbleibende Gesamtdauer angezeigt.
+- Beim Speichern bzw. Anwenden von Ereignisänderungen zeigt der Aktionsbutton einen Loader und verhindert während der laufenden Anfrage Doppelklicks.
+
 ### 0.43.1 – Kombinierbare Unterereignisnamen und native Datumsfelder
 
 - Die Benennung von Unterereignissen verwendet jetzt dieselben frei kombinierbaren Optionen wie normale Ereignisse: „Jahr einbeziehen“, „Uhrzeit einbeziehen“ und „Von–bis im Namen“. Der separate Auswahlmodus „Datum/Datumsbereich/Uhrzeit/Jahr/Kein Präfix“ entfällt.
