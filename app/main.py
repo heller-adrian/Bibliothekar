@@ -8162,6 +8162,12 @@ def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
 def api_preview_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     context = current_library_context()
     try:
+        selected_raw = payload.get("selected_relative_paths")
+        selected_relative_paths = (
+            [str(value) for value in selected_raw if str(value or "").strip()]
+            if isinstance(selected_raw, list)
+            else None
+        )
         preview = preview_multiple_metadata_correction(
             workspace_root=context.workspace_root,
             library_id=context.library_id,
@@ -8169,6 +8175,7 @@ def api_preview_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                 payload.get("reference_relative_path") or ""
             ),
             proposed_datetime=payload.get("proposed_datetime"),
+            selected_relative_paths=selected_relative_paths,
         )
         return {"preview": preview}
     except (MetadataCorrectionError, MetadataError, ValueError, OSError) as error:
@@ -8183,6 +8190,28 @@ def api_apply_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Unbekannter Mehrfachkorrektur-Modus.")
 
     try:
+        selected_raw = payload.get("selected_relative_paths")
+        selected_relative_paths = (
+            [str(value) for value in selected_raw if str(value or "").strip()]
+            if isinstance(selected_raw, list)
+            else None
+        )
+        if mode == "apply_and_import" and selected_relative_paths:
+            selection_preview = preview_multiple_metadata_correction(
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                reference_relative_path=str(
+                    payload.get("reference_relative_path") or ""
+                ),
+                proposed_datetime=payload.get("proposed_datetime"),
+                selected_relative_paths=selected_relative_paths,
+            )
+            if bool(selection_preview.get("selection_is_subset")):
+                raise MetadataCorrectionError(
+                    "Eine Teilmenge kann korrigiert, aber nicht direkt als kompletter "
+                    "Mehrfachkorrektur-Ordner in den Tagesbestand übernommen werden."
+                )
+
         result = apply_multiple_metadata_correction(
             workspace_root=context.workspace_root,
             library_id=context.library_id,
@@ -8193,6 +8222,7 @@ def api_apply_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
             expected_preview_fingerprint=str(
                 payload.get("preview_fingerprint") or ""
             ),
+            selected_relative_paths=selected_relative_paths,
         )
 
         response: dict[str, Any] = {
