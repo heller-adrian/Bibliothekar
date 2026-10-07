@@ -8240,6 +8240,215 @@ def api_apply_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.post("/api/metadata-correction/correct-batch", tags=["Metadatenkorrektur"])
+def api_correct_metadata_batch(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply one metadata source type to many files without rescanning per item."""
+    area = str(payload.get("area") or "").strip().lower()
+    source_type = str(payload.get("source_type") or "").strip()
+    raw_items = payload.get("items")
+    items = raw_items if isinstance(raw_items, list) else []
+    if area not in {"library", "general"}:
+        raise HTTPException(status_code=422, detail="Mehrfachkorrektur ist für diesen Bereich nicht verfügbar.")
+    if not source_type or not items:
+        raise HTTPException(status_code=422, detail="Metadaten-Quelltyp oder Auswahl fehlt.")
+
+    def safe_source(base: Path, relative_value: Any) -> Path:
+        relative = Path(str(relative_value or "").replace("\\", "/").strip("/"))
+        if (
+            not relative.parts
+            or relative.is_absolute()
+            or any(part in {"", ".", ".."} for part in relative.parts)
+        ):
+            raise MetadataCorrectionError("Unsicherer Metadatenpfad.")
+        root = Path(base).resolve(strict=False)
+        source = (root / relative).resolve(strict=False)
+        try:
+            source.relative_to(root)
+        except ValueError as error:
+            raise MetadataCorrectionError("Metadatenpfad verlässt den verwalteten Bereich.") from error
+        if not source.is_file() or source.is_symlink():
+            raise MetadataCorrectionError("Ausgewählte Metadatendatei fehlt: " + relative.as_posix())
+        return source
+
+    def source_candidate(row: dict[str, Any]) -> dict[str, Any]:
+        candidates = sorted(
+            (
+                dict(candidate)
+                for candidate in (row.get("metadata_candidates") or [])
+                if bool(candidate.get("usable"))
+                and str(candidate.get("normalized_datetime") or "").strip()
+            ),
+            key=lambda candidate: (
+                int(candidate.get("priority") or 999),
+                str(candidate.get("tag_name") or ""),
+            ),
+        )
+        for candidate in candidates:
+            logical = str(candidate.get("source_type") or "").strip()
+            if not logical:
+                logical = str(candidate.get("tag_name") or "").rsplit(":", 1)[-1]
+            if logical == source_type:
+                return candidate
+        raise MetadataCorrectionError(
+            f"Mindestens eine ausgewählte Datei besitzt den Quelltyp „{source_type}“ nicht mehr."
+        )
+
+    try:
+        prepared: list[dict[str, Any]] = []
+        context_cache: dict[str, tuple[LibraryContext, set[str], dict[int, dict[str, Any]], Path]] = {}
+
+        if area == "library":
+            for raw in items:
+                if not isinstance(raw, dict):
+                    continue
+                library_id = str(raw.get("library_id") or "").strip()
+                family_id = int(raw.get("family_id") or 0)
+                if not library_id or not family_id:
+                    raise MetadataCorrectionError("Bibliothek oder Familie fehlt in der Mehrfachauswahl.")
+                cached = context_cache.get(library_id)
+                if cached is None:
+                    context = resolve_library_context(REGISTRY_DATABASE_FILE, library_id)
+                    ensure_library_database_schema(context)
+                    job_ids = set(list_library_import_job_ids(REGISTRY_DATABASE_FILE, context.library_id))
+                    scan = scan_metadata_area(
+                        area="library",
+                        workspace_root=context.workspace_root,
+                        library_id=context.library_id,
+                        database_path=context.database_path,
+                        library_name=context.display_name,
+                        allowed_job_ids=job_ids,
+                    )
+                    by_family = {
+                        int(row["family_id"]): dict(row)
+                        for row in (scan.get("files") or [])
+                        if row.get("family_id") is not None
+                    }
+                    root = metadata_area_paths(
+                        area="library",
+                        workspace_root=context.workspace_root,
+                        library_id=context.library_id,
+                        create=True,
+                    )["output_root"].resolve(strict=False)
+                    cached = (context, job_ids, by_family, root)
+                    context_cache[library_id] = cached
+                context, job_ids, by_family, root = cached
+                row = by_family.get(family_id)
+                if row is None:
+                    raise MetadataCorrectionError("Eine ausgewählte Ohne-Datum-Familie wurde nicht gefunden.")
+                candidate = source_candidate(row)
+                source = safe_source(root, row.get("relative_path"))
+                prepared.append({
+                    "context": context,
+                    "job_ids": job_ids,
+                    "row": row,
+                    "source": source,
+                    "candidate": candidate,
+                    "family_id": family_id,
+                })
+        else:
+            context = current_library_context()
+            ensure_library_database_schema(context)
+            scan = scan_metadata_area(
+                area="general",
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                database_path=context.database_path,
+                library_name=context.display_name,
+            )
+            by_relative = {
+                str(row.get("relative_path") or ""): dict(row)
+                for row in (scan.get("files") or [])
+            }
+            root = metadata_area_paths(
+                area="general",
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                create=True,
+            )["input_root"].resolve(strict=False)
+            for raw in items:
+                if not isinstance(raw, dict):
+                    continue
+                relative = str(raw.get("relative_path") or "").replace("\\", "/").strip("/")
+                row = by_relative.get(relative)
+                if row is None:
+                    raise MetadataCorrectionError("Eine ausgewählte Allgemein-Datei wurde nicht gefunden.")
+                candidate = source_candidate(row)
+                source = safe_source(root, relative)
+                prepared.append({
+                    "context": context,
+                    "job_ids": None,
+                    "row": row,
+                    "source": source,
+                    "candidate": candidate,
+                    "family_id": None,
+                })
+
+        if len(prepared) != len(items):
+            raise MetadataCorrectionError("Die Mehrfachauswahl enthält ungültige Einträge.")
+
+        completed: list[dict[str, Any]] = []
+        touched_families: list[tuple[LibraryContext, str, str]] = []
+        for item in prepared:
+            context = item["context"]
+            row = item["row"]
+            candidate = item["candidate"]
+            task = execute_metadata_correction(
+                context.database_path,
+                area=area,
+                relative_path=str(row.get("relative_path") or ""),
+                family_id=item["family_id"],
+                proposed_datetime=str(candidate["normalized_datetime"])[:19],
+                workspace_root=context.workspace_root,
+                library_id=context.library_id,
+                library_name=context.display_name,
+                allowed_job_ids=item["job_ids"],
+                proposal_source_tag=str(candidate.get("tag_name") or ""),
+                _prevalidated_row=row,
+                _prevalidated_source=item["source"],
+            )
+            completed.append(task)
+            if area == "library":
+                detected = dict(task.get("detected") or {})
+                job_id = str(detected.get("job_id") or "")
+                family_key = str(detected.get("family_key") or "")
+                if job_id and family_key:
+                    touched_families.append((context, job_id, family_key))
+
+        if touched_families:
+            databases = [
+                Path(str(row["database_path"]))
+                for row in list_libraries(
+                    REGISTRY_DATABASE_FILE,
+                    active_only=False,
+                    registered_only=True,
+                )
+                if str(row.get("database_path") or "").strip()
+            ]
+            for context, job_id, family_key in touched_families:
+                propagate_corrected_family(
+                    context.database_path,
+                    databases,
+                    job_id=job_id,
+                    family_key=family_key,
+                )
+            synchronize_global_central_stock()
+
+        return {
+            "tasks": completed,
+            "count": len(completed),
+            "source_type": source_type,
+        }
+    except (
+        MetadataCorrectionError,
+        MetadataError,
+        GlobalStockError,
+        LibraryRegistryError,
+        ValueError,
+        OSError,
+    ) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.post("/api/metadata-correction/correct", tags=["Metadatenkorrektur"])
 def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     """Write and verify one explicitly confirmed correction in one request."""
