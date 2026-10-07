@@ -206,8 +206,12 @@ def _compute_event_plan(
             raise EventChangeRequestError("Unterereignisse dürfen sich zeitlich nicht überschneiden.")
     if preview.get('subevents'):
         from app.subevents import normalize_subevents
-        normalized_child_segments=normalize_subevents(preview['subevents'],
-            f"{preview['start_date']}T{preview.get('start_time') or '00:00'}:00",f"{preview['end_date']}T{preview.get('end_time') or '23:59'}:59")
+        normalized_child_segments=normalize_subevents(
+            preview['subevents'],
+            f"{preview['start_date']}T{preview.get('start_time') or '00:00'}:00",
+            f"{preview['end_date']}T{preview.get('end_time') or '23:59'}:59",
+            naming=preview.get("folder_naming"),
+        )
         normalized_child_segments=[{**s,'folder':s['folder_name']} for s in normalized_child_segments]
     preserve_day_folders = bool(preview.get("preserve_day_folders"))
     start_date = str(preview.get("start_date") or str(event["start_datetime"] or "")[:10])
