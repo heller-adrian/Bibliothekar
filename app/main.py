@@ -287,7 +287,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.42.0"
+DEPLOYMENT_VERSION = "0.42.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -10790,7 +10790,15 @@ def index() -> str:
       }
 
       const data = await response.json();
-      jobHistoryJobs = data.jobs || [];
+      const hiddenMetadataTransferOperations = new Set([
+        "metadata_general_import",
+        "metadata_multiple_import"
+      ]);
+      jobHistoryJobs = (data.jobs || []).filter(
+        job => !hiddenMetadataTransferOperations.has(
+          String(job.operation || "")
+        )
+      );
 
       if (jobHistoryJobs.length === 0) {
         jobsElement.innerHTML = `
