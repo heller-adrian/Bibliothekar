@@ -7234,6 +7234,12 @@ def api_event_preview(
         event_id=str(payload.get("existing_parent_event_id") or "").strip() or None,
     )
     try:
+        with database_connection(current_database_file()) as connection:
+            membership = resolve_payload_membership(connection, payload)
+        payload = {
+            **payload,
+            "selected_family_ids": membership["canonical_family_ids"],
+        }
         available_families = _available_families_for_event_payload(job_id, payload)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -7253,6 +7259,7 @@ def api_event_preview(
     return {
         "job_id": job_id,
         "preview": preview,
+        "membership": membership,
     }
 
 
