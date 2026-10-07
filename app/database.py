@@ -1985,6 +1985,13 @@ def list_job_day_groups(
 
             WHERE job_id = ?
               AND selected_capture_time IS NOT NULL
+              AND NOT (
+                  current_root_kind='shared_workspace'
+                  AND (
+                      current_relative_path='Ohne_Datum'
+                      OR current_relative_path LIKE 'Ohne_Datum/%'
+                  )
+              )
               {exclusion_sql}
 
             GROUP BY
@@ -2024,7 +2031,16 @@ def list_job_day_groups(
             FROM files
 
             WHERE job_id = ?
-              AND selected_capture_time IS NULL
+              AND (
+                  selected_capture_time IS NULL
+                  OR (
+                      current_root_kind='shared_workspace'
+                      AND (
+                          current_relative_path='Ohne_Datum'
+                          OR current_relative_path LIKE 'Ohne_Datum/%'
+                      )
+                  )
+              )
               {exclusion_sql}
             """,
             (job_id, *exclusion_params),
