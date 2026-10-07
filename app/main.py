@@ -8302,6 +8302,151 @@ def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.post("/api/metadata-correction/general/reintegrate", tags=["Metadatenkorrektur"], status_code=202)
+def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    """Queue selected corrected General files for the verified day-stock import path."""
+    raw_items = payload.get("items")
+    values = raw_items if isinstance(raw_items, list) else [payload]
+    relatives: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        if not isinstance(raw, dict):
+            continue
+        value = str(raw.get("relative_path") or "").replace("\\", "/").strip("/")
+        path = Path(value)
+        if (
+            not value
+            or path.is_absolute()
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or value in seen
+        ):
+            continue
+        seen.add(value)
+        relatives.append(path.as_posix())
+    if not relatives:
+        raise HTTPException(status_code=422, detail="Keine Allgemein-Datei zum Einsortieren ausgewählt.")
+
+    context = current_library_context()
+    try:
+        scan = scan_metadata_area(
+            area="general",
+            workspace_root=context.workspace_root,
+            library_id=context.library_id,
+            database_path=context.database_path,
+            library_name=context.display_name,
+        )
+        by_relative = {
+            str(row.get("relative_path") or ""): dict(row)
+            for row in (scan.get("files") or [])
+        }
+        area_paths = metadata_area_paths(
+            area="general",
+            workspace_root=context.workspace_root,
+            library_id=context.library_id,
+            create=True,
+        )
+        general_root = area_paths["root"].resolve(strict=False)
+        selected: list[tuple[str, Path, dict[str, Any]]] = []
+        for relative in relatives:
+            row = by_relative.get(relative)
+            if row is None:
+                raise MetadataCorrectionError(
+                    "Die ausgewählte Allgemein-Datei wurde nicht gefunden: " + relative
+                )
+            if (
+                not str(row.get("selected_capture_time") or "").strip()
+                or str(row.get("capture_time_confidence") or "")
+                not in {"high", "medium"}
+            ):
+                raise MetadataCorrectionError(
+                    "Vor der Übernahme in den Tagesbestand muss jede ausgewählte Datei eine belastbare Aufnahmezeit besitzen."
+                )
+            source = (general_root / Path(relative)).resolve(strict=False)
+            source.relative_to(general_root)
+            if not source.is_file() or source.is_symlink():
+                raise MetadataCorrectionError("Allgemein-Datei fehlt: " + relative)
+            selected.append((relative, source, row))
+
+        # A known camera original is not imported as a new source merely
+        # because its metadata bytes were corrected in Allgemein.
+        known_original_sha = {
+            str(row.get("sha256") or "")
+            for row in list_imported_media_origins(DATABASE_FILE)
+            if str(row.get("sha256") or "")
+        }
+        with database_connection(context.database_path) as connection:
+            for relative, source, _row in selected:
+                current_sha = sha256_file(source)
+                correction = connection.execute(
+                    """SELECT source_sha256
+                       FROM metadata_corrections
+                       WHERE area='general'
+                         AND source_relative_path=?
+                         AND status='completed'
+                       ORDER BY COALESCE(completed_at,created_at) DESC
+                       LIMIT 1""",
+                    (relative,),
+                ).fetchone()
+                original_sha = str(correction["source_sha256"] or "") if correction else ""
+                if current_sha in known_original_sha or (
+                    original_sha and original_sha in known_original_sha
+                ):
+                    raise MetadataCorrectionError(
+                        "Diese Datei gehört bereits zu einem bekannten Kameraimport. "
+                        "Es wird keine neue Sicherung/Provenienz angelegt; bitte die bekannte Aufnahme im Bibliotheksbestand korrigieren."
+                    )
+
+        metadata_root = storage_paths(context.workspace_root)["metadata_root"].resolve(strict=False)
+        stage_parent = (metadata_root / ".general-import").resolve(strict=False)
+        stage_parent.mkdir(parents=True, exist_ok=True)
+        job_id = datetime.now().astimezone().strftime("GENERAL_IMPORT_%Y%m%d_%H%M%S_%f")
+        stage = (stage_parent / job_id).resolve(strict=False)
+        stage.mkdir(parents=True, exist_ok=False)
+        try:
+            for relative, source, _row in selected:
+                target = (stage / Path(relative)).resolve(strict=False)
+                target.relative_to(stage)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+                if (
+                    int(target.stat().st_size) != int(source.stat().st_size)
+                    or sha256_file(target) != sha256_file(source)
+                ):
+                    raise MetadataCorrectionError(
+                        "Staging-Kopie konnte nicht verifiziert werden: " + relative
+                    )
+            signature = quick_source_signature(stage)
+            job = create_job(
+                DATABASE_FILE,
+                job_id=job_id,
+                kind="sd_import",
+                trigger_type="manual",
+                source_path=str(stage),
+                working_path=str(workspace_backup_root(WORKSPACE_PATH)),
+                operation="metadata_general_import",
+                source_volume_label="Metadatenkorrektur · Allgemein",
+                source_signature=signature,
+                source_device_id=None,
+            )
+        except Exception:
+            shutil.rmtree(stage, ignore_errors=True)
+            raise
+
+        return {
+            "queued": True,
+            "job": job,
+            "file_count": len(selected),
+        }
+    except (
+        MetadataCorrectionError,
+        MetadataError,
+        LibraryRegistryError,
+        ValueError,
+        OSError,
+    ) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.post("/api/metadata-correction/reintegrate", tags=["Metadatenkorrektur"])
 def api_reintegrate_metadata_families(payload: dict[str, Any]) -> dict[str, Any]:
     """Explicitly move corrected Ohne_Datum families into canonical day stock."""
