@@ -209,7 +209,8 @@ def test_0340_ui_has_preview_apply_and_import_flow():
 def test_0340_worker_supports_managed_multiple_import():
     source = Path("app/main.py").read_text(encoding="utf-8")
     assert '"metadata_multiple_import"' in source
-    assert "allow_workspace_source=managed_multiple_import" in source
+    assert "managed_metadata_import = managed_multiple_import or managed_general_import" in source
+    assert "allow_workspace_source=managed_metadata_import" in source
     assert "imported_source_files" in source
     assert "Mehrfachkorrektur-Import verweist auf einen unerwarteten Quellordner." in source
 
