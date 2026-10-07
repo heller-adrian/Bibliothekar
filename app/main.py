@@ -8228,6 +8228,7 @@ def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                 library_id=context.library_id,
                 library_name=context.display_name,
                 allowed_job_ids=job_ids,
+                proposal_source_tag=str(payload.get("proposal_source_tag") or "") or None,
             )
         elif area == "general":
             context = current_library_context()
@@ -8240,6 +8241,7 @@ def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                 workspace_root=context.workspace_root,
                 library_id=context.library_id,
                 library_name=context.display_name,
+                proposal_source_tag=str(payload.get("proposal_source_tag") or "") or None,
             )
         else:
             raise MetadataCorrectionError(
