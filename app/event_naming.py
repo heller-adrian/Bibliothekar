@@ -224,6 +224,7 @@ def _render_legacy_subevent_prefix(
     end: str,
     name: str,
     prefix_enabled: bool,
+    include_year: bool,
 ) -> str:
     if not prefix_enabled or mode == "none":
         return name
@@ -233,8 +234,8 @@ def _render_legacy_subevent_prefix(
             f"{end[5:16].replace('T', ' ').replace(':', '-')} - {name}"
         )
 
-    start_date = start[5:10]
-    end_date = end[5:10]
+    start_date = _date_token(start[:10], include_year=include_year)
+    end_date = _date_token(end[:10], include_year=include_year)
     if mode == "date":
         prefix = start_date
     elif mode == "date_range":
@@ -272,6 +273,13 @@ def render_subevent_folder_name(
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", end):
         raise EventNamingError("Ungültiges Ende für Unterereignis.")
 
+    parent_start = str(parent_start_datetime or start)[:19]
+    parent_end = str(parent_end_datetime or end)[:19]
+    cross_year = (
+        start[:4] != end[:4]
+        or parent_start[:4] != parent_end[:4]
+    )
+
     legacy_mode = str(raw.get("subevent_prefix_mode") or "").strip().lower()
     if legacy_mode:
         return _render_legacy_subevent_prefix(
@@ -280,17 +288,12 @@ def render_subevent_folder_name(
             end=end,
             name=name,
             prefix_enabled=normalized["subevent_prefix_enabled"],
+            include_year=cross_year,
         )
 
     if not normalized["subevent_prefix_enabled"]:
         return name
 
-    parent_start = str(parent_start_datetime or start)[:19]
-    parent_end = str(parent_end_datetime or end)[:19]
-    cross_year = (
-        start[:4] != end[:4]
-        or parent_start[:4] != parent_end[:4]
-    )
     include_year = normalized["subevent_include_year"] or cross_year
     start_date = _date_token(start[:10], include_year=include_year)
     end_date = _date_token(end[:10], include_year=include_year)
