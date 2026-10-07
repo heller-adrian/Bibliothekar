@@ -1900,6 +1900,66 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function validIsoDateText(value) {
+      const text=String(value||"").trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(text))return false;
+      const date=new Date(text+"T12:00:00");
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0,10)===text;
+    }
+
+    function openOptionalDatePicker(input) {
+      if(!input)return;
+      const picker=document.createElement("input");
+      picker.type="date";
+      picker.value=validIsoDateText(input.value) ? input.value : "";
+      const min=String(input.dataset.dateMin||input.min||"");
+      const max=String(input.dataset.dateMax||input.max||"");
+      if(min)picker.min=min;
+      if(max)picker.max=max;
+      picker.style.position="fixed";
+      picker.style.left="50%";
+      picker.style.bottom="12px";
+      picker.style.width="2px";
+      picker.style.height="2px";
+      picker.style.opacity=".01";
+      picker.style.zIndex="99999";
+      document.body.appendChild(picker);
+      let finished=false;
+      const cleanup=()=>{
+        if(finished)return;
+        finished=true;
+        setTimeout(()=>picker.remove(),0);
+      };
+      picker.addEventListener("change",()=>{
+        if(picker.value){
+          input.value=picker.value;
+          input.dispatchEvent(new Event("change",{bubbles:true}));
+          input.dispatchEvent(new Event("input",{bubbles:true}));
+        }
+        cleanup();
+      },{once:true});
+      picker.addEventListener("blur",()=>setTimeout(cleanup,250),{once:true});
+      picker.focus({preventScroll:true});
+      try{
+        if(typeof picker.showPicker==="function")picker.showPicker();
+        else picker.click();
+      }catch(_){
+        picker.click();
+      }
+    }
+
+    document.addEventListener("click",event=>{
+      const button=event.target.closest?.("[data-date-picker-target],[data-date-picker-inline]");
+      if(!button)return;
+      event.preventDefault();
+      const id=String(button.dataset.datePickerTarget||"");
+      const input=id
+        ? document.getElementById(id)
+        : button.parentElement?.querySelector("input[type='text']");
+      openOptionalDatePicker(input);
+    });
+
+
     function setStatus(
       message,
       isError = false
@@ -3878,9 +3938,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function subeventDayControl(attribute, displayAttribute, selected, label){
+      const bounds=subeventBounds();
       const days=subeventAllowedDays();
       const current=days.includes(selected) ? selected : (days[0]||selected||"");
-      return `<label><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:58px minmax(82px,1fr);gap:6px"><select ${attribute}>${subeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+      return `<label><span>${escapeHtml(label)}</span><span class="date-entry"><input ${attribute} type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="\\d{4}-\\d{2}-\\d{2}" data-date-min="${escapeHtml(bounds.minDate||"")}" data-date-max="${escapeHtml(bounds.maxDate||"")}" value="${escapeHtml(current)}"><button type="button" class="date-picker-button" data-date-picker-inline aria-label="${escapeHtml(label)} im Kalender wählen">📅</button></span></label>`;
     }
     function minuteAfter(value){
       const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
@@ -3936,22 +3997,18 @@ WORKSPACE_HTML = r"""<!doctype html>
       const allowed=subeventAllowedDays();
       if(!bounds.minDate||!bounds.maxDate||!allowed.length)return;
       for(const row of createSubeventList.querySelectorAll("[data-create-subevent]")){
-        for(const [selector,displaySelector] of [
-          ["[data-create-child-start-date]","[data-create-child-start-month-year]"],
-          ["[data-create-child-end-date]","[data-create-child-end-month-year]"],
+        for(const selector of [
+          "[data-create-child-start-date]",
+          "[data-create-child-end-date]",
         ]){
           const control=row.querySelector(selector);
           if(!control)continue;
-          let value=control.value;
-          if(!allowed.includes(value)){
-            if(!value || value<bounds.minDate)value=bounds.minDate;
-            else if(value>bounds.maxDate)value=bounds.maxDate;
-            else value=allowed[0];
-          }
-          control.innerHTML=subeventDayOptions(value);
+          control.dataset.dateMin=bounds.minDate;
+          control.dataset.dateMax=bounds.maxDate;
+          let value=String(control.value||"");
+          if(!validIsoDateText(value) || value<bounds.minDate)value=bounds.minDate;
+          else if(value>bounds.maxDate)value=bounds.maxDate;
           control.value=value;
-          const display=row.querySelector(displaySelector);
-          if(display)display.value=monthYearForIso(value);
         }
       }
     }
