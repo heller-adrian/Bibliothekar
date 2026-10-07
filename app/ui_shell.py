@@ -5334,10 +5334,27 @@ BIBLIOTHEKAR_JS = r"""
     const bridge=standalone
       ? 0
       : (parseFloat(getComputedStyle(shell).getPropertyValue("--bk-page-bridge-height"))||0);
-    root.style.setProperty("--bk-shell-sticky-height", Math.ceil(shell.getBoundingClientRect().height + bridge) + "px");
+    const shellHeight=Math.ceil(shell.getBoundingClientRect().height + bridge);
+    root.style.setProperty("--bk-shell-sticky-height", shellHeight + "px");
+
+    const subnav=document.querySelector(".bk-workspace-subnav");
+    const subnavHeight=subnav
+      ? Math.ceil(subnav.getBoundingClientRect().height)
+      : 0;
+    root.style.setProperty(
+      "--bk-secondary-sticky-bottom",
+      (shellHeight + subnavHeight) + "px"
+    );
   }
   syncShellStickyHeight();
   window.addEventListener("resize", syncShellStickyHeight);
+  if(typeof ResizeObserver==="function"){
+    const stickyObserver=new ResizeObserver(()=>syncShellStickyHeight());
+    const shell=document.querySelector(".bk-shell");
+    const subnav=document.querySelector(".bk-workspace-subnav");
+    if(shell)stickyObserver.observe(shell);
+    if(subnav)stickyObserver.observe(subnav);
+  }
   if(document.fonts?.ready)document.fonts.ready.then(syncShellStickyHeight).catch(()=>{});
 
   document.querySelectorAll(".bk-tab").forEach(tab => {
