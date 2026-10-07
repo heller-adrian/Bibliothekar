@@ -127,12 +127,12 @@ TRANSFER_HTML = r'''<!doctype html>
   <div class="grid summary">
     <div class="card"><span class="muted">Offene Prüfungen</span><strong id="candidate-count">–</strong></div>
     <div class="card"><span class="muted">Vollständig geprüft</span><strong id="verified-count">–</strong></div>
-    <div class="card"><span class="muted">SSD freigegeben</span><strong id="released-count">–</strong></div>
+    <div class="card"><span class="muted">Arbeitsbereich freigegeben</span><strong id="released-count">–</strong></div>
     <div class="card"><span class="muted">Gesperrt</span><strong id="blocked-count">–</strong></div>
   </div>
 
   <section>
-    <div class="section-head"><div class="bk-section-title-row"><h2 class="bk-title-help" tabindex="0" role="button" aria-expanded="false" data-bk-title-help data-help="Neu angewendete Ereignisse werden hier geprüft und anschließend von der SSD freigegeben. Neueste Ereignisse stehen zuerst.">Zur Archivprüfung</h2></div></div>
+    <div class="section-head"><div class="bk-section-title-row"><h2 class="bk-title-help" tabindex="0" role="button" aria-expanded="false" data-bk-title-help data-help="Neu angewendete Ereignisse werden hier geprüft und anschließend von der Arbeitsbereich freigegeben. Neueste Ereignisse stehen zuerst.">Zur Archivprüfung</h2></div></div>
     <div id="archive-notice" class="notice" hidden></div>
     <div id="archive-list" class="list"><div class="empty">Wird geladen …</div></div>
   </section>
@@ -193,7 +193,7 @@ TRANSFER_HTML = r'''<!doctype html>
     releasedCount.textContent=summary.released_count||0;
     blockedCount.textContent=summary.blocked_count||0;
     archiveNotice.hidden=summary.archive_readable;
-    archiveNotice.textContent=summary.archive_readable?'':`Kamerabibliothek ist noch nicht read-only unter ${summary.archive_root} eingebunden. Die Verwaltungsseite ist bereit; die Prüfung und SSD-Freigabe bleiben bis zur Einbindung gesperrt.`;
+    archiveNotice.textContent=summary.archive_readable?'':`Kamerabibliothek ist noch nicht read-only unter ${summary.archive_root} eingebunden. Die Verwaltungsseite ist bereit; die Prüfung und Arbeitsbereich-Freigabe bleiben bis zur Einbindung gesperrt.`;
     archiveList.innerHTML=''; historyList.innerHTML='';
     const open=(summary.candidates||[]).filter(item=>!item.released);
     const history=(summary.candidates||[]).filter(item=>item.released);
@@ -201,21 +201,21 @@ TRANSFER_HTML = r'''<!doctype html>
     for(const item of open){
       const card=document.createElement('article');card.className='card archive-check-card';
       const verification=item.released
-        ?'SSD freigegeben'
+        ?'Arbeitsbereich freigegeben'
         :(item.verified
           ?'Vollständig geprüft'
           :(item.verification_invalidated?'Erneut prüfen':(item.verification_status||'Noch nicht geprüft')));
       const releaseDisabled=!item.ssd_release_ready;
-      const releaseLabel=item.released?'SSD freigegeben':'SSD freigeben';
+      const releaseLabel=item.released?'Arbeitsbereich freigegeben':'Arbeitsbereich freigeben';
       card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge ${(item.verified||item.released)?'success':'warning'}">${escapeHtml(verification)}</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div><div class="actions"><button class="verify archive-verify-button" ${summary.archive_readable?'':'disabled'}>Archiv prüfen</button><button class="release" ${releaseDisabled?'disabled':''}>${releaseLabel}</button></div><div class="result" hidden></div>`;
       const result=card.querySelector('.result');
       const verifyButton=card.querySelector('.verify');
       const releaseButton=card.querySelector('.release');
       verifyButton.addEventListener('click',async(event)=>{event.currentTarget.disabled=true;result.hidden=false;result.textContent='Kamerabibliothek wird vollständig per Größe und SHA-256 geprüft …';try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/archive-verify`);result.className=`result ${data.verified?'success':'danger'}`;result.textContent=`${data.message} ${data.verified_file_count}/${data.file_count} Dateien bestätigt; ${data.missing_file_count} fehlen; ${data.mismatched_file_count} weichen ab.`;await load();}catch(error){result.className='result danger';result.textContent=error.message;event.currentTarget.disabled=false;}});
       releaseButton.addEventListener('click',async(event)=>{
-        if(!confirm(`SSD-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im SSD-Arbeitsbereich entfernt.`))return;
-        event.currentTarget.disabled=true;verifyButton.disabled=true;result.hidden=false;result.className='result';result.textContent='Kamerabibliothek und SSD-Dateien werden erneut per SHA-256 geprüft. Anschließend wird nur der bestätigte SSD-Ereignisbestand entfernt …';
-        try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);result.className='result success';result.textContent=`${data.message} ${Number(data.file_count||0)} Dateien geprüft; ${Number(data.deleted_file_count||0)} SSD-Dateien entfernt.`;await load();}
+        if(!confirm(`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.`))return;
+        event.currentTarget.disabled=true;verifyButton.disabled=true;result.hidden=false;result.className='result';result.textContent='Kamerabibliothek und Arbeitsbereich-Dateien werden erneut per SHA-256 geprüft. Anschließend wird nur der bestätigte SSD-Ereignisbestand entfernt …';
+        try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);result.className='result success';result.textContent=`${data.message} ${Number(data.file_count||0)} Dateien geprüft; ${Number(data.deleted_file_count||0)} Arbeitsbereich-Dateien entfernt.`;await load();}
         catch(error){result.className='result danger';result.textContent=error.message;event.currentTarget.disabled=false;verifyButton.disabled=false;}
       });
       archiveList.appendChild(card);
@@ -223,7 +223,7 @@ TRANSFER_HTML = r'''<!doctype html>
     if(!history.length) historyList.innerHTML='<div class="empty">Noch keine freigegebenen Ereignisse im Verlauf.</div>';
     for(const item of history){
       const card=document.createElement('article');card.className='card';
-      card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">SSD freigegeben</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div>`;
+      card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">Arbeitsbereich freigegeben</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div>`;
       historyList.appendChild(card);
     }
   }
