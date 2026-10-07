@@ -3695,6 +3695,108 @@ BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 """
 
 
+BIBLIOTHEKAR_0424_CSS = r"""
+@keyframes bk-pwa-select-wobble {
+  0% { transform: translateX(0); }
+  24% { transform: translateX(-2px); }
+  48% { transform: translateX(2px); }
+  72% { transform: translateX(-1px); }
+  100% { transform: translateX(0); }
+}
+
+@media (max-width: 820px) {
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {
+    position: relative;
+    transform-origin: center center;
+    will-change: transform;
+  }
+
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
+    z-index: 2;
+    animation: bk-pwa-select-wobble .28s ease-out;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog[open] {
+    box-sizing: border-box;
+    color: var(--bk-ink, #172235);
+    background: var(--bk-surface, #fff);
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.full-detail[open] {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    width: 100dvw;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    overflow: hidden;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.full-detail::backdrop {
+    background: rgb(10 20 30 / .28);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection[open] {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: auto 10px calc(72px + env(safe-area-inset-bottom)) 10px;
+    width: auto;
+    max-width: none;
+    max-height: 44dvh;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--bk-line, #ccd2d8);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 12px 38px rgb(0 0 0 / .24);
+    z-index: 6200;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog .meta-mobile-dialog-head {
+    flex: 0 0 auto;
+    padding:
+      max(12px, env(safe-area-inset-top))
+      14px
+      12px;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection .meta-mobile-dialog-head {
+    padding: 10px 12px;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog .meta-mobile-dialog-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 12px 14px calc(30px + env(safe-area-inset-bottom));
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection .meta-mobile-dialog-body {
+    padding: 10px 12px 14px;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection #meta-detail-card > strong:first-child,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection #multi-detail-card > strong:first-child,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.full-detail #meta-detail-card > strong:first-child,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.full-detail #multi-detail-card > strong:first-child {
+    display: none;
+  }
+}
+"""
+
 BIBLIOTHEKAR_JS = r"""
 (() => {
   const root = document.documentElement;
@@ -3708,6 +3810,35 @@ BIBLIOTHEKAR_JS = r"""
   let bkPwaSelectGesture = null;
   let bkPwaSuppressClickUntil = 0;
 
+  function bkPwaCardKey(card) {
+    if (!card) return "";
+    return String(
+      card.dataset.bkPwaKey
+      || card.dataset.bkSelectionKey
+      || card.dataset.metaFile
+      || card.dataset.multiFile
+      || ""
+    );
+  }
+
+  function bkPwaGroupCards(group) {
+    return [...document.querySelectorAll("[data-bk-pwa-select]")]
+      .filter(card => String(card.dataset.bkPwaSelect || "") === String(group || ""));
+  }
+
+  function bkPwaFindCard(group, key) {
+    return bkPwaGroupCards(group)
+      .find(card => bkPwaCardKey(card) === String(key || "")) || null;
+  }
+
+  function bkPwaCardSelected(card) {
+    if (!card) return false;
+    if (card.classList.contains("selected")) return true;
+    if (card.getAttribute("aria-selected") === "true") return true;
+    const checkbox = card.querySelector('input[type="checkbox"]');
+    return Boolean(checkbox?.checked);
+  }
+
   function bkPwaSelectPulse(card) {
     if (!card) return;
     card.classList.remove("bk-pwa-select-wobble");
@@ -3716,23 +3847,143 @@ BIBLIOTHEKAR_JS = r"""
     window.setTimeout(() => card.classList.remove("bk-pwa-select-wobble"), 320);
   }
 
-  function bkPwaDispatchSelect(card, phase) {
+  function bkPwaDispatchSelect(card, phase, selected=null) {
     if (!card) return;
     card.dispatchEvent(new CustomEvent("bk:pwa-select", {
       bubbles: false,
-      detail: {phase}
+      detail: {
+        phase,
+        selected,
+        key: bkPwaCardKey(card)
+      }
     }));
-    if (phase !== "end") bkPwaSelectPulse(card);
+    if (phase !== "end") {
+      const live = bkPwaFindCard(
+        String(card.dataset.bkPwaSelect || ""),
+        bkPwaCardKey(card)
+      ) || card;
+      bkPwaSelectPulse(live);
+    }
+  }
+
+  function bkPwaNearestCard(group, x, y) {
+    const direct = document.elementFromPoint(x, y)
+      ?.closest?.("[data-bk-pwa-select]");
+    if (
+      direct
+      && String(direct.dataset.bkPwaSelect || "") === String(group || "")
+    ) {
+      return direct;
+    }
+
+    const cards = bkPwaGroupCards(group)
+      .map(card => ({card, rect: card.getBoundingClientRect()}))
+      .filter(item => (
+        item.rect.bottom > 0
+        && item.rect.top < window.innerHeight
+      ));
+    if (!cards.length) return null;
+
+    cards.sort((a, b) => {
+      const aY = Math.max(a.rect.top, Math.min(y, a.rect.bottom));
+      const bY = Math.max(b.rect.top, Math.min(y, b.rect.bottom));
+      const aX = Math.max(a.rect.left, Math.min(x, a.rect.right));
+      const bX = Math.max(b.rect.left, Math.min(x, b.rect.right));
+      return (
+        Math.hypot(x - aX, y - aY)
+        - Math.hypot(x - bX, y - bY)
+      );
+    });
+    return cards[0]?.card || null;
+  }
+
+  function bkPwaApplyRange(gesture, currentKey) {
+    if (!gesture?.active || !currentKey) return;
+    const cards = bkPwaGroupCards(gesture.group);
+    const keys = cards.map(bkPwaCardKey);
+    const startIndex = keys.indexOf(gesture.startKey);
+    const currentIndex = keys.indexOf(String(currentKey));
+    if (startIndex < 0 || currentIndex < 0) return;
+
+    const lo = Math.min(startIndex, currentIndex);
+    const hi = Math.max(startIndex, currentIndex);
+    const nextRange = new Set(keys.slice(lo, hi + 1));
+    const changedKeys = new Set([
+      ...gesture.rangeKeys,
+      ...nextRange
+    ]);
+
+    for (const key of changedKeys) {
+      const wasInRange = gesture.rangeKeys.has(key);
+      const isInRange = nextRange.has(key);
+      if (wasInRange === isInRange) continue;
+
+      const card = bkPwaFindCard(gesture.group, key);
+      if (!card) continue;
+      const desired = isInRange
+        ? true
+        : Boolean(gesture.baseline.get(key));
+      bkPwaDispatchSelect(card, "set", desired);
+    }
+
+    gesture.rangeKeys = nextRange;
+    gesture.lastKey = String(currentKey);
+  }
+
+  function bkPwaUpdateGesturePoint(gesture) {
+    if (!gesture?.active) return;
+    const card = bkPwaNearestCard(
+      gesture.group,
+      gesture.lastX,
+      gesture.lastY
+    );
+    if (!card) return;
+    const key = bkPwaCardKey(card);
+    if (!key) return;
+    bkPwaApplyRange(gesture, key);
+  }
+
+  function bkPwaAutoScrollSpeed(y) {
+    const topEdge = Math.max(
+      92,
+      Number.parseFloat(
+        getComputedStyle(root).getPropertyValue("--bk-shell-sticky-height")
+      ) || 92
+    ) + 34;
+    const bottomEdge = window.innerHeight - 104;
+    if (y < topEdge) {
+      const ratio = Math.min(1, (topEdge - y) / 92);
+      return -(5 + ratio * 17);
+    }
+    if (y > bottomEdge) {
+      const ratio = Math.min(1, (y - bottomEdge) / 92);
+      return 5 + ratio * 17;
+    }
+    return 0;
+  }
+
+  function bkPwaSelectionFrame() {
+    const gesture = bkPwaSelectGesture;
+    if (!gesture?.active) return;
+    const speed = bkPwaAutoScrollSpeed(gesture.lastY);
+    if (speed) {
+      window.scrollBy(0, speed);
+    }
+    bkPwaUpdateGesturePoint(gesture);
+    gesture.frame = window.requestAnimationFrame(bkPwaSelectionFrame);
   }
 
   function bkPwaFinishGesture() {
-    if (!bkPwaSelectGesture) return;
-    window.clearTimeout(bkPwaSelectGesture.timer);
-    if (bkPwaSelectGesture.active) {
-      bkPwaDispatchSelect(
-        bkPwaSelectGesture.lastCard || bkPwaSelectGesture.startCard,
-        "end"
-      );
+    const gesture = bkPwaSelectGesture;
+    if (!gesture) return;
+    window.clearTimeout(gesture.timer);
+    if (gesture.frame) window.cancelAnimationFrame(gesture.frame);
+    if (gesture.active) {
+      const card = bkPwaFindCard(
+        gesture.group,
+        gesture.lastKey || gesture.startKey
+      ) || bkPwaFindCard(gesture.group, gesture.startKey);
+      bkPwaDispatchSelect(card, "end", null);
       bkPwaSuppressClickUntil = Date.now() + 650;
       document.body?.classList.remove("bk-pwa-selecting");
     }
@@ -3746,20 +3997,40 @@ BIBLIOTHEKAR_JS = r"""
     if (!card) return;
     const touch = event.touches[0];
     const group = String(card.dataset.bkPwaSelect || "");
+    const startKey = bkPwaCardKey(card);
+    if (!group || !startKey) return;
+
     const gesture = {
-      startCard: card,
-      lastCard: card,
       group,
+      startKey,
+      lastKey: startKey,
       startX: touch.clientX,
       startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
       active: false,
-      timer: null
+      timer: null,
+      frame: null,
+      baseline: new Map(),
+      rangeKeys: new Set()
     };
     gesture.timer = window.setTimeout(() => {
       if (bkPwaSelectGesture !== gesture) return;
       gesture.active = true;
+      for (const item of bkPwaGroupCards(group)) {
+        gesture.baseline.set(
+          bkPwaCardKey(item),
+          bkPwaCardSelected(item)
+        );
+      }
+      gesture.rangeKeys = new Set([startKey]);
       document.body?.classList.add("bk-pwa-selecting");
-      bkPwaDispatchSelect(card, "start");
+      bkPwaDispatchSelect(
+        bkPwaFindCard(group, startKey) || card,
+        "start",
+        true
+      );
+      gesture.frame = window.requestAnimationFrame(bkPwaSelectionFrame);
       try { window.navigator.vibrate?.(12); } catch (_) {}
     }, 380);
     bkPwaSelectGesture = gesture;
@@ -3769,6 +4040,8 @@ BIBLIOTHEKAR_JS = r"""
     const gesture = bkPwaSelectGesture;
     if (!gesture || event.touches.length !== 1) return;
     const touch = event.touches[0];
+    gesture.lastX = touch.clientX;
+    gesture.lastY = touch.clientY;
     if (!gesture.active) {
       const dx = touch.clientX - gesture.startX;
       const dy = touch.clientY - gesture.startY;
@@ -3779,19 +4052,7 @@ BIBLIOTHEKAR_JS = r"""
       return;
     }
     event.preventDefault();
-    const target = document.elementFromPoint(touch.clientX, touch.clientY);
-    const card = target?.closest?.("[data-bk-pwa-select]");
-    if (
-      card
-      && String(card.dataset.bkPwaSelect || "") === gesture.group
-      && card !== gesture.lastCard
-    ) {
-      gesture.lastCard = card;
-      bkPwaDispatchSelect(card, "enter");
-    }
-    const edge = 78;
-    if (touch.clientY > window.innerHeight - edge) window.scrollBy(0, 13);
-    else if (touch.clientY < edge) window.scrollBy(0, -13);
+    bkPwaUpdateGesturePoint(gesture);
   }, {passive: false, capture: true});
 
   document.addEventListener("touchend", bkPwaFinishGesture, {passive: true, capture: true});
@@ -5405,7 +5666,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0354_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0355_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0356_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0423_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0423_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0424_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
