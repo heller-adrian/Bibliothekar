@@ -4922,6 +4922,8 @@ EVENTS_HTML = r"""<!doctype html>
       const d=change.detected||{};
       structureChangeSubtitle.textContent=(d.status==="archived"?"Archiviert":"Angewendet")+" · "+String(d.event_name||change.event_id||"");
       const added=d.directory_added||[], removed=d.directory_removed||[], moves=d.file_moves||[];
+      const rootRename=d.root_rename||null;
+      const childRenames=d.child_renames||[];
       const structureEnabled=Boolean(d.proposed_structure_enabled);
       const rawInputOptions=d.input_options||[""];
       const inputOptions=structureEnabled
@@ -4945,8 +4947,10 @@ EVENTS_HTML = r"""<!doctype html>
         ...(d.unclassified_directories||[]).map(path=>`Strukturpfad nicht eindeutig · ${path}`),
         ...(d.inconsistent_leaf_layouts?["Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen."]:[])
       ];
-      const folderChangeCount=added.length+removed.length;
+      const folderChangeCount=added.length+removed.length+(rootRename?1:0)+childRenames.length;
       const folderChanges=[
+        ...(rootRename?[ `<div>↪ Ereignisordner: <code>${escapeHtml(rootRename.old_folder||rootRename.old_path||"")}</code><br><span class="muted">nach</span> <code>${escapeHtml(rootRename.new_folder||rootRename.new_path||"")}</code></div>` ]:[]),
+        ...childRenames.map(row=>`<div>↪ Unterereignisordner: <code>${escapeHtml(row.old_folder||"")}</code><br><span class="muted">nach</span> <code>${escapeHtml(row.new_folder||"")}</code></div>`),
         ...added.map(path=>`<div>＋ Ordner: <code>${escapeHtml(path)}</code></div>`),
         ...removed.map(path=>`<div>− Ordner: <code>${escapeHtml(path)}</code></div>`)
       ].join("");
