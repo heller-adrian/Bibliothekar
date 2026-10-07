@@ -345,6 +345,142 @@ def _snapshot_from_inventory(
     missing_ids = sorted(set(expected_files) - set(observed_known))
     duplicate_ids = sorted(file_id for file_id, count in known_counts.items() if count != 1)
 
+    expected_year = str(event.get("start_datetime") or "")[:4]
+    expected_folder = str(event.get("folder_name") or "").strip()
+    expected_root = (
+        PurePosixPath(expected_year, expected_folder).as_posix()
+        if expected_year and expected_folder
+        else ""
+    )
+
+    # Eine komplette manuelle Umbenennung des Ereignisordners wird durch den
+    # beim Inventarscan beobachteten gemeinsamen Root erkannt. event_inventory
+    # liefert den realen Prefix, event.json liefert zuvor die stabile Event-ID.
+    observed_roots: set[str] = set()
+    for observed in observed_known.values():
+        full = PurePosixPath(_safe_rel(observed.get("relative_path")))
+        rel = PurePosixPath(_safe_rel(observed.get("event_relative_path")))
+        if rel.parts and len(full.parts) > len(rel.parts):
+            prefix_parts = full.parts[:-len(rel.parts)]
+            if prefix_parts:
+                observed_roots.add(PurePosixPath(*prefix_parts).as_posix())
+
+    root_rename: dict[str, Any] | None = None
+    if len(observed_roots) == 1 and expected_root:
+        observed_root = next(iter(observed_roots))
+        observed_parts = PurePosixPath(observed_root).parts
+        expected_parts = PurePosixPath(expected_root).parts
+        if (
+            observed_root != expected_root
+            and len(observed_parts) == len(expected_parts) == 2
+            and observed_parts[0] == expected_parts[0]
+        ):
+            root_rename = {
+                "old_path": expected_root,
+                "new_path": observed_root,
+                "old_folder": expected_parts[-1],
+                "new_folder": observed_parts[-1],
+            }
+
+    # Unterereignisse besitzen einen eigenen ersten Pfadbestandteil. Wenn alle
+    # bekannten Dateien eines Unterereignisses geschlossen unter genau einem
+    # neuen, bisher nicht belegten Prefix wiedergefunden werden, ist dies eine
+    # eindeutige Ordnerumbenennung und keine Serie falscher Dateizuordnungen.
+    child_rows = [
+        dict(row)
+        for row in connection.execute(
+            """SELECT DISTINCT f.id AS file_id,
+                      assigned.id AS child_event_id,
+                      assigned.folder_name AS child_folder
+               FROM event_assignments ea
+               JOIN events assigned ON assigned.id=ea.event_id
+               JOIN files f
+                 ON (
+                    ea.file_id=f.id
+                    OR (
+                        ea.file_id IS NULL
+                        AND ea.family_id=f.family_id
+                    )
+                 )
+               WHERE assigned.parent_event_id=?
+               ORDER BY assigned.start_datetime,assigned.id,f.id""",
+            (event_id,),
+        ).fetchall()
+    ]
+    existing_child_folders = {
+        str(row["folder_name"] or "")
+        for row in connection.execute(
+            "SELECT folder_name FROM events WHERE parent_event_id=?",
+            (event_id,),
+        ).fetchall()
+        if str(row["folder_name"] or "")
+    }
+    child_groups: dict[str, dict[str, Any]] = {}
+    for row in child_rows:
+        child_id = str(row["child_event_id"])
+        group = child_groups.setdefault(
+            child_id,
+            {
+                "child_event_id": child_id,
+                "old_folder": str(row["child_folder"] or ""),
+                "file_ids": [],
+            },
+        )
+        group["file_ids"].append(int(row["file_id"]))
+
+    child_renames: list[dict[str, Any]] = []
+    child_rename_by_file: dict[int, tuple[str, str]] = {}
+    child_directory_map: dict[str, str] = {}
+    for group in child_groups.values():
+        old_folder = str(group["old_folder"] or "")
+        file_ids = [int(value) for value in group["file_ids"]]
+        if not old_folder or not file_ids or any(fid not in observed_known for fid in file_ids):
+            continue
+        candidates: set[str] = set()
+        valid = True
+        for file_id in file_ids:
+            parts = PurePosixPath(
+                _safe_rel(observed_known[file_id].get("event_relative_path"))
+            ).parts
+            if not parts:
+                valid = False
+                break
+            candidates.add(parts[0])
+        if not valid or len(candidates) != 1:
+            continue
+        new_folder = next(iter(candidates))
+        if (
+            new_folder == old_folder
+            or new_folder in existing_child_folders
+            or not new_folder
+        ):
+            continue
+        child_renames.append({
+            "child_event_id": str(group["child_event_id"]),
+            "old_folder": old_folder,
+            "new_folder": new_folder,
+        })
+        child_directory_map[new_folder] = old_folder
+        for file_id in file_ids:
+            child_rename_by_file[file_id] = (new_folder, old_folder)
+
+    def normalize_event_relative(file_id: int, value: Any) -> str:
+        raw = _safe_rel(value)
+        parts = list(PurePosixPath(raw).parts)
+        mapping = child_rename_by_file.get(int(file_id))
+        if mapping and parts and parts[0] == mapping[0]:
+            parts[0] = mapping[1]
+        return PurePosixPath(*parts).as_posix() if parts else ""
+
+    def normalize_directory(value: str) -> str:
+        raw = _safe_rel(value)
+        parts = list(PurePosixPath(raw).parts)
+        if parts and parts[0] in child_directory_map:
+            parts[0] = child_directory_map[parts[0]]
+        return PurePosixPath(*parts).as_posix() if parts else ""
+
+    normalized_dirs = [normalize_directory(value) for value in observed_dirs]
+
     file_moves = []
     placement_conflicts = []
     for file_id, observed in observed_known.items():
@@ -353,13 +489,22 @@ def _snapshot_from_inventory(
             continue
         old = _safe_rel(expected.get("current_relative_path"))
         new = _safe_rel(observed.get("relative_path"))
+        normalized_rel = normalize_event_relative(
+            file_id,
+            observed.get("event_relative_path"),
+        )
+        normalized_new = (
+            PurePosixPath(expected_root, normalized_rel).as_posix()
+            if expected_root and normalized_rel
+            else new
+        )
         expected_prefix = _expected_file_prefix(
             connection,
             event,
             file_id,
         )
         if expected_prefix and not _is_within_prefix(
-            new,
+            normalized_new,
             expected_prefix,
         ):
             placement_conflicts.append({
@@ -371,7 +516,10 @@ def _snapshot_from_inventory(
                 "sha256": str(observed.get("sha256") or ""),
                 "size_bytes": int(observed.get("size_bytes") or 0),
             })
-        if old != new:
+        # Reine Root-/Unterereignis-Renames werden nicht zusätzlich als viele
+        # einzelne Dateibewegungen dargestellt. Echte Organisationsbewegungen
+        # innerhalb des Blatts bleiben dagegen sichtbar.
+        if old != new and old != normalized_new:
             file_moves.append({
                 "file_id": file_id,
                 "family_id": observed.get("family_id"),
@@ -389,7 +537,7 @@ def _snapshot_from_inventory(
             structural_leaf_dirs.add(PurePosixPath(*parts[:index]).as_posix())
     by_leaf: dict[str, set[str]] = {leaf: set() for leaf in leaves}
     unclassified: list[str] = []
-    for directory in observed_dirs:
+    for directory in normalized_dirs:
         if directory in structural_leaf_dirs:
             continue
         split = _split_org_path(directory, leaves)
@@ -420,11 +568,17 @@ def _snapshot_from_inventory(
         for org in expected_org:
             value = PurePosixPath(*(PurePosixPath(leaf).parts if leaf else ()), *PurePosixPath(org).parts)
             expected_dirs.add(value.as_posix())
-    directory_added = sorted(set(observed_dirs) - expected_dirs)
-    directory_removed = sorted(expected_dirs - set(observed_dirs))
+    directory_added = sorted(set(normalized_dirs) - expected_dirs)
+    directory_removed = sorted(expected_dirs - set(normalized_dirs))
 
     blocked = bool(missing_ids or duplicate_ids or unclassified or inconsistent)
-    changed = bool(file_moves or directory_added or directory_removed)
+    changed = bool(
+        file_moves
+        or directory_added
+        or directory_removed
+        or root_rename
+        or child_renames
+    )
     signature_payload = {
         "observed_dirs": observed_dirs,
         "files": [
@@ -448,6 +602,8 @@ def _snapshot_from_inventory(
         "expected_directories": sorted(expected_dirs),
         "directory_added": directory_added,
         "directory_removed": directory_removed,
+        "root_rename": root_rename,
+        "child_renames": child_renames,
         "file_moves": file_moves,
         "placement_conflicts": placement_conflicts,
         "missing_file_ids": missing_ids,
@@ -461,7 +617,6 @@ def _snapshot_from_inventory(
         "changed": changed,
         "blocked": blocked,
     }
-
 
 def detect_event_structure_change(
     database_path: Path,
