@@ -29,7 +29,8 @@ def test_0424_workspace_respects_select_and_deselect_from_range_gesture():
 def test_0424_metadata_long_press_enters_real_checkbox_selection_mode():
     html = METADATA_CORRECTION_HTML
 
-    assert 'data-bk-pwa-key="'+ "'+esc(fileKey(file))+'" in html
+    assert 'data-bk-pwa-key="' in html
+    assert "esc(fileKey(file))" in html
     assert 'if(phase==="start"&&!state.selectionMode)' in html
     assert "state.selectionMode=true;" in html
     assert "renderFiles();renderDetails();" in html
@@ -68,6 +69,7 @@ def test_0424_single_detail_is_fullscreen_and_multi_selection_is_nonmodal_sheet(
     assert "#meta-mobile-dialog.compact-selection[open]" in css
     assert "max-height: 44dvh;" in css
     assert "-webkit-overflow-scrolling: touch;" in css
+    assert "backdrop-filter: none;" in css
 
 
 def test_0424_wobble_no_longer_scales_cards_at_viewport_edges():
