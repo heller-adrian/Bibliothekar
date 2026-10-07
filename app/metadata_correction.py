@@ -256,6 +256,68 @@ def _analysis_by_relative(root: Path) -> dict[str, dict[str, Any]]:
     }
 
 
+def _completed_correction_history(
+    database_path: Path | None,
+    *,
+    area: str,
+) -> dict[str, dict[Any, dict[str, Any]]]:
+    """Return the latest durable pre-correction snapshot for visible records."""
+    result: dict[str, dict[Any, dict[str, Any]]] = {
+        "by_relative": {},
+        "by_family": {},
+    }
+    if database_path is None or not Path(database_path).is_file():
+        return result
+    with database_connection(database_path) as connection:
+        rows = [
+            dict(row)
+            for row in connection.execute(
+                """SELECT source_relative_path,proposal_source,proposed_datetime,
+                          detected_json,completed_at,created_at
+                   FROM metadata_corrections
+                   WHERE area=? AND status='completed'
+                   ORDER BY COALESCE(completed_at,created_at) DESC, created_at DESC""",
+                (str(area),),
+            ).fetchall()
+        ]
+    for row in rows:
+        try:
+            detected = json.loads(str(row.get("detected_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            detected = {}
+        before = dict(
+            detected.get("before_metadata")
+            or {
+                key: detected.get(key)
+                for key in (
+                    "selected_capture_time",
+                    "selected_capture_source",
+                    "capture_time_confidence",
+                    "metadata_candidates",
+                    "filename_suggestion",
+                )
+            }
+        )
+        snapshot = {
+            "corrected_at": row.get("completed_at") or row.get("created_at"),
+            "proposed_datetime": row.get("proposed_datetime"),
+            "proposal_source": row.get("proposal_source"),
+            "before_metadata": before,
+        }
+        relative = str(row.get("source_relative_path") or "")
+        if relative and relative not in result["by_relative"]:
+            result["by_relative"][relative] = snapshot
+        family_id = detected.get("family_id")
+        if family_id is not None:
+            try:
+                family_key = int(family_id)
+            except (TypeError, ValueError):
+                family_key = None
+            if family_key is not None and family_key not in result["by_family"]:
+                result["by_family"][family_key] = snapshot
+    return result
+
+
 def _scan_library_undated(
     *,
     database_path: Path,
@@ -331,6 +393,10 @@ def _scan_library_undated(
             ]
 
     analyzed = _analysis_by_relative(input_root)
+    correction_history = _completed_correction_history(
+        database_path,
+        area="library",
+    )
     by_family: dict[int, list[dict[str, Any]]] = {}
     for row in rows:
         current = Path(str(row.get("current_relative_path") or ""))
@@ -393,6 +459,7 @@ def _scan_library_undated(
             "filename_suggestion": filename_hint,
             "preferred_suggestion": preferred,
             "needs_attention": not reintegration_ready,
+            "original_metadata": correction_history["by_family"].get(family_id),
             "member_count": len(members),
             "members": [
                 {
@@ -481,6 +548,10 @@ def scan_metadata_area(
         }
 
     analysis = analyze_tree(input_root, include_other=False)
+    correction_history = _completed_correction_history(
+        database_path,
+        area="general",
+    )
     records: list[dict[str, Any]] = []
     for record in analysis.get("files") or []:
         media_type = str(record.get("media_type") or "")
@@ -503,6 +574,9 @@ def scan_metadata_area(
             "preferred_suggestion": preferred,
             "needs_attention": bool(record.get("review_required"))
             or filename_hint is not None,
+            "original_metadata": correction_history["by_relative"].get(
+                str(record.get("relative_path") or "")
+            ),
         })
 
     return {
