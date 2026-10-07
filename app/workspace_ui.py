@@ -4034,7 +4034,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
     function updateSubeventPrefixToggle(){
       const count=createSubeventList.querySelectorAll("[data-create-subevent]").length;
-      const visible=!createSubevents.hidden && count>0;
+      const visible=!createSubevents.hidden && !activeExtension && count>0;
       subeventPrefixToggle.hidden=!visible;
       subeventPrefixToggle.textContent=dialogSubeventPrefixEnabled ? "Präfix: an" : "Präfix: aus";
       subeventPrefixToggle.setAttribute("aria-pressed",dialogSubeventPrefixEnabled ? "true" : "false");
@@ -4115,7 +4115,6 @@ WORKSPACE_HTML = r"""<!doctype html>
         end_date: eventEndDate.value,
         uses_time_range: !["no_event","existing_no_event"].includes(dialogMode),
         subevents: ["no_event","existing_no_event"].includes(dialogMode) ? [] : collectCreateSubevents(),
-        subevent_prefix_enabled: ["no_event","existing_no_event"].includes(dialogMode) ? false : dialogSubeventPrefixEnabled,
         selected_intervals: selectedDatedGroups().map(g=>({start_datetime:g.start_datetime,end_datetime:g.end_datetime})),
         start_time: eventStartTime.value,
         end_time: eventEndTime.value,
@@ -4124,6 +4123,9 @@ WORKSPACE_HTML = r"""<!doctype html>
         selected_day_keys: selectedDatedGroups().map(group => group.day_key),
         existing_parent_event_id: (!["no_event","existing_no_event"].includes(dialogMode) ? (existingParentEvent?.value || null) : null)
       };
+      if (!["no_event","existing_no_event"].includes(dialogMode) && !base.existing_parent_event_id) {
+        base.subevent_prefix_enabled=dialogSubeventPrefixEnabled;
+      }
       const parentId = base.existing_parent_event_id;
       const parent = parentId ? (workspace?.events||[]).find(event=>event.id===parentId) : null;
       if (parent) {
