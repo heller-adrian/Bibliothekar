@@ -208,7 +208,7 @@ def test_0430_membership_warns_only_for_hidden_active_backups(tmp_path: Path):
                        size_bytes,sha256_original,selected_capture_time,capture_time_confidence,
                        review_status,metadata_write_status,created_at,updated_at
                    ) VALUES (?,?,?,?,'shared_workspace',?,'.JPG','jpeg',100,?,?,
-                             'high','ok','not_requested','2026-07-20','2026-07-20')""",
+                             'high','not_required','not_requested','2026-07-20','2026-07-20')""",
                 (
                     job_id,
                     family_id,
