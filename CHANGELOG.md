@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 0.43.1 – Kombinierbare Unterereignisnamen und native Datumsfelder
+
+- Die Benennung von Unterereignissen verwendet jetzt dieselben frei kombinierbaren Optionen wie normale Ereignisse: „Jahr einbeziehen“, „Uhrzeit einbeziehen“ und „Von–bis im Namen“. Der separate Auswahlmodus „Datum/Datumsbereich/Uhrzeit/Jahr/Kein Präfix“ entfällt.
+- „Standardmäßig verwenden“ schaltet den Unterereignis-Präfix vollständig ein oder aus; der kompakte Schalter „Präfix: an/aus“ im Ereignisfenster bleibt unverändert erhalten.
+- 0.43.0-Ereignisse behalten ihre bereits gespeicherte Unterereignis-Benennung. Alte 0.43.0-Bibliothekseinstellungen werden beim Lesen in das neue kombinierbare Modell überführt.
+- Die Vorschau zeigt Unterereignis und dessen Ordnerstruktur jetzt innerhalb des normalen Ereignisbeispiels. Die separate dritte Vorschaukarte entfällt.
+- Ereignis- und Unterereignis-Datumsfelder verwenden wieder native Datumsfelder des Browsers. Damit stehen lokalisierte Eingabe, segmentweises Tippen und das native Kalendersymbol wieder zur Verfügung; die zusätzlich eingeführten Kalender-Emoji-Schaltflächen entfallen.
+
 ### 0.43.0 – Ereignisplanung und Unterereignisse
 
 - Fotofreie Kalendertage innerhalb eines normalen Ereignis- oder Unterereigniszeitraums gelten nicht als Lücken. Ein normales Ereignis bleibt ein durchgehender Beginn-/Ende-Zeitraum; Tageskarten sind nur Auswahlhilfen.
