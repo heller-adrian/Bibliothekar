@@ -138,6 +138,30 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     && Boolean(window.matchMedia?.("(max-width: 820px)")?.matches)
   );
   const mobileDetail={node:null,parent:null,next:null,mode:null,kind:null};
+  function clearMobileSelectionSheetClearance(){
+    document.body?.classList.remove("bk-meta-selection-sheet-open");
+    document.documentElement.style.removeProperty("--bk-meta-selection-sheet-height");
+  }
+  function updateMobileSelectionSheetClearance(){
+    const dialog=$("meta-mobile-dialog");
+    if(
+      !isMobileWebApp()
+      || !dialog?.open
+      || !dialog.classList.contains("compact-selection")
+    ){
+      clearMobileSelectionSheetClearance();
+      return;
+    }
+    document.body?.classList.add("bk-meta-selection-sheet-open");
+    window.requestAnimationFrame(()=>{
+      if(!dialog.open||!dialog.classList.contains("compact-selection"))return;
+      const height=Math.ceil(dialog.getBoundingClientRect().height);
+      document.documentElement.style.setProperty(
+        "--bk-meta-selection-sheet-height",
+        Math.max(0,height)+"px"
+      );
+    });
+  }
   function closeMobileDetail(){
     const dialog=$("meta-mobile-dialog");
     if(dialog?.open)dialog.close();
@@ -151,6 +175,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     mobileDetail.node=null;mobileDetail.parent=null;mobileDetail.next=null;
     mobileDetail.mode=null;mobileDetail.kind=null;
     dialog?.classList.remove("full-detail","compact-selection");
+    clearMobileSelectionSheetClearance();
   }
   function openMobileDetail(kind,mode="full"){
     if(!isMobileWebApp())return;
@@ -183,6 +208,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       if(normalizedMode==="compact")dialog.show();
       else dialog.showModal();
     }
+    if(normalizedMode==="compact")updateMobileSelectionSheetClearance();
+    else clearMobileSelectionSheetClearance();
   }
   function syncMobileSelectionDetail(kind,count){
     if(!isMobileWebApp())return;
@@ -340,6 +367,38 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       if(checked)state.selectedSet.add(i);else state.selectedSet.delete(i);
     }
   }
+  function activateMetaSelectionModeInPlace(index,desired=true){
+    const files=state.scan?.files||[];
+    state.selectionMode=true;
+    state.selectedSet.clear();
+    state.selected=index;
+    state.lastSelected=index;
+    if(desired)state.selectedSet.add(index);
+
+    document.querySelectorAll("[data-meta-file]").forEach(row=>{
+      const rowIndex=Number(row.dataset.metaFile);
+      row.classList.add("selectable");
+      row.classList.toggle("selected",state.selectedSet.has(rowIndex));
+      let checkbox=row.querySelector("[data-meta-check]");
+      if(!checkbox){
+        checkbox=document.createElement("input");
+        checkbox.className="meta-file-check";
+        checkbox.dataset.metaCheck=String(rowIndex);
+        checkbox.type="checkbox";
+        checkbox.setAttribute("aria-label","Datei auswählen");
+        row.prepend(checkbox);
+      }
+      checkbox.checked=state.selectedSet.has(rowIndex);
+    });
+
+    const fileCount=Number(state.scan?.summary?.file_count ?? files.length);
+    const familyCount=Number(state.scan?.summary?.family_count ?? files.length);
+    $("meta-summary").textContent=state.area==="library"
+      ? familyCount+" Familien · "+fileCount+" Dateien · "+state.selectedSet.size+" ausgewählt"
+      : files.length+" Datei"+(files.length===1?"":"en")+" · "+state.selectedSet.size+" ausgewählt";
+    updateSelectionControls();
+    renderDetails();
+  }
   function renderFiles(){
     const files=state.scan?.files||[];
     for(const index of [...state.selectedSet])if(index<0||index>=files.length)state.selectedSet.delete(index);
@@ -370,12 +429,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
           ? Boolean(event.detail?.selected)
           : true;
         if(phase==="start"&&!state.selectionMode){
-          state.selectionMode=true;
-          state.selectedSet.clear();
-          state.selected=index;
-          state.lastSelected=index;
-          if(desired)state.selectedSet.add(index);
-          renderFiles();renderDetails();
+          activateMetaSelectionModeInPlace(index,desired);
           return;
         }
         if(desired)state.selectedSet.add(index);
@@ -703,6 +757,38 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     $("multi-select-all").textContent=all?"Auswahl aufheben":"Alle auswählen";
     $("multi-select-all").disabled=!files.length;
   }
+  function activateMultipleSelectionModeInPlace(index,desired=true){
+    const files=state.scan?.files||[];
+    state.multipleSelectionMode=true;
+    state.multipleSelectedSet.clear();
+    state.multipleReference=index;
+    if(desired)state.multipleSelectedSet.add(index);
+    state.multiplePreview=null;
+    $("multi-preview-card").hidden=true;
+
+    document.querySelectorAll("[data-multi-file]").forEach(row=>{
+      const rowIndex=Number(row.dataset.multiFile);
+      row.classList.add("selectable");
+      row.classList.toggle("selected",state.multipleSelectedSet.has(rowIndex));
+      let checkbox=row.querySelector("[data-multi-check]");
+      if(!checkbox){
+        checkbox=document.createElement("input");
+        checkbox.className="meta-file-check";
+        checkbox.dataset.multiCheck=String(rowIndex);
+        checkbox.type="checkbox";
+        checkbox.setAttribute("aria-label","Datei auswählen");
+        const marker=row.firstElementChild;
+        if(marker?.tagName==="SPAN")marker.replaceWith(checkbox);
+        else row.prepend(checkbox);
+      }
+      checkbox.checked=state.multipleSelectedSet.has(rowIndex);
+    });
+
+    $("multi-summary").textContent=files.length+" Datei"+(files.length===1?"":"en")
+      +" · "+state.multipleSelectedSet.size+" ausgewählt";
+    updateMultipleSelectionControls();
+    renderMultipleDetails();
+  }
   function renderMultipleFiles(){
     const files=state.scan?.files||[];
     for(const index of [...state.multipleSelectedSet]){
@@ -747,14 +833,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
           ? Boolean(event.detail?.selected)
           : true;
         if(phase==="start"&&!state.multipleSelectionMode){
-          state.multipleSelectionMode=true;
-          state.multipleSelectedSet.clear();
-          state.multipleReference=index;
-          if(desired)state.multipleSelectedSet.add(index);
-          state.multiplePreview=null;
-          $("multi-preview-card").hidden=true;
-          renderMultipleFiles();
-          renderMultipleDetails();
+          activateMultipleSelectionModeInPlace(index,desired);
           return;
         }
         if(desired)state.multipleSelectedSet.add(index);
@@ -1006,6 +1085,10 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     event.preventDefault();
     closeMobileDetail();
   });
+  if(typeof ResizeObserver==="function"){
+    new ResizeObserver(()=>updateMobileSelectionSheetClearance())
+      .observe($("meta-mobile-dialog"));
+  }
   $("multi-apply").addEventListener("click",()=>applyMultiple("apply"));
   $("multi-apply-import").addEventListener("click",()=>applyMultiple("apply_and_import"));
   configureArea();
