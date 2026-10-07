@@ -85,21 +85,32 @@ def partition_import_entries(
     entries: list[dict[str, Any]],
     known_hashes: set[tuple[int, str]] | None = None,
     duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
+    known_sha256: set[str] | None = None,
+    duplicate_origins_by_sha: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split one source manifest into new files and exact known duplicates."""
+    """Split one source manifest into new files and exact known duplicates.
+
+    SHA-256 is the stable identity of the original imported bytes. 0.42.0
+    deliberately keeps the historical size+SHA fast path, but also accepts an
+    exact original SHA match when legacy metadata corrections left an
+    unreliable source_size_bytes backfill behind.
+    """
     known = known_hashes or set()
+    known_sha = {str(value) for value in (known_sha256 or set()) if str(value)}
     origins = duplicate_origins or {}
+    origins_by_sha = duplicate_origins_by_sha or {}
     new_entries: list[dict[str, Any]] = []
     duplicates: list[dict[str, Any]] = []
     details: list[dict[str, Any]] = []
     for raw in entries:
         entry = dict(raw)
-        key = (int(entry["size_bytes"]), str(entry["sha256"]))
-        if key not in known:
+        sha = str(entry["sha256"])
+        key = (int(entry["size_bytes"]), sha)
+        if key not in known and sha not in known_sha:
             new_entries.append(entry)
             continue
         duplicates.append(entry)
-        origin = dict(origins.get(key) or {})
+        origin = dict(origins.get(key) or origins_by_sha.get(sha) or {})
         details.append({
             "relative_path": str(entry["relative_path"]),
             "size_bytes": int(entry["size_bytes"]),
@@ -503,6 +514,8 @@ def run_folder_import_job(
     identity_callback: IdentityCallback | None = None,
     imported_hashes: set[tuple[int, str]] | None = None,
     duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
+    imported_sha256: set[str] | None = None,
+    duplicate_origins_by_sha: dict[str, dict[str, Any]] | None = None,
     import_history_callback: ImportHistoryCallback | None = None,
     family_admission_callback: FamilyAdmissionCallback | None = None,
     destination_directory_callback: DestinationDirectoryCallback | None = None,
@@ -617,6 +630,8 @@ def run_folder_import_job(
             all_entries,
             imported_hashes,
             duplicate_origins,
+            imported_sha256,
+            duplicate_origins_by_sha,
         )
         if not entries:
             raise PipelineError(
