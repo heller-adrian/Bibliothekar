@@ -653,3 +653,61 @@ def test_0413_real_manual_archive_move_is_detected_verified_and_finalized(tmp_pa
     assert str(event_row["status"]) == "archived"
     assert str(file_row["current_root_kind"]) == "camera_archive"
     assert (archive_event_root / "ARCHIVE-MOVE.JPG").is_file()
+
+def test_0414_manual_restore_can_be_verified_after_database_followed_ist(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    initialize_database(db)
+    layout = ensure_workspace_layout(workspace)
+    central = Path(layout["backup_root"])
+    work = Path(layout["work_root"])
+
+    _family_id, file_id, relative = _seed_free_file(
+        db,
+        family_key="MANUAL-RESTORE",
+        filename="MANUAL.JPG",
+        day="2026-10-05",
+        data=b"manual-restore",
+    )
+    expected = central / relative
+    expected.parent.mkdir(parents=True, exist_ok=True)
+    expected.write_bytes(b"manual-restore")
+    reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+
+    observed = central / "2026/2026-10-06/MANUAL.JPG"
+    observed.parent.mkdir(parents=True, exist_ok=True)
+    expected.replace(observed)
+    reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+    state = list_external_change_state(db)
+    assert state["required_count"] == 1
+    with database_connection(db) as connection:
+        current = connection.execute(
+            "SELECT current_relative_path FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert str(current["current_relative_path"]) == "2026/2026-10-06/MANUAL.JPG"
+
+    # Simulate the documented manual fallback before clicking "Erneut prüfen".
+    expected.parent.mkdir(parents=True, exist_ok=True)
+    observed.replace(expected)
+    repaired = repair_external_conflicts(
+        db,
+        central_root=central,
+        library_work_root=work,
+    )
+    assert repaired["repaired_count"] == 1
+    assert repaired["skipped"] == []
+    assert expected.read_bytes() == b"manual-restore"
+    with database_connection(db) as connection:
+        current = connection.execute(
+            "SELECT current_relative_path,current_root_kind FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert tuple(current) == (relative, "shared_workspace")
+    assert list_external_change_state(db)["required_count"] == 0
+
