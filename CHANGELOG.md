@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.41.4 – Applied-Reparatur, Planned-Performance und konsistentes Loading
+
+- Falsch verschobene Dateien aus angewendeten Ereignissen behalten ihren semantischen Sollpfad persistent und können mit Größen-/SHA-256-Prüfung sicher dorthin zurückgesetzt werden; manuell bereits korrekt zurückgelegte Dateien werden beim erneuten Prüfen ebenfalls verifiziert und übernommen.
+- Fehlgeschlagene automatische Reparaturen werden nicht mehr wie Erfolg behandelt: Die Aufgabe bleibt offen, der erwartete Sollort wird angezeigt und „Ignorieren“ bleibt für normale Zuordnungskonflikte möglich.
+- Reines Speichern eines geplanten Ereignisses löst beim unmittelbaren UI-Nachladen keinen zweiten vollständigen Inventar-/Reconcile-/Strukturscan mehr aus. Normale Seitenaufrufe und Reloads behalten die vollständige physische IST-Prüfung.
+- Speichern, Rückgängig, Arbeitsbereich, Ereignisliste, Archivprüfung sowie Import-/Prüfaktualisierung erhalten konsistente Busy-/Spinner-Zustände ohne künstliche Wartezeiten.
+- Der Einstellungsdialog ist gegen bereichsspezifische Import-CSS-Regeln abgeschirmt; Akkordeons und Vorschaukästen verwenden in Hell/Dunkel dieselben Settings-Komponenten wie in Arbeitsbereich und Archiv.
+- „Archiv prüfen“ im externen Hinweisdialog erhält einen nicht abgeschnittenen, aber weiterhin tastaturzugänglichen Fokuszustand.
+
 ### 0.40.3 – iPhone-Web-App im Hochformat fixieren
 
 - Die installierte Web-App erhält ein echtes Web-App-Manifest. Auf iPhone/iPod wird die bevorzugte App-Ausrichtung auf `portrait-primary` gesetzt, sodass Drehen des Geräts die Web-App nicht mehr in die Querformatansicht umschaltet.
