@@ -480,6 +480,20 @@ def test_0414_applied_file_moved_to_wrong_subevent_is_repaired_to_semantic_leaf(
     )
     detect_event_structure_change(db, "e")
 
+    # Ein weiterer Reload/Reconcile darf den fachlichen Sollpfad nicht durch
+    # den inzwischen in SQLite übernommenen falschen IST-Pfad ersetzen.
+    scan_event_inventory(
+        db,
+        work_root,
+        "j",
+        "e",
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    detect_event_structure_change(db, "e")
+
     state = list_external_change_state(db)
     assert state["required_count"] == 1
     notice = state["required"][0]
