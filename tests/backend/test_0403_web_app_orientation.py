@@ -1,4 +1,4 @@
-"""0.41.4: iPhone-Web-App bleibt im Hochformat, Tablet und Website bleiben frei."""
+"""0.42.0: iPhone-Web-App bleibt im Hochformat, Tablet und Website bleiben frei."""
 import json
 from pathlib import Path
 
@@ -30,11 +30,11 @@ def _manifest(user_agent: str) -> dict:
 
 
 def test_0403_version_contract():
-    assert PACKAGE_VERSION == "0.41.4"
+    assert PACKAGE_VERSION == "0.42.0"
     assert main.APP_VERSION == PACKAGE_VERSION
     assert main.DEPLOYMENT_VERSION == PACKAGE_VERSION
-    assert "patch-0.41.4" in Path("compose.example.yaml").read_text(encoding="utf-8")
-    assert "0.41.4 · Kamerakern 0.32.11" in Path("app/ui_shell.py").read_text(encoding="utf-8")
+    assert "patch-0.42.0" in Path("compose.example.yaml").read_text(encoding="utf-8")
+    assert "0.42.0 · Kamerakern 0.32.11" in Path("app/ui_shell.py").read_text(encoding="utf-8")
 
 
 def test_0403_shell_links_manifest_without_changing_browser_layout():
