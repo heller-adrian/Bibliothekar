@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### 0.43.0 – Ereignisplanung und Unterereignisse
+
+- Fotofreie Kalendertage innerhalb eines normalen Ereignis- oder Unterereigniszeitraums gelten nicht als Lücken. Ein normales Ereignis bleibt ein durchgehender Beginn-/Ende-Zeitraum; Tageskarten sind nur Auswahlhilfen.
+- Nicht angehakte Tageskarten aus sichtbaren aktiven Sicherungen werden innerhalb des gewählten Zeitraums automatisch mit einbezogen. Die Bestätigung „Weitere Aufnahmen“ erscheint nur noch für zusätzliche freie Aufnahmen aus aktuell ausgeblendeten aktiven Sicherungen.
+- Datumswerte für normale Ereignisse und Unterereignisse lassen sich vollständig als `JJJJ-MM-TT` tippen. Der Kalender bleibt als optionaler Button verfügbar; ungültige Kalenderdaten werden serverseitig abgewiesen.
+- Jahresübergreifende Ereignisse und Unterereignisse erhalten bei datumsbasierten Präfixen automatisch eindeutige Jahresangaben.
+- Einstellungen → Ereignisordner enthält den eigenen Bereich „Unterereignisse“. Für neue Unterereignisordner kann der Namenspräfix auf Datum, Datumsbereich, Uhrzeit, Jahr oder kein Präfix gestellt und standardmäßig ein- oder ausgeschaltet werden.
+- Sobald im Erstellfenster mindestens ein Unterereignis angelegt ist, erscheint kompakt „Präfix: an/aus“. Die Entscheidung wird mit dem Ereignis eingefroren; bestehende Ereignisse behalten ihren bisherigen Benennungsstand.
+- „Ohne Ereignis“ kann keine semantischen Unterereignisse besitzen. Verschachtelte Unter-Unterereignisse werden ebenfalls nicht zugelassen.
+- Bestehende Archiv-/Strukturänderungen laufen weiterhin über den vorhandenen Workflow „Manuelle Ereignisänderung“; für 0.43.0 wurde kein paralleler Änderungsmechanismus eingeführt.
+
 ### 0.42.5 – PWA-Auswahlabschluss und Metadaten-Sheet
 
 - In der installierten Handy-Web-App bleiben auswählbare Karten nicht mehr dauerhaft als eigene Transform-/Compositor-Layer vorgemerkt. Die Optimierung gilt nur während des kurzen Wobble-Effekts; dadurch werden die feinen Kartenrahmen auf iOS nicht mehr an Viewport- bzw. Sticky-Layer-Grenzen abgeschnitten.
