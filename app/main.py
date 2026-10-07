@@ -7754,8 +7754,17 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/workspace/summary", tags=["Arbeitsbereich"])
-def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
-    """Canonical workspace projection for the selected library."""
+def api_global_workspace_summary(
+    jobs: str = "",
+    physical_refresh: bool = True,
+) -> dict[str, Any]:
+    """Canonical workspace projection for the selected library.
+
+    physical_refresh=false is reserved for an immediate UI refresh after a
+    pure planned-event DB write. In that path no file has moved, so a second
+    inventory/reconcile/hash pass would only delay closing the save dialog.
+    Normal page loads keep the full physical truth refresh.
+    """
     selected = [
         part.strip()
         for part in str(jobs or "").split(",")
@@ -7768,22 +7777,23 @@ def api_global_workspace_summary(jobs: str = "") -> dict[str, Any]:
                 detail="Mindestens eine Sicherung wurde nicht gefunden.",
             )
 
-    refresh_live_event_inventories(
-        current_database_file(),
-        current_workspace_root(),
-        current_archive_root(),
-    )
-    reconcile_global_central_stock_state(
-        force=True
-    )
-    detect_all_event_structure_changes(
-        current_database_file()
-    )
-    backfill_library_claims(
-        REGISTRY_DATABASE_FILE,
-        database_path=current_database_file(),
-        library_id=current_library_context().library_id,
-    )
+    if physical_refresh:
+        refresh_live_event_inventories(
+            current_database_file(),
+            current_workspace_root(),
+            current_archive_root(),
+        )
+        reconcile_global_central_stock_state(
+            force=True
+        )
+        detect_all_event_structure_changes(
+            current_database_file()
+        )
+        backfill_library_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=current_database_file(),
+            library_id=current_library_context().library_id,
+        )
 
     excluded_by_job = {
         job_id: blocked_family_ids(
