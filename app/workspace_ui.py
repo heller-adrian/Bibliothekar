@@ -3105,6 +3105,8 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         card.className =
           "day-card";
+        card.dataset.bkPwaSelect = "workspace-capture";
+        card.dataset.bkSelectionKey = key;
         if (group.released_archive) {
           card.classList.add("released-archive-card");
         }
@@ -3133,6 +3135,23 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-check";
         checkbox.checked =
           selectedDays.has(key);
+
+        card.addEventListener("bk:pwa-select", event => {
+          const phase = String(event.detail?.phase || "");
+          if (phase === "end") {
+            renderDays();
+            renderSelection();
+            return;
+          }
+          if (!selectedDays.has(key)) {
+            selectedDays.add(key);
+            checkbox.checked = true;
+            card.classList.add("selected");
+          }
+          lastSelectedDayKey = key;
+          updateDaySelectAllButton();
+          renderSelection();
+        });
 
         checkbox.addEventListener(
           "click",
