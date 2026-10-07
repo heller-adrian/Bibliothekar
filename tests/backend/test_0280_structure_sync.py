@@ -6,6 +6,10 @@ import json
 
 from app.database import database_connection, initialize_database
 from app.event_inventory import scan_event_inventory
+from app.external_changes import (
+    list_external_change_state,
+    repair_external_conflicts,
+)
 from app.event_layout import ensure_event_layout_snapshot, get_event_layout, layout_paths
 from app.event_structure_changes import (
     confirm_applied_structure_change,
@@ -404,3 +408,116 @@ def test_0413_applied_child_root_rename_is_one_structure_change(tmp_path: Path):
         ).fetchone()
     assert str(child["folder_name"]) == "A"
     assert str(file_row["current_relative_path"]) == "2026/07-23 - Trip/A/Alle/A.JPG"
+
+def test_0414_applied_file_moved_to_wrong_subevent_is_repaired_to_semantic_leaf(
+    tmp_path: Path,
+):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    layout = ensure_workspace_layout(workspace)
+    work_root = shared_work_root(workspace)
+    central_root = Path(layout["backup_root"])
+
+    _family_id, file_id = _seed_event_with_legacy_layout(
+        db,
+        status="applied",
+        current_root_kind="shared_workspace",
+    )
+    with database_connection(db) as connection:
+        for child_id, name in (("c1", "Tag 1"), ("c2", "Tag 2")):
+            connection.execute(
+                """INSERT INTO events(
+                       id,job_id,parent_event_id,event_level,name,start_datetime,
+                       end_datetime,uses_time_range,folder_name,status,created_at,
+                       updated_at,event_kind,preserve_day_folders,revision,
+                       applied_at,resort_required,time_model_version,timeline_model)
+                   VALUES (?, 'j','e','child',?,'2026-07-23T00:00:00',
+                           '2026-07-23T23:59:59',1,?,'applied',?,?, 'event',0,1,?,0,2,'continuous')""",
+                (child_id, name, name, NOW, NOW, NOW),
+            )
+        connection.execute(
+            "UPDATE event_assignments SET event_id='c1' WHERE event_id='e'"
+        )
+        connection.execute(
+            """UPDATE files
+               SET current_relative_path=?
+               WHERE id=?""",
+            ("2026/07-23 - Trip/Tag 1/Alle/A.JPG", file_id),
+        )
+
+    event_root = work_root / "2026" / "07-23 - Trip"
+    for child in ("Tag 1", "Tag 2"):
+        for name in ("Alle", "Sortiert", "Export"):
+            (event_root / child / name).mkdir(parents=True, exist_ok=True)
+    expected = event_root / "Tag 1" / "Alle" / "A.JPG"
+    observed = event_root / "Tag 2" / "Alle" / "A.JPG"
+    expected.write_bytes(b"camera-a")
+
+    scan_event_inventory(
+        db,
+        work_root,
+        "j",
+        "e",
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    detect_event_structure_change(db, "e")
+
+    observed.parent.mkdir(parents=True, exist_ok=True)
+    expected.rename(observed)
+    scan_event_inventory(
+        db,
+        work_root,
+        "j",
+        "e",
+        root_kind="shared_workspace",
+        persist=True,
+        update_known_file_locations=False,
+        fast_refresh=False,
+    )
+    detect_event_structure_change(db, "e")
+
+    state = list_external_change_state(db)
+    assert state["required_count"] == 1
+    notice = state["required"][0]
+    assert notice["kind"] == "placement_conflict"
+    assert notice["details"]["expected_relative_path"] == (
+        "2026/07-23 - Trip/Tag 1/Alle/A.JPG"
+    )
+    assert notice["details"]["observed_relative_path"] == (
+        "2026/07-23 - Trip/Tag 2/Alle/A.JPG"
+    )
+    with database_connection(db) as connection:
+        current = connection.execute(
+            "SELECT current_relative_path FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    # Physical IST may be adopted in SQLite, but the persistent notice retains
+    # the semantic target used by the repair.
+    assert str(current["current_relative_path"]) == (
+        "2026/07-23 - Trip/Tag 2/Alle/A.JPG"
+    )
+
+    repaired = repair_external_conflicts(
+        db,
+        central_root=central_root,
+        library_work_root=work_root,
+    )
+    assert repaired["repaired_count"] == 1
+    assert repaired["skipped"] == []
+    assert expected.read_bytes() == b"camera-a"
+    assert not observed.exists()
+    with database_connection(db) as connection:
+        current = connection.execute(
+            "SELECT current_relative_path,current_root_kind FROM files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    assert tuple(current) == (
+        "2026/07-23 - Trip/Tag 1/Alle/A.JPG",
+        "shared_workspace",
+    )
+    assert list_external_change_state(db)["required_count"] == 0
+
