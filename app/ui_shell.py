@@ -3866,16 +3866,18 @@ BIBLIOTHEKAR_JS = r"""
     }
   }
 
-  function bkPwaNearestCard(group, x, y) {
-    const direct = document.elementFromPoint(x, y)
-      ?.closest?.("[data-bk-pwa-select]");
-    if (
-      direct
-      && String(direct.dataset.bkPwaSelect || "") === String(group || "")
-    ) {
-      return direct;
-    }
+  function bkPwaSelectionSafeBounds() {
+    const stickyHeight = Number.parseFloat(
+      getComputedStyle(root).getPropertyValue("--bk-shell-sticky-height")
+    ) || 62;
+    return {
+      top: Math.max(92, stickyHeight + 34),
+      bottom: window.innerHeight - 104
+    };
+  }
 
+  function bkPwaNearestCard(group, x, y) {
+    const bounds = bkPwaSelectionSafeBounds();
     const cards = bkPwaGroupCards(group)
       .map(card => ({card, rect: card.getBoundingClientRect()}))
       .filter(item => (
@@ -3884,7 +3886,27 @@ BIBLIOTHEKAR_JS = r"""
       ));
     if (!cards.length) return null;
 
-    cards.sort((a, b) => {
+    const safeCards = cards.filter(item => (
+      item.rect.top >= bounds.top
+      && item.rect.bottom <= bounds.bottom
+    ));
+    const direct = document.elementFromPoint(x, y)
+      ?.closest?.("[data-bk-pwa-select]");
+    if (
+      direct
+      && String(direct.dataset.bkPwaSelect || "") === String(group || "")
+    ) {
+      const directRect = direct.getBoundingClientRect();
+      if (
+        directRect.top >= bounds.top
+        && directRect.bottom <= bounds.bottom
+      ) {
+        return direct;
+      }
+    }
+
+    const candidates = safeCards.length ? safeCards : cards;
+    candidates.sort((a, b) => {
       const aY = Math.max(a.rect.top, Math.min(y, a.rect.bottom));
       const bY = Math.max(b.rect.top, Math.min(y, b.rect.bottom));
       const aX = Math.max(a.rect.left, Math.min(x, a.rect.right));
@@ -3894,7 +3916,7 @@ BIBLIOTHEKAR_JS = r"""
         - Math.hypot(x - bX, y - bY)
       );
     });
-    return cards[0]?.card || null;
+    return candidates[0]?.card || null;
   }
 
   function bkPwaApplyRange(gesture, currentKey) {
