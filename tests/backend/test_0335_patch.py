@@ -117,7 +117,7 @@ def test_0335_metadata_ui_is_flat_selectable_and_two_step():
     assert "state.selectionMode" in METADATA_CORRECTION_HTML
     assert "correctSelectedBySource(files)" in METADATA_CORRECTION_HTML
     assert "Für jede Datei wird ihr eigener Wert des gewählten Metadaten-Tags verwendet." in METADATA_CORRECTION_HTML
-    assert "Einträge ausgewählt.</strong></div>" in METADATA_CORRECTION_HTML
+    assert "Einträge ausgewählt.</strong><div" in METADATA_CORRECTION_HTML
     assert "0.34.0" not in METADATA_CORRECTION_HTML
     assert "Metadaten werden sicher auf Arbeitskopien geschrieben" not in METADATA_CORRECTION_HTML
     assert "outline:2px" not in METADATA_CORRECTION_HTML
