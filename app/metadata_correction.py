@@ -1017,6 +1017,7 @@ def create_metadata_correction(
     family_id: int | None = None,
     library_name: str | None = None,
     allowed_job_ids: set[str] | None = None,
+    proposal_source_tag: str | None = None,
 ) -> dict[str, Any]:
     row, source, _ = _find_scan_record(
         area=area,
@@ -1034,7 +1035,24 @@ def create_metadata_correction(
     filename_hint = row.get("filename_suggestion")
     metadata_hint = _metadata_suggestion(row)
     source_kind = "manual"
-    if filename_hint and filename_hint.get("datetime") == proposed:
+    verified_source_tag = str(proposal_source_tag or "").strip()
+    if verified_source_tag:
+        candidate = next(
+            (
+                item
+                for item in (row.get("metadata_candidates") or [])
+                if str(item.get("tag_name") or "") == verified_source_tag
+                and bool(item.get("usable"))
+                and str(item.get("normalized_datetime") or "")[:19] == proposed
+            ),
+            None,
+        )
+        if candidate is None:
+            raise MetadataCorrectionError(
+                "Der gewählte Metadaten-Quelltyp passt nicht mehr zum aktuellen Dateibestand."
+            )
+        source_kind = "metadata"
+    elif filename_hint and filename_hint.get("datetime") == proposed:
         source_kind = "filename"
     elif metadata_hint and str(metadata_hint.get("datetime") or "")[:19] == proposed:
         source_kind = "metadata"
@@ -1051,6 +1069,7 @@ def create_metadata_correction(
     detected = {
         **before_metadata,
         "before_metadata": before_metadata,
+        "proposal_source_tag": verified_source_tag or None,
         "library_id": library_id,
         "library_name": library_name or library_id,
     }
@@ -2018,6 +2037,7 @@ def execute_metadata_correction(
     family_id: int | None = None,
     library_name: str | None = None,
     allowed_job_ids: set[str] | None = None,
+    proposal_source_tag: str | None = None,
 ) -> dict[str, Any]:
     """Create and execute one user-confirmed metadata correction.
 
@@ -2034,6 +2054,7 @@ def execute_metadata_correction(
         family_id=family_id,
         library_name=library_name,
         allowed_job_ids=allowed_job_ids,
+        proposal_source_tag=proposal_source_tag,
     )
     return apply_metadata_correction(
         database_path,
