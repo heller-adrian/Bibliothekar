@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### 0.42.2 – Automatische Metadatenprüfung
+
+- Die Bereiche `Bibliothek`, `Allgemein` und `Mehrfachkorrektur` prüfen ihren jeweiligen Bestand jetzt automatisch beim Öffnen bzw. Reload der Metadatenkorrektur.
+- Der vorhandene Button `Bestand prüfen` bleibt für eine manuelle erneute Prüfung erhalten.
+- Automatische und manuelle Prüfungen zeigen während des laufenden Scans denselben Busy-Zustand mit Spinner am Button und Ladeindikator in der Statuszeile.
+
 ### 0.42.1 – Metadaten-Rücksortierung und Prüffall-UI
 
 - Interne Übernahmen aus `Allgemein` und `Mehrfachkorrektur` bleiben technisch als verifizierte Hintergrundjobs erhalten, werden aber nicht mehr als sichtbare Karten im Import- und Prüfverlauf dargestellt.
