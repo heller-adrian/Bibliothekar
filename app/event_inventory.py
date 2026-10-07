@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 import hashlib
+import json
 import os
 import stat
 import re
@@ -59,6 +60,50 @@ def event_root_relative(event: dict[str, Any]) -> PurePosixPath:
             "Ereignis besitzt keinen eindeutigen Jahres-/Ordnerpfad."
         )
     return _safe_relative(PurePosixPath(year, folder).as_posix())
+
+
+def _discover_event_prefix_by_document(
+    root: Path,
+    expected_prefix: PurePosixPath,
+    event_id: str,
+) -> PurePosixPath:
+    """Find a manually renamed event root by its stable event.json identity."""
+    expected_root = root.joinpath(*expected_prefix.parts)
+    if expected_root.exists():
+        return expected_prefix
+    if not expected_prefix.parts:
+        return expected_prefix
+
+    year_root = root / expected_prefix.parts[0]
+    if not year_root.is_dir() or year_root.is_symlink():
+        return expected_prefix
+
+    matches: list[PurePosixPath] = []
+    try:
+        candidates = sorted(year_root.iterdir(), key=lambda path: path.name.casefold())
+    except OSError:
+        return expected_prefix
+
+    for candidate in candidates:
+        if not candidate.is_dir() or candidate.is_symlink():
+            continue
+        document = candidate / "event.json"
+        if not document.is_file() or document.is_symlink():
+            continue
+        try:
+            payload = json.loads(document.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        document_event = payload.get("event") or {}
+        if str(document_event.get("id") or "") != str(event_id):
+            continue
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError:
+            continue
+        matches.append(PurePosixPath(relative.as_posix()))
+
+    return matches[0] if len(matches) == 1 else expected_prefix
 
 
 def _event_and_known_files(
@@ -465,6 +510,11 @@ def scan_event_inventory(
         _safe_relative(str(event_prefix_override))
         if event_prefix_override is not None
         else event_root_relative(event)
+    )
+    prefix = _discover_event_prefix_by_document(
+        root,
+        prefix,
+        event_id,
     )
     event_root = root.joinpath(*prefix.parts)
 
