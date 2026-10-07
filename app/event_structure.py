@@ -404,10 +404,24 @@ def build_event_preview(
             + child_name
         ) if child_name else None
 
+    raw_naming = payload.get("folder_naming") or DEFAULT_EVENT_NAMING
+    naming = (
+        dict(raw_naming)
+        if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
+        else naming_snapshot_for_new_event(raw_naming)
+    )
+    if "subevent_prefix_enabled" in payload:
+        naming = dict(naming)
+        naming["subevent_prefix_enabled"] = bool(payload.get("subevent_prefix_enabled"))
+
     from app.subevents import normalize_subevents
     try:
-        subevents = normalize_subevents(payload.get('subevents') or [],
-            f"{start_date}T{start_time or '00:00'}:00",f"{end_date}T{end_time or '23:59'}:59")
+        subevents = normalize_subevents(
+            payload.get('subevents') or [],
+            f"{start_date}T{start_time or '00:00'}:00",
+            f"{end_date}T{end_time or '23:59'}:59",
+            naming=naming,
+        )
     except ValueError as error:
         raise EventPreviewError(str(error)) from error
     requested_family_ids = {
@@ -471,9 +485,6 @@ def build_event_preview(
     empty_subevent_days = []
     child_family_ids = set()
 
-    if subevents:
-        from datetime import date, timedelta
-
     for subevent in subevents:
         matching = [
             family for family in candidate_families
@@ -503,23 +514,9 @@ def build_event_preview(
             })
             continue
 
-        if preserve_day_folders:
-            start_day = date.fromisoformat(subevent["start_datetime"][:10])
-            end_day = date.fromisoformat(subevent["end_datetime"][:10])
-            occupied = set(matching_day_keys)
-            missing_days = []
-            current_day = start_day
-            while current_day <= end_day:
-                day_key = current_day.isoformat()
-                if day_key not in occupied:
-                    missing_days.append(day_key)
-                current_day += timedelta(days=1)
-            if missing_days:
-                empty_subevent_days.append({
-                    "name": subevent["name"],
-                    "folder_name": subevent["folder_name"],
-                    "day_keys": missing_days,
-                })
+        # Fotofreie Kalendertage innerhalb eines definierten Unterereignisses
+        # sind keine strukturellen Lücken.  Tagesordner entstehen nur dort,
+        # wo tatsächlich Aufnahmen vorhanden sind.
 
     if subevents:
         parent_structure_day_keys = sorted({
@@ -530,13 +527,6 @@ def build_event_preview(
         })
     else:
         parent_structure_day_keys = selected_day_keys
-
-    raw_naming = payload.get("folder_naming") or DEFAULT_EVENT_NAMING
-    naming = (
-        dict(raw_naming)
-        if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
-        else naming_snapshot_for_new_event(raw_naming)
-    )
 
     if event_kind == "no_event":
         if str(naming.get("mode") or "") == "locked":
