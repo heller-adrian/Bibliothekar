@@ -143,8 +143,11 @@ def test_0420_completed_correction_keeps_original_metadata_visible(tmp_path: Pat
                    proposed_datetime,proposal_source,output_path,output_size_bytes,
                    output_sha256,verification_json,error_message,created_at,updated_at,
                    completed_at)
-               VALUES ('META_OLD','general','completed',?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
+                "META_OLD",
+                "general",
+                "completed",
                 str(source),
                 "A.JPG",
                 "A.JPG",
@@ -158,6 +161,7 @@ def test_0420_completed_correction_keeps_original_metadata_visible(tmp_path: Pat
                 5,
                 hashlib.sha256(b"photo").hexdigest(),
                 "{}",
+                None,
                 now,
                 now,
                 now,
