@@ -7,6 +7,7 @@
 - Bereits bekannte Kameraoriginale werden beim Reimport zusätzlich über ihre stabile ursprüngliche SHA-256-Identität erkannt. Damit erscheinen ältere, vor der Einführung von `source_size_bytes` korrigierte Dateien nicht wegen einer nachträglich veränderten Dateigröße erneut als neue Prüffälle.
 - Die Dateiliste arbeitet standardmäßig ohne Checkboxen. Mehrfachauswahl wird bewusst über `Auswählen` aktiviert und unterstützt Umschalt-/Bereichsauswahl sowie `Alle auswählen`.
 - Bei Mehrfachauswahl wird kein gemeinsames Datum/Uhrzeit-Feld mehr angeboten. Stattdessen wählt man einen gemeinsamen Metadaten-Quelltyp; jede Datei übernimmt ihren eigenen aktuellen Wert dieses Tags.
+- Mehrfachkorrekturen werden serverseitig gebündelt: Der Metadatenbestand wird pro beteiligtem Bereich bzw. Bibliothek nur einmal vorgeprüft, statt für jede ausgewählte Datei erneut vollständig gescannt zu werden.
 - Metadatenkandidaten zeigen deutsche Bezeichnungen, technischen ExifTool-Tag und eine einfache deterministische Vertrauensbewertung. Der bevorzugte Kandidat ist direkt sichtbar; weitere Kandidaten bleiben kompakt aufklappbar.
 - Die vor einer Korrektur beobachteten Metadaten bleiben über die vorhandenen persistenten Korrekturaufträge einsehbar.
 - Dateien aus `Allgemein` können kontrolliert über den vorhandenen verifizierten Importpfad in den Tagesbestand übernommen werden. Bereits bekannte Kameraaufnahmen werden dabei blockiert, statt künstlich eine neue Sicherung bzw. Provenienz zu erzeugen.
