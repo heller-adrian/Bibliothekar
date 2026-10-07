@@ -4792,11 +4792,16 @@ BIBLIOTHEKAR_JS = r"""
     const year=document.getElementById("bk-event-include-year");
     const time=document.getElementById("bk-event-include-time");
     const collectionYear=document.getElementById("bk-no-event-include-year");
+    const subeventMode=document.getElementById("bk-subevent-prefix-mode");
+    const subeventEnabled=document.getElementById("bk-subevent-prefix-enabled");
     if(label)label.value=String(data.no_event_label||"Ohne Ereignis");
     if(range)range.checked=String(data.date_mode||"start")==="range";
     if(year)year.checked=Boolean(data.include_year);
     if(time)time.checked=Boolean(data.include_time);
     if(collectionYear)collectionYear.checked=Boolean(data.no_event_include_year);
+    if(subeventMode)subeventMode.value=String(data.subevent_prefix_mode||"date_range");
+    if(subeventEnabled)subeventEnabled.checked=data.subevent_prefix_enabled!==false;
+    if(subeventEnabled)subeventEnabled.disabled=String(data.subevent_prefix_mode||"date_range")==="none";
     bkUpdateSettingsPreview();
   }
 
@@ -4832,6 +4837,8 @@ BIBLIOTHEKAR_JS = r"""
     const year=Boolean(document.getElementById("bk-event-include-year")?.checked);
     const time=Boolean(document.getElementById("bk-event-include-time")?.checked);
     const collectionYear=Boolean(document.getElementById("bk-no-event-include-year")?.checked);
+    const subeventMode=String(document.getElementById("bk-subevent-prefix-mode")?.value||"date_range");
+    const subeventEnabled=Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked) && subeventMode!=="none";
     const d1=year?"2026-07-20":"07-20";
     const d2=year?"2026-07-21":"07-21";
     let datePart=range ? d1+"–"+d2 : d1;
@@ -4842,9 +4849,18 @@ BIBLIOTHEKAR_JS = r"""
     }
     const normal=datePart+" - Urlaub";
     const collection=(collectionYear?"2026-07":"07")+" - "+label;
+    const subeventPrefix={
+      date:"07-20",
+      date_range:"07-20–07-21",
+      time:"14-00–18-30",
+      year:"2026",
+      none:""
+    }[subeventMode]||"";
+    const subevent=(subeventEnabled && subeventPrefix ? subeventPrefix+" - " : "")+"Stadtbesuch";
     preview.innerHTML=
       '<div class="bk-settings-preview-grid">'
       +'<div class="bk-settings-preview-case"><strong>Normales Ereignis</strong><pre>'+bkEscape(bkPreviewStructure(normal))+'</pre></div>'
+      +'<div class="bk-settings-preview-case"><strong>Unterereignis</strong><pre>'+bkEscape("└── "+subevent)+'</pre></div>'
       +'<div class="bk-settings-preview-case"><strong>Sammelordner</strong><pre>'+bkEscape(bkPreviewStructure(collection))+'</pre></div>'
       +'</div>';
   }
@@ -4859,9 +4875,18 @@ BIBLIOTHEKAR_JS = r"""
     }catch(error){if(status)status.textContent=error.message;}
   }
 
-  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year"].forEach(id=>{
+  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year","bk-subevent-prefix-mode","bk-subevent-prefix-enabled"].forEach(id=>{
     document.getElementById(id)?.addEventListener("input",bkUpdateSettingsPreview);
     document.getElementById(id)?.addEventListener("change",bkUpdateSettingsPreview);
+  });
+  document.getElementById("bk-subevent-prefix-mode")?.addEventListener("change",()=>{
+    const mode=String(document.getElementById("bk-subevent-prefix-mode")?.value||"date_range");
+    const enabled=document.getElementById("bk-subevent-prefix-enabled");
+    if(enabled){
+      enabled.disabled=mode==="none";
+      if(mode==="none")enabled.checked=false;
+    }
+    bkUpdateSettingsPreview();
   });
   document.getElementById("bk-event-naming-save")?.addEventListener("click",async()=>{
     const status=document.getElementById("bk-event-naming-status");
@@ -4875,11 +4900,13 @@ BIBLIOTHEKAR_JS = r"""
           include_year:Boolean(document.getElementById("bk-event-include-year")?.checked),
           include_time:Boolean(document.getElementById("bk-event-include-time")?.checked),
           no_event_include_year:Boolean(document.getElementById("bk-no-event-include-year")?.checked),
+          subevent_prefix_mode:String(document.getElementById("bk-subevent-prefix-mode")?.value||"date_range"),
+          subevent_prefix_enabled:Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked),
         })
       });
       bkRenderEventNaming(data);
       document.dispatchEvent(new CustomEvent("bibliothekar:event-naming-updated",{detail:data}));
-      if(status)status.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse und Sammelordner.";
+      if(status)status.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse, Unterereignisse und Sammelordner.";
     }catch(error){if(status)status.textContent=error.message;}
   });
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadEventNaming);
@@ -5607,6 +5634,27 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
               <label class="bk-compact-toggle"><input id="bk-event-date-range" type="checkbox"> <span>Von–bis im Namen</span></label>
             </div>
             <div class="bk-language-note">Der eingegebene Ereignisname bleibt Bestandteil des Ordnernamens. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand.</div>
+          </div>
+        </details>
+
+        <details class="bk-settings-card">
+          <summary><span>Unterereignisse</span><span style="color:var(--bk-muted);font-weight:600">Standardbenennung</span></summary>
+          <div class="bk-settings-card-body">
+            <label style="display:grid;gap:6px">
+              <span>Namenspräfix</span>
+              <select id="bk-subevent-prefix-mode">
+                <option value="date">Datum</option>
+                <option value="date_range">Datumsbereich</option>
+                <option value="time">Uhrzeit</option>
+                <option value="year">Jahr</option>
+                <option value="none">Kein Präfix</option>
+              </select>
+            </label>
+            <label class="bk-compact-toggle" style="margin-top:10px">
+              <input id="bk-subevent-prefix-enabled" type="checkbox">
+              <span>Standardmäßig verwenden</span>
+            </label>
+            <div class="bk-language-note">Der eingegebene Unterereignisname bleibt immer erhalten. Im Ereignisfenster kann der Standard pro Ereignis mit „Präfix: an/aus“ überschrieben werden.</div>
           </div>
         </details>
 
