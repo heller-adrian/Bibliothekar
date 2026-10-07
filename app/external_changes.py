@@ -7,7 +7,7 @@ import json
 import uuid
 
 from app.database import database_connection
-from app.safe_transfer import SafeTransferError, move_verified_no_overwrite
+from app.safe_transfer import SafeTransferError, move_verified_no_overwrite, sha256_file
 
 
 class ExternalChangeError(RuntimeError):
@@ -332,21 +332,46 @@ def repair_external_notice(
 
     expected_size = int(details.get("size_bytes") or 0)
     expected_sha = str(details.get("sha256") or "")
-    if not source.is_file():
-        raise ExternalChangeError("Die verschobene Datei wurde am beobachteten Ort nicht mehr gefunden.")
-    if target.exists() or target.is_symlink():
-        raise ExternalChangeError("Der ursprüngliche Zielpfad ist bereits belegt.")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        move_verified_no_overwrite(
-            source,
-            target,
-            expected_size=expected_size,
-            expected_sha256=expected_sha,
+    source_exists = source.is_file()
+    target_exists = target.is_file()
+    already_restored = False
+
+    # 0.41.4: Ein Nutzer darf eine fehlgeschlagene automatische Reparatur
+    # jederzeit selbst im Finder/SMB erledigen. Beim erneuten Prüfen wird ein
+    # bereits am exakten Sollort liegender, byte-identischer Bestand deshalb
+    # als erfolgreich wiederhergestellt übernommen.
+    if not source_exists and target_exists:
+        if expected_size and int(target.stat().st_size) != expected_size:
+            raise ExternalChangeError(
+                "Am erwarteten Sollort liegt bereits eine Datei mit abweichender Größe."
+            )
+        if expected_sha and sha256_file(target) != expected_sha:
+            raise ExternalChangeError(
+                "Am erwarteten Sollort liegt bereits eine Datei mit abweichender SHA-256-Summe."
+            )
+        already_restored = True
+    elif not source_exists:
+        raise ExternalChangeError(
+            "Die verschobene Datei wurde am beobachteten Ort nicht mehr gefunden "
+            "und liegt auch nicht am erwarteten Sollort."
         )
-    except SafeTransferError as error:
-        raise ExternalChangeError(str(error)) from error
+    elif target.exists() or target.is_symlink():
+        raise ExternalChangeError(
+            "Der erwartete Sollort ist bereits belegt. Bitte die dortige Datei prüfen; "
+            "Bibliothekar überschreibt niemals vorhandene Dateien."
+        )
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            move_verified_no_overwrite(
+                source,
+                target,
+                expected_size=expected_size,
+                expected_sha256=expected_sha,
+            )
+        except SafeTransferError as error:
+            raise ExternalChangeError(str(error)) from error
 
     timestamp = _now()
     with database_connection(database_path) as connection:
@@ -397,6 +422,7 @@ def repair_external_notice(
                         "expected_root_kind": expected_kind,
                         "observed_relative_path": observed_rel.as_posix(),
                         "expected_relative_path": expected_rel.as_posix(),
+                        "already_restored_manually": already_restored,
                     },
                     ensure_ascii=False,
                     sort_keys=True,
@@ -421,6 +447,10 @@ def repair_external_conflicts(
             skipped.append({
                 "id": str(notice["id"]),
                 "reason": "Archiv/RO oder nicht eindeutig automatisch reparierbar.",
+                "expected_root_kind": str((notice.get("details") or {}).get("expected_root_kind") or ""),
+                "expected_relative_path": str((notice.get("details") or {}).get("expected_relative_path") or ""),
+                "observed_root_kind": str((notice.get("details") or {}).get("observed_root_kind") or notice.get("root_kind") or ""),
+                "observed_relative_path": str((notice.get("details") or {}).get("observed_relative_path") or notice.get("relative_path") or ""),
             })
             continue
         try:
@@ -432,9 +462,14 @@ def repair_external_conflicts(
             )
             repaired.append(str(notice["id"]))
         except ExternalChangeError as error:
+            details = dict(notice.get("details") or {})
             skipped.append({
                 "id": str(notice["id"]),
                 "reason": str(error),
+                "expected_root_kind": str(details.get("expected_root_kind") or ""),
+                "expected_relative_path": str(details.get("expected_relative_path") or ""),
+                "observed_root_kind": str(details.get("observed_root_kind") or notice.get("root_kind") or ""),
+                "observed_relative_path": str(details.get("observed_relative_path") or notice.get("relative_path") or ""),
             })
     return {
         "repaired_ids": repaired,
