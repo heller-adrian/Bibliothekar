@@ -3815,6 +3815,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         createSubevents.hidden=false;
         createSubeventHeading.textContent="Unterereignisse (optional)";
         createSubeventList.innerHTML="";
+        updateSubeventPrefixToggle();
         if (dated.length) {
           eventStartDate.value=dated[0].day_key || String(dated[0].start_datetime||"").slice(0,10);
           eventEndDate.value=dated[dated.length-1].day_key || String(dated[dated.length-1].end_datetime||"").slice(0,10);
@@ -3842,6 +3843,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventName.disabled=true;
       createSubeventList.innerHTML="";
       renderExistingSubeventCards(parent);
+      updateSubeventPrefixToggle();
 
       useTimeRange.checked=true;
       useTimeRange.disabled=true;
@@ -4012,6 +4014,23 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       }
     }
+    function updateSubeventPrefixToggle(){
+      const count=createSubeventList.querySelectorAll("[data-create-subevent]").length;
+      const visible=!createSubevents.hidden && count>0;
+      subeventPrefixToggle.hidden=!visible;
+      subeventPrefixToggle.textContent=dialogSubeventPrefixEnabled ? "Präfix: an" : "Präfix: aus";
+      subeventPrefixToggle.setAttribute("aria-pressed",dialogSubeventPrefixEnabled ? "true" : "false");
+      const labels={
+        date:"Datum",
+        date_range:"Datumsbereich",
+        time:"Uhrzeit",
+        year:"Jahr",
+        none:"kein Präfix"
+      };
+      const mode=labels[globalSubeventPrefixMode] || "Standard";
+      subeventPrefixToggle.title="Namenspräfix für Unterereignisse · "+mode;
+    }
+
     function addCreateSubeventCard(value={}){
       const defaults=Object.keys(value||{}).length ? value : nextSubeventDefaults();
       if(!defaults)return;
@@ -4041,10 +4060,11 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       };
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
-      row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});
+      row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();updateSubeventPrefixToggle();scheduleDialogPreview();});
       row.querySelectorAll("input,select").forEach(input=>input.addEventListener("change",()=>{syncDayDisplays();scheduleDialogPreview();}));
       createSubeventList.appendChild(row);
       syncDayDisplays();
+      updateSubeventPrefixToggle();
       name?.focus();
       dialogError.hidden=true;
       dialogError.textContent="";
@@ -4060,7 +4080,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";
       eventStartDate.disabled=false;eventStartTime.disabled=false;eventEndDate.disabled=false;eventEndTime.disabled=false;eventStartDate.removeAttribute("min");eventStartDate.removeAttribute("max");eventEndDate.removeAttribute("min");eventEndDate.removeAttribute("max");
       useTimeRange.checked=!noEvent;useTimeRange.disabled=true;setParentTimeFieldsVisible(true);
-      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;createSubfolders.checked=Boolean(globalFolderLayout?.structure_enabled ?? true);createSubfolders.disabled=false;createSubfoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";
+      dialogSubeventPrefixEnabled=globalSubeventPrefixEnabled;
+      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;createSubfolders.checked=Boolean(globalFolderLayout?.structure_enabled ?? true);createSubfolders.disabled=false;createSubfoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";updateSubeventPrefixToggle();
       noEventSegmentEditor.hidden=!noEvent;existingNoEventTargetRow.hidden=!existingNoEvent;
       if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
       else if(noEvent){renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));await autoAttachExistingNoEventCollection();}
@@ -4076,6 +4097,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         end_date: eventEndDate.value,
         uses_time_range: !["no_event","existing_no_event"].includes(dialogMode),
         subevents: ["no_event","existing_no_event"].includes(dialogMode) ? [] : collectCreateSubevents(),
+        subevent_prefix_enabled: ["no_event","existing_no_event"].includes(dialogMode) ? false : dialogSubeventPrefixEnabled,
         selected_intervals: selectedDatedGroups().map(g=>({start_datetime:g.start_datetime,end_datetime:g.end_datetime})),
         start_time: eventStartTime.value,
         end_time: eventEndTime.value,
@@ -4420,6 +4442,11 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     // Normale Ereignisse besitzen immer exakte Datum-/Uhrzeitgrenzen.
     addCreateSubevent?.addEventListener("click",()=>addCreateSubeventCard());
+    subeventPrefixToggle?.addEventListener("click",()=>{
+      dialogSubeventPrefixEnabled=!dialogSubeventPrefixEnabled;
+      updateSubeventPrefixToggle();
+      scheduleDialogPreview();
+    });
 
     existingParentEvent?.addEventListener("change", applyExistingParentChoice);
 
