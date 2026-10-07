@@ -3503,6 +3503,150 @@ BIBLIOTHEKAR_0356_CSS = r"""
 
 """
 
+BIBLIOTHEKAR_0423_CSS = r"""
+@keyframes bk-pwa-select-wobble {
+  0% { transform: scale(1) rotate(0deg); }
+  24% { transform: scale(1.018) rotate(-0.65deg); }
+  48% { transform: scale(.995) rotate(.55deg); }
+  72% { transform: scale(1.01) rotate(-0.25deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+@media (max-width: 820px) {
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {
+    -webkit-touch-callout: none;
+  }
+
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
+    animation: bk-pwa-select-wobble .28s ease-out;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.review-card {
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 88px) !important;
+    align-items: center !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.review-card > .badge {
+    min-width: 0 !important;
+    max-width: 88px !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    text-align: center !important;
+    justify-content: center !important;
+    line-height: 1.1 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file {
+    min-width: 0 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file:not(.selectable):not([data-multi-file]) {
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 92px) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file.selectable {
+    grid-template-columns: auto minmax(0, 1fr) minmax(72px, 92px) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] [data-multi-file].meta-file {
+    grid-template-columns: auto minmax(0, 1fr) minmax(72px, 92px) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file > span:not(.badge),
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file strong,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file small {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file > .badge {
+    min-width: 0 !important;
+    max-width: 92px !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    text-align: center !important;
+    justify-content: center !important;
+    line-height: 1.12 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-detail-card,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #multi-detail-card {
+    display: none;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog #meta-detail-card,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog #multi-detail-card {
+    display: block;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog {
+    position: fixed;
+    inset: auto 0 0 0;
+    width: 100%;
+    max-width: none;
+    max-height: min(88dvh, 760px);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 22px 22px 0 0;
+    background: var(--bk-surface, #fff);
+    color: var(--bk-ink, #172235);
+    box-shadow: 0 -18px 48px rgb(0 0 0 / .20);
+    overflow: hidden;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog::backdrop {
+    background: rgb(10 20 30 / .38);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--bk-line, #ccd2d8);
+    background: color-mix(in srgb, var(--bk-surface, #fff) 96%, transparent);
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-head strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-close {
+    flex: 0 0 auto;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 0 12px;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-body {
+    max-height: calc(min(88dvh, 760px) - 67px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 12px 14px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-body > .meta-card {
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+}
+"""
+
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 (() => {
   const isStandalone = Boolean(
@@ -3556,6 +3700,108 @@ BIBLIOTHEKAR_JS = r"""
   const root = document.documentElement;
   const pageUrl = new URL(window.location.href);
   const bkLibraryId = window.__bkLibraryId || pageUrl.searchParams.get("library") || "main";
+
+  const bkPwaQuickSelectEnabled = () => (
+    root.dataset.bkDisplayMode === "standalone"
+    && Boolean(window.matchMedia?.("(max-width: 820px)")?.matches)
+  );
+  let bkPwaSelectGesture = null;
+  let bkPwaSuppressClickUntil = 0;
+
+  function bkPwaSelectPulse(card) {
+    if (!card) return;
+    card.classList.remove("bk-pwa-select-wobble");
+    void card.offsetWidth;
+    card.classList.add("bk-pwa-select-wobble");
+    window.setTimeout(() => card.classList.remove("bk-pwa-select-wobble"), 320);
+  }
+
+  function bkPwaDispatchSelect(card, phase) {
+    if (!card) return;
+    card.dispatchEvent(new CustomEvent("bk:pwa-select", {
+      bubbles: false,
+      detail: {phase}
+    }));
+    if (phase !== "end") bkPwaSelectPulse(card);
+  }
+
+  function bkPwaFinishGesture() {
+    if (!bkPwaSelectGesture) return;
+    window.clearTimeout(bkPwaSelectGesture.timer);
+    if (bkPwaSelectGesture.active) {
+      bkPwaDispatchSelect(
+        bkPwaSelectGesture.lastCard || bkPwaSelectGesture.startCard,
+        "end"
+      );
+      bkPwaSuppressClickUntil = Date.now() + 650;
+      document.body?.classList.remove("bk-pwa-selecting");
+    }
+    bkPwaSelectGesture = null;
+  }
+
+  document.addEventListener("touchstart", event => {
+    if (!bkPwaQuickSelectEnabled() || event.touches.length !== 1) return;
+    if (event.target.closest("button,input,select,textarea,a")) return;
+    const card = event.target.closest("[data-bk-pwa-select]");
+    if (!card) return;
+    const touch = event.touches[0];
+    const group = String(card.dataset.bkPwaSelect || "");
+    const gesture = {
+      startCard: card,
+      lastCard: card,
+      group,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      active: false,
+      timer: null
+    };
+    gesture.timer = window.setTimeout(() => {
+      if (bkPwaSelectGesture !== gesture) return;
+      gesture.active = true;
+      document.body?.classList.add("bk-pwa-selecting");
+      bkPwaDispatchSelect(card, "start");
+      try { window.navigator.vibrate?.(12); } catch (_) {}
+    }, 380);
+    bkPwaSelectGesture = gesture;
+  }, {passive: true, capture: true});
+
+  document.addEventListener("touchmove", event => {
+    const gesture = bkPwaSelectGesture;
+    if (!gesture || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    if (!gesture.active) {
+      const dx = touch.clientX - gesture.startX;
+      const dy = touch.clientY - gesture.startY;
+      if (Math.hypot(dx, dy) > 11) {
+        window.clearTimeout(gesture.timer);
+        bkPwaSelectGesture = null;
+      }
+      return;
+    }
+    event.preventDefault();
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+    const card = target?.closest?.("[data-bk-pwa-select]");
+    if (
+      card
+      && String(card.dataset.bkPwaSelect || "") === gesture.group
+      && card !== gesture.lastCard
+    ) {
+      gesture.lastCard = card;
+      bkPwaDispatchSelect(card, "enter");
+    }
+    const edge = 78;
+    if (touch.clientY > window.innerHeight - edge) window.scrollBy(0, 13);
+    else if (touch.clientY < edge) window.scrollBy(0, -13);
+  }, {passive: false, capture: true});
+
+  document.addEventListener("touchend", bkPwaFinishGesture, {passive: true, capture: true});
+  document.addEventListener("touchcancel", bkPwaFinishGesture, {passive: true, capture: true});
+  document.addEventListener("click", event => {
+    if (Date.now() >= bkPwaSuppressClickUntil) return;
+    if (!event.target.closest("[data-bk-pwa-select]")) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
 
   function bkLibraryHref(href, libraryId=bkLibraryId) {
     try {
@@ -5158,7 +5404,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0353_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0354_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0355_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0356_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0356_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0423_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
