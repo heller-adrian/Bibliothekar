@@ -2376,7 +2376,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       await loadWorkspace();
     }
 
-    async function loadWorkspace() {
+    async function loadWorkspace({physicalRefresh=true}={}) {
       if (!globalFolderLayout) {
         try { globalFolderLayout = await getJson("/api/settings/event-folder-layout"); }
         catch (_) { globalFolderLayout = {structure_enabled:true,input_path:"Alle",layout:{version:1,nodes:[]}}; }
@@ -2397,8 +2397,15 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
 
       setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
+      statusElement.classList.add("bk-loading-status");
       const query=ids.map(encodeURIComponent).join(",");
-      workspace=await getJson(`/api/workspace/summary?jobs=${query}`);
+      try {
+        workspace=await getJson(
+          `/api/workspace/summary?jobs=${query}&physical_refresh=${physicalRefresh ? "true" : "false"}`
+        );
+      } finally {
+        statusElement.classList.remove("bk-loading-status");
+      }
       eventSuggestions=workspace.event_suggestions || [];
 
       updateTechnicalAnchor(jobSelect.value);
@@ -4019,6 +4026,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
 
       saveEventButton.disabled = true;
+      saveEventButton.classList.add("bk-busy");
+      saveEventButton.setAttribute("aria-busy", "true");
       calculatePreviewButton.disabled = true;
 
       saveResult.hidden = false;
@@ -4100,7 +4109,12 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         selectedDays.clear();
 
-        await loadWorkspace();
+        const fastPlannedRefresh = (
+          String(result?.status || "") === "planned"
+          && String(result?.parent_event?.status || "") === "planned"
+          && !result?.change_request_id
+        );
+        await loadWorkspace({physicalRefresh: !fastPlannedRefresh});
 
         eventDialog.close();
 
@@ -4123,6 +4137,8 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       } finally {
         saveEventButton.disabled = false;
+        saveEventButton.classList.remove("bk-busy");
+        saveEventButton.removeAttribute("aria-busy");
         calculatePreviewButton.disabled =
           false;
       }
