@@ -348,6 +348,40 @@ def reconcile_missing_files(
                     file_identity["current_root_kind"]
                     or root_kind
                 )
+
+                # 0.41.4: Nach der ersten Fremdverschiebung folgt SQLite
+                # bewusst dem beobachteten physischen IST. Der fachliche
+                # Sollpfad darf dadurch bei einem weiteren Reload/Reconcile
+                # aber nicht verloren gehen. Ein bereits offener eindeutiger
+                # placement_conflict ist deshalb die persistente Sollpfad-
+                # Erinnerung, bis die Zuordnung wirklich wieder stimmt.
+                prior_conflict = connection.execute(
+                    """SELECT details_json
+                       FROM external_change_notices
+                       WHERE notice_key=?
+                         AND status='open'
+                         AND action_required=1
+                       LIMIT 1""",
+                    (f"placement:{file_id}",),
+                ).fetchone()
+                if prior_conflict is not None:
+                    try:
+                        prior_details = json.loads(
+                            str(prior_conflict["details_json"] or "{}")
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        prior_details = {}
+                    prior_expected_path = str(
+                        prior_details.get("expected_relative_path") or ""
+                    ).strip()
+                    prior_expected_kind = str(
+                        prior_details.get("expected_root_kind") or ""
+                    ).strip()
+                    if prior_expected_path:
+                        expected_path = prior_expected_path
+                    if prior_expected_kind:
+                        expected_kind = prior_expected_kind
+
                 detail = (
                     f"{file_identity['original_filename']} wurde aus "
                     f"„{event.get('name') or event_id}“ nach "
