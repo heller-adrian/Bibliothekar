@@ -43,16 +43,7 @@ jobs:
       - name: Collect complete backend regression suite
         run: pytest --collect-only -q -o addopts='' tests/backend
       - name: Run complete backend regression suite without fail-fast
-        run: |
-          set -o pipefail
-          pytest -q -o addopts='' tests/backend 2>&1 | tee "$RUNNER_TEMP/backend-pytest.log"
-      - name: Upload backend failure log
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-pytest-failure
-          path: ${{ runner.temp }}/backend-pytest.log
-          if-no-files-found: ignore
+        run: pytest -q -o addopts='' tests/backend
 
   archive-isolation-harness:
     runs-on: ubuntu-latest
