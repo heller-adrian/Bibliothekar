@@ -2122,10 +2122,20 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     function confirmCrossBackupMembership(error) {
       const membership=error?.data?.membership || {};
-      const sources=membership.sources || [];
+      const sources=membership.hidden_sources || membership.sources || [];
+      const familyCount=Number(
+        membership.hidden_additional_family_count
+        ?? membership.additional_family_count
+        ?? 0
+      );
+      const fileCount=Number(
+        membership.hidden_additional_file_count
+        ?? membership.additional_file_count
+        ?? 0
+      );
       crossBackupMembershipSummary.textContent =
-        `${Number(membership.additional_family_count||0)} weitere Familien · `
-        + `${Number(membership.additional_file_count||0)} Dateien liegen bereits in aktiven Sicherungen und gehören ebenfalls zu diesem Zeitraum.`;
+        `${familyCount} weitere Familien · `
+        + `${fileCount} Dateien liegen in aktuell ausgeblendeten aktiven Sicherungen und gehören ebenfalls zu diesem Zeitraum.`;
 
       crossBackupMembershipSources.innerHTML=sources.map(source=>{
         const familyRows=(source.families||[]).map(family=>{
@@ -2253,6 +2263,12 @@ WORKSPACE_HTML = r"""<!doctype html>
       return [...selectedJobIds][0] || "";
     }
 
+    function visibleActiveJobIds(){
+      return jobs
+        .filter(job=>job.workflow_status!=="archived" && selectedJobIds.has(job.id))
+        .map(job=>String(job.id));
+    }
+
     function payloadForSourceJob(base, jobId) {
       const bucket = sourceGroupsForSelection().get(jobId);
       if (!bucket) return {...base};
@@ -2269,7 +2285,8 @@ WORKSPACE_HTML = r"""<!doctype html>
         ...base,
         selected_intervals: intervals,
         selected_day_keys: dayKeys,
-        selected_family_ids: familyIds
+        selected_family_ids: familyIds,
+        visible_active_job_ids: visibleActiveJobIds()
       };
     }
 
@@ -2287,7 +2304,8 @@ WORKSPACE_HTML = r"""<!doctype html>
           .filter(group => group.start_datetime && group.end_datetime)
           .map(group => ({start_datetime:group.start_datetime,end_datetime:group.end_datetime})),
         selected_day_keys: [...new Set(groups.map(group=>group.day_key).filter(Boolean))].sort(),
-        selected_family_ids: familyIds
+        selected_family_ids: familyIds,
+        visible_active_job_ids: visibleActiveJobIds()
       };
     }
 
