@@ -5777,7 +5777,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
                     "end_time": target_end[11:16],
                     "uses_time_range": bool(target["uses_time_range"]),
                     "preserve_day_folders": bool(target["preserve_day_folders"]),
-                    "folder_naming": archived_naming,
+                    "folder_naming": _naming_snapshot_from_event_context(context),
                     "subevents": [
                         {
                             "id": child.get("id"),
@@ -5974,7 +5974,7 @@ def api_create_event(
                 "end_time": extension["new_end"][11:16],
                 "uses_time_range": True,
                 "preserve_day_folders": bool(archived_target["preserve_day_folders"]),
-                "folder_naming": _naming_snapshot_from_event_context(context),
+                "folder_naming": archived_naming,
                 "subevents": [
                     *[
                         {
