@@ -6,8 +6,8 @@ import re
 
 DEFAULT_NO_EVENT_LABEL = "Ohne Ereignis"
 
-# Public choices for new semantic subevent folders.  "legacy_datetime_range"
-# remains an internal compatibility mode for events created before 0.43.0.
+# 0.43.0 stored one exclusive mode. Keep those values readable so existing
+# event snapshots never change their physical folder naming after the patch.
 SUBEVENT_PREFIX_MODES = {
     "date",
     "date_range",
@@ -26,8 +26,11 @@ DEFAULT_EVENT_NAMING = {
     # Monthly collection folders have no coherent start/end time range.
     # They may optionally include the year before the month.
     "no_event_include_year": False,
-    # Semantic child folders use their own compact naming policy.
-    "subevent_prefix_mode": "date_range",
+    # 0.43.1: semantic child folders use the same combinable controls as
+    # normal events instead of one mutually exclusive mode.
+    "subevent_date_mode": "start",
+    "subevent_include_year": False,
+    "subevent_include_time": False,
     "subevent_prefix_enabled": True,
 }
 
@@ -65,34 +68,91 @@ def normalize_event_naming(value: Any) -> dict[str, Any]:
             "Datumsdarstellung muss „start“ oder „range“ sein."
         )
 
-    subevent_prefix_mode = str(
-        raw.get("subevent_prefix_mode")
-        or DEFAULT_EVENT_NAMING["subevent_prefix_mode"]
-    ).strip().lower()
-    if subevent_prefix_mode not in SUBEVENT_PREFIX_MODES:
-        raise EventNamingError(
-            "Unbekannter Namenspräfix für Unterereignisse."
+    legacy_subevent_mode = str(raw.get("subevent_prefix_mode") or "").strip().lower()
+    if legacy_subevent_mode and legacy_subevent_mode not in SUBEVENT_PREFIX_MODES:
+        raise EventNamingError("Unbekannter Namenspräfix für Unterereignisse.")
+
+    has_composite_subevent_naming = any(
+        key in raw
+        for key in (
+            "subevent_date_mode",
+            "subevent_include_year",
+            "subevent_include_time",
+        )
+    )
+
+    if has_composite_subevent_naming:
+        subevent_date_mode = str(
+            raw.get("subevent_date_mode")
+            or DEFAULT_EVENT_NAMING["subevent_date_mode"]
+        ).strip().lower()
+        subevent_include_year = bool(raw.get("subevent_include_year", False))
+        subevent_include_time = bool(raw.get("subevent_include_time", False))
+    else:
+        # Migrate the 0.43.0 settings surface into the combinable 0.43.1
+        # controls. Existing event snapshots still keep the old mode key and
+        # are rendered below with their exact old semantics.
+        mapping = {
+            "date": ("start", False, False),
+            "date_range": ("range", False, False),
+            "time": ("start", False, True),
+            "year": ("start", True, False),
+            "none": ("start", False, False),
+            "legacy_datetime_range": ("range", False, True),
+        }
+        (
+            subevent_date_mode,
+            subevent_include_year,
+            subevent_include_time,
+        ) = mapping.get(
+            legacy_subevent_mode,
+            (
+                DEFAULT_EVENT_NAMING["subevent_date_mode"],
+                DEFAULT_EVENT_NAMING["subevent_include_year"],
+                DEFAULT_EVENT_NAMING["subevent_include_time"],
+            ),
         )
 
-    return {
+    if subevent_date_mode not in {"start", "range"}:
+        raise EventNamingError(
+            "Datumsdarstellung für Unterereignisse muss „start“ oder „range“ sein."
+        )
+
+    prefix_default = (
+        False
+        if legacy_subevent_mode == "none" and "subevent_prefix_enabled" not in raw
+        else DEFAULT_EVENT_NAMING["subevent_prefix_enabled"]
+    )
+
+    result = {
         "no_event_label": no_event_label,
         "date_mode": date_mode,
         "include_year": bool(raw.get("include_year", False)),
         "include_time": bool(raw.get("include_time", False)),
         "no_event_include_year": bool(raw.get("no_event_include_year", False)),
-        "subevent_prefix_mode": subevent_prefix_mode,
+        "subevent_date_mode": subevent_date_mode,
+        "subevent_include_year": subevent_include_year,
+        "subevent_include_time": subevent_include_time,
         "subevent_prefix_enabled": bool(
-            raw.get(
-                "subevent_prefix_enabled",
-                DEFAULT_EVENT_NAMING["subevent_prefix_enabled"],
-            )
+            raw.get("subevent_prefix_enabled", prefix_default)
         ),
     }
+
+    # Preserve the old key only when it already exists. This freezes 0.43.0
+    # event snapshots while new settings/snapshots use the composite model.
+    if legacy_subevent_mode:
+        result["subevent_prefix_mode"] = legacy_subevent_mode
+
+    return result
 
 
 def naming_from_library_settings(settings: Any) -> dict[str, Any]:
     raw = settings if isinstance(settings, dict) else {}
-    return normalize_event_naming(raw.get("event_naming") or {})
+    result = normalize_event_naming(raw.get("event_naming") or {})
+    # Library settings are migrated into the new combinable model immediately.
+    # Existing per-event snapshots are handled separately and stay frozen.
+    result.pop("subevent_prefix_mode", None)
+    return result
 
 
 def _date_token(value: str, *, include_year: bool) -> str:
@@ -135,7 +195,7 @@ def render_event_folder_name(
     name = _clean_component(event_name, field="Ereignisname")
 
     # Even if years are normally omitted, a year-spanning event must remain
-    # unambiguous.  The event continues to live below its start-year root.
+    # unambiguous. The event continues to live below its start-year root.
     cross_year = str(start_date)[:4] != str(end_date)[:4]
     include_year = normalized["include_year"] or cross_year
     start = _date_token(start_date, include_year=include_year)
@@ -157,6 +217,37 @@ def render_event_folder_name(
     return f"{date_part} - {name}"
 
 
+def _render_legacy_subevent_prefix(
+    *,
+    mode: str,
+    start: str,
+    end: str,
+    name: str,
+    prefix_enabled: bool,
+) -> str:
+    if not prefix_enabled or mode == "none":
+        return name
+    if mode == "legacy_datetime_range":
+        return (
+            f"{start[5:16].replace('T', ' ').replace(':', '-')} - "
+            f"{end[5:16].replace('T', ' ').replace(':', '-')} - {name}"
+        )
+
+    start_date = start[5:10]
+    end_date = end[5:10]
+    if mode == "date":
+        prefix = start_date
+    elif mode == "date_range":
+        prefix = start_date if start[:10] == end[:10] else f"{start_date}–{end_date}"
+    elif mode == "time":
+        prefix = f"{_time_token(start[11:16])}–{_time_token(end[11:16])}"
+    elif mode == "year":
+        prefix = start[:4] if start[:4] == end[:4] else f"{start[:4]}–{end[:4]}"
+    else:
+        prefix = ""
+    return f"{prefix} - {name}" if prefix else name
+
+
 def render_subevent_folder_name(
     *,
     event_name: str,
@@ -168,11 +259,11 @@ def render_subevent_folder_name(
 ) -> str:
     """Render one semantic child-event folder.
 
-    The human-entered name is always the semantic part.  A configurable
-    prefix may precede it.  The internal legacy mode reproduces the exact
-    pre-0.43.0 prefix for already existing events.
+    New 0.43.1 snapshots combine year/time/range independently. A persisted
+    0.43.0 exclusive mode remains byte-for-byte compatible.
     """
-    normalized = normalize_event_naming(naming)
+    raw = naming if isinstance(naming, dict) else {}
+    normalized = normalize_event_naming(raw)
     name = _clean_component(event_name, field="Unterereignisname")
     start = str(start_datetime or "")[:19]
     end = str(end_datetime or "")[:19]
@@ -181,15 +272,18 @@ def render_subevent_folder_name(
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", end):
         raise EventNamingError("Ungültiges Ende für Unterereignis.")
 
-    mode = normalized["subevent_prefix_mode"]
-    if not normalized["subevent_prefix_enabled"] or mode == "none":
-        return name
-
-    if mode == "legacy_datetime_range":
-        return (
-            f"{start[5:16].replace('T', ' ').replace(':', '-')} - "
-            f"{end[5:16].replace('T', ' ').replace(':', '-')} - {name}"
+    legacy_mode = str(raw.get("subevent_prefix_mode") or "").strip().lower()
+    if legacy_mode:
+        return _render_legacy_subevent_prefix(
+            mode=legacy_mode,
+            start=start,
+            end=end,
+            name=name,
+            prefix_enabled=normalized["subevent_prefix_enabled"],
         )
+
+    if not normalized["subevent_prefix_enabled"]:
+        return name
 
     parent_start = str(parent_start_datetime or start)[:19]
     parent_end = str(parent_end_datetime or end)[:19]
@@ -197,21 +291,30 @@ def render_subevent_folder_name(
         start[:4] != end[:4]
         or parent_start[:4] != parent_end[:4]
     )
-    start_date = _date_token(start[:10], include_year=cross_year)
-    end_date = _date_token(end[:10], include_year=cross_year)
+    include_year = normalized["subevent_include_year"] or cross_year
+    start_date = _date_token(start[:10], include_year=include_year)
+    end_date = _date_token(end[:10], include_year=include_year)
 
-    if mode == "date":
-        prefix = start_date
-    elif mode == "date_range":
-        prefix = start_date if start[:10] == end[:10] else f"{start_date}–{end_date}"
-    elif mode == "time":
-        prefix = f"{_time_token(start[11:16])}–{_time_token(end[11:16])}"
-    elif mode == "year":
-        prefix = start[:4] if start[:4] == end[:4] else f"{start[:4]}–{end[:4]}"
+    if (
+        normalized["subevent_date_mode"] == "range"
+        and start[:10] != end[:10]
+    ):
+        date_part = f"{start_date}–{end_date}"
     else:
-        prefix = ""
+        date_part = start_date
 
-    return f"{prefix} - {name}" if prefix else name
+    if normalized["subevent_include_time"]:
+        start_clock = _time_token(start[11:16])
+        end_clock = _time_token(end[11:16])
+        if (
+            normalized["subevent_date_mode"] == "range"
+            and start[:10] != end[:10]
+        ):
+            date_part = f"{start_date} {start_clock}–{end_date} {end_clock}"
+        else:
+            date_part = f"{date_part} · {start_clock}–{end_clock}"
+
+    return f"{date_part} - {name}"
 
 
 def render_no_event_folder_name(month_key: str, naming: Any) -> str:
