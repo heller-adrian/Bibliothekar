@@ -248,12 +248,9 @@ def test_0430_membership_warns_only_for_hidden_active_backups(tmp_path: Path):
 def test_0430_settings_and_event_dialog_expose_subevent_prefix_policy():
     shell = _shell_markup("workspace", "captures")
     assert "<span>Unterereignisse</span>" in shell
-    assert 'id="bk-subevent-prefix-mode"' in shell
-    assert '<option value="date">Datum</option>' in shell
-    assert '<option value="date_range">Datumsbereich</option>' in shell
-    assert '<option value="time">Uhrzeit</option>' in shell
-    assert '<option value="year">Jahr</option>' in shell
-    assert '<option value="none">Kein Präfix</option>' in shell
+    assert 'id="bk-subevent-include-year"' in shell
+    assert 'id="bk-subevent-include-time"' in shell
+    assert 'id="bk-subevent-date-range"' in shell
     assert 'id="bk-subevent-prefix-enabled"' in shell
     assert "Stadtbesuch" in BIBLIOTHEKAR_JS
 
@@ -265,17 +262,14 @@ def test_0430_settings_and_event_dialog_expose_subevent_prefix_policy():
     assert "Weitere Aufnahmen aus ausgeblendeten Sicherungen" in WORKSPACE_HTML
 
 
-def test_0430_full_dates_are_directly_typable_with_optional_picker():
-    assert 'id="event-start-date" type="text"' in WORKSPACE_HTML
-    assert 'id="event-end-date" type="text"' in WORKSPACE_HTML
-    assert 'data-date-picker-target="event-start-date"' in WORKSPACE_HTML
-    assert 'data-date-picker-target="event-end-date"' in WORKSPACE_HTML
-    assert 'placeholder="JJJJ-MM-TT"' in WORKSPACE_HTML
+def test_0430_full_dates_use_native_date_controls():
+    assert 'id="event-start-date" type="date"' in WORKSPACE_HTML
+    assert 'id="event-end-date" type="date"' in WORKSPACE_HTML
+    assert "📅" not in WORKSPACE_HTML
 
-    assert 'id="edit-start-date" type="text"' in EVENTS_HTML
-    assert 'id="edit-end-date" type="text"' in EVENTS_HTML
-    assert 'data-edit-date-picker="edit-start-date"' in EVENTS_HTML
-    assert 'data-edit-date-picker="edit-end-date"' in EVENTS_HTML
+    assert 'id="edit-start-date" type="date"' in EVENTS_HTML
+    assert 'id="edit-end-date" type="date"' in EVENTS_HTML
+    assert "📅" not in EVENTS_HTML
 
 
 def test_0430_invalid_direct_date_is_rejected():
