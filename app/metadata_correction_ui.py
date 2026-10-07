@@ -366,11 +366,20 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const firstOthers=others.slice(0,3);
     const remaining=others.slice(3);
     const original=file.original_metadata?.before_metadata||null;
+    const originalCandidates=(original?.metadata_candidates||[]).filter(Boolean);
+    const originalCandidateRows=originalCandidates.length
+      ? '<div class="meta-candidate-list" style="margin-top:9px">'+originalCandidates.map(candidate=>
+          '<div class="meta-candidate"><strong>'+esc(candidate.label_de||candidate.source_type||String(candidate.tag_name||"").split(":").pop()||"Metadaten")+'</strong>'
+          +'<span>'+esc(String(candidate.normalized_datetime||candidate.raw_value||"nicht nutzbar").slice(0,80))+'</span>'
+          +'<small class="muted"><code>'+esc(candidate.technical_tag||candidate.tag_name||"")+'</code></small></div>'
+        ).join("")+'</div>'
+      : "";
     const originalBlock=original
       ? '<details><summary>Ursprüngliche Metadaten vor der Korrektur</summary><div class="meta-kv" style="margin-top:9px">'
         +'<span>Aufnahmezeit</span><span>'+esc(original.selected_capture_time||"nicht vorhanden")+'</span>'
         +'<span>Quelle</span><span>'+esc(original.selected_capture_source||"—")+'</span>'
-        +'<span>Vertrauen</span><span>'+esc(original.capture_time_confidence||"—")+'</span></div></details>'
+        +'<span>Vertrauen</span><span>'+esc(original.capture_time_confidence||"—")+'</span></div>'
+        +originalCandidateRows+'</details>'
       : "";
     const candidateBlock='<div><strong>Bevorzugter Metadatenkandidat</strong><div class="meta-candidate-list" style="margin-top:7px">'
       +(preferred?formatCandidate(preferred):'<div class="muted">Kein nutzbarer Metadatenkandidat vorhanden.</div>')+'</div></div>'
@@ -401,8 +410,14 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       const candidate=(file.metadata_candidates||[]).find(item=>String(item.tag_name||"")===String(button.dataset.metaUseCandidate||""));
       if(!candidate)return;
       const value=String(candidate.normalized_datetime||"").slice(0,19);
-      if($("meta-date"))$("meta-date").value=value.slice(0,10);
+      if($("meta-date")){
+        $("meta-date").value=value.slice(0,10);
+        $("meta-date").dataset.sourceTag=String(candidate.tag_name||"");
+      }
       if($("meta-time"))$("meta-time").value=value.slice(11,19);
+    }));
+    ["meta-date","meta-time"].forEach(id=>$(id)?.addEventListener("input",()=>{
+      if($("meta-date"))delete $("meta-date").dataset.sourceTag;
     }));
     $("meta-prepare").addEventListener("click",()=>correctSelected(file));
     $("meta-reintegrate")?.addEventListener("click",reintegrateSelected);
@@ -431,6 +446,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     setStatus("Metadaten werden geändert …");
     try{
       const payload={area:state.area,relative_path:file.relative_path,proposed_datetime:date+"T"+time};
+      const sourceTag=String($("meta-date")?.dataset?.sourceTag||"");
+      if(sourceTag)payload.proposal_source_tag=sourceTag;
       if(state.area==="library"){payload.library_id=file.library_id;payload.family_id=file.family_id;}
       await json("/api/metadata-correction/correct",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
       await scan(false,true);
