@@ -328,18 +328,19 @@ def test_deleting_one_of_two_events_merges_free_stock_across_jobs(tmp_path):
         assert connection.execute(
             "SELECT COUNT(*) FROM events WHERE id='first-event'"
         ).fetchone()[0] == 0
-    first_tasks = [
-        task for task in list_global_tasks(db)
-        if task.get("job_id") == "first"
-    ]
-    assert not any(task["kind"] in {"reassignment","resort"} for task in first_tasks)
-    # The fixture already contained one unrelated free family ("free2") before
-    # the delete. It remains a legitimate generic task. The family released by
-    # the confirmed delete is excluded by released_free_families, so the task
-    # must still report exactly that one pre-existing family.
-    unassigned = [task for task in first_tasks if task["kind"] == "unassigned_families"]
+    tasks = list_global_tasks(db)
+    assert not any(task["kind"] in {"reassignment","resort"} for task in tasks)
+    # Freier datierter Bestand ist seit 0.42.1 eine globale Aufgabe über alle
+    # Import-/Korrekturjobs. Die durch das bestätigte Löschen freigegebene
+    # Familie bleibt via released_free_families ausgeschlossen; die beiden
+    # bereits vorher freien Familien aus "first" und "second" werden gemeinsam
+    # gezählt statt als job-spezifische Karten dargestellt.
+    unassigned = [task for task in tasks if task["kind"] == "unassigned_families"]
     assert len(unassigned) == 1
-    assert unassigned[0]["detail"].startswith("1 Familie ·")
+    assert unassigned[0]["family_count"] == 2
+    assert unassigned[0]["job_count"] == 2
+    assert unassigned[0]["detail"] == "2 Familien · freier Tagesbestand"
+    assert unassigned[0]["href"] == "/workspace?task=free"
 @pytest.mark.parametrize("preserve", [False, True])
 def test_reassignment_new_event_uses_explicit_day_folder_option(tmp_path, preserve):
     db = tmp_path / "db.sqlite3"
