@@ -1610,9 +1610,13 @@ WORKSPACE_HTML = r"""<!doctype html>
     const noEventButton =
       document.getElementById("no-event-button");
     let noEventLabel = "Ohne Ereignis";
+    let globalSubeventPrefixMode = "date_range";
+    let globalSubeventPrefixEnabled = true;
 
-    function applyNoEventLabel(value) {
-      noEventLabel = String(value || "Ohne Ereignis").trim() || "Ohne Ereignis";
+    function applyEventNamingSettings(value={}) {
+      noEventLabel = String(value.no_event_label || "Ohne Ereignis").trim() || "Ohne Ereignis";
+      globalSubeventPrefixMode = String(value.subevent_prefix_mode || "date_range");
+      globalSubeventPrefixEnabled = value.subevent_prefix_enabled !== false;
       if (noEventButton) noEventButton.textContent = noEventLabel;
       if (existingNoEventButton) existingNoEventButton.textContent = "Zu bestehendem " + noEventLabel;
     }
@@ -1620,14 +1624,14 @@ WORKSPACE_HTML = r"""<!doctype html>
     async function loadEventNamingSettings() {
       try {
         const data = await getJson("/api/settings/event-naming");
-        applyNoEventLabel(data.no_event_label);
+        applyEventNamingSettings(data);
       } catch (_) {
-        applyNoEventLabel("Ohne Ereignis");
+        applyEventNamingSettings({});
       }
     }
 
     document.addEventListener("bibliothekar:event-naming-updated", event => {
-      applyNoEventLabel(event.detail?.no_event_label);
+      applyEventNamingSettings(event.detail || {});
     });
 
     const statusElement =
@@ -1799,6 +1803,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     const createSubeventHeading=document.getElementById("create-subevent-heading");
     const createSubeventList=document.getElementById("create-subevent-list");
     const addCreateSubevent=document.getElementById("add-create-subevent");
+    const subeventPrefixToggle=document.getElementById("subevent-prefix-toggle");
+    let dialogSubeventPrefixEnabled=true;
     const dialogError=document.getElementById("dialog-error");
 
     const eventStartTime =
