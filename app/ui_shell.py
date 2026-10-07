@@ -4792,26 +4792,33 @@ BIBLIOTHEKAR_JS = r"""
     const year=document.getElementById("bk-event-include-year");
     const time=document.getElementById("bk-event-include-time");
     const collectionYear=document.getElementById("bk-no-event-include-year");
-    const subeventMode=document.getElementById("bk-subevent-prefix-mode");
+    const subeventRange=document.getElementById("bk-subevent-date-range");
+    const subeventYear=document.getElementById("bk-subevent-include-year");
+    const subeventTime=document.getElementById("bk-subevent-include-time");
     const subeventEnabled=document.getElementById("bk-subevent-prefix-enabled");
     if(label)label.value=String(data.no_event_label||"Ohne Ereignis");
     if(range)range.checked=String(data.date_mode||"start")==="range";
     if(year)year.checked=Boolean(data.include_year);
     if(time)time.checked=Boolean(data.include_time);
     if(collectionYear)collectionYear.checked=Boolean(data.no_event_include_year);
-    if(subeventMode)subeventMode.value=String(data.subevent_prefix_mode||"date_range");
+    if(subeventRange)subeventRange.checked=String(data.subevent_date_mode||"start")==="range";
+    if(subeventYear)subeventYear.checked=Boolean(data.subevent_include_year);
+    if(subeventTime)subeventTime.checked=Boolean(data.subevent_include_time);
     if(subeventEnabled)subeventEnabled.checked=data.subevent_prefix_enabled!==false;
-    if(subeventEnabled)subeventEnabled.disabled=String(data.subevent_prefix_mode||"date_range")==="none";
     bkUpdateSettingsPreview();
   }
 
-  function bkPreviewStructure(parentFolder) {
+  function bkPreviewStructure(parentFolder, childFolder="") {
     const enabled=Boolean(folderLayoutState?.structure_enabled);
     const nodes=folderLayoutState?.layout?.nodes||[];
     const inputPath=String(folderLayoutState?.input_path||"");
     const lines=["2026"];
-    const parentInput=enabled && !inputPath ? "  [Input]" : "";
+    const parentInput=enabled && !inputPath && !childFolder ? "  [Input]" : "";
     lines.push("└── "+parentFolder+parentInput);
+    if(childFolder){
+      const childInput=enabled && !inputPath ? "  [Input]" : "";
+      lines.push("    └── "+childFolder+childInput);
+    }
     if(!enabled || !nodes.length)return lines.join("\n");
 
     function walk(items,prefix,pathPrefix){
@@ -4825,7 +4832,7 @@ BIBLIOTHEKAR_JS = r"""
         walk(node.children||[],prefix+(last?"    ":"│   "),path);
       });
     }
-    walk(nodes,"    ","");
+    walk(nodes,childFolder?"        ":"    ","");
     return lines.join("\n");
   }
 
@@ -4837,8 +4844,11 @@ BIBLIOTHEKAR_JS = r"""
     const year=Boolean(document.getElementById("bk-event-include-year")?.checked);
     const time=Boolean(document.getElementById("bk-event-include-time")?.checked);
     const collectionYear=Boolean(document.getElementById("bk-no-event-include-year")?.checked);
-    const subeventMode=String(document.getElementById("bk-subevent-prefix-mode")?.value||"date_range");
-    const subeventEnabled=Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked) && subeventMode!=="none";
+    const subeventRange=Boolean(document.getElementById("bk-subevent-date-range")?.checked);
+    const subeventYear=Boolean(document.getElementById("bk-subevent-include-year")?.checked);
+    const subeventTime=Boolean(document.getElementById("bk-subevent-include-time")?.checked);
+    const subeventEnabled=Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked);
+
     const d1=year?"2026-07-20":"07-20";
     const d2=year?"2026-07-21":"07-21";
     let datePart=range ? d1+"–"+d2 : d1;
@@ -4848,23 +4858,24 @@ BIBLIOTHEKAR_JS = r"""
         : d1+" · 14-00–18-30";
     }
     const normal=datePart+" - Urlaub";
+
+    const sd1=subeventYear?"2026-07-20":"07-20";
+    const sd2=subeventYear?"2026-07-21":"07-21";
+    let subeventPart=subeventRange ? sd1+"–"+sd2 : sd1;
+    if(subeventTime){
+      subeventPart=subeventRange
+        ? sd1+" 14-00–"+sd2+" 18-30"
+        : sd1+" · 14-00–18-30";
+    }
+    const subevent=(subeventEnabled ? subeventPart+" - " : "")+"Stadtbesuch";
     const collection=(collectionYear?"2026-07":"07")+" - "+label;
-    const subeventPrefix={
-      date:"07-20",
-      date_range:"07-20–07-21",
-      time:"14-00–18-30",
-      year:"2026",
-      none:""
-    }[subeventMode]||"";
-    const subevent=(subeventEnabled && subeventPrefix ? subeventPrefix+" - " : "")+"Stadtbesuch";
+
     preview.innerHTML=
       '<div class="bk-settings-preview-grid">'
-      +'<div class="bk-settings-preview-case"><strong>Normales Ereignis</strong><pre>'+bkEscape(bkPreviewStructure(normal))+'</pre></div>'
-      +'<div class="bk-settings-preview-case"><strong>Unterereignis</strong><pre>'+bkEscape("└── "+subevent)+'</pre></div>'
+      +'<div class="bk-settings-preview-case"><strong>Normales Ereignis</strong><pre>'+bkEscape(bkPreviewStructure(normal,subevent))+'</pre></div>'
       +'<div class="bk-settings-preview-case"><strong>Sammelordner</strong><pre>'+bkEscape(bkPreviewStructure(collection))+'</pre></div>'
       +'</div>';
   }
-
   async function bkLoadEventNaming() {
     if(!eventNamingSettings)return;
     const status=document.getElementById("bk-event-naming-status");
@@ -4875,18 +4886,9 @@ BIBLIOTHEKAR_JS = r"""
     }catch(error){if(status)status.textContent=error.message;}
   }
 
-  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year","bk-subevent-prefix-mode","bk-subevent-prefix-enabled"].forEach(id=>{
+  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year","bk-subevent-date-range","bk-subevent-include-year","bk-subevent-include-time","bk-subevent-prefix-enabled"].forEach(id=>{
     document.getElementById(id)?.addEventListener("input",bkUpdateSettingsPreview);
     document.getElementById(id)?.addEventListener("change",bkUpdateSettingsPreview);
-  });
-  document.getElementById("bk-subevent-prefix-mode")?.addEventListener("change",()=>{
-    const mode=String(document.getElementById("bk-subevent-prefix-mode")?.value||"date_range");
-    const enabled=document.getElementById("bk-subevent-prefix-enabled");
-    if(enabled){
-      enabled.disabled=mode==="none";
-      if(mode==="none")enabled.checked=false;
-    }
-    bkUpdateSettingsPreview();
   });
   document.getElementById("bk-event-naming-save")?.addEventListener("click",async()=>{
     const status=document.getElementById("bk-event-naming-status");
@@ -4900,7 +4902,9 @@ BIBLIOTHEKAR_JS = r"""
           include_year:Boolean(document.getElementById("bk-event-include-year")?.checked),
           include_time:Boolean(document.getElementById("bk-event-include-time")?.checked),
           no_event_include_year:Boolean(document.getElementById("bk-no-event-include-year")?.checked),
-          subevent_prefix_mode:String(document.getElementById("bk-subevent-prefix-mode")?.value||"date_range"),
+          subevent_date_mode:Boolean(document.getElementById("bk-subevent-date-range")?.checked)?"range":"start",
+          subevent_include_year:Boolean(document.getElementById("bk-subevent-include-year")?.checked),
+          subevent_include_time:Boolean(document.getElementById("bk-subevent-include-time")?.checked),
           subevent_prefix_enabled:Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked),
         })
       });
@@ -5640,21 +5644,16 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <details class="bk-settings-card">
           <summary><span>Unterereignisse</span><span style="color:var(--bk-muted);font-weight:600">Standardbenennung</span></summary>
           <div class="bk-settings-card-body">
-            <label style="display:grid;gap:6px">
-              <span>Namenspräfix</span>
-              <select id="bk-subevent-prefix-mode">
-                <option value="date">Datum</option>
-                <option value="date_range">Datumsbereich</option>
-                <option value="time">Uhrzeit</option>
-                <option value="year">Jahr</option>
-                <option value="none">Kein Präfix</option>
-              </select>
-            </label>
+            <div style="display:flex;gap:14px;flex-wrap:wrap">
+              <label class="bk-compact-toggle"><input id="bk-subevent-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-subevent-include-time" type="checkbox"> <span>Uhrzeit einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-subevent-date-range" type="checkbox"> <span>Von–bis im Namen</span></label>
+            </div>
             <label class="bk-compact-toggle" style="margin-top:10px">
               <input id="bk-subevent-prefix-enabled" type="checkbox">
               <span>Standardmäßig verwenden</span>
             </label>
-            <div class="bk-language-note">Der eingegebene Unterereignisname bleibt immer erhalten. Im Ereignisfenster kann der Standard pro Ereignis mit „Präfix: an/aus“ überschrieben werden.</div>
+            <div class="bk-language-note">Der eingegebene Unterereignisname bleibt immer erhalten. Jahr, Uhrzeit und Von–bis lassen sich frei kombinieren. Im Ereignisfenster kann der Standard pro Ereignis mit „Präfix: an/aus“ überschrieben werden.</div>
           </div>
         </details>
 
