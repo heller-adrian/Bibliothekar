@@ -4999,8 +4999,10 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 "href": "/workspace?task=placement-conflicts",
             })
 
-        for row in connection.execute(
-            """SELECT ff.job_id, COALESCE(j.source_volume_label,ff.job_id) AS label, COUNT(*) AS n
+        row = connection.execute(
+            """SELECT COUNT(*) AS n,
+                      COUNT(DISTINCT ff.job_id) AS job_count,
+                      MIN(COALESCE(j.source_volume_label,ff.job_id)) AS only_label
                FROM file_families ff JOIN jobs j ON j.id=ff.job_id
                WHERE ff.selected_capture_time IS NOT NULL
                  AND NOT EXISTS (
@@ -5025,17 +5027,28 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  AND NOT EXISTS (
                    SELECT 1 FROM released_free_families marker
                    WHERE marker.job_id=ff.job_id AND marker.family_id=ff.id
-                 )
-               GROUP BY ff.job_id,j.source_volume_label
-               HAVING COUNT(*) > 0
-               ORDER BY MAX(j.updated_at) DESC"""
-        ).fetchall():
+                 )"""
+        ).fetchone()
+        unassigned_count = int(row["n"] or 0) if row is not None else 0
+        if unassigned_count:
+            job_count = int(row["job_count"] or 0)
+            suffix = (
+                f" · {row['only_label']}"
+                if job_count == 1 and str(row["only_label"] or "").strip()
+                else " · freier Tagesbestand"
+            )
             tasks.append({
-                'kind': 'unassigned_families', 'job_id': row['job_id'],
-                'title': 'Noch nicht zugeordnet',
-                'detail': f"{int(row['n'])} Familie" + ('' if int(row['n']) == 1 else 'n') + f" · {row['label']}",
-                'count': 1,
-                'href': f"/workspace?job={row['job_id']}&task=free",
+                "kind": "unassigned_families",
+                "title": "Noch nicht zugeordnet",
+                "detail": (
+                    f"{unassigned_count} Familie"
+                    + ("" if unassigned_count == 1 else "n")
+                    + suffix
+                ),
+                "count": 1,
+                "family_count": unassigned_count,
+                "job_count": job_count,
+                "href": "/workspace?task=free",
             })
     return tasks
 
