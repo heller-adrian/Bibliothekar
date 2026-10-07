@@ -3825,6 +3825,7 @@ BIBLIOTHEKAR_0425_CSS = r"""
       ) !important;
   }
 }
+"""
 
 BIBLIOTHEKAR_JS = r"""
 (() => {
