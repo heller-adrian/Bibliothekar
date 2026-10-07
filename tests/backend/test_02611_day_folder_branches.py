@@ -24,7 +24,7 @@ def test_02611_structure_renderer_uses_branch_specific_days():
         True,
     )
     text = "\n".join(lines)
-    child = text.split("07-20 12-00 - 07-21 17-00 - Test 2", 1)[1]
+    child = text.split("07-20–07-21 - Test 2", 1)[1]
     assert "2026-07-20" in child
     assert "2026-07-21" not in child
 
