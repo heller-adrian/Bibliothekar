@@ -16,6 +16,8 @@ def normalize_subevents(values, start, end, naming=None):
     result=[]
     effective_naming = _legacy_subevent_naming() if naming is None else naming
     for value in values or []:
+        if any(value.get(key) for key in ("subevents","children","child_events")):
+            raise ValueError("Verschachtelte Unter-Unterereignisse werden nicht unterstützt.")
         name=str(value.get('name') or '').strip()
         if not name or any(x in name for x in ('/','\\','\0')):
             raise ValueError('Ein Unterereignis benötigt einen gültigen Namen.')
