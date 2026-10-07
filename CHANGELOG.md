@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 0.42.1 – Metadaten-Rücksortierung und Prüffall-UI
+
+- Interne Übernahmen aus `Allgemein` und `Mehrfachkorrektur` bleiben technisch als verifizierte Hintergrundjobs erhalten, werden aber nicht mehr als sichtbare Karten im Import- und Prüfverlauf dargestellt.
+- Freie datierte Familien werden in den globalen Aufgaben bibliotheksweit zu einer einzigen Aufgabe `Noch nicht zugeordnet` zusammengefasst. Eine zurücksortierte korrigierte Familie erhöht damit den bestehenden Zähler, statt eine eigene Ein-Familien-Aufgabe zu erzeugen.
+- `Ohne Datum` ist im Arbeitsbereich keine auswählbare Tagesgruppe mehr. Prüffälle stehen hervorgehoben am Anfang der Tagesordnerliste, werden von `Alle auswählen` ausgeschlossen und können nicht in die Ereignisplanung übernommen werden.
+- Ein Klick auf die Prüffallkarte zeigt in der Zielstruktur-Vorschau einen direkten Einstieg `Metadatenkorrektur`; Doppelklick bzw. der Button öffnen unmittelbar die Bibliotheks-Prüffälle.
+
 ### 0.42.0 – Metadatenkorrektur für große Bestände
 
 - Bereits bekannte Kameraoriginale werden beim Reimport zusätzlich über ihre stabile ursprüngliche SHA-256-Identität erkannt. Damit erscheinen ältere, vor der Einführung von `source_size_bytes` korrigierte Dateien nicht wegen einer nachträglich veränderten Dateigröße erneut als neue Prüffälle.
