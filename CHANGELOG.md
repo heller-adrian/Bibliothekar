@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.42.0 – Metadatenkorrektur für große Bestände
+
+- Bereits bekannte Kameraoriginale werden beim Reimport zusätzlich über ihre stabile ursprüngliche SHA-256-Identität erkannt. Damit erscheinen ältere, vor der Einführung von `source_size_bytes` korrigierte Dateien nicht wegen einer nachträglich veränderten Dateigröße erneut als neue Prüffälle.
+- Die Dateiliste arbeitet standardmäßig ohne Checkboxen. Mehrfachauswahl wird bewusst über `Auswählen` aktiviert und unterstützt Umschalt-/Bereichsauswahl sowie `Alle auswählen`.
+- Bei Mehrfachauswahl wird kein gemeinsames Datum/Uhrzeit-Feld mehr angeboten. Stattdessen wählt man einen gemeinsamen Metadaten-Quelltyp; jede Datei übernimmt ihren eigenen aktuellen Wert dieses Tags.
+- Metadatenkandidaten zeigen deutsche Bezeichnungen, technischen ExifTool-Tag und eine einfache deterministische Vertrauensbewertung. Der bevorzugte Kandidat ist direkt sichtbar; weitere Kandidaten bleiben kompakt aufklappbar.
+- Die vor einer Korrektur beobachteten Metadaten bleiben über die vorhandenen persistenten Korrekturaufträge einsehbar.
+- Dateien aus `Allgemein` können kontrolliert über den vorhandenen verifizierten Importpfad in den Tagesbestand übernommen werden. Bereits bekannte Kameraaufnahmen werden dabei blockiert, statt künstlich eine neue Sicherung bzw. Provenienz zu erzeugen.
+- `FileCreateDate` steht als zusätzlicher niedrig gewichteter Dateisystem-Kandidat zur Verfügung; die Auswahl bleibt vollständig deterministisch und verwendet kein KI-Modell.
+
 ### 0.41.4 – Applied-Reparatur, Planned-Performance und konsistentes Loading
 
 - Falsch verschobene Dateien aus angewendeten Ereignissen behalten ihren semantischen Sollpfad persistent und können mit Größen-/SHA-256-Prüfung sicher dorthin zurückgesetzt werden; manuell bereits korrekt zurückgelegte Dateien werden beim erneuten Prüfen ebenfalls verifiziert und übernommen.
