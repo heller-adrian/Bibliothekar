@@ -1246,10 +1246,20 @@ def process_claimed_job(
                 (int(row["size_bytes"]), str(row["sha256"]))
                 for row in origin_rows
             }
+            imported_sha256 = {
+                str(row["sha256"])
+                for row in origin_rows
+                if str(row.get("sha256") or "")
+            }
             duplicate_origins: dict[tuple[int, str], dict[str, Any]] = {}
+            duplicate_origins_by_sha: dict[str, dict[str, Any]] = {}
             for row in origin_rows:
                 duplicate_origins.setdefault(
                     (int(row["size_bytes"]), str(row["sha256"])),
+                    dict(row),
+                )
+                duplicate_origins_by_sha.setdefault(
+                    str(row["sha256"]),
                     dict(row),
                 )
 
@@ -1298,6 +1308,8 @@ def process_claimed_job(
                 identity_callback=persist_identity,
                 imported_hashes=imported_hashes,
                 duplicate_origins=duplicate_origins,
+                imported_sha256=imported_sha256,
+                duplicate_origins_by_sha=duplicate_origins_by_sha,
                 import_history_callback=persist_import_history,
                 family_admission_callback=admit_families,
                 destination_directory_callback=central_destination_directory,
