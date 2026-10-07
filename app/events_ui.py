@@ -3231,8 +3231,9 @@ EVENTS_HTML = r"""<!doctype html>
 
       function editSubeventDayControl(attribute, displayAttribute, selected, label, disabled){
         const days=editSubeventDays();
+        const bounds=editSubeventBounds();
         const current=days.includes(selected) ? selected : (days[0]||selected||"");
-        return `<label class="edit-field"><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:58px minmax(82px,1fr);gap:6px"><select ${attribute} ${disabled?"disabled":""}>${editSubeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+        return `<label class="edit-field"><span>${escapeHtml(label)}</span><span class="edit-date-entry"><input ${attribute} type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="\\d{4}-\\d{2}-\\d{2}" data-date-min="${escapeHtml(bounds.minDate||"")}" data-date-max="${escapeHtml(bounds.maxDate||"")}" value="${escapeHtml(current)}" ${disabled?"disabled":""}><button type="button" class="edit-date-picker" data-edit-date-picker aria-label="${escapeHtml(label)} im Kalender wählen" ${disabled?"disabled":""}>📅</button></span></label>`;
       }
 
       function syncEditSubeventDayDisplay(row, prefix){
@@ -3315,11 +3316,11 @@ EVENTS_HTML = r"""<!doctype html>
             <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>` : `
           <div class="edit-boundaries">
             <div class="edit-boundary">
-              <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
+              <label class="edit-field"><span>Beginn</span><span class="edit-date-entry"><input id="edit-start-date" type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="\\d{4}-\\d{2}-\\d{2}" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}><button type="button" class="edit-date-picker" data-edit-date-picker="edit-start-date" aria-label="Beginn im Kalender wählen" ${structural ? "" : "disabled"}>📅</button></span></label>
               <label class="edit-field"><span>Startzeit</span><input id="edit-start-time" type="time" value="${escapeHtml(isoTime(event.start_datetime,'00:00'))}" ${structural ? "" : "disabled"}></label>
             </div>
             <div class="edit-boundary">
-              <label class="edit-field"><span>Ende</span><input id="edit-end-date" type="date" value="${escapeHtml(isoDate(event.end_datetime))}" ${structural ? "" : "disabled"}></label>
+              <label class="edit-field"><span>Ende</span><span class="edit-date-entry"><input id="edit-end-date" type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="\\d{4}-\\d{2}-\\d{2}" value="${escapeHtml(isoDate(event.end_datetime))}" ${structural ? "" : "disabled"}><button type="button" class="edit-date-picker" data-edit-date-picker="edit-end-date" aria-label="Ende im Kalender wählen" ${structural ? "" : "disabled"}>📅</button></span></label>
               <label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="${escapeHtml(isoTime(event.end_datetime,'23:59'))}" ${structural ? "" : "disabled"}></label>
             </div>
           </div>
@@ -3364,15 +3365,12 @@ EVENTS_HTML = r"""<!doctype html>
             for(const prefix of ["start","end"]){
               const control=row.querySelector(`[data-child-${prefix}-date]`);
               if(!control)continue;
-              let value=control.value;
-              if(!days.includes(value)){
-                if(!value||value<bounds.minDate)value=bounds.minDate;
-                else if(value>bounds.maxDate)value=bounds.maxDate;
-                else value=days[0];
-              }
-              control.innerHTML=editSubeventDayOptions(value);
+              control.dataset.dateMin=bounds.minDate;
+              control.dataset.dateMax=bounds.maxDate;
+              let value=String(control.value||"");
+              if(!validEditableIsoDate(value)||value<bounds.minDate)value=bounds.minDate;
+              else if(value>bounds.maxDate)value=bounds.maxDate;
               control.value=value;
-              syncEditSubeventDayDisplay(row,prefix);
             }
           });
         };
