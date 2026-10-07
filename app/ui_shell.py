@@ -3501,27 +3501,6 @@ BIBLIOTHEKAR_0356_CSS = r"""
   }
 }
 
-
-/* 0.41.3: Einstellungsdialog bleibt in allen Bereichen identisch.
- * Import-spezifische details-Regeln dürfen die gemeinsamen Settings nicht
- * überschreiben. */
-body[data-bk-area="import"] #bk-settings-dialog details > summary {
-  display:flex !important;
-  grid-template-columns:none !important;
-}
-body[data-bk-area="import"] #bk-settings-dialog details > summary::before {
-  content:"▸" !important;
-  display:inline-block !important;
-  width:auto !important;
-  margin-right:0 !important;
-  font-size:inherit !important;
-  line-height:inherit !important;
-  text-align:initial !important;
-}
-body[data-bk-area="import"] #bk-settings-dialog details[open] > summary::before {
-  content:"▸" !important;
-  transform:rotate(90deg) !important;
-}
 """
 
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
