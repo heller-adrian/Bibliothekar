@@ -3106,6 +3106,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         card.className =
           "day-card";
         card.dataset.bkPwaSelect = "workspace-capture";
+        card.dataset.bkPwaKey = key;
         card.dataset.bkSelectionKey = key;
         if (group.released_archive) {
           card.classList.add("released-archive-card");
@@ -3143,11 +3144,15 @@ WORKSPACE_HTML = r"""<!doctype html>
             renderSelection();
             return;
           }
-          if (!selectedDays.has(key)) {
-            selectedDays.add(key);
-            checkbox.checked = true;
-            card.classList.add("selected");
-          }
+
+          const desired = phase === "set"
+            ? Boolean(event.detail?.selected)
+            : true;
+          if (desired) selectedDays.add(key);
+          else selectedDays.delete(key);
+
+          checkbox.checked = desired;
+          card.classList.toggle("selected", desired);
           lastSelectedDayKey = key;
           updateDaySelectAllButton();
           renderSelection();
