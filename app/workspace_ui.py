@@ -431,7 +431,14 @@ WORKSPACE_HTML = r"""<!doctype html>
     .event-boundary{display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:10px;align-items:end}
     .create-subevents{display:grid;gap:10px;margin-top:4px}
     .create-subevent-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .create-subevent-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}
     .create-subevent-head button{white-space:nowrap;min-height:38px;padding:8px 12px}
+    .subevent-prefix-toggle{min-height:34px!important;padding:6px 10px!important;font-size:.82rem}
+    .subevent-prefix-toggle[aria-pressed="true"]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+    .date-entry{display:grid;grid-template-columns:minmax(0,1fr) 42px;gap:6px;align-items:center}
+    .date-entry>input{min-width:0}
+    .date-picker-button{width:42px;min-width:42px;padding:0;display:grid;place-items:center}
+
     .create-subevent-card{border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:12px}
     .create-subevent-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;align-items:end}
     .create-subevent-top{display:flex;align-items:end;justify-content:space-between;gap:10px}
@@ -1442,11 +1449,11 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         <div id="event-boundaries" class="event-boundaries full-width">
           <div class="event-boundary">
-            <label><span>Beginn</span><input id="event-start-date" type="date" required></label>
+            <label><span>Beginn</span><span class="date-entry"><input id="event-start-date" type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="\\d{4}-\\d{2}-\\d{2}" required><button type="button" class="date-picker-button" data-date-picker-target="event-start-date" aria-label="Beginn im Kalender wählen">📅</button></span></label>
             <label id="event-start-time-label"><span>Startzeit</span><input id="event-start-time" type="time" value="00:00"></label>
           </div>
           <div class="event-boundary">
-            <label><span>Ende</span><input id="event-end-date" type="date" required></label>
+            <label><span>Ende</span><span class="date-entry"><input id="event-end-date" type="text" inputmode="numeric" autocomplete="off" placeholder="JJJJ-MM-TT" pattern="\\d{4}-\\d{2}-\\d{2}" required><button type="button" class="date-picker-button" data-date-picker-target="event-end-date" aria-label="Ende im Kalender wählen">📅</button></span></label>
             <label id="event-end-time-label"><span>Endzeit</span><input id="event-end-time" type="time" value="23:59"></label>
           </div>
         </div>
@@ -1456,7 +1463,10 @@ WORKSPACE_HTML = r"""<!doctype html>
         <div id="create-subevents" class="create-subevents full-width">
           <div class="create-subevent-head">
             <strong id="create-subevent-heading">Unterereignisse (optional)</strong>
-            <button id="add-create-subevent" type="button">＋ Unterereignis hinzufügen</button>
+            <div class="create-subevent-actions">
+              <button id="subevent-prefix-toggle" type="button" class="subevent-prefix-toggle" hidden>Präfix: an</button>
+              <button id="add-create-subevent" type="button">＋ Unterereignis hinzufügen</button>
+            </div>
           </div>
           <div id="create-subevent-list" style="display:grid;gap:8px"></div>
         </div>
@@ -1531,13 +1541,13 @@ WORKSPACE_HTML = r"""<!doctype html>
   
   <dialog id="cross-backup-membership-dialog">
     <div class="dialog-content">
-      <h2 style="margin-top:0">Weitere Aufnahmen im gewählten Zeitraum</h2>
+      <h2 style="margin-top:0">Weitere Aufnahmen aus ausgeblendeten Sicherungen</h2>
       <p id="cross-backup-membership-summary" class="muted"></p>
       <div id="cross-backup-membership-sources" style="display:grid;gap:9px;margin-top:12px"></div>
       <p class="muted" style="margin-top:14px">
-        Der Sicherungsfilter ist nur eine Ansicht. Wenn du fortfährst, werden
-        alle bereits vorhandenen freien Aufnahmen dieses Zeitraums Bestandteil
-        desselben Ereignisses.
+        Nicht angehakte Tageskarten innerhalb sichtbarer Sicherungen werden automatisch
+        nach Zeitraum einbezogen. Hier werden nur zusätzliche Aufnahmen aus aktuell
+        ausgeblendeten aktiven Sicherungen bestätigt.
       </p>
       <div class="dialog-actions">
         <button id="cross-backup-membership-cancel" type="button">Abbrechen</button>
