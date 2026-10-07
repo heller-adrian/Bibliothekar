@@ -397,7 +397,7 @@ def test_0412_shell_has_single_consistency_dialog_contract():
     assert "data-bk-notice-repair" not in source
 
 
-def test_0412_ohne_datum_is_a_legal_manual_correction_route(tmp_path: Path):
+def test_0412_ohne_datum_is_one_way_manual_correction_route(tmp_path: Path):
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -438,13 +438,23 @@ def test_0412_ohne_datum_is_a_legal_manual_correction_route(tmp_path: Path):
     reconcile_central_free_stock(
         db, workspace, library_id="main", excluded_family_ids=set()
     )
-    with database_connection(db) as connection:
-        row = connection.execute(
-            "SELECT current_relative_path FROM files WHERE id=?",
-            (file_id,),
-        ).fetchone()
-    assert str(row["current_relative_path"]) == relative
-    assert list_external_change_state(db)["required_count"] == 0
+    state = list_external_change_state(db)
+    assert state["required_count"] == 1
+    conflict = state["required"][0]
+    assert conflict["details"]["force_repair"] is True
+    assert conflict["details"]["expected_relative_path"] == "Ohne_Datum/ROUNDTRIP.JPG"
+
+    acknowledge_external_notices(db, [conflict["id"]])
+    assert list_external_change_state(db)["unseen_required_count"] == 1
+
+    repaired = repair_external_conflicts(
+        db,
+        central_root=central,
+        library_work_root=Path(layout["work_root"]),
+    )
+    assert repaired["repaired_count"] == 1
+    assert undated.read_bytes() == b"undated-roundtrip"
+    assert not source.exists()
 
 
 def test_0412_archived_file_moved_to_day_stock_stays_read_only(tmp_path: Path):
@@ -498,3 +508,38 @@ def test_0412_archived_file_moved_to_day_stock_stays_read_only(tmp_path: Path):
     assert conflict["repairable"] is False
     assert conflict["details"]["expected_root_kind"] == "camera_archive"
     assert conflict["details"]["observed_root_kind"] == "central_stock"
+
+
+def test_0413_planned_event_does_not_create_physical_placement_conflict(tmp_path: Path):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    initialize_database(db)
+    layout = ensure_workspace_layout(workspace)
+    central = Path(layout["backup_root"])
+
+    family_id, _file_id, relative = _seed_free_file(
+        db,
+        family_key="PLANNED-STAYS-FREE",
+        filename="PLANNED.JPG",
+        day="2026-10-05",
+        data=b"planned-stays-free",
+    )
+    source = central / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"planned-stays-free")
+    reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+
+    create_planned_event(
+        db,
+        "J",
+        _event_preview(family_id, "2026-10-05"),
+    )
+    result = reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+    assert result["misplaced_file_count"] == 0
+    assert source.is_file()
+    assert list_external_change_state(db)["required_count"] == 0
