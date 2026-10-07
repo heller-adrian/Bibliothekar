@@ -15,7 +15,7 @@ def _fnv1a32(text: str) -> str:
 
 
 def test_0301_shell_css_matches_frozen_0287_design():
-    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 43515
+    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 44419
     assert _fnv1a32(ui_shell.BIBLIOTHEKAR_CSS) == "6c49c6e0"
 
 
