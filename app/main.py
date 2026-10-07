@@ -2129,7 +2129,15 @@ def _event_payload_with_folder_layout(
                 naming = dict(snapshot)
                 if (
                     str(event_row["event_kind"] or "event") == "event"
-                    and "subevent_prefix_mode" not in naming
+                    and not any(
+                        key in naming
+                        for key in (
+                            "subevent_prefix_mode",
+                            "subevent_date_mode",
+                            "subevent_include_year",
+                            "subevent_include_time",
+                        )
+                    )
                 ):
                     # Existing 0.33–0.42 snapshots predate configurable
                     # Unterereignis-Präfixe. Keep their physical child-folder
@@ -2171,7 +2179,15 @@ def _naming_snapshot_from_event_context(context: dict[str, Any]) -> dict[str, An
         result = dict(snapshot)
         if (
             str(event.get("event_kind") or "event") == "event"
-            and "subevent_prefix_mode" not in result
+            and not any(
+                key in result
+                for key in (
+                    "subevent_prefix_mode",
+                    "subevent_date_mode",
+                    "subevent_include_year",
+                    "subevent_include_time",
+                )
+            )
         ):
             result["subevent_prefix_mode"] = "legacy_datetime_range"
             result["subevent_prefix_enabled"] = True
