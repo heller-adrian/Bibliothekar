@@ -270,11 +270,12 @@ def build_event_preview(
     if payload.get("child_segments"):
         raise EventPreviewError("Normale Ereignisse benötigen einen durchgehenden Beginn und ein Ende. Getrennte Belegungssegmente sind nicht zulässig.")
     selected_intervals = payload.get("selected_intervals") or []
-    if selected_intervals and payload.get("event_kind", "event") == "event":
-        from app.released_ranges import merge_intervals
-        ranges = merge_intervals((v['start_datetime'], v['end_datetime']) for v in selected_intervals)
-        if len(ranges) != 1 and not payload.get("existing_parent_event_id"):
-            raise EventPreviewError("Die Auswahl ist nicht durchgehend. Bitte getrennte Ereignisse oder „Ohne Ereignis“ verwenden.")
+    # Seit 0.43.0 definieren Tageskarten keine Belegungssegmente mehr.
+    # Ein normales Ereignis ist ausschließlich der durchgehende Beginn-/Ende-
+    # Zeitraum des Formulars. Fotofreie Kalendertage und nicht angehakte
+    # Tageskarten innerhalb dieses Bereichs sind deshalb keine „Lücken“.
+    # Nur Erweiterungen bestehender Ereignisse verwenden selected_intervals
+    # weiterhin als expliziten neu hinzukommenden Bereich.
     event_kind = str(
         payload.get(
             "event_kind",
