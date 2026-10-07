@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.42.4 – Reversible PWA-Auswahl und mobile Metadatenfenster
+
+- Die Long-Press-Schnellauswahl arbeitet jetzt als zusammenhängende Range: Beim Zurückwischen werden nur die durch die laufende Geste hinzugekommenen Karten wieder abgewählt; bereits vorher ausgewählte Karten bleiben erhalten.
+- Randscrollen während einer laufenden Auswahl wird kontinuierlich per Animation-Frame fortgeführt. Neu in den Viewport kommende Karten werden dadurch ohne erneutes Überstreichen nahtlos in die Auswahl einbezogen.
+- Die Wobble-Rückmeldung verzichtet auf Skalierung und wackelt nur horizontal, damit Kartenrahmen am oberen bzw. unteren Viewportrand nicht abgeschnitten erscheinen.
+- In Bibliothek, Allgemein und Mehrfachkorrektur aktiviert Long-Press den regulären Auswahlmodus mit sichtbaren Checkboxen. Auswahl und Abwahl werden unmittelbar in den Häkchen und Karten dargestellt.
+- Ein gezielter Einzel-Tap öffnet die mobile Dateiprüfung als vollflächige, vollständig scrollbar bleibende Detailansicht.
+- Ab zwei ausgewählten Metadateneinträgen erscheint stattdessen ein kompaktes, nicht-modales Auswahlfenster am unteren Rand. Der Hintergrund bleibt ohne Blur sichtbar und weiter bedienbar, sodass zusätzliche Dateien ausgewählt werden können.
+- Die Mehrfachkorrektur besitzt jetzt denselben expliziten Auswahlmodus wie Bibliothek und Allgemein; Einzel-Tap bleibt weiterhin die Auswahl einer Referenzaufnahme.
+
 ### 0.42.3 – Web-App-Interaktion für Aufnahmen und Metadaten
 
 - In der installierten Handy-Web-App bleibt der `x Prüffälle`-Badge der Ohne-Datum-Karte vollständig innerhalb der Aufnahmen-Karte.
