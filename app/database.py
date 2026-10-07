@@ -3066,12 +3066,18 @@ def create_planned_event(
                     extension_details['extension_start'],
                     extension_details['extension_end'],
                     now,
+                    naming=preview.get("folder_naming"),
                 )
                 for row in family_rows:
                     connection.execute('UPDATE event_assignments SET event_id=? WHERE family_id=? AND event_id=?',
                         (assignment_target(parent_event_id,children,str(row['selected_capture_time'])[:19]),row['id'],assignment_event_id))
             else:
-                organizational=normalize_subevents(preview['subevents'],parent_start,parent_end)
+                organizational=normalize_subevents(
+                    preview['subevents'],
+                    parent_start,
+                    parent_end,
+                    naming=preview.get("folder_naming"),
+                )
                 children=store_subevents(connection,parent_event_id,organizational,now)
                 for row in family_rows:
                     connection.execute('UPDATE event_assignments SET event_id=? WHERE family_id=? AND event_id=?',
@@ -4160,7 +4166,12 @@ def update_event_definition(
         organizational = list(preview.get('subevents') or [])
         if preview.get('child_folder') and not organizational:
             organizational=[{'name':preview['child_event_name'],'start_datetime':assignment_start,'end_datetime':assignment_end}]
-        organizational=normalize_subevents(organizational,parent_start,parent_end)
+        organizational=normalize_subevents(
+            organizational,
+            parent_start,
+            parent_end,
+            naming=preview.get("folder_naming"),
+        )
         children=store_subevents(connection,event_id,organizational,now)
         assignment_rows=[(assignment_target(event_id,children,str(row['selected_capture_time'])[:19]),int(row['id']),'date_time_range',now) for row in rows]
         assignment_event_id = event_id
