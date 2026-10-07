@@ -113,7 +113,10 @@ def test_0335_metadata_ui_is_flat_selectable_and_two_step():
     assert "In Tagesbestand einsortieren" in METADATA_CORRECTION_HTML
     assert "selectedFiles()" in METADATA_CORRECTION_HTML
     assert "files.every(file=>file.reintegration_ready)" in METADATA_CORRECTION_HTML
-    assert "for(const item of files)" in METADATA_CORRECTION_HTML
+    assert 'id="meta-select-mode"' in METADATA_CORRECTION_HTML
+    assert "state.selectionMode" in METADATA_CORRECTION_HTML
+    assert "correctSelectedBySource(files)" in METADATA_CORRECTION_HTML
+    assert "Für jede Datei wird ihr eigener Wert des gewählten Metadaten-Tags verwendet." in METADATA_CORRECTION_HTML
     assert "Einträge ausgewählt.</strong></div>" in METADATA_CORRECTION_HTML
     assert "0.34.0" not in METADATA_CORRECTION_HTML
     assert "Metadaten werden sicher auf Arbeitskopien geschrieben" not in METADATA_CORRECTION_HTML
