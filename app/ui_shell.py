@@ -916,6 +916,38 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   }
 }
 
+@keyframes bk-spin {
+  to { transform: rotate(360deg); }
+}
+button.bk-busy,
+.bk-busy {
+  cursor: progress !important;
+}
+button.bk-busy::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+  display: inline-block;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: bk-spin .7s linear infinite;
+}
+.bk-loading-status::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  display: inline-block;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: bk-spin .7s linear infinite;
+}
+
 .bk-dialog {
   width: min(560px, calc(100vw - 28px));
   border: 1px solid var(--bk-line);
@@ -983,6 +1015,14 @@ body[data-bk-area="assistant"] main > .card {
   max-width: 900px;
   margin: 20px 0 0 !important;
   padding: 16px 18px !important;
+}
+
+[data-bk-archive-review]:focus {
+  outline: none;
+}
+[data-bk-archive-review]:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, currentColor 70%, transparent) !important;
 }
 
 .bk-help {
@@ -1232,20 +1272,20 @@ body.bibliothekar-redesign #sd-card-status {
 .bk-source-pane > h3:first-child {
   margin-top: 0;
 }
-body[data-bk-area="import"] details > summary {
+body[data-bk-area="import"] main details > summary {
   list-style: none !important;
   display: grid !important;
   grid-template-columns: 20px minmax(0,1fr) !important;
   align-items: center !important;
   gap: 7px !important;
 }
-body[data-bk-area="import"] details > summary::-webkit-details-marker {
+body[data-bk-area="import"] main details > summary::-webkit-details-marker {
   display: none !important;
 }
-body[data-bk-area="import"] details > summary::marker {
+body[data-bk-area="import"] main details > summary::marker {
   content: "" !important;
 }
-body[data-bk-area="import"] details > summary::before {
+body[data-bk-area="import"] main details > summary::before {
   content: "▸";
   display: block;
   width: 20px;
@@ -1254,7 +1294,7 @@ body[data-bk-area="import"] details > summary::before {
   text-align: center;
   color: currentColor;
 }
-body[data-bk-area="import"] details[open] > summary::before {
+body[data-bk-area="import"] main details[open] > summary::before {
   content: "▾";
 }
 body[data-bk-area="import"] .drive-actions {
@@ -1818,7 +1858,10 @@ BIBLIOTHEKAR_0311_CSS = r"""
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 14px;
+  min-height: 46px;
+  box-sizing: border-box;
+  padding: 11px 14px;
+  line-height: 1.25;
   font-weight: 800;
 }
 .bk-settings-card > summary::-webkit-details-marker,
@@ -1872,9 +1915,17 @@ BIBLIOTHEKAR_0311_CSS = r"""
 }
 .bk-settings-preview-case pre {
   margin:8px 0 0;
+  padding:0 !important;
+  border:0 !important;
+  background:transparent !important;
+  color:var(--bk-ink) !important;
   white-space:pre-wrap;
   overflow-wrap:anywhere;
   font: .86rem/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+#bk-settings-dialog .bk-settings-preview-case {
+  background:var(--bk-surface-2) !important;
+  color:var(--bk-ink) !important;
 }
 #bk-library-management-list .bk-library-card {
   padding:0 !important;
@@ -4556,7 +4607,10 @@ BIBLIOTHEKAR_JS = r"""
       document.getElementById("bk-external-repair-all")?.addEventListener(
         "click",
         async event => {
-          event.currentTarget.disabled = true;
+          const repairButton = event.currentTarget;
+          repairButton.disabled = true;
+          repairButton.classList.add("bk-busy");
+          repairButton.setAttribute("aria-busy", "true");
           try {
             const response = await fetch(
               "/api/external-change-notices/repair-all",
@@ -4568,14 +4622,54 @@ BIBLIOTHEKAR_JS = r"""
                 data.detail || "Die Änderungen konnten nicht vollständig zurückgesetzt werden."
               );
             }
+            const failed = Array.isArray(data.skipped) ? data.skipped : [];
+            if (failed.length) {
+              const rootLabel = kind => kind === "central_stock"
+                ? "SD-Kartensicherungen"
+                : kind === "shared_workspace"
+                  ? "Arbeitsbereich"
+                  : "Archiv";
+              externalChangeLead.textContent =
+                "Automatisches Rückgängigmachen fehlgeschlagen. Die Aufgabe bleibt offen.";
+              const failureHtml = failed.map(item => {
+                const expected = [rootLabel(item.expected_root_kind), item.expected_relative_path]
+                  .filter(Boolean).join(" / ");
+                return '<div style="padding:11px;border:1px solid var(--bk-danger);border-radius:11px;margin-bottom:9px">' +
+                  '<strong style="display:block;color:var(--bk-danger)">Nicht automatisch zurückgesetzt</strong>' +
+                  '<span style="display:block;margin-top:5px">' + bkEscapeNotice(item.reason || "Unbekannter Fehler") + '</span>' +
+                  (expected
+                    ? '<span style="display:block;color:var(--bk-muted);margin-top:5px">Erwarteter Sollort: <code>' + bkEscapeNotice(expected) + '</code></span>'
+                    : '') +
+                  '<span style="display:block;color:var(--bk-muted);margin-top:5px">Du kannst die Datei notfalls selbst an den Sollort zurücklegen und danach erneut prüfen.</span>' +
+                  '</div>';
+              }).join("");
+              externalChangeList.insertAdjacentHTML("afterbegin", failureHtml);
+              repairButton.textContent = "Erneut prüfen";
+              repairButton.disabled = false;
+              await refreshTasks();
+              return;
+            }
             if (displayedInfo.length) {
               await bkAcknowledgeNotices(displayedInfo.map(row => row.id));
             }
             externalChangeDialog.close();
             await refreshTasks();
           } catch (error) {
-            event.currentTarget.disabled = false;
-            alert(error.message);
+            externalChangeLead.textContent =
+              "Automatisches Rückgängigmachen fehlgeschlagen. Die Aufgabe bleibt offen.";
+            externalChangeList.insertAdjacentHTML(
+              "afterbegin",
+              '<div style="padding:11px;border:1px solid var(--bk-danger);border-radius:11px;margin-bottom:9px">' +
+              '<strong style="display:block;color:var(--bk-danger)">Reparatur fehlgeschlagen</strong>' +
+              '<span style="display:block;margin-top:5px">' + bkEscapeNotice(error.message) + '</span>' +
+              '<span style="display:block;color:var(--bk-muted);margin-top:5px">Bitte den angezeigten Sollort prüfen, die Datei bei Bedarf manuell zurücklegen und danach erneut prüfen.</span>' +
+              '</div>'
+            );
+            repairButton.textContent = "Erneut prüfen";
+            repairButton.disabled = false;
+          } finally {
+            repairButton.classList.remove("bk-busy");
+            repairButton.removeAttribute("aria-busy");
           }
         }
       );
