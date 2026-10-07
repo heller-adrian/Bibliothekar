@@ -47,7 +47,7 @@ def test_0274_disclosure_triangles_are_large_and_uniform():
     shell = (ROOT / "app" / "ui_shell.py").read_text()
     assert 'grid-template-columns:22px minmax(0,1fr) auto !important' in events
     assert 'width:22px;\n      font-size:19px' in events
-    assert 'body[data-bk-area="import"] details > summary::before' in shell
+    assert 'body[data-bk-area="import"] main details > summary::before' in shell
     assert 'font-size: 18px' in shell
 
 
