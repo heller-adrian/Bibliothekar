@@ -31,6 +31,7 @@ from app.trash import (
     empty_trash_filesystem, purge_trash_database,
 )
 from app.ui_shell import apply_shell
+from app import background_mutation_cancel as cancel_queue
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
 from app.global_stock import (
@@ -1769,11 +1770,51 @@ def claim_next_library_job(
     return None
 
 
+def process_background_mutation_cancel() -> bool:
+    """Bearbeite einen dauerhaften Verwerfauftrag unabhängig vom HTTP-Request."""
+    from app.event_mutation import cancel_mutation
+    for context in list_active_library_contexts(REGISTRY_DATABASE_FILE):
+        ensure_library_database_schema(context)
+        row = cancel_queue.claim_next(context.database_path)
+        if row is None:
+            continue
+        try:
+            with database_connection(context.database_path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if not cancel_queue.mutation_already_cancelled(
+                    connection, row["mutation_id"], row["job_id"]
+                ):
+                    cancel_mutation(
+                        connection, row["mutation_id"], row["job_id"],
+                        workspace_path=context.workspace_root,
+                    )
+                connection.commit()
+
+            # Auch nach einem Neustart zwischen SQLite-COMMIT und dem
+            # zentralen Claims-Abgleich ist dieser Schritt wiederholbar.
+            backfill_library_claims(
+                REGISTRY_DATABASE_FILE,
+                database_path=context.database_path,
+                library_id=context.library_id,
+            )
+            synchronize_global_central_stock()
+            cancel_queue.finish(context.database_path, row["id"])
+        except Exception as error:
+            cancel_queue.finish(
+                context.database_path, row["id"], error=str(error)
+            )
+            print("Hintergrund-Verwerfen fehlgeschlagen:", error, flush=True)
+        return True
+    return False
+
+
 def worker_loop() -> None:
     last_library_id: str | None = None
 
     while not WORKER_STOP.is_set():
         try:
+            if process_background_mutation_cancel():
+                continue
             # Kamera-/Ordnerimporte sind seit 0.31.1 globaler Bestand und
             # liegen ausschließlich in der Main-Datenbank. Sie werden deshalb
             # direkt aus dieser Queue übernommen und nicht über die
@@ -2122,6 +2163,11 @@ def startup_database() -> None:
             )
 
         DATABASE_INITIALIZATION_ERROR = None
+
+        # Unterbrochene Aufträge vor dem Workerstart zur Wiederaufnahme freigeben.
+        for context in list_active_library_contexts(REGISTRY_DATABASE_FILE):
+            ensure_library_database_schema(context)
+            cancel_queue.recover_interrupted(context.database_path)
 
         WORKER_STOP.clear()
 
@@ -8094,28 +8140,26 @@ def api_active_event_mutation(job_id: str) -> dict[str, Any]:
     return {"active": True, "mutation": safe}
 
 
-@app.post("/api/jobs/{job_id}/event-mutations/{mutation_id}/cancel", tags=["Ereignisse"])
+@app.post("/api/jobs/{job_id}/event-mutations/{mutation_id}/cancel", tags=["Ereignisse"], status_code=202)
 def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
-    from app.event_mutation import cancel_mutation
-    from app.database import database_connection
+    """Bestätigt die Annahme; Ausführung ist unabhängig vom Browser."""
     try:
-        with database_connection(current_database_file()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            result = cancel_mutation(connection, mutation_id, job_id, workspace_path=current_workspace_root())
-            connection.commit()
-
-        # Ein verworfener Edit stellt die lokale Ereigniswahrheit wieder her.
-        # Danach müssen auch globale Reservierungs-/Besitz-Claims und die
-        # zentralen freien Pfade wieder exakt diesem Zustand entsprechen.
-        backfill_library_claims(
-            REGISTRY_DATABASE_FILE,
-            database_path=current_database_file(),
-            library_id=current_library_context().library_id,
-        )
-        synchronize_global_central_stock()
-        return result
+        return cancel_queue.enqueue(current_database_file(), job_id, mutation_id)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/background-cancellations", tags=["Ereignisse"])
+def api_background_cancellations() -> dict[str, Any]:
+    return {"operations": cancel_queue.list_visible(current_database_file())}
+
+
+@app.get("/api/background-cancellations/{operation_id}", tags=["Ereignisse"])
+def api_background_cancellation_status(operation_id: str) -> dict[str, Any]:
+    result = cancel_queue.get(current_database_file(), operation_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Verwerfauftrag nicht gefunden.")
+    return result
 
 
 @app.get("/api/workspace/summary", tags=["Arbeitsbereich"])
