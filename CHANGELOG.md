@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.45.1 – Kontinuierliche Reiteranimation und Theme-First-Paint (08.10.2026)
+
+- Dark-/Light-Mode bereits vor dem ersten Paint synchron aus der gespeicherten Theme-Wahl initialisiert; vermeidet helle Zwischenframes und vorübergehend schwarze inaktive Reiter auf iOS Safari und in der installierten Web-App.
+- Bereichswechsel als zusammenhängende Animation: Mobile Tap hebt nur einmal an, Desktop Hover hebt leicht und Pointerdown/Klick etwas weiter an; keine Rückbewegung zwischen Pointerup und Navigation.
+- Übergabe des Zielreiters per kurzlebigem SessionStorage-Eintrag an die nächste HTML-Seite: Zielreiter bleibt zunächst angehoben und fährt erst nach dem ersten Paint in die aktive Endlage.
+- Browser-History/BFCache bereinigt Presszustände; Reduced-Motion wird berücksichtigt. Frozen-Design und Kamera-/Archivfachlogik bleiben unverändert.
+- Gezielte Tests für frühe Theme-Initialisierung, Reiternavigation und Versionsverträge.
+
 ## 0.45.0 – Typografie und Navigation (08.10.2026)
 
 - Appweit die Schriftfolge Futura → Helvetica Neue → Helvetica → Arial → sans-serif eingeführt; keine externen Fontdateien erforderlich. Gilt auch für Eingaben, technische Textfelder sowie Import-, Ereignis- und Archivansicht.
