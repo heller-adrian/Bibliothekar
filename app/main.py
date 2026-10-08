@@ -3938,7 +3938,7 @@ def _helper_request(path: str, method: str = "GET", payload: dict[str, Any] | No
 def api_import_sources(force_refresh: bool = False) -> dict[str, Any]:
     # Quellen können auch außerhalb von Bibliothekar verändert werden.
     # Die Darstellung bleibt kurz gecacht; Mount-Prüfung erfolgt unabhängig davon.
-    db_path = current_database_file()
+    db_path = DATABASE_FILE
     if not force_refresh:
         cached = view_cache.get_snapshot(db_path, "import-sources")
         if cached is not None and cached["mounted"] == IMPORT_ROOT.is_dir():
@@ -4113,7 +4113,7 @@ def api_import_history(
     limit = max(1, min(int(limit), 50))
     where = """(operation='folder_import' OR operation='metadata_fixture_analysis'
                   OR kind='sd_import') AND history_hidden=?"""
-    with database_connection(current_database_file()) as conn:
+    with database_connection(DATABASE_FILE) as conn:
         total = int(conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE " + where, (int(hidden),)
         ).fetchone()[0])
@@ -4126,7 +4126,7 @@ def api_import_history(
         ]
     rows: list[dict[str, Any]] = []
     for job_id in ids:
-        item = get_job(current_database_file(), job_id)
+        item = get_job(DATABASE_FILE, job_id)
         if item is None:
             continue
         item["backup_delete_allowed"] = False
@@ -4136,7 +4136,7 @@ def api_import_history(
                 and item.get("state") == "completed"):
             try:
                 info = backup_deletion_status(
-                    current_database_file(),
+                    DATABASE_FILE,
                     REGISTRY_DATABASE_FILE,
                     workspace_backup_root(WORKSPACE_PATH),
                     job_id,
@@ -4154,7 +4154,7 @@ def api_import_history_visibility(job_id: str, payload: dict[str, Any]) -> dict[
     hidden = payload.get("hidden")
     if not isinstance(hidden, bool):
         raise HTTPException(status_code=422, detail="Sichtbarkeit muss true oder false sein.")
-    with database_connection(current_database_file()) as conn:
+    with database_connection(DATABASE_FILE) as conn:
         row = conn.execute(
             "SELECT id, operation, kind, state FROM jobs WHERE id=?", (job_id,)
         ).fetchone()
@@ -4167,7 +4167,7 @@ def api_import_history_visibility(job_id: str, payload: dict[str, Any]) -> dict[
         conn.execute(
             "UPDATE jobs SET history_hidden=? WHERE id=?", (int(hidden), job_id)
         )
-    view_cache.invalidate(current_database_file())
+    view_cache.invalidate(DATABASE_FILE)
     return {"job_id": job_id, "hidden": hidden}
 
 
