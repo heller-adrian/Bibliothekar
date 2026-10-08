@@ -128,9 +128,14 @@ def preflight_folder_import(
     }
 
 
-def quick_source_signature(source: Path) -> str:
+def quick_source_signature(
+    source: Path,
+    cancellation_callback: CancellationCallback | None = None,
+) -> str:
     digest = hashlib.sha256()
     for path in sorted(source.rglob("*")):
+        if cancellation_callback is not None and cancellation_callback():
+            raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
         if should_ignore_source_path(source, path):
             continue
         if path.is_symlink() or not path.is_file():
@@ -708,7 +713,7 @@ def run_folder_import_job(
             cancellation_callback=check_cancelled,
         )
         check_cancelled()
-        source_signature = quick_source_signature(source)
+        source_signature = quick_source_signature(source, cancellation_callback)
         source_fingerprint = manifest_fingerprint(all_entries)
         if identity_callback is not None:
             identity_callback(source_signature, source_fingerprint)
