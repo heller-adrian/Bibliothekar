@@ -123,7 +123,7 @@ def list_visible(database_path: Path, *, limit: int = 5) -> list[dict[str, Any]]
     with database_connection(database_path) as db:
         rows = db.execute(
             """SELECT * FROM background_mutation_cancellations
-               WHERE status IN ('queued','running')
+               WHERE status IN ('queued','running','failed')
                   OR completed_at >= datetime('now','-30 seconds')
                ORDER BY created_at DESC,id DESC LIMIT ?""",
             (limit,),
