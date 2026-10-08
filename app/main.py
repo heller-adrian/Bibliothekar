@@ -32,6 +32,7 @@ from app.trash import (
 )
 from app.ui_shell import apply_shell
 from app import background_mutation_cancel as cancel_queue
+from app.background_activity import current_activity
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
 from app.global_stock import (
@@ -293,7 +294,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.44.3"
+DEPLOYMENT_VERSION = "0.44.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -8182,6 +8183,12 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
         return result
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/background-activity", tags=["Aufträge"])
+def api_background_activity() -> dict[str, Any]:
+    """Kompakter, rein lesender Status für die Desktop-Hinweise."""
+    return current_activity(current_database_file(), DATABASE_FILE)
 
 
 @app.get("/api/background-cancellations", tags=["Ereignisse"])
