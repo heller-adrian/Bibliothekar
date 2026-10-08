@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 0.43.4 – Unterbrochene Importe bereinigen
+
+- Durch einen App-Neustart unterbrochene Ordnerimporte bleiben als klarer Status „Unterbrochen“ erhalten, berechnen aber keine weiterlaufende Restzeit mehr.
+- Fehlgeschlagene und unterbrochene Kamera-/Ordnerimporte erhalten im Importverlauf die Aktion „Import entfernen“.
+- Beim Entfernen werden noch vorhandene sichere Importreste im zentralen Arbeitsbestand gegen Größe und SHA-256 geprüft, temporäre `.incoming`-Daten entfernt und anschließend der zugehörige Auftrags-/Verlaufseintrag bereinigt. Die ursprüngliche Importquelle bleibt unverändert.
+- Laufende Importe behalten „Import abbrechen“, abgeschlossene Sicherungen behalten die bestehende kontrollierte Aktion „Sicherung löschen“. Damit hat jeder relevante Importzustand eine passende Abschlussaktion, ohne abgeschlossene Provenienz vorschnell zu verwerfen.
+- Die vorhandene Neustart-Sicherung bleibt unverändert: laufende Aufträge werden beim Start deterministisch als „interrupted_after_restart“ markiert und können danach sauber entfernt werden.
+
 ### 0.43.3 – Feinschliff Importfortschritt
 
 - Laufende Importe zeigen die Prozentzahl nicht mehr doppelt: Die Balken sind nur noch mit „Aktuelle Stufe“ und „Gesamt“ beschriftet; die Prozentangabe bleibt kompakt in „Fortschritt gesamt“ darunter.
