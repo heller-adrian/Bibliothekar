@@ -5817,6 +5817,7 @@ BIBLIOTHEKAR_0443_CSS = r"""
 }
 #bk-background-cancel-notice[hidden]{display:none!important}
 #bk-background-cancel-notice[data-status="failed"]{border-color:var(--bk-danger)}
+#bk-background-cancel-notice .bk-cancel-retry{margin-left:auto;padding:6px 10px;font-size:.8rem;white-space:nowrap}
 #bk-background-cancel-notice .bk-cancel-spinner{
   width:17px;height:17px;flex:0 0 17px;
   border:2px solid var(--bk-blue);border-right-color:transparent;
@@ -5835,9 +5836,10 @@ BIBLIOTHEKAR_0443_JS = r"""
   box.hidden=true;
   box.setAttribute("role","status");
   box.setAttribute("aria-live","polite");
-  box.innerHTML='<span class="bk-cancel-spinner" aria-hidden="true"></span><span class="bk-cancel-message"></span>';
+  box.innerHTML='<span class="bk-cancel-spinner" aria-hidden="true"></span><span class="bk-cancel-message"></span><button class="bk-cancel-retry" type="button" hidden>Erneut versuchen</button>';
   document.body.appendChild(box);
   const message=box.querySelector(".bk-cancel-message");
+  const retry=box.querySelector(".bk-cancel-retry");
   let inFlight=false;
   let lastOperation="";
   async function refresh(){
@@ -5860,6 +5862,18 @@ BIBLIOTHEKAR_0443_JS = r"""
       else if(item.status==="running") message.textContent="Änderung wird im Hintergrund verworfen. Bitte betroffene Dateien noch nicht bearbeiten.";
       else if(item.status==="completed") message.textContent="Änderung erfolgreich verworfen. Der ursprüngliche Zustand ist wiederhergestellt.";
       else message.textContent="Verwerfen fehlgeschlagen: "+String(item.error_message||"Unbekannter Fehler")+". Du kannst die Änderung erneut verwerfen.";
+      retry.hidden=item.status!=="failed";
+      retry.onclick=async()=>{
+        retry.disabled=true;
+        try{
+          const lib=encodeURIComponent(window.__bkLibraryId || "main");
+          const url="/api/jobs/"+encodeURIComponent(item.job_id)+"/event-mutations/"+encodeURIComponent(item.mutation_id)+"/cancel?library="+lib;
+          const response=await fetch(url,{method:"POST"});
+          if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"Auftrag konnte nicht erneut vorgemerkt werden.");}
+          await refresh();
+        }catch(error){message.textContent=String(error.message||error);}
+        finally{retry.disabled=false;}
+      };
       if(lastOperation!==item.id) lastOperation=item.id;
     }catch(_){}
     finally{inFlight=false;}
