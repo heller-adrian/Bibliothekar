@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 0.43.3 – Feinschliff Importfortschritt
+
+- Laufende Importe zeigen die Prozentzahl nicht mehr doppelt: Die Balken sind nur noch mit „Aktuelle Stufe“ und „Gesamt“ beschriftet; die Prozentangabe bleibt kompakt in „Fortschritt gesamt“ darunter.
+- Der Abstand zwischen den beiden laufenden Fortschrittsbalken wurde reduziert.
+- Die Restzeitschätzung erscheint bereits nach kurzer Laufzeit. Backend-Zeitstempel werden für iOS/Safari robust normalisiert; bei sehr kurzen Restzeiten wird in Sekunden geschätzt statt nur ein Gedankenstrich gezeigt.
+- Abgeschlossene Importe zeigen nur noch den grünen Gesamtbalken mit der Beschriftung „Abgeschlossen“; der Stufenbalken entfällt.
+
 ### 0.43.2 – Sticky-Vorschauen, zweistufiger Importfortschritt und Speicher-Loader
 
 - Die Zielstruktur-Vorschau im Arbeitsbereich bleibt auf Desktop beim Scrollen direkt unter dem Secondary-Header. Ihre lange Tages-/Dateiliste besitzt einen eigenen vertikalen Scrollbereich, damit nicht die gesamte Seite verschoben werden muss.
