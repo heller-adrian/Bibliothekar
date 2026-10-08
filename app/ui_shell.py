@@ -5803,7 +5803,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.4 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.5 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6582,6 +6582,58 @@ body.bibliothekar-redesign .event-card {
 }
 """
 
+
+BIBLIOTHEKAR_0455_CSS = r"""
+/* 0.45.5: Die Stufenanzeige besitzt einen echten Füllstand aus dem Importverlauf. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .progress-row {
+  min-width:0;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .progress-caption {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:5px 10px;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-stage-badge {
+  display:inline-block;
+  margin-inline-start:8px;
+  padding:2px 8px;
+  border-radius:999px;
+  background:color-mix(in srgb,var(--bk-blue) 11%,var(--surface));
+  border:1px solid color-mix(in srgb,var(--bk-blue) 28%,var(--border));
+  color:var(--bk-ink);
+  font-size:.79rem;
+  font-weight:600;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-stage-value {
+  font-size:.79rem;
+  color:var(--muted);
+}
+/* Maximal zwei Prozent optische Veränderung statt einer auffälligen
+   Hintergrundumschaltung. Auch der Rahmen bleibt sehr zurückhaltend. */
+@media(hover:hover) and (pointer:fine){
+  html[data-bk-theme="dark"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover,
+  html[data-bk-theme="light"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:color-mix(in srgb,var(--surface) 98%,var(--bk-ink) 2%) !important;
+    border-color:color-mix(in srgb,var(--border) 94%,var(--bk-ink) 6%) !important;
+  }
+  html[data-bk-theme="dark"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.review-card:hover {
+    background:color-mix(in srgb,var(--warning) 13%,var(--surface)) !important;
+    border-color:var(--warning) !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.without-date.review-card:hover {
+    background:#f2e1cc !important;
+    border-color:#b56d22 !important;
+  }
+  body.bibliothekar-redesign[data-bk-area="workspace"] .timeline-event-card:not(.selected-preview):hover,
+  body.bibliothekar-redesign[data-bk-area="workspace"] .event-card:not(.selected-preview):not(.is-open):hover {
+    background:color-mix(in srgb,var(--surface-2) 98%,var(--bk-ink) 2%) !important;
+    border-color:color-mix(in srgb,var(--border) 94%,var(--bk-ink) 6%) !important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -6614,7 +6666,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0451_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0452_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0453_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0454_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0454_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0455_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
