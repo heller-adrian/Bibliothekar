@@ -5804,6 +5804,75 @@ body[data-bk-area="trash"] main {
 """
 
 
+BIBLIOTHEKAR_0443_CSS = r"""
+/* Bibliotheksübergreifend sichtbarer Status persistenter Verwerfaufträge. */
+#bk-background-cancel-notice {
+  position:fixed;right:18px;top:74px;z-index:1250;
+  box-sizing:border-box;max-width:min(440px,calc(100vw - 32px));
+  border:1px solid var(--bk-line);border-radius:12px;
+  background:var(--bk-surface);color:var(--bk-ink);
+  box-shadow:0 7px 24px rgba(0,0,0,.17);
+  padding:12px 15px;display:flex;gap:11px;align-items:center;
+  font-size:.89rem;line-height:1.4;
+}
+#bk-background-cancel-notice[hidden]{display:none!important}
+#bk-background-cancel-notice[data-status="failed"]{border-color:var(--bk-danger)}
+#bk-background-cancel-notice .bk-cancel-spinner{
+  width:17px;height:17px;flex:0 0 17px;
+  border:2px solid var(--bk-blue);border-right-color:transparent;
+  border-radius:50%;animation:bk-cancel-spin .75s linear infinite;
+}
+@keyframes bk-cancel-spin{to{transform:rotate(360deg)}}
+@media(max-width:700px){
+  #bk-background-cancel-notice{top:75px;left:12px;right:12px;max-width:none}
+}
+"""
+
+BIBLIOTHEKAR_0443_JS = r"""
+(function(){
+  const box=document.createElement("div");
+  box.id="bk-background-cancel-notice";
+  box.hidden=true;
+  box.setAttribute("role","status");
+  box.setAttribute("aria-live","polite");
+  box.innerHTML='<span class="bk-cancel-spinner" aria-hidden="true"></span><span class="bk-cancel-message"></span>';
+  document.body.appendChild(box);
+  const message=box.querySelector(".bk-cancel-message");
+  let inFlight=false;
+  let lastOperation="";
+  async function refresh(){
+    if(inFlight || document.hidden) return;
+    inFlight=true;
+    try{
+      const library=encodeURIComponent(window.__bkLibraryId || "main");
+      const response=await fetch("/api/background-cancellations?library="+library,{cache:"no-store"});
+      if(!response.ok) return;
+      const data=await response.json();
+      const jobs=Array.isArray(data.operations)?data.operations:[];
+      const active=jobs.find(x=>x.status==="running"||x.status==="queued");
+      const item=active||jobs[0];
+      if(!item){box.hidden=true;return;}
+      box.hidden=false;
+      box.dataset.status=item.status;
+      const spinner=box.querySelector(".bk-cancel-spinner");
+      spinner.hidden=!(item.status==="running"||item.status==="queued");
+      if(item.status==="queued") message.textContent="Änderung zum Verwerfen vorgemerkt. Du kannst in andere Bereiche wechseln.";
+      else if(item.status==="running") message.textContent="Änderung wird im Hintergrund verworfen. Bitte betroffene Dateien noch nicht bearbeiten.";
+      else if(item.status==="completed") message.textContent="Änderung erfolgreich verworfen. Der ursprüngliche Zustand ist wiederhergestellt.";
+      else message.textContent="Verwerfen fehlgeschlagen: "+String(item.error_message||"Unbekannter Fehler")+". Du kannst die Änderung erneut verwerfen.";
+      if(lastOperation!==item.id) lastOperation=item.id;
+    }catch(_){}
+    finally{inFlight=false;}
+  }
+  window.addEventListener("bk-cancellation-queued",refresh);
+  window.addEventListener("pageshow",refresh);
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)refresh()});
+  refresh();
+  window.setInterval(refresh,1500);
+})();
+"""
+
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = html
     result = result.replace(
@@ -5823,7 +5892,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0423_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0424_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0425_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0441_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0441_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0443_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
@@ -5849,7 +5919,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     )
     result = result.replace(
         "</body>",
-        f"<script>{BIBLIOTHEKAR_JS}</script>\n</body>",
+        f"<script>{BIBLIOTHEKAR_JS}</script>\n"
+        f"<script>{BIBLIOTHEKAR_0443_JS}</script>\n</body>",
         1,
     )
     return result
