@@ -146,6 +146,7 @@ from app.folder_import import (
     cleanup_completed_folder_import,
     run_folder_import_job,
     quick_source_signature,
+    preflight_folder_import,
 )
 from app.event_structure import (
     EventPreviewError,
@@ -295,7 +296,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.45.4"
+DEPLOYMENT_VERSION = "0.45.5"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -583,19 +584,60 @@ IMPORT_CANCEL_LOCK = Lock()
 IMPORT_CANCEL_REQUESTS: set[str] = set()
 
 
-def _request_import_cancel(job_id: str) -> None:
+def _import_cancel_marker(job_id: str, *, force: bool = False) -> Path:
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", str(job_id)):
+        raise ValueError("Ungültige Importkennung.")
+    suffix = ".force" if force else ".cancel"
+    return LOG_PATH / "import-cancellations" / (str(job_id) + suffix)
+
+
+def _request_import_cancel(job_id: str, *, force: bool = False) -> None:
+    # Dauerhafte, jobspezifische Anforderung: auch nach einem HTTP-Reload
+    # oder Workerwechsel sichtbar. Der Job-Worker allein führt den Rollback aus.
+    marker = _import_cancel_marker(job_id)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with marker.open("x", encoding="utf-8") as handle:
+            handle.write(datetime.now(timezone.utc).isoformat())
+    except FileExistsError:
+        pass
+    if force:
+        escalation = _import_cancel_marker(job_id, force=True)
+        try:
+            with escalation.open("x", encoding="utf-8") as handle:
+                handle.write(datetime.now(timezone.utc).isoformat())
+        except FileExistsError:
+            pass
     with IMPORT_CANCEL_LOCK:
         IMPORT_CANCEL_REQUESTS.add(str(job_id))
 
 
 def _import_cancel_requested(job_id: str) -> bool:
+    marker = _import_cancel_marker(job_id)
+    if marker.is_file():
+        return True
     with IMPORT_CANCEL_LOCK:
         return str(job_id) in IMPORT_CANCEL_REQUESTS
+
+
+def _import_cancel_info(job_id: str) -> dict[str, Any]:
+    marker = _import_cancel_marker(job_id)
+    if not marker.is_file():
+        return {"cancel_requested": False, "cancel_forced": False}
+    return {
+        "cancel_requested": True,
+        "cancel_forced": _import_cancel_marker(job_id, force=True).is_file(),
+        "cancel_requested_at": datetime.fromtimestamp(
+            marker.stat().st_mtime, timezone.utc
+        ).isoformat(),
+    }
 
 
 def _clear_import_cancel(job_id: str) -> None:
     with IMPORT_CANCEL_LOCK:
         IMPORT_CANCEL_REQUESTS.discard(str(job_id))
+    for force in (False, True):
+        _import_cancel_marker(job_id, force=force).unlink(missing_ok=True)
 
 
 def _remove_cancelled_import_job(job_id: str) -> None:
@@ -4054,6 +4096,20 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     source = resolve_import_source(relative_value, root_key)
     root = _safe_root(root_key)
     source_device_id = source_device_id_for_path(source, root_key, root)
+    if root_key == "nas" and source == root:
+        raise HTTPException(
+            status_code=422,
+            detail="Der gesamte NAS-Quellenbereich kann nicht importiert werden. Bitte einen einzelnen Unterordner wählen.",
+        )
+    try:
+        storage = load_settings().get("storage", {})
+        preflight_folder_import(
+            source, WORKSPACE_PATH, WORKSPACE_PATH,
+            processing_buffer_percent=int(storage.get("processing_buffer_percent", 10)),
+            safety_reserve_gib=int(storage.get("safety_reserve_gib", 20)),
+        )
+    except (PipelineError, OSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     source_signature = quick_source_signature(source)
     duplicate = find_folder_import_by_identity(
         DATABASE_FILE,
@@ -4133,6 +4189,23 @@ def api_import_history(
         item = get_job(DATABASE_FILE, job_id)
         if item is None:
             continue
+        if item.get("operation") == "folder_import":
+            item.update(_import_cancel_info(job_id))
+            if item.get("state") in {
+                "copying", "verifying", "backup_verified",
+                "analyzing_metadata", "organizing",
+            }:
+                lifecycle = next(
+                    (row for row in list_backup_lifecycles(DATABASE_FILE, limit=100)
+                     if str(row.get("job_id") or "") == job_id), None
+                ) or {}
+                details = lifecycle.get("details") or {}
+                stage = str(details.get("stage") or item.get("stage") or "")
+                item["stage_progress_stage"] = stage
+                item["stage_progress_current"] = int(details.get("progress_current") or 0)
+                item["stage_progress_total"] = int(details.get("progress_total") or 0)
+                item["overall_progress_current"] = int(item.get("progress_current") or 0)
+                item["overall_progress_total"] = int(item.get("progress_total") or 0)
         item["backup_delete_allowed"] = False
         item["backup_delete_reason"] = ""
         if (item.get("operation") == "folder_import"
@@ -4277,7 +4350,7 @@ def api_jobs() -> dict[str, Any]:
     tags=["Import"],
     status_code=202,
 )
-def api_cancel_import(job_id: str) -> JSONResponse:
+def api_cancel_import(job_id: str, force: bool = False) -> JSONResponse:
     job = get_job(DATABASE_FILE, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Import wurde nicht gefunden.")
@@ -4319,13 +4392,24 @@ def api_cancel_import(job_id: str) -> JSONResponse:
         "analyzing_metadata",
         "organizing",
     }:
-        _request_import_cancel(job_id)
+        if force:
+            # Ein eskalierter Abbruch darf erst nach einer Wartefrist erfolgen.
+            info = _import_cancel_info(job_id)
+            if not info["cancel_requested"]:
+                raise HTTPException(status_code=409, detail="Zuerst normalen Abbruch anfordern.")
+            if datetime.now(timezone.utc).timestamp() - _import_cancel_marker(job_id).stat().st_mtime < 15:
+                raise HTTPException(status_code=409, detail="Die Sicherheitswartefrist ist noch nicht abgelaufen.")
+        _request_import_cancel(job_id, force=force)
         return JSONResponse(
             status_code=202,
             content={
                 "accepted": True,
                 "cancelled": False,
-                "message": "Abbruch wurde angefordert. Der Import wird sicher zurückgerollt.",
+                "force": force,
+                "message": (
+                    "Erzwungener Abbruch angefordert. Nur eigene Importdateien werden sicher zurückgerollt."
+                    if force else "Abbruch wurde angefordert. Der Import wird sicher zurückgerollt."
+                ),
             },
         )
 
