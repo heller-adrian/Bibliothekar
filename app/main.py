@@ -4103,7 +4103,11 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
             detail="Der gesamte NAS-Quellenbereich kann nicht importiert werden. Bitte einen einzelnen Unterordner wählen.",
         )
     try:
-        storage = load_settings().get("storage", {})
+        try:
+            storage = load_settings().get("storage", {})
+        except FileNotFoundError:
+            # Frische Test-/Setup-Installationen haben noch keine settings.json.
+            storage = {}
         preflight_folder_import(
             source, WORKSPACE_PATH, WORKSPACE_PATH,
             processing_buffer_percent=int(storage.get("processing_buffer_percent", 10)),
