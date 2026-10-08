@@ -5910,6 +5910,7 @@ BIBLIOTHEKAR_0444_CSS = r"""
 }
 #bk-background-cancel-notice[hidden],
 #bk-background-cancel-notice [hidden] {display:none!important}
+#bk-background-cancel-notice[data-collapsed="true"] {width:44px;}
 #bk-background-cancel-notice .bk-activity-card {
   border:1px solid var(--bk-line);
   border-radius:13px;
@@ -6026,8 +6027,6 @@ BIBLIOTHEKAR_0444_CSS = r"""
 BIBLIOTHEKAR_0444_JS = r"""
 (function() {
   const desktop = window.matchMedia("(min-width: 1400px) and (min-height: 620px) and (hover: hover) and (pointer: fine)");
-  if (!desktop.matches) return;
-
   document.body.insertAdjacentHTML("beforeend",
     '<aside id="bk-background-cancel-notice" aria-label="Hintergrundvorgänge" hidden></aside>');
   const box = document.getElementById("bk-background-cancel-notice");
@@ -6054,6 +6053,7 @@ BIBLIOTHEKAR_0444_JS = r"""
   let waiting = false;
   let lastSeen = [];
   function viewState() {
+    box.dataset.collapsed = String(collapsed);
     card.hidden = collapsed;
     mini.hidden = !collapsed;
     mini.setAttribute("aria-expanded", String(!collapsed));
