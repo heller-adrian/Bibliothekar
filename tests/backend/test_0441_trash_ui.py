@@ -30,7 +30,7 @@ def test_0441_collapsible_full_inventory_without_pagination():
     assert 'const depth=entry.entry_type==="directory"?parts.length:parts.length-1' in TRASH_HTML
     assert 'if(entry.entry_type!=="directory") parent.items.push(entry)' in TRASH_HTML
     assert 'folder.items.slice().sort(' in TRASH_HTML
-    assert 'title="'+''' in TRASH_HTML or 'title="' in TRASH_HTML
+    assert 'title="' in TRASH_HTML
     assert 'Mehr anzeigen' not in TRASH_HTML
     assert 'slice(0,15)' not in TRASH_HTML
     assert 'data.entries||[]' in TRASH_HTML
