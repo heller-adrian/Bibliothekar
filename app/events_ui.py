@@ -159,6 +159,7 @@ EVENTS_HTML = r"""<!doctype html>
       min-height: 24px;
       margin-bottom: 14px;
     }
+    .status:empty { display:none; }
 
     .error {
       color: var(--danger);
