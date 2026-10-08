@@ -31,6 +31,7 @@ from app.trash import (
     empty_trash_filesystem, purge_trash_database,
 )
 from app.ui_shell import apply_shell
+from app import view_cache
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity
 from app.live_inventory import refresh_live_event_inventories
@@ -294,7 +295,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.45.1"
+DEPLOYMENT_VERSION = "0.45.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -3934,14 +3935,23 @@ def _helper_request(path: str, method: str = "GET", payload: dict[str, Any] | No
 
 
 @app.get("/api/import-sources", tags=["Import"])
-def api_import_sources() -> dict[str, Any]:
+def api_import_sources(force_refresh: bool = False) -> dict[str, Any]:
+    # Quellen können auch außerhalb von Bibliothekar verändert werden.
+    # Die Darstellung bleibt kurz gecacht; Mount-Prüfung erfolgt unabhängig davon.
+    db_path = current_database_file()
+    if not force_refresh:
+        cached = view_cache.get_snapshot(db_path, "import-sources")
+        if cached is not None and cached["mounted"] == IMPORT_ROOT.is_dir():
+            return cached
     sources = discover_import_sources("saved") + discover_import_sources("removable")
-    return {
+    result = {
         "root": str(IMPORT_ROOT),
         "mounted": IMPORT_ROOT.is_dir(),
         "count": len(sources),
         "sources": sources,
     }
+    view_cache.put_snapshot(db_path, "import-sources", result)
+    return result
 
 
 @app.get("/api/source-devices", tags=["Import"])
@@ -4091,6 +4101,74 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
             "job": job,
         },
     )
+
+
+# Der Import-/Prüfverlauf ist eine separate, paginierte Anzeige und verändert
+# weder die Sicherungsdateien noch die fachlichen Auftragszustände.
+@app.get("/api/import-history", tags=["Import"])
+def api_import_history(
+    offset: int = 0, limit: int = 5, hidden: bool = False,
+) -> dict[str, Any]:
+    offset = max(0, int(offset))
+    limit = max(1, min(int(limit), 50))
+    where = """(operation='folder_import' OR operation='metadata_fixture_analysis'
+                  OR kind='sd_import') AND history_hidden=?"""
+    with database_connection(current_database_file()) as conn:
+        total = int(conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE " + where, (int(hidden),)
+        ).fetchone()[0])
+        ids = [
+            str(row[0]) for row in conn.execute(
+                "SELECT id FROM jobs WHERE " + where
+                + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                (int(hidden), limit, offset),
+            ).fetchall()
+        ]
+    rows: list[dict[str, Any]] = []
+    for job_id in ids:
+        item = get_job(current_database_file(), job_id)
+        if item is None:
+            continue
+        item["backup_delete_allowed"] = False
+        item["backup_delete_reason"] = ""
+        if (item.get("operation") == "folder_import"
+                and item.get("kind") == "sd_import"
+                and item.get("state") == "completed"):
+            try:
+                info = backup_deletion_status(
+                    current_database_file(),
+                    REGISTRY_DATABASE_FILE,
+                    workspace_backup_root(WORKSPACE_PATH),
+                    job_id,
+                )
+                item["backup_delete_allowed"] = bool(info.get("allowed"))
+                item["backup_delete_reason"] = str(info.get("reason") or "")
+            except Exception as error:
+                item["backup_delete_reason"] = str(error)
+        rows.append(item)
+    return {"jobs": rows, "total": total, "has_more": offset + len(rows) < total}
+
+
+@app.post("/api/import-history/{job_id}/visibility", tags=["Import"])
+def api_import_history_visibility(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    hidden = payload.get("hidden")
+    if not isinstance(hidden, bool):
+        raise HTTPException(status_code=422, detail="Sichtbarkeit muss true oder false sein.")
+    with database_connection(current_database_file()) as conn:
+        row = conn.execute(
+            "SELECT id, operation, kind, state FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Import nicht gefunden.")
+        if row["operation"] not in ("folder_import", "metadata_fixture_analysis") and row["kind"] != "sd_import":
+            raise HTTPException(status_code=409, detail="Dieser Auftrag ist kein Importverlauf.")
+        if hidden and row["state"] != "completed":
+            raise HTTPException(status_code=409, detail="Nur abgeschlossene Importe ausblenden.")
+        conn.execute(
+            "UPDATE jobs SET history_hidden=? WHERE id=?", (int(hidden), job_id)
+        )
+    view_cache.invalidate(current_database_file())
+    return {"job_id": job_id, "hidden": hidden}
 
 
 @app.get(
@@ -7622,19 +7700,27 @@ def api_event_preview(
 
 
 @app.get("/api/events/search", tags=["Ereignisse"])
-def api_search_events(q: str = "", limit: int = 25, offset: int = 0) -> dict[str, Any]:
-    refresh_live_event_inventories(
-        current_database_file(),
-        current_workspace_root(),
-        current_archive_root(),
-    )
-    reconcile_global_central_stock_state(
-        force=True
-    )
-    detect_all_event_structure_changes(
-        current_database_file()
-    )
-    return search_events(current_database_file(), query=q, limit=limit, offset=offset)
+def api_search_events(
+    q: str = "", limit: int = 25, offset: int = 0,
+    physical_refresh: bool = True,
+) -> dict[str, Any]:
+    db_path = current_database_file()
+    must_check = physical_refresh or view_cache.needs_first_physical_check(db_path)
+    if must_check:
+        refresh_live_event_inventories(
+            db_path, current_workspace_root(), current_archive_root()
+        )
+        reconcile_global_central_stock_state(force=True)
+        detect_all_event_structure_changes(db_path)
+        view_cache.mark_physical_checked(db_path)
+        view_cache.invalidate(db_path)
+    if not must_check:
+        result = view_cache.get_snapshot(db_path, "events", q, limit, offset)
+        if result is not None:
+            return result
+    result = search_events(db_path, query=q, limit=limit, offset=offset)
+    view_cache.put_snapshot(db_path, "events", result, q, limit, offset)
+    return result
 
 
 
@@ -8220,9 +8306,11 @@ def api_global_workspace_summary(
                 detail="Mindestens eine Sicherung wurde nicht gefunden.",
             )
 
-    if physical_refresh:
+    db_path = current_database_file()
+    must_check = physical_refresh or view_cache.needs_first_physical_check(db_path)
+    if must_check:
         refresh_live_event_inventories(
-            current_database_file(),
+            db_path,
             current_workspace_root(),
             current_archive_root(),
         )
@@ -8237,6 +8325,15 @@ def api_global_workspace_summary(
             database_path=current_database_file(),
             library_id=current_library_context().library_id,
         )
+
+        view_cache.mark_physical_checked(db_path)
+        view_cache.invalidate(db_path)
+
+    cache_key = tuple(sorted(selected))
+    if not must_check:
+        cached = view_cache.get_snapshot(db_path, "workspace", cache_key)
+        if cached is not None:
+            return cached
 
     excluded_by_job = {
         job_id: blocked_family_ids(
@@ -8268,6 +8365,7 @@ def api_global_workspace_summary(
                 "source_label": label,
             })
     payload["event_suggestions"] = suggestions
+    view_cache.put_snapshot(db_path, "workspace", payload, cache_key)
     return payload
 
 @app.get(

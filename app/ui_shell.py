@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from html import escape
 import re
+from app.library_runtime import get_current_library
 
 
 BIBLIOTHEKAR_CSS = r"""
@@ -5550,7 +5551,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     <span class="bk-mark" aria-hidden="true"><span class="y"></span><span class="r"></span><span class="b"></span></span>
     <span class="bk-brand-copy">
       <span class="bk-brand-title">Bibliothekar</span>
-      <span id="bk-current-library-name" class="bk-brand-library">Bibliothek …</span>
+      <span id="bk-current-library-name" class="bk-brand-library">{escape((get_current_library().display_name if get_current_library() else "Hauptbibliothek"))}</span>
     </span>
   </a>
 

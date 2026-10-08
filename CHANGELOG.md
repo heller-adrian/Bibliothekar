@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.45.2 – Schnellere Ansichten, Prüf-Reload und kompakter Importverlauf (08.10.2026)
+
+- Sofortige Bibliotheksbezeichnung, differenzierte hellfarbige Prüffallkarte, bereinigte Tagesordnerübersicht.
+- Wiederverwendbare Ansichten für Aufnahmen, Ereignisse und Importquellen; physische Prüfungen beim manuellen Neuladen und vor kritischen Dateioperationen.
+- Eigene paginierte SQLite-Sichtbarkeit des Import-/Prüfverlaufs. Kompakte Karten mit aufklappbaren technischen Details, sicherem Ausblenden/Wiederherstellen.
+- Regressionstests zur neuen Version und zum Schutz der Dateibestände.
+
 ## 0.45.1 – Kontinuierliche Reiteranimation und Theme-First-Paint (08.10.2026)
 
 - Dark-/Light-Mode bereits vor dem ersten Paint synchron aus der gespeicherten Theme-Wahl initialisiert; vermeidet helle Zwischenframes und vorübergehend schwarze inaktive Reiter auf iOS Safari und in der installierten Web-App.
