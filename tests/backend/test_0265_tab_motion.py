@@ -27,7 +27,10 @@ def test_0265_main_tabs_lift_instead_of_brighten():
 
 def test_0265_main_tab_click_animation_preserves_modified_clicks():
     assert 'document.querySelectorAll(".bk-tab").forEach(tab =>' in BIBLIOTHEKAR_JS
-    assert 'tab.classList.add("is-navigating")' in BIBLIOTHEKAR_JS
+    assert 'tab.classList.add("is-navigating", "bk-tab-pressing")' in BIBLIOTHEKAR_JS
+    assert 'tab.addEventListener("pointerdown"' in BIBLIOTHEKAR_JS
+    assert 'tab.addEventListener("pointerup"' in BIBLIOTHEKAR_JS
+    assert 'tab.addEventListener("pointercancel"' in BIBLIOTHEKAR_JS
     assert "event.metaKey" in BIBLIOTHEKAR_JS
     assert "event.ctrlKey" in BIBLIOTHEKAR_JS
     assert "event.shiftKey" in BIBLIOTHEKAR_JS
