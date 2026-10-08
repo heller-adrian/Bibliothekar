@@ -6317,8 +6317,8 @@ html[data-bk-nav-arriving="archive"] .bk-tab.active[data-area="archive"] {
 
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
-        r"(<head(?:\\s[^>]*)?>)",
-        lambda match: match.group(0) + f"\\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\\n",
+        r"(<head(?:\s[^>]*)?>)",
+        lambda match: match.group(0) + f"\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n",
         html,
         count=1,
         flags=re.IGNORECASE,
