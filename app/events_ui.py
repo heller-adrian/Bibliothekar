@@ -1140,6 +1140,9 @@ EVENTS_HTML = r"""<!doctype html>
     .reassignment-controls { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:end; }
     .reassignment-new-name { margin-top:10px; }
     .reassignment-new-name[hidden] { display:none !important; }
+    .event-operation-loading { display:flex; align-items:center; gap:12px; padding:18px 14px; border:1px solid var(--bk-line,var(--border)); border-radius:12px; background:var(--bk-surface,var(--surface)); color:var(--bk-muted,var(--muted)); }
+    .event-operation-spinner { flex:0 0 18px; width:18px; height:18px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:event-operation-spin .75s linear infinite; }
+    @keyframes event-operation-spin { to { transform:rotate(360deg); } }
     .reassignment-resume { margin-top:12px; padding:10px 12px; border:1px solid var(--warning); border-radius:11px; background:rgba(255,193,7,.06); display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; }
     /* 0.20.7: Offene Neu-Zuordnung optisch sauber vom darunterliegenden
        <details>-Summary trennen. Auf schmalen Ansichten lag dessen native
@@ -1993,25 +1996,22 @@ EVENTS_HTML = r"""<!doctype html>
         const statusClass = ["planned","applied","archived"].includes(event.status) ? event.status : "";
         const isMutationAnchor = event.mutation_id && event.id === event.mutation_anchor_event_id;
         const isReconcileTarget = Boolean(Number(event.reconcile_target||0));
-        const reassign = Number(event.pending_reassignment_count||0) > 0 ? `
-          <div class="reassignment-resume">
-            <span><strong>⚠ Neu-Zuordnung offen · ${Number(event.pending_reassignment_count)} ${Number(event.pending_reassignment_count)===1?"Familie":"Familien"}</strong><br><span class="muted">Das Ereignis bleibt angewendet. Die herausgefallenen Familien sind im Plan wieder frei, haben aber noch kein neues Ziel. Erst nach ihrer Zuordnung folgt die gemeinsame, ausdrücklich bestätigte Nachsortierung.</span></span>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-              <a class="plan-button bk-positive-action" href="/workspace?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=free">In Aufnahmen öffnen</a>
-              ${isMutationAnchor ? `<button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button>` : ""}
-            </div>
-          </div>` : "";
-        const mutation = isMutationAnchor && Number(event.pending_reassignment_count||0) === 0 ? `
-          <div class="reassignment-resume"><span><strong>⚠ Nachsortierung offen</strong><br><span class="muted">Das Ereignis bleibt angewendet und die Neu-Zuordnung ist vollständig. Der gespeicherte SOLL-Zustand muss nur noch per SHA-256 geprüft und ausdrücklich auf den SSD-Arbeitsbereich angewendet werden.</span></span><button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button></div>` : "";
         const reconcileTargetNotice = isReconcileTarget ? `
           <div class="reassignment-resume"><span><strong>↳ Ziel einer offenen Nachsortierung</strong><br><span class="muted">Dieses geplante Ereignis wird nicht separat angewendet. Es wird zusammen mit dem bearbeiteten Ursprungsereignis im gemeinsamen Nachsortierplan geprüft und angewendet.</span></span></div>` : "";
         card.innerHTML = `
           <div class="event-card-header"><div><strong class="event-name">${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder">${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
-          ${mutation}
-          ${reassign}
           ${reconcileTargetNotice}
           <div class="event-card-actions" hidden>
             <button type="button" data-view-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Öffnen</button>
+            ${isMutationAnchor && Number(event.pending_reassignment_count||0) > 0
+              ? `<button type="button" class="plan-button bk-positive-action" data-reassign-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-resort-required="1">Neu-Zuordnung fortsetzen</button>`
+              : ""}
+            ${isMutationAnchor && !Number(event.pending_reassignment_count||0)
+              ? `<button type="button" class="plan-button bk-positive-action" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">Änderung fortsetzen</button>`
+              : ""}
+            ${isMutationAnchor
+              ? `<button type="button" class="danger-button" data-cancel-mutation="${escapeHtml(event.mutation_id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Änderung verwerfen</button>`
+              : ""}
             ${isReconcileTarget && event.reconcile_source_event_id
               ? `<a class="plan-button bk-positive-action" href="/events?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=resort:${encodeURIComponent(event.reconcile_source_event_id)}">Gemeinsame Nachsortierung öffnen</a>`
               : isSortPlannable(event)
@@ -2254,6 +2254,24 @@ EVENTS_HTML = r"""<!doctype html>
       setTimeout(run,360);
     }
     window.addEventListener("resize",()=>fitVisibleTrees(document));
+
+    function showSortPreparation(eventName, operation="Änderungen") {
+      sortPlanTitle.textContent = `${operation} · ${eventName}`;
+      sortPlanSubtitle.textContent = "Dateien, Ziele und Konflikte werden rein lesend geprüft …";
+      sortPlanBody.innerHTML = '<div class="event-operation-loading" role="status"><span class="event-operation-spinner" aria-hidden="true"></span><span>Bitte warten. Der Prüfungsplan wird vorbereitet …</span></div>';
+      sortPlanCloseButton.disabled = true;
+      sortPlanCloseButton.hidden = false;
+      if (!sortPlanDialog.open) sortPlanDialog.showModal();
+    }
+
+    function releaseSortPreparation() {
+      sortPlanCloseButton.disabled = false;
+    }
+
+    function setEventOperationBusy(message, busy=true) {
+      setStatus(message);
+      statusElement.classList.toggle("bk-loading-status", Boolean(busy));
+    }
 
     function renderSortPlan(plan) {
       currentSortPlan = plan;
@@ -3658,13 +3676,14 @@ EVENTS_HTML = r"""<!doctype html>
         ? {eventId,jobId,mutationId:String(options.mutationId||event.mutation_id||"")}
         : null;
       sortPlanCloseButton.hidden = false;
+      releaseSortPreparation();
       sortPlanCloseButton.textContent = mandatoryMutationContext ? "Änderungen verwerfen" : "Schließen";
       sortPlanCloseButton.classList.toggle("danger-button", Boolean(mandatoryMutationContext));
       sortPlanTitle.textContent = mandatoryMutationContext
         ? `Änderungen anwenden · ${event.name}`
         : `Nachsortierung · ${event.name}`;
       sortPlanSubtitle.textContent = "Alte und neue Pfade werden rein lesend geprüft …";
-      sortPlanBody.textContent = "Dateien, Ziele und Konflikte werden geprüft …";
+      sortPlanBody.innerHTML = '<div class="event-operation-loading" role="status"><span class="event-operation-spinner" aria-hidden="true"></span><span>Dateien, Ziele und Konflikte werden geprüft …</span></div>';
       if (!sortPlanDialog.open) sortPlanDialog.showModal();
       try {
         const plan = await requestJson(`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/reconcile-plan`);
