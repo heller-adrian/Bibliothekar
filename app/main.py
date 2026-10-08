@@ -297,7 +297,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.45.5"
+DEPLOYMENT_VERSION = "0.45.6"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -10965,7 +10965,8 @@ def index() -> str:
         <article class="job bk-history-expanded">
           
           <div class="bk-history-detail-date">
-            Erstellt: ${escapeHtml(formatDate(job.created_at))}
+            <span>Erstellt: ${escapeHtml(formatDate(job.created_at))}</span>
+            ${isActive ? `<span class="bk-stage-badge bk-stage-badge-header">${escapeHtml(stageLabel)}</span>` : ""}
           </div>
 
           <div class="message">
@@ -10982,7 +10983,7 @@ def index() -> str:
             ${job.state === "completed" ? "" : `
               <div class="progress-row">
                 <div class="progress-caption">
-                  <span>Aktuelle Phase <span class="bk-stage-badge">${escapeHtml(stageLabel)}</span></span>
+                  <span>Aktuelle Phase</span>
                   <span class="bk-stage-value">${stagePercent} %</span>
                 </div>
                 <div class="progress stage-progress" role="progressbar"
