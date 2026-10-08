@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.45.6 – UI-Feinschliff (09.10.2026)
+
+- Der Name der aktuellen Importphase steht rechts oben in der aufgeklappten Importkarte beim Erstellungsdatum, unterhalb der Aktionen; der Phasenbalken behält seinen Fortschrittswert.
+- Tages- und Ereigniskarten im Hellmodus zeigen einen Zwischenwert zwischen den Hover-Stärken 0.45.4 und 0.45.5; Dunkelmodus bleibt unverändert.
+- In der iPhone-Standalone-Schnellauswahl wackeln nur die Karteninhalte, damit WebKit den oberen Kartenrand während der Animation nicht mehr abschneidet.
+- Ausschließlich UI/CSS und Versionstexte; keine Datenbankmigration oder Änderung des Importprozesses.
+
 ## 0.45.5 – Sicherer Abbruch und Importkontrolle
 
 - Live-Fortschrittsanzeige mit Phasen-Badge und unabhängigem Gesamtfortschritt.
