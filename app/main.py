@@ -10966,7 +10966,7 @@ def index() -> str:
           
           <div class="bk-history-detail-date">
             <span>Erstellt: ${escapeHtml(formatDate(job.created_at))}</span>
-            ${isActive ? `<span class="bk-stage-badge bk-stage-badge-header">${escapeHtml(stageLabel)}</span>` : ""}
+            ${activeStates.has(job.state) ? `<span class="bk-stage-badge bk-stage-badge-header">${escapeHtml(stageLabel)}</span>` : ""}
           </div>
 
           <div class="message">
