@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.45.4 – UI-Feinschliff und stabiler Importverlauf (08.10.2026)
+
+- „Ausgeblendet“ öffnet sofort; Hintergrundabfragen und veraltete Zwischenstände überschreiben keine neueren Zähler. Ein schnelles SQLite-Count-API verhindert unnötige Sicherungsprüfungen für die reine Anzahl.
+- Ausgeklappte Importdetails verwenden keinen überholten Bildspalten-Platzhalter mehr; Datum, Beschreibung und technische Daten sind linksbündig.
+- Tages-, Prüffall- und Ereigniskarten reagieren in Hell- und Dunkelmodus dezenter mit einem weichen Ein-/Ausblenden. Die Auswahl bleibt unabhängig; reduzierte Bewegung wird berücksichtigt.
+- Unbenutzte Statushöhe unter „Ereignisse“ entfernt, damit Kennzahlen unmittelbar unter dem Seitentitel stehen.
+- Seitentitel und Bereichstitel zeigen ihre bestehenden Hilfen nur noch per Klick/Tastatur an, als schwebende Hinweise ohne Layoutverschiebung.
+- Reine UI-/Anzeigeänderungen; keine Migration und keine Änderung des Kamera-, Ereignis- oder Archiv-Workflows.
+
 ## 0.45.3 – Importkartendetails, mobile Aktionen und Ereignissuche (08.10.2026)
 
 - Importkarten: Details ohne doppelten Namen oder Status; technische Angaben ohne leere Vorschau-Spalte, Hellmodus-Farben korrigiert.
