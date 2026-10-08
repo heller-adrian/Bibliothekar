@@ -11,9 +11,9 @@ def test_0433_eta_appears_early_and_normalizes_backend_timestamps():
 
 def test_0433_progress_percent_is_only_repeated_in_summary_not_bar_caption():
     html = main.index()
-    assert '<span>Aktuelle Stufe</span>\n                </div>' in html
+    assert '<span>Aktuelle Phase <span class="bk-stage-badge">' in html
     assert '<span>${job.state === "completed" ? "Abgeschlossen" : "Gesamt"}</span>' in html
-    assert "<span>${stagePercent} %</span>" not in html
+    assert 'class="bk-stage-value">${stagePercent} %</span>' in html
     assert "<span>${percent} %</span>" not in html
     assert "Fortschritt gesamt:" in html
 
