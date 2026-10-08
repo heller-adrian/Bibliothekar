@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.45.3 – Importkartendetails, mobile Aktionen und Ereignissuche (08.10.2026)
+
+- Importkarten: Details ohne doppelten Namen oder Status; technische Angaben ohne leere Vorschau-Spalte, Hellmodus-Farben korrigiert.
+- Handy-Website und Web-App: Aktionen unter der Importkarte in einer gemeinsamen Zeile, auch wenn Details aufgeklappt sind.
+- „Ausgeblendet“: reduzierte, mittig beschriftete Schaltfläche ohne Dekorationssymbole.
+- Tagesordner und Ereignisse: dezente Hoverfarben in beiden Themes; mehr unterer Freiraum für den Desktop-Arbeitsbereich.
+- Ereignissuche: sichtbares Label entfernt, barrierefreies Suchfeld mit Lupensymbol und zusätzlichem Abstand zum Titel.
+- Alle Datenbank-, Import-, Cache- und Sicherungsfunktionen gegenüber 0.45.2 unverändert.
+
 ## Kostenkontrolle der GitHub Actions (0.45.2)
 
 - Bei Zwischen-Commits auf patch/* werden weder doppelte Backendtests noch Container-Builds gestartet.

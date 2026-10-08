@@ -1367,6 +1367,36 @@ EVENTS_HTML = r"""<!doctype html>
  #event-reload { grid-column:2; }
 }
 
+
+/* 0.45.3: Ruhe und Abstand zwischen Überschrift und Ereignissuche. */
+.event-browser-toolbar {
+  display:grid !important;
+  grid-template-columns:minmax(0,max-content) minmax(200px,1fr) auto;
+  gap:12px 32px !important;
+  align-items:end;
+}
+.event-browser-heading { min-width:0; }
+.event-browser-search { min-width:0 !important; width:100%; }
+.bk-event-search-field { position:relative; width:100%; }
+.bk-event-search-field #event-search {
+  box-sizing:border-box; width:100%; min-width:0;
+  padding-left:40px !important; min-height:42px;
+}
+.bk-event-search-icon {
+  position:absolute; left:13px; top:50%; transform:translateY(-50%);
+  pointer-events:none; z-index:1; color:var(--muted);
+}
+.bk-visually-hidden {
+  position:absolute !important; width:1px;height:1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;
+}
+@media(max-width:760px){
+  .event-browser-toolbar { grid-template-columns:minmax(0,1fr) auto; gap:14px 10px !important; }
+  .event-browser-heading { grid-column:1 / -1; }
+  .event-browser-search { grid-column:1; }
+  #event-reload { grid-column:2; }
+}
+
 </style>
 </head>
 
@@ -1410,10 +1440,16 @@ EVENTS_HTML = r"""<!doctype html>
           <h2 style="margin-bottom:6px">Gespeicherte Ereignisse</h2>
           <div id="event-result-info" class="muted">Die zuletzt geänderten Ereignisse werden angezeigt.</div>
         </div>
-        <label class="event-browser-search">
-          <span>Ereignisse suchen</span>
-          <input id="event-search" type="search" placeholder="Name, Datum oder Sicherung …" autocomplete="off">
-        </label>
+        <div class="event-browser-search">
+          <label class="bk-visually-hidden" for="event-search">Ereignisse durchsuchen</label>
+          <div class="bk-event-search-field">
+            <svg class="bk-event-search-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <circle cx="10.8" cy="10.8" r="6.8" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
+              <path d="m16 16 5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+            </svg>
+            <input id="event-search" type="search" placeholder="Suche nach Name, Datum oder Sicherung …" autocomplete="off">
+          </div>
+        </div>
         <button id="event-reload" type="button" title="Ereignisse und Dateibestand erneut vollständig prüfen">Neuladen</button>
       </div>
 

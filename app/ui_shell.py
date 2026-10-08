@@ -5810,7 +5810,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.2 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.3 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6337,6 +6337,186 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .day-card.without-date.re
 """
 
 
+
+BIBLIOTHEKAR_0453_CSS = r"""
+/* 0.45.3: Importverlauf strukturell getrennt, nur eine Überschrift, Theme-Variablen im Hellmodus. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-row {
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  align-items:center;
+  min-width:0;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-strip {
+  grid-column:1;
+  grid-row:1;
+  min-width:0;
+  padding:8px 10px;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions {
+  grid-column:2;
+  grid-row:1;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  flex-direction:row;
+  justify-content:flex-end;
+  gap:8px;
+  padding:8px 10px 8px 0;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions .bk-job-actions {
+  margin:0;
+  display:flex;
+  align-items:center;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details {
+  grid-column:1 / -1;
+  grid-row:2;
+  min-width:0;
+  padding:0 12px 12px;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-history-expanded {
+  margin:0 !important;
+  padding:12px 0 0 !important;
+  border:0 !important;
+  border-radius:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  width:100%;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-detail-date {
+  font-size:.83rem;
+  color:var(--muted);
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .progress-stack.completed-only {
+  display:none !important;
+}
+/* Dezent: die Schublade für ausgeblendete Einträge ist kein eigener Akzentbereich. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-hidden-section {
+  border-top:1px solid var(--border);
+  margin-top:18px;
+  padding-top:10px;
+}
+body.bibliothekar-redesign[data-bk-area="import"] #hidden-history-toggle {
+  display:block;
+  width:100%;
+  min-height:38px;
+  padding:8px 14px !important;
+  line-height:1.35;
+  border:1px solid var(--border);
+  border-radius:9px;
+  text-align:center !important;
+  font-weight:500;
+  background:transparent !important;
+  color:var(--muted) !important;
+}
+body.bibliothekar-redesign[data-bk-area="import"] #hidden-history-toggle:hover {
+  border-color:var(--muted);
+}
+/* Ursprünglich dunkel kodierte Importkarten bekommen ein sauberes Hellmodus-Theme. */
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] .bk-history-row {
+  --surface:#faf8f2;
+  --surface-soft:#f1ede5;
+  --border:#d9d0c2;
+  --text:#162536;
+  --muted:#66717e;
+  color:var(--text) !important;
+  background:var(--surface-soft) !important;
+  border-color:var(--border) !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details {
+  color:var(--text) !important;
+  background:var(--surface) !important;
+  border-color:var(--border) !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] .bk-history-open {
+  color:var(--text) !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] .bk-history-hidden-section {
+  --border:#d9d0c2;
+  --muted:#67727e;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] #hidden-history-toggle {
+  color:#66717e !important;
+}
+/* Auf allen mobilen Ansichten bleiben Sicherung löschen/Ausblenden nebeneinander unten. */
+@media(max-width:700px){
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-row {
+    grid-template-columns:minmax(0,1fr);
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-strip {
+    grid-column:1;grid-row:1;
+    padding:9px 10px;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-strip .bk-history-open {
+    min-width:0;
+    width:100%;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details {
+    grid-column:1;grid-row:2;
+    padding:0 10px 10px;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions {
+    grid-column:1;grid-row:3;
+    display:flex !important;
+    flex-direction:row !important;
+    align-items:center;
+    justify-content:stretch;
+    gap:8px;
+    padding:8px 10px 10px;
+    border-top:1px solid var(--border);
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions > button,
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions .bk-job-actions {
+    flex:1 1 0;
+    min-width:0;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions .bk-job-actions > button {
+    width:100%;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions button {
+    width:100%;
+    min-height:36px;
+    padding:7px 8px !important;
+    font-size:.8rem;
+    white-space:normal;
+  }
+}
+/* Zusätzliche Leerfläche unter dem letzten Tagesordner (Desktop). */
+@media(min-width:821px){
+  body.bibliothekar-redesign[data-bk-area="workspace"] main {
+    padding-bottom:max(180px, 23vh) !important;
+  }
+}
+/* Kleine, konsistente Hoververfärbung: keine optische Größenänderung. */
+@media(hover:hover) and (pointer:fine){
+  html[data-bk-theme="dark"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:#202a33 !important;
+    border-color:#53626f !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:#e9e3d9 !important;
+    border-color:#c4b8a8 !important;
+  }
+  html[data-bk-theme="dark"] body.bibliothekar-redesign .event-card:not(.is-open):hover {
+    background:#222e38 !important;
+    border-color:#536675 !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign .event-card:not(.is-open):hover {
+    background:#ebe6de !important;
+    border-color:#c7b8a9 !important;
+  }
+}
+body.bibliothekar-redesign .day-card:not(.review-card),
+body.bibliothekar-redesign .event-card {
+  transition:background-color .17s ease, border-color .17s ease;
+}
+@media(prefers-reduced-motion:reduce){
+  body.bibliothekar-redesign .day-card,
+  body.bibliothekar-redesign .event-card {transition:none !important;}
+}
+"""
+
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -6367,7 +6547,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0444_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0450_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0451_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0452_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0452_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0453_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"

@@ -295,7 +295,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.45.2"
+DEPLOYMENT_VERSION = "0.45.3"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -10118,7 +10118,7 @@ def index() -> str:
       display:inline;
     }
 
-/* 0.45.2 – flache Importkarten, Details erst auf Wunsch. */
+/* 0.45.3 – flache Importkarten, Details erst auf Wunsch. */
 .bk-history-row { border:1px solid var(--border); background:var(--surface-soft); border-radius:13px; overflow:hidden; margin:0 0 9px; }
 .bk-history-strip { display:flex; align-items:center; gap:10px; min-height:64px; padding:8px 10px; }
 .bk-history-open { display:flex; gap:12px; flex:1 1 auto; min-width:0; padding:0; border:0; background:transparent; color:inherit; text-align:left; align-items:center; cursor:pointer; }
@@ -10852,27 +10852,8 @@ def index() -> str:
       const detailMarkup = `
         <article class="job bk-history-expanded">
           
-          <div class="job-header">
-            <div class="job-title">
-              <div class="job-name">
-                ${escapeHtml(presentation.title)}
-              </div>
-
-              <div class="job-description">
-                ${escapeHtml(presentation.description)}
-              </div>
-
-              <div class="job-time">
-                Erstellt:
-                ${escapeHtml(formatDate(job.created_at))}
-              </div>
-            </div>
-
-            <div
-              class="badge ${badgeClass(job.state)}"
-            >
-              ${escapeHtml(state)}
-            </div>
+          <div class="bk-history-detail-date">
+            Erstellt: ${escapeHtml(formatDate(job.created_at))}
           </div>
 
           <div class="message">
@@ -10979,9 +10960,9 @@ def index() -> str:
               </span>
               ${isActive ? '<span class="bk-history-spinner" aria-hidden="true"></span>' : ""}
             </button>
-            <div class="bk-history-actions" data-history-actions>${actionMarkup}</div>
           </div>
           <div class="bk-history-details" ${expanded ? "" : "hidden"}>${detailMarkup}</div>
+          <div class="bk-history-actions" data-history-actions>${actionMarkup}</div>
         </article>`;
     }
 
@@ -11425,9 +11406,7 @@ def index() -> str:
         : '<div class="empty">Keine sichtbaren Importe vorhanden.</div>')
         + (remaining ? `<div class="bk-history-more"><button class="secondary" id="jobs-more-button" type="button">Mehr anzeigen (${remaining})</button></div>` : "")
         + `<div class="bk-history-hidden-section">
-             <button type="button" id="hidden-history-toggle" aria-expanded="${hiddenHistoryOpen}">
-               <span aria-hidden="true">◉</span> Ausgeblendet (${hiddenHistoryTotal}) <span>${hiddenHistoryOpen ? "▴" : "▾"}</span>
-             </button>
+             <button type="button" id="hidden-history-toggle" aria-expanded="${hiddenHistoryOpen}">Ausgeblendet (${hiddenHistoryTotal})</button>
              <div id="hidden-history-list" ${hiddenHistoryOpen ? "" : "hidden"}></div>
            </div>`;
       restoreOpenJobDetails(openDetails);
@@ -11569,7 +11548,7 @@ def index() -> str:
       const data=await response.json();
       hiddenHistoryTotal = Number(data.total || 0);
       const label=document.getElementById("hidden-history-toggle");
-      if(label) label.innerHTML = '<span aria-hidden="true">◉</span> Ausgeblendet (' + hiddenHistoryTotal + ') <span>' + (hiddenHistoryOpen ? "▴" : "▾") + '</span>';
+      if(label) label.textContent = 'Ausgeblendet (' + hiddenHistoryTotal + ')';
     }
 
     async function requestHistoryPages(hidden, count) {
