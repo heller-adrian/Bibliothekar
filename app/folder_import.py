@@ -9,6 +9,7 @@ import os
 import re
 import hashlib
 import shutil
+import time
 
 from app.metadata import analyze_tree
 from app.source_filter import should_ignore_source_path
@@ -49,6 +50,82 @@ CancellationCallback = Callable[[], bool]
 class ImportCancelled(PipelineError):
     pass
 
+
+
+def preflight_folder_import(
+    source: Path,
+    workspace: Path,
+    pool_probe_path: Path,
+    *,
+    processing_buffer_percent: int,
+    safety_reserve_gib: int,
+    max_scan_seconds: float = 8.0,
+    max_entries: int = 200000,
+    cancellation_callback: CancellationCallback | None = None,
+) -> dict[str, int]:
+    """Vor einer Jobannahme nur Dateigrößen ermitteln, niemals SHA-256 lesen.
+
+    Ein unüberschaubarer NAS-Baum wird kontrolliert abgewiesen, damit der
+    HTTP-Worker keine unbegrenzte Verzeichnissuche ausführt. Quoten werden
+    über die wirksam verfügbare Kapazität des tatsächlichen Schreibpfads
+    abgefragt; ein späterer Check schützt vor zwischenzeitlichen Änderungen.
+    """
+    source = source.resolve(strict=True)
+    workspace = workspace.resolve(strict=True)
+    if source == workspace or source in workspace.parents or workspace in source.parents:
+        raise PipelineError("Quelle und Kamera-Arbeitsbereich dürfen nicht ineinander liegen.")
+    started = time.monotonic()
+    count = 0
+    bytes_total = 0
+    stack = [source]
+    while stack:
+        if cancellation_callback is not None and cancellation_callback():
+            raise ImportCancelled("Import vor Beginn abgebrochen.")
+        if time.monotonic() - started > max_scan_seconds:
+            raise PipelineError(
+                "Die Quelle ist für eine schnelle Speicherprüfung zu umfangreich. "
+                "Bitte einen kleineren Unterordner auswählen."
+            )
+        current = stack.pop()
+        with os.scandir(current) as entries:
+            for item in entries:
+                count += 1
+                if count > max_entries:
+                    raise PipelineError(
+                        "Die Importquelle umfasst zu viele Einträge für eine sichere Vorprüfung. "
+                        "Bitte einen kleineren Unterordner auswählen."
+                    )
+                if item.is_symlink():
+                    raise PipelineError("Symbolische Links sind als Importquelle nicht erlaubt.")
+                path = Path(item.path)
+                if should_ignore_source_path(source, path):
+                    continue
+                if item.is_dir(follow_symlinks=False):
+                    stack.append(path)
+                elif item.is_file(follow_symlinks=False):
+                    bytes_total += item.stat(follow_symlinks=False).st_size
+                else:
+                    raise PipelineError("Unzulässiger Dateityp in der Importquelle.")
+    reserve = safety_reserve_gib * 1024 ** 3
+    required = bytes_total + math.ceil(bytes_total * processing_buffer_percent / 100) + reserve
+    workspace_fs = os.statvfs(workspace)
+    pool_fs = os.statvfs(pool_probe_path)
+    workspace_free = workspace_fs.f_bavail * workspace_fs.f_frsize
+    pool_free = pool_fs.f_bavail * pool_fs.f_frsize
+    if min(workspace_free, pool_free) < required:
+        raise PipelineError(
+            "Nicht genügend freier Speicher für diesen Import: benötigt "
+            f"{required / 1024**3:.1f} GiB einschließlich Puffer und Sicherheitsreserve; "
+            f"im Arbeitsbereich {workspace_free / 1024**3:.1f} GiB verfügbar. "
+            "Eventuelle Dataset-Quoten sind maßgeblich."
+        )
+    return {
+        "files_and_directories": count,
+        "source_bytes": bytes_total,
+        "required_bytes": required,
+        "workspace_available_bytes": workspace_free,
+        "pool_available_bytes": pool_free,
+    }
 
 
 def quick_source_signature(source: Path) -> str:
@@ -218,6 +295,7 @@ def build_folder_import_plan(
 
     reserved: set[str] = set()
     plan: list[dict[str, Any]] = []
+    committed_plan: list[dict[str, Any]] = []
     review_family_count = 0
     device_counts: dict[str, int] = defaultdict(int)
 
@@ -611,6 +689,13 @@ def run_folder_import_job(
             1,
             "Quelle wird inventarisiert und per SHA-256 erfasst.",
         )
+        # Zuerst ein begrenzter Größen-Scan, bevor irgendeine Datei gehasht wird.
+        preflight_folder_import(
+            source, workspace, pool_probe_path,
+            processing_buffer_percent=processing_buffer_percent,
+            safety_reserve_gib=safety_reserve_gib,
+            cancellation_callback=cancellation_callback,
+        )
         all_entries = source_manifest(
             source,
             progress_callback=lambda current, total: progress(
@@ -620,7 +705,9 @@ def run_folder_import_job(
                 max(total, 1),
                 "Quelldateien werden inventarisiert und per SHA-256 erfasst.",
             ),
+            cancellation_callback=check_cancelled,
         )
+        check_cancelled()
         source_signature = quick_source_signature(source)
         source_fingerprint = manifest_fingerprint(all_entries)
         if identity_callback is not None:
@@ -702,6 +789,7 @@ def run_folder_import_job(
             temporary_original,
             entries,
             progress_callback=report_copy_progress,
+            cancellation_callback=check_cancelled,
         )
 
         progress(
@@ -751,6 +839,7 @@ def run_folder_import_job(
         analysis = analyze_tree(
             temporary_original,
             include_other=False,
+            cancellation_callback=check_cancelled,
             progress_callback=lambda current, total: progress(
                 "analyzing_metadata",
                 "metadata_analysis",
@@ -852,6 +941,9 @@ def run_folder_import_job(
             post_move_callback=path_callback,
             cancellation_callback=cancellation_callback,
         )
+        # Erst ab vollständiger, bestätigter Überführung gehören diese Pfade
+        # diesem Job. Vorher ist der Rollback ausschließlich Sache der Move-Routine.
+        committed_plan = list(plan)
 
         if import_history_callback is not None:
             imported_paths = {str(item["source_relative_path"]) for item in plan}
@@ -963,7 +1055,7 @@ def run_folder_import_job(
         return status
     except ImportCancelled:
         cleanup_errors: list[str] = []
-        for item in plan:
+        for item in committed_plan:
             destination = work_root / str(item["destination_relative_path"])
             try:
                 if not destination.exists():
