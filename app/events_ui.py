@@ -3938,6 +3938,9 @@ EVENTS_HTML = r"""<!doctype html>
         setStatus("Änderung verworfen. Der vorherige Zustand wurde wiederhergestellt.",false,true);
       } catch (error) {
         // Bei einem fehlgeschlagenen Verwerfen muss der Nutzer erneut versuchen können.
+        sortPlanSubtitle.textContent="Verwerfen fehlgeschlagen. Bitte erneut versuchen.";
+        sortPlanBody.insertAdjacentHTML("afterbegin",
+          `<div class="card" role="alert"><strong class="danger-text">Verwerfen fehlgeschlagen</strong><p class="muted">${escapeHtml(error.message)}</p></div>`);
         if (!sortPlanDialog.open) sortPlanDialog.showModal();
         throw error;
       } finally {
