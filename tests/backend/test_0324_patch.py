@@ -76,7 +76,7 @@ def test_0324_cancel_mutation_reconciles_claims_and_central_stock(
     tmp_path: Path,
     monkeypatch,
 ):
-    """0.44.4: Annahme ist sofort, Claims-/Stock-Abgleich liegt beim Worker."""
+    """0.45.0: Annahme ist sofort, Claims-/Stock-Abgleich liegt beim Worker."""
     import sqlite3
 
     database = tmp_path / "kamera.sqlite3"
@@ -309,8 +309,8 @@ def test_0324_archived_delete_blocks_unresolved_user_file(tmp_path: Path):
 
 
 def test_0324_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.44.4"
-    assert "0.44.4 · Kamerakern 0.32.11" in ui_shell._shell_markup(
+    assert main.DEPLOYMENT_VERSION == "0.45.0"
+    assert "0.45.0 · Kamerakern 0.32.11" in ui_shell._shell_markup(
         "workspace",
         "events",
     )
