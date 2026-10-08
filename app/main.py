@@ -4449,11 +4449,15 @@ def api_backups() -> dict[str, Any]:
     "/api/archive/summary",
     tags=["Archivübernahme"],
 )
-def api_archive_summary() -> dict[str, Any]:
-    return list_archive_candidates(
-        current_database_file(),
-        current_archive_root(),
-    )
+def api_archive_summary(force_refresh: bool = False) -> dict[str, Any]:
+    db_path = current_database_file()
+    if not force_refresh:
+        cached = view_cache.get_snapshot(db_path, "archive")
+        if cached is not None:
+            return cached
+    result = list_archive_candidates(db_path, current_archive_root())
+    view_cache.put_snapshot(db_path, "archive", result)
+    return result
 
 
 @app.post(
@@ -11466,7 +11470,7 @@ def index() -> str:
           }catch(error){showError(error);button.disabled = false;}
         });
       }
-      for (const button of jobsElement.querySelectorAll("[data-cancel-import]")) {
+      for (const button of host.querySelectorAll("[data-cancel-import]")) {
         button.addEventListener("click", async () => {
           const jobId = String(button.dataset.cancelImport || "");
           if (!jobId) return;
@@ -11490,7 +11494,7 @@ def index() -> str:
         });
       }
 
-      for (const button of jobsElement.querySelectorAll("[data-discard-import]")) {
+      for (const button of host.querySelectorAll("[data-discard-import]")) {
         button.addEventListener("click", async () => {
           const jobId = String(button.dataset.discardImport || "");
           if (!jobId) return;
@@ -11520,7 +11524,7 @@ def index() -> str:
         });
       }
 
-      for (const button of jobsElement.querySelectorAll("[data-delete-backup]")) {
+      for (const button of host.querySelectorAll("[data-delete-backup]")) {
         button.addEventListener("click", async () => {
           const jobId = String(button.dataset.deleteBackup || "");
           if (!jobId) return;

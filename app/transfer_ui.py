@@ -211,11 +211,11 @@ TRANSFER_HTML = r'''<!doctype html>
       const result=card.querySelector('.result');
       const verifyButton=card.querySelector('.verify');
       const releaseButton=card.querySelector('.release');
-      verifyButton.addEventListener('click',async(event)=>{const button=event.currentTarget;button.disabled=true;button.classList.add('bk-busy');button.setAttribute('aria-busy','true');result.hidden=false;result.textContent='Kamerabibliothek wird vollständig per Größe und SHA-256 geprüft …';try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/archive-verify`);result.className=`result ${data.verified?'success':'danger'}`;result.textContent=`${data.message} ${data.verified_file_count}/${data.file_count} Dateien bestätigt; ${data.missing_file_count} fehlen; ${data.mismatched_file_count} weichen ab.`;await load();}catch(error){result.className='result danger';result.textContent=error.message;button.disabled=false;}finally{button.classList.remove('bk-busy');button.removeAttribute('aria-busy');}});
+      verifyButton.addEventListener('click',async(event)=>{const button=event.currentTarget;button.disabled=true;button.classList.add('bk-busy');button.setAttribute('aria-busy','true');result.hidden=false;result.textContent='Kamerabibliothek wird vollständig per Größe und SHA-256 geprüft …';try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/archive-verify`);result.className=`result ${data.verified?'success':'danger'}`;result.textContent=`${data.message} ${data.verified_file_count}/${data.file_count} Dateien bestätigt; ${data.missing_file_count} fehlen; ${data.mismatched_file_count} weichen ab.`;await load({forceRefresh:true});}catch(error){result.className='result danger';result.textContent=error.message;button.disabled=false;}finally{button.classList.remove('bk-busy');button.removeAttribute('aria-busy');}});
       releaseButton.addEventListener('click',async(event)=>{
         if(!confirm(`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.`))return;
         event.currentTarget.disabled=true;verifyButton.disabled=true;result.hidden=false;result.className='result';result.textContent='Kamerabibliothek und Arbeitsbereich-Dateien werden erneut per SHA-256 geprüft. Anschließend wird nur der bestätigte SSD-Ereignisbestand entfernt …';
-        try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);result.className='result success';result.textContent=`${data.message} ${Number(data.file_count||0)} Dateien geprüft; ${Number(data.deleted_file_count||0)} Arbeitsbereich-Dateien entfernt.`;await load();}
+        try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);result.className='result success';result.textContent=`${data.message} ${Number(data.file_count||0)} Dateien geprüft; ${Number(data.deleted_file_count||0)} Arbeitsbereich-Dateien entfernt.`;await load({forceRefresh:true});}
         catch(error){result.className='result danger';result.textContent=error.message;event.currentTarget.disabled=false;verifyButton.disabled=false;}
       });
       archiveList.appendChild(card);
@@ -228,11 +228,22 @@ TRANSFER_HTML = r'''<!doctype html>
     }
   }
 
-  async function load(){
-    archiveList.innerHTML='<div class="empty bk-loading-status">Archiv wird geladen …</div>';
-    historyList.innerHTML='<div class="empty bk-loading-status">Archivverlauf wird geladen …</div>';
-    const archive=await getJson('/api/archive/summary');
+  async function load({forceRefresh=false}={}){
+    const snapshotKey = "bk-archive-0452:" + (window.__bkLibraryId || "main");
+    if(!forceRefresh){
+      try {
+        const cached=JSON.parse(sessionStorage.getItem(snapshotKey) || "null");
+        if(cached && Array.isArray(cached.candidates)) renderArchive(cached);
+      } catch (_) {}
+    }
+    if(!archiveList.children.length)archiveList.innerHTML='<div class="empty bk-loading-status">Archiv wird geladen …</div>';
+    if(!historyList.children.length)historyList.innerHTML='<div class="empty bk-loading-status">Archivverlauf wird geladen …</div>';
+    const archive=await getJson('/api/archive/summary' + (forceRefresh ? '?force_refresh=true' : ''));
     renderArchive(archive);
+    try {
+      const value=JSON.stringify(archive);
+      if(value.length<1200000)sessionStorage.setItem(snapshotKey,value);
+    }catch(_){}
   }
 
   async function autoVerifyFromLocation(){
@@ -250,7 +261,7 @@ TRANSFER_HTML = r'''<!doctype html>
       archiveNotice.textContent=data.manual_archive_finalized
         ? data.message
         : `${data.message} ${data.verified_file_count}/${data.file_count} Dateien bestätigt.`;
-      await load();
+      await load({forceRefresh:true});
       history.replaceState({},'',location.pathname);
     }catch(error){
       archiveNotice.hidden=false;
