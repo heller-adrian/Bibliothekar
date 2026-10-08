@@ -48,13 +48,13 @@ def test_0441_statistics_and_destructive_confirmation_are_preserved():
 
 
 def test_0441_responsive_spacing_and_unified_settings():
-    from app.ui_shell import BIBLIOTHEKAR_CSS
+    from app.ui_shell import BIBLIOTHEKAR_0441_CSS
 
     assert 'body[data-bk-area="trash"] main.trash-page{padding-bottom:72px!important}' in TRASH_HTML
     assert '@media(min-width:701px)' in TRASH_HTML
     assert '@media(max-width:700px)' in TRASH_HTML
-    assert 'body[data-bk-area="trash"] {' in BIBLIOTHEKAR_CSS
-    assert 'html[data-bk-theme="dark"] body[data-bk-area="trash"] {' in BIBLIOTHEKAR_CSS
-    assert 'body[data-bk-area="trash"] main {' in BIBLIOTHEKAR_CSS
-    assert 'bk-tabs-active-trash' in BIBLIOTHEKAR_CSS
+    assert 'body[data-bk-area="trash"] {' in BIBLIOTHEKAR_0441_CSS
+    assert 'html[data-bk-theme="dark"] body[data-bk-area="trash"] {' in BIBLIOTHEKAR_0441_CSS
+    assert 'body[data-bk-area="trash"] main {' in BIBLIOTHEKAR_0441_CSS
+    assert 'bk-tabs-active-trash' in BIBLIOTHEKAR_0441_CSS
     assert 'id="bk-settings-dialog"' in _shell_markup("trash", None)
