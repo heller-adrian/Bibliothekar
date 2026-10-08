@@ -6,8 +6,8 @@ def test_0414_planned_save_uses_fast_post_write_refresh_only():
     workspace = Path("app/workspace_ui.py").read_text(encoding="utf-8")
 
     assert "physical_refresh: bool = True" in main
-    assert "if physical_refresh:" in main
-    assert "loadWorkspace({physicalRefresh=true}={})" in workspace
+    assert "must_check = physical_refresh or view_cache.needs_first_physical_check(db_path)" in main
+    assert "loadWorkspace({physicalRefresh=false}={})" in workspace
     assert 'physical_refresh=${physicalRefresh ? "true" : "false"}' in workspace
     assert "fastPlannedRefresh" in workspace
     assert "loadWorkspace({physicalRefresh: !fastPlannedRefresh})" in workspace

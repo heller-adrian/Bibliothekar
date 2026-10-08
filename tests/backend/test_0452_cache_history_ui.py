@@ -168,3 +168,23 @@ def test_0452_patch_publish_requires_explicit_release_request():
     assert "'patch/**'" in trigger_workflow
     assert "'.github/release-requests/**'" in trigger_workflow
     assert "uses: ./.github/workflows/publish-container.yml" in trigger_workflow
+
+
+def test_0452_import_history_excludes_internal_metadata_jobs(tmp_path, monkeypatch):
+    db = tmp_path / "global.sqlite3"
+    initialize_database(db)
+    monkeypatch.setattr(main, "DATABASE_FILE", db)
+    with database_connection(db) as conn:
+        for ident, operation in (
+            ("VISIBLE", "folder_import"),
+            ("INTERNAL_GENERAL", "metadata_general_import"),
+            ("INTERNAL_MULTIPLE", "metadata_multiple_import"),
+        ):
+            conn.execute(
+                "INSERT INTO jobs(id,kind,trigger_type,state,stage,operation,created_at,updated_at)"
+                " VALUES (?, 'sd_import', 'manual', 'completed', 'completed', ?, ?, ?)",
+                (ident, operation, "2026-10-08T13:00:00", "2026-10-08T13:00:00"),
+            )
+    result = main.api_import_history(limit=10)
+    assert result["total"] == 1
+    assert [job["id"] for job in result["jobs"]] == ["VISIBLE"]

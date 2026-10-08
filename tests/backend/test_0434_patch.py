@@ -15,7 +15,8 @@ def test_0434_terminal_imports_offer_remove_action():
     assert 'job.state === "interrupted" || job.state === "failed"' in html
     assert 'data-discard-import="' in html
     assert ">Import entfernen</button>" in html
-    assert 'jobsElement.querySelectorAll("[data-discard-import]")' in html
+    assert 'host.querySelectorAll("[data-discard-import]")' in html
+    assert "bindHistoryButtons(jobsElement)" in html
     assert '/api/jobs/${encodeURIComponent(jobId)}/discard' in html
     assert '{method:"DELETE"}' in html
 

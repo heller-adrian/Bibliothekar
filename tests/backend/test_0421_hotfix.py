@@ -49,14 +49,25 @@ def test_0421_unassigned_families_are_one_global_task_across_jobs(tmp_path: Path
     assert "job_id" not in tasks[0]
 
 
-def test_0421_internal_metadata_transfers_are_hidden_from_import_history():
-    source = Path("app/main.py").read_text(encoding="utf-8")
+def test_0421_internal_metadata_transfers_are_hidden_from_import_history(tmp_path, monkeypatch):
+    from app import main
+    db = tmp_path / "history.sqlite3"
+    initialize_database(db)
+    _job(db, "IMPORT", "folder_import", "Kamera")
+    _job(db, "GENERAL", "metadata_general_import", "Metadaten · Allgemein")
+    _job(db, "MULTIPLE", "metadata_multiple_import", "Metadaten · Mehrfach")
+    monkeypatch.setattr(main, "DATABASE_FILE", db)
 
-    assert '"metadata_general_import"' in source
-    assert '"metadata_multiple_import"' in source
-    assert "hiddenMetadataTransferOperations" in source
-    assert "jobHistoryJobs = (data.jobs || []).filter(" in source
-    assert "!hiddenMetadataTransferOperations.has(" in source
+    visible = main.api_import_history(limit=20)["jobs"]
+    assert [row["id"] for row in visible] == ["IMPORT"]
+    assert main.api_import_history()["total"] == 1
+    for job_id in ("GENERAL", "MULTIPLE"):
+        try:
+            main.api_import_history_visibility(job_id, {"hidden": True})
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 409
+        else:
+            raise AssertionError("Metadatenübertragungen dürfen nicht im Importverlauf ausblendbar sein.")
 
 
 def test_0421_without_date_is_review_card_not_event_selection():

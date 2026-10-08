@@ -139,7 +139,8 @@ def test_0335_workspace_supports_shift_range_and_select_all():
 def test_0335_import_history_starts_with_five_and_can_expand():
     source = Path("app/main.py").read_text(encoding="utf-8")
     assert "let jobHistoryLimit = 5;" in source
-    assert "jobHistoryJobs.slice(0, jobHistoryLimit)" in source
+    assert "requestHistoryPages(false, jobHistoryLimit)" in source
+    assert 'LIMIT ? OFFSET ?' in source
     assert "jobHistoryLimit += 5;" in source
     assert "Mehr anzeigen" in source
 

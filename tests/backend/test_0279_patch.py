@@ -84,7 +84,7 @@ def test_0279_cross_backup_accept_api_returns_after_success(tmp_path: Path, monk
 
 def test_0279_import_job_id_declared_before_duplicate_notice():
     source = Path("app/main.py").read_text(encoding="utf-8")
-    render = source[source.index("function renderJob(job)"): ]
+    render = source[source.index("function renderJob(job, isHidden=false)"): ]
     job_id = render.index('const jobId = String(job.job_id || job.id || "");')
     duplicate_notice = render.index("const duplicateNotice = duplicateCount > 0")
     assert job_id < duplicate_notice

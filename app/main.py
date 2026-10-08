@@ -4111,9 +4111,10 @@ def api_import_history(
 ) -> dict[str, Any]:
     offset = max(0, int(offset))
     limit = max(1, min(int(limit), 50))
-    where = """(operation='folder_import' OR operation='metadata_fixture_analysis'
-                  OR operation='sd_import' OR kind IN ('sd_import', 'simulation'))
-                  AND history_hidden=?"""
+    where = """(operation IN ('folder_import', 'metadata_fixture_analysis', 'sd_import')
+                 OR (operation='legacy_simulation' AND kind IN ('sd_import','simulation')))
+                 AND operation NOT IN ('metadata_general_import','metadata_multiple_import')
+                 AND history_hidden=?"""
     with database_connection(DATABASE_FILE) as conn:
         total = int(conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE " + where, (int(hidden),)
@@ -4161,8 +4162,10 @@ def api_import_history_visibility(job_id: str, payload: dict[str, Any]) -> dict[
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Import nicht gefunden.")
-        if (row["operation"] not in ("folder_import", "metadata_fixture_analysis", "sd_import")
-                and row["kind"] not in ("sd_import", "simulation")):
+        if not (
+            row["operation"] in ("folder_import", "metadata_fixture_analysis", "sd_import")
+            or (row["operation"] == "legacy_simulation" and row["kind"] in ("sd_import","simulation"))
+        ):
             raise HTTPException(status_code=409, detail="Dieser Auftrag ist kein Importverlauf.")
         if hidden and row["state"] != "completed":
             raise HTTPException(status_code=409, detail="Nur abgeschlossene Importe ausblenden.")
