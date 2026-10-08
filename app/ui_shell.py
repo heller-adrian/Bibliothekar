@@ -84,8 +84,7 @@ body[data-bk-area="archive"] {
   --bk-page-bg: #f8f4e8;
 }
 body[data-bk-area="assistant"],
-body[data-bk-area="metadata"],
-body[data-bk-area="trash"] {
+body[data-bk-area="metadata"] {
   --bk-area-accent: #7c8790;
   --bk-page-bg: #f1f2ef;
 }
@@ -93,8 +92,7 @@ html[data-bk-theme="dark"] body[data-bk-area="import"] { --bk-page-bg: #120f11; 
 html[data-bk-theme="dark"] body[data-bk-area="workspace"] { --bk-page-bg: #0c1217; }
 html[data-bk-theme="dark"] body[data-bk-area="archive"] { --bk-page-bg: #14120c; }
 html[data-bk-theme="dark"] body[data-bk-area="assistant"],
-html[data-bk-theme="dark"] body[data-bk-area="metadata"],
-html[data-bk-theme="dark"] body[data-bk-area="trash"] { --bk-page-bg: #0f1418; }
+html[data-bk-theme="dark"] body[data-bk-area="metadata"] { --bk-page-bg: #0f1418; }
 
 html[data-bk-theme] body.bibliothekar-redesign,
 html[data-bk-theme] body.bibliothekar-redesign main {
@@ -558,8 +556,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
 /* Sonderseiten ohne aktiven Hauptreiter: Assistent und Metadatenkorrektion
  * behalten an beiden Fugen denselben dezenten Staffelungsverlauf. */
 .bk-tabs-active-assistant .bk-tab[data-area="workspace"],
-.bk-tabs-active-metadata .bk-tab[data-area="workspace"],
-.bk-tabs-active-trash .bk-tab[data-area="workspace"] {
+.bk-tabs-active-metadata .bk-tab[data-area="workspace"] {
   --bk-tab-edge-gradient:
     linear-gradient(
       to right,
@@ -569,8 +566,7 @@ html[data-bk-theme="light"] body.bibliothekar-redesign .planned-check:checked::a
     );
 }
 .bk-tabs-active-assistant .bk-tab[data-area="archive"],
-.bk-tabs-active-metadata .bk-tab[data-area="archive"],
-.bk-tabs-active-trash .bk-tab[data-area="archive"] {
+.bk-tabs-active-metadata .bk-tab[data-area="archive"] {
   --bk-tab-edge-gradient:
     linear-gradient(
       to right,
@@ -1011,8 +1007,7 @@ button.bk-busy::after {
 }
 
 body[data-bk-area="assistant"] main,
-body[data-bk-area="metadata"] main,
-body[data-bk-area="trash"] main {
+body[data-bk-area="metadata"] main {
   min-height: 0 !important;
   background: transparent !important;
 }
@@ -5784,6 +5779,31 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 """
 
 
+BIBLIOTHEKAR_0441_CSS = r"""
+/* 0.44.1: neutraler Papierkorb ohne Eingriff in den eingefrorenen App-Stil. */
+body[data-bk-area="trash"] {
+  --bk-area-accent: #7c8790;
+  --bk-page-bg: #f1f2ef;
+}
+html[data-bk-theme="dark"] body[data-bk-area="trash"] {
+  --bk-page-bg: #0f1418;
+}
+.bk-tabs-active-trash .bk-tab[data-area="workspace"],
+.bk-tabs-active-trash .bk-tab[data-area="archive"] {
+  --bk-tab-edge-gradient:
+    linear-gradient(
+      to right,
+      var(--bk-stack-blend) 0,
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+      transparent 100%
+    );
+}
+body[data-bk-area="trash"] main {
+  min-height: 0 !important;
+}
+"""
+
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = html
     result = result.replace(
@@ -5802,7 +5822,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0356_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0423_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0424_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0425_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0425_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0441_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
