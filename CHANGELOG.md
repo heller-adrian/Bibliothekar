@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 0.44.4 – kompakter Desktop-Hinweis für Hintergrundvorgänge
+
+- Der bisherige Hinweis für das Verwerfen wurde vom Header nach rechts unten verlagert; er verdeckt keine obere Navigation mehr.
+- Ein kleiner Schließen-Button verkleinert den Hinweis auf ein Statussymbol. Durch Klick wird die Übersicht wieder geöffnet; der eingeklappte Zustand bleibt beim Seitenwechsel erhalten.
+- Die Desktop-Übersicht zeigt drei vorhandene serverseitige Prozesse an: laufende Importe, Ereignissortierungen (auch Sammelanwendungen) und persistente Verwerfaufträge. Verlinkungen führen zu den zugehörigen App-Bereichen.
+- Sehr schmale bzw. niedrige Fenster und Geräte mit Touch-Zeiger erhalten keinen Overlay-Hinweis. Die eigentlichen Vorgänge bleiben davon unberührt.
+- Der Statusabruf ist rein lesend; beim Import, Sortieren und Verwerfen werden keine Abläufe verändert.
+
+
+
 ### 0.44.3 – Verwerfen als persistenter Hintergrundauftrag
 
 - Applied-Änderungen werden als idempotente SQLite-Aufträge übernommen; der Server-Worker verarbeitet die Wiederherstellung unabhängig vom Browser und stellt nach einem App-Neustart unterbrochene Aufträge erneut zu.
