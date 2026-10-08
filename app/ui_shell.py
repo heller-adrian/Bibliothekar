@@ -5360,30 +5360,73 @@ BIBLIOTHEKAR_JS = r"""
   }
   if(document.fonts?.ready)document.fonts.ready.then(syncShellStickyHeight).catch(()=>{});
 
+  // Der gehoverte Reiter wird beim Pressen nicht mehr auf seine Ruhelage entlassen.
+  // Touch: 0 -> -8px; Maus: Hover -3px -> Klick -8px.
+  let bkTabNavigationStarted = false;
+  const bkTabReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.querySelectorAll(".bk-tab").forEach(tab => {
+    let pressReset = null;
+    const cancelPress = () => {
+      if (pressReset) window.clearTimeout(pressReset);
+      pressReset = null;
+      if (!tab.classList.contains("is-navigating")) tab.classList.remove("bk-tab-pressing");
+    };
+    tab.addEventListener("pointerdown", event => {
+      if (tab.classList.contains("active") || event.button !== 0 || bkTabReducedMotion()
+          || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      tab.classList.add("bk-tab-pressing");
+      if (pressReset) window.clearTimeout(pressReset);
+    });
+    tab.addEventListener("pointerup", () => {
+      // Klick wird unmittelbar nach pointerup ausgelöst; danach erst zurücksetzen.
+      if (pressReset) window.clearTimeout(pressReset);
+      pressReset = window.setTimeout(cancelPress, 450);
+    });
+    tab.addEventListener("pointercancel", cancelPress);
+    tab.addEventListener("dragstart", cancelPress);
     tab.addEventListener("click", event => {
       if (
-        tab.classList.contains("active")
-        || event.defaultPrevented
-        || event.button !== 0
-        || event.metaKey
-        || event.ctrlKey
-        || event.shiftKey
-        || event.altKey
-        || matchMedia("(prefers-reduced-motion: reduce)").matches
-      ) {
-        return;
-      }
-
+        tab.classList.contains("active") || bkTabNavigationStarted
+        || event.defaultPrevented || event.button !== 0
+        || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+        || bkTabReducedMotion()
+      ) return;
       const href = tab.href;
       if (!href) return;
-
       event.preventDefault();
-      tab.classList.add("is-navigating");
-      window.setTimeout(() => {
-        window.location.assign(href);
-      }, 105);
+      bkTabNavigationStarted = true;
+      tab.classList.add("is-navigating", "bk-tab-pressing");
+      try {
+        sessionStorage.setItem("bk-tab-navigation-0451", JSON.stringify({
+          href, area: tab.dataset.area, at: Date.now()
+        }));
+      } catch (_) {}
+      // Die CSS-Hubbewegung (150ms) vollständig zeigen, dann erst navigieren.
+      window.setTimeout(() => window.location.assign(href), 190);
     });
+  });
+
+  // Der Zielreiter startet hoch und fährt erst nach dem ersten Paint auf seine
+  // reguläre aktive Position. Das verhindert einen zweiten Hoch-Runter-Hub.
+  if (root.dataset.bkNavArriving) {
+    const area = root.dataset.bkNavArriving;
+    const target = document.querySelector('.bk-tab.active[data-area="' + area + '"]');
+    if (!target || bkTabReducedMotion()) {
+      delete root.dataset.bkNavArriving;
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        delete root.dataset.bkNavArriving;
+      }));
+    }
+  }
+  window.addEventListener("pageshow", event => {
+    if (!event.persisted) return;
+    bkTabNavigationStarted = false;
+    document.querySelectorAll(".bk-tab").forEach(tab => {
+      tab.classList.remove("is-navigating", "bk-tab-pressing");
+    });
+    delete root.dataset.bkNavArriving;
+    try { sessionStorage.removeItem("bk-tab-navigation-0451"); } catch (_) {}
   });
 
   fetch("/api/health", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(data => {
@@ -5764,7 +5807,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.0 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.1 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6208,8 +6251,78 @@ body.bibliothekar-redesign samp {
 """
 
 
+BIBLIOTHEKAR_0451_HEAD_JS = r"""
+/* Vor den Styles und dem ersten Paint: iOS Safari darf kein helles Default-Theme zeichnen. */
+(() => {
+  const root = document.documentElement;
+  let choice = "light";
+  try { choice = localStorage.getItem("bibliothekar-theme") || "light"; } catch (_) {}
+  let systemDark = false;
+  try { systemDark = Boolean(window.matchMedia("(prefers-color-scheme: dark)").matches); } catch (_) {}
+  root.dataset.bkTheme = choice === "dark" || (choice === "system" && systemDark) ? "dark" : "light";
+  root.dataset.bkThemeChoice = choice;
+  root.dataset.bkDisplayMode = (
+    window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true
+  ) ? "standalone" : "browser";
+  // Sessionzustand gilt nur für den exakt angesteuerten neuen Bereich.
+  try {
+    const key = "bk-tab-navigation-0451";
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return;
+    sessionStorage.removeItem(key);
+    const saved = JSON.parse(raw);
+    const next = new URL(saved.href, location.href);
+    const expected = {"/": "import", "/workspace": "workspace", "/transfer": "archive"}[location.pathname];
+    if (expected && saved.area === expected && next.pathname === location.pathname
+        && Date.now() - Number(saved.at) < 30000 && Date.now() >= Number(saved.at)) {
+      root.dataset.bkNavArriving = saved.area;
+    }
+  } catch (_) {}
+})();
+"""
+
+BIBLIOTHEKAR_0451_CSS = r"""
+/* 0.45.1: Theme und Standalone-Modus werden vor dem ersten CSS-Paint initialisiert. */
+html[data-bk-theme="dark"] { background-color: #0c1115; color-scheme: dark; }
+html[data-bk-theme="light"] { background-color: #f4f1e8; color-scheme: light; }
+
+/* Hover bleibt ein reiner Desktopzustand; ein Fingertipp erzeugt genau einen Hub. */
+.bk-tab.active { animation: none; }
+.bk-tab.bk-tab-pressing:not(.active),
+.bk-tab.is-navigating:not(.active) {
+  transform: translateY(-8px) !important;
+}
+@media (hover: none), (pointer: coarse) {
+  .bk-tab:hover:not(.active):not(.bk-tab-pressing):not(.is-navigating) {
+    transform: translateY(0);
+  }
+}
+
+/* Auf der Folgeseite startet der aktive Reiter in der angehobenen Lage.
+   Erst nach zwei Animation-Frames wird dieser Zustand freigegeben. */
+html[data-bk-nav-arriving="import"] .bk-tab.active[data-area="import"],
+html[data-bk-nav-arriving="workspace"] .bk-tab.active[data-area="workspace"],
+html[data-bk-nav-arriving="archive"] .bk-tab.active[data-area="archive"] {
+  transform: translateY(-8px);
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bk-tab.bk-tab-pressing:not(.active),
+  .bk-tab.is-navigating:not(.active) { transform: none !important; }
+  html[data-bk-nav-arriving] .bk-tab.active { transform: none !important; }
+}
+"""
+
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
-    result = html
+    result = re.sub(
+        r"(<head(?:\\s[^>]*)?>)",
+        lambda match: match.group(0) + f"\\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\\n",
+        html,
+        count=1,
+        flags=re.IGNORECASE,
+    )
     result = result.replace(
         "</head>",
         '<link rel="manifest" href="/manifest.webmanifest">\n'
@@ -6230,7 +6343,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0441_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0443_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0444_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0450_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0450_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0451_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
