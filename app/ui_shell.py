@@ -5771,7 +5771,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.44.1 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.44.2 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -5780,7 +5780,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
 
 BIBLIOTHEKAR_0441_CSS = r"""
-/* 0.44.1: neutraler Papierkorb ohne Eingriff in den eingefrorenen App-Stil. */
+/* 0.44.2: neutraler Papierkorb ohne Eingriff in den eingefrorenen App-Stil. */
 body[data-bk-area="trash"] {
   --bk-area-accent: #7c8790;
   --bk-page-bg: #f1f2ef;

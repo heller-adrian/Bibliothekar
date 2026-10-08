@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 0.44.2 – unmittelbares Feedback bei Ereignisänderungen
+
+- Das Prüfungsfenster öffnet sich bei angewendeten Ereignissen bereits beim Löschen oder Speichern; ein animierter Fortschrittsindikator informiert während der Berechnung.
+- Beim Verwerfen laufender Applied-Änderungen erscheint auf der Ereignisseite sofort ein Ladekreis, bis der ursprüngliche Zustand wiederhergestellt ist.
+- Die veralteten gelben Karten „Neu-Zuordnung offen“ und „Nachsortierung offen“ entfallen. Nur tatsächlich unterbrochene Transaktionen bleiben über das aufgeklappte Ereignis fortsetzbar und verwerfbar.
+- Archivierte Ereignisse zeigen die Vorbereitung ihres manuellen Löschauftrags ebenfalls sofort im zugehörigen Dialog.
+
+
 ### 0.44.0 – Bibliothekar-Papierkorb
 
 - Der gemeinsame Kamera-Arbeitsbereich besitzt einen vierten verwalteten Stammordner „Papierkorb“. Seine interne Rolle ist stabil; der sichtbare Ordnername kann unter Einstellungen → Pfade unabhängig geändert werden.
