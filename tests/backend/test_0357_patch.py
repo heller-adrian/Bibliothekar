@@ -4,7 +4,7 @@ from app import main
 
 
 def test_0357_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.45.5"
+    assert main.DEPLOYMENT_VERSION == "0.45.6"
 
 
 def test_0357_onboarding_script_keeps_newline_escape_for_browser():
