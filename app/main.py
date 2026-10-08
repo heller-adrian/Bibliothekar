@@ -10108,6 +10108,30 @@ def index() -> str:
     .duplicate-file-list code {
       display:inline;
     }
+
+/* 0.45.2 – flache Importkarten, Details erst auf Wunsch. */
+.bk-history-row { border:1px solid var(--border); background:var(--surface-soft); border-radius:13px; overflow:hidden; margin:0 0 9px; }
+.bk-history-strip { display:flex; align-items:center; gap:10px; min-height:64px; padding:8px 10px; }
+.bk-history-open { display:flex; gap:12px; flex:1 1 auto; min-width:0; padding:0; border:0; background:transparent; color:inherit; text-align:left; align-items:center; cursor:pointer; }
+.bk-history-open:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.bk-history-open .bk-job-thumb { flex:0 0 48px; width:48px; height:48px; margin:0; display:grid; place-items:center; overflow:hidden; border-radius:9px; }
+.bk-history-open .bk-job-thumb img { width:100%; height:100%; object-fit:cover; }
+.bk-history-text { display:grid; gap:4px; min-width:0; }
+.bk-history-text strong { font-size:.97rem; overflow-wrap:anywhere; }
+.bk-history-text small { color:var(--muted); font-size:.8rem; }
+.bk-history-spinner { flex:0 0 15px; width:15px;height:15px;border:2px solid var(--muted);border-top-color:var(--accent);border-radius:50%;animation:bk-history-spin .8s linear infinite; }
+@keyframes bk-history-spin { to{transform:rotate(360deg)} }
+.bk-history-actions { display:flex; flex:0 0 auto; gap:7px; align-items:center; }
+.bk-history-actions .bk-job-actions { margin:0; }
+.bk-history-actions button { padding:6px 9px; min-height:34px; font-size:.77rem; }
+.bk-history-details[hidden] { display:none !important; }
+.bk-history-details { padding:3px 10px 12px; border-top:1px solid var(--border); }
+.bk-history-details .job { margin:8px 0 0; }
+.bk-history-more { display:flex;justify-content:center; margin:13px 0; }
+.bk-history-hidden-section { border-top:1px solid var(--border); margin-top:17px; padding-top:12px; }
+#hidden-history-toggle { display:flex; width:100%; justify-content:space-between; background:transparent; border:0; color:inherit; padding:9px 2px; font-weight:700; text-align:left; cursor:pointer; }
+@media(max-width:700px){ .bk-history-strip {gap:6px;padding:7px;} .bk-history-open {gap:7px;} .bk-history-open .bk-job-thumb {flex-basis:37px;width:37px;height:37px;} .bk-history-actions {flex-direction:column;align-items:stretch;gap:4px;} .bk-history-actions button{min-height:30px;font-size:.69rem;padding:4px 6px;} .bk-history-text strong{font-size:.84rem;} .bk-history-text small{font-size:.7rem;} }
+@media(prefers-reduced-motion:reduce){.bk-history-spinner{animation:none;}}
 </style>
 </head>
 
@@ -10359,6 +10383,15 @@ def index() -> str:
 
     let jobHistoryLimit = 5;
     let jobHistoryJobs = [];
+    let jobHistoryTotal = 0;
+    let hiddenHistoryTotal = 0;
+    let hiddenHistoryLimit = 15;
+    let hiddenHistoryJobs = [];
+    let hiddenHistoryOpen = false;
+    const openHistoryIds = new Set();
+    const seenHistoryStates = new Map();
+    let lastImportHistoryPoll = 0;
+    const importHistoryCacheKey = "bk-import-history-0452:" + (window.__bkLibraryId || "main");
 
     const noticeElement =
       document.getElementById("notice");
@@ -10693,7 +10726,7 @@ def index() -> str:
       return "";
     }
 
-    function renderJob(job) {
+    function renderJob(job, isHidden=false) {
       const state =
         job.stage === "cancelled"
         ? "Abgebrochen"
@@ -10807,9 +10840,9 @@ def index() -> str:
         `
         : "";
 
-      return `
-        <article class="job">
-          ${thumbnail}
+      const detailMarkup = `
+        <article class="job bk-history-expanded">
+          
           <div class="job-header">
             <div class="job-title">
               <div class="job-name">
@@ -10894,8 +10927,6 @@ def index() -> str:
             </span>
           </div>
 
-          ${backupActions}
-
           <details data-job-detail-key="${escapeHtml(jobId)}:technical">
             <summary>
               Technische Details
@@ -10916,6 +10947,32 @@ def index() -> str:
           </details>
         </article>
       `;
+      const isDone = job.state === "completed";
+      const expanded = openHistoryIds.has(jobId);
+      const progressLabel = isDone
+        ? `Abgeschlossen · ${fileCount ?? "–"} Dateien`
+        : `${escapeHtml(state)} · ${percent}% · ${escapeHtml(remaining)}`;
+      const actionMarkup = isHidden
+        ? `<button type="button" class="secondary" data-history-unhide="${escapeHtml(jobId)}">Wieder einblenden</button>`
+        : (isDone
+          ? `${completedBackup ? backupActions : ""}<button type="button" class="secondary" data-history-hide="${escapeHtml(jobId)}">Ausblenden</button>`
+          : backupActions);
+      return `
+        <article class="bk-history-row" data-history-row="${escapeHtml(jobId)}">
+          <div class="bk-history-strip">
+            <button type="button" class="bk-history-open" data-history-toggle="${escapeHtml(jobId)}"
+              aria-expanded="${expanded}" aria-label="Details ${escapeHtml(presentation.title)} ${expanded ? "einklappen" : "aufklappen"}">
+              ${thumbnail}
+              <span class="bk-history-text">
+                <strong>${escapeHtml(presentation.title)}</strong>
+                <small>${isDone ? "Abgeschlossen" : progressLabel}${isDone ? " · " + (fileCount ?? "–") + " Dateien" : ""}</small>
+              </span>
+              ${isDone ? "" : '<span class="bk-history-spinner" aria-hidden="true"></span>'}
+            </button>
+            <div class="bk-history-actions" data-history-actions>${actionMarkup}</div>
+          </div>
+          <div class="bk-history-details" ${expanded ? "" : "hidden"}>${detailMarkup}</div>
+        </article>`;
     }
 
     async function loadHealth() {
@@ -11352,24 +11409,62 @@ def index() -> str:
     }
 
     function renderJobHistory(openDetails = new Set()) {
-      const shown = jobHistoryJobs.slice(0, jobHistoryLimit);
-      const remaining = Math.max(0, jobHistoryJobs.length - shown.length);
-      jobsElement.innerHTML =
-        shown.map(renderJob).join("")
-        + (remaining
-          ? `<div style="display:flex;justify-content:center;margin-top:12px">
-               <button class="secondary" id="jobs-more-button" type="button">
-                 Mehr anzeigen (${remaining})
-               </button>
-             </div>`
-          : "");
+      const remaining = Math.max(0, jobHistoryTotal - jobHistoryJobs.length);
+      jobsElement.innerHTML = jobHistoryJobs.map(job => renderJob(job)).join("")
+        + (remaining ? `<div class="bk-history-more"><button class="secondary" id="jobs-more-button" type="button">Mehr anzeigen (${remaining})</button></div>` : "")
+        + `<div class="bk-history-hidden-section">
+             <button type="button" id="hidden-history-toggle" aria-expanded="${hiddenHistoryOpen}">
+               <span aria-hidden="true">◉</span> Ausgeblendet (${hiddenHistoryTotal}) <span>${hiddenHistoryOpen ? "▴" : "▾"}</span>
+             </button>
+             <div id="hidden-history-list" ${hiddenHistoryOpen ? "" : "hidden"}></div>
+           </div>`;
       restoreOpenJobDetails(openDetails);
-      document.getElementById("jobs-more-button")?.addEventListener("click", () => {
-        const open = openJobDetailKeys();
+      document.getElementById("jobs-more-button")?.addEventListener("click", async event => {
+        event.currentTarget.disabled = true;
         jobHistoryLimit += 5;
-        renderJobHistory(open);
+        await loadJobs().catch(showError);
       });
+      document.getElementById("hidden-history-toggle")?.addEventListener("click", async () => {
+        hiddenHistoryOpen = !hiddenHistoryOpen;
+        if(hiddenHistoryOpen) await loadHiddenHistory();
+        else renderJobHistory(openJobDetailKeys());
+      });
+      bindHistoryButtons(jobsElement);
+      if(hiddenHistoryOpen) renderHiddenHistory();
+    }
 
+    function bindHistoryButtons(host) {
+      for(const button of host.querySelectorAll("[data-history-toggle]")){
+        button.addEventListener("click", () => {
+          const id = button.dataset.historyToggle;
+          const row = button.closest("[data-history-row]");
+          if (!row || !id) return;
+          if(openHistoryIds.has(id)) openHistoryIds.delete(id);
+          else openHistoryIds.add(id);
+          const expanded = openHistoryIds.has(id);
+          const detail = row.querySelector(".bk-history-details");
+          if(detail) detail.hidden = !expanded;
+          button.setAttribute("aria-expanded", String(expanded));
+        });
+      }
+      for(const button of host.querySelectorAll("[data-history-hide], [data-history-unhide]")){
+        button.addEventListener("click", async () => {
+          const id = button.dataset.historyHide || button.dataset.historyUnhide;
+          const hidden = Boolean(button.dataset.historyHide);
+          button.disabled = true;
+          try {
+            const response = await fetch("/api/import-history/" + encodeURIComponent(id) + "/visibility", {
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({hidden})
+            });
+            const result = await response.json();
+            if(!response.ok) throw new Error(result.detail || "Sichtbarkeit konnte nicht geändert werden.");
+            await loadJobs();
+            await loadHiddenCount();
+            if(hiddenHistoryOpen) await loadHiddenHistory();
+          }catch(error){showError(error);button.disabled = false;}
+        });
+      }
       for (const button of jobsElement.querySelectorAll("[data-cancel-import]")) {
         button.addEventListener("click", async () => {
           const jobId = String(button.dataset.cancelImport || "");
@@ -11456,43 +11551,71 @@ def index() -> str:
       }
     }
 
+    async function loadHiddenCount() {
+      const response = await fetch("/api/import-history?hidden=true&limit=1", {cache:"no-store"});
+      if(!response.ok) return;
+      const data=await response.json();
+      hiddenHistoryTotal = Number(data.total || 0);
+      const label=document.getElementById("hidden-history-toggle");
+      if(label) label.innerHTML = '<span aria-hidden="true">◉</span> Ausgeblendet (' + hiddenHistoryTotal + ') <span>' + (hiddenHistoryOpen ? "▴" : "▾") + '</span>';
+    }
+
+    async function loadHiddenHistory() {
+      const response=await fetch("/api/import-history?hidden=true&limit=" + hiddenHistoryLimit, {cache:"no-store"});
+      if(!response.ok)throw new Error("Ausgeblendete Importe konnten nicht geladen werden.");
+      const data=await response.json();
+      hiddenHistoryJobs = data.jobs || [];
+      hiddenHistoryTotal = Number(data.total || 0);
+      renderHiddenHistory();
+    }
+
+    function renderHiddenHistory() {
+      const host=document.getElementById("hidden-history-list");
+      if(!host)return;
+      const more = Math.max(0, hiddenHistoryTotal-hiddenHistoryJobs.length);
+      host.innerHTML = hiddenHistoryJobs.map(job=>renderJob(job,true)).join("")
+        + (more ? `<div class="bk-history-more"><button type="button" id="hidden-more">Mehr anzeigen (${more})</button></div>` : "");
+      bindHistoryButtons(host);
+      host.querySelector("#hidden-more")?.addEventListener("click", async event=>{
+        event.currentTarget.disabled=true;hiddenHistoryLimit+=15;await loadHiddenHistory();
+      });
+    }
+
     async function loadJobs() {
+      if(!jobHistoryJobs.length){
+        try {
+          const snapshot=JSON.parse(sessionStorage.getItem(importHistoryCacheKey) || "null");
+          if(Array.isArray(snapshot?.jobs)){
+            jobHistoryJobs=snapshot.jobs;jobHistoryTotal=Number(snapshot.total || 0);
+            hiddenHistoryTotal=Number(snapshot.hidden || 0);
+            renderJobHistory();
+          }
+        }catch(_){}
+      }
       const openDetails = openJobDetailKeys();
-
-      const response = await fetch(
-        "/api/jobs",
-        {
-          cache: "no-store"
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          "Aufträge konnten nicht geladen werden."
-        );
-      }
-
+      const response = await fetch("/api/import-history?limit=" + jobHistoryLimit, {cache:"no-store"});
+      if(!response.ok)throw new Error("Importverlauf konnte nicht geladen werden.");
       const data = await response.json();
-      const hiddenMetadataTransferOperations = new Set([
-        "metadata_general_import",
-        "metadata_multiple_import"
-      ]);
-      jobHistoryJobs = (data.jobs || []).filter(
-        job => !hiddenMetadataTransferOperations.has(
-          String(job.operation || "")
-        )
-      );
-
-      if (jobHistoryJobs.length === 0) {
-        jobsElement.innerHTML = `
-          <div class="empty">
-            Noch keine Datenbankaufträge vorhanden.
-          </div>
-        `;
-        return;
+      const previous=new Map(jobHistoryJobs.map(job=>[String(job.id),job.state]));
+      jobHistoryJobs = data.jobs || [];
+      jobHistoryTotal = Number(data.total || 0);
+      for(const job of jobHistoryJobs){
+        const id=String(job.id);
+        const old=previous.get(id);
+        if(old && old!=="completed" && job.state==="completed") openHistoryIds.delete(id);
+        else if(!seenHistoryStates.has(id) && job.state!=="completed") openHistoryIds.add(id);
+        seenHistoryStates.set(id,job.state);
       }
-
-      renderJobHistory(openDetails);
+      if(!jobHistoryJobs.length && !hiddenHistoryTotal){
+        jobsElement.innerHTML='<div class="empty">Noch keine Importe vorhanden.</div>';
+      }else{
+        renderJobHistory(openDetails);
+      }
+      try {
+        sessionStorage.setItem(importHistoryCacheKey,JSON.stringify({
+          jobs:jobHistoryJobs,total:jobHistoryTotal,hidden:hiddenHistoryTotal
+        }));
+      }catch(_){}
     }
 
     async function refreshAll() {
@@ -11734,12 +11857,16 @@ def index() -> str:
       refreshAll
     );
 
-    refreshAll();
+    refreshAll().then(() => loadHiddenCount()).catch(showError);
 
-    window.setInterval(
-      loadJobs,
-      2000
-    );
+    // Nur aktive Vorgänge benötigen eine laufende Fortschrittsanzeige.
+    window.setInterval(() => {
+      if(document.hidden)return;
+      const active=jobHistoryJobs.some(job => !["completed","failed","interrupted"].includes(job.state));
+      if(active || Date.now()-lastImportHistoryPoll>60000){
+        lastImportHistoryPoll=Date.now();loadJobs().catch(showError);
+      }
+    }, 2000);
 
     window.setInterval(
       loadHealth,
