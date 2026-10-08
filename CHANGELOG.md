@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 0.44.3 – Verwerfen als persistenter Hintergrundauftrag
+
+- Applied-Änderungen werden als idempotente SQLite-Aufträge übernommen; der Server-Worker verarbeitet die Wiederherstellung unabhängig vom Browser und stellt nach einem App-Neustart unterbrochene Aufträge erneut zu.
+- Dateirücknahmen erkennen nach einem Prozessabbruch vollständig oder halb abgeschlossene sichere Hardlink-Verschiebungen anhand von Dateipfaden, Inode, Größe und SHA-256.
+- Alle App-Bereiche zeigen den Status des Hintergrundauftrags an. Nach bestätigter Annahme darf der Browser gewechselt, geschlossen oder neu geladen werden; nicht gleichzeitig dieselben Dateien bearbeiten.
+- Archiv-Rückänderungen bleiben bewusst beim separat geführten manuellen Finder-Workflow und werden nicht automatisch abgeschlossen.
+
+
 ### 0.44.2 – unmittelbares Feedback bei Ereignisänderungen
 
 - Das Prüfungsfenster öffnet sich bei angewendeten Ereignissen bereits beim Löschen oder Speichern; ein animierter Fortschrittsindikator informiert während der Berechnung.
