@@ -5321,6 +5321,8 @@ BIBLIOTHEKAR_JS = r"""
     forceRequired: externalTaskRequested
   }).catch(() => {});
 
+  window.bkForceExternalChangeCheck = () => bkRenderExternalChanges({forceRequired:true});
+
   // Der eigentliche Dateisystemscan läuft seitenbezogen (z. B. beim Laden
   // des Arbeitsbestands). Deshalb wird der Hinweiszustand kurz danach noch
   // einmal beobachtet: ein beim selben Reload neu erkannter Ordnerverlust
@@ -5808,7 +5810,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.1 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.2 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6316,6 +6318,25 @@ html[data-bk-nav-arriving="archive"] .bk-tab.active[data-area="archive"] {
 """
 
 
+
+BIBLIOTHEKAR_0452_CSS = r"""
+/* 0.45.2: Im Hellmodus bleiben Prüffälle deutlich von gewöhnlichen Tagen unterscheidbar. */
+html[data-bk-theme="light"] body.bibliothekar-redesign .day-card.without-date.review-card {
+  background: #f3e3cf !important;
+  border-color: #b56d22 !important;
+  color: #382a1e !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign .day-card.without-date.review-card:hover {
+  background: #efd7b9 !important;
+  border-color: #985819 !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign .day-card.without-date.review-card .badge.warning {
+  color: #89500f !important;
+  border-color: #b56d22 !important;
+}
+"""
+
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -6345,7 +6366,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0443_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0444_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0450_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0451_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0451_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0452_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
