@@ -573,6 +573,9 @@ def _requested_library_id(request: Request) -> str:
 
 
 WORKER_STOP = Event()
+CANCEL_WORKER_STOP = Event()
+CANCEL_WORKER_WAKE = Event()
+CANCEL_WORKER_THREAD: Thread | None = None
 WORKER_THREAD: Thread | None = None
 IMPORT_CANCEL_LOCK = Lock()
 IMPORT_CANCEL_REQUESTS: set[str] = set()
@@ -1808,13 +1811,36 @@ def process_background_mutation_cancel() -> bool:
     return False
 
 
+def cancel_worker_loop() -> None:
+    """Unabhängiger, ereignisgesteuerter Worker; keine Leerlauf-DB-Abfragen."""
+    while not CANCEL_WORKER_STOP.is_set():
+        try:
+            while not CANCEL_WORKER_STOP.is_set() and process_background_mutation_cancel():
+                pass
+        except Exception as error:
+            print("Hintergrund-Verwerfworker:", error, flush=True)
+        CANCEL_WORKER_WAKE.wait(5.0)
+        CANCEL_WORKER_WAKE.clear()
+
+
+def start_cancel_worker() -> None:
+    global CANCEL_WORKER_THREAD
+    CANCEL_WORKER_STOP.clear()
+    if CANCEL_WORKER_THREAD is None or not CANCEL_WORKER_THREAD.is_alive():
+        CANCEL_WORKER_THREAD = Thread(
+            target=cancel_worker_loop,
+            name="bibliothekar-mutation-cancel-worker",
+            daemon=True,
+        )
+        CANCEL_WORKER_THREAD.start()
+    CANCEL_WORKER_WAKE.set()
+
+
 def worker_loop() -> None:
     last_library_id: str | None = None
 
     while not WORKER_STOP.is_set():
         try:
-            if process_background_mutation_cancel():
-                continue
             # Kamera-/Ordnerimporte sind seit 0.31.1 globaler Bestand und
             # liegen ausschließlich in der Main-Datenbank. Sie werden deshalb
             # direkt aus dieser Queue übernommen und nicht über die
@@ -1933,6 +1959,7 @@ def startup_database() -> None:
                     daemon=True,
                 )
                 WORKER_THREAD.start()
+            start_cancel_worker()
             return
 
         if existing_main is not None:
@@ -2182,6 +2209,8 @@ def startup_database() -> None:
             )
             WORKER_THREAD.start()
 
+        start_cancel_worker()
+
         # 0.41.3: Persistente Mehrfach-Anwendungen und Sortierjournale
         # werden nach einem Neustart auch in sekundären Bibliotheken
         # wiederentdeckt.
@@ -2230,6 +2259,10 @@ def startup_database() -> None:
 @app.on_event("shutdown")
 def shutdown_worker() -> None:
     WORKER_STOP.set()
+    CANCEL_WORKER_STOP.set()
+    CANCEL_WORKER_WAKE.set()
+    if CANCEL_WORKER_THREAD is not None and CANCEL_WORKER_THREAD.is_alive():
+        CANCEL_WORKER_THREAD.join(timeout=5)
 
     if (
         WORKER_THREAD is not None
@@ -8144,7 +8177,9 @@ def api_active_event_mutation(job_id: str) -> dict[str, Any]:
 def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
     """Bestätigt die Annahme; Ausführung ist unabhängig vom Browser."""
     try:
-        return cancel_queue.enqueue(current_database_file(), job_id, mutation_id)
+        result = cancel_queue.enqueue(current_database_file(), job_id, mutation_id)
+        CANCEL_WORKER_WAKE.set()
+        return result
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
