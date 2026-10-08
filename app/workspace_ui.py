@@ -1044,6 +1044,19 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     }
 
+
+/* 0.45.2: Auf dem Handy zuerst Anzahl und Neuladen, darunter Titel und Auswahl. */
+.day-section-header .day-header-controls { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+.day-section-header #day-reload { min-height:34px; padding:6px 10px; }
+@media(max-width:700px){
+  .day-section-header { display:grid !important; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:8px 10px; align-items:center; }
+  .day-section-header h2 { grid-column:1; grid-row:2; margin:0; }
+  .day-section-header .day-header-controls { display:contents; }
+  .day-section-header #day-count-label { grid-column:1; grid-row:1; white-space:normal; font-size:.83rem; }
+  .day-section-header #day-reload { grid-column:2; grid-row:1; justify-self:end; }
+  .day-section-header #day-select-all { grid-column:2; grid-row:2; justify-self:end; min-height:34px; }
+}
+
     @media (prefers-reduced-motion: reduce) {
       *,
       *::before,
@@ -1361,14 +1374,15 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     <section class="workspace-layout">
       <div>
-        <div class="section-header">
+        <div class="section-header day-section-header">
           <h2>Tagesordner</h2>
 
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <div class="day-header-controls">
             <span
               id="day-count-label"
-              class="muted"
+              class="muted day-count-label"
             ></span>
+            <button id="day-reload" type="button" title="Dateibestand und Zuordnung erneut prüfen">Neuladen</button>
             <button
               id="day-select-all"
               type="button"
@@ -2504,9 +2518,28 @@ WORKSPACE_HTML = r"""<!doctype html>
       };
     }
 
-    async function loadJobs() {
-      setStatus("Arbeitsbestände werden geladen …");
+    async function loadJobs({physicalRefresh=false}={}) {
+      const cacheKey = "bk-workspace-jobs-0452:" + (window.__bkLibraryId || "main");
+      if (!jobs.length) {
+        try {
+          const saved = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
+          if (Array.isArray(saved?.jobs)) {
+            jobs = saved.jobs.filter(job => ["metadata_fixture_analysis","folder_import","sd_import"].includes(job.operation));
+            selectedJobIds = new Set(jobs.filter(job => job.workflow_status !== "archived").map(job => job.id));
+            updateTechnicalAnchor(); renderBackupFilter();
+            const ids = [...selectedJobIds];
+            const snapshotKey = "bk-workspace-0452:" + (window.__bkLibraryId || "main") + ":" + ids.map(encodeURIComponent).join(",");
+            const snap = JSON.parse(sessionStorage.getItem(snapshotKey) || "null");
+            if (snap?.statistics && snap?.planning_overview) {
+              workspace = snap; eventSuggestions = snap.event_suggestions || [];
+              renderSummary(); renderEventSuggestions(); renderDays(); renderPlannedActions(); renderSelection();
+            }
+          }
+        } catch (_) {}
+      }
+      if (!workspace?.statistics) setStatus("Arbeitsbestände werden geladen …");
       const data = await getJson("/api/jobs");
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch (_) {}
       const previous = new Set(selectedJobIds);
 
       jobs = (data.jobs || [])
@@ -2532,13 +2565,13 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       if(!jobs.length){
         setStatus("Noch kein analysierter Arbeitsbestand vorhanden.");
-        await loadWorkspace();
+        await loadWorkspace({physicalRefresh});
         return;
       }
-      await loadWorkspace();
+      await loadWorkspace({physicalRefresh});
     }
 
-    async function loadWorkspace({physicalRefresh=true}={}) {
+    async function loadWorkspace({physicalRefresh=false}={}) {
       if (!globalFolderLayout) {
         try { globalFolderLayout = await getJson("/api/settings/event-folder-layout"); }
         catch (_) { globalFolderLayout = {structure_enabled:true,input_path:"Alle",layout:{version:1,nodes:[]}}; }
@@ -2558,9 +2591,21 @@ WORKSPACE_HTML = r"""<!doctype html>
         return;
       }
 
-      setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
-      statusElement.classList.add("bk-loading-status");
       const query=ids.map(encodeURIComponent).join(",");
+      const snapshotKey = "bk-workspace-0452:" + (window.__bkLibraryId || "main") + ":" + query;
+      if (!physicalRefresh) {
+        try {
+          const saved = JSON.parse(sessionStorage.getItem(snapshotKey) || "null");
+          if (saved && saved.statistics && saved.planning_overview) {
+            workspace = saved;
+            eventSuggestions = saved.event_suggestions || [];
+            renderSummary(); renderEventSuggestions(); renderDays();
+            renderPlannedActions(); renderSelection();
+          }
+        } catch (_) {}
+      }
+      if (!workspace?.statistics || physicalRefresh) setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
+      statusElement.classList.add("bk-loading-status");
       try {
         workspace=await getJson(
           `/api/workspace/summary?jobs=${query}&physical_refresh=${physicalRefresh ? "true" : "false"}`
@@ -2569,6 +2614,10 @@ WORKSPACE_HTML = r"""<!doctype html>
         statusElement.classList.remove("bk-loading-status");
       }
       eventSuggestions=workspace.event_suggestions || [];
+      try {
+        const packed = JSON.stringify(workspace);
+        if (packed.length < 1800000) sessionStorage.setItem(snapshotKey, packed);
+      } catch (_) {}
 
       updateTechnicalAnchor(jobSelect.value);
       renderSummary();
@@ -2577,12 +2626,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       renderPlannedActions();
       renderSelection();
 
-      const activeCount=ids.filter(id=>jobs.find(job=>job.id===id)?.workflow_status!=="archived").length;
-      setStatus(
-        ids.length===1
-          ? `${workspace.statistics.day_count} Tagesgruppen geladen.`
-          : `${workspace.statistics.day_count} Tagesgruppen aus ${ids.length} Sicherungen geladen${activeCount!==ids.length?" · archivierte Sicherung eingeblendet":""}.`
-      );
+      setStatus("");
     }
 
     function renderEventSuggestions() {
@@ -4771,6 +4815,16 @@ WORKSPACE_HTML = r"""<!doctype html>
         eventSuggestionStatus.textContent = error.message;
         button.disabled = false;
       }
+    });
+
+    document.getElementById("day-reload")?.addEventListener("click", async event => {
+      const button = event.currentTarget;
+      button.disabled = true; button.classList.add("bk-busy");
+      try {
+        await loadJobs({physicalRefresh:true});
+        await window.bkForceExternalChangeCheck?.();
+      } catch (error) { setStatus(error.message, true); }
+      finally { button.disabled = false; button.classList.remove("bk-busy"); }
     });
 
     daySelectAllButton.addEventListener("click", () => {
