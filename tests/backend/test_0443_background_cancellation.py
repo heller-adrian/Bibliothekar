@@ -1,4 +1,4 @@
-"""0.44.3: dauerhafte Auftragsannahme, Wiederaufnahme und sichere Dateirücknahme."""
+"""0.44.4: dauerhafte Auftragsannahme, Wiederaufnahme und sichere Dateirücknahme."""
 import hashlib
 import json
 import os
