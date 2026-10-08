@@ -9548,22 +9548,30 @@ def index() -> str:
 
     .progress-stack {
       display: grid;
-      gap: 0.58rem;
-      margin-top: 0.9rem;
+      gap: 0.38rem;
+      margin-top: 0.78rem;
+    }
+
+    .progress-stack.completed-only {
+      gap: 0;
     }
 
     .progress-row {
       display: grid;
-      gap: 0.28rem;
+      gap: 0.18rem;
     }
 
     .progress-caption {
       display: flex;
-      justify-content: space-between;
       gap: 1rem;
       color: var(--muted);
       font-size: 0.76rem;
-      line-height: 1.2;
+      line-height: 1.1;
+    }
+
+    .progress-stack.completed-only .progress-caption {
+      color: var(--success);
+      font-weight: 700;
     }
 
     .progress {
@@ -10210,6 +10218,18 @@ def index() -> str:
       );
     }
 
+    function backendTimestampMs(value) {
+      const raw = String(value || "").trim();
+      if (!raw) {
+        return NaN;
+      }
+      const normalized = raw.replace(
+        /(\.\d{3})\d+(?=(?:Z|[+-]\d\d:\d\d)?$)/,
+        "$1"
+      );
+      return Date.parse(normalized);
+    }
+
     function estimatedRemainingText(job) {
       if (job.state === "completed") {
         return "fertig";
@@ -10226,20 +10246,30 @@ def index() -> str:
         ?? 0
       );
       if (total <= 0 || current <= 0 || current >= total) {
-        return "—";
+        return "wird berechnet …";
       }
 
-      const started = new Date(job.started_at || job.created_at || "").getTime();
+      const started = backendTimestampMs(
+        job.started_at || job.created_at || ""
+      );
       if (!Number.isFinite(started)) {
-        return "—";
+        return "wird berechnet …";
       }
       const elapsed = Date.now() - started;
-      if (elapsed < 10000) {
-        return "—";
+      if (elapsed < 2000) {
+        return "wird berechnet …";
       }
 
       const ratio = Math.max(.001, Math.min(.999, current / total));
-      const remainingMs = elapsed * (1 - ratio) / ratio;
+      const remainingMs = Math.max(0, elapsed * (1 - ratio) / ratio);
+      if (remainingMs < 60000) {
+        const seconds = Math.max(
+          5,
+          Math.round(remainingMs / 5000) * 5
+        );
+        return "ca. " + seconds + " Sek.";
+      }
+
       const minutes = Math.max(1, Math.round(remainingMs / 60000));
       if (minutes < 60) {
         return "ca. " + minutes + " Min.";
@@ -10412,35 +10442,24 @@ def index() -> str:
           ${error}
           ${duplicateNotice}
 
-          <div class="progress-stack">
+          <div class="progress-stack ${job.state === "completed" ? "completed-only" : ""}">
+            ${job.state === "completed" ? "" : `
+              <div class="progress-row">
+                <div class="progress-caption">
+                  <span>Aktuelle Stufe</span>
+                </div>
+                <div class="progress stage-progress">
+                  <div style="width: ${stagePercent}%"></div>
+                </div>
+              </div>
+            `}
             <div class="progress-row">
               <div class="progress-caption">
-                <span>Aktuelle Stufe</span>
-                <span>${stagePercent} %</span>
-              </div>
-              <div class="progress stage-progress">
-                <div
-                  class="${
-                    job.state === "completed"
-                    ? "completed"
-                    : ""
-                  }"
-                  style="width: ${stagePercent}%"
-                ></div>
-              </div>
-            </div>
-            <div class="progress-row">
-              <div class="progress-caption">
-                <span>Gesamt</span>
-                <span>${percent} %</span>
+                <span>${job.state === "completed" ? "Abgeschlossen" : "Gesamt"}</span>
               </div>
               <div class="progress overall-progress">
                 <div
-                  class="${
-                    job.state === "completed"
-                    ? "completed"
-                    : ""
-                  }"
+                  class="${job.state === "completed" ? "completed" : ""}"
                   style="width: ${percent}%"
                 ></div>
               </div>
