@@ -358,7 +358,7 @@ EVENTS_HTML = r"""<!doctype html>
       background:var(--surface-2);
       white-space:pre;
       overflow:auto;
-      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+      font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size:.84rem;
       line-height:1.5;
     }
@@ -525,7 +525,7 @@ EVENTS_HTML = r"""<!doctype html>
       gap:10px;
       align-items:baseline;
       min-width:0;
-      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+      font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size:.78rem;
       line-height:1.35;
     }
@@ -549,7 +549,7 @@ EVENTS_HTML = r"""<!doctype html>
       white-space:pre;
       overflow-wrap:normal;
       overflow-x:hidden;
-      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+      font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size:.82rem;
       line-height:1.5;
     }

@@ -294,7 +294,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.44.4"
+DEPLOYMENT_VERSION = "0.45.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -836,7 +836,7 @@ def _library_onboarding_html() -> str:
 <title>Bibliothekar · Bibliothek einrichten</title>
 <style>
 :root{{color-scheme:dark;--bg:#0c1115;--surface:#172027;--border:#34414a;--text:#f2f4f5;--muted:#aeb8bf;--accent:#58aaf2;--danger:#ff716f}}
-*{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+*{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif}}
 main{{width:min(760px,calc(100% - 32px));margin:7vh auto}} .card{{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px}}
 h1{{margin:0 0 8px;font-size:2rem}} p{{color:var(--muted);line-height:1.5}} label{{display:grid;gap:7px;margin:18px 0}}
 input{{width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);background:#10171c;color:var(--text);font:inherit}}
@@ -9508,14 +9508,7 @@ def index() -> str:
   <style>
     :root {
       color-scheme: dark;
-      font-family:
-        Inter,
-        ui-sans-serif,
-        system-ui,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
 
       --background: #0d0f12;
       --surface: #171a1f;

@@ -109,7 +109,7 @@ body.bibliothekar-redesign {
   background: var(--bk-page-bg, var(--bk-paper)) !important;
   color: var(--bk-ink) !important;
   min-height: 100vh;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 body.bibliothekar-redesign button,
@@ -722,7 +722,6 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   background: var(--bk-yellow); color: #202020; padding: 0 6px;
   font-size: .72rem; font-weight: 850;
 }
-.bk-assistant-button,
 .bk-menu-button {
   width: 44px;
   min-width: 44px;
@@ -735,25 +734,6 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   padding: 0 !important;
   border-radius: 12px !important;
   align-self: center;
-}
-.bk-assistant-button {
-  display: grid;
-  place-items: center;
-  color: #fff;
-  text-decoration: none;
-}
-.bk-assistant-button svg {
-  width: 19px;
-  height: 19px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.bk-assistant-button.active {
-  border-color: #8ea0ab;
-  background: #2a3943;
 }
 .bk-menu-button { font-size: 1.18rem; }
 .bk-menu,
@@ -1471,7 +1451,6 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   }
   .bk-task-label { display: none; }
   .bk-task-button { padding: 8px 9px; }
-  .bk-assistant-button,
   .bk-menu-button {
     width: 42px;
     min-width: 42px;
@@ -1921,7 +1900,7 @@ BIBLIOTHEKAR_0311_CSS = r"""
   color:var(--bk-ink) !important;
   white-space:pre-wrap;
   overflow-wrap:anywhere;
-  font: .86rem/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font: .86rem/1.45 Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 #bk-settings-dialog .bk-settings-preview-case {
   background:var(--bk-surface-2) !important;
@@ -5523,9 +5502,6 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <span class="bk-task-label">Aufgaben</span>
       <span id="bk-task-count" class="bk-task-count" data-bk-task-count>0</span>
     </button>
-    <a class="bk-shell-button bk-assistant-button{' active' if active == 'assistant' else ''}" href="/assistant" aria-label="Bibliothekar Assistent" title="Bibliothekar Assistent">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
-    </a>
     <button id="bk-menu-button" class="bk-shell-button bk-menu-button" type="button" aria-label="Menü">☰</button>
 
     <div id="bk-task-panel" class="bk-task-panel" hidden></div>
@@ -5546,10 +5522,6 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <a href="/metadata-correction">
         <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5M16.5 13.5l2 2M18.5 13.5l-2 2"/></svg></span>
         <span>Metadatenkorrektion</span>
-      </a>
-      <a href="/assistant">
-        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg></span>
-        <span>Assistent</span>
       </a>
       <div class="bk-menu-separator"></div>
       <button type="button" data-bk-open-about>
@@ -5771,7 +5743,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.44.4 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.0 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6159,6 +6131,58 @@ BIBLIOTHEKAR_0444_JS = r"""
 """
 
 
+BIBLIOTHEKAR_0450_CSS = r"""
+/* 0.45.0: typografischer App-Standard ohne eingebundene Fontdateien.
+ * Der Browser benutzt die erste lokal verfügbare Schrift. */
+body.bibliothekar-redesign,
+body.bibliothekar-redesign button,
+body.bibliothekar-redesign input,
+body.bibliothekar-redesign select,
+body.bibliothekar-redesign textarea,
+body.bibliothekar-redesign code,
+body.bibliothekar-redesign pre,
+body.bibliothekar-redesign kbd,
+body.bibliothekar-redesign samp {
+  font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* Keine zusätzlichen Umbrüche durch abweichende Glyphenbreiten in der Navigation. */
+.bk-brand-copy,
+.bk-brand-title,
+.bk-brand-library,
+.bk-tab-label,
+.bk-tab-mobile-label {
+  min-width: 0;
+}
+.bk-brand-title {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bk-tab-label,
+.bk-tab-mobile-label,
+.bk-pwa-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bk-shell-actions { flex-shrink: 0; }
+@media (max-width: 820px) {
+  .bk-shell { grid-template-columns: minmax(0, 1fr) auto; }
+  .bk-brand { min-width: 0; }
+  .bk-brand-copy { min-width: 0; overflow: hidden; }
+  .bk-shell-actions { min-width: 0; }
+}
+@media (max-width: 400px) {
+  .bk-shell { gap: 6px; }
+  .bk-brand { gap: 7px; }
+  .bk-tab { padding-inline: 10px; }
+}
+"""
+
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = html
     result = result.replace(
@@ -6180,7 +6204,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0425_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0441_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0443_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0444_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0444_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0450_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"

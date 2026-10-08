@@ -18,7 +18,7 @@ TRANSFER_HTML = r'''<!doctype html>
       --warning:#e6b65c;
       --danger:#ee6b6e;
       --accent:#8eb8ff;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
     }
     html,body {
       min-height:100%;
@@ -75,7 +75,7 @@ TRANSFER_HTML = r'''<!doctype html>
     .item-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
     .title { font-weight:750; overflow-wrap:anywhere; }
     .meta { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:10px; color:var(--muted); font-size:.9rem; }
-    .path { margin-top:8px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.82rem; color:var(--muted); overflow-wrap:anywhere; }
+    .path { margin-top:8px; font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif; font-size:.82rem; color:var(--muted); overflow-wrap:anywhere; }
     .badge { border:1px solid var(--border); border-radius:999px; padding:4px 9px; font-size:.8rem; white-space:nowrap; }
     .success { border-color:var(--success); color:var(--success); }
     .warning { border-color:var(--warning); color:var(--warning); }

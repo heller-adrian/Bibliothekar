@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.45.0 – Typografie und Navigation (08.10.2026)
+
+- Appweit die Schriftfolge Futura → Helvetica Neue → Helvetica → Arial → sans-serif eingeführt; keine externen Fontdateien erforderlich. Gilt auch für Eingaben, technische Textfelder sowie Import-, Ereignis- und Archivansicht.
+- KI-Assistenten-Button im Desktop-Header und Assistenten-Eintrag im mobilen Hamburger-Menü ausgeblendet. Die interne Platzhalterroute bleibt für eine spätere KI-Anbindung erhalten.
+- Navigation gegen schriftbedingte Überläufe abgesichert (verkürzte Labels statt ungeplanter Umbrüche, besonders auf schmalen Mobilgeräten).
+- Versionsanzeige und fokussierte Regressionstests auf 0.45.0 angehoben; Fachlogik und Bibliotheksdaten bleiben unverändert.
+
+
 ## [Unreleased]
 
 ### 0.44.4 – kompakter Desktop-Hinweis für Hintergrundvorgänge
