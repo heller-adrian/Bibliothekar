@@ -603,6 +603,101 @@ def _remove_cancelled_import_job(job_id: str) -> None:
         pass
 
 
+def _discard_terminal_import_job(job_id: str) -> dict[str, int]:
+    """Remove a failed/interrupted folder import and safe remnants.
+
+    Restart recovery already turns running jobs into interrupted jobs. This
+    cleanup is limited to terminal incomplete imports so it cannot race a live
+    worker or erase a completed provenance record.
+    """
+    job = get_job(DATABASE_FILE, job_id)
+    if job is None:
+        raise ValueError("Import wurde nicht gefunden.")
+    if (
+        str(job.get("kind") or "") != "sd_import"
+        or str(job.get("operation") or "") != "folder_import"
+    ):
+        raise ValueError("Nur Kamera-/Ordnerimporte können entfernt werden.")
+
+    state = str(job.get("state") or "")
+    if state not in {"failed", "interrupted"}:
+        raise ValueError(
+            "Nur fehlgeschlagene oder unterbrochene Importe können entfernt werden."
+        )
+
+    central_root = workspace_backup_root(WORKSPACE_PATH).resolve(strict=False)
+    removed_files = 0
+
+    with database_connection(DATABASE_FILE) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                current_root_kind,
+                current_relative_path,
+                size_bytes,
+                COALESCE(NULLIF(sha256_current, ''), sha256_original) AS sha256
+            FROM files
+            WHERE job_id = ?
+            ORDER BY id
+            """,
+            (job_id,),
+        ).fetchall()
+
+    for row in rows:
+        if str(row["current_root_kind"] or "") != "shared_workspace":
+            continue
+        relative = str(row["current_relative_path"] or "").strip()
+        if not relative:
+            continue
+        candidate = (central_root / relative).resolve(strict=False)
+        try:
+            candidate.relative_to(central_root)
+        except ValueError as error:
+            raise ValueError(
+                "Unsicherer Dateipfad im unterbrochenen Import: " + relative
+            ) from error
+        if not candidate.exists():
+            continue
+        if not candidate.is_file() or candidate.is_symlink():
+            raise ValueError(
+                "Unerwarteter Eintrag im unterbrochenen Import: " + relative
+            )
+        expected_size = int(row["size_bytes"] or 0)
+        expected_sha = str(row["sha256"] or "")
+        if expected_size and candidate.stat().st_size != expected_size:
+            raise ValueError(
+                "Dateigröße stimmt beim Bereinigen nicht mehr: " + relative
+            )
+        if expected_sha and sha256_file(candidate) != expected_sha:
+            raise ValueError(
+                "SHA-256 stimmt beim Bereinigen nicht mehr: " + relative
+            )
+        candidate.unlink()
+        removed_files += 1
+        current = candidate.parent
+        while current != central_root:
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
+
+    incoming = (central_root / ".incoming" / job_id).resolve(strict=False)
+    try:
+        incoming.relative_to(central_root)
+    except ValueError as error:
+        raise ValueError("Unsicherer temporärer Importpfad.") from error
+    shutil.rmtree(incoming, ignore_errors=True)
+    try:
+        incoming.parent.rmdir()
+    except OSError:
+        pass
+
+    _clear_import_cancel(job_id)
+    _remove_cancelled_import_job(job_id)
+    return {"deleted_file_count": removed_files}
+
+
 def _thumbnail_path(
     job_id: str,
     *,
@@ -4063,6 +4158,26 @@ def api_cancel_import(job_id: str) -> JSONResponse:
         status_code=409,
         detail="Dieser Import kann in seinem aktuellen Zustand nicht abgebrochen werden.",
     )
+
+
+@app.delete(
+    "/api/jobs/{job_id}/discard",
+    tags=["Import"],
+)
+def api_discard_terminal_import(job_id: str) -> dict[str, Any]:
+    try:
+        result = _discard_terminal_import_job(job_id)
+    except ValueError as error:
+        message = str(error)
+        status_code = 404 if "nicht gefunden" in message else 409
+        raise HTTPException(status_code=status_code, detail=message) from error
+
+    return {
+        "deleted": True,
+        "job_id": job_id,
+        "message": "Unterbrochener Import wurde vollständig aus dem Verlauf entfernt.",
+        **result,
+    }
 
 
 @app.delete(
@@ -10234,6 +10349,9 @@ def index() -> str:
       if (job.state === "completed") {
         return "fertig";
       }
+      if (job.state === "interrupted" || job.state === "failed") {
+        return "—";
+      }
 
       const current = Number(
         job.overall_progress_current
@@ -10384,15 +10502,22 @@ def index() -> str:
       const cancellable =
         job.operation === "folder_import"
         && (job.state === "queued" || activeStates.has(job.state));
+      const removableInterrupted =
+        job.operation === "folder_import"
+        && job.kind === "sd_import"
+        && (job.state === "interrupted" || job.state === "failed");
       const completedBackup =
         job.operation === "folder_import"
         && job.kind === "sd_import"
         && job.state === "completed";
-      const backupActions = (cancellable || completedBackup)
+      const backupActions = (cancellable || removableInterrupted || completedBackup)
         ? `
           <div class="bk-job-actions">
             ${cancellable
               ? `<button class="secondary" type="button" data-cancel-import="${escapeHtml(jobId)}">Import abbrechen</button>`
+              : ""}
+            ${removableInterrupted
+              ? `<button class="danger" type="button" data-discard-import="${escapeHtml(jobId)}">Import entfernen</button>`
               : ""}
             ${completedBackup
               ? `<button class="danger" type="button"
@@ -10986,6 +11111,36 @@ def index() -> str:
             noticeElement.classList.remove("error-text");
             noticeElement.textContent = data.message || "Abbruch wurde angefordert.";
             await loadJobs();
+          } catch (error) {
+            showError(error);
+            button.disabled = false;
+          }
+        });
+      }
+
+      for (const button of jobsElement.querySelectorAll("[data-discard-import]")) {
+        button.addEventListener("click", async () => {
+          const jobId = String(button.dataset.discardImport || "");
+          if (!jobId) return;
+          const confirmed = window.confirm(
+            "Der unterbrochene bzw. fehlgeschlagene Import wird entfernt. "
+            + "Temporäre Importdaten und der Verlaufseintrag werden gelöscht; "
+            + "die ursprüngliche Quelle bleibt unverändert. Fortfahren?"
+          );
+          if (!confirmed) return;
+          button.disabled = true;
+          try {
+            const response = await fetch(
+              `/api/jobs/${encodeURIComponent(jobId)}/discard`,
+              {method:"DELETE"}
+            );
+            const data = await response.json();
+            if (!response.ok) {
+              throw new Error(data.detail || "Import konnte nicht entfernt werden.");
+            }
+            noticeElement.classList.remove("error-text");
+            noticeElement.textContent = data.message || "Import wurde entfernt.";
+            await Promise.all([loadJobs(), loadSources()]);
           } catch (error) {
             showError(error);
             button.disabled = false;
