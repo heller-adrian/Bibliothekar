@@ -3564,12 +3564,33 @@ EVENTS_HTML = r"""<!doctype html>
         }
         return;
       }
-      setStatus("Ereignisänderungen werden gespeichert …");
+      const preparingApplied = context.event.status === "applied";
+      setEventOperationBusy("Ereignisänderungen werden vorbereitet …");
+      if (preparingApplied) {
+        // Sichtbares Feedback sofort nach dem Klick, VOR der PUT-Anfrage.
+        eventEditDialog.close();
+        showSortPreparation(context.event.name, "Änderungen anwenden");
+      }
       let result;
-      result = await updateEventWithEmptySubeventConfirmation(context, payload);
+      try {
+        result = await updateEventWithEmptySubeventConfirmation(context, payload);
+      } catch (error) {
+        if (preparingApplied) {
+          releaseSortPreparation();
+          sortPlanDialog.close();
+          if (!eventEditDialog.open) eventEditDialog.showModal();
+        }
+        statusElement.classList.remove("bk-loading-status");
+        throw error;
+      }
       eventEditDialog.close();
+      if (preparingApplied && result.archive_manual?.change_request_ids?.length) {
+        releaseSortPreparation();
+        sortPlanDialog.close();
+      }
 
       if (result.archive_manual?.change_request_ids?.length) {
+        statusElement.classList.remove("bk-loading-status");
         const crId = result.archive_manual.change_request_ids[0];
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
         await showChangeRequestDetail(crId);
@@ -3595,9 +3616,15 @@ EVENTS_HTML = r"""<!doctype html>
           false,
           true
         );
+        statusElement.classList.remove("bk-loading-status");
         return;
       }
 
+      if (preparingApplied) {
+        releaseSortPreparation();
+        sortPlanDialog.close();
+      }
+      statusElement.classList.remove("bk-loading-status");
       if (result.reassignment_required && (result.removed_family_ids || []).length) {
         await openReassignmentWorkflow(context.event.id, context._job_id, Boolean(result.resort_required));
       } else {
