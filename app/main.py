@@ -137,6 +137,7 @@ from app.event_naming import (
     normalize_event_naming,
 )
 from app.pipeline import (
+    PipelineError,
     recover_cross_device_protocol_failures,
     run_simulated_job,
     sha256_file,
@@ -10538,6 +10539,17 @@ def index() -> str:
       "organizing"
     ]);
 
+    const stageLabels = {
+      starting: "Vorbereitung", source_manifest: "Quelle inventarisieren",
+      copying: "Dateien kopieren", backup_verification: "Sicherung prüfen",
+      snapshot_created: "Prüfbeleg erstellen",
+      metadata_analysis: "Aufnahmen analysieren",
+      organization_planning: "Sortierung planen",
+      workspace_moving: "Dateien übernehmen",
+      workspace_verification: "Übernahme prüfen",
+      completed: "Abgeschlossen"
+    };
+    const cancelEscalationPrompted = new Set();
     const stateLabels = {
       queued: "Wartet",
       copying: "Kopiert",
@@ -10839,6 +10851,13 @@ def index() -> str:
         progressPercent(job);
       const stagePercent =
         stageProgressPercent(job);
+      const stageCode = String(job.stage_progress_stage || job.stage || "starting");
+      const stageLabel = stageLabels[stageCode] || stateLabels[stageCode] || stageCode;
+      const cancelAgeMs = job.cancel_requested_at
+        ? Date.now() - backendTimestampMs(job.cancel_requested_at) : 0;
+      const mayForceCancel = Boolean(
+        job.cancel_requested && !job.cancel_forced && cancelAgeMs >= 15000
+      );
       const remaining =
         estimatedRemainingText(job);
 
@@ -10919,7 +10938,9 @@ def index() -> str:
         ? `
           <div class="bk-job-actions">
             ${cancellable
-              ? `<button class="secondary" type="button" data-cancel-import="${escapeHtml(jobId)}">Import abbrechen</button>`
+              ? `<button class="secondary" type="button" data-cancel-import="${escapeHtml(jobId)}"
+                   ${job.cancel_requested ? "disabled" : ""}>${job.cancel_requested ? "Abbruch läuft …" : "Import abbrechen"}</button>
+                 ${mayForceCancel ? `<button class="danger" type="button" data-force-import="${escapeHtml(jobId)}">Abbruch erzwingen</button>` : ""}`
               : ""}
             ${removableInterrupted
               ? `<button class="danger" type="button" data-discard-import="${escapeHtml(jobId)}">Import entfernen</button>`
@@ -10957,9 +10978,11 @@ def index() -> str:
             ${job.state === "completed" ? "" : `
               <div class="progress-row">
                 <div class="progress-caption">
-                  <span>Aktuelle Stufe</span>
+                  <span>Aktuelle Phase <span class="bk-stage-badge">${escapeHtml(stageLabel)}</span></span>
+                  <span class="bk-stage-value">${stagePercent} %</span>
                 </div>
-                <div class="progress stage-progress">
+                <div class="progress stage-progress" role="progressbar"
+                  aria-label="${escapeHtml(stageLabel)}" aria-valuenow="${stagePercent}" aria-valuemin="0" aria-valuemax="100">
                   <div style="width: ${stagePercent}%"></div>
                 </div>
               </div>
@@ -11584,6 +11607,28 @@ def index() -> str:
         });
       }
 
+      for(const button of host.querySelectorAll("[data-force-import]")) {
+        button.addEventListener("click", async () => {
+          const jobId = String(button.dataset.forceImport || "");
+          if(!jobId || !window.confirm(
+            "Importabbruch erzwingen? Der laufende Import wird an sicheren Unterbrechungspunkten beendet. "
+            + "Es werden nur eindeutig diesem Import gehörende Dateien bereinigt; fremde Dateien bleiben unangetastet."
+          )) return;
+          cancelEscalationPrompted.add(jobId);
+          button.disabled = true;
+          try {
+            const response = await fetch(
+              `/api/jobs/${encodeURIComponent(jobId)}/cancel?force=true`,
+              {method:"POST"}
+            );
+            const data = await response.json();
+            if(!response.ok) throw new Error(data.detail || "Eskalierter Abbruch fehlgeschlagen.");
+            noticeElement.textContent = data.message || "Erzwungener Abbruch angefordert.";
+            await loadJobs();
+          } catch(error) {showError(error);button.disabled=false;}
+        });
+      }
+
       for (const button of host.querySelectorAll("[data-discard-import]")) {
         button.addEventListener("click", async () => {
           const jobId = String(button.dataset.discardImport || "");
@@ -11714,6 +11759,23 @@ def index() -> str:
       }
       // Die Schublade bleibt auch bei null sichtbaren Importen erreichbar.
       renderJobHistory(openDetails);
+      if(!document.hidden) {
+        const stalled = jobHistoryJobs.find(job => {
+          if(!job.cancel_requested || job.cancel_forced || !activeStates.has(job.state)) return false;
+          const age = Date.now()-backendTimestampMs(job.cancel_requested_at);
+          return age>=15000 && !cancelEscalationPrompted.has(String(job.id));
+        });
+        if(stalled){
+          const key=String(stalled.id);
+          cancelEscalationPrompted.add(key);
+          // Beim ersten erfolglosen Abbruch einmalig nachfragen; Nein bleibt
+          // möglich, der sichtbare Eskalationsknopf bleibt verfügbar.
+          if(window.confirm("Der Import reagiert seit mindestens 15 Sekunden nicht auf den Abbruch. Abbruch erzwingen?")) {
+            const button=jobsElement.querySelector('[data-force-import="'+key+'"]');
+            button?.click();
+          }
+        }
+      }
     }
 
     async function refreshAll({forceSources=false}={}) {
