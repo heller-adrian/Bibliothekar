@@ -5542,10 +5542,12 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
     return f"""
 <header class="bk-shell">
-  <a class="bk-brand" href="/" aria-label="Bibliothekar Startseite">
-    <span class="bk-mark" aria-hidden="true"><span class="y"></span><span class="r"></span><span class="b"></span></span>
-    <span class="bk-brand-copy">
-      <span class="bk-brand-title">Bibliothekar</span>
+  <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
+    <span class="bk-brand-art">
+      <img class="bk-brand-image"
+           src="/assets/bibliothekar-logo.svg?v=0.46.0"
+           width="165" height="45" alt="Bibliothekar"
+           decoding="async" draggable="false">
       <span id="bk-current-library-name" class="bk-brand-library">{escape((get_current_library().display_name if get_current_library() else "Hauptbibliothek"))}</span>
     </span>
   </a>
@@ -5803,7 +5805,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.6 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.46.0 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6699,6 +6701,97 @@ body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-stage-
 }
 """
 
+
+BIBLIOTHEKAR_0460_CSS = r"""
+/* 0.46.0: Ein einziges vektorbasiertes Markenlogo in allen Bereichen.
+   Die Bibliotheksbezeichnung bleibt ein unabhängiges dynamisches Feld.
+   Sie sitzt bewusst im Freiraum unter dem Pfad-Schriftzug – nicht
+   unter dem nach unten reichenden Symbol links. */
+body.bibliothekar-redesign .bk-brand-new {
+  display:flex;
+  align-items:center;
+  gap:0;
+  min-width:0;
+}
+body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+  display:block;
+  flex:0 0 auto;
+  position:relative;
+  width:165px;
+  height:45px;
+  max-width:100%;
+  line-height:normal;
+}
+body.bibliothekar-redesign .bk-brand-new .bk-brand-image {
+  display:block;
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+}
+body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+  display:block !important;
+  position:absolute;
+  top:71%;
+  left:21.5%;
+  right:1%;
+  max-width:none;
+  min-width:0;
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  color:rgba(255,255,255,.80);
+  font-family:Futura,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  font-size:10px !important;
+  font-weight:600;
+  letter-spacing:.015em;
+  line-height:1.1;
+  text-align:left;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+  pointer-events:none;
+}
+@media (min-width:821px) and (max-width:1120px) {
+  body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+    width:150px;
+    height:41px;
+  }
+  body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+    font-size:9.5px !important;
+  }
+}
+@media (max-width:820px) {
+  body.bibliothekar-redesign .bk-brand-new {
+    padding-bottom:0;
+  }
+  body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+    width:147px;
+    height:40px;
+  }
+  body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+    font-size:9px !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+    width:169px;
+    height:46px;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+    font-size:10.5px !important;
+  }
+}
+@media (max-width:360px) {
+  html[data-bk-display-mode="browser"] body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+    width:132px;
+    height:36px;
+  }
+  html[data-bk-display-mode="browser"] body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+    font-size:8.5px !important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -6733,7 +6826,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0453_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0454_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0455_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0456_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0456_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0460_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
