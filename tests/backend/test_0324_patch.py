@@ -76,13 +76,26 @@ def test_0324_cancel_mutation_reconciles_claims_and_central_stock(
     tmp_path: Path,
     monkeypatch,
 ):
+    """0.44.3: Annahme ist sofort, Claims-/Stock-Abgleich liegt beim Worker."""
+    import sqlite3
+
     database = tmp_path / "kamera.sqlite3"
     initialize_database(database)
-
+    # Isolierter Eintrag für den Test; keine Importdateien erforderlich.
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """INSERT INTO event_mutations(
+                id,job_id,anchor_event_id,mutation_kind,status,
+                affected_event_ids_json,original_state_json,target_state_json,
+                created_at,updated_at
+            ) VALUES('MUT','JOB','EVT','edit','pending_apply','[]','{}','{}',
+                     datetime('now'),datetime('now'))"""
+        )
     called = {"cancel": 0, "claims": 0, "sync": 0}
 
     def fake_cancel(connection, mutation_id, job_id, *, workspace_path=None):
         called["cancel"] += 1
+        connection.execute("UPDATE event_mutations SET status='cancelled' WHERE id=?", (mutation_id,))
         return {"status": "cancelled", "mutation_id": mutation_id}
 
     def fake_claims(*args, **kwargs):
@@ -95,21 +108,24 @@ def test_0324_cancel_mutation_reconciles_claims_and_central_stock(
         called["sync"] += 1
         return {}
 
+    context = SimpleNamespace(
+        library_id="test-library", database_path=database,
+        workspace_root=tmp_path / "work",
+    )
     monkeypatch.setattr("app.event_mutation.cancel_mutation", fake_cancel)
     monkeypatch.setattr(main, "current_database_file", lambda: database)
-    monkeypatch.setattr(main, "current_workspace_root", lambda: tmp_path / "work")
-    monkeypatch.setattr(
-        main,
-        "current_library_context",
-        lambda: SimpleNamespace(library_id="test-library"),
-    )
+    monkeypatch.setattr(main, "list_active_library_contexts", lambda _: [context])
+    monkeypatch.setattr(main, "ensure_library_database_schema", lambda _: None)
     monkeypatch.setattr(main, "backfill_library_claims", fake_claims)
     monkeypatch.setattr(main, "synchronize_global_central_stock", fake_sync)
 
     result = main.api_cancel_event_mutation("JOB", "MUT")
-
-    assert result["status"] == "cancelled"
+    assert result["status"] == "queued"
+    assert called == {"cancel": 0, "claims": 0, "sync": 0}
+    assert main.process_background_mutation_cancel() is True
     assert called == {"cancel": 1, "claims": 1, "sync": 1}
+    from app.background_mutation_cancel import get
+    assert get(database, result["id"])["status"] == "completed"
 
 
 def test_0324_released_archive_assets_and_marker_project_between_libraries(
