@@ -2014,7 +2014,7 @@ EVENTS_HTML = r"""<!doctype html>
               : ""}
             ${isReconcileTarget && event.reconcile_source_event_id
               ? `<a class="plan-button bk-positive-action" href="/events?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=resort:${encodeURIComponent(event.reconcile_source_event_id)}">Gemeinsame Nachsortierung öffnen</a>`
-              : isSortPlannable(event)
+              : isSortPlannable(event) && !isMutationAnchor
                 ? `<button type="button" class="plan-button bk-positive-action" data-sort-plan-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}" data-event-status="${escapeHtml(event.status)}">Sortierung prüfen</button>`
                 : ""}
             ${isDeletable(event)
