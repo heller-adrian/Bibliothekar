@@ -11608,7 +11608,7 @@ def index() -> str:
       }
 
       for(const button of host.querySelectorAll("[data-force-import]")) {
-        button.addEventListener("click", async () => {
+        button.addEventListener("click", () => {
           const jobId = String(button.dataset.forceImport || "");
           if(!jobId || !window.confirm(
             "Importabbruch erzwingen? Der laufende Import wird an sicheren Unterbrechungspunkten beendet. "
@@ -11616,16 +11616,7 @@ def index() -> str:
           )) return;
           cancelEscalationPrompted.add(jobId);
           button.disabled = true;
-          try {
-            const response = await fetch(
-              `/api/jobs/${encodeURIComponent(jobId)}/cancel?force=true`,
-              {method:"POST"}
-            );
-            const data = await response.json();
-            if(!response.ok) throw new Error(data.detail || "Eskalierter Abbruch fehlgeschlagen.");
-            noticeElement.textContent = data.message || "Erzwungener Abbruch angefordert.";
-            await loadJobs();
-          } catch(error) {showError(error);button.disabled=false;}
+          void requestForcedImportCancel(jobId).catch(showError);
         });
       }
 
@@ -11725,6 +11716,18 @@ def index() -> str:
       renderHiddenHistory();
     }
 
+    async function requestForcedImportCancel(jobId) {
+      const response = await fetch(
+        `/api/jobs/${encodeURIComponent(jobId)}/cancel?force=true`,
+        {method:"POST"}
+      );
+      const data = await response.json();
+      if(!response.ok) throw new Error(data.detail || "Eskalierter Abbruch fehlgeschlagen.");
+      noticeElement.classList.remove("error-text");
+      noticeElement.textContent = data.message || "Erzwungener Abbruch angefordert.";
+      await loadJobs();
+    }
+
     function renderHiddenHistory() {
       const host=document.getElementById("hidden-history-list");
       if(!host)return;
@@ -11771,8 +11774,7 @@ def index() -> str:
           // Beim ersten erfolglosen Abbruch einmalig nachfragen; Nein bleibt
           // möglich, der sichtbare Eskalationsknopf bleibt verfügbar.
           if(window.confirm("Der Import reagiert seit mindestens 15 Sekunden nicht auf den Abbruch. Abbruch erzwingen?")) {
-            const button=jobsElement.querySelector('[data-force-import="'+key+'"]');
-            button?.click();
+            void requestForcedImportCancel(key).catch(showError);
           }
         }
       }
