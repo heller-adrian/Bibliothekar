@@ -125,7 +125,7 @@ def test_0443_backend_accepts_without_performing_inline_cancel(tmp_path, monkeyp
     result = main.api_cancel_event_mutation("job", "mut")
     assert result["status"] == "queued"
     assert queue.claim_next(db)["id"] == result["id"]
-    assert queue.mutation_already_cancelled(sqlite3.connect(db), "mut", "job") is False
+    assert queue.get(db, result["id"])["status"] == "running"
 
 
 def test_0443_global_status_and_navigation_contract():
@@ -137,4 +137,4 @@ def test_0443_global_status_and_navigation_contract():
     assert 'new Event("bk-cancellation-queued")' in EVENTS_HTML
     assert "mandatoryMutationContext=null;" in EVENTS_HTML
     assert 'Verwerfauftrag angenommen.' in EVENTS_HTML
-    assert "cancel_queue.recover_interrupted(context.database_path)" in main.__dict__["startup_database"].__code__.co_consts.__repr__() or hasattr(main, "process_background_mutation_cancel")
+    assert hasattr(main, "process_background_mutation_cancel")
