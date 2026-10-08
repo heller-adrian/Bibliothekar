@@ -1,0 +1,2 @@
+Freigabeauftrag 0.46.0: Nach erfolgreicher Backend-QA (890 bestanden; Archiv-Isolation erfolgreich) ghcr.io/heller-adrian/bibliothekar:patch-0.46.0 bauen und in der GitHub Container Registry veröffentlichen.
+Das benutzerseitig in design/neues-logo bereitgestellte app/bibliothekar-logo.svg ersetzt im gemeinsamen Header altes Symbol und HTML-Schriftzug; aktuelle Bibliotheksbezeichnung bleibt dynamisch unter der Wortmarke. Asset-Route und responsive Abstände enthalten. Keine SQLite-Migration. main/latest unverändert lassen.
