@@ -3080,12 +3080,7 @@ BIBLIOTHEKAR_0353_CSS = r"""
   letter-spacing: 0;
   white-space: normal;
 }
-@media (hover: hover) and (pointer: fine) {
-  .bk-title-help:hover::after,
-  .bk-title-help:focus-visible::after {
-    display: inline-block;
-  }
-}
+/* Hilfen werden ausschließlich durch die Klickklasse .is-open geöffnet. */
 .bk-title-help.is-open::after {
   display: inline-block;
 }
@@ -4134,7 +4129,6 @@ BIBLIOTHEKAR_JS = r"""
     link.setAttribute("href", bkLibraryHref(link.getAttribute("href")));
   });
 
-  const bkTitleHelpMedia = window.matchMedia?.("(hover: none), (pointer: coarse)");
   const bkTitleHelpTriggers = [...document.querySelectorAll("[data-bk-title-help]")];
 
   function bkCloseTitleHelps(except=null) {
@@ -4155,7 +4149,6 @@ BIBLIOTHEKAR_JS = r"""
 
   bkTitleHelpTriggers.forEach(trigger => {
     trigger.addEventListener("click", event => {
-      if (!(bkTitleHelpMedia?.matches || root.dataset.bkDisplayMode === "standalone")) return;
       event.preventDefault();
       event.stopPropagation();
       bkToggleTitleHelp(trigger);
@@ -5810,7 +5803,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.3 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.4 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6517,6 +6510,78 @@ body.bibliothekar-redesign .event-card {
 """
 
 
+
+BIBLIOTHEKAR_0454_CSS = r"""
+/* 0.45.4: Detailraster, kleine Hover-Reaktionen und ausschließlich anklickbare Hilfen. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-history-expanded {
+  display:block !important;
+  grid-template-columns:none !important;
+  column-gap:0 !important;
+}
+body.bibliothekar-redesign[data-bk-area="workspace"] main > #status:empty {
+  display:none !important;
+}
+body.bibliothekar-redesign[data-bk-area="workspace"] main > #summary {
+  margin-top:0;
+}
+/* Der Hinweis schwebt über den Inhalten und verändert nie die Titelhöhe. */
+.bk-title-help {
+  position:relative;
+  cursor:help;
+}
+.bk-title-help::after {
+  position:absolute;
+  z-index:5200;
+  top:calc(100% + 8px);
+  left:0;
+  width:max-content;
+  max-width:min(580px, calc(100vw - 36px));
+  white-space:normal;
+  pointer-events:none;
+}
+.bk-title-help.is-open::after {
+  display:block;
+}
+@media(max-width:700px) {
+  .bk-title-help {cursor:help;}
+  .bk-title-help.is-open::after {
+    margin-top:0;
+    flex-basis:auto;
+    max-width:calc(100vw - 36px);
+  }
+}
+body.bibliothekar-redesign .day-card,
+body.bibliothekar-redesign .timeline-event-card,
+body.bibliothekar-redesign .event-card {
+  transition:background-color .24s ease-in-out, border-color .24s ease-in-out;
+}
+@media (hover:hover) and (pointer:fine) {
+  html[data-bk-theme="dark"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover,
+  html[data-bk-theme="light"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:color-mix(in srgb, var(--surface) 96%, var(--bk-ink) 4%) !important;
+    border-color:color-mix(in srgb, var(--border) 85%, var(--bk-ink) 15%) !important;
+  }
+  html[data-bk-theme="dark"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.review-card:hover {
+    background:color-mix(in srgb, var(--warning) 14%, var(--surface)) !important;
+    border-color:var(--warning) !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.without-date.review-card:hover {
+    background:#f1dfc8 !important;
+    border-color:#b56d22 !important;
+  }
+  body.bibliothekar-redesign[data-bk-area="workspace"] .timeline-event-card:not(.selected-preview):hover,
+  body.bibliothekar-redesign[data-bk-area="workspace"] .event-card:not(.selected-preview):not(.is-open):hover {
+    background:color-mix(in srgb, var(--surface-2) 96%, var(--bk-ink) 4%) !important;
+    border-color:color-mix(in srgb, var(--border) 85%, var(--bk-ink) 15%) !important;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  body.bibliothekar-redesign .day-card,
+  body.bibliothekar-redesign .timeline-event-card,
+  body.bibliothekar-redesign .event-card {transition:none !important;}
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -6548,7 +6613,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0450_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0451_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0452_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0453_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0453_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0454_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
