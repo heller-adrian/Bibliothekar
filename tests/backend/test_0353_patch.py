@@ -8,7 +8,7 @@ from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0353_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.45.3"
+    assert main.DEPLOYMENT_VERSION == "0.45.4"
 
 
 def test_0353_title_help_has_no_visible_question_mark():
@@ -23,7 +23,7 @@ def test_0353_title_help_has_no_visible_question_mark():
         assert "data-bk-title-help" in html
         assert "bk-page-help" not in html
     assert "bkToggleTitleHelp" in BIBLIOTHEKAR_JS
-    assert "(hover: hover) and (pointer: fine)" in BIBLIOTHEKAR_0353_CSS
+    assert ".bk-title-help:hover::after" not in BIBLIOTHEKAR_0353_CSS
 
 
 def test_0353_archive_subheadings_use_title_help():
