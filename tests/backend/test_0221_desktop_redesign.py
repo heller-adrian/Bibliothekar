@@ -40,8 +40,8 @@ def test_0221_only_three_main_registers_and_assistant_is_header_action():
     assert 'data-area="workspace"' in html
     assert 'data-area="archive"' in html
     assert 'data-area="assistant"' not in html
-    assert 'href="/assistant"' in html
-    assert 'bk-assistant-button' in html
+    assert 'href="/assistant"' not in html
+    assert 'class="bk-shell-button bk-assistant-button' not in html
 
     assert '.bk-tabs-active-workspace' in BIBLIOTHEKAR_CSS
     assert '.bk-tabs-active-archive' in BIBLIOTHEKAR_CSS

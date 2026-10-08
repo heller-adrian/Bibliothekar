@@ -15,7 +15,7 @@ def test_0220_version_and_app_shell():
     assert "Archiv" in html
     assert "Bibliothek wechseln" in html
     assert "Einstellungen" in html
-    assert "Bibliothekar Assistent" in html
+    assert "Bibliothekar Assistent" not in html
     assert 'data-bk-theme-choice="light"' in html
     assert 'data-bk-theme-choice="dark"' in html
     assert 'data-bk-theme-choice="system"' in html
