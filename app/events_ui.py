@@ -1355,6 +1355,18 @@ EVENTS_HTML = r"""<!doctype html>
         padding:7px 10px;
       }
     }
+
+/* 0.45.2: Neuladen neben der Suche, auch auf kleinen Geräten. */
+.event-browser-toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
+.event-browser-toolbar .event-browser-search { flex:1 1 220px; min-width:0; }
+#event-reload { min-height:40px; white-space:nowrap; }
+@media(max-width:700px){
+ .event-browser-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; }
+ .event-browser-toolbar .event-browser-heading { grid-column:1 / -1; }
+ .event-browser-toolbar .event-browser-search { grid-column:1; min-width:0; }
+ #event-reload { grid-column:2; }
+}
+
 </style>
 </head>
 
@@ -1402,6 +1414,7 @@ EVENTS_HTML = r"""<!doctype html>
           <span>Ereignisse suchen</span>
           <input id="event-search" type="search" placeholder="Name, Datum oder Sicherung …" autocomplete="off">
         </label>
+        <button id="event-reload" type="button" title="Ereignisse und Dateibestand erneut vollständig prüfen">Neuladen</button>
       </div>
 
       <div
@@ -2008,14 +2021,25 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
 
-    async function loadEvents({reset=false}={}) {
+    async function loadEvents({reset=false,physicalRefresh=false}={}) {
       if (reset) eventOffset = 0;
-      setStatus("Ereignisse werden geladen …");
-      statusElement.classList.add("bk-loading-status");
       const q = eventSearch?.value?.trim() || "";
+      const snapshotKey = "bk-events-0452:" + (window.__bkLibraryId || "main") + ":" + q + ":" + eventOffset;
+      if (reset && !physicalRefresh) {
+        try {
+          const saved = JSON.parse(sessionStorage.getItem(snapshotKey) || "null");
+          if (saved && Array.isArray(saved.events)) {
+            renderEvents(saved.events.map(event => ({...event,_job_id:event.job_id,_job_label:event.source_volume_label || event.job_id})));
+            eventResultInfo.textContent = saved.resultInfo || "";
+            eventLoadMore.hidden = !saved.has_more;
+          }
+        } catch (_) {}
+      }
+      if (!currentEvents.length || physicalRefresh) setStatus("Ereignisse werden geladen …");
+      statusElement.classList.add("bk-loading-status");
       let data;
       try {
-        data = await requestJson(`/api/events/search?q=${encodeURIComponent(q)}&limit=${eventLimit}&offset=${eventOffset}`);
+        data = await requestJson(`/api/events/search?q=${encodeURIComponent(q)}&limit=${eventLimit}&offset=${eventOffset}&physical_refresh=${physicalRefresh ? "true" : "false"}`);
       } finally {
         statusElement.classList.remove("bk-loading-status");
       }
@@ -2032,7 +2056,13 @@ EVENTS_HTML = r"""<!doctype html>
       eventResultInfo.textContent = q
         ? `${shown} von ${Number(data.matching_count||0)} Treffern · insgesamt ${Number(data.total_count||0)} Ereignisse`
         : `${shown} von ${Number(data.total_count||0)} Ereignissen · zuletzt geändert`;
-      setStatus(shown===1 ? "1 Ereignis geladen." : `${shown} Ereignisse geladen.`);
+      setStatus("");
+      if (reset) {
+        try {
+          const packed = JSON.stringify({...data,resultInfo:eventResultInfo.textContent});
+          if (packed.length < 1500000) sessionStorage.setItem(snapshotKey, packed);
+        } catch (_) {}
+      }
     }
 
 
@@ -5037,6 +5067,16 @@ EVENTS_HTML = r"""<!doctype html>
     async function openChangeRequestWorkflow(eventId, jobId) {
       await proposeChangeRequest(eventId, jobId);
     }
+
+    document.getElementById("event-reload")?.addEventListener("click", async event => {
+      const button = event.currentTarget;
+      button.disabled = true; button.classList.add("bk-busy");
+      try {
+        await loadEvents({reset:true,physicalRefresh:true});
+        await window.bkForceExternalChangeCheck?.();
+      } catch (error) { setStatus(error.message, true); }
+      finally { button.disabled = false; button.classList.remove("bk-busy"); }
+    });
 
     eventSearch?.addEventListener("input", () => {
       clearTimeout(eventSearchTimer);
