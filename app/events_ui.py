@@ -3880,6 +3880,7 @@ EVENTS_HTML = r"""<!doctype html>
         return;
       }
       if (!window.confirm("Diese Archivänderung vollständig verwerfen?\n\nWenn du im Archiv bereits manuelle Änderungen vorgenommen hast, wird anschließend ein eigener Rückänderungsauftrag geöffnet. Er führt dich Schritt für Schritt durch die Wiederherstellung und prüft den ursprünglichen Zustand, bevor die Änderung endgültig verworfen wird.")) return;
+      setEventOperationBusy("Archivänderung wird verworfen …");
       changeRequestAction(mandatoryArchiveChangeContext.crId, "cancel")
         .catch(error => {
           const inlineError=document.getElementById("change-request-inline-error");
@@ -3887,7 +3888,8 @@ EVENTS_HTML = r"""<!doctype html>
             inlineError.textContent=error.message;
             inlineError.hidden=false;
           }
-        });
+        })
+        .finally(() => statusElement.classList.remove("bk-loading-status"));
     });
     changeRequestDialog.addEventListener("cancel", event => {
       if (mandatoryArchiveChangeContext) event.preventDefault();
@@ -3916,23 +3918,32 @@ EVENTS_HTML = r"""<!doctype html>
 
     async function discardMandatoryMutation() {
       const ctx=mandatoryMutationContext;
-      if (!ctx) {
-        sortPlanDialog.close();
-        return;
-      }
+      if (!ctx) { sortPlanDialog.close(); return; }
       if (!window.confirm("Diese Applied-Änderung vollständig verwerfen und den Zustand vor der Bearbeitung wiederherstellen?")) return;
-      await requestJson(
-        `/api/jobs/${encodeURIComponent(ctx.jobId)}/event-mutations/${encodeURIComponent(ctx.mutationId)}/cancel`,
-        {method:"POST"}
-      );
-      mandatoryMutationContext=null;
+      // Das Modal schließen und den Fortschritt direkt auf der Ereignisseite zeigen.
+      sortPlanCloseButton.disabled=true;
       sortPlanDialog.close();
-      sortPlanCloseButton.classList.remove("danger-button");
-      sortPlanCloseButton.textContent="Schließen";
-      sortPlanCloseButton.hidden=false;
-      await loadEvents({reset:true});
-      refreshGlobalTasks();
-      setStatus("Änderung verworfen. Der vorherige Zustand wurde wiederhergestellt.",false,true);
+      setEventOperationBusy("Änderung wird verworfen …");
+      try {
+        await requestJson(
+          `/api/jobs/${encodeURIComponent(ctx.jobId)}/event-mutations/${encodeURIComponent(ctx.mutationId)}/cancel`,
+          {method:"POST"}
+        );
+        await loadEvents({reset:true});
+        mandatoryMutationContext=null;
+        sortPlanCloseButton.classList.remove("danger-button");
+        sortPlanCloseButton.textContent="Schließen";
+        sortPlanCloseButton.hidden=false;
+        refreshGlobalTasks();
+        setStatus("Änderung verworfen. Der vorherige Zustand wurde wiederhergestellt.",false,true);
+      } catch (error) {
+        // Bei einem fehlgeschlagenen Verwerfen muss der Nutzer erneut versuchen können.
+        if (!sortPlanDialog.open) sortPlanDialog.showModal();
+        throw error;
+      } finally {
+        statusElement.classList.remove("bk-loading-status");
+        sortPlanCloseButton.disabled=false;
+      }
     }
 
     sortPlanCloseButton.addEventListener(
@@ -4005,13 +4016,19 @@ EVENTS_HTML = r"""<!doctype html>
         const cancelMutationButton = event.target.closest("[data-cancel-mutation]");
         if (cancelMutationButton && !cancelMutationButton.disabled) {
           if (!window.confirm("Diese noch nicht abgeschlossene Änderung vollständig verwerfen und den gespeicherten Ursprungszustand wiederherstellen?")) return;
+          cancelMutationButton.disabled=true;
+          setEventOperationBusy("Änderung wird verworfen …");
           requestJson(`/api/jobs/${encodeURIComponent(cancelMutationButton.dataset.jobId||"")}/event-mutations/${encodeURIComponent(cancelMutationButton.dataset.cancelMutation)}/cancel`, {method:"POST"})
             .then(async () => {
-              setStatus("Änderung verworfen. Der gespeicherte Ursprungszustand wurde wiederhergestellt.", false, true);
               await loadEvents({reset:true});
               refreshGlobalTasks();
+              setStatus("Änderung verworfen. Der gespeicherte Ursprungszustand wurde wiederhergestellt.", false, true);
             })
-            .catch(error => setStatus(error.message, true));
+            .catch(error => setStatus(error.message, true))
+            .finally(() => {
+              statusElement.classList.remove("bk-loading-status");
+              if (cancelMutationButton.isConnected) cancelMutationButton.disabled=false;
+            });
           return;
         }
 
