@@ -297,7 +297,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.45.6"
+DEPLOYMENT_VERSION = "0.46.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -9637,6 +9637,23 @@ def api_run_simulated_job() -> JSONResponse:
                 "in die Warteschlange aufgenommen."
             ),
             "job": job,
+        },
+    )
+
+
+@app.get(
+    "/assets/bibliothekar-logo.svg",
+    include_in_schema=False,
+)
+def bibliothekar_brand_logo() -> FileResponse:
+    """Derselbe freigestellte SVG-Schriftzug für alle Bibliothekar-Seiten."""
+    return FileResponse(
+        Path(__file__).with_name("bibliothekar-logo.svg"),
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
         },
     )
 
