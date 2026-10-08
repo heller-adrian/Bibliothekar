@@ -1,0 +1,21 @@
+name: Publish requested patch
+
+# A patch build only starts when an explicit release-request file is committed.
+# Regular patch source commits no longer consume Actions minutes.
+on:
+  push:
+    branches:
+      - 'patch/**'
+    paths:
+      - '.github/release-requests/**'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    uses: ./.github/workflows/publish-container.yml
+    permissions:
+      contents: write
+      packages: write

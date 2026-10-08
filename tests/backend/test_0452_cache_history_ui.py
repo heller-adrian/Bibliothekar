@@ -157,3 +157,14 @@ def test_0452_github_build_is_manual_for_patch_branches():
     assert "'patch/**'" not in qa
     assert "'patch/**'" not in publish
     assert "type=raw,value=patch-" in publish
+
+
+def test_0452_patch_publish_requires_explicit_release_request():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    main_workflow = (root / ".github/workflows/publish-container.yml").read_text()
+    trigger_workflow = (root / ".github/workflows/publish-patch-request.yml").read_text()
+    assert "workflow_call:" in main_workflow
+    assert "'patch/**'" in trigger_workflow
+    assert "'.github/release-requests/**'" in trigger_workflow
+    assert "uses: ./.github/workflows/publish-container.yml" in trigger_workflow
