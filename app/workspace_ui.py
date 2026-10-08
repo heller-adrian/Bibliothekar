@@ -55,11 +55,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       overflow-x: hidden;
       background: var(--background);
       color: var(--text);
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
     }
 
     button,
@@ -588,11 +584,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       border-radius: 13px;
       background: var(--surface-2);
       padding: 13px;
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 0.9rem;
       line-height: 1.5;
       white-space: pre;
@@ -601,11 +593,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
     .tree.rich-preview {
       white-space: normal;
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
     }
     .stored-preview-meta {
       display:grid;
@@ -625,11 +613,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       white-space:pre;
       overflow-wrap:normal;
       overflow-x:hidden;
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size:.88rem;
       line-height:1.5;
       color:var(--text);

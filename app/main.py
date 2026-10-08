@@ -4677,11 +4677,7 @@ def file_browser_interface() -> HTMLResponse:
       margin: 0;
       background: var(--background);
       color: var(--text);
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
     }
 
     button,
@@ -4964,11 +4960,7 @@ def file_browser_interface() -> HTMLResponse:
 
     .candidate-value {
       color: var(--muted);
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 0.85rem;
       overflow-wrap: anywhere;
     }

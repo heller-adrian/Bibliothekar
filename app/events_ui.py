@@ -51,11 +51,7 @@ EVENTS_HTML = r"""<!doctype html>
       min-height: 100dvh;
       margin: 0;
       color: var(--text);
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
     }
 
     button,
@@ -753,11 +749,7 @@ EVENTS_HTML = r"""<!doctype html>
       background: var(--surface-2);
       padding: 13px;
       color: var(--text);
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 0.88rem;
       line-height: 1.6;
       white-space: pre;
@@ -770,11 +762,7 @@ EVENTS_HTML = r"""<!doctype html>
       border-radius: 13px;
       background: var(--surface-2);
       padding: 12px;
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 0.83rem;
       overflow-wrap: anywhere;
     }
@@ -804,11 +792,7 @@ EVENTS_HTML = r"""<!doctype html>
         minmax(0, 1fr);
       gap: 8px;
       align-items: center;
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 0.82rem;
     }
 
@@ -919,11 +903,7 @@ EVENTS_HTML = r"""<!doctype html>
       background: var(--surface-2);
       padding: 9px 10px;
       color: var(--muted);
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 0.8rem;
       overflow-wrap: anywhere;
     }
