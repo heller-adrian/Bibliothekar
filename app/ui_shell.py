@@ -6028,10 +6028,9 @@ BIBLIOTHEKAR_0444_JS = r"""
   const desktop = window.matchMedia("(min-width: 1400px) and (min-height: 620px) and (hover: hover) and (pointer: fine)");
   if (!desktop.matches) return;
 
-  const box = document.createElement("aside");
-  box.id = "bk-background-cancel-notice";
-  box.setAttribute("aria-label", "Hintergrundvorgänge");
-  box.hidden = true;
+  document.body.insertAdjacentHTML("beforeend",
+    '<aside id="bk-background-cancel-notice" aria-label="Hintergrundvorgänge" hidden></aside>');
+  const box = document.getElementById("bk-background-cancel-notice");
 
   const mini = document.createElement("button");
   mini.type = "button";
