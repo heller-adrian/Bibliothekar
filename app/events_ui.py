@@ -3800,9 +3800,20 @@ EVENTS_HTML = r"""<!doctype html>
         return;
       }
 
-      setStatus("Planung wird gelöscht …");
-
-      const result = await requestJson(
+      // Sofortige Rückmeldung statt eines wartenden Ladekreises hinter dem Dialog.
+      const preparingApplied = event.status === "applied";
+      const preparingArchived = event.status === "archived";
+      setEventOperationBusy("Löschauftrag wird vorbereitet …");
+      if (preparingApplied) showSortPreparation(event.name, "Änderungen anwenden");
+      if (preparingArchived) {
+        changeRequestTitle.textContent = "Ereignis löschen · " + event.name;
+        changeRequestSubtitle.textContent = "Der manuelle Löschauftrag wird vorbereitet …";
+        changeRequestBody.innerHTML = '<div class="event-operation-loading" role="status"><span class="event-operation-spinner" aria-hidden="true"></span><span>Der Archivbestand wird rein lesend geprüft …</span></div>';
+        if (!changeRequestDialog.open) changeRequestDialog.showModal();
+      }
+      let result;
+      try {
+        result = await requestJson(
         `/api/jobs/${
           encodeURIComponent(jobId)
         }/events/${
@@ -3812,8 +3823,22 @@ EVENTS_HTML = r"""<!doctype html>
           method: "DELETE"
         }
       );
+      } catch (error) {
+        if (preparingApplied) {
+          releaseSortPreparation();
+          sortPlanDialog.close();
+        }
+        if (preparingArchived) changeRequestDialog.close();
+        statusElement.classList.remove("bk-loading-status");
+        throw error;
+      }
+      statusElement.classList.remove("bk-loading-status");
 
       if (result.change_request_id) {
+        if (preparingApplied) {
+          releaseSortPreparation();
+          sortPlanDialog.close();
+        }
         await loadEvents({reset:true});
         refreshGlobalTasks();
         if (!changeRequestDialog.open) changeRequestDialog.showModal();
@@ -3835,6 +3860,11 @@ EVENTS_HTML = r"""<!doctype html>
         );
         return;
       }
+      if (preparingApplied) {
+        releaseSortPreparation();
+        sortPlanDialog.close();
+      }
+      if (preparingArchived) changeRequestDialog.close();
       await loadEvents({reset:true});
       refreshGlobalTasks();
       setStatus(`Ereignis gelöscht: ${result.event_name} · ${Number(result.released_family_count||0)} Familien wieder frei.`, false, true);
