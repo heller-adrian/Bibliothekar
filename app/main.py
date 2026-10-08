@@ -4112,7 +4112,8 @@ def api_import_history(
     offset = max(0, int(offset))
     limit = max(1, min(int(limit), 50))
     where = """(operation='folder_import' OR operation='metadata_fixture_analysis'
-                  OR kind='sd_import') AND history_hidden=?"""
+                  OR operation='sd_import' OR kind IN ('sd_import', 'simulation'))
+                  AND history_hidden=?"""
     with database_connection(DATABASE_FILE) as conn:
         total = int(conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE " + where, (int(hidden),)
@@ -4160,7 +4161,8 @@ def api_import_history_visibility(job_id: str, payload: dict[str, Any]) -> dict[
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Import nicht gefunden.")
-        if row["operation"] not in ("folder_import", "metadata_fixture_analysis") and row["kind"] != "sd_import":
+        if (row["operation"] not in ("folder_import", "metadata_fixture_analysis", "sd_import")
+                and row["kind"] not in ("sd_import", "simulation")):
             raise HTTPException(status_code=409, detail="Dieser Auftrag ist kein Importverlauf.")
         if hidden and row["state"] != "completed":
             raise HTTPException(status_code=409, detail="Nur abgeschlossene Importe ausblenden.")
@@ -8291,12 +8293,12 @@ def api_global_workspace_summary(
     jobs: str = "",
     physical_refresh: bool = True,
 ) -> dict[str, Any]:
-    """Canonical workspace projection for the selected library.
+    """Canonical library workspace projection; independent of the display cache.
 
-    physical_refresh=false is reserved for an immediate UI refresh after a
-    pure planned-event DB write. In that path no file has moved, so a second
-    inventory/reconcile/hash pass would only delay closing the save dialog.
-    Normal page loads keep the full physical truth refresh.
+    The first inspection per process remains physical. A user-requested
+    physical_refresh=True forces verification; ordinary view reads reuse
+    a DB-stamp-scoped snapshot. Any destructive action checks physical truth
+    separately and must not trust this display snapshot.
     """
     selected = [
         part.strip()

@@ -138,12 +138,12 @@ def test_0452_hidden_history_remains_reachable_without_visible_jobs():
 
 def test_0452_cache_ttl_for_external_mount_state(tmp_path, monkeypatch):
     import app.view_cache as cache
-    import time
     db = tmp_path / "main.sqlite3"
     db.write_bytes(b"test")
     cache.put_snapshot(db, "import-sources", {"mounted": True})
     assert cache.get_snapshot(db, "import-sources", max_age_seconds=15) == {"mounted": True}
-    monkeypatch.setattr(cache.time, "monotonic", lambda: time.monotonic() + 1800)
+    baseline = cache.time.monotonic()
+    monkeypatch.setattr(cache.time, "monotonic", lambda: baseline + 1800)
     assert cache.get_snapshot(db, "import-sources", max_age_seconds=15) is None
 
 
