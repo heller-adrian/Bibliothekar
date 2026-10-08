@@ -31,7 +31,8 @@ def test_0432_import_ui_has_stage_and_overall_progress_plus_eta():
     html = main.index()
     assert "function stageProgressPercent(job)" in html
     assert "function estimatedRemainingText(job)" in html
-    assert "Aktuelle Phase" in html\n    assert "bk-stage-badge" in html
+    assert "Aktuelle Phase" in html
+    assert "bk-stage-badge" in html
     assert "Gesamt" in html
     assert "Fortschritt gesamt:" in html
     assert "Restzeit:" in html
