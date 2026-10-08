@@ -5887,6 +5887,279 @@ BIBLIOTHEKAR_0443_JS = r"""
 """
 
 
+BIBLIOTHEKAR_0444_CSS = r"""
+/* 0.44.4: bewusst kompakter Desktop-Dock, außerhalb des Headers. */
+#bk-background-cancel-notice {
+  position:fixed;
+  top:auto;
+  left:auto;
+  right:22px;
+  bottom:22px;
+  z-index:900;
+  display:block;
+  width:290px;
+  max-width:calc(100vw - 44px);
+  padding:0;
+  border:0;
+  border-radius:13px;
+  background:transparent;
+  box-shadow:none;
+  color:var(--bk-ink);
+  font-size:.83rem;
+  line-height:1.4;
+}
+#bk-background-cancel-notice[hidden],
+#bk-background-cancel-notice [hidden] {display:none!important}
+#bk-background-cancel-notice .bk-activity-card {
+  border:1px solid var(--bk-line);
+  border-radius:13px;
+  background:var(--bk-surface);
+  box-shadow:0 6px 22px rgba(0,0,0,.13);
+  overflow:hidden;
+}
+#bk-background-cancel-notice .bk-activity-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:9px 11px 7px 13px;
+  border-bottom:1px solid var(--bk-line);
+}
+#bk-background-cancel-notice .bk-activity-header strong {
+  font-size:.83rem;
+}
+#bk-background-cancel-notice .bk-activity-collapse {
+  flex:0 0 auto;
+  border:1px solid var(--bk-line);
+  border-radius:8px;
+  padding:1px 7px;
+  min-width:26px;
+  min-height:26px;
+  background:var(--bk-surface-2);
+  color:var(--bk-ink);
+  cursor:pointer;
+  font-size:1.1rem;
+  line-height:1.2;
+}
+#bk-background-cancel-notice .bk-activity-list {
+  padding:6px 9px 9px;
+  display:grid;
+  gap:4px;
+}
+#bk-background-cancel-notice .bk-activity-item {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  padding:7px 5px;
+  border-radius:8px;
+}
+#bk-background-cancel-notice .bk-activity-item + .bk-activity-item {
+  border-top:1px solid var(--bk-line);
+  border-radius:0;
+}
+#bk-background-cancel-notice .bk-activity-link {
+  flex:1 1 auto;
+  min-width:0;
+  color:var(--bk-ink);
+  text-decoration:none;
+  overflow-wrap:anywhere;
+}
+#bk-background-cancel-notice .bk-activity-link:hover {text-decoration:underline}
+#bk-background-cancel-notice .bk-activity-link strong {display:block;font-size:.83rem}
+#bk-background-cancel-notice .bk-activity-link small {display:block;color:var(--bk-muted);font-size:.76rem}
+#bk-background-cancel-notice .bk-activity-retry {
+  font-size:.73rem;
+  padding:4px 7px;
+  border:1px solid var(--bk-line);
+  border-radius:7px;
+  background:var(--bk-surface-2);
+  color:var(--bk-ink);
+  cursor:pointer;
+}
+#bk-background-cancel-notice .bk-activity-icon {
+  width:17px;
+  flex:0 0 17px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:700;
+}
+#bk-background-cancel-notice .bk-activity-icon[data-busy="true"] {
+  height:17px;
+  border:2px solid var(--bk-blue);
+  border-right-color:transparent;
+  border-radius:50%;
+  animation:bk-cancel-spin .75s linear infinite;
+}
+#bk-background-cancel-notice .bk-activity-mini {
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  min-width:40px;
+  height:40px;
+  padding:0 8px;
+  border:1px solid var(--bk-line);
+  border-radius:50px;
+  background:var(--bk-surface);
+  color:var(--bk-ink);
+  box-shadow:0 5px 18px rgba(0,0,0,.13);
+  cursor:pointer;
+}
+#bk-background-cancel-notice .bk-activity-mini .bk-activity-icon {margin:0}
+#bk-background-cancel-notice .bk-activity-mini-count {font-size:.75rem}
+#bk-background-cancel-notice [data-status="failed"] .bk-activity-icon {color:var(--bk-danger)}
+#bk-background-cancel-notice [data-status="completed"] .bk-activity-icon {color:var(--bk-green)}
+#bk-background-cancel-notice button:focus-visible,
+#bk-background-cancel-notice a:focus-visible {
+  outline:2px solid var(--bk-blue);
+  outline-offset:2px;
+}
+/* Nur echte, breite Desktop-Websites: weder Handy noch schmale Fenster. */
+@media (max-width:1399px), (max-height:619px), (hover:none), (pointer:coarse) {
+  #bk-background-cancel-notice {display:none!important}
+}
+"""
+
+BIBLIOTHEKAR_0444_JS = r"""
+(function() {
+  const desktop = window.matchMedia("(min-width: 1400px) and (min-height: 620px) and (hover: hover) and (pointer: fine)");
+  if (!desktop.matches) return;
+
+  const box = document.createElement("aside");
+  box.id = "bk-background-cancel-notice";
+  box.setAttribute("aria-label", "Hintergrundvorgänge");
+  box.hidden = true;
+
+  const mini = document.createElement("button");
+  mini.type = "button";
+  mini.className = "bk-activity-mini";
+  mini.setAttribute("aria-label", "Hintergrundvorgänge anzeigen");
+  mini.setAttribute("title", "Hintergrundvorgänge anzeigen");
+  mini.innerHTML = '<span class="bk-activity-icon" aria-hidden="true"></span><span class="bk-activity-mini-count"></span>';
+  mini.hidden = true;
+
+  const card = document.createElement("section");
+  card.className = "bk-activity-card";
+  card.innerHTML = '<div class="bk-activity-header"><strong>Hintergrundvorgänge</strong><button class="bk-activity-collapse" type="button" aria-label="Hinweis verkleinern" title="Hinweis verkleinern">×</button></div><div class="bk-activity-list"></div>';
+  const collapse = card.querySelector(".bk-activity-collapse");
+  const list = card.querySelector(".bk-activity-list");
+  box.append(card, mini);
+  document.body.appendChild(box);
+
+  const library = () => encodeURIComponent(window.__bkLibraryId || "main");
+  let collapsed = false;
+  try { collapsed = sessionStorage.getItem("bk-activity-collapsed") === "1"; } catch (_) {}
+  let waiting = false;
+  let lastSeen = [];
+  function viewState() {
+    card.hidden = collapsed;
+    mini.hidden = !collapsed;
+    mini.setAttribute("aria-expanded", String(!collapsed));
+    if (collapsed) {
+      const active = lastSeen.filter(item => item.active);
+      const icon = mini.querySelector(".bk-activity-icon");
+      const busy = active.length > 0;
+      icon.dataset.busy = String(busy);
+      icon.textContent = busy ? "" : lastSeen.some(item => item.status === "failed") ? "!" : "✓";
+      mini.querySelector(".bk-activity-mini-count").textContent = busy && active.length > 1 ? String(active.length) : "";
+    }
+  }
+  function setCollapsed(value) {
+    collapsed = value;
+    try { sessionStorage.setItem("bk-activity-collapsed", value ? "1" : "0"); } catch (_) {}
+    viewState();
+  }
+  collapse.addEventListener("click", () => setCollapsed(true));
+  mini.addEventListener("click", () => setCollapsed(false));
+
+  function destination(item) {
+    const lib = library();
+    if (item.kind === "import") return "/?library=" + lib;
+    const job = item.job_id ? "&job=" + encodeURIComponent(item.job_id) : "";
+    return "/events?library=" + lib + job;
+  }
+  function makeItem(item) {
+    const row = document.createElement("div");
+    row.className = "bk-activity-item";
+    row.dataset.status = item.status;
+    const icon = document.createElement("span");
+    icon.className = "bk-activity-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.dataset.busy = String(!!item.active);
+    icon.textContent = item.active ? "" : item.status === "completed" ? "✓" : "!";
+    const link = document.createElement("a");
+    link.className = "bk-activity-link";
+    link.href = destination(item);
+    link.title = "Zum Vorgang wechseln";
+    const name = document.createElement("strong");
+    name.textContent = item.label || "Hintergrundvorgang";
+    const detail = document.createElement("small");
+    detail.textContent = item.detail || "";
+    link.append(name, detail);
+    row.append(icon, link);
+    if (item.kind === "cancel" && item.can_retry) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "bk-activity-retry";
+      retry.textContent = "Wiederholen";
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        try {
+          const url = "/api/jobs/" + encodeURIComponent(item.job_id) +
+            "/event-mutations/" + encodeURIComponent(item.mutation_id) +
+            "/cancel?library=" + library();
+          const response = await fetch(url, {method:"POST"});
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || "Auftrag konnte nicht erneut vorgemerkt werden.");
+          }
+          await refresh();
+        } catch (error) {
+          detail.textContent = String(error.message || error);
+        } finally {
+          retry.disabled = false;
+        }
+      });
+      row.appendChild(retry);
+    }
+    return row;
+  }
+  async function refresh() {
+    if (waiting || document.hidden || !desktop.matches) return;
+    waiting = true;
+    try {
+      const res = await fetch("/api/background-activity?library=" + library(), {cache:"no-store"});
+      if (!res.ok) return;
+      const data = await res.json();
+      const ops = Array.isArray(data.operations) ? data.operations : [];
+      const active = ops.filter(item => item.active);
+      const finished = ops.filter(item => !item.active);
+      lastSeen = active.concat(finished).slice(0,5);
+      box.hidden = lastSeen.length === 0;
+      if (!box.hidden) {
+        list.replaceChildren(...lastSeen.map(makeItem));
+        viewState();
+      }
+    } catch (_) {
+      // Kurzzeitige Netzfehler verändern die serverseitigen Aufträge nicht.
+    } finally {
+      waiting = false;
+    }
+  }
+  const mediaChange = () => { box.hidden = !desktop.matches || !lastSeen.length; if (desktop.matches) refresh(); };
+  desktop.addEventListener?.("change", mediaChange);
+  window.addEventListener("bk-cancellation-queued", refresh);
+  window.addEventListener("pageshow", refresh);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  refresh();
+  window.setInterval(refresh, 2500);
+})();
+"""
+
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = html
     result = result.replace(
@@ -5907,7 +6180,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0424_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0425_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0441_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0443_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0443_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0444_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
@@ -5934,7 +6208,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     result = result.replace(
         "</body>",
         f"<script>{BIBLIOTHEKAR_JS}</script>\n"
-        f"<script>{BIBLIOTHEKAR_0443_JS}</script>\n</body>",
+        f"<script>{BIBLIOTHEKAR_0444_JS}</script>\n</body>",
         1,
     )
     return result
