@@ -300,7 +300,6 @@ def build_folder_import_plan(
 
     reserved: set[str] = set()
     plan: list[dict[str, Any]] = []
-    committed_plan: list[dict[str, Any]] = []
     review_family_count = 0
     device_counts: dict[str, int] = defaultdict(int)
 
@@ -659,6 +658,7 @@ def run_folder_import_job(
     manifest_path = temporary_protocol / "manifest.json"
     snapshot_path = temporary_protocol / "snapshot.json"
     plan: list[dict[str, Any]] = []
+    committed_plan: list[dict[str, Any]] = []
 
     if temporary_job_root.exists():
         raise PipelineError(f"Temporärer Sicherungsbestand existiert bereits: {temporary_job_root}")
