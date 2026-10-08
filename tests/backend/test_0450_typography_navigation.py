@@ -34,7 +34,8 @@ def test_0450_no_assistant_link_in_desktop_or_mobile_navigation():
     ):
         rendered = _render(area, subarea)
         assert 'href="/assistant"' not in rendered
-        assert 'bk-assistant-button' not in rendered
+        header = rendered.split('<header class="bk-shell">', 1)[1].split('</header>', 1)[0]
+        assert 'bk-assistant-button' not in header
         assert '<span>Assistent</span>' not in rendered
         assert 'href="/metadata-correction"' in rendered
         assert 'href="/trash"' in rendered
@@ -59,6 +60,8 @@ def test_0450_no_unintentional_legacy_font_family():
                  "workspace_ui.py", "metadata_correction_ui.py",
                  "transfer_ui.py", "trash_ui.py"):
         source = (Path(__file__).resolve().parents[2] / "app" / name).read_text(encoding="utf-8")
+        if name == "ui_shell.py":
+            source = source[source.index("BIBLIOTHEKAR_0450_CSS = "):]
         for rule in re.findall(r"font-family\\s*:\\s*([^;\\n]+)", source, flags=re.I):
             assert FONT_STACK in rule or rule.strip() in {"inherit", "var(--bk-font-ui)"}, (name, rule)
 

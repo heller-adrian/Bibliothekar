@@ -109,7 +109,7 @@ body.bibliothekar-redesign {
   background: var(--bk-page-bg, var(--bk-paper)) !important;
   color: var(--bk-ink) !important;
   min-height: 100vh;
-  font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 body.bibliothekar-redesign button,
@@ -722,6 +722,7 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   background: var(--bk-yellow); color: #202020; padding: 0 6px;
   font-size: .72rem; font-weight: 850;
 }
+.bk-assistant-button,
 .bk-menu-button {
   width: 44px;
   min-width: 44px;
@@ -734,6 +735,25 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   padding: 0 !important;
   border-radius: 12px !important;
   align-self: center;
+}
+.bk-assistant-button {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  text-decoration: none;
+}
+.bk-assistant-button svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bk-assistant-button.active {
+  border-color: #8ea0ab;
+  background: #2a3943;
 }
 .bk-menu-button { font-size: 1.18rem; }
 .bk-menu,
@@ -1451,6 +1471,7 @@ body[data-bk-area="import"] .diagnostics + section .bk-import-head {
   }
   .bk-task-label { display: none; }
   .bk-task-button { padding: 8px 9px; }
+  .bk-assistant-button,
   .bk-menu-button {
     width: 42px;
     min-width: 42px;
@@ -6143,6 +6164,10 @@ body.bibliothekar-redesign code,
 body.bibliothekar-redesign pre,
 body.bibliothekar-redesign kbd,
 body.bibliothekar-redesign samp {
+  font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+#bk-settings-dialog .bk-settings-preview-case pre {
   font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
