@@ -10948,10 +10948,11 @@ def index() -> str:
         </article>
       `;
       const isDone = job.state === "completed";
+      const isActive = !["completed","failed","interrupted"].includes(job.state);
       const expanded = openHistoryIds.has(jobId);
       const progressLabel = isDone
         ? `Abgeschlossen · ${fileCount ?? "–"} Dateien`
-        : `${escapeHtml(state)} · ${percent}% · ${escapeHtml(remaining)}`;
+        : (isActive ? `${escapeHtml(state)} · ${percent}% · ${escapeHtml(remaining)}` : escapeHtml(state));
       const actionMarkup = isHidden
         ? `<button type="button" class="secondary" data-history-unhide="${escapeHtml(jobId)}">Wieder einblenden</button>`
         : (isDone
@@ -10967,7 +10968,7 @@ def index() -> str:
                 <strong>${escapeHtml(presentation.title)}</strong>
                 <small>${isDone ? "Abgeschlossen" : progressLabel}${isDone ? " · " + (fileCount ?? "–") + " Dateien" : ""}</small>
               </span>
-              ${isDone ? "" : '<span class="bk-history-spinner" aria-hidden="true"></span>'}
+              ${isActive ? '<span class="bk-history-spinner" aria-hidden="true"></span>' : ""}
             </button>
             <div class="bk-history-actions" data-history-actions>${actionMarkup}</div>
           </div>
@@ -11304,9 +11305,9 @@ def index() -> str:
 
     let availableSources = [];
 
-    async function loadSources() {
+    async function loadSources({forceRefresh=false}={}) {
       const response = await fetch(
-        "/api/import-sources",
+        "/api/import-sources" + (forceRefresh ? "?force_refresh=true" : ""),
         { cache: "no-store" }
       );
 
@@ -11560,12 +11561,26 @@ def index() -> str:
       if(label) label.innerHTML = '<span aria-hidden="true">◉</span> Ausgeblendet (' + hiddenHistoryTotal + ') <span>' + (hiddenHistoryOpen ? "▴" : "▾") + '</span>';
     }
 
+    async function requestHistoryPages(hidden, count) {
+      let offset = 0, total = 0, jobs = [];
+      do {
+        const limit = Math.min(50, count - offset);
+        const response = await fetch("/api/import-history?hidden=" + String(hidden)
+          + "&limit=" + limit + "&offset=" + offset, {cache:"no-store"});
+        if(!response.ok)throw new Error("Importverlauf konnte nicht geladen werden.");
+        const part = await response.json();
+        total = Number(part.total || 0);
+        jobs.push(...(part.jobs || []));
+        if(!part.jobs?.length || jobs.length >= total) break;
+        offset = jobs.length;
+      } while (offset < count);
+      return {jobs,total};
+    }
+
     async function loadHiddenHistory() {
-      const response=await fetch("/api/import-history?hidden=true&limit=" + hiddenHistoryLimit, {cache:"no-store"});
-      if(!response.ok)throw new Error("Ausgeblendete Importe konnten nicht geladen werden.");
-      const data=await response.json();
-      hiddenHistoryJobs = data.jobs || [];
-      hiddenHistoryTotal = Number(data.total || 0);
+      const data = await requestHistoryPages(true, hiddenHistoryLimit);
+      hiddenHistoryJobs = data.jobs;
+      hiddenHistoryTotal = data.total;
       renderHiddenHistory();
     }
 
@@ -11593,9 +11608,7 @@ def index() -> str:
         }catch(_){}
       }
       const openDetails = openJobDetailKeys();
-      const response = await fetch("/api/import-history?limit=" + jobHistoryLimit, {cache:"no-store"});
-      if(!response.ok)throw new Error("Importverlauf konnte nicht geladen werden.");
-      const data = await response.json();
+      const data = await requestHistoryPages(false, jobHistoryLimit);
       const previous=new Map(jobHistoryJobs.map(job=>[String(job.id),job.state]));
       jobHistoryJobs = data.jobs || [];
       jobHistoryTotal = Number(data.total || 0);
@@ -11618,7 +11631,7 @@ def index() -> str:
       }catch(_){}
     }
 
-    async function refreshAll() {
+    async function refreshAll({forceSources=false}={}) {
       refreshButton.disabled = true;
       refreshButton.classList.add("bk-busy");
       refreshButton.setAttribute("aria-busy", "true");
@@ -11628,7 +11641,7 @@ def index() -> str:
       try {
         await Promise.all([
           loadHealth(),
-          loadSources(),
+          loadSources({forceRefresh:forceSources}),
           loadJobs(),
           loadSourceDevices(),
           loadFolderBrowser().catch(() => null)
@@ -11854,7 +11867,7 @@ def index() -> str:
 
     refreshButton.addEventListener(
       "click",
-      refreshAll
+      () => refreshAll({forceSources:true})
     );
 
     refreshAll().then(() => loadHiddenCount()).catch(showError);
