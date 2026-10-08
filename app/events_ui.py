@@ -3925,17 +3925,22 @@ EVENTS_HTML = r"""<!doctype html>
       sortPlanDialog.close();
       setEventOperationBusy("Änderung wird verworfen …");
       try {
-        await requestJson(
+        const accepted=await requestJson(
           `/api/jobs/${encodeURIComponent(ctx.jobId)}/event-mutations/${encodeURIComponent(ctx.mutationId)}/cancel`,
           {method:"POST"}
         );
-        await loadEvents({reset:true});
+        if (!["queued","running","completed"].includes(String(accepted.status))) {
+          throw new Error("Der Verwerfauftrag wurde nicht angenommen.");
+        }
+        // Nach persistenter Annahme darf der Browser ohne Warnung wechseln.
         mandatoryMutationContext=null;
+        window.dispatchEvent(new Event("bk-cancellation-queued"));
         sortPlanCloseButton.classList.remove("danger-button");
         sortPlanCloseButton.textContent="Schließen";
         sortPlanCloseButton.hidden=false;
         refreshGlobalTasks();
-        setStatus("Änderung verworfen. Der vorherige Zustand wurde wiederhergestellt.",false,true);
+        setStatus("Verwerfauftrag angenommen. Er läuft unabhängig von dieser Seite im Hintergrund.",false,true);
+        loadEvents({reset:true}).catch(error=>setStatus(error.message,true));
       } catch (error) {
         // Bei einem fehlgeschlagenen Verwerfen muss der Nutzer erneut versuchen können.
         sortPlanSubtitle.textContent="Verwerfen fehlgeschlagen. Bitte erneut versuchen.";
@@ -4022,10 +4027,14 @@ EVENTS_HTML = r"""<!doctype html>
           cancelMutationButton.disabled=true;
           setEventOperationBusy("Änderung wird verworfen …");
           requestJson(`/api/jobs/${encodeURIComponent(cancelMutationButton.dataset.jobId||"")}/event-mutations/${encodeURIComponent(cancelMutationButton.dataset.cancelMutation)}/cancel`, {method:"POST"})
-            .then(async () => {
-              await loadEvents({reset:true});
+            .then(accepted => {
+              if (!["queued","running","completed"].includes(String(accepted.status))) {
+                throw new Error("Der Verwerfauftrag wurde nicht angenommen.");
+              }
+              window.dispatchEvent(new Event("bk-cancellation-queued"));
+              setStatus("Verwerfauftrag angenommen. Er läuft unabhängig von dieser Seite im Hintergrund.", false, true);
+              loadEvents({reset:true}).catch(error=>setStatus(error.message,true));
               refreshGlobalTasks();
-              setStatus("Änderung verworfen. Der gespeicherte Ursprungszustand wurde wiederhergestellt.", false, true);
             })
             .catch(error => setStatus(error.message, true))
             .finally(() => {
