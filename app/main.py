@@ -295,7 +295,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.45.3"
+DEPLOYMENT_VERSION = "0.45.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4107,7 +4107,7 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
 # weder die Sicherungsdateien noch die fachlichen Auftragszustände.
 @app.get("/api/import-history", tags=["Import"])
 def api_import_history(
-    offset: int = 0, limit: int = 5, hidden: bool = False,
+    offset: int = 0, limit: int = 5, hidden: bool = False, count_only: bool = False,
 ) -> dict[str, Any]:
     offset = max(0, int(offset))
     limit = max(1, min(int(limit), 50))
@@ -4119,6 +4119,8 @@ def api_import_history(
         total = int(conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE " + where, (int(hidden),)
         ).fetchone()[0])
+        if count_only:
+            return {"jobs": [], "total": total, "has_more": False}
         ids = [
             str(row[0]) for row in conn.execute(
                 "SELECT id FROM jobs WHERE " + where
@@ -10397,10 +10399,11 @@ def index() -> str:
     let hiddenHistoryLimit = 15;
     let hiddenHistoryJobs = [];
     let hiddenHistoryOpen = false;
+    let importHistoryRequestId = 0;
+    let hiddenHistoryRequestId = 0;
     const openHistoryIds = new Set();
     const seenHistoryStates = new Map();
     let lastImportHistoryPoll = 0;
-    const importHistoryCacheKey = "bk-import-history-0452:" + (window.__bkLibraryId || "main");
 
     const noticeElement =
       document.getElementById("notice");
@@ -11415,10 +11418,18 @@ def index() -> str:
         jobHistoryLimit += 5;
         await loadJobs().catch(showError);
       });
-      document.getElementById("hidden-history-toggle")?.addEventListener("click", async () => {
+      document.getElementById("hidden-history-toggle")?.addEventListener("click", () => {
         hiddenHistoryOpen = !hiddenHistoryOpen;
-        if(hiddenHistoryOpen) await loadHiddenHistory();
-        else renderJobHistory(openJobDetailKeys());
+        const toggle = document.getElementById("hidden-history-toggle");
+        const list = document.getElementById("hidden-history-list");
+        if(toggle) toggle.setAttribute("aria-expanded", String(hiddenHistoryOpen));
+        if(list) list.hidden = !hiddenHistoryOpen;
+        if(hiddenHistoryOpen) {
+          if(list && !hiddenHistoryJobs.length) list.innerHTML = '<div class="empty bk-loading-status">Ausgeblendete Importe werden geladen …</div>';
+          void loadHiddenHistory().catch(showError);
+        } else {
+          hiddenHistoryRequestId++;
+        }
       });
       bindHistoryButtons(jobsElement);
       if(hiddenHistoryOpen) renderHiddenHistory();
@@ -11450,8 +11461,17 @@ def index() -> str:
             });
             const result = await response.json();
             if(!response.ok) throw new Error(result.detail || "Sichtbarkeit konnte nicht geändert werden.");
+            // Sichtbarkeit unmittelbar nach dem bestätigten Schreibzugriff aktualisieren.
+            if(hidden) {
+              jobHistoryJobs = jobHistoryJobs.filter(job => String(job.id) !== String(id));
+              jobHistoryTotal = Math.max(0, jobHistoryTotal - 1);
+              hiddenHistoryTotal++;
+            } else {
+              hiddenHistoryJobs = hiddenHistoryJobs.filter(job => String(job.id) !== String(id));
+              hiddenHistoryTotal = Math.max(0, hiddenHistoryTotal - 1);
+            }
+            renderJobHistory(openJobDetailKeys());
             await loadJobs();
-            await loadHiddenCount();
             if(hiddenHistoryOpen) await loadHiddenHistory();
           }catch(error){showError(error);button.disabled = false;}
         });
@@ -11543,12 +11563,10 @@ def index() -> str:
     }
 
     async function loadHiddenCount() {
-      const response = await fetch("/api/import-history?hidden=true&limit=1", {cache:"no-store"});
-      if(!response.ok) return;
-      const data=await response.json();
-      hiddenHistoryTotal = Number(data.total || 0);
-      const label=document.getElementById("hidden-history-toggle");
-      if(label) label.textContent = 'Ausgeblendet (' + hiddenHistoryTotal + ')';
+      const response = await fetch("/api/import-history?hidden=true&count_only=true", {cache:"no-store"});
+      if(!response.ok) throw new Error("Zähler für ausgeblendete Importe konnte nicht geladen werden.");
+      const data = await response.json();
+      return Number(data.total || 0);
     }
 
     async function requestHistoryPages(hidden, count) {
@@ -11568,9 +11586,13 @@ def index() -> str:
     }
 
     async function loadHiddenHistory() {
+      const requestId = ++hiddenHistoryRequestId;
       const data = await requestHistoryPages(true, hiddenHistoryLimit);
+      if(requestId !== hiddenHistoryRequestId || !hiddenHistoryOpen) return;
       hiddenHistoryJobs = data.jobs;
       hiddenHistoryTotal = data.total;
+      const label = document.getElementById("hidden-history-toggle");
+      if(label) label.textContent = 'Ausgeblendet (' + hiddenHistoryTotal + ')';
       renderHiddenHistory();
     }
 
@@ -11587,36 +11609,27 @@ def index() -> str:
     }
 
     async function loadJobs() {
-      if(!jobHistoryJobs.length){
-        try {
-          const snapshot=JSON.parse(sessionStorage.getItem(importHistoryCacheKey) || "null");
-          if(Array.isArray(snapshot?.jobs)){
-            jobHistoryJobs=snapshot.jobs;jobHistoryTotal=Number(snapshot.total || 0);
-            hiddenHistoryTotal=Number(snapshot.hidden || 0);
-            renderJobHistory();
-          }
-        }catch(_){}
-      }
+      // Liste und Zähler nur gemeinsam aus der aktuellen SQLite-Ansicht darstellen.
+      const requestId = ++importHistoryRequestId;
       const openDetails = openJobDetailKeys();
-      const data = await requestHistoryPages(false, jobHistoryLimit);
-      const previous=new Map(jobHistoryJobs.map(job=>[String(job.id),job.state]));
+      const [data, hiddenCount] = await Promise.all([
+        requestHistoryPages(false, jobHistoryLimit),
+        loadHiddenCount()
+      ]);
+      if(requestId !== importHistoryRequestId) return;
+      const previous = new Map(jobHistoryJobs.map(job => [String(job.id), job.state]));
       jobHistoryJobs = data.jobs || [];
       jobHistoryTotal = Number(data.total || 0);
-      for(const job of jobHistoryJobs){
-        const id=String(job.id);
-        const old=previous.get(id);
-        if(old && old!=="completed" && job.state==="completed") openHistoryIds.delete(id);
-        else if(!seenHistoryStates.has(id) && job.state!=="completed") openHistoryIds.add(id);
-        seenHistoryStates.set(id,job.state);
+      hiddenHistoryTotal = hiddenCount;
+      for(const job of jobHistoryJobs) {
+        const id = String(job.id);
+        const old = previous.get(id);
+        if(old && old !== "completed" && job.state === "completed") openHistoryIds.delete(id);
+        else if(!seenHistoryStates.has(id) && job.state !== "completed") openHistoryIds.add(id);
+        seenHistoryStates.set(id, job.state);
       }
-      // Die Schublade "Ausgeblendet" bleibt selbst dann erreichbar,
-      // wenn alle abgeschlossenen Importe ausgeblendet wurden.
+      // Die Schublade bleibt auch bei null sichtbaren Importen erreichbar.
       renderJobHistory(openDetails);
-      try {
-        sessionStorage.setItem(importHistoryCacheKey,JSON.stringify({
-          jobs:jobHistoryJobs,total:jobHistoryTotal,hidden:hiddenHistoryTotal
-        }));
-      }catch(_){}
     }
 
     async function refreshAll({forceSources=false}={}) {
@@ -11858,7 +11871,7 @@ def index() -> str:
       () => refreshAll({forceSources:true})
     );
 
-    refreshAll().then(() => loadHiddenCount()).catch(showError);
+    refreshAll().catch(showError);
 
     // Nur aktive Vorgänge benötigen eine laufende Fortschrittsanzeige.
     window.setInterval(() => {
