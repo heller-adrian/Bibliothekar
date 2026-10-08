@@ -35,3 +35,13 @@ def test_0434_restart_guard_remains_in_place():
     source = Path(main.__file__).read_text(encoding="utf-8")
     assert "mark_running_jobs_interrupted" in source
     assert "repair_interrupted_jobs_from_terminal_evidence" in source
+
+
+def test_0434_each_import_lifecycle_has_a_terminal_action():
+    html = main.index()
+    assert 'data-cancel-import="' in html
+    assert ">Import abbrechen</button>" in html
+    assert 'data-discard-import="' in html
+    assert ">Import entfernen</button>" in html
+    assert 'data-delete-backup="' in html
+    assert "Sicherung löschen" in html
