@@ -6,6 +6,7 @@ from typing import Any, Iterator
 from datetime import datetime, timezone
 import json
 import sqlite3
+import re
 import uuid
 
 
@@ -138,6 +139,82 @@ def available_migrations() -> list[tuple[int, Path]]:
     return migrations
 
 
+def _apply_trash_root_kind_migration(
+    connection: sqlite3.Connection,
+    version: int,
+) -> None:
+    """Rebuild the files CHECK constraint, preserving all existing columns/FKs."""
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys=OFF")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='files'"
+        ).fetchone()
+        if row is None or not row["sql"]:
+            raise DatabaseError("Die Tabelle files fehlt für die Papierkorb-Migration.")
+        create_sql = str(row["sql"])
+        renamed, count = re.subn(
+            r"(?i)^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?files\b",
+            "CREATE TABLE files_trash_upgrade",
+            create_sql,
+            count=1,
+        )
+        if count != 1:
+            raise DatabaseError("Das Schema der Tabelle files ist unbekannt.")
+        upgraded, count = re.subn(
+            r"(current_root_kind\s+IN\s*\(\s*'job_root'\s*,"
+            r"\s*'shared_workspace'\s*,\s*'camera_archive')",
+            r"\1, 'trash'",
+            renamed,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count != 1:
+            raise DatabaseError("Die Root-Kind-Constraint ist unbekannt.")
+        definitions = [
+            str(record["sql"])
+            for record in connection.execute(
+                """SELECT sql FROM sqlite_master
+                   WHERE tbl_name='files'
+                     AND type IN ('index','trigger')
+                     AND sql IS NOT NULL
+                   ORDER BY type,name"""
+            ).fetchall()
+        ]
+        connection.execute(upgraded)
+        columns = [
+            str(item["name"])
+            for item in connection.execute("PRAGMA table_info(files)").fetchall()
+        ]
+        if not columns:
+            raise DatabaseError("Die bestehenden Dateispalten fehlen.")
+        column_list = ",".join('"' + name.replace('"', '""') + '"' for name in columns)
+        connection.execute(
+            f"INSERT INTO files_trash_upgrade ({column_list}) "
+            f"SELECT {column_list} FROM files"
+        )
+        connection.execute("DROP TABLE files")
+        connection.execute("ALTER TABLE files_trash_upgrade RENAME TO files")
+        for sql in definitions:
+            connection.execute(sql)
+        if connection.execute("PRAGMA foreign_key_check").fetchall():
+            raise DatabaseError("Fremdschlüsselprüfung nach Papierkorb-Migration fehlgeschlagen.")
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise DatabaseError("SQLite-Integrität nach Papierkorb-Migration: " + str(integrity))
+        connection.execute(
+            "INSERT INTO schema_versions(version,applied_at) VALUES (?,datetime('now'))",
+            (version,),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+
 def apply_migration(
     connection: sqlite3.Connection,
     version: int,
@@ -151,6 +228,10 @@ def apply_migration(
         raise DatabaseError(
             f"Migration ist leer: {path}"
         )
+
+    if version == 48:
+        _apply_trash_root_kind_migration(connection, version)
+        return
 
     try:
         connection.executescript(

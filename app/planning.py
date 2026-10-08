@@ -82,6 +82,10 @@ def _load_family_stats(
                 ff.capture_time_confidence
 
             HAVING COUNT(f.id) > 0
+                OR NOT EXISTS (
+                    SELECT 1 FROM files any_file
+                    WHERE any_file.family_id=ff.id
+                )
 
             ORDER BY
                 ff.selected_capture_time,

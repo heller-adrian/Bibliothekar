@@ -52,6 +52,14 @@ def event_family_rows(connection: Any, event_id: str) -> list[dict[str, Any]]:
     if not family_ids:
         return []
     placeholders = ",".join("?" for _ in family_ids)
+    has_root_kind = any(
+        row["name"] == "current_root_kind"
+        for row in connection.execute("PRAGMA table_info(files)")
+    )
+    active_clause = (
+        "AND COALESCE(f.current_root_kind,'job_root') <> 'trash'"
+        if has_root_kind else ""
+    )
     rows = connection.execute(
         f"""SELECT ff.id AS family_id, ff.*, j.source_volume_label AS source_label,
                    COUNT(DISTINCT f.id) AS file_count,
@@ -59,10 +67,11 @@ def event_family_rows(connection: Any, event_id: str) -> list[dict[str, Any]]:
             FROM file_families ff
             JOIN jobs j ON j.id=ff.job_id
             LEFT JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
-              AND COALESCE(f.current_root_kind,'job_root') <> 'trash'
+              {active_clause}
             WHERE ff.id IN ({placeholders})
             GROUP BY ff.id
             HAVING COUNT(DISTINCT f.id) > 0
+              OR NOT EXISTS (SELECT 1 FROM files any_file WHERE any_file.family_id=ff.id)
             ORDER BY ff.selected_capture_time,ff.id""",
         tuple(family_ids),
     ).fetchall()
@@ -95,6 +104,14 @@ def event_file_rows(connection: Any, event_id: str) -> list[dict[str, Any]]:
         values.extend(direct_file_ids)
     if not clauses:
         return []
+    has_root_kind = any(
+        row["name"] == "current_root_kind"
+        for row in connection.execute("PRAGMA table_info(files)")
+    )
+    active_clause = (
+        "AND COALESCE(f.current_root_kind,'job_root') <> 'trash'"
+        if has_root_kind else ""
+    )
     rows = connection.execute(
         f"""SELECT f.id AS file_id, f.*, ff.family_key,
                    ff.selected_capture_time AS family_capture_time,
@@ -104,7 +121,7 @@ def event_file_rows(connection: Any, event_id: str) -> list[dict[str, Any]]:
             LEFT JOIN file_families ff ON ff.id=f.family_id
             JOIN jobs j ON j.id=f.job_id
             WHERE ({" OR ".join(clauses)})
-              AND COALESCE(f.current_root_kind,'job_root') <> 'trash'
+              {active_clause}
             ORDER BY ff.selected_capture_time,f.id""",
         tuple(values),
     ).fetchall()

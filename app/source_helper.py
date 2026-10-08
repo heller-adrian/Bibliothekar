@@ -10,7 +10,7 @@ import subprocess
 
 from fastapi import FastAPI, HTTPException
 
-app = FastAPI(title="Kamera-Quellen-Helfer", version="0.43.4")
+app = FastAPI(title="Kamera-Quellen-Helfer", version="0.44.0")
 MOUNT_ROOT = Path(
     os.environ.get(
         "KAMERA_REMOVABLE_MOUNT_ROOT",

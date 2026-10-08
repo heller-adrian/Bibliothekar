@@ -2,11 +2,11 @@
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktuelle veröffentlichte Version: **0.43.4**
+Aktuelle veröffentlichte Version: **0.44.0**
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
-Fester Rollback-Tag: **`ghcr.io/heller-adrian/bibliothekar:0.43.4`**
+Aktuelles Testimage: **`ghcr.io/heller-adrian/bibliothekar:patch-0.44.0`**
 
 ## Updates
 
@@ -58,6 +58,7 @@ als `/workspace` ein. Bibliothekar verwaltet darunter standardmäßig:
 - `/workspace/SD-Kartensicherungen` – globaler Sicherungs- und freier Kamerabestand
 - `/workspace/Arbeitsbereiche` – Stamm für frei benannte Bibliotheks-Arbeitsbereiche
 - `/workspace/Metadatenkorrektur` – verwalteter Stamm für Metadatenkorrekturen
+- `/workspace/Papierkorb` – verwalteter Papierkorb ohne automatische Löschfrist
 - `/workspace/Metadatenkorrektur/Allgemein` – allgemeine Einzeldatei-Korrektur
 - `/workspace/Metadatenkorrektur/Mehrfachkorrektur` – unabhängige Korrektur zusammengehöriger Aufnahmen mit konstantem Zeitversatz
 
@@ -67,7 +68,7 @@ Dateisystempfad. Bibliothekar erzeugt daraus weder
 `/workspace/Metadatenkorrektur/Bibliothek/main`. Maßgeblich sind immer die
 vom Nutzer gespeicherten Arbeitsbereichs- und Archivpfade.
 
-Die Namen der drei verwalteten Stammordner können unter
+Die Namen der vier verwalteten Stammordner können unter
 **Einstellungen → Pfade** geändert werden. Eigene TrueNAS-Datasets oder
 Host-Path-Mounts werden von Bibliothekar weder erzeugt noch umgehängt.
 
