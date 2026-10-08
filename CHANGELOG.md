@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### 0.44.0 – Bibliothekar-Papierkorb
+
+- Der gemeinsame Kamera-Arbeitsbereich besitzt einen vierten verwalteten Stammordner „Papierkorb“. Seine interne Rolle ist stabil; der sichtbare Ordnername kann unter Einstellungen → Pfade unabhängig geändert werden.
+- Der Papierkorb ist über das Hamburgermenü erreichbar und gleicht beim Öffnen automatisch den tatsächlichen Dateisystembestand mit SQLite ab. Finder-/SMB-Verschiebungen in den Papierkorb werden als normaler Workflow erkannt.
+- Dateien mit physischem Zustand `trash` werden aus aktivem Tagesbestand, Ereignisdateien und Sortierplänen ausgeschlossen. SQLite folgt dem beobachteten Speicherort, bleibt aber als Herkunfts-/Identitätsquelle für eine spätere Wiederherstellung erhalten.
+- „Papierkorb entleeren“ ist ausschließlich manuell, verlangt eine Sicherheitsbestätigung, löscht den physischen Bestand ohne Symlink-Folgepfade und bereinigt anschließend die zugehörigen SQLite-Datei-/Familieneinträge.
+- Die vorhandene Umbenennungsarchitektur der verwalteten Stammordner wurde gehärtet: Bibliotheks-Kompatibilitätswurzeln verwenden nun die konfigurierten Rollennamen statt sichtbarer Standardnamen.
+- Es gibt keine automatische Löschfrist und keinen zweiten Löschmechanismus neben dem Papierkorb.
+
 ### 0.43.4 – Unterbrochene Importe bereinigen
 
 - Durch einen App-Neustart unterbrochene Ordnerimporte bleiben als klarer Status „Unterbrochen“ erhalten, berechnen aber keine weiterlaufende Restzeit mehr.

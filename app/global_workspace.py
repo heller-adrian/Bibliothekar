@@ -50,10 +50,13 @@ def _event_counts(
     ph = ",".join("?" for _ in family_ids)
     values = connection.execute(
         f"""SELECT COUNT(*) AS file_count,
+                   COUNT(DISTINCT family_id) AS family_count,
                    COALESCE(SUM(size_bytes),0) AS total_size_bytes,
                    COALESCE(SUM(CASE WHEN review_status='required' THEN 1 ELSE 0 END),0)
                      AS review_required_count
-            FROM files WHERE family_id IN ({ph})""",
+            FROM files
+            WHERE family_id IN ({ph})
+              AND COALESCE(current_root_kind,'job_root') <> 'trash'""",
         tuple(family_ids),
     ).fetchone()
     released_assets = {"file_count": 0, "total_size_bytes": 0}
@@ -70,7 +73,7 @@ def _event_counts(
             "total_size_bytes": int(asset_values["total_size_bytes"] or 0),
         }
     return {
-        "family_count": len(family_ids),
+        "family_count": int(values["family_count"] or 0),
         "file_count": (
             int(values["file_count"] or 0)
             + int(released_assets["file_count"])

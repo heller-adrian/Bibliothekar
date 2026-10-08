@@ -7,6 +7,7 @@ from app.database import database_connection
 from app.event_inventory import EventInventoryError, scan_event_inventory
 from app.sort_plan import _reapply_physical_event_prefix
 from app.workspace_layout import WorkspaceLayoutError, shared_work_root
+from app.trash import reconcile_trash_inventory
 
 
 def refresh_live_event_inventories(
@@ -18,6 +19,7 @@ def refresh_live_event_inventories(
     event_id: str | None = None,
 ) -> dict[str, Any]:
     """Refresh observational IST snapshots for applied/archived parent events."""
+    reconcile_trash_inventory(database_path, workspace_path)
     where = [
         "parent_event_id IS NULL",
         "status IN ('applied','archived')",

@@ -25,6 +25,11 @@ from app.workspace_ui import WORKSPACE_HTML
 from app.events_ui import EVENTS_HTML
 from app.transfer_ui import TRANSFER_HTML
 from app.metadata_correction_ui import METADATA_CORRECTION_HTML
+from app.trash_ui import TRASH_HTML
+from app.trash import (
+    TRASH_CONFIRMATION, TrashError, reconcile_trash_inventory,
+    empty_trash_filesystem, purge_trash_database,
+)
 from app.ui_shell import apply_shell
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
@@ -287,7 +292,7 @@ from app.archive_reassignment import (
 
 APP_VERSION = __version__
 RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.43.4"
+DEPLOYMENT_VERSION = "0.44.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -511,6 +516,14 @@ def compatibility_workspace_root(context: LibraryContext) -> Path:
         root / BACKUP_DIRECTORY_NAME,
         workspace_backup_root(context.workspace_root),
     )
+    # The legacy alias remains for old internal paths; canonical operations
+    # must also resolve the configured name, even after a Finder rename.
+    configured_backup = load_storage_settings()["backup_directory_name"]
+    if configured_backup != BACKUP_DIRECTORY_NAME:
+        _ensure_compatibility_link(
+            root / configured_backup,
+            workspace_backup_root(context.workspace_root),
+        )
     return root
 
 
@@ -2474,6 +2487,7 @@ def _storage_settings_state() -> dict[str, Any]:
         "backup_root": str(paths["backup_root"]),
         "workspaces_root": str(paths["workspaces_root"]),
         "metadata_root": str(paths["metadata_root"]),
+        "trash_root": str(paths["trash_root"]),
         "libraries": libraries,
     }
 
@@ -2531,6 +2545,7 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
         "backup_directory_name": "backup",
         "workspaces_directory_name": "workspaces",
         "metadata_directory_name": "metadata",
+        "trash_directory_name": "trash",
     }
     moved: list[tuple[Path, Path]] = []
     previous_rows = list_libraries(
@@ -2548,7 +2563,7 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
             for key in key_map
         }
 
-        # Alle drei Namen vor dem ersten Dateisystemeingriff prüfen.
+        # Alle vier Namen vor dem ersten Dateisystemeingriff prüfen.
         for key in key_map:
             old_path = old_paths[key]
             new_path = new_paths[key]
@@ -2887,7 +2902,7 @@ def get_health() -> dict[str, Any]:
                 health_workspace / BACKUP_DIRECTORY_NAME
             ).resolve(strict=False)
             health_work_area = (
-                health_workspace / "Arbeitsbereiche"
+                health_workspace / load_storage_settings()["workspaces_directory_name"]
             ).resolve(strict=False)
         archive_path = {
             "path": None,
@@ -4340,6 +4355,83 @@ def api_ssd_release(
         raise HTTPException(
             status_code=status_code,
             detail=message,
+        ) from error
+
+
+@app.get("/trash", response_class=HTMLResponse, tags=["Oberfläche"])
+def trash_interface() -> HTMLResponse:
+    return HTMLResponse(
+        content=apply_shell(TRASH_HTML, active_area="trash"),
+        status_code=200,
+    )
+
+
+@app.get("/api/trash", tags=["Papierkorb"])
+def api_trash_inventory() -> dict[str, Any]:
+    # The shared physical tree is the source of truth. Reconcile every
+    # registered library so a Finder move cannot leave parallel active rows.
+    results = []
+    for row in list_libraries(
+        REGISTRY_DATABASE_FILE,
+        active_only=False,
+        registered_only=True,
+    ):
+        path = Path(str(row["database_path"]))
+        if path.is_file():
+            results.append(
+                reconcile_trash_inventory(path, WORKSPACE_PATH)
+            )
+    if not results:
+        return reconcile_trash_inventory(current_database_file(), WORKSPACE_PATH)
+    result = results[0]
+    return {
+        **result,
+        "tracked_file_count": sum(
+            1 for entry in result["entries"]
+            if entry.get("entry_type") == "file"
+            and any(
+                next(
+                    (item.get("tracked") for item in other["entries"]
+                     if item.get("relative_path") == entry.get("relative_path")),
+                    False,
+                ) for other in results
+            )
+        ),
+    }
+
+
+@app.post("/api/trash/empty", tags=["Papierkorb"])
+def api_empty_trash(payload: dict[str, Any]) -> dict[str, Any]:
+    if str(payload.get("confirmation") or "") != TRASH_CONFIRMATION:
+        raise HTTPException(
+            status_code=422,
+            detail="Die ausdrückliche Sicherheitsbestätigung fehlt.",
+        )
+    try:
+        api_trash_inventory()
+        empty_trash_filesystem(WORKSPACE_PATH)
+        # A failed/partial filesystem deletion raises and leaves DB rows
+        # untouched; only a fully empty physical root permits DB cleanup.
+        state = reconcile_trash_inventory(current_database_file(), WORKSPACE_PATH)
+        if state["entry_count"] or state["directory_count"]:
+            raise TrashError("Papierkorb ist noch nicht vollständig leer.")
+        databases = {
+            Path(str(row["database_path"])).resolve(strict=False)
+            for row in list_libraries(
+                REGISTRY_DATABASE_FILE,
+                active_only=False,
+                registered_only=True,
+            )
+            if Path(str(row["database_path"])).is_file()
+        }
+        databases.add(current_database_file().resolve(strict=False))
+        for database in sorted(databases):
+            purge_trash_database(database)
+        return api_trash_inventory()
+    except (OSError, TrashError, ValueError) as error:
+        raise HTTPException(
+            status_code=409,
+            detail="Papierkorb konnte nicht sicher geleert werden: " + str(error),
         ) from error
 
 

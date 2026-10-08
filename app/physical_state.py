@@ -257,6 +257,23 @@ def reconcile_missing_files(
             (file_id,),
         ).fetchone()
 
+        if (
+            file_identity is not None
+            and str(file_identity["current_root_kind"] or "") == "trash"
+        ):
+            connection.execute(
+                """DELETE FROM event_missing_file_observations
+                   WHERE event_id=? AND root_kind=? AND file_id=?""",
+                (event_id, root_kind, file_id),
+            )
+            resolve_notice_key(connection, f"placement:{file_id}", now=timestamp)
+            resolve_notice_key(
+                connection,
+                f"cross-event:{event_id}:{file_id}",
+                now=timestamp,
+            )
+            continue
+
         cross_matches = []
         if file_identity is not None and str(file_identity["sha256"] or ""):
             cross_matches = connection.execute(

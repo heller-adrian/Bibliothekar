@@ -10,6 +10,7 @@ import tempfile
 DEFAULT_BACKUP_DIRECTORY_NAME = "SD-Kartensicherungen"
 DEFAULT_WORKSPACES_DIRECTORY_NAME = "Arbeitsbereiche"
 DEFAULT_METADATA_DIRECTORY_NAME = "Metadatenkorrektur"
+DEFAULT_TRASH_DIRECTORY_NAME = "Papierkorb"
 
 
 class StorageSettingsError(RuntimeError):
@@ -68,6 +69,11 @@ def load_storage_settings() -> dict[str, str]:
             field="Metadatenkorrektur",
             default=DEFAULT_METADATA_DIRECTORY_NAME,
         ),
+        "trash_directory_name": _clean_name(
+            storage.get("trash_directory_name"),
+            field="Papierkorb",
+            default=DEFAULT_TRASH_DIRECTORY_NAME,
+        ),
     }
 
 
@@ -81,6 +87,7 @@ def normalize_storage_settings(values: dict[str, Any]) -> dict[str, str]:
                 "backup_directory_name",
                 "workspaces_directory_name",
                 "metadata_directory_name",
+                "trash_directory_name",
             )
             if key in values
         },
@@ -101,10 +108,15 @@ def normalize_storage_settings(values: dict[str, Any]) -> dict[str, str]:
             field="Metadatenkorrektur",
             default=DEFAULT_METADATA_DIRECTORY_NAME,
         ),
+        "trash_directory_name": _clean_name(
+            merged["trash_directory_name"],
+            field="Papierkorb",
+            default=DEFAULT_TRASH_DIRECTORY_NAME,
+        ),
     }
     if len(set(cleaned.values())) != len(cleaned):
         raise StorageSettingsError(
-            "Die drei verwalteten Stammordner müssen unterschiedliche Namen haben."
+            "Die vier verwalteten Stammordner müssen unterschiedliche Namen haben."
         )
     return cleaned
 
@@ -156,6 +168,7 @@ def storage_paths(workspace_root: Path) -> dict[str, Path]:
         "backup_root": (root / settings["backup_directory_name"]).resolve(strict=False),
         "workspaces_root": (root / settings["workspaces_directory_name"]).resolve(strict=False),
         "metadata_root": (root / settings["metadata_directory_name"]).resolve(strict=False),
+        "trash_root": (root / settings["trash_directory_name"]).resolve(strict=False),
     }
 
 

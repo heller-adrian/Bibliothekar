@@ -16,6 +16,7 @@ from app.free_stock_layout import (
     released_origin_directory,
 )
 from app.storage_config import storage_paths
+from app.trash import reconcile_trash_inventory
 
 
 SENTINEL_NAME = ".bibliothekar-central-stock-v1"
@@ -329,6 +330,7 @@ def reconcile_central_free_stock(
     excluded_family_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     timestamp = _now()
+    trash_state = reconcile_trash_inventory(database_path, workspace_root)
     central_root = storage_paths(workspace_root)["backup_root"].resolve(strict=False)
     excluded = {int(value) for value in (excluded_family_ids or set())}
 
@@ -834,4 +836,5 @@ def reconcile_central_free_stock(
         "deleted_file_count": len(deleted_rows),
         "misplaced_file_count": misplaced,
         "modified_file_count": modified,
+        "trash_file_count": int(trash_state.get("file_count") or 0),
     }

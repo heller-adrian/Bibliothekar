@@ -1985,6 +1985,7 @@ def list_job_day_groups(
 
             WHERE job_id = ?
               AND selected_capture_time IS NOT NULL
+              AND COALESCE(current_root_kind,'job_root') <> 'trash'
               AND NOT (
                   current_root_kind='shared_workspace'
                   AND (
@@ -2031,6 +2032,7 @@ def list_job_day_groups(
             FROM files
 
             WHERE job_id = ?
+              AND COALESCE(current_root_kind,'job_root') <> 'trash'
               AND (
                   selected_capture_time IS NULL
                   OR (

@@ -71,6 +71,7 @@ def _load_family_stats(
             LEFT JOIN files AS f
                 ON f.family_id = ff.id
                AND f.job_id = ff.job_id
+               AND COALESCE(f.current_root_kind,'job_root') <> 'trash'
 
             WHERE ff.job_id = ?
 
@@ -79,6 +80,8 @@ def _load_family_stats(
                 ff.family_key,
                 ff.selected_capture_time,
                 ff.capture_time_confidence
+
+            HAVING COUNT(f.id) > 0
 
             ORDER BY
                 ff.selected_capture_time,

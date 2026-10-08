@@ -4599,10 +4599,12 @@ BIBLIOTHEKAR_JS = r"""
     setValue("bk-storage-backup-name", data.backup_directory_name);
     setValue("bk-storage-workspaces-name", data.workspaces_directory_name);
     setValue("bk-storage-metadata-name", data.metadata_directory_name);
+    setValue("bk-storage-trash-name", data.trash_directory_name);
     setText("bk-storage-workspace-root", data.workspace_root || "/workspace");
     setText("bk-storage-backup-preview", "SD-Kartensicherungen: " + String(data.backup_root || ""));
     setText("bk-storage-workspaces-preview", "Arbeitsbereiche: " + String(data.workspaces_root || ""));
     setText("bk-storage-metadata-preview", "Metadatenkorrektur: " + String(data.metadata_root || ""));
+    setText("bk-storage-trash-preview", "Papierkorb: " + String(data.trash_root || ""));
   }
 
   async function bkLoadStorageSettings() {
@@ -4628,6 +4630,7 @@ BIBLIOTHEKAR_JS = r"""
           backup_directory_name:document.getElementById("bk-storage-backup-name")?.value || "",
           workspaces_directory_name:document.getElementById("bk-storage-workspaces-name")?.value || "",
           metadata_directory_name:document.getElementById("bk-storage-metadata-name")?.value || "",
+          trash_directory_name:document.getElementById("bk-storage-trash-name")?.value || "",
         }),
       });
       const refreshed=await bkJson("/api/settings/storage-paths");
@@ -5398,7 +5401,7 @@ BIBLIOTHEKAR_JS = r"""
 
 
 def _shell_markup(active_area: str, subarea: str | None) -> str:
-    active = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
+    active = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
     heading_map = {
         ("import", None): (
             "Import & Prüfung",
@@ -5415,6 +5418,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         ("archive", None): (
             "Archiv",
             "Archivierung prüfen, abschließen und spätere Änderungen nachvollziehen.",
+        ),
+        ("trash", None): (
+            "Papierkorb",
+            "Manuell ausgesonderte Dateien und Ordner im gemeinsamen Kamera-Arbeitsbereich.",
         ),
         ("assistant", None): (
             "Bibliothekar Assistent",
@@ -5532,6 +5539,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
         <span>Bibliothek wechseln</span>
       </button>
+      <a href="/trash">
+        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/></svg></span>
+        <span>Papierkorb</span>
+      </a>
       <a href="/metadata-correction">
         <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5M16.5 13.5l2 2M18.5 13.5l-2 2"/></svg></span>
         <span>Metadatenkorrektion</span>
@@ -5704,11 +5715,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <label><span>SD-Kartensicherungen</span><input id="bk-storage-backup-name" value="SD-Kartensicherungen"></label>
           <label><span>Bibliotheks-Arbeitsbereiche</span><input id="bk-storage-workspaces-name" value="Arbeitsbereiche"></label>
           <label><span>Metadatenkorrektur</span><input id="bk-storage-metadata-name" value="Metadatenkorrektur"></label>
+          <label><span>Papierkorb</span><input id="bk-storage-trash-name" value="Papierkorb"></label>
         </div>
         <div class="bk-library-meta" style="margin-top:10px">
           <span id="bk-storage-backup-preview"></span>
           <span id="bk-storage-workspaces-preview"></span>
           <span id="bk-storage-metadata-preview"></span>
+          <span id="bk-storage-trash-preview"></span>
         </div>
         <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Metadatenkorrektur → Allgemein liegt automatisch im Unterordner <code>Allgemein</code>; dafür ist kein zusätzlicher TrueNAS-Host-Path nötig.</p>
         <div class="bk-library-actions"><button id="bk-storage-save" type="button" class="bk-positive-action">Pfade speichern</button></div>
@@ -5723,7 +5736,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <details class="bk-library-add-card">
           <summary>Bibliothek hinzufügen</summary>
           <div class="bk-library-form">
-            <div style="color:var(--bk-muted);font-size:.88rem;line-height:1.45">Standardmäßig legt Bibliothekar den Arbeitsbereich automatisch unter <code>/workspace/Arbeitsbereiche/&lt;Bibliotheks-ID&gt;</code> an. Nur für einen externen Arbeitsbereich ist ein zusätzlicher RW-Host-Path in TrueNAS nötig. Das Archiv wird aus Sicherheitsgründen pro Bibliothek separat als Read Only Host Path eingebunden.</div>
+            <div style="color:var(--bk-muted);font-size:.88rem;line-height:1.45">Standardmäßig legt Bibliothekar den Arbeitsbereich unter dem konfigurierten Stamm „Bibliotheks-Arbeitsbereiche“ an. Nur für einen externen Arbeitsbereich ist ein zusätzlicher RW-Host-Path in TrueNAS nötig. Das Archiv wird aus Sicherheitsgründen pro Bibliothek separat als Read Only Host Path eingebunden.</div>
             <label><span>Anzeigename</span><input id="bk-new-library-name" placeholder="z. B. Business"></label>
             <label><span>Arbeitsbereich · optional</span><input id="bk-new-library-work" placeholder="Leer = automatisch im gemeinsamen Workspace"></label>
             <label><span>Archiv · eigener RO-Mount</span><input id="bk-new-library-archive" placeholder="/libraries/business/archive"></label>

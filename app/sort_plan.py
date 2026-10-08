@@ -817,6 +817,7 @@ def build_event_sort_plan(
                         ON ff.id = f.family_id
 
                     WHERE f.family_id IN ({family_placeholders})
+                      AND COALESCE(f.current_root_kind,'job_root') <> 'trash'
 
                     ORDER BY
                         ff.selected_capture_time,
@@ -847,6 +848,7 @@ def build_event_sort_plan(
                         ON ff.id = f.family_id
 
                     WHERE f.id IN ({file_placeholders})
+                      AND COALESCE(f.current_root_kind,'job_root') <> 'trash'
 
                     ORDER BY f.original_relative_path
                     """,

@@ -13,6 +13,7 @@ from app.storage_config import (
     DEFAULT_BACKUP_DIRECTORY_NAME,
     DEFAULT_WORKSPACES_DIRECTORY_NAME,
     DEFAULT_METADATA_DIRECTORY_NAME,
+    DEFAULT_TRASH_DIRECTORY_NAME,
     default_library_work_root,
     load_storage_settings,
     storage_paths,
@@ -25,6 +26,7 @@ BACKUP_DIRECTORY_NAME = "SD-Kartensicherungen"
 WORK_DIRECTORY_NAME = "Arbeitsbereich"
 WORKSPACES_DIRECTORY_NAME = DEFAULT_WORKSPACES_DIRECTORY_NAME
 METADATA_DIRECTORY_NAME = DEFAULT_METADATA_DIRECTORY_NAME
+TRASH_DIRECTORY_NAME = DEFAULT_TRASH_DIRECTORY_NAME
 
 
 class WorkspaceLayoutError(RuntimeError):
@@ -115,6 +117,7 @@ def ensure_workspace_layout(
     backup = configured["backup_root"]
     workspaces = configured["workspaces_root"]
     metadata = configured["metadata_root"]
+    trash = configured["trash_root"]
 
     # 0.32.9 invariant: Es gibt keinen automatisch erzeugten
     # Bibliotheks-Arbeitsbereich "main". Ein Arbeitsbereich stammt entweder
@@ -136,7 +139,7 @@ def ensure_workspace_layout(
         main_is_existing_configuration = False
 
     created: list[str] = []
-    for directory in (backup, workspaces, metadata):
+    for directory in (backup, workspaces, metadata, trash):
         if directory.exists() and not directory.is_dir():
             raise WorkspaceLayoutError(
                 "Ein benötigter Strukturpfad ist kein Ordner: "
@@ -223,6 +226,7 @@ def ensure_workspace_layout(
         "backup_root": str(backup),
         "workspaces_root": str(workspaces),
         "metadata_root": str(metadata),
+        "trash_root": str(trash),
         # Ohne Bibliothek ist dies nur der neutrale, konfigurierte
         # Arbeitsbereiche-Stamm – ausdrücklich kein Bibliotheks-Unterordner.
         "work_root": str(main_work if main_work is not None else workspaces),
