@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.46.0 – Neues Bibliothekar-Markenlogo (09.10.2026)
+
+- Das vom Designer bereitgestellte weiße SVG (in Pfade konvertierter Schriftzug mit freigestelltem Symbol) ersetzt das bisherige farbige Symbol und den HTML-Schriftzug in der gemeinsamen Hauptnavigation.
+- Die aktuelle Bibliotheksbezeichnung bleibt als eigenes, automatisch wechselndes Textelement unter der Wortmarke im freien SVG-Bereich bestehen.
+- Gleiches SVG in Desktop, mobiler Website und iPhone-Web-App; jeweils passende Abmessungen, ohne andere Seitenheader individuell zu verändern.
+- Auslieferung über `/assets/bibliothekar-logo.svg` mit SVG-Medientyp und Versionscache; keine externen Fonts oder Rasterbilder erforderlich.
+- Keine Datenbankmigration und keine Änderungen des Import-, Sortier- und Archivkerns.
+
 ## 0.45.6 – UI-Feinschliff (09.10.2026)
 
 - Der Name der aktuellen Importphase steht rechts oben in der aufgeklappten Importkarte beim Erstellungsdatum, unterhalb der Aktionen; der Phasenbalken behält seinen Fortschrittswert.

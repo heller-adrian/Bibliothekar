@@ -1,4 +1,4 @@
-"""0.45.6: Phasenplatzierung, ausschließlich heller Hover und randfreie PWA-Schnellauswahl."""
+"""0.46.0: Phasenplatzierung, ausschließlich heller Hover und randfreie PWA-Schnellauswahl."""
 from pathlib import Path
 
 from app import __version__, main
@@ -8,10 +8,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0456_versions_and_shell_load_new_css_last():
-    assert __version__ == "0.45.6"
-    assert main.DEPLOYMENT_VERSION == "0.45.6"
+    assert __version__ == "0.46.0"
+    assert main.DEPLOYMENT_VERSION == "0.46.0"
     html = apply_shell("<html><head></head><body></body></html>", active_area="workspace")
-    assert "0.45.6 · Kamerakern 0.32.11" in html
+    assert "0.46.0 · Kamerakern 0.32.11" in html
     assert html.index(f"<style>{BIBLIOTHEKAR_0455_CSS}</style>") < html.index(
         f"<style>{BIBLIOTHEKAR_0456_CSS}</style>"
     )
