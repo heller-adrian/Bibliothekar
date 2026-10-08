@@ -5803,7 +5803,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.5 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.45.6 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6634,6 +6634,71 @@ body.bibliothekar-redesign[data-bk-area="import"] .bk-stage-value {
 }
 """
 
+
+BIBLIOTHEKAR_0456_CSS = r"""
+/* 0.45.6: Phasen-Badge nur im ausgeklappten Import, oben rechts.
+   Kein absolut positionierter Text: die Zeile bleibt auch mobil kollisionsfrei. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-history-detail-date {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  column-gap:12px;
+  row-gap:5px;
+  min-width:0;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-stage-badge-header {
+  margin-inline-start:auto;
+  flex:0 0 auto;
+  white-space:nowrap;
+}
+
+/* Ausschließlich Hellmodus: Zwischenwert aus 0.45.4 und 0.45.5.
+   Die vorhandenen Dark-Mode-Regeln und 240-ms-Übergänge bleiben unverändert. */
+@media (hover:hover) and (pointer:fine) {
+  html[data-bk-theme="light"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:color-mix(in srgb,var(--surface) 97%,var(--bk-ink) 3%) !important;
+    border-color:color-mix(in srgb,var(--border) 91%,var(--bk-ink) 9%) !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.without-date.review-card:hover {
+    background:#f1dfc9 !important;
+    border-color:#b56d22 !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .timeline-event-card:not(.selected-preview):hover,
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .event-card:not(.selected-preview):not(.is-open):hover {
+    background:color-mix(in srgb,var(--surface-2) 97%,var(--bk-ink) 3%) !important;
+    border-color:color-mix(in srgb,var(--border) 91%,var(--bk-ink) 9%) !important;
+  }
+}
+
+/* iOS-PWA: Safari schneidet während transform/will-change auf dem gesamten
+   Karten-Element mitunter den oberen Border-Radius ab. Deshalb nur die
+   Kindinhalte bewegen. Die Karte samt Kontur bleibt in der normalen Ebene. */
+@keyframes bk-pwa-select-inner-wobble {
+  0%,100% { transform:translateX(0); }
+  24% { transform:translateX(-2px); }
+  48% { transform:translateX(2px); }
+  72% { transform:translateX(-1px); }
+}
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble {
+    animation:none !important;
+    transform:none !important;
+    will-change:auto !important;
+  }
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble > .day-main,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble > .day-check,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble > .badge {
+    animation:bk-pwa-select-inner-wobble .28s ease-out;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble > * {
+    animation:none !important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -6667,7 +6732,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0452_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0453_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0454_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0455_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0455_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0456_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
