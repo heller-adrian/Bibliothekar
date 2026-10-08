@@ -8,7 +8,7 @@ from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0353_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.44.2"
+    assert main.DEPLOYMENT_VERSION == "0.44.3"
 
 
 def test_0353_title_help_has_no_visible_question_mark():
