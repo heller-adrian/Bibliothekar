@@ -1,4 +1,4 @@
-"""0.45.2: störungsfreier Wechsel zwischen Hauptbereichen und früher Dark-Mode-Paint."""
+"""0.45.3: störungsfreier Wechsel zwischen Hauptbereichen und früher Dark-Mode-Paint."""
 from app import __version__, main
 from app.ui_shell import (
     BIBLIOTHEKAR_0451_HEAD_JS, BIBLIOTHEKAR_0451_CSS,
@@ -7,8 +7,8 @@ from app.ui_shell import (
 
 
 def test_0451_versions():
-    assert __version__ == "0.45.2"
-    assert main.DEPLOYMENT_VERSION == "0.45.2"
+    assert __version__ == "0.45.3"
+    assert main.DEPLOYMENT_VERSION == "0.45.3"
 
 
 def test_0451_theme_script_is_in_head_before_all_styles():

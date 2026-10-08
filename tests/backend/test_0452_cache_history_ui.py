@@ -1,4 +1,4 @@
-"""0.45.2: Schnellansicht und Verlauf dürfen fachliche Sicherheit nicht verändern."""
+"""0.45.3: Schnellansicht und Verlauf dürfen fachliche Sicherheit nicht verändern."""
 from __future__ import annotations
 
 from app import __version__, main, view_cache
@@ -11,8 +11,8 @@ from app.events_ui import EVENTS_HTML
 
 
 def test_0452_versions_and_reload_controls():
-    assert __version__ == "0.45.2"
-    assert main.DEPLOYMENT_VERSION == "0.45.2"
+    assert __version__ == "0.45.3"
+    assert main.DEPLOYMENT_VERSION == "0.45.3"
     assert 'id="day-reload"' in WORKSPACE_HTML
     assert 'id="event-reload"' in EVENTS_HTML
     assert "physicalRefresh:true" in WORKSPACE_HTML
