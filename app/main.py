@@ -3940,7 +3940,7 @@ def api_import_sources(force_refresh: bool = False) -> dict[str, Any]:
     # Die Darstellung bleibt kurz gecacht; Mount-Prüfung erfolgt unabhängig davon.
     db_path = DATABASE_FILE
     if not force_refresh:
-        cached = view_cache.get_snapshot(db_path, "import-sources")
+        cached = view_cache.get_snapshot(db_path, "import-sources", max_age_seconds=15)
         if cached is not None and cached["mounted"] == IMPORT_ROOT.is_dir():
             return cached
     sources = discover_import_sources("saved") + discover_import_sources("removable")
@@ -4452,7 +4452,7 @@ def api_backups() -> dict[str, Any]:
 def api_archive_summary(force_refresh: bool = False) -> dict[str, Any]:
     db_path = current_database_file()
     if not force_refresh:
-        cached = view_cache.get_snapshot(db_path, "archive")
+        cached = view_cache.get_snapshot(db_path, "archive", max_age_seconds=20)
         if cached is not None:
             return cached
     result = list_archive_candidates(db_path, current_archive_root())
@@ -10952,7 +10952,7 @@ def index() -> str:
         </article>
       `;
       const isDone = job.state === "completed";
-      const isActive = !["completed","failed","interrupted"].includes(job.state);
+      const isActive = activeStates.has(job.state);
       const expanded = openHistoryIds.has(jobId);
       const progressLabel = isDone
         ? `Abgeschlossen · ${fileCount ?? "–"} Dateien`
@@ -11415,7 +11415,9 @@ def index() -> str:
 
     function renderJobHistory(openDetails = new Set()) {
       const remaining = Math.max(0, jobHistoryTotal - jobHistoryJobs.length);
-      jobsElement.innerHTML = jobHistoryJobs.map(job => renderJob(job)).join("")
+      jobsElement.innerHTML = (jobHistoryJobs.length
+        ? jobHistoryJobs.map(job => renderJob(job)).join("")
+        : '<div class="empty">Keine sichtbaren Importe vorhanden.</div>')
         + (remaining ? `<div class="bk-history-more"><button class="secondary" id="jobs-more-button" type="button">Mehr anzeigen (${remaining})</button></div>` : "")
         + `<div class="bk-history-hidden-section">
              <button type="button" id="hidden-history-toggle" aria-expanded="${hiddenHistoryOpen}">
@@ -11623,11 +11625,9 @@ def index() -> str:
         else if(!seenHistoryStates.has(id) && job.state!=="completed") openHistoryIds.add(id);
         seenHistoryStates.set(id,job.state);
       }
-      if(!jobHistoryJobs.length && !hiddenHistoryTotal){
-        jobsElement.innerHTML='<div class="empty">Noch keine Importe vorhanden.</div>';
-      }else{
-        renderJobHistory(openDetails);
-      }
+      // Die Schublade "Ausgeblendet" bleibt selbst dann erreichbar,
+      // wenn alle abgeschlossenen Importe ausgeblendet wurden.
+      renderJobHistory(openDetails);
       try {
         sessionStorage.setItem(importHistoryCacheKey,JSON.stringify({
           jobs:jobHistoryJobs,total:jobHistoryTotal,hidden:hiddenHistoryTotal

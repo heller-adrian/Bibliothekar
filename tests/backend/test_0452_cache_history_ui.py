@@ -125,3 +125,35 @@ def test_0452_history_ui_is_compact_and_paginated():
         'history_hidden=?', 'backup_delete_allowed', 'restoreOpenJobDetails',
     ):
         assert item in source
+
+
+def test_0452_hidden_history_remains_reachable_without_visible_jobs():
+    from pathlib import Path
+    source = Path(main.__file__).read_text(encoding="utf-8")
+    assert "renderJobHistory(openDetails);" in source
+    assert "Keine sichtbaren Importe vorhanden." in source
+    assert 'if(!jobHistoryJobs.length && !hiddenHistoryTotal)' not in source
+    assert 'activeStates.has(job.state)' in source
+
+
+def test_0452_cache_ttl_for_external_mount_state(tmp_path, monkeypatch):
+    import app.view_cache as cache
+    import time
+    db = tmp_path / "main.sqlite3"
+    db.write_bytes(b"test")
+    cache.put_snapshot(db, "import-sources", {"mounted": True})
+    assert cache.get_snapshot(db, "import-sources", max_age_seconds=15) == {"mounted": True}
+    monkeypatch.setattr(cache.time, "monotonic", lambda: time.monotonic() + 1800)
+    assert cache.get_snapshot(db, "import-sources", max_age_seconds=15) is None
+
+
+def test_0452_github_build_is_manual_for_patch_branches():
+    from pathlib import Path
+    project = Path(__file__).resolve().parents[2]
+    qa = (project / ".github/workflows/qa-tests.yml").read_text(encoding="utf-8")
+    publish = (project / ".github/workflows/publish-container.yml").read_text(encoding="utf-8")
+    assert "workflow_dispatch:" in qa
+    assert "workflow_dispatch:" in publish
+    assert "'patch/**'" not in qa
+    assert "'patch/**'" not in publish
+    assert "type=raw,value=patch-" in publish

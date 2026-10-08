@@ -1,5 +1,12 @@
 # Changelog
 
+## Kostenkontrolle der GitHub Actions (0.45.2)
+
+- Bei Zwischen-Commits auf patch/* werden weder doppelte Backendtests noch Container-Builds gestartet.
+- Backend-QA lässt sich manuell oder über einen Pull Request auslösen; der Container wird auf Patchbranches ausschließlich per "Run workflow" erzeugt.
+- Importquellen und Archivübersichten bleiben nur wenige Sekunden serverseitig gecacht; echte Bearbeitungs- und Dateiprüfungen bleiben verbindlich.
+- Alle ausgeblendeten Importverläufe sind auch bei leerer sichtbarer Liste erreichbar.
+
 ## 0.45.2 – Schnellere Ansichten, Prüf-Reload und kompakter Importverlauf (08.10.2026)
 
 - Sofortige Bibliotheksbezeichnung, differenzierte hellfarbige Prüffallkarte, bereinigte Tagesordnerübersicht.

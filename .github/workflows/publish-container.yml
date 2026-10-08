@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - 'patch/**'
     tags:
       - 'v*'
   workflow_dispatch:
@@ -87,6 +86,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=tag
+            type=raw,value=patch-${{ steps.version.outputs.version }},enable=${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
             type=raw,value=${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=v${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}

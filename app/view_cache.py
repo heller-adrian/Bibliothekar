@@ -27,14 +27,15 @@ def database_stamp(path: Path) -> tuple[Any, ...]:
     return tuple(values)
 
 
-def get_snapshot(path: Path, group: str, *args: Any) -> Any | None:
+def get_snapshot(path: Path, group: str, *args: Any, max_age_seconds: int | None = None) -> Any | None:
     key = (str(path.resolve(strict=False)), group, *args)
     with _LOCK:
         row = _ITEMS.get(key)
         if row is None:
             return None
         stamp, born, value = row
-        if time.monotonic() - born > _MAX_AGE_SECONDS or stamp != database_stamp(path):
+        ttl = min(_MAX_AGE_SECONDS, max_age_seconds) if max_age_seconds is not None else _MAX_AGE_SECONDS
+        if time.monotonic() - born > ttl or stamp != database_stamp(path):
             _ITEMS.pop(key, None)
             return None
         _ITEMS.move_to_end(key)

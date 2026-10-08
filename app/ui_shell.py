@@ -4182,7 +4182,7 @@ BIBLIOTHEKAR_JS = r"""
       currentLibraryName.textContent = name;
       currentLibraryName.title = name;
     } catch (_) {
-      currentLibraryName.textContent = bkLibraryId === "main" ? "Hauptbibliothek" : bkLibraryId;
+      // Serverseitig eingeblendeten Bibliotheksnamen bei Netzfehler beibehalten.
       currentLibraryName.title = currentLibraryName.textContent;
     }
   }

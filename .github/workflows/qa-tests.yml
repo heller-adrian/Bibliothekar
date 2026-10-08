@@ -1,10 +1,9 @@
 name: Backend QA
 
+# 0.45.2: Entwicklungspushes lösen keine GitHub-Minuten mehr aus.
+# QA bei PR oder manuell über "Run workflow" am jeweiligen Branch starten.
 on:
-  push:
-    branches:
-      - main
-      - 'patch/**'
+  workflow_dispatch:
   pull_request:
 
 permissions:
