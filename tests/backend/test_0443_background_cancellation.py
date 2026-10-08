@@ -131,7 +131,7 @@ def test_0443_backend_accepts_without_performing_inline_cancel(tmp_path, monkeyp
 def test_0443_global_status_and_navigation_contract():
     html = apply_shell(EVENTS_HTML, active_area="workspace", subarea="events")
     assert 'id="bk-background-cancel-notice"' in html
-    assert '"/api/background-cancellations?library="' in html
+    assert '"/api/background-activity?library="' in html
     assert 'window.__bkLibraryId' in BIBLIOTHEKAR_0443_JS
     assert ".bk-cancel-spinner" in BIBLIOTHEKAR_0443_CSS
     assert 'new Event("bk-cancellation-queued")' in EVENTS_HTML
