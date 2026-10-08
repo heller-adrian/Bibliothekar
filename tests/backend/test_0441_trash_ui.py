@@ -1,4 +1,4 @@
-"""0.44.1: UI-Vertrag für die eigenständige Papierkorbseite.
+"""0.44.2: UI-Vertrag für die eigenständige Papierkorbseite.
 
 Der Patch ändert bewusst weder das physische Inventar noch die Lösch-API.
 """
