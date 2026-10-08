@@ -80,6 +80,14 @@ def recover_interrupted(database_path: Path) -> int:
 
 def claim_next(database_path: Path) -> dict[str, Any] | None:
     with database_connection(database_path) as db:
+        # Der normale Leerlauf darf keine SQLite-Schreibsperre setzen:
+        # derselbe Server verarbeitet parallel Import-/Metadatenjobs.
+        row = db.execute(
+            """SELECT id FROM background_mutation_cancellations
+               WHERE status='queued' ORDER BY created_at,id LIMIT 1"""
+        ).fetchone()
+        if row is None:
+            return None
         db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             """SELECT * FROM background_mutation_cancellations
