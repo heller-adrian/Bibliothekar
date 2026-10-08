@@ -10,7 +10,8 @@ import stat
 
 from app.database import database_connection
 from app.external_changes import resolve_notice_key
-from app.storage_config import storage_paths
+from app.storage_config import load_storage_settings, storage_paths
+from app.library_runtime import get_current_library
 from app.workspace_layout import WorkspaceLayoutError, shared_work_root
 
 
@@ -37,16 +38,28 @@ def _sha256_file(path: Path) -> str:
 
 
 def trash_root(workspace_root: Path, *, create: bool = True) -> Path:
-    root = storage_paths(workspace_root)["trash_root"].resolve(strict=False)
-    if root.is_symlink():
+    workspace = workspace_root.expanduser().resolve(strict=False)
+    # Request-scoped legacy compatibility roots contain symlinks and live
+    # under /tmp. The trash always belongs to the original shared RW mount,
+    # never to the temporary per-library compatibility directory.
+    context = get_current_library()
+    if (
+        context is not None
+        and workspace.parent == Path("/tmp/bibliothekar-library-workspaces")
+    ):
+        workspace = context.workspace_root.expanduser().resolve(strict=False)
+    raw = workspace / load_storage_settings()["trash_directory_name"]
+    # Check the unresolved entry: Path.resolve() would hide a malicious
+    # Finder-created symlink to another dataset before this security check.
+    if raw.is_symlink():
         raise TrashError("Der verwaltete Papierkorb darf kein symbolischer Link sein.")
-    if root.exists() and not root.is_dir():
-        raise TrashError("Der konfigurierte Papierkorb ist kein Ordner: " + str(root))
-    if create and not root.exists():
-        root.mkdir(parents=True, exist_ok=True)
-    if root.exists() and not os.access(root, os.R_OK | os.W_OK | os.X_OK):
-        raise TrashError("Der Papierkorb ist nicht vollständig zugreifbar: " + str(root))
-    return root
+    if raw.exists() and not raw.is_dir():
+        raise TrashError("Der konfigurierte Papierkorb ist kein Ordner: " + str(raw))
+    if create and not raw.exists():
+        raw.mkdir(parents=True, exist_ok=True)
+    if raw.exists() and not os.access(raw, os.R_OK | os.W_OK | os.X_OK):
+        raise TrashError("Der Papierkorb ist nicht vollständig zugreifbar: " + str(raw))
+    return raw.resolve(strict=False)
 
 
 def _physical_entries(workspace_root: Path) -> tuple[Path, list[dict[str, Any]], int]:
@@ -74,6 +87,14 @@ def _physical_entries(workspace_root: Path) -> tuple[Path, list[dict[str, Any]],
             elif stat.S_ISDIR(info.st_mode):
                 safe_dirs.append(name)
         dirnames[:] = safe_dirs
+        if directory != root:
+            entries.append({
+                "relative_path": directory.relative_to(root).as_posix(),
+                "filename": directory.name,
+                "size_bytes": 0,
+                "entry_type": "directory",
+                "tracked": False,
+            })
 
         for filename in sorted(filenames, key=str.casefold):
             path = directory / filename

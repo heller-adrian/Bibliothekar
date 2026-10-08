@@ -151,9 +151,9 @@ def _apply_trash_root_kind_migration(
         row = connection.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='files'"
         ).fetchone()
-        if row is None or not row["sql"]:
+        if row is None or not row[0]:
             raise DatabaseError("Die Tabelle files fehlt für die Papierkorb-Migration.")
-        create_sql = str(row["sql"])
+        create_sql = str(row[0])
         renamed, count = re.subn(
             r"(?i)^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?files\b",
             "CREATE TABLE files_trash_upgrade",
@@ -173,7 +173,7 @@ def _apply_trash_root_kind_migration(
         if count != 1:
             raise DatabaseError("Die Root-Kind-Constraint ist unbekannt.")
         definitions = [
-            str(record["sql"])
+            str(record[0])
             for record in connection.execute(
                 """SELECT sql FROM sqlite_master
                    WHERE tbl_name='files'
@@ -184,7 +184,7 @@ def _apply_trash_root_kind_migration(
         ]
         connection.execute(upgraded)
         columns = [
-            str(item["name"])
+            str(item[1])
             for item in connection.execute("PRAGMA table_info(files)").fetchall()
         ]
         if not columns:

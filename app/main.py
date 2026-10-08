@@ -4384,19 +4384,34 @@ def api_trash_inventory() -> dict[str, Any]:
     if not results:
         return reconcile_trash_inventory(current_database_file(), WORKSPACE_PATH)
     result = results[0]
+    known_paths = {
+        str(item["relative_path"])
+        for state in results
+        for item in state["entries"]
+        if item.get("entry_type") == "file" and item.get("tracked")
+    }
+    entries = [
+        {
+            **item,
+            "tracked": (
+                str(item["relative_path"]) in known_paths
+                if item.get("entry_type") == "file"
+                else False
+            ),
+        }
+        for item in result["entries"]
+    ]
     return {
         **result,
         "tracked_file_count": sum(
-            1 for entry in result["entries"]
-            if entry.get("entry_type") == "file"
-            and any(
-                next(
-                    (item.get("tracked") for item in other["entries"]
-                     if item.get("relative_path") == entry.get("relative_path")),
-                    False,
-                ) for other in results
-            )
+            1 for item in entries
+            if item.get("entry_type") == "file" and item.get("tracked")
         ),
+        "untracked_file_count": sum(
+            1 for item in entries
+            if item.get("entry_type") == "file" and not item.get("tracked")
+        ),
+        "entries": entries,
     }
 
 

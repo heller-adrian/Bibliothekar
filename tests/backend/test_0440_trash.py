@@ -180,3 +180,49 @@ def test_0440_menu_and_page_contract():
     assert "/api/trash/empty" in TRASH_HTML
     assert "Papierkorb entleeren" in TRASH_HTML
     assert "active_area=\"trash\"" in Path(main.__file__).read_text()
+
+
+def test_0440_root_symlink_is_rejected_before_deletion(tmp_path: Path, monkeypatch):
+    from app.trash import TrashError, trash_root
+
+    _db, workspace, paths = _fixture(tmp_path, monkeypatch)
+    target = tmp_path / "protected"
+    target.mkdir()
+    (target / "keep.txt").write_text("protected")
+    root = Path(paths["trash_root"])
+    root.rmdir()
+    root.symlink_to(target, target_is_directory=True)
+    with pytest.raises(TrashError):
+        trash_root(workspace)
+    with pytest.raises(TrashError):
+        empty_trash_filesystem(workspace)
+    assert (target / "keep.txt").read_text() == "protected"
+
+
+def test_0440_compatibility_workspace_uses_physical_root(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+    from app import trash as trash_module
+
+    _db, workspace, paths = _fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        trash_module, "get_current_library",
+        lambda: SimpleNamespace(workspace_root=workspace),
+    )
+    compat = Path("/tmp/bibliothekar-library-workspaces/qa-0440")
+    assert trash_module.trash_root(compat) == Path(paths["trash_root"])
+    assert not (compat / "Papierkorb").exists()
+
+
+def test_0440_sqlite_migration_preserves_references(tmp_path: Path, monkeypatch):
+    db, _workspace, _paths = _fixture(tmp_path, monkeypatch)
+    with database_connection(db) as connection:
+        schema = str(connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='files'"
+        ).fetchone()[0])
+        assert "'trash'" in schema
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        versions = {
+            int(row[0])
+            for row in connection.execute("SELECT version FROM schema_versions")
+        }
+        assert 48 in versions
