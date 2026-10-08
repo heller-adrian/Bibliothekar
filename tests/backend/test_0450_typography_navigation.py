@@ -18,8 +18,8 @@ def _render(area, subarea=None):
 
 
 def test_0450_version_and_existing_core_remain_separate():
-    assert __version__ == "0.45.4"
-    assert main.DEPLOYMENT_VERSION == "0.45.4"
+    assert __version__ == "0.45.5"
+    assert main.DEPLOYMENT_VERSION == "0.45.5"
     assert main.RELEASE_VERSION == "0.28.7"
 
 

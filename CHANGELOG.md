@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.45.5 – Sicherer Abbruch und Importkontrolle
+
+- Live-Fortschrittsanzeige mit Phasen-Badge und unabhängigem Gesamtfortschritt.
+- Noch zurückhaltendere Hover-Effekte bei Tages-, Prüffall- und Ereigniskarten.
+- Begrenzte, nicht hashende Speicher-Vorprüfung vor der Jobannahme; NAS-Stammordner und übergroße oder unüberschaubare Quellen werden früh abgewiesen.
+- Tatsächlich verfügbarer Platz am Schreibdataset mit Puffer und Sicherheitsreserve; erneute Prüfung im Worker vor dem Kopieren.
+- Dauerhafte, auf einen Auftrag beschränkte Abbruchanforderung; 1-MiB-Unterbrechungspunkte beim Hashen und Kopieren, gezielt beendbarer ExifTool-Kindprozess.
+- Nach 15 Sekunden offener Abbruchanforderung Bestätigung zum Eskalieren; keine ungeprüften Löschungen. Rollback entfernt nur von diesem Import nachweislich überführte Zieldateien.
+- Neue Regressionstests für Speichergrenzen, Abbrüche großer Dateien, Fremddateischutz und Neustartfestigkeit.
+- Keine SQLite-Migration und kein Merge nach main.
+
 ## 0.45.4 – UI-Feinschliff und stabiler Importverlauf (08.10.2026)
 
 - „Ausgeblendet“ öffnet sofort; Hintergrundabfragen und veraltete Zwischenstände überschreiben keine neueren Zähler. Ein schnelles SQLite-Count-API verhindert unnötige Sicherungsprüfungen für die reine Anzahl.
