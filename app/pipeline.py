@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 from typing import Any, Callable
 import hashlib
 import json
@@ -56,18 +57,21 @@ def classify(extension: str) -> str:
     return "other"
 
 
-def sha256_file(path: Path) -> str:
+def sha256_file(
+    path: Path,
+    cancellation_callback: Callable[[], None] | None = None,
+) -> str:
     digest = hashlib.sha256()
-
     with path.open("rb") as handle:
         while True:
+            if cancellation_callback is not None:
+                cancellation_callback()
             block = handle.read(1024 * 1024)
-
             if not block:
                 break
-
             digest.update(block)
-
+    if cancellation_callback is not None:
+        cancellation_callback()
     return digest.hexdigest()
 
 
@@ -292,6 +296,7 @@ def recover_cross_device_protocol_failures(
 def source_manifest(
     source: Path,
     progress_callback: Callable[[int, int], None] | None = None,
+    cancellation_callback: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     if not source.is_dir():
         raise PipelineError(
@@ -299,11 +304,13 @@ def source_manifest(
         )
 
     entries: list[dict[str, Any]] = []
-    paths = [
-        path
-        for path in sorted(source.rglob("*"))
-        if not should_ignore_source_path(source, path)
-    ]
+    paths = []
+    for path in source.rglob("*"):
+        if cancellation_callback is not None:
+            cancellation_callback()
+        if not should_ignore_source_path(source, path):
+            paths.append(path)
+    paths.sort()
     total_files = sum(
         1
         for candidate in paths
@@ -312,6 +319,8 @@ def source_manifest(
     processed_files = 0
 
     for path in paths:
+        if cancellation_callback is not None:
+            cancellation_callback()
         if path.is_symlink():
             raise PipelineError(
                 f"Symbolischer Link nicht erlaubt: {path}"
@@ -343,7 +352,7 @@ def source_manifest(
                 tz=timezone.utc,
             ).astimezone().isoformat(),
             "modified_at_ns": int(stat.st_mtime_ns),
-            "sha256": sha256_file(path),
+            "sha256": sha256_file(path, cancellation_callback),
         })
 
         processed_files += 1
@@ -363,6 +372,7 @@ def copy_and_verify(
     destination: Path,
     entries: list[dict[str, Any]],
     progress_callback: Callable[[str, int, int], None] | None = None,
+    cancellation_callback: Callable[[], None] | None = None,
 ) -> None:
     if destination.exists():
         raise PipelineError(
@@ -374,6 +384,8 @@ def copy_and_verify(
     total_entries = len(entries)
 
     for index, entry in enumerate(entries, start=1):
+        if cancellation_callback is not None:
+            cancellation_callback()
         relative = Path(entry["relative_path"])
         source_path = source / relative
         destination_path = destination / relative
@@ -387,10 +399,17 @@ def copy_and_verify(
         # Unix-Modus der Quelle dürfen nicht übernommen werden.
         source_stat = source_path.stat()
 
-        shutil.copyfile(
-            source_path,
-            destination_path,
-        )
+        # Blöcke begrenzen die Wartezeit bis zum sicheren Abbruch.
+        with source_path.open("rb") as src, destination_path.open("xb") as dst:
+            while True:
+                if cancellation_callback is not None:
+                    cancellation_callback()
+                block = src.read(1024 * 1024)
+                if not block:
+                    break
+                dst.write(block)
+        if cancellation_callback is not None:
+            cancellation_callback()
 
         # Aufnahmeunabhängige Dateisystemzeiten erhalten, ohne
         # chmod, chown oder ACL-Änderungen auszuführen.
@@ -425,12 +444,14 @@ def copy_and_verify(
     for index, entry in enumerate(entries, start=1):
         copied = destination / entry["relative_path"]
 
+        if cancellation_callback is not None:
+            cancellation_callback()
         if copied.stat().st_size != entry["size_bytes"]:
             raise PipelineError(
                 f"Größenabweichung: {entry['relative_path']}"
             )
 
-        if sha256_file(copied) != entry["sha256"]:
+        if sha256_file(copied, cancellation_callback) != entry["sha256"]:
             raise PipelineError(
                 f"SHA-256-Abweichung: "
                 f"{entry['relative_path']}"
