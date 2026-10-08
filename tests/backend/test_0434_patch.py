@@ -41,7 +41,8 @@ def test_0434_restart_guard_remains_in_place():
 def test_0434_each_import_lifecycle_has_a_terminal_action():
     html = main.index()
     assert 'data-cancel-import="' in html
-    assert '"Import abbrechen"' in html\n    assert "data-force-import=" in html
+    assert '"Import abbrechen"' in html
+    assert "data-force-import=" in html
     assert 'data-discard-import="' in html
     assert ">Import entfernen</button>" in html
     assert 'data-delete-backup="' in html
