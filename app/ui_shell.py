@@ -5808,7 +5808,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.4</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.5</span></p>
   </div>
 </dialog>
 
@@ -6018,6 +6018,7 @@ BIBLIOTHEKAR_0444_CSS = r"""
 #bk-background-cancel-notice .bk-activity-link:hover {text-decoration:underline}
 #bk-background-cancel-notice .bk-activity-link strong {display:block;font-size:.83rem}
 #bk-background-cancel-notice .bk-activity-link small {display:block;color:var(--bk-muted);font-size:.76rem}
+#bk-background-cancel-notice .bk-activity-progress {flex:0 0 auto;font-size:.78rem;font-weight:700;font-variant-numeric:tabular-nums;color:var(--bk-blue)}
 #bk-background-cancel-notice .bk-activity-retry {
   font-size:.73rem;
   padding:4px 7px;
@@ -6117,7 +6118,12 @@ BIBLIOTHEKAR_0444_JS = r"""
       const busy = active.length > 0;
       icon.dataset.busy = String(busy);
       icon.textContent = busy ? "" : lastSeen.some(item => item.status === "failed") ? "!" : "✓";
-      mini.querySelector(".bk-activity-mini-count").textContent = busy && active.length > 1 ? String(active.length) : "";
+      const single = active.length === 1 ? active[0] : null;
+      const hasPercent = single && Number.isFinite(Number(single.progress_percent))
+        && single.progress_percent !== null && single.progress_percent !== undefined;
+      mini.querySelector(".bk-activity-mini-count").textContent =
+        hasPercent ? Math.round(Number(single.progress_percent)) + "%"
+        : busy && active.length > 1 ? String(active.length) : "";
     }
   }
   function setCollapsed(value) {
@@ -6153,6 +6159,15 @@ BIBLIOTHEKAR_0444_JS = r"""
     detail.textContent = item.detail || "";
     link.append(name, detail);
     row.append(icon, link);
+    if (item.kind === "apply" && item.progress_percent !== null
+        && item.progress_percent !== undefined
+        && Number.isFinite(Number(item.progress_percent))) {
+      const progress = document.createElement("span");
+      progress.className = "bk-activity-progress";
+      progress.textContent = Math.round(Number(item.progress_percent)) + " %";
+      progress.setAttribute("aria-label", "Fortschritt " + progress.textContent);
+      row.appendChild(progress);
+    }
     if (item.kind === "cancel" && item.can_retry) {
       const retry = document.createElement("button");
       retry.type = "button";
@@ -6232,6 +6247,14 @@ body.bibliothekar-redesign samp {
   font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
+/* Fixed-width glyphs are required for the unicode connector lines. */
+body.bibliothekar-redesign :is(
+  .plan-tree, .inspect-structure, .change-target-tree,
+  .structure-lines, .tree:not(.rich-preview), .bk-settings-preview-case pre
+) {
+  font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+  letter-spacing:0;
+}
 /* Keine zusätzlichen Umbrüche durch abweichende Glyphenbreiten in der Navigation. */
 .bk-brand-copy,
 .bk-brand-title,
