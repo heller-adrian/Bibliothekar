@@ -47,6 +47,46 @@ def _layout_directories_at_leaf(leaf: PurePosixPath, layout_state: dict[str, Any
     }
 
 
+def _reapply_original_child_folder_names(
+    database_path: Path,
+    job_id: str,
+    event_id: str,
+) -> set[str]:
+    """Read OLD child folders from the pending mutation, not the new SOLL.
+
+    Structural edits can remove or rename children before physical reconcile.
+    The current event rows therefore cannot describe the still-existing source
+    hierarchy. An absent/corrupt snapshot must not be guessed from folder names.
+    """
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT original_state_json FROM event_mutations
+               WHERE job_id=?
+                 AND status IN ('pending_reassignment','pending_apply')
+               ORDER BY created_at DESC,id DESC""",
+            (job_id,),
+        ).fetchall()
+    for row in rows:
+        try:
+            original = json.loads(str(row["original_state_json"] or "{}"))
+        except (TypeError, ValueError):
+            continue
+        original_events = list(original.get("events") or [])
+        if not any(
+            str(event.get("id") or "") == event_id
+            and not event.get("parent_event_id")
+            for event in original_events
+        ):
+            continue
+        return {
+            str(event.get("folder_name") or "")
+            for event in original_events
+            if str(event.get("parent_event_id") or "") == event_id
+            and str(event.get("folder_name") or "")
+        }
+    return set()
+
+
 def _observed_organization_path(
     inventory_file: dict[str, Any],
     *,
@@ -1177,6 +1217,12 @@ def build_event_sort_plan(
         str(child.get("folder_name") or "") for child in child_definitions
         if str(child.get("folder_name") or "")
     }
+    if allow_reapply:
+        # Source hierarchy is the mutation's OLD event graph. Without this,
+        # removing "Teil 04" would preserve "Teil 04/Alle" as a custom path.
+        child_folder_names.update(
+            _reapply_original_child_folder_names(database_path, job_id, event_id)
+        )
 
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []

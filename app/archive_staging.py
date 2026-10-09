@@ -423,8 +423,6 @@ def _obsolete_directories_from_plan(
             )
         )
     ]
-    if not affected_items:
-        return []
     if delete_event:
         return [current_root.as_posix()]
     try:
@@ -433,6 +431,25 @@ def _obsolete_directories_from_plan(
         return []
     if current_root != target_root:
         return [current_root.as_posix()]
+
+    # Empty old child folders produce no move/delete file rows. They are
+    # nevertheless app-managed obsolete archive structure and must be shown
+    # in the manual change steps (never deleted by the application).
+    with database_connection(database_path) as connection:
+        old_children = {
+            str(row["folder_name"])
+            for row in connection.execute(
+                "SELECT folder_name FROM events WHERE parent_event_id=?",
+                (event_id,),
+            ).fetchall()
+            if str(row["folder_name"] or "")
+        }
+    wanted_children = set(_preview_child_folders(preview))
+    removed_child_directories = {
+        current_root / name for name in (old_children - wanted_children)
+    }
+    if not affected_items:
+        return sorted(path.as_posix() for path in removed_child_directories)
 
     desired_directories = _desired_directory_plan(preview, plan)
     affected_containers: set[PurePosixPath] = set()
@@ -456,7 +473,7 @@ def _obsolete_directories_from_plan(
                 str(old_rel.parts[branch_index])
             )
 
-    obsolete: set[PurePosixPath] = set()
+    obsolete: set[PurePosixPath] = set(removed_child_directories)
     for container in affected_containers:
         if container != current_root and container not in desired_directories:
             obsolete.add(container)
