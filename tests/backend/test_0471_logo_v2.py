@@ -1,4 +1,4 @@
-"""0.47.1: Die neue SVG-Datei ist in Header und Info-Dialog aktiv."""
+"""0.47.2: Die neue SVG-Datei ist in Header und Info-Dialog aktiv."""
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -23,7 +23,7 @@ def test_0471_v2_logo_is_the_selected_asset():
 def test_0471_header_and_about_use_v2_without_old_asset():
     for area in ("import", "workspace", "archive", "metadata", "trash"):
         html = apply_shell("<html><head></head><body></body></html>", active_area=area)
-        assert html.count('/assets/bibliothekar-logo-v2.svg?v=0.47.1') == 2
+        assert html.count('/assets/bibliothekar-logo-v2.svg?v=0.47.2') == 2
         assert '/assets/bibliothekar-logo.svg?v=' not in html
         assert html.count('id="bk-current-library-name"') == 1
 

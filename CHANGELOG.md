@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.47.2 – Kompakter PWA-Seitenkopf und einheitliche untere Navigation (09.10.2026)
+
+- Die installierte Handy-Web-App zieht Seitenüberschriften und Bereichsreiter weiter in Richtung Statusleiste. Safe-Area-Reserve bleibt erhalten; das Nachrücken erfolgt im Dokumentfluss.
+- Ein für alle Bereiche gleicher, fest an der Gerätekante verankerter Dock ersetzt widersprüchliche Höhen früherer PWA-Regeln.
+- Aufgaben erhält die gelbe runde Zahl als Icon und den Schriftzug darunter; Aufgaben und Hamburger-Menü sind rahmenlos. Symbole der drei Hauptbereiche sind größer, das aktive zusätzlich hervorgehoben.
+- Menü- und Aufgaben-Panels sitzen oberhalb des Docks, Scrollflächen behalten einen ausreichenden Sicherheitsabstand.
+- Logo V2 und weitere 0.47.1-Funktionen bleiben erhalten, ebenso die Desktopansicht und die normale mobile Website. Keine Datenbankmigration.
+
 ## 0.47.1 – Aktualisiertes Bibliothekar-Logo (09.10.2026)
 
 - Das vom Nutzer in `patch/0.47.0` ergänzte `app/bibliothekar-logo-v2.svg` wird in der gemeinsamen Kopfzeile und im Dialog „Über Bibliothekar“ angezeigt.
