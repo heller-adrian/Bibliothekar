@@ -655,6 +655,7 @@ def cleanup_archive_release_stock(
     # Pass 3: remove now-empty segment/year directories, but stop at the
     # shared 'Freigewordene Archivdateien' root. Foreign contents remain.
     removed_directories = 0
+    warnings: list[str] = []
     for parent in sorted(parents, key=lambda p: len(p.parts), reverse=True):
         cursor = parent
         while cursor != release_root and cursor != root:
@@ -664,6 +665,20 @@ def cleanup_archive_release_stock(
                 cursor.rmdir()
                 removed_directories += 1
             except OSError:
+                # A shared segment containing files from other changes
+                # is intentionally retained, but must be reported clearly.
+                if cursor.is_dir() and not cursor.is_symlink():
+                    try:
+                        if any(cursor.iterdir()):
+                            relative = cursor.relative_to(root).as_posix()
+                            notice = (
+                                "SSD-Ordner enthält fremde oder unbekannte "
+                                "Dateien und bleibt erhalten: " + relative
+                            )
+                            if notice not in warnings:
+                                warnings.append(notice)
+                    except OSError:
+                        pass
                 break
             cursor = cursor.parent
 
@@ -679,5 +694,5 @@ def cleanup_archive_release_stock(
     return {
         "removed_file_count": removed,
         "removed_directory_count": removed_directories,
-        "warnings": [],
+        "warnings": warnings,
     }
