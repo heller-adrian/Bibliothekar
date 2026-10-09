@@ -14,7 +14,7 @@ def test_0478_mobile_event_action_font_is_explicit_and_responsive():
     assert "body.bibliothekar-redesign[data-bk-area=\"workspace\"]" in scoped
     assert ".event-card-actions > button" in scoped
     assert ".event-card-actions > a" in scoped
-    assert re.search(r"font-size:\s*clamp\(\.50rem,2\.1vw,\.63rem\)\s*!important", scoped)
+    assert re.search(r"font-size:\s*clamp\(\.625rem,2\.8vw,\.72rem\)\s*!important", scoped)
     assert "white-space:nowrap" in scoped
     assert "min-width:0 !important" in scoped
     # No display-mode selector: the same mobile rule covers browser and PWA.
