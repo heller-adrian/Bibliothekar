@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_0474_version_and_dock_are_single_source_of_truth():
     shell = (ROOT / "app" / "ui_shell.py").read_text()
-    assert __version__ == main.DEPLOYMENT_VERSION == main.RELEASE_VERSION == "0.47.4"
-    assert "Version <span data-bk-version>0.47.4</span>" in shell
+    assert __version__ == main.DEPLOYMENT_VERSION == main.RELEASE_VERSION
+    assert f"Version <span data-bk-version>{__version__}</span>" in shell
     assert "Kamerakern 0.32.11" not in shell
     assert "· Kern ${core}" not in shell
     assert 'width:48px;' in shell
