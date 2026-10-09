@@ -310,13 +310,21 @@ def cancel_event_change(
     if workspace_path is not None:
         from app.archive_staging import cleanup_archive_change_staging
         from app.archive_release_stock import cleanup_archive_release_stock
+        from app.archive_release_stock import ArchiveReleaseStockError
+        # Return copies must be removed BEFORE helper material is discarded.
+        # A failure must leave the original request active and retryable.
+        try:
+            release_cleanup = cleanup_archive_release_stock(
+                database_path, workspace_path, cr_id, archive_root=archive_root
+            )
+        except ArchiveReleaseStockError as error:
+            raise EventChangeApplyError(
+                "Verwerfen noch nicht abgeschlossen: " + str(error)
+            ) from error
+        cleanup_warnings.extend(release_cleanup.get("warnings") or [])
         cleanup_archive_change_staging(
             database_path, workspace_path, cr_id, remove_originals=False
         )
-        release_cleanup = cleanup_archive_release_stock(
-            database_path, workspace_path, cr_id
-        )
-        cleanup_warnings.extend(release_cleanup.get("warnings") or [])
         try:
             from app.archive_reversal import cleanup_archive_reversal
             cleanup_archive_reversal(workspace_path, cr_id)
