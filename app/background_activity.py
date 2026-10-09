@@ -10,6 +10,8 @@ from typing import Any
 
 from app.database import database_connection
 from app.background_mutation_cancel import list_visible
+from app.operation_batches import get_operation_batch
+from app.sort_apply import get_sort_run
 
 
 _IMPORT_STATES = (
@@ -68,7 +70,10 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         ).fetchall()
 
     for row in batches:
+        # Reuse the authoritative child-run-aware batch progress.
+        batch_progress = get_operation_batch(library_database, str(row["id"]))
         operations.append({
+            "progress_percent": batch_progress["progress_percent"],
             "kind": "apply",
             "id": str(row["id"]),
             "status": str(row["status"]),
@@ -80,7 +85,9 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         })
 
     for row in runs:
+        sort_run = get_sort_run(library_database, str(row["job_id"]), str(row["id"]))
         operations.append({
+            "progress_percent": sort_run["progress_percent"] if sort_run is not None else None,
             "kind": "apply",
             "id": str(row["id"]),
             "status": str(row["status"]),
