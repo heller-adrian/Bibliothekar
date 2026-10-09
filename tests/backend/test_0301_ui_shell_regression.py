@@ -27,10 +27,7 @@ def test_0301_shell_javascript_version_block_is_real_javascript():
 
     expected = """document.querySelectorAll("[data-bk-version]").forEach(node => {
       const deployment = data.deployment_version || data.version || "";
-      const core = data.version || "";
-      node.textContent = deployment && core && deployment !== core
-        ? `${deployment} · Kern ${core}`
-        : deployment;
+      node.textContent = deployment;
     });"""
     assert expected in ui_shell.BIBLIOTHEKAR_JS
 
