@@ -5548,7 +5548,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
     <span class="bk-brand-art">
       <img class="bk-brand-image"
-           src="/assets/bibliothekar-logo-v2.svg?v=0.47.2"
+           src="/assets/bibliothekar-logo-v2.svg?v=0.47.3"
            width="165" height="45" alt="Bibliothekar"
            decoding="async" draggable="false">
       <span id="bk-current-library-name" class="bk-brand-library">{escape((get_current_library().display_name if get_current_library() else "Hauptbibliothek"))}</span>
@@ -5805,13 +5805,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
       <div class="bk-about-title">
-        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo-v2.svg?v=0.47.2" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
+        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo-v2.svg?v=0.47.3" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
         <div class="bk-about-tagline">Sichern · Ordnen · Bewahren</div>
       </div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.2 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.3 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -7225,6 +7225,64 @@ BIBLIOTHEKAR_0472_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0473_VIEWPORT_JS = r"""
+/* Nur iOS-/Smartphone-PWA: gleiche Viewport-Geometrie wie Import & Prüfung.
+   Workspace und Archiv enthielten viewport-fit=cover, die übrigen Bereiche
+   nicht. Daher waren dort Dock-Icons unterschiedlich hoch über der Kante.
+   Die mobile Website behält ihren ursprünglichen Viewport. */
+(() => {
+  const root = document.documentElement;
+  if (root.dataset.bkDisplayMode !== "standalone" ||
+      !window.matchMedia?.("(max-width: 820px)")?.matches) return;
+  const viewport = document.querySelector('meta[name="viewport"]');
+  if (!viewport) return;
+  const original = viewport.getAttribute("content") || "";
+  if (!/(?:^|,)\s*viewport-fit\s*=\s*cover\b/i.test(original)) return;
+  const normalized = original.replace(/,\s*viewport-fit\s*=\s*cover\b/i, "")
+    .replace(/viewport-fit\s*=\s*cover\s*,\s*/i, "");
+  viewport.setAttribute("content", normalized);
+  root.dataset.bkViewportNormalized = "true";
+})();
+"""
+
+
+BIBLIOTHEKAR_0473_CSS = r"""
+/* 0.47.3: Standalone-Smartphone-PWA: keine überlappenden Reiter und Titel.
+   Die Korrektur gehört ans obere Navigations-Element, nicht an die
+   Überschrift. 0.47.2 verschob nur die Reiter per negativen Margin,
+   dadurch überlagerten sie bei Sticky die nachfolgenden Überschriften. */
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-workspace-subnav,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-metadata-subnav {
+    position:sticky !important;
+    top:0 !important;
+    margin-top:0 !important;
+    margin-bottom:0 !important;
+    padding-top:8px !important;
+    z-index:4700;
+    background:var(--bk-page-bg) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-page-heading,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-page-heading {
+    position:relative;
+    z-index:1;
+    margin-top:12px !important;
+    padding-top:0 !important;
+  }
+
+  /* Die Zahl bleibt gleich groß, nur ihre Hintergrundscheibe wird kleiner
+     als die ungewählten Bereichs-Icons (36px) und deutlich kleiner als
+     das aktive Icon (42px). */
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-task-count {
+    width:33px !important;
+    min-width:33px !important;
+    height:33px !important;
+    font-size:.85rem !important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -7262,7 +7320,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0456_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0460_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0470_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0472_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0472_CSS}</style>\n"\n        f"<style>{BIBLIOTHEKAR_0473_CSS}</style>\n"\n        f"<script>{BIBLIOTHEKAR_0473_VIEWPORT_JS}</script>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
