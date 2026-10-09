@@ -5548,7 +5548,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
     <span class="bk-brand-art">
       <img class="bk-brand-image"
-           src="/assets/bibliothekar-logo.svg?v=0.47.0"
+           src="/assets/bibliothekar-logo-v2.svg?v=0.47.1"
            width="165" height="45" alt="Bibliothekar"
            decoding="async" draggable="false">
       <span id="bk-current-library-name" class="bk-brand-library">{escape((get_current_library().display_name if get_current_library() else "Hauptbibliothek"))}</span>
@@ -5805,13 +5805,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
       <div class="bk-about-title">
-        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo.svg?v=0.47.0" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
+        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo-v2.svg?v=0.47.1" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
         <div class="bk-about-tagline">Sichern · Ordnen · Bewahren</div>
       </div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.0 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.1 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
