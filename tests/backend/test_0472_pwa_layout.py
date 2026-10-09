@@ -10,7 +10,7 @@ def test_0472_runtime_and_logo_v2_intact():
         assert f"<style>{BIBLIOTHEKAR_0472_CSS}</style>" in html
         assert html.count('/assets/bibliothekar-logo-v2.svg?v=0.47.2') == 2
         assert html.count('id="bk-current-library-name"') == 1
-    assert main.bibliothekar_brand_logo().path.endswith("bibliothekar-logo-v2.svg")
+    assert main.bibliothekar_brand_logo().path.name == "bibliothekar-logo-v2.svg"
 
 
 def test_0472_headings_and_subnav_move_up_in_document_flow():
