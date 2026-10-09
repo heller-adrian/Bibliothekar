@@ -6159,7 +6159,7 @@ BIBLIOTHEKAR_0444_JS = r"""
     detail.textContent = item.detail || "";
     link.append(name, detail);
     row.append(icon, link);
-    if (item.kind === "apply" && item.progress_percent !== null
+    if ((item.kind === "apply" || item.kind === "release") && item.progress_percent !== null
         && item.progress_percent !== undefined
         && Number.isFinite(Number(item.progress_percent))) {
       const progress = document.createElement("span");
