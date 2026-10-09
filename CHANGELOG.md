@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.47.3 – PWA: einheitlicher Dock und sichtbare Seitenüberschriften (09.10.2026)
+
+- Arbeitsbereich und Archiv nutzen in der installierten Smartphone-Web-App bereits vor dem ersten Paint dieselbe Viewport-Geometrie wie Import & Prüfung. Die mobile Browserwebsite behält ihre ursprüngliche Viewport-Angabe.
+- Fixierte Unternavigation von Aufnahmen/Ereignisse und Metadatenkorrektion sitzt ohne negativen Außenabstand direkt am oberen Rand des sichtbaren Seitenbereichs; Überschriften bleiben vollständig darunter statt abgeschnitten zu sein.
+- Aufgabenzähler: nur gelber Kreis von 39 auf 33 CSS-Pixel verkleinert, Zifferngröße beibehalten. Die übrigen Dock-Maße, Icons, Logo V2 und Funktionen bleiben unverändert.
+- Keine Datenbankmigration, Import-/Archivlogik unverändert.
+
 ## 0.47.2 – Kompakter PWA-Seitenkopf und einheitliche untere Navigation (09.10.2026)
 
 - Die installierte Handy-Web-App zieht Seitenüberschriften und Bereichsreiter weiter in Richtung Statusleiste. Safe-Area-Reserve bleibt erhalten; das Nachrücken erfolgt im Dokumentfluss.
