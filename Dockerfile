@@ -39,7 +39,6 @@ RUN mkdir -p \
         /logs \
         /workspace \
         /main-library \
-        /sources/import \
         /sources/nas \
         /sources/removable \
     && chown -R 568:568 \
