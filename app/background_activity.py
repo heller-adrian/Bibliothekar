@@ -13,6 +13,7 @@ from app.database import database_connection
 from app.background_mutation_cancel import list_visible
 from app.operation_batches import get_operation_batch
 from app.sort_apply import get_sort_run
+from app.ssd_release_background import visible_release_tasks
 
 
 _IMPORT_STATES = (
@@ -128,6 +129,30 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             "href": "/events?job=" + str(row["job_id"]),
             "active": status in ("queued", "running"),
             "can_retry": status == "failed",
+        })
+
+    try:
+        releases = visible_release_tasks(library_database)
+    except OperationalError as error:
+        if "no such table: ssd_release_tasks" not in str(error):
+            raise
+        releases = []
+    for task in releases:
+        status = str(task["status"])
+        operations.append({
+            "kind": "release",
+            "id": str(task["id"]),
+            "status": status,
+            "label": "Arbeitsbereich freigeben",
+            "detail": (
+                "Freigabe wartet auf Verarbeitung" if status == "queued"
+                else "Freigabe läuft; Archiv und SSD werden geprüft"
+                if status == "running"
+                else "Freigabe angehalten: " + str(task.get("error_message") or "Unbekannter Fehler")
+            ),
+            "href": "/archive",
+            "progress_percent": task.get("progress_percent"),
+            "active": status in ("queued", "running"),
         })
 
     return {
