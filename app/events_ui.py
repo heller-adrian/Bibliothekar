@@ -4269,7 +4269,35 @@ EVENTS_HTML = r"""<!doctype html>
         html += '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finish disabled>Ursprungszustand bestätigen & Änderung verwerfen</button></div></section>';
       }
 
+      html += '<div class="card" style="margin-top:10px;border-color:var(--bk-danger,#c75050)"><details><summary><strong>Notausstieg bei unmöglicher Rückänderung</strong></summary><p class="muted" style="margin-top:8px">Nur verwenden, wenn die Wiederherstellung unmöglich ist. Der Auftrag wird beendet, aber das Ereignis bleibt gesperrt, bis der Originalbestand gesondert geprüft wurde. Es werden keine Archivdateien verändert oder als geprüft markiert.</p><button type="button" class="plan-button danger-button" data-reversal-force>Abbrechen erzwingen · manuelle Klärung</button></details></div>';
       changeRequestBody.innerHTML = html;
+      changeRequestBody.querySelector("[data-reversal-force]")?.addEventListener("click", async event => {
+        if (!window.confirm("NOTFALLABBRUCH: Der ursprüngliche Archivbestand ist danach NICHT als wiederhergestellt bestätigt. Das Ereignis bleibt bis zur erneuten Prüfung gesperrt. Fortfahren?")) return;
+        const confirmation = window.prompt("Gib zur Bestätigung exakt NOTFALLABBRUCH ein:");
+        if (confirmation !== "NOTFALLABBRUCH") return;
+        const reason = window.prompt("Warum ist die Wiederherstellung nicht möglich?") || "";
+        if (reason.trim().length < 8) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          const result = await requestJson(
+            `/api/change-requests/${encodeURIComponent(crId)}/reversal/force-stop`,
+            {method:"POST",headers:{"Content-Type":"application/json"},
+             body:JSON.stringify({confirmation,reason})}
+          );
+          mandatoryArchiveChangeContext = null;
+          clearChangeTaskFromUrl(crId);
+          changeRequestClose.disabled = false;
+          changeRequestClose.textContent = "Schließen";
+          changeRequestDialog.close();
+          await loadEvents({reset:true});
+          refreshGlobalTasks();
+          setStatus(result.message,true);
+        } catch (error) {
+          button.disabled = false;
+          showReversalError(error.message);
+        }
+      });
       const showReversalError = message => {
         let box=changeRequestBody.querySelector("#reversal-inline-error");
         if(!box){
