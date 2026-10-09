@@ -30,11 +30,11 @@ def _manifest(user_agent: str) -> dict:
 
 
 def test_0403_version_contract():
-    assert PACKAGE_VERSION == "0.47.7"
+    assert PACKAGE_VERSION == "0.47.8"
     assert main.APP_VERSION == PACKAGE_VERSION
     assert main.DEPLOYMENT_VERSION == PACKAGE_VERSION
-    assert "patch-0.47.7" in Path("compose.example.yaml").read_text(encoding="utf-8")
-    assert "Version <span data-bk-version>0.47.7</span>" in Path("app/ui_shell.py").read_text(encoding="utf-8")
+    assert "patch-0.47.8" in Path("compose.example.yaml").read_text(encoding="utf-8")
+    assert "Version <span data-bk-version>0.47.8</span>" in Path("app/ui_shell.py").read_text(encoding="utf-8")
 
 
 def test_0403_shell_links_manifest_without_changing_browser_layout():
