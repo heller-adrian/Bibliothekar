@@ -5548,7 +5548,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
     <span class="bk-brand-art">
       <img class="bk-brand-image"
-           src="/assets/bibliothekar-logo-v2.svg?v=0.47.1"
+           src="/assets/bibliothekar-logo-v2.svg?v=0.47.2"
            width="165" height="45" alt="Bibliothekar"
            decoding="async" draggable="false">
       <span id="bk-current-library-name" class="bk-brand-library">{escape((get_current_library().display_name if get_current_library() else "Hauptbibliothek"))}</span>
@@ -5805,13 +5805,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
       <div class="bk-about-title">
-        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo-v2.svg?v=0.47.1" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
+        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo-v2.svg?v=0.47.2" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
         <div class="bk-about-tagline">Sichern · Ordnen · Bewahren</div>
       </div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.1 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.2 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -7036,6 +7036,195 @@ BIBLIOTHEKAR_0470_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0472_CSS = r"""
+/* 0.47.2: Alle Regeln ausschließlich für die installierte Smartphone-PWA.
+   Frühere kompakte und große Dockvorgaben werden hier zentral überstimmt. */
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-top:0 !important;
+    margin-top:0 !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign > .bk-shell {
+    display:none !important;
+  }
+  /* Die alte Kopfhöhe war bereits entfernt. In 0.47.0 verblieb eine
+     zweite Safe-Area-Reserve an Titel bzw. Bereichsreitern.
+     Hier rückt das ganze Layout im normalen Dokumentfluss nach oben,
+     nicht per transform, sodass es keine leere Lücke hinterlässt. */
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign:not([data-bk-area="workspace"]):not([data-bk-area="metadata"]) > .bk-page-heading {
+    margin-top:-26px !important;
+    padding-top:max(38px, calc(env(safe-area-inset-top) - 6px)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-workspace-subnav,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-metadata-subnav {
+    margin-top:-26px !important;
+    padding-top:max(38px, calc(env(safe-area-inset-top) - 6px)) !important;
+    top:0 !important;
+    position:sticky !important;
+    background:var(--bk-page-bg) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-page-heading,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-page-heading {
+    margin-top:8px !important;
+  }
+
+  /* Identischer Dock in Import, Aufnahmen, Archiv und auf Unterseiten,
+     unabhängig vom Dokument-Scroll und früheren page-spezifischen Padding. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    position:fixed !important;
+    bottom:0 !important;
+    top:auto !important;
+    left:0 !important;
+    right:0 !important;
+    width:100% !important;
+    height:calc(112px + env(safe-area-inset-bottom)) !important;
+    min-height:0 !important;
+    max-height:calc(112px + env(safe-area-inset-bottom)) !important;
+    box-sizing:border-box !important;
+    grid-template-columns:minmax(0,.84fr) minmax(0,1.34fr) minmax(0,.80fr) minmax(0,.92fr) minmax(0,.70fr) !important;
+    align-items:stretch !important;
+    gap:2px !important;
+    padding:8px 7px calc(10px + env(safe-area-inset-bottom)) !important;
+    border-top:1px solid var(--bk-line);
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    width:100% !important;
+    min-width:0 !important;
+    height:100% !important;
+    min-height:0 !important;
+    max-height:none !important;
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:47px 22px !important;
+    align-content:center !important;
+    align-items:center !important;
+    justify-items:center !important;
+    gap:3px !important;
+    padding:3px 0 !important;
+    border:0 !important;
+    border-radius:10px !important;
+    box-shadow:none !important;
+    background:transparent !important;
+    font-size:clamp(.54rem,2.55vw,.68rem) !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item .bk-pwa-icon {
+    display:grid;
+    grid-row:1;
+    place-items:center;
+    align-self:center;
+    width:100%;
+    min-height:47px;
+    line-height:1;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item .bk-pwa-label {
+    display:block !important;
+    grid-row:2;
+    min-width:0 !important;
+    max-width:100% !important;
+    overflow:visible !important;
+    white-space:nowrap !important;
+    text-overflow:clip !important;
+    text-align:center !important;
+    font-size:inherit !important;
+    line-height:1.1 !important;
+    letter-spacing:-.025em;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg {
+    width:36px !important;
+    height:36px !important;
+    transition:transform 180ms ease, width 180ms ease, height 180ms ease;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item.active .bk-pwa-icon svg {
+    width:42px !important;
+    height:42px !important;
+    transform:scale(1.04);
+  }
+
+  /* Aufgaben ist ein regulärer Reiter: runde gelbe Zahl als Icon,
+     der Schriftzug liegt exakt in der Textzeile der Hauptbereiche. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle {
+    border:0 !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    grid-template-areas:"icon" "label" !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:47px 22px !important;
+    min-height:0 !important;
+    height:100% !important;
+    padding:3px 0 !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-task-count {
+    grid-area:icon;
+    grid-row:1;
+    align-self:center;
+    justify-self:center;
+    display:grid;
+    place-items:center;
+    box-sizing:border-box;
+    width:39px !important;
+    height:39px !important;
+    min-width:39px !important;
+    border-radius:50% !important;
+    padding:0 !important;
+    font-size:.85rem !important;
+    font-weight:850;
+    background:var(--bk-yellow);
+    color:#202020;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-label {
+    grid-area:label;
+    grid-row:2;
+    display:block !important;
+  }
+
+  /* Gleich hohe, rahmenlose Hamburger-Fläche; nur das Symbol in Reihe 1. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    border:0 !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    min-height:0 !important;
+    height:100% !important;
+    justify-self:stretch !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:47px 22px !important;
+    padding:3px 0 !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle .bk-pwa-label {
+    display:none !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle .bk-pwa-icon {
+    grid-row:1;
+  }
+
+  /* Dialoge schweben oberhalb des exakt festgelegten Docks. */
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom:calc(112px + env(safe-area-inset-bottom)) !important;
+    max-height:calc(100dvh - max(44px, env(safe-area-inset-top)) - 137px - env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign main {
+    padding-bottom:calc(134px + env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"].bk-meta-selection-sheet-open main {
+    padding-bottom:calc(134px + env(safe-area-inset-bottom) + var(--bk-meta-selection-sheet-height,44dvh) + 18px) !important;
+  }
+}
+@media (max-width:360px) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    font-size:.50rem !important;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg {
+    transition:none !important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -7072,7 +7261,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0455_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0456_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0460_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0470_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0470_CSS}</style>\n"\n        f"<style>{BIBLIOTHEKAR_0472_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
