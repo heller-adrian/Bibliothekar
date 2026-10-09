@@ -12447,6 +12447,45 @@ def api_finish_change_reversal(cr_id: str) -> JSONResponse:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@app.post("/api/change-requests/{cr_id}/reversal/force-stop")
+def api_force_stop_change_reversal(
+    cr_id: str, body: dict[str, Any],
+) -> JSONResponse:
+    """Emergency lock, not a successful reversal or deletion."""
+    from app.archive_recovery import force_stop_reversal
+    try:
+        result = force_stop_reversal(
+            current_database_file(), current_archive_root(), current_workspace_root(),
+            cr_id, phrase=str(body.get("confirmation") or ""),
+            reason=str(body.get("reason") or ""),
+        )
+        return JSONResponse(content=result)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/archive/recovery/{event_id}")
+def api_archive_recovery_status(event_id: str) -> JSONResponse:
+    from app.archive_recovery import read_recovery_incident
+    incident = read_recovery_incident(current_database_file(), event_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Kein offener Wiederherstellungsfall.")
+    return JSONResponse(content=incident)
+
+
+@app.post("/api/archive/recovery/{event_id}/verify-and-unlock")
+def api_archive_recovery_verify_and_unlock(event_id: str) -> JSONResponse:
+    from app.archive_recovery import resolve_recovery_incident
+    try:
+        result = resolve_recovery_incident(
+            current_database_file(), current_archive_root(), current_workspace_root(),
+            event_id,
+        )
+        return JSONResponse(content=result)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.post("/api/change-requests/{cr_id}/release-copy/create")
 def api_create_archive_release_copy(cr_id: str) -> JSONResponse:
     """Freigewordene Archivdateien nach ausdrücklicher Freigabe auf die SSD kopieren."""
