@@ -5801,11 +5801,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 <dialog id="bk-about-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
-      <div><h2>Bibliothekar</h2><div style="color:var(--bk-muted);margin-top:5px">Sichern · Ordnen · Bewahren</div></div>
+      <div class="bk-about-title">
+        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo.svg?v=0.47.0" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
+        <div class="bk-about-tagline">Sichern · Ordnen · Bewahren</div>
+      </div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.46.0 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.0 · Kamerakern 0.32.11</span></p>
   </div>
 </dialog>
 
@@ -6792,6 +6795,194 @@ body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name 
 }
 """
 
+
+BIBLIOTHEKAR_0470_CSS = r"""
+/* 0.47.0 – Nur installierte Smartphone-Web-App. Mobile Browserseite und
+ * Desktop-Shell behalten unverändert den Markenkopf von 0.46.0. */
+.bk-about-logo-heading {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin:0;
+  padding:10px 12px;
+  border-radius:12px;
+  background:#15222c;
+  line-height:0;
+}
+.bk-about-logo-heading img {
+  display:block;
+  width:min(190px,55vw);
+  height:auto;
+  aspect-ratio:489.84 / 133.36;
+  object-fit:contain;
+}
+.bk-about-tagline {
+  color:var(--bk-muted);
+  margin-top:6px;
+  line-height:1.3;
+}
+@media (max-width:820px) {
+  /* PWA-Farbfläche füllt auch den iOS-Statusleisten-Hintergrund.
+     Keine dunkelblaue Blindfläche oberhalb des Seiteninhalts. */
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="import"]) {
+    background:#f8efec;
+  }
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="workspace"]) {
+    background:#eef4f8;
+  }
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="archive"]) {
+    background:#f8f4e8;
+  }
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="metadata"]),
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="assistant"]),
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="trash"]) {
+    background:#f1f2ef;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="import"]) {
+    background:#120f11;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="workspace"]) {
+    background:#0c1217;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="archive"]) {
+    background:#14120c;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="metadata"]),
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="assistant"]),
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="trash"]) {
+    background:#0f1418;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-top:0 !important;
+    padding-bottom:calc(132px + env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign > .bk-shell {
+    display:none !important;
+  }
+  /* Bei Seiten ohne obere Unternavigation folgt die Überschrift direkt
+     auf die Safe-Area; keine Kopfhöhe als Leerraum reservieren. */
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign:not([data-bk-area="workspace"]):not([data-bk-area="metadata"]) > .bk-page-heading {
+    margin-top:0 !important;
+    padding-top:calc(max(44px, env(safe-area-inset-top)) + 12px) !important;
+  }
+  /* Aufnahmen/Ereignisse bzw. Bibliothek/Allgemein/Mehrfachkorrektur:
+     die obere Tab-Leiste ist der Kopf – inklusive sicherer Statusleistenhöhe.
+     Auch beim Sticky-Scrollen bleibt sie unter den System-Icons lesbar. */
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-workspace-subnav,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-metadata-subnav {
+    position:sticky !important;
+    top:0 !important;
+    margin-top:0 !important;
+    padding-top:calc(max(44px, env(safe-area-inset-top)) + 6px) !important;
+    background:var(--bk-page-bg) !important;
+    z-index:4700;
+    box-sizing:border-box;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-page-heading,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-page-heading {
+    margin-top:12px !important;
+  }
+  /* Die größere Navigation darf den letzten Eintrag oder die nichtmodalen
+     Metadaten-Auswahlflächen nicht verdecken. */
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign main {
+    padding-bottom:calc(154px + env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"].bk-meta-selection-sheet-open main {
+    padding-bottom:calc(154px + env(safe-area-inset-bottom) + var(--bk-meta-selection-sheet-height,44dvh) + 18px) !important;
+  }
+  /* Einheitlicher, großer PWA-Dock auf sämtlichen Unterseiten:
+     flächenfüllende Touch-Ziele, flexible Spalten, ungekürzte Texte. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    box-sizing:border-box;
+    width:100%;
+    min-height:calc(112px + env(safe-area-inset-bottom)) !important;
+    grid-template-columns:minmax(0,.8fr) minmax(0,1.32fr) minmax(0,.74fr) minmax(0,1.14fr) minmax(40px,.55fr) !important;
+    gap:3px !important;
+    align-items:stretch !important;
+    padding:9px 9px calc(10px + env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    box-sizing:border-box;
+    width:100%;
+    min-width:0 !important;
+    height:auto !important;
+    min-height:87px !important;
+    grid-template-rows:39px 18px !important;
+    align-content:center !important;
+    gap:5px !important;
+    padding:7px 1px !important;
+    overflow:visible !important;
+    font-size:clamp(.55rem,2.65vw,.68rem) !important;
+    line-height:1.1 !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item .bk-pwa-label {
+    display:block;
+    min-width:0;
+    max-width:100%;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:nowrap !important;
+    font-size:inherit !important;
+    line-height:1.15 !important;
+    letter-spacing:-.025em;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg {
+    width:32px !important;
+    height:32px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle {
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:20px 30px !important;
+    place-items:center !important;
+    align-content:center !important;
+    gap:5px !important;
+    min-height:87px !important;
+    padding:8px 2px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-label {
+    display:block !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-count {
+    width:auto;
+    min-width:28px !important;
+    height:28px !important;
+    padding-inline:5px;
+    flex:0 0 auto;
+    font-size:.73rem !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    min-height:87px !important;
+    height:auto !important;
+    padding:0 !important;
+    justify-self:stretch;
+    display:grid !important;
+    grid-template-rows:1fr !important;
+    align-content:center !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle .bk-pwa-label {
+    display:none !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom:calc(120px + env(safe-area-inset-bottom)) !important;
+    max-height:calc(100dvh - max(44px, env(safe-area-inset-top)) - 155px - env(safe-area-inset-bottom)) !important;
+  }
+}
+@media (max-width:360px) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    font-size:.53rem !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    padding-inline:6px !important;
+    gap:1px !important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -6827,7 +7018,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0454_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0455_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0456_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0460_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0460_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0470_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
