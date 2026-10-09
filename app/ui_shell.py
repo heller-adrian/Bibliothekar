@@ -6285,6 +6285,56 @@ BIBLIOTHEKAR_0451_HEAD_JS = r"""
 })();
 """
 
+BIBLIOTHEKAR_0470_HEAD_JS = r"""
+/* Statusleiste in der installierten Handy-PWA passend zum Seitenhintergrund,
+   damit Uhrzeit und Systemicons auch ohne dunklen Markenheader lesbar sind. */
+(() => {
+  const root=document.documentElement;
+  if(root.dataset.bkDisplayMode!=="standalone"
+      || !window.matchMedia?.("(max-width: 820px)")?.matches) return;
+  const pathname=location.pathname;
+  const area=pathname==="/" ? "import"
+    : (pathname==="/workspace" || pathname==="/events") ? "workspace"
+    : pathname==="/transfer" ? "archive"
+    : (pathname==="/metadata-correction" || pathname.startsWith("/metadata-correction/")) ? "metadata"
+    : "neutral";
+  const palettes={
+    import:["#f8efec","#120f11"],
+    workspace:["#eef4f8","#0c1217"],
+    archive:["#f8f4e8","#14120c"],
+    metadata:["#f1f2ef","#0f1418"],
+    neutral:["#f1f2ef","#0f1418"]
+  };
+  const apply=()=>{
+    const dark=root.dataset.bkTheme==="dark";
+    const color=palettes[area][dark?1:0];
+    root.style.backgroundColor=color;
+    let theme=document.querySelector('meta[name="theme-color"]');
+    if(!theme){
+      theme=document.createElement("meta");
+      theme.setAttribute("name","theme-color");
+      document.head.appendChild(theme);
+    }
+    theme.setAttribute("content",color);
+    let bar=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+    if(!bar){
+      bar=document.createElement("meta");
+      bar.setAttribute("name","apple-mobile-web-app-status-bar-style");
+      document.head.appendChild(bar);
+    }
+    bar.setAttribute("content",dark?"black-translucent":"default");
+  };
+  if(document.readyState==="loading"){
+    document.addEventListener("DOMContentLoaded",apply,{once:true});
+  }else{ apply(); }
+  if(typeof MutationObserver==="function"){
+    new MutationObserver(apply).observe(root,{
+      attributes:true,attributeFilter:["data-bk-theme"]
+    });
+  }
+})();
+"""
+
 BIBLIOTHEKAR_0451_CSS = r"""
 /* 0.45.1: Theme und Standalone-Modus werden vor dem ersten CSS-Paint initialisiert. */
 html[data-bk-theme="dark"] { background-color: #0c1115; color-scheme: dark; }
@@ -6989,7 +7039,7 @@ BIBLIOTHEKAR_0470_CSS = r"""
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
-        lambda match: match.group(0) + f"\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n",
+        lambda match: match.group(0) + f"\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n<script>{BIBLIOTHEKAR_0470_HEAD_JS}</script>\n",
         html,
         count=1,
         flags=re.IGNORECASE,
