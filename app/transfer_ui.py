@@ -181,6 +181,37 @@ TRANSFER_HTML = r'''<!doctype html>
   async function getJson(url){const response=await fetch(url,{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
   async function postJson(url){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
 
+  async function followRelease(jobId,eventId,result,verifyButton,releaseButton){
+    const url=`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/ssd-release/task`;
+    const check=async()=>{
+      try{
+        const task=await getJson(url);
+        const pct=Number.isFinite(Number(task.progress_percent))
+          ? Math.round(Number(task.progress_percent))+" %" : "–";
+        if(task.status==="completed"){
+          result.className="result success";
+          result.textContent="SSD-Freigabe abgeschlossen · "+pct;
+          await load({forceRefresh:true});
+          return;
+        }
+        if(task.status==="failed"){
+          result.className="result danger";
+          result.textContent="Freigabe angehalten: "+String(task.error_message||"Unbekannter Fehler")
+            +" · Die bisherigen Prüfschritte bleiben gespeichert.";
+          releaseButton.disabled=false;
+          verifyButton.disabled=false;
+          return;
+        }
+        result.textContent="Arbeitsbereich wird im Hintergrund freigegeben · "+pct
+          +" · Ein Seitenwechsel oder Browser-Neustart unterbricht den Serverauftrag nicht.";
+        setTimeout(check,2000);
+      }catch(error){
+        result.className="result danger";
+        result.textContent="Auftragsstatus konnte nicht abgefragt werden: "+error.message;
+      }
+    };
+    await check();
+  }
   function eventStatusLabel(status){const labels={draft:'Entwurf',planned:'geplant',applied:'angewendet',archived:'archiviert'};return labels[String(status||'')]||String(status||'');}
     function formatDate(value){
     const date=new Date(value||'');
@@ -215,7 +246,7 @@ TRANSFER_HTML = r'''<!doctype html>
       releaseButton.addEventListener('click',async(event)=>{
         if(!confirm(`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.`))return;
         event.currentTarget.disabled=true;verifyButton.disabled=true;result.hidden=false;result.className='result';result.textContent='Kamerabibliothek und Arbeitsbereich-Dateien werden erneut per SHA-256 geprüft. Anschließend wird nur der bestätigte SSD-Ereignisbestand entfernt …';
-        try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);result.className='result success';result.textContent=`${data.message} ${Number(data.file_count||0)} Dateien geprüft; ${Number(data.deleted_file_count||0)} Arbeitsbereich-Dateien entfernt.`;await load({forceRefresh:true});}
+        try{await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);await followRelease(item.job_id,item.event_id,result,verifyButton,releaseButton);}
         catch(error){result.className='result danger';result.textContent=error.message;event.currentTarget.disabled=false;verifyButton.disabled=false;}
       });
       archiveList.appendChild(card);
