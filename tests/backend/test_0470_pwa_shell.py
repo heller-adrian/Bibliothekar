@@ -11,7 +11,7 @@ def test_0470_version_and_pwa_css_injected_after_branding():
     assert __version__ == main.DEPLOYMENT_VERSION == "0.47.0"
     html = apply_shell("<html><head></head><body><main></main></body></html>", active_area="import")
     assert "<style>" + BIBLIOTHEKAR_0470_CSS + "</style>" in html
-    assert html.index("BIBLIOTHEKAR_0460_CSS") == -1
+    assert "BIBLIOTHEKAR_0460_CSS" not in html
     assert 'src="/assets/bibliothekar-logo.svg?v=0.47.0"' in html
 
 
