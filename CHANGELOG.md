@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.47.7 – Rückkehrkopien beim Archivverwerfen zuverlässig entfernen (09.10.2026)
+
+- Archiv-Verwerfen prüft vor dem SSD-Cleanup sämtliche betroffenen Archivoriginale und SSD-Rückkehrkopien erneut nach Größe und SHA-256. Erst danach werden bekannte Kopien entfernt und leere Tages-/Jahresordner unter „Freigewordene Archivdateien“ aufgeräumt.
+- Fehlende oder veränderte Archivoriginale erfordern weiterhin den bewährten Rückänderungsauftrag. Unbekannte/fremde SSD-Dateien werden niemals entfernt.
+- Ein nicht vollständig bereinigter Rückkehrbestand darf keinen als abgeschlossen verbuchten Abbruch mehr erzeugen. Der Auftrag bleibt offen und wiederholbar, bis alle eigenen Rückkehrkopien sicher entfernt sind.
+- Tests für Kamera- und Export-Assets, geteilte Freigabeordner, veränderte Kopien, verlorene Archivoriginale und abgeschlossene Rückänderungen.
+- Keine neue Datenbankmigration und keine automatisch veränderten Archivdateien.
+
 ## 0.47.5 – Sichere Ereignisänderungen und Hintergrundfortschritt (09.10.2026)
 
 - Der Nachsortierplan angewendeter Ereignisse erkennt aus dem ursprünglichen Mutations-Snapshot auch bereits entfernte oder umbenannte Unterereignisordner. Diese werden nicht länger fälschlich als freie Organisationsordner in den neuen Zielpfad übernommen.
