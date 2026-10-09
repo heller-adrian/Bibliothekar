@@ -131,3 +131,70 @@ def test_0476_javascript_reversal_has_global_archive_label():
     assert EVENTS_HTML.index("const reversalArchiveRoot") < EVENTS_HTML.index('if (phase === "prepare")')
     assert "data-reversal-force" in EVENTS_HTML
     assert "ssd-release/task" in TRANSFER_HTML
+
+
+def test_0476_missing_original_cannot_be_unlocked_after_forced_stop(tmp_path: Path):
+    db, workspace, archive, folder, old_family, new_family, _ = _seed(
+        tmp_path, full_archive_triplet=True
+    )
+    proposed = propose_event_change(
+        db, "old", "archive", _preview(folder, old_family, new_family),
+        event_name="Test Archiv 2", archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+    cancelled = cancel_event_change(db, cr_id, archive, workspace)
+    assert cancelled["reversal_required"] is True
+    lost_original = archive / "2026" / folder / "Alle" / "alt.JPG"
+    lost_original.unlink()
+    result = force_stop_reversal(
+        db, archive, workspace, cr_id, phrase=FORCE_PHRASE,
+        reason="Originaldatei wurde außerhalb der App gelöscht",
+    )
+    assert result["status"] == "manual_review"
+    incident = read_recovery_incident(db, "archive")
+    assert incident is not None
+    assert not incident["snapshot"]["verification"]["complete"]
+    assert any(
+        p.get("kind") == "file"
+        for p in incident["snapshot"]["verification"].get("problems", [])
+    )
+    unresolved = resolve_recovery_incident(db, archive, workspace, "archive")
+    assert unresolved["resolved"] is False
+    assert read_recovery_incident(db, "archive") is not None
+    assert not lost_original.exists()
+
+
+def test_0476_failed_release_remains_retriable_and_does_not_touch_archive(
+    tmp_path: Path, monkeypatch
+):
+    from app import ssd_release_background as background
+    db, workspace, archive, folder, *_ = _seed(tmp_path)
+    with database_connection(db) as connection:
+        connection.execute(
+            "UPDATE events SET status='applied',archived_at=NULL WHERE id='archive'"
+        )
+    first = enqueue_release(db, "old", "archive")
+    claimed = claim_release(db)
+    assert claimed["id"] == first["id"]
+
+    def stop_before_deletion(*args):
+        raise RuntimeError("Fehlende Originaldatei / SHA-256 passt nicht")
+    monkeypatch.setattr(background, "release_event_ssd", stop_before_deletion)
+    process_release(db, workspace, archive, claimed)
+    failed = get_release_task(db, "old", "archive")
+    assert failed["status"] == "failed"
+    assert "SHA-256" in failed["error_message"]
+    original = archive / "2026" / folder / "Alle" / "alt.JPG"
+    assert original.read_bytes() == b"alt"
+
+    retry = enqueue_release(db, "old", "archive")
+    assert retry["id"] != first["id"]
+    claimed_retry = claim_release(db)
+    monkeypatch.setattr(
+        background, "release_event_ssd",
+        lambda *args: {"released": True, "deleted_file_count": 1},
+    )
+    process_release(db, workspace, archive, claimed_retry)
+    assert get_release_task(db, "old", "archive")["status"] == "completed"
+    assert original.read_bytes() == b"alt"
