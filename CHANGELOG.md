@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.47.5 – Sichere Ereignisänderungen und Hintergrundfortschritt (09.10.2026)
+
+- Der Nachsortierplan angewendeter Ereignisse erkennt aus dem ursprünglichen Mutations-Snapshot auch bereits entfernte oder umbenannte Unterereignisordner. Diese werden nicht länger fälschlich als freie Organisationsordner in den neuen Zielpfad übernommen.
+- Bei Archiv-Änderungen werden auch leere, entfernte Unterereignisse im manuellen Ordnerbereinigungsplan berücksichtigt. Bibliothekar verändert das Archiv weiterhin nicht selbst.
+- Im seitenunabhängigen Desktop-Hintergrundmonitor werden die bereits vom Server berechneten Prozentwerte einzelner Sortierläufe und Sammelaufträge angezeigt.
+- Die Wiederaufnahme des Fortschritts eines laufenden Sammelauftrags ist vom Laden der umfangreichen Aufnahmenübersicht entkoppelt.
+- Ordnerbäume nutzen eine feste Zeichenbreite für korrekte Verbindungslinien; die übrige App bleibt in Futura.
+- Zusätzliche Regressionstests, Versionsanpassung auf 0.47.5; keine Datenbankmigration und keine automatisch ausgeführte Reparatur vorhandener Ereignisse.
+
 ## 0.47.4 – Abschlusskorrekturen an Import und Hintergrundanzeige (09.10.2026)
 
 - Der alte Block „Bereits erkannte Sicherungsquellen“ sowie die Auswahl `saved` entfallen aus dem Ordnerbrowser. Der SD-Import prüft den tatsächlich eingebundenen Kartenordner, unabhängig von der alten Quellensuche.
