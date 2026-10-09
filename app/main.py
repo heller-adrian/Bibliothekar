@@ -34,6 +34,7 @@ from app.ui_shell import apply_shell
 from app import view_cache
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity
+from app import ssd_release_background as release_queue
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
 from app.global_stock import (
@@ -296,8 +297,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.47.5"
-DEPLOYMENT_VERSION = "0.47.5"
+RELEASE_VERSION = "0.47.6"
+DEPLOYMENT_VERSION = "0.47.6"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1856,6 +1857,50 @@ def process_background_mutation_cancel() -> bool:
     return False
 
 
+RELEASE_WORKER_STOP = Event()
+RELEASE_WORKER_WAKE = Event()
+RELEASE_WORKER_THREAD: Thread | None = None
+
+
+def process_background_release() -> bool:
+    """Claim one persisted SSD release without relying on an HTTP connection."""
+    for context in list_active_library_contexts(REGISTRY_DATABASE_FILE):
+        ensure_library_database_schema(context)
+        task = release_queue.claim_release(context.database_path)
+        if task is None:
+            continue
+        release_queue.process_release(
+            context.database_path, compatibility_workspace_root(context),
+            context.archive_root, task,
+        )
+        return True
+    return False
+
+
+def release_worker_loop() -> None:
+    while not RELEASE_WORKER_STOP.is_set():
+        try:
+            while not RELEASE_WORKER_STOP.is_set() and process_background_release():
+                pass
+        except Exception as error:
+            print("SSD-Freigabeworker fehlgeschlagen:", error, flush=True)
+        RELEASE_WORKER_WAKE.wait(3.0)
+        RELEASE_WORKER_WAKE.clear()
+
+
+def start_release_worker() -> None:
+    global RELEASE_WORKER_THREAD
+    RELEASE_WORKER_STOP.clear()
+    if RELEASE_WORKER_THREAD is None or not RELEASE_WORKER_THREAD.is_alive():
+        RELEASE_WORKER_THREAD = Thread(
+            target=release_worker_loop,
+            name="bibliothekar-ssd-release-worker",
+            daemon=True,
+        )
+        RELEASE_WORKER_THREAD.start()
+    RELEASE_WORKER_WAKE.set()
+
+
 def cancel_worker_loop() -> None:
     """Unabhängiger, ereignisgesteuerter Worker; keine Leerlauf-DB-Abfragen."""
     while not CANCEL_WORKER_STOP.is_set():
@@ -2005,6 +2050,7 @@ def startup_database() -> None:
                 )
                 WORKER_THREAD.start()
             start_cancel_worker()
+            start_release_worker()
             return
 
         if existing_main is not None:
@@ -2240,6 +2286,7 @@ def startup_database() -> None:
         for context in list_active_library_contexts(REGISTRY_DATABASE_FILE):
             ensure_library_database_schema(context)
             cancel_queue.recover_interrupted(context.database_path)
+            release_queue.recover_releases(context.database_path)
 
         WORKER_STOP.clear()
 
@@ -2255,6 +2302,7 @@ def startup_database() -> None:
             WORKER_THREAD.start()
 
         start_cancel_worker()
+        start_release_worker()
 
         # 0.41.3: Persistente Mehrfach-Anwendungen und Sortierjournale
         # werden nach einem Neustart auch in sekundären Bibliotheken
@@ -2306,6 +2354,10 @@ def shutdown_worker() -> None:
     WORKER_STOP.set()
     CANCEL_WORKER_STOP.set()
     CANCEL_WORKER_WAKE.set()
+    RELEASE_WORKER_STOP.set()
+    RELEASE_WORKER_WAKE.set()
+    if RELEASE_WORKER_THREAD is not None and RELEASE_WORKER_THREAD.is_alive():
+        RELEASE_WORKER_THREAD.join(timeout=5)
     if CANCEL_WORKER_THREAD is not None and CANCEL_WORKER_THREAD.is_alive():
         CANCEL_WORKER_THREAD.join(timeout=5)
 
@@ -4604,26 +4656,26 @@ def api_archive_verify(
 @app.post(
     "/api/jobs/{job_id}/events/{event_id}/ssd-release",
     tags=["Archivübernahme"],
+    status_code=202,
 )
-def api_ssd_release(
-    job_id: str,
-    event_id: str,
-) -> dict[str, Any]:
+def api_ssd_release(job_id: str, event_id: str) -> dict[str, Any]:
+    """Only enqueue. Worker verifies archive and performs durable SSD cleanup."""
     try:
-        return release_event_ssd(
-            current_database_file(),
-            current_workspace_root(),
-            current_archive_root(),
-            job_id,
-            event_id,
-        )
-    except SsdReleaseError as error:
-        message = str(error)
-        status_code = 404 if "nicht gefunden" in message else 409
-        raise HTTPException(
-            status_code=status_code,
-            detail=message,
-        ) from error
+        task = release_queue.enqueue_release(current_database_file(), job_id, event_id)
+        start_release_worker()
+        RELEASE_WORKER_WAKE.set()
+        return {"status": str(task["status"]), "task_id": str(task["id"]),
+                "message": "SSD-Freigabe im Hintergrund angenommen."}
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/jobs/{job_id}/events/{event_id}/ssd-release/task", tags=["Archivübernahme"])
+def api_ssd_release_task(job_id: str, event_id: str) -> dict[str, Any]:
+    task = release_queue.get_release_task(current_database_file(), job_id, event_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Freigabeauftrag nicht gefunden.")
+    return task
 
 
 @app.get("/trash", response_class=HTMLResponse, tags=["Oberfläche"])
