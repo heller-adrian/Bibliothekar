@@ -41,7 +41,7 @@ def test_0220_import_source_picker_keeps_all_paths():
     assert 'data-source-mode="folder"' in html
     assert 'id="device-select"' in html
     assert 'id="folder-root-select"' in html
-    assert 'id="source-select"' in html
+    assert 'id="folder-source-detail"' in html
 
 
 def test_0220_manifest_and_copy_report_live_progress(tmp_path: Path):
