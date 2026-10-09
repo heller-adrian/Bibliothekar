@@ -7261,7 +7261,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0455_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0456_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0460_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0470_CSS}</style>\n"\n        f"<style>{BIBLIOTHEKAR_0472_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0470_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0472_CSS}</style>\n</head>",
         1,
     )
     area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
