@@ -296,8 +296,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.28.7"
-DEPLOYMENT_VERSION = "0.47.3"
+RELEASE_VERSION = "0.47.4"
+DEPLOYMENT_VERSION = "0.47.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4041,6 +4041,16 @@ def api_source_folders(root_key: str = "nas", relative_path: str = ".") -> dict[
         "parent_relative_path": parent,
         "directories": directories,
     }
+
+
+@app.get("/api/source-folder-summary", tags=["Import"])
+def api_source_folder_summary(root_key: str = "nas", relative_path: str = ".") -> dict[str, Any]:
+    """Return statistics for the selected folder, not a discovered backup."""
+    root = _safe_root(root_key)
+    source = resolve_import_source(relative_path, root_key)
+    if source == root:
+        raise HTTPException(status_code=422, detail="Bitte einen einzelnen Quellordner auswählen.")
+    return import_source_summary(source, root_key, root)
 
 
 def _folder_import_runtime_blocker() -> str | None:
@@ -10424,26 +10434,16 @@ def index() -> str:
               <select id="folder-root-select" aria-label="Quellenbereich">
                 <option value="nas">NAS-Speicher</option>
                 <option value="removable">Eingebundene Wechselmedien</option>
-                <option value="saved">Bisherige Sicherungsquellen</option>
               </select>
               <div class="folder-path" id="folder-path">/</div>
               <div class="folder-list" id="folder-list"></div>
+              <div class="source-detail" id="folder-source-detail" role="status" aria-live="polite"></div>
               <div class="import-controls">
                 <button class="secondary" id="folder-up-button" type="button">Eine Ebene höher</button>
                 <button class="primary" id="folder-import-button" type="button">Diesen Ordner importieren</button>
               </div>
             </div>
 
-            <h3>Bereits erkannte Sicherungsquellen</h3>
-            <div class="import-controls">
-              <select id="source-select" aria-label="Importquelle">
-                <option value="">Quellen werden geladen …</option>
-              </select>
-              <button class="primary" id="import-button" type="button">
-                Quelle importieren
-              </button>
-            </div>
-            <div class="source-detail" id="source-detail"></div>
           </section>
         </div>
       </details>
@@ -10514,17 +10514,8 @@ def index() -> str:
     const noticeElement =
       document.getElementById("notice");
 
-    const importButton =
-      document.getElementById("import-button");
-
-    const sourceSelect =
-      document.getElementById("source-select");
-
     const sdSourceDetail =
       document.getElementById("sd-source-detail");
-
-    const sourceDetail =
-      document.getElementById("source-detail");
 
     const sdCardStatus = document.getElementById("sd-card-status");
     const sdMountButton = document.getElementById("sd-mount-button");
@@ -10545,6 +10536,7 @@ def index() -> str:
     const folderRootSelect = document.getElementById("folder-root-select");
     const folderPath = document.getElementById("folder-path");
     const folderList = document.getElementById("folder-list");
+    const folderSourceDetail = document.getElementById("folder-source-detail");
     const folderUpButton = document.getElementById("folder-up-button");
     const folderImportButton = document.getElementById("folder-import-button");
 
@@ -11304,7 +11296,7 @@ def index() -> str:
       const response = await fetch("/api/source-devices/unmount", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({device_path:devicePath})});
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Quelle konnte nicht ausgeworfen werden.");
-      await Promise.all([loadSourceDevices(), loadSources()]);
+      await loadSourceDevices();
       return data.device;
     }
 
@@ -11314,35 +11306,42 @@ def index() -> str:
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Quelle konnte nicht eingebunden werden.");
-      await Promise.all([loadSourceDevices(), loadSources()]);
+      await loadSourceDevices();
       return data.device;
     }
 
-    function mountedSourceForDevice(device) {
-      if (!device?.mounted || !device.device_id) return null;
-      return availableSources.find(source => source.root_key === "removable" && (source.relative_path === device.device_id || source.relative_path.startsWith(device.device_id + "/")));
-    }
-
-    function updateSdSourceDetail() {
-      const source = mountedSourceForDevice(selectedSdDevice);
-      if (!selectedSdDevice?.mounted) {
+    let sdSummaryRequest = 0;
+    async function updateSdSourceDetail() {
+      const device = selectedSdDevice;
+      const requestId = ++sdSummaryRequest;
+      if (!device?.mounted || !device.read_only || !device.device_id) {
         sdSourceDetail.textContent = "";
         return;
       }
-      if (!source) {
-        sdSourceDetail.textContent = "Karteninhalt wird noch erkannt …";
-        return;
+      sdSourceDetail.textContent = "Karteninhalt wird geprüft …";
+      try {
+        const params = new URLSearchParams({root_key:"removable", relative_path:device.device_id});
+        const response = await fetch("/api/source-folder-summary?" + params, {cache:"no-store"});
+        const source = await response.json();
+        if (!response.ok) throw new Error(source.detail || "Karteninhalt konnte nicht geprüft werden.");
+        if (requestId !== sdSummaryRequest) return;
+        const changed = Number(source.changed_file_count || 0);
+        const ignored = Number(source.ignored_file_count || 0);
+        sdSourceDetail.textContent = `${source.file_count} Dateien insgesamt · `
+          + `${source.media_file_count} Medien · `
+          + `${formatBytes(source.total_size_bytes)} · `
+          + `${Number(source.already_imported_file_count || 0)} bereits gesichert · `
+          + `${Number(source.new_file_count || 0)} neu`
+          + (changed ? ` · ${changed} verändert/zu prüfen` : "")
+          + (ignored ? ` · ${ignored} Verwaltungsdateien ignoriert` : "")
+          + (source.import_status === "no_changes" ? " · Keine neuen Dateien" : "");
+        if (["no_changes", "already_imported", "import_running"].includes(source.import_status)) {
+          sdImportButton.disabled = true;
+        }
+      } catch (error) {
+        if (requestId === sdSummaryRequest)
+          sdSourceDetail.textContent = "Karteninformationen nicht verfügbar: " + error.message;
       }
-      const changed = Number(source.changed_file_count || 0);
-      const ignored = Number(source.ignored_file_count || 0);
-      sdSourceDetail.textContent = `${source.file_count} Dateien insgesamt · `
-        + `${source.media_file_count} Medien · `
-        + `${formatBytes(source.total_size_bytes)} · `
-        + `${Number(source.already_imported_file_count || 0)} bereits gesichert · `
-        + `${Number(source.new_file_count || 0)} neu`
-        + (changed ? ` · ${changed} verändert/zu prüfen` : "")
-        + (ignored ? ` · ${ignored} Verwaltungsdateien ignoriert` : "")
-        + (source.import_status === "no_changes" ? " · Keine neuen Dateien" : "");
     }
 
     async function loadDriveFolderBrowser(relativePath=driveFolderBoundary) {
@@ -11404,11 +11403,40 @@ def index() -> str:
       });
     }
 
+    let folderBrowserRequest = 0;
+    let folderSummaryRequest = 0;
+
+    async function updateFolderSourceDetail(rootKey, relativePath) {
+      const requestId = ++folderSummaryRequest;
+      if (relativePath === ".") {
+        folderSourceDetail.textContent = "Bitte einen Unterordner auswählen.";
+        folderImportButton.disabled = true;
+        return;
+      }
+      folderImportButton.disabled = false;
+      folderSourceDetail.textContent = "Ausgewählten Ordner prüfen …";
+      try {
+        const params = new URLSearchParams({root_key:rootKey, relative_path:relativePath});
+        const response = await fetch("/api/source-folder-summary?" + params, {cache:"no-store"});
+        const source = await response.json();
+        if (!response.ok) throw new Error(source.detail || "Ordner konnte nicht geprüft werden.");
+        if (requestId !== folderSummaryRequest) return;
+        folderSourceDetail.textContent = `${source.file_count} Dateien insgesamt · `
+          + `${source.media_file_count} Medien · `
+          + formatBytes(source.total_size_bytes);
+      } catch (error) {
+        if (requestId === folderSummaryRequest)
+          folderSourceDetail.textContent = "Ordnerinformationen nicht verfügbar: " + error.message;
+      }
+    }
+
     async function loadFolderBrowser(rootKey=currentFolderRoot, relativePath=currentFolderPath) {
+      const requestId = ++folderBrowserRequest;
       const params = new URLSearchParams({root_key:rootKey, relative_path:relativePath});
       const response = await fetch(`/api/source-folders?${params}`, {cache:"no-store"});
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Ordner konnten nicht geladen werden.");
+      if (requestId !== folderBrowserRequest) return;
       currentFolderRoot = data.root_key;
       currentFolderPath = data.relative_path;
       currentFolderParent = data.parent_relative_path;
@@ -11417,104 +11445,15 @@ def index() -> str:
       folderList.innerHTML = (data.directories || []).length
         ? data.directories.map(item => `<button type="button" class="secondary folder-entry" data-folder="${escapeHtml(item.relative_path)}">📁 ${escapeHtml(item.name)}</button>`).join("")
         : '<div class="source-detail">Keine Unterordner</div>';
-      folderList.querySelectorAll("[data-folder]").forEach(button => button.addEventListener("click", () => loadFolderBrowser(currentFolderRoot, button.dataset.folder).catch(showError)));
+      folderList.querySelectorAll("[data-folder]").forEach(button =>
+        button.addEventListener("click", () =>
+          loadFolderBrowser(currentFolderRoot, button.dataset.folder).catch(showError)));
+      void updateFolderSourceDetail(currentFolderRoot, currentFolderPath);
     }
 
     function showError(error) {
       noticeElement.textContent = error.message;
       noticeElement.classList.add("error-text");
-    }
-
-    let availableSources = [];
-
-    async function loadSources({forceRefresh=false}={}) {
-      const response = await fetch(
-        "/api/import-sources" + (forceRefresh ? "?force_refresh=true" : ""),
-        { cache: "no-store" }
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          "Importquellen konnten nicht geladen werden."
-        );
-      }
-
-      const data = await response.json();
-      availableSources = data.sources || [];
-
-      if (!data.mounted) {
-        sourceSelect.innerHTML =
-          '<option value="">Importquellen sind nicht eingebunden</option>';
-        sourceSelect.disabled = true;
-        importButton.disabled = true;
-        sourceDetail.textContent =
-          "Der read-only Mount /import-sources fehlt.";
-        return;
-      }
-
-      if (availableSources.length === 0) {
-        sourceSelect.innerHTML =
-          '<option value="">Keine geeignete Quelle gefunden</option>';
-        sourceSelect.disabled = true;
-        importButton.disabled = true;
-        sourceDetail.textContent =
-          "Erkannt werden Ordner mit DCIM oder direkt enthaltenen Medien.";
-        return;
-      }
-
-      const previous = sourceSelect.value;
-      sourceSelect.innerHTML = availableSources.map(source => {
-        const blocked = source.import_status !== "available";
-        const suffix = source.import_status === "already_imported"
-          ? " · Bereits importiert"
-          : source.import_status === "import_running"
-            ? " · Import läuft"
-            : "";
-        return `
-          <option value="${escapeHtml(source.root_key + "::" + source.relative_path)}" ${blocked ? "disabled" : ""}>
-            ${escapeHtml(source.relative_path)}
-            · ${source.media_file_count} Medien
-            · ${formatBytes(source.total_size_bytes)}${suffix}
-          </option>
-        `;
-      }).join("");
-      sourceSelect.disabled = false;
-
-      if ([...sourceSelect.options].some(option => option.value === previous)) {
-        sourceSelect.value = previous;
-      }
-      updateSourceDetail();
-      updateSdSourceDetail();
-    }
-
-    function updateSourceDetail() {
-      const source = availableSources.find(
-        item => (item.root_key + "::" + item.relative_path) === sourceSelect.value
-      );
-      if (!source) {
-        sourceDetail.textContent = "";
-        importButton.disabled = true;
-        return;
-      }
-      const blocked = source.import_status !== "available";
-      importButton.disabled = blocked;
-      importButton.textContent = source.import_status === "no_changes"
-        ? "Keine neuen Dateien"
-        : source.import_status === "already_imported"
-          ? "Bereits importiert"
-          : source.import_status === "import_running"
-            ? "Import läuft"
-            : "Quelle importieren";
-      const incremental = source.source_device_id
-        ? ` · ${source.already_imported_file_count || 0} bereits gesichert · ${source.new_file_count || 0} neu`
-          + ((source.changed_file_count || 0) ? ` · ${source.changed_file_count} verändert/zu prüfen` : "")
-          + ((source.ignored_file_count || 0) ? ` · ${source.ignored_file_count} Verwaltungsdateien ignoriert` : "")
-        : "";
-      sourceDetail.textContent = `${source.file_count} Dateien insgesamt · `
-        + `${source.media_file_count} Medien · `
-        + `${formatBytes(source.total_size_bytes)}`
-        + incremental
-        + (source.import_status === "already_imported" ? " · Diese unveränderte Quelle wurde bereits importiert." : "");
     }
 
     function openJobDetailKeys() {
@@ -11664,7 +11603,7 @@ def index() -> str:
             }
             noticeElement.classList.remove("error-text");
             noticeElement.textContent = data.message || "Import wurde entfernt.";
-            await Promise.all([loadJobs(), loadSources()]);
+            await loadJobs();
           } catch (error) {
             showError(error);
             button.disabled = false;
@@ -11695,7 +11634,7 @@ def index() -> str:
             noticeElement.classList.remove("error-text");
             noticeElement.textContent =
               `Sicherung gelöscht: ${data.deleted_file_count || 0} Dateien.`;
-            await Promise.all([loadJobs(), loadSources()]);
+            await loadJobs();
           } catch (error) {
             showError(error);
             await loadJobs().catch(() => null);
@@ -11802,7 +11741,7 @@ def index() -> str:
       }
     }
 
-    async function refreshAll({forceSources=false}={}) {
+    async function refreshAll() {
       refreshButton.disabled = true;
       refreshButton.classList.add("bk-busy");
       refreshButton.setAttribute("aria-busy", "true");
@@ -11812,7 +11751,6 @@ def index() -> str:
       try {
         await Promise.all([
           loadHealth(),
-          loadSources({forceRefresh:forceSources}),
           loadJobs(),
           loadSourceDevices(),
           loadFolderBrowser().catch(() => null)
@@ -11856,15 +11794,13 @@ def index() -> str:
     });
 
     sdImportButton.addEventListener("click", async () => {
-      const source = mountedSourceForDevice(selectedSdDevice);
-      if (!source) { showError(new Error("Auf der eingebundenen SD-Karte wurde noch keine geeignete Kartenwurzel erkannt.")); return; }
-      sourceSelect.value = source.root_key + "::" + source.relative_path;
-      updateSourceDetail();
+      const device = selectedSdDevice;
+      if (!device?.mounted || !device.read_only || !device.device_id) {
+        showError(new Error("Bitte die SD-Karte zuerst ausschließlich lesend einbinden."));
+        return;
+      }
       await startFolderImportSelection(
-        source.root_key,
-        source.relative_path,
-        "",
-        "sd_card"
+        "removable", device.device_id, device.label || device.model || "SD-Karte", "sd_card"
       );
     });
 
@@ -11954,14 +11890,9 @@ def index() -> str:
       if (currentFolderParent !== null) loadFolderBrowser(currentFolderRoot, currentFolderParent).catch(showError);
     });
     folderImportButton.addEventListener("click", async () => {
-      const selected = currentFolderRoot + "::" + currentFolderPath;
-      sourceSelect.innerHTML += `<option value="${escapeHtml(selected)}">${escapeHtml(currentFolderPath)}</option>`;
-      sourceSelect.value = selected;
       const leaf = currentFolderPath.split("/").filter(Boolean).at(-1) || "Sicherungsordner";
       await startFolderImportSelection(currentFolderRoot, currentFolderPath, leaf, "folder");
     });
-
-    sourceSelect.addEventListener("change", updateSourceDetail);
 
     async function startFolderImportSelection(rootKey, relativePath, displayName="", sourceMode="folder") {
       if (!rootKey || !relativePath) {
@@ -11970,9 +11901,8 @@ def index() -> str:
         return;
       }
 
-      importButton.disabled = true;
-      importButton.classList.add("bk-busy");
-      importButton.setAttribute("aria-busy", "true");
+      folderImportButton.disabled = true;
+      sdImportButton.disabled = true;
       deviceImportButton.disabled = true;
       driveFolderImportButton.disabled = true;
       noticeElement.classList.remove("error-text");
@@ -12005,40 +11935,16 @@ def index() -> str:
         noticeElement.textContent = error.message;
         noticeElement.classList.add("error-text");
       } finally {
-        await Promise.all([loadSources(), loadSourceDevices()]);
+        await loadSourceDevices();
         updateDriveControls();
-        importButton.classList.remove("bk-busy");
-        importButton.removeAttribute("aria-busy");
+        folderImportButton.disabled = currentFolderPath === ".";
         noticeElement.classList.remove("bk-loading-status");
       }
     }
 
-    async function startFolderImport() {
-      const selected = sourceSelect.value;
-      if (!selected) {
-        noticeElement.textContent = "Bitte zuerst eine Importquelle auswählen.";
-        noticeElement.classList.add("error-text");
-        return;
-      }
-      const separator = selected.indexOf("::");
-      const rootKey = separator >= 0 ? selected.slice(0, separator) : "saved";
-      const relativePath = separator >= 0 ? selected.slice(separator + 2) : selected;
-      await startFolderImportSelection(rootKey, relativePath);
-    }
-
-    importButton.addEventListener(
-      "click",
-      startFolderImport
-    );
-
-    sourceSelect.addEventListener(
-      "change",
-      updateSourceDetail
-    );
-
     refreshButton.addEventListener(
       "click",
-      () => refreshAll({forceSources:true})
+      () => refreshAll()
     );
 
     refreshAll().catch(showError);
