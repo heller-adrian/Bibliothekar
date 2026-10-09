@@ -1,0 +1,6 @@
+Bibliothekar 0.48.0 – separates iOS-Web-App-UI-Testimage veröffentlichen.
+Ausgangsstand patch/0.47.8, 0.47.8 unverändert.
+Vollständige Backend-QA auf patch/0.48.0: 932 bestanden, 0 fehlgeschlagen, 5 Warnungen; TrueNAS-Compose-Validierung und isolierter Archiv-Test erfolgreich.
+Scope: Die Auswahl per Gedrückthalten und Ziehen lässt die Karten- und Statusrahmen vollständig statisch. Statt transformierter Karten/Kindelemente wird nur ein innenliegender Auswahlimpuls animiert. Doppelte Animations-Keyframes, will-change:transform für auswählbare Karten und die 0.45.6-Transform-Animation des Metadaten-Badges wurden entfernt.
+Unverändert: Auswahl-, Autoscroll-, Datenbank-, Archiv-, API- und Kameradateilogik. Keine Migration.
+Veröffentliche das separate Containerimage ghcr.io/heller-adrian/bibliothekar:patch-0.48.0. main/latest unverändert lassen. Echte iOS-Safari-Sichtabnahme folgt nach Installation.
