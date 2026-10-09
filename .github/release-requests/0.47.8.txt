@@ -1,0 +1,4 @@
+Bibliothekar 0.47.8 – separates mobiles Layout-Testimage veröffentlichen.
+Ausgangsstand patch/0.47.7. Vollständige Backend-QA erfolgreich: 932 bestanden, 0 fehlgeschlagen, 5 Warnungen; Archiv-Isolationstest bestanden.
+Scope: ausschließlich responsive Ereignis-Aktionsbuttons für geplante Ereignisse in der mobilen Website und der installierten Web-App. Die Beschriftungen Öffnen, Sortierung prüfen und Ereignis löschen bleiben auf schmalen Bildschirmgrößen innerhalb ihrer Buttons; die Schrift wird über clamp(.625rem,2.8vw,.72rem) angepasst. Keine Desktopänderung, keine Datenbankmigration, keine API- oder Geschäftslogikänderung.
+Veröffentliche das separate Image ghcr.io/heller-adrian/bibliothekar:patch-0.47.8; main/latest unverändert lassen.
