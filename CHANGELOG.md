@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.47.1 – Aktualisiertes Bibliothekar-Logo (09.10.2026)
+
+- Das vom Nutzer in `patch/0.47.0` ergänzte `app/bibliothekar-logo-v2.svg` wird in der gemeinsamen Kopfzeile und im Dialog „Über Bibliothekar“ angezeigt.
+- Die SVG-Geometrie und Proportionen bleiben unverändert; die v2-Kontur verwendet den vom Nutzer gelieferten Farbwert. Die alte SVG bleibt für Version 0.47.0 vorhanden.
+- Auslieferung über `/assets/bibliothekar-logo-v2.svg` mit neuer Cachekennung `v=0.47.1`; dynamischer Bibliotheksname und sämtliche Maße des Headers bleiben unverändert.
+- Keine Datenbankmigration, keine Änderungen an PWA-Navigation, Kamera- oder Archivfunktionen.
+
 ## 0.47.0 – Platzgewinn und Navigation in der iPhone-Web-App (09.10.2026)
 
 - Nur in der installierten Smartphone-Web-App verschwindet der dunkelblaue Kopf mit der Wortmarke. Import-, Arbeitsbereich-, Archiv- und Unterseitenfarben reichen bis unter die iPhone-Statusleiste.

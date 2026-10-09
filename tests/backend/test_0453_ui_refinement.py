@@ -9,9 +9,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0453_release_version():
-    assert __version__ == "0.47.0"
-    assert main.DEPLOYMENT_VERSION == "0.47.0"
-    assert "0.47.0 · Kamerakern 0.32.11" in apply_shell(
+    assert __version__ == "0.47.1"
+    assert main.DEPLOYMENT_VERSION == "0.47.1"
+    assert "0.47.1 · Kamerakern 0.32.11" in apply_shell(
         "<html><head></head><body></body></html>", active_area="import"
     )
 
