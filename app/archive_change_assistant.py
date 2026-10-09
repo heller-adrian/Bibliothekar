@@ -107,7 +107,12 @@ def _collapse_copy_roots(
             continue
         if not suffix.parts:
             continue
-        result.add(root / suffix.parts[0])
+        top_level = root / suffix.parts[0]
+        # A folder already present in the archive must NEVER be offered as a
+        # whole-folder copy: Finder could replace its existing contents.
+        # The individual incoming files will be listed by copy_files below.
+        if not _safe_archive_path(archive_root, top_level.as_posix()).is_dir():
+            result.add(top_level)
     return sorted(path.as_posix() for path in result)
 
 
