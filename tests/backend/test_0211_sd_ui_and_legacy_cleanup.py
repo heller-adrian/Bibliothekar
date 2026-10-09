@@ -45,6 +45,6 @@ def test_import_page_has_separate_sd_and_generic_source_details():
         from pathlib import Path
         html = Path(main.__file__).read_text()
     assert 'id="sd-source-detail"' in html
-    assert 'id="source-detail"' in html
+    assert 'id="folder-source-detail"' in html
     assert "function updateSdSourceDetail()" in html
     assert 'source.root_key === "removable"' in html
