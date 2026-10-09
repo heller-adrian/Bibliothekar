@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.47.4 – Abschlusskorrekturen an Import und Hintergrundanzeige (09.10.2026)
+
+- Der alte Block „Bereits erkannte Sicherungsquellen“ sowie die Auswahl `saved` entfallen aus dem Ordnerbrowser. Der SD-Import prüft den tatsächlich eingebundenen Kartenordner, unabhängig von der alten Quellensuche.
+- Der NAS-/Wechselmedien-Ordnerbrowser zeigt Anzahl aller Dateien, Anzahl der Medien und Gesamtgröße des gewählten Ordners. Veraltete asynchrone Antworten werden ignoriert.
+- Die minimierte Desktop-Anzeige der Hintergrundvorgänge ist quadratisch (48 × 48 Pixel); statt des X erscheint ein Abwärtspfeil.
+- Im Dialog „Über Bibliothekar“ sowie in der Health-API wird nur noch die einheitliche Version 0.47.4 angegeben.
+- Der überholte Host-Mount `/sources/import` entfällt aus Compose/Dockerfile. `/sources/nas` bleibt unverändert. Keine Datenbankmigration und keine Änderung bestehender Kameradateien.
+
+
 ## 0.47.3 – PWA: einheitlicher Dock und sichtbare Seitenüberschriften (09.10.2026)
 
 - Arbeitsbereich und Archiv nutzen in der installierten Smartphone-Web-App bereits vor dem ersten Paint dieselbe Viewport-Geometrie wie Import & Prüfung. Die mobile Browserwebsite behält ihre ursprüngliche Viewport-Angabe.
