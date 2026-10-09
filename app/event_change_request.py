@@ -854,6 +854,11 @@ def propose_event_change(
             no_event_segment_overlaps,
         )
         from app.archive_reassignment_segments import proposed_ranges
+        from app.archive_recovery import assert_not_quarantined
+        try:
+            assert_not_quarantined(connection, event_id)
+        except ValueError as error:
+            raise EventChangeRequestError(str(error)) from error
         if preview.get("child_segments"):
             raise EventChangeRequestError(
                 "Getrennte Belegungssegmente sind für normale Ereignisse nicht zulässig."
@@ -930,6 +935,11 @@ def propose_event_change(
         for a,b in proposed_ranges(preview):
             if continuous_event_overlaps(connection,job_id,a,b,exclude_event_id=event_id) or no_event_segment_overlaps(connection,job_id,a,b,exclude_event_id=event_id):
                 raise EventChangeRequestError('Die Änderung überschneidet sich mit belegter Zeit. Bitte zuerst das andere Ereignis bearbeiten.')
+        from app.archive_recovery import assert_not_quarantined
+        try:
+            assert_not_quarantined(connection, event_id)
+        except ValueError as error:
+            raise EventChangeRequestError(str(error)) from error
         # Pruefe, ob bereits ein aktiver Auftrag existiert
         existing = connection.execute(
             "SELECT id, version FROM event_change_requests "
@@ -1254,6 +1264,11 @@ def propose_archived_event_deletion(
             raise EventChangeRequestError(
                 "Nur archivierte Ereignisse benötigen diesen manuellen Löschauftrag."
             )
+        from app.archive_recovery import assert_not_quarantined
+        try:
+            assert_not_quarantined(connection, event_id)
+        except ValueError as error:
+            raise EventChangeRequestError(str(error)) from error
         existing = connection.execute(
             """SELECT id FROM event_change_requests
                WHERE event_id=? AND status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt')
