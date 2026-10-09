@@ -5548,7 +5548,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
     <span class="bk-brand-art">
       <img class="bk-brand-image"
-           src="/assets/bibliothekar-logo.svg?v=0.46.0"
+           src="/assets/bibliothekar-logo.svg?v=0.47.0"
            width="165" height="45" alt="Bibliothekar"
            decoding="async" draggable="false">
       <span id="bk-current-library-name" class="bk-brand-library">{escape((get_current_library().display_name if get_current_library() else "Hauptbibliothek"))}</span>
@@ -6709,7 +6709,7 @@ body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-stage-
 
 
 BIBLIOTHEKAR_0460_CSS = r"""
-/* 0.46.0: Ein einziges vektorbasiertes Markenlogo in allen Bereichen.
+/* 0.47.0: Ein einziges vektorbasiertes Markenlogo in allen Bereichen.
    Die Bibliotheksbezeichnung bleibt ein unabhängiges dynamisches Feld.
    Sie sitzt bewusst im Freiraum unter dem Pfad-Schriftzug – nicht
    unter dem nach unten reichenden Symbol links. */
@@ -6801,7 +6801,7 @@ body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name 
 
 BIBLIOTHEKAR_0470_CSS = r"""
 /* 0.47.0 – Nur installierte Smartphone-Web-App. Mobile Browserseite und
- * Desktop-Shell behalten unverändert den Markenkopf von 0.46.0. */
+ * Desktop-Shell behalten unverändert den Markenkopf von 0.47.0. */
 .bk-about-logo-heading {
   display:inline-flex;
   align-items:center;
