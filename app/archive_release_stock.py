@@ -549,62 +549,135 @@ def cleanup_archive_release_stock(
     database_path: Path,
     workspace_path: Path,
     cr_id: str,
+    *,
+    archive_root: Path,
 ) -> dict[str, Any]:
+    """Discard only this request's SSD return copies, after archive verification.
+
+    The return area is shared by several requests and may contain unrelated
+    user files. Never remove its root or arbitrary contents. All existing
+    request-owned SSD copies are checked BEFORE deleting the first one.
+    A failed check leaves the request open, not silently marked cancelled.
+    """
     context = _release_context(database_path, cr_id)
     root = backup_root(workspace_path).resolve(strict=False)
-    removed = 0
-    warnings: list[str] = []
+    release_root = root / RELEASE_DIRECTORY_NAME
+    prepared: list[tuple[Path, Path, str]] = []
     parents: set[Path] = set()
+
+    # Pass 1: reject missing/modified archive originals and unsafe or modified
+    # SSD copies before doing any filesystem mutation.
     for row in context["rows"]:
         relative = str(row.get("workspace_release_path") or "").strip()
         if not relative:
             continue
+        rel = _safe_relative(relative)
+        if not rel.parts or rel.parts[0] != RELEASE_DIRECTORY_NAME:
+            raise ArchiveReleaseStockError(
+                "SSD-Rückkehrpfad gehört nicht zum freigewordenen Archivbestand: " + relative
+            )
+        candidate = root.joinpath(*rel.parts)
+        # resolve() alone would hide a symlink to a second path inside root.
+        current = root
+        for part in rel.parts:
+            current = current / part
+            if current.is_symlink():
+                raise ArchiveReleaseStockError(
+                    "Symlink im SSD-Rückkehrpfad: " + relative
+                )
         target = _safe_workspace_path(workspace_path, relative)
         parents.add(target.parent)
-        if not target.exists():
-            continue
+
         expected_size = int(row.get("expected_size_bytes") or 0)
         expected_sha = str(row.get("expected_sha256") or "").strip()
+        old_rel = str(row.get("old_path") or "").strip()
+        if not old_rel or not expected_sha:
+            raise ArchiveReleaseStockError(
+                "Archivoriginal oder SHA-256 fehlt für SSD-Rückkehrdatei: " + relative
+            )
+        original = _safe_archive_path(archive_root, old_rel)
+        if (
+            not original.is_file()
+            or original.is_symlink()
+            or (expected_size and original.stat().st_size != expected_size)
+            or _sha256_file(original) != expected_sha
+        ):
+            raise ArchiveReleaseStockError(
+                "Archivoriginal fehlt oder ist verändert. Zuerst sicheren "
+                "Rückänderungsauftrag abschließen: " + old_rel
+            )
+
+        if not candidate.exists():
+            continue
+        if (
+            not candidate.is_file()
+            or (expected_size and candidate.stat().st_size != expected_size)
+            or _sha256_file(candidate) != expected_sha
+        ):
+            raise ArchiveReleaseStockError(
+                "SSD-Rückkehrkopie wurde verändert und wird nicht gelöscht: " + relative
+            )
+        prepared.append((candidate, original, relative))
+
+    removed = 0
+    # Pass 2: verify again immediately before each unlink. A partial failure
+    # is retryable; already removed copies will be skipped on the next call.
+    for target, original, relative in prepared:
+        row = next(
+            row for row in context["rows"]
+            if str(row.get("workspace_release_path") or "").strip() == relative
+        )
+        expected_sha = str(row.get("expected_sha256") or "").strip()
+        expected_size = int(row.get("expected_size_bytes") or 0)
         try:
             if (
-                not target.is_file()
+                not original.is_file()
+                or original.is_symlink()
+                or (expected_size and original.stat().st_size != expected_size)
+                or _sha256_file(original) != expected_sha
+                or not target.is_file()
                 or target.is_symlink()
-                or (expected_size and int(target.stat().st_size) != expected_size)
-                or not expected_sha
+                or (expected_size and target.stat().st_size != expected_size)
                 or _sha256_file(target) != expected_sha
             ):
-                warnings.append("SSD-Rückkehrkopie wurde wegen abweichendem Inhalt nicht entfernt: " + relative)
-                continue
+                raise ArchiveReleaseStockError(
+                    "Archiv oder SSD-Kopie hat sich während der Bereinigung "
+                    "verändert: " + relative
+                )
             target.unlink()
             removed += 1
         except OSError as exc:
-            warnings.append(f"SSD-Rückkehrkopie konnte nicht entfernt werden: {relative}: {exc}")
+            raise ArchiveReleaseStockError(
+                "SSD-Rückkehrdatei konnte nicht entfernt werden: "
+                + relative + ": " + str(exc)
+            ) from exc
 
-    release_root = (root / RELEASE_DIRECTORY_NAME).resolve(strict=False)
+    # Pass 3: remove now-empty segment/year directories, but stop at the
+    # shared 'Freigewordene Archivdateien' root. Foreign contents remain.
+    removed_directories = 0
     for parent in sorted(parents, key=lambda p: len(p.parts), reverse=True):
         cursor = parent
-        while cursor != root and cursor != release_root and cursor != release_root.parent:
+        while cursor != release_root and cursor != root:
+            if not cursor.is_dir() or cursor.is_symlink():
+                break
             try:
-                if cursor.exists() and cursor.is_dir() and not any(cursor.iterdir()):
-                    cursor.rmdir()
-                else:
-                    if cursor.exists() and cursor.is_dir():
-                        relative_cursor = cursor.relative_to(root).as_posix()
-                        warning = (
-                            "Laufbezogener SSD-Ordner bleibt erhalten, weil er fremde "
-                            "oder unbekannte Inhalte enthält: " + relative_cursor
-                        )
-                        if warning not in warnings:
-                            warnings.append(warning)
-                    break
+                cursor.rmdir()
+                removed_directories += 1
             except OSError:
                 break
             cursor = cursor.parent
-    try:
-        release_root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        warnings.append("Stammordner „Freigewordene Archivdateien“ konnte nicht erhalten werden: " + str(exc))
+
+    # Re-check request-owned paths; a successful request MUST NOT leave a
+    # known SSD copy behind while marking the change as cancelled.
+    for row in context["rows"]:
+        relative = str(row.get("workspace_release_path") or "").strip()
+        if relative and _safe_workspace_path(workspace_path, relative).exists():
+            raise ArchiveReleaseStockError(
+                "SSD-Rückkehrkopie ist weiterhin vorhanden: " + relative
+            )
+    release_root.mkdir(parents=True, exist_ok=True)
     return {
         "removed_file_count": removed,
-        "warnings": warnings,
+        "removed_directory_count": removed_directories,
+        "warnings": [],
     }
