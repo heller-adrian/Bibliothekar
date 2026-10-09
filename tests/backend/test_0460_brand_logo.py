@@ -37,7 +37,9 @@ def test_0460_single_svg_in_all_shell_areas_and_dynamic_library():
             subarea=subarea,
         )
         assert page.count('class="bk-brand bk-brand-new"') == 1
-        assert page.count('src="/assets/bibliothekar-logo.svg?v=0.47.0"') == 1
+        header = page.split('<header class="bk-shell">', 1)[1].split("</header>", 1)[0]
+        assert header.count('src="/assets/bibliothekar-logo.svg?v=0.47.0"') == 1
+        assert page.count('src="/assets/bibliothekar-logo.svg?v=0.47.0"') == 2
         assert page.count('id="bk-current-library-name"') == 1
         assert "bk-brand-title" not in page.split("<header class=\"bk-shell\">", 1)[1].split("</header>", 1)[0]
         assert 'class="bk-mark"' not in page.split("<header class=\"bk-shell\">", 1)[1].split("</header>", 1)[0]
