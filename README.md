@@ -6,7 +6,7 @@ Aktuelle veröffentlichte Version: **0.47.3**
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
-Aktuelles Testimage: **`ghcr.io/heller-adrian/bibliothekar:patch-0.47.3`**
+Aktuelles Testimage: **`ghcr.io/heller-adrian/bibliothekar:patch-0.47.4`**
 
 ## Updates
 
@@ -168,10 +168,11 @@ Hat sich der Bestand verändert, muss die Vorschau neu berechnet werden.
 - `/workspace` – gemeinsamer Kamera-Arbeitsbereich, read-write
 - Bibliotheksarchive – jeweils eigener read-only Host Path
 - optionale externe Bibliotheks-Arbeitsbereiche – eigener read-write Host Path
-- `/sources/import` – zusätzliche allgemeine Importquelle, read-only
 - `/sources/nas` – NAS-Quellen, read-only
 - `/sources/removable` – Mountpunkt für Wechselmedien
 - `/tmp` – flüchtiges tmpfs
+
+Der NAS-Ordnerimport benötigt `/sources/nas`, aber keinen zusätzlichen alten Sicherungsquellen-Mount `/sources/import` mehr. Die bisherige Import-API bleibt zur Kompatibilität verfügbar, die alte automatische Quellenauswahl gehört nicht mehr zur Oberfläche.
 
 `compose.example.yaml` enthält die Ein-Container-Vorlage.
 
