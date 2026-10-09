@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.47.8 – Mobile Ereignisbuttons lesbar (09.10.2026)
+
+- Die Beschriftungen von „Öffnen“, „Sortierung prüfen“ und „Ereignis löschen“ erhalten bei Handybreiten eine gezielte kleinere Schriftgröße. Alle drei Aktionen bleiben nebeneinander, ohne aus ihren Buttons herauszuragen.
+- Die Änderung gilt für die installierte Web-App und die mobile Browser-Website, nicht für den Desktop.
+- Keine Änderungen am Ereignisworkflow, an SQLite oder am Dateibestand.
+
 ## 0.47.7 – Rückkehrkopien beim Archivverwerfen zuverlässig entfernen (09.10.2026)
 
 - Archiv-Verwerfen prüft vor dem SSD-Cleanup sämtliche betroffenen Archivoriginale und SSD-Rückkehrkopien erneut nach Größe und SHA-256. Erst danach werden bekannte Kopien entfernt und leere Tages-/Jahresordner unter „Freigewordene Archivdateien“ aufgeräumt.
