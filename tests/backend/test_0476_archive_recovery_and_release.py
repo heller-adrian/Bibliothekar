@@ -143,6 +143,10 @@ def test_0476_missing_original_cannot_be_unlocked_after_forced_stop(tmp_path: Pa
     )
     cr_id = proposed["change_request_id"]
     confirm_event_change(db, cr_id, archive, workspace)
+    # Simulate real Finder work before cancelling; otherwise cancellation
+    # rightly detects the untouched original and needs no reversal.
+    incoming_file = archive / "2026" / folder / "Alle" / "neu.JPG"
+    incoming_file.write_bytes(b"neu")
     cancelled = cancel_event_change(db, cr_id, archive, workspace)
     assert cancelled["reversal_required"] is True
     lost_original = archive / "2026" / folder / "Alle" / "alt.JPG"
