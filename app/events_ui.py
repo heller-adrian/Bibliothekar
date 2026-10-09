@@ -1297,6 +1297,25 @@ EVENTS_HTML = r"""<!doctype html>
       }
     }
 
+    /* 0.47.8: mobile Browserseite und installierte Web-App.
+       Drei Aktionen bei geplanten Ereignissen muessen nebeneinander
+       bleiben, ohne dass 'Sortierung prüfen' den Button verlaesst. */
+    @media (max-width:820px) {
+      body.bibliothekar-redesign[data-bk-area="workspace"]
+      .event-card-actions > button,
+      body.bibliothekar-redesign[data-bk-area="workspace"]
+      .event-card-actions > a {
+        min-width:0 !important;
+        max-width:100%;
+        padding-inline:2px !important;
+        font-size:clamp(.50rem,2.1vw,.63rem) !important;
+        letter-spacing:-.02em;
+        line-height:1.12;
+        white-space:nowrap;
+        text-align:center;
+      }
+    }
+
     /* 0.40.2: mobile No-Event-Zeitsegmente mit zwei vollständigen Datums-/Zeitzeilen. */
     .no-event-mobile-range-title,
     .no-event-end-date-mirror {
