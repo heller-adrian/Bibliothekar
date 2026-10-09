@@ -218,6 +218,33 @@ TRANSFER_HTML = r'''<!doctype html>
     if(Number.isNaN(date.getTime()))return 'Zeitpunkt unbekannt';
     return new Intl.DateTimeFormat('de-DE',{dateStyle:'medium',timeStyle:'short'}).format(date);
   }
+  function attachRecoveryAction(card,item){
+    if(!Number(item.unresolved_recovery_count||0))return;
+    const panel=document.createElement("div");
+    panel.className="result danger";
+    panel.innerHTML="<strong>Manuelle Archivklärung erforderlich</strong><p>Nach einem Notfallabbruch wurde der ursprüngliche Archivzustand noch nicht wieder bestätigt. Neue Änderungen bleiben gesperrt.</p>";
+    const action=document.createElement("button");
+    action.type="button"; action.className="plan-button";
+    action.textContent="Originalbestand erneut prüfen";
+    panel.appendChild(action);
+    card.appendChild(panel);
+    action.addEventListener("click",async()=>{
+      action.disabled=true;
+      try{
+        const data=await postJson(`/api/archive/recovery/${encodeURIComponent(item.event_id)}/verify-and-unlock`);
+        if(data.resolved){
+          panel.className="result success";
+          panel.textContent=data.message;
+          await load({forceRefresh:true});
+        }else{
+          panel.className="result danger";
+          panel.textContent=data.message+" "+(data.problems||[]).slice(0,4)
+            .map(p=>String(p.path||"")+": "+String(p.message||"")).join(" · ");
+        }
+      }catch(error){panel.textContent=error.message;}
+      finally{action.disabled=false;}
+    });
+  }
   function renderArchive(summary){
     candidateCount.textContent=summary.candidate_count;
     verifiedCount.textContent=summary.verified_count;
@@ -249,12 +276,14 @@ TRANSFER_HTML = r'''<!doctype html>
         try{await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);await followRelease(item.job_id,item.event_id,result,verifyButton,releaseButton);}
         catch(error){result.className='result danger';result.textContent=error.message;event.currentTarget.disabled=false;verifyButton.disabled=false;}
       });
+      attachRecoveryAction(card,item);
       archiveList.appendChild(card);
     }
     if(!history.length) historyList.innerHTML='<div class="empty">Noch keine freigegebenen Ereignisse im Verlauf.</div>';
     for(const item of history){
       const card=document.createElement('article');card.className='card';
       card.innerHTML=`<div class="item-head"><div><div class="title">${escapeHtml(item.name)}</div><div class="path">${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">Arbeitsbereich freigegeben</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div>`;
+      attachRecoveryAction(card,item);
       historyList.appendChild(card);
     }
   }
