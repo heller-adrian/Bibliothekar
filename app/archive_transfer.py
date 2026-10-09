@@ -198,6 +198,9 @@ def list_archive_candidates(
                 latest_release.status AS release_status,
                 latest_release.deleted_file_count AS release_deleted_file_count,
                 latest_release.completed_at AS release_completed_at,
+                (SELECT COUNT(*) FROM archive_recovery_incidents ar
+                 WHERE ar.event_id=events.id AND ar.status='manual_review')
+                 AS unresolved_recovery_count,
                 (SELECT COUNT(*) FROM event_reapply_removed_families pr
                  WHERE pr.event_id=events.id AND pr.target_event_id IS NULL) AS pending_reassignment_count,
                 (SELECT COUNT(*) FROM event_mutations em
