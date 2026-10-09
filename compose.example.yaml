@@ -1,6 +1,6 @@
 services:
   bibliothekar:
-    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:patch-0.47.3}
+    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:patch-0.47.4}
     restart: unless-stopped
     user: "0:0"
     privileged: true
@@ -14,7 +14,6 @@ services:
       KAMERA_LOG_DIR: /logs
       KAMERA_POOL_PROBE: /workspace
       KAMERA_ARCHIVE_ROOT: /main-library
-      KAMERA_IMPORT_ROOT: /sources/import
       KAMERA_REMOVABLE_ROOT: /sources/removable
       KAMERA_NAS_SOURCE_ROOT: /sources/nas
       KAMERA_SOURCE_HELPER_URL: http://127.0.0.1:8090
@@ -33,7 +32,6 @@ services:
       - ${BIBLIOTHEKAR_LOG_DIR}:/logs
       - ${BIBLIOTHEKAR_WORKSPACE_DIR}:/workspace
       - ${BIBLIOTHEKAR_MAIN_LIBRARY_DIR}:/main-library:ro
-      - ${BIBLIOTHEKAR_IMPORT_SOURCE_DIR}:/sources/import:ro
       - ${BIBLIOTHEKAR_NAS_SOURCE_DIR}:/sources/nas:ro
       - ${BIBLIOTHEKAR_REMOVABLE_DIR}:/sources/removable
       - /run/udev:/run/udev:ro
