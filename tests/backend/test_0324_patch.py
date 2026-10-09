@@ -309,8 +309,8 @@ def test_0324_archived_delete_blocks_unresolved_user_file(tmp_path: Path):
 
 
 def test_0324_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.47.3"
-    assert "0.47.3 · Kamerakern 0.32.11" in ui_shell._shell_markup(
+    assert main.DEPLOYMENT_VERSION == "0.47.4"
+    assert "Version <span data-bk-version>0.47.4</span>" in ui_shell._shell_markup(
         "workspace",
         "events",
     )
