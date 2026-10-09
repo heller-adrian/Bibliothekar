@@ -4218,6 +4218,9 @@ EVENTS_HTML = r"""<!doctype html>
       changeRequestClose.classList.remove("danger-button");
       changeRequestClose.disabled = true;
 
+      const reversalPathLabels=assistant.path_labels||{};
+      const reversalArchiveRoot=String(reversalPathLabels.archive_root||"Kamerabibliothek");
+      const reversalWorkRoot=String(reversalPathLabels.work_root||"Arbeitsbereich");
       const phase = String(assistant.phase || "prepare");
       const logicalOrder = ["prepare","finder","verify"];
       const currentLogical = logicalOrder.indexOf(phase);
@@ -4241,9 +4244,6 @@ EVENTS_HTML = r"""<!doctype html>
 
       if (phase === "prepare") {
         html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Rückänderung vorbereiten</h3><p class="muted">Du hast bestätigt, dass die Archivänderung verworfen werden soll. Der ursprüngliche Zustand wird jetzt als eigener Rückweg vorbereitet.</p></div></div>`;
-        const reversalPathLabels=assistant.path_labels||{};
-        const reversalArchiveRoot=String(reversalPathLabels.archive_root||"Kamerabibliothek");
-        const reversalWorkRoot=String(reversalPathLabels.work_root||"Arbeitsbereich");
         html += `<div class="card"><strong>Dieser Wiederherstellungsbereich wird erst mit „Rückänderung vorbereiten“ angelegt:</strong><code style="display:block;margin-top:8px;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || (reversalWorkRoot+"/Später zuordnen"))}</code><p class="muted" style="margin-top:9px">Vor diesem Schritt muss der angezeigte Ordner noch nicht existieren. Beim Vorbereiten prüft die App den tatsächlichen Archivzustand sowie Größe und SHA-256. Nur Originale, die für den Rückweg wirklich auf SSD benötigt werden, werden dort sicher materialisiert.</p></div>`;
         html += '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-prepare>Rückänderung vorbereiten</button></div></section>';
       } else if (phase === "finder") {
