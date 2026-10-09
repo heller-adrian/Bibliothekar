@@ -9,8 +9,9 @@ import stat
 import subprocess
 
 from fastapi import FastAPI, HTTPException
+from app import __version__
 
-app = FastAPI(title="Kamera-Quellen-Helfer", version="0.47.4")
+app = FastAPI(title="Kamera-Quellen-Helfer", version=__version__)
 MOUNT_ROOT = Path(
     os.environ.get(
         "KAMERA_REMOVABLE_MOUNT_ROOT",
@@ -362,7 +363,7 @@ def selected_device(path: str) -> dict[str, Any]:
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "version": "0.47.4", "mount_root": str(MOUNT_ROOT), "device_node_root": str(DEVICE_NODE_ROOT), "mode": "direct"}
+    return {"status": "ok", "version": __version__, "mount_root": str(MOUNT_ROOT), "device_node_root": str(DEVICE_NODE_ROOT), "mode": "direct"}
 
 
 @app.get("/devices")
