@@ -1308,7 +1308,7 @@ EVENTS_HTML = r"""<!doctype html>
         min-width:0 !important;
         max-width:100%;
         padding-inline:2px !important;
-        font-size:clamp(.50rem,2.1vw,.63rem) !important;
+        font-size:clamp(.625rem,2.8vw,.72rem) !important;
         letter-spacing:-.02em;
         line-height:1.12;
         white-space:nowrap;
