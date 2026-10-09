@@ -368,15 +368,20 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
     )
     operation_kinds = [item["kind"] for item in assistant["operations"]]
     assert "move_archive_files" not in operation_kinds
-    helper_operations = [
+    # Alle exists in the archive and must never be replaced as a folder.
+    file_operations = [
         item for item in assistant["operations"]
-        if item["kind"] == "copy_helper_folders"
+        if item["kind"] == "copy_files"
     ]
-    assert helper_operations
-    assert any(
-        source.endswith("/2026/07.25 - Test/Alle")
-        for item in helper_operations
-        for source in (item.get("sources") or [])
+    assert file_operations
+    assert all(item["target"].endswith("/Alle") for item in file_operations)
+    assert {"incoming.JPG", "incoming.XMP"}.issubset({
+        name for item in file_operations for name in item["items"]
+    })
+    assert not any(
+        "Alle" in item.get("items", [])
+        for item in assistant["operations"]
+        if item["kind"] == "copy_helper_folders"
     )
 
     helper_root = workspace / "Arbeitsbereich" / "Später zuordnen"
