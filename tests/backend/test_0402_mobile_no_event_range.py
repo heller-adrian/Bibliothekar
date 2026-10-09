@@ -6,13 +6,13 @@ from app import main, source_helper
 
 
 def test_0402_version_contract():
-    assert PACKAGE_VERSION == "0.47.3"
+    assert PACKAGE_VERSION == "0.47.4"
     assert main.APP_VERSION == PACKAGE_VERSION
     assert main.DEPLOYMENT_VERSION == PACKAGE_VERSION
     assert source_helper.app.version == PACKAGE_VERSION
     assert source_helper.healthz()["version"] == PACKAGE_VERSION
-    assert "patch-0.47.3" in Path("compose.example.yaml").read_text(encoding="utf-8")
-    assert "0.47.3 · Kamerakern 0.32.11" in Path("app/ui_shell.py").read_text(encoding="utf-8")
+    assert "patch-0.47.4" in Path("compose.example.yaml").read_text(encoding="utf-8")
+    assert "Version <span data-bk-version>0.47.4</span>" in Path("app/ui_shell.py").read_text(encoding="utf-8")
 
 
 def test_0402_mobile_no_event_range_has_one_heading_and_two_full_rows():
