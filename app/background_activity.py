@@ -6,6 +6,7 @@ to run in their existing back-end workers and keep their existing safety rules.
 from __future__ import annotations
 
 from pathlib import Path
+from sqlite3 import OperationalError
 from typing import Any
 
 from app.database import database_connection
@@ -71,9 +72,21 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
 
     for row in batches:
         # Reuse the authoritative child-run-aware batch progress.
-        batch_progress = get_operation_batch(library_database, str(row["id"]))
+        try:
+            batch_progress = get_operation_batch(library_database, str(row["id"]))
+            progress_percent = batch_progress["progress_percent"]
+        except OperationalError as error:
+            # Older databases / read-only QA snapshots can have a legacy
+            # batch-item layout with no batch_id column. Show the durable
+            # completed/item count until the full run schema is available.
+            if "no such column: batch_id" not in str(error):
+                raise
+            total = max(1, int(row["item_count"] or 0))
+            progress_percent = min(
+                100, round(100 * int(row["completed_item_count"] or 0) / total)
+            )
         operations.append({
-            "progress_percent": batch_progress["progress_percent"],
+            "progress_percent": progress_percent,
             "kind": "apply",
             "id": str(row["id"]),
             "status": str(row["status"]),
