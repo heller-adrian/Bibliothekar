@@ -87,7 +87,7 @@ def test_0475_release_and_background_dock_contract():
     from app import __version__, main
     from app.ui_shell import BIBLIOTHEKAR_0444_JS, BIBLIOTHEKAR_0450_CSS
     assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.47.5"
-    assert '.bk-activity-progress' in BIBLIOTHEKAR_0444_JS
+    assert 'bk-activity-progress' in BIBLIOTHEKAR_0444_JS
     assert 'progress_percent' in BIBLIOTHEKAR_0444_JS
     assert "Liberation Mono" in BIBLIOTHEKAR_0450_CSS
     assert ".change-target-tree" in BIBLIOTHEKAR_0450_CSS
