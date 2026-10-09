@@ -216,7 +216,7 @@ def test_0273_stale_helper_child_is_never_reused_as_current_instruction(tmp_path
 
     rendered = repr(assistant["operations"])
     assert "STALE-VOM-ALTEN-AUFTRAG" not in rendered
-    assert any(item["kind"] == "copy_helper_folders" for item in assistant["operations"])
+    assert any(item["kind"] == "copy_files" for item in assistant["operations"])
 
 
 def test_0326_reversal_uses_library_specific_display_paths(tmp_path: Path):
