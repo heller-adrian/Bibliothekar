@@ -5432,10 +5432,7 @@ BIBLIOTHEKAR_JS = r"""
     if (!data) return;
     document.querySelectorAll("[data-bk-version]").forEach(node => {
       const deployment = data.deployment_version || data.version || "";
-      const core = data.version || "";
-      node.textContent = deployment && core && deployment !== core
-        ? `${deployment} · Kern ${core}`
-        : deployment;
+      node.textContent = deployment;
     });
   }).catch(() => {});
 })();
@@ -5811,7 +5808,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.3 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.47.4</span></p>
   </div>
 </dialog>
 
@@ -5950,7 +5947,7 @@ BIBLIOTHEKAR_0444_CSS = r"""
 }
 #bk-background-cancel-notice[hidden],
 #bk-background-cancel-notice [hidden] {display:none!important}
-#bk-background-cancel-notice[data-collapsed="true"] {width:44px;}
+#bk-background-cancel-notice[data-collapsed="true"] {width:48px;}
 #bk-background-cancel-notice .bk-activity-card {
   border:1px solid var(--bk-line);
   border-radius:13px;
@@ -5970,17 +5967,29 @@ BIBLIOTHEKAR_0444_CSS = r"""
   font-size:.83rem;
 }
 #bk-background-cancel-notice .bk-activity-collapse {
-  flex:0 0 auto;
+  flex:0 0 30px;
+  width:30px;
+  height:30px;
+  min-width:30px;
+  min-height:30px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
   border:1px solid var(--bk-line);
-  border-radius:8px;
-  padding:1px 7px;
-  min-width:26px;
-  min-height:26px;
+  border-radius:9px;
+  padding:0;
   background:var(--bk-surface-2);
   color:var(--bk-ink);
   cursor:pointer;
-  font-size:1.1rem;
-  line-height:1.2;
+}
+#bk-background-cancel-notice .bk-activity-collapse svg {
+  width:16px;
+  height:16px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:2.5;
+  stroke-linecap:round;
+  stroke-linejoin:round;
 }
 #bk-background-cancel-notice .bk-activity-list {
   padding:6px 9px 9px;
@@ -6035,15 +6044,20 @@ BIBLIOTHEKAR_0444_CSS = r"""
 }
 #bk-background-cancel-notice .bk-activity-mini {
   margin-left:auto;
+  box-sizing:border-box !important;
   display:flex;
   align-items:center;
   justify-content:center;
   gap:5px;
-  min-width:40px;
-  height:40px;
-  padding:0 8px;
+  flex:0 0 48px;
+  width:48px;
+  min-width:48px;
+  max-width:48px;
+  height:48px;
+  min-height:48px;
+  padding:0;
   border:1px solid var(--bk-line);
-  border-radius:50px;
+  border-radius:14px;
   background:var(--bk-surface);
   color:var(--bk-ink);
   box-shadow:0 5px 18px rgba(0,0,0,.13);
@@ -6081,7 +6095,7 @@ BIBLIOTHEKAR_0444_JS = r"""
 
   const card = document.createElement("section");
   card.className = "bk-activity-card";
-  card.innerHTML = '<div class="bk-activity-header"><strong>Hintergrundvorgänge</strong><button class="bk-activity-collapse" type="button" aria-label="Hinweis verkleinern" title="Hinweis verkleinern">×</button></div><div class="bk-activity-list"></div>';
+  card.innerHTML = '<div class="bk-activity-header"><strong>Hintergrundvorgänge</strong><button class="bk-activity-collapse" type="button" aria-label="Hintergrundvorgänge verkleinern" title="Hintergrundvorgänge verkleinern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7"/></svg></button></div><div class="bk-activity-list"></div>';
   const collapse = card.querySelector(".bk-activity-collapse");
   const list = card.querySelector(".bk-activity-list");
   box.append(card, mini);
