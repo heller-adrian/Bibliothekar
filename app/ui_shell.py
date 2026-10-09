@@ -5330,10 +5330,13 @@ BIBLIOTHEKAR_JS = r"""
     const shell=document.querySelector(".bk-shell");
     if(!shell)return;
     const standalone=root.dataset.bkDisplayMode === "standalone";
+    const compactPwa=standalone && Boolean(window.matchMedia?.("(max-width: 820px)")?.matches);
     const bridge=standalone
       ? 0
       : (parseFloat(getComputedStyle(shell).getPropertyValue("--bk-page-bridge-height"))||0);
-    const shellHeight=Math.ceil(shell.getBoundingClientRect().height + bridge);
+    // Die PWA hat keinen sichtbaren Markenkopf mehr. Auch die Sticky-
+    // Höhenvariable muss null sein, sonst bleiben unsichtbare Abstände.
+    const shellHeight=compactPwa ? 0 : Math.ceil(shell.getBoundingClientRect().height + bridge);
     root.style.setProperty("--bk-shell-sticky-height", shellHeight + "px");
 
     const subnav=document.querySelector(".bk-workspace-subnav");
