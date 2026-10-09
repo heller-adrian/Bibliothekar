@@ -12,7 +12,7 @@ def test_0470_version_and_pwa_css_injected_after_branding():
     html = apply_shell("<html><head></head><body><main></main></body></html>", active_area="import")
     assert "<style>" + BIBLIOTHEKAR_0470_CSS + "</style>" in html
     assert html.index("BIBLIOTHEKAR_0460_CSS") == -1
-    assert 'src="/assets/bibliothekar-logo.svg?v=0.46.0"' in html
+    assert 'src="/assets/bibliothekar-logo.svg?v=0.47.0"' in html
 
 
 def test_0470_about_modal_shows_white_vector_logo_on_dark_ground():

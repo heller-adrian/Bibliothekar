@@ -1,4 +1,4 @@
-"""0.46.0: Einheitliches SVG-Markenlogo mit dynamischem Bibliotheksnamen."""
+"""0.47.0: Einheitliches SVG-Markenlogo mit dynamischem Bibliotheksnamen."""
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -26,7 +26,7 @@ def test_0460_svg_is_self_contained_white_and_font_independent():
 
 
 def test_0460_single_svg_in_all_shell_areas_and_dynamic_library():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.46.0"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.47.0"
     for area, subarea in [
         ("import", None), ("workspace", "captures"), ("workspace", "events"),
         ("archive", None), ("metadata", None), ("trash", None)
@@ -37,7 +37,7 @@ def test_0460_single_svg_in_all_shell_areas_and_dynamic_library():
             subarea=subarea,
         )
         assert page.count('class="bk-brand bk-brand-new"') == 1
-        assert page.count('src="/assets/bibliothekar-logo.svg?v=0.46.0"') == 1
+        assert page.count('src="/assets/bibliothekar-logo.svg?v=0.47.0"') == 1
         assert page.count('id="bk-current-library-name"') == 1
         assert "bk-brand-title" not in page.split("<header class=\"bk-shell\">", 1)[1].split("</header>", 1)[0]
         assert 'class="bk-mark"' not in page.split("<header class=\"bk-shell\">", 1)[1].split("</header>", 1)[0]

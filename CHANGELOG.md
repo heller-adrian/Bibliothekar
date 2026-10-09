@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.47.0 – Platzgewinn und Navigation in der iPhone-Web-App (09.10.2026)
+
+- Nur in der installierten Smartphone-Web-App verschwindet der dunkelblaue Kopf mit der Wortmarke. Import-, Arbeitsbereich-, Archiv- und Unterseitenfarben reichen bis unter die iPhone-Statusleiste.
+- Import, Archiv, Papierkorb und weitere Seiten beginnen nach dem oberen Sicherheitsabstand mit ihrer Überschrift; Aufnahmen/Ereignisse und Metadatenkorrektion beginnen mit ihren weiterhin fixierbaren Bereichsreitern.
+- Keine künstliche Kopfhöhe mehr im Sticky-System. Desktop und mobile Browserseite behalten ihre bisherigen Header.
+- PWA-Navigation unten höher, Icons größer, flexibel verteilte Spalten und vollständig lesbare Beschriftungen auch bei Aufgaben; Menü und Aufgaben-Panels stehen darüber. Inhalte bleiben trotz höherem Dock scrollbar.
+- Das Dialogfenster „Über Bibliothekar“ enthält jetzt an Stelle des Texttitels die weiße SVG-Wortmarke auf dunkelblauem Hintergrund; übriger Text bleibt unverändert.
+- Keine SQLite-Migration oder Änderungen an Fotoverarbeitungsprozessen.
+
 ## 0.46.0 – Neues Bibliothekar-Markenlogo (09.10.2026)
 
 - Das vom Designer bereitgestellte weiße SVG (in Pfade konvertierter Schriftzug mit freigestelltem Symbol) ersetzt das bisherige farbige Symbol und den HTML-Schriftzug in der gemeinsamen Hauptnavigation.
