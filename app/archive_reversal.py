@@ -828,8 +828,18 @@ def finish_archive_reversal(
 
     from app.archive_staging import cleanup_archive_change_staging
     from app.archive_release_stock import cleanup_archive_release_stock
+    from app.archive_release_stock import ArchiveReleaseStockError
+    # After the original archive is verified, clear any SSD return copies
+    # first. Do not mark reversal successful while copies remain on the SSD.
+    try:
+        cleanup_archive_release_stock(
+            database_path, workspace_path, cr_id, archive_root=archive_root
+        )
+    except ArchiveReleaseStockError as error:
+        raise ArchiveReversalError(
+            "Rückänderung noch nicht abgeschlossen: " + str(error)
+        ) from error
     cleanup_archive_change_staging(database_path, workspace_path, cr_id, remove_originals=False)
-    cleanup_archive_release_stock(database_path, workspace_path, cr_id)
     cleanup_archive_reversal(workspace_path, cr_id)
 
     now = _now()
