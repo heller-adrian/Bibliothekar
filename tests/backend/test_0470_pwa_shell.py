@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from app import __version__, main
-from app.ui_shell import BIBLIOTHEKAR_0470_CSS, apply_shell
+from app.ui_shell import BIBLIOTHEKAR_0470_CSS, BIBLIOTHEKAR_0470_HEAD_JS, apply_shell
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -62,3 +62,15 @@ def test_0470_dock_large_labels_not_ellipsized_and_dialog_above():
     html = apply_shell("<html><head></head><body></body></html>", active_area="trash")
     for label in ["Import", "Arbeitsbereich", "Archiv", "Aufgaben"]:
         assert f'<span class="bk-pwa-label">{label}</span>' in html
+
+
+def test_0470_status_bar_theme_follows_page_and_pwa_only():
+    html = apply_shell("<html><head></head><body></body></html>", active_area="import")
+    assert "<script>" + BIBLIOTHEKAR_0470_HEAD_JS + "</script>" in html
+    script=BIBLIOTHEKAR_0470_HEAD_JS
+    assert 'root.dataset.bkDisplayMode!=="standalone"' in script
+    assert '"#f8efec","#120f11"' in script
+    assert '"#eef4f8","#0c1217"' in script
+    assert '"#f8f4e8","#14120c"' in script
+    assert 'apple-mobile-web-app-status-bar-style' in script
+    assert 'dark?"black-translucent":"default"' in script
