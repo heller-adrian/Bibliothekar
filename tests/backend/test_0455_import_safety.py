@@ -1,4 +1,4 @@
-"""0.47.1: Speicher-Vorprüfung und sicherer, jobspezifischer Importabbruch."""
+"""0.47.2: Speicher-Vorprüfung und sicherer, jobspezifischer Importabbruch."""
 import hashlib
 import os
 from pathlib import Path
@@ -16,9 +16,9 @@ from app.ui_shell import BIBLIOTHEKAR_0455_CSS, apply_shell
 
 
 def test_0455_version_and_phase_css():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.47.1"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.47.2"
     html = apply_shell("<html><head></head><body></body></html>", active_area="import")
-    assert "0.47.1 · Kamerakern 0.32.11" in html
+    assert "0.47.2 · Kamerakern 0.32.11" in html
     assert f"<style>{BIBLIOTHEKAR_0455_CSS}</style>" in html
     assert "--bk-ink) 2%)" in BIBLIOTHEKAR_0455_CSS
 

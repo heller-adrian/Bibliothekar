@@ -1,4 +1,4 @@
-"""0.47.1: Importverlauf, Klickhilfen und dezente UI-Übergänge."""
+"""0.47.2: Importverlauf, Klickhilfen und dezente UI-Übergänge."""
 from pathlib import Path
 
 from app import __version__, main
@@ -15,10 +15,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0454_version_and_style_is_loaded():
-    assert __version__ == "0.47.1"
-    assert main.DEPLOYMENT_VERSION == "0.47.1"
+    assert __version__ == "0.47.2"
+    assert main.DEPLOYMENT_VERSION == "0.47.2"
     page = apply_shell("<html><head></head><body></body></html>", active_area="workspace", subarea="events")
-    assert "0.47.1 · Kamerakern 0.32.11" in page
+    assert "0.47.2 · Kamerakern 0.32.11" in page
     assert f"<style>{BIBLIOTHEKAR_0454_CSS}</style>" in page
 
 
