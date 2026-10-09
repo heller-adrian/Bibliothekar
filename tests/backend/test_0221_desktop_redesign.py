@@ -18,7 +18,7 @@ def test_0221_import_uses_three_source_cards_and_keeps_all_paths():
     assert 'data-source-mode="folder"' in html
     assert 'id="device-select"' in html
     assert 'id="folder-root-select"' in html
-    assert 'id="source-select"' in html
+    assert 'id="folder-source-detail"' in html
 
     assert 'class="bk-action-tile bk-action-mount"' in html
     assert 'class="bk-action-tile bk-action-save"' in html
