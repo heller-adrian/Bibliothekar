@@ -6,8 +6,8 @@ from app.ui_shell import _shell_markup
 
 
 def test_0442_version_and_shared_shell_stay_consistent():
-    assert main.DEPLOYMENT_VERSION == "0.47.3"
-    assert "0.47.3" in _shell_markup("workspace", "events")
+    assert main.DEPLOYMENT_VERSION == "0.47.4"
+    assert "0.47.4" in _shell_markup("workspace", "events")
     assert 'id="sort-plan-dialog"' in EVENTS_HTML
     assert 'id="change-request-dialog"' in EVENTS_HTML
 
