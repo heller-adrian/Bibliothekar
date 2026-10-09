@@ -47,4 +47,4 @@ def test_import_page_has_separate_sd_and_generic_source_details():
     assert 'id="sd-source-detail"' in html
     assert 'id="folder-source-detail"' in html
     assert "function updateSdSourceDetail()" in html
-    assert 'source.root_key === "removable"' in html
+    assert 'root_key:"removable"' in html
