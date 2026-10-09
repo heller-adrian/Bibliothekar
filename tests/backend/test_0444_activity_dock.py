@@ -110,7 +110,7 @@ def test_0444_desktop_dock_and_minimize_behaviour():
     assert 'bk-activity-collapsed' in BIBLIOTHEKAR_0444_JS
     assert 'setCollapsed(true)' in BIBLIOTHEKAR_0444_JS
     assert 'setCollapsed(false)' in BIBLIOTHEKAR_0444_JS
-    assert 'Hinweis verkleinern' in BIBLIOTHEKAR_0444_JS
+    assert 'Hintergrundvorgänge verkleinern' in BIBLIOTHEKAR_0444_JS
     assert 'window.setInterval(refresh, 2500)' in BIBLIOTHEKAR_0444_JS
     assert 'window.setInterval(refresh,1500)' not in page  # alter Header-Hinweis entfernt
 
@@ -120,4 +120,4 @@ def test_0444_links_to_import_and_events_preserve_library():
     assert 'return "/events?library=" + lib + job;' in BIBLIOTHEKAR_0444_JS
     assert 'new Event("bk-cancellation-queued")' not in BIBLIOTHEKAR_0444_JS
     assert "window.addEventListener(\"bk-cancellation-queued\", refresh)" in BIBLIOTHEKAR_0444_JS
-    assert main.DEPLOYMENT_VERSION == "0.47.3"
+    assert main.DEPLOYMENT_VERSION == "0.47.4"
