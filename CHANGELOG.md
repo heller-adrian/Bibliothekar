@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.48.0 – iOS-PWA: vollständige Karten- und Metadatenrahmen (10.10.2026)
+
+- Die Schnellauswahl per Halten und Ziehen animiert keine Tageskarten, Checkboxen oder umrandeten Metadatenstatus mehr mit `transform`. Der kurze Auswahlpuls wird als innenliegender Schatten (`box-shadow: inset`) gezeichnet.
+- Widersprüchliche Animationen aus 0.42.3/0.42.4, temporäre `will-change: transform`-Beschleunigung und die 0.45.6-Kindanimation der Kontur „Metadaten eindeutig“ bereinigt.
+- Neue CSS-/Auswahl-Regressionen schützen gegen erneut animierte Konturen, auch für den letzten Tagesordner. Echte iOS-WebKit-Abnahme bleibt notwendig.
+- Bereichsauswahl, Umkehren der Auswahl und Auto-Scroll bleiben unverändert. Keine Datenbankmigration und keine Änderungen an Kameradateien.
+
+
 ## 0.47.8 – Mobile Ereignisbuttons lesbar (09.10.2026)
 
 - Die Beschriftungen von „Öffnen“, „Sortierung prüfen“ und „Ereignis löschen“ erhalten bei Handybreiten eine gezielte kleinere Schriftgröße. Alle drei Aktionen bleiben nebeneinander, ohne aus ihren Buttons herauszuragen.

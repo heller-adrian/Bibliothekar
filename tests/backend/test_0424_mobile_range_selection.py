@@ -1,5 +1,5 @@
 from app.metadata_correction_ui import METADATA_CORRECTION_HTML
-from app.ui_shell import BIBLIOTHEKAR_0424_CSS, BIBLIOTHEKAR_JS
+from app.ui_shell import BIBLIOTHEKAR_0423_CSS, BIBLIOTHEKAR_0424_CSS, BIBLIOTHEKAR_JS
 from app.workspace_ui import WORKSPACE_HTML
 
 
@@ -75,10 +75,13 @@ def test_0424_single_detail_is_fullscreen_and_multi_selection_is_nonmodal_sheet(
     assert "backdrop-filter: none;" in css
 
 
-def test_0424_wobble_no_longer_scales_cards_at_viewport_edges():
-    css = BIBLIOTHEKAR_0424_CSS
-
-    assert "@keyframes bk-pwa-select-wobble" in css
-    assert "translateX(-2px)" in css
-    assert "translateX(2px)" in css
-    assert "scale(" not in css
+def test_0480_feedback_never_transforms_bordered_cards():
+    assert "@keyframes bk-pwa-select-wobble" in BIBLIOTHEKAR_0423_CSS
+    assert "box-shadow: inset" in BIBLIOTHEKAR_0423_CSS
+    assert "transform:" not in BIBLIOTHEKAR_0423_CSS.split(
+        "@keyframes bk-pwa-select-wobble", 1
+    )[1].split("}", 2)[0]
+    assert "translateX(" not in BIBLIOTHEKAR_0424_CSS
+    assert "scale(" not in BIBLIOTHEKAR_0424_CSS
+    assert "will-change: transform" not in BIBLIOTHEKAR_0424_CSS
+    assert "prefers-reduced-motion" in BIBLIOTHEKAR_0424_CSS

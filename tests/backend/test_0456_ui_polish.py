@@ -8,10 +8,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0456_versions_and_shell_load_new_css_last():
-    assert __version__ == "0.47.8"
-    assert main.DEPLOYMENT_VERSION == "0.47.8"
+    assert __version__ == "0.48.0"
+    assert main.DEPLOYMENT_VERSION == "0.48.0"
     html = apply_shell("<html><head></head><body></body></html>", active_area="workspace")
-    assert "Version <span data-bk-version>0.47.8</span>" in html
+    assert "Version <span data-bk-version>0.48.0</span>" in html
     assert html.index(f"<style>{BIBLIOTHEKAR_0455_CSS}</style>") < html.index(
         f"<style>{BIBLIOTHEKAR_0456_CSS}</style>"
     )
@@ -48,16 +48,12 @@ def test_0456_light_hover_midpoint_does_not_override_dark_theme():
     )
 
 
-def test_0456_mobile_day_wobble_moves_content_not_border():
-    css = BIBLIOTHEKAR_0456_CSS
-    assert 'html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble' in css
-    assert 'animation:none !important;' in css
-    assert 'will-change:auto !important;' in css
-    assert '> .day-main' in css
-    assert '> .day-check' in css
-    assert '> .badge' in css
-    assert '@keyframes bk-pwa-select-inner-wobble' in css
-    assert '@media (prefers-reduced-motion:reduce)' in css
+def test_0480_mobile_selection_keeps_bordered_children_stationary():
+    from app.ui_shell import BIBLIOTHEKAR_0423_CSS, BIBLIOTHEKAR_0424_CSS
+    assert "bk-pwa-select-inner-wobble" not in BIBLIOTHEKAR_0456_CSS
+    assert "box-shadow: inset" in BIBLIOTHEKAR_0423_CSS
+    assert "translateX(" not in BIBLIOTHEKAR_0424_CSS
+    assert "will-change: transform" not in BIBLIOTHEKAR_0424_CSS
     script = (ROOT / "app/ui_shell.py").read_text()
     assert 'bkPwaSelectPulse(live)' in script
     assert 'bkPwaApplyRange(gesture, key)' in script

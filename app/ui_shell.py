@@ -3500,12 +3500,10 @@ BIBLIOTHEKAR_0356_CSS = r"""
 """
 
 BIBLIOTHEKAR_0423_CSS = r"""
+/* 0.48.0: animate only an inset shadow, not rounded borders or badges. */
 @keyframes bk-pwa-select-wobble {
-  0% { transform: scale(1) rotate(0deg); }
-  24% { transform: scale(1.018) rotate(-0.65deg); }
-  48% { transform: scale(.995) rotate(.55deg); }
-  72% { transform: scale(1.01) rotate(-0.25deg); }
-  100% { transform: scale(1) rotate(0deg); }
+  0%, 100% { box-shadow: inset 0 0 0 0 rgba(75,155,226,0); }
+  45% { box-shadow: inset 0 0 0 2px rgba(75,155,226,.26); }
 }
 
 @media (max-width: 820px) {
@@ -3692,24 +3690,22 @@ BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 
 
 BIBLIOTHEKAR_0424_CSS = r"""
-@keyframes bk-pwa-select-wobble {
-  0% { transform: translateX(0); }
-  24% { transform: translateX(-2px); }
-  48% { transform: translateX(2px); }
-  72% { transform: translateX(-1px); }
-  100% { transform: translateX(0); }
-}
+/* 0.48.0: former translating keyframe override removed. */
 
 @media (max-width: 820px) {
   html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {
     position: relative;
-    transform-origin: center center;
-    will-change: transform;
+    will-change: auto;
   }
 
   html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
-    z-index: 2;
     animation: bk-pwa-select-wobble .28s ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
+      animation: none !important;
+    }
   }
 
   html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog[open] {
@@ -3795,17 +3791,13 @@ BIBLIOTHEKAR_0424_CSS = r"""
 
 BIBLIOTHEKAR_0425_CSS = r"""
 @media (max-width: 820px) {
-  /* 0.42.5: Selectable cards must not stay permanently promoted to their
-   * own compositor layer. On iOS standalone this caused 1px card borders
-   * to be raster-clipped at viewport/sticky-layer boundaries even while
-   * no wobble animation was running. Promote only for the short animation.
-   */
+  /* 0.48.0: never promote a selectable card's rounded border. */
   html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {
     will-change: auto;
   }
 
   html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
-    will-change: transform;
+    will-change: auto;
   }
 
   /* A non-modal selection sheet must never make the last metadata rows
@@ -6766,32 +6758,8 @@ body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-stage-
   }
 }
 
-/* iOS-PWA: Safari schneidet während transform/will-change auf dem gesamten
-   Karten-Element mitunter den oberen Border-Radius ab. Deshalb nur die
-   Kindinhalte bewegen. Die Karte samt Kontur bleibt in der normalen Ebene. */
-@keyframes bk-pwa-select-inner-wobble {
-  0%,100% { transform:translateX(0); }
-  24% { transform:translateX(-2px); }
-  48% { transform:translateX(2px); }
-  72% { transform:translateX(-1px); }
-}
-@media (max-width:820px) {
-  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble {
-    animation:none !important;
-    transform:none !important;
-    will-change:auto !important;
-  }
-  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble > .day-main,
-  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble > .day-check,
-  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble > .badge {
-    animation:bk-pwa-select-inner-wobble .28s ease-out;
-  }
-}
-@media (prefers-reduced-motion:reduce) {
-  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.bk-pwa-select-wobble > * {
-    animation:none !important;
-  }
-}
+/* 0.48.0: 0.45.6 inner translations removed. They moved the
+   bordered “Metadaten eindeutig” badge and could clip its outline. */
 """
 
 

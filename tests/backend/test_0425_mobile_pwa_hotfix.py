@@ -2,13 +2,14 @@ from app.metadata_correction_ui import METADATA_CORRECTION_HTML
 from app.ui_shell import BIBLIOTHEKAR_0425_CSS
 
 
-def test_0425_pwa_cards_are_only_promoted_during_wobble():
+def test_0480_pwa_cards_are_not_promoted_even_during_feedback():
     css = BIBLIOTHEKAR_0425_CSS
 
     assert 'html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {' in css
     assert "will-change: auto;" in css
     assert '[data-bk-pwa-select].bk-pwa-select-wobble' in css
-    assert "will-change: transform;" in css
+    assert "will-change: transform;" not in css
+    assert css.count("will-change: auto;") >= 2
 
 
 def test_0425_metadata_initial_long_press_keeps_touch_target_alive():
