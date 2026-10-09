@@ -1,4 +1,4 @@
-"""0.47.6: archive enlargement, irreversible-stop quarantine, SSD background queue."""
+"""0.47.7: archive enlargement, irreversible-stop quarantine, SSD background queue."""
 from pathlib import Path
 
 import pytest
