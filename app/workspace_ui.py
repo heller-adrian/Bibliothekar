@@ -4841,8 +4841,12 @@ WORKSPACE_HTML = r"""<!doctype html>
       renderSelection();
     });
 
+    // Recover server progress without waiting for the complete 4,000-file
+    // workspace view. The separate global activity dock can also poll early.
+    resumeActiveApplyBatch().catch(error => {
+      applySavedEventStatus.textContent = error.message;
+    });
     loadJobs().then(async () => {
-      await resumeActiveApplyBatch();
       const params = new URLSearchParams(location.search);
       const task = params.get("task") || "";
       if (task.startsWith("batch:")) {
