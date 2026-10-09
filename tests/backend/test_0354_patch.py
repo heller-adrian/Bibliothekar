@@ -6,7 +6,7 @@ from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0354_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.46.0"
+    assert main.DEPLOYMENT_VERSION == "0.47.0"
 
 
 def test_0354_capture_summary_stays_below_title_and_above_workspace_content():
