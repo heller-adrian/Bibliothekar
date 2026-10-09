@@ -1,4 +1,4 @@
-"""0.47.7: refusing to leave orphan SSD copies after discarding archive changes."""
+"""0.47.8: refusing to leave orphan SSD copies after discarding archive changes."""
 from __future__ import annotations
 
 import shutil
