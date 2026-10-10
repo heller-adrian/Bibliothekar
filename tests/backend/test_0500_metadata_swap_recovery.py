@@ -102,11 +102,16 @@ m.write_metadata_datetime = lambda path,media_type,value: Path(path).write_bytes
     Path(path).read_bytes()+b"|corrected"
 )
 m.verify_metadata_datetime = lambda path,expected: {"expected_datetime":expected,"matching_tags":[{"tag":"test","value":expected}],"observed_tags":[]}
-if sys.argv[3] == "after_backup":
+if sys.argv[3] in {"after_backup","after_first_replacement","after_second_backup"}:
     original=m.os.replace
     def abrupt(src,dst):
         result=original(src,dst)
-        if ".metadata-before-" in str(dst):
+        mode=sys.argv[3]
+        if mode=="after_backup" and ".metadata-before-" in str(dst):
+            os._exit(42)
+        if mode=="after_first_replacement" and ".metadata-" in str(src) and ".metadata-before-" not in str(src) and str(dst).endswith("IMG_0001.JPG"):
+            os._exit(42)
+        if mode=="after_second_backup" and ".metadata-before-" in str(dst) and ".XMP." in str(dst):
             os._exit(42)
         return result
     m.os.replace=abrupt
@@ -118,7 +123,10 @@ m.apply_metadata_correction(Path(sys.argv[1]),"META_BA12_TEST",workspace_root=Pa
 """.replace("sys.argv[3]",repr(mode))
 
 
-@pytest.mark.parametrize("mode",["after_backup","after_db_commit","after_journal_commit"])
+@pytest.mark.parametrize("mode",[
+    "after_backup","after_first_replacement","after_second_backup",
+    "after_db_commit","after_journal_commit",
+])
 def test_0500_library_swap_restart_is_safe_at_three_crash_boundaries(tmp_path,mode):
     db,ws,source,family_id,task_id=_seed_library(tmp_path,two_files=True)
     _child(db,ws,_child_library(mode))
@@ -133,7 +141,7 @@ def test_0500_library_swap_restart_is_safe_at_three_crash_boundaries(tmp_path,mo
         task=conn.execute("SELECT status FROM metadata_corrections WHERE id=?",(task_id,)).fetchone()
         row=conn.execute("SELECT selected_capture_time FROM file_families WHERE id=?",(family_id,)).fetchone()
         assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
-    if mode=="after_backup":
+    if mode in {"after_backup","after_first_replacement","after_second_backup"}:
         assert state["rolled_back"]==1
         assert source.read_bytes()==OLD
         assert source.with_suffix(".XMP").read_bytes()==b"synthetic-sidecar"
@@ -210,11 +218,16 @@ preview=m.preview_multiple_metadata_correction(
     workspace_root=Path(sys.argv[2]),library_id="main",
     reference_relative_path="A.JPG",proposed_datetime="2026-07-21T12:30:00",
 )
-if sys.argv[3]=="after_backup":
+if sys.argv[3] in {"after_backup","after_first_replacement","after_second_backup"}:
     original=m.os.replace
     def abrupt(src,dst):
         result=original(src,dst)
-        if ".multiple-before-" in str(dst):
+        mode=sys.argv[3]
+        if mode=="after_backup" and ".multiple-before-" in str(dst):
+            os._exit(42)
+        if mode=="after_first_replacement" and ".multiple-" in str(src) and ".multiple-before-" not in str(src) and str(dst).endswith("A.JPG"):
+            os._exit(42)
+        if mode=="after_second_backup" and ".multiple-before-" in str(dst) and ".MP4." in str(dst):
             os._exit(42)
         return result
     m.os.replace=abrupt
@@ -231,7 +244,8 @@ m.apply_multiple_metadata_correction(
 
 
 @pytest.mark.parametrize("mode",[
-    "after_backup","after_all_swaps","after_journal_commit",
+    "after_backup","after_first_replacement","after_second_backup",
+    "after_all_swaps","after_journal_commit",
 ])
 def test_0500_multiple_correction_recovers_at_all_commit_boundaries(tmp_path,mode):
     root=_seed_multiple(tmp_path)
@@ -285,11 +299,16 @@ m.build_folder_import_plan=lambda entries,analysis,root,**kw: ([
     {"source_relative_path":"DCIM/IMG_0001.JPG",
      "destination_relative_path":"2026/2026-07-20/20260720_141530_Test.JPG"}
 ],[],{})
-if sys.argv[3]=="after_backup":
+if sys.argv[3] in {"after_backup","after_incoming","after_destination"}:
     old=m.os.replace
     def terminate(src,dst):
         result=old(src,dst)
-        if ".reintegrate-before-" in str(dst):
+        mode=sys.argv[3]
+        if mode=="after_backup" and ".reintegrate-before-" in str(dst):
+            os._exit(42)
+        if mode=="after_incoming" and ".reintegrate-" in str(src) and ".reintegrate-before-" not in str(src) and str(dst).endswith("IMG_0001.JPG"):
+            os._exit(42)
+        if mode=="after_destination" and str(dst).endswith("20260720_141530_Test.JPG"):
             os._exit(42)
         return result
     m.os.replace=terminate
@@ -305,7 +324,8 @@ m.reintegrate_library_metadata_family(
 
 
 @pytest.mark.parametrize("mode",[
-    "after_backup","after_db_commit","after_journal_commit",
+    "after_backup","after_incoming","after_destination",
+    "after_db_commit","after_journal_commit",
 ])
 def test_0500_reintegration_survives_swap_and_db_commit_crashes(tmp_path,mode):
     db,ws,source,family_id=_seed_reintegration(tmp_path)
@@ -317,7 +337,7 @@ def test_0500_reintegration_survives_swap_and_db_commit_crashes(tmp_path,mode):
     with database_connection(db) as conn:
         file=conn.execute("SELECT current_relative_path FROM files WHERE family_id=?",(family_id,)).fetchone()
         assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
-    if mode=="after_backup":
+    if mode in {"after_backup","after_incoming","after_destination"}:
         assert result["rolled_back"]==1
         assert source.read_bytes()==OLD
         assert not destination.exists()
