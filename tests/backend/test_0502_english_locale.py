@@ -1,4 +1,4 @@
-"""0.50.2 English-first UI and safe legacy storage defaults.
+"""0.50.3 English-first UI and safe legacy storage defaults.
 
 Tests only use disposable synthetic paths. No TrueNAS/production mounts.
 """
@@ -93,7 +93,7 @@ def test_0502_login_setup_and_settings_get_localisation():
     assert 'data-bk-language-choice="en"' in html
     assert 'data-bk-language-choice="de"' in html
     assert "MutationObserver" in html
-    assert 'data-bk-version>0.50.2</span>' in html
+    assert 'data-bk-version>0.50.3</span>' in html
 
 
 def test_0502_english_new_install_inventory_reconcile(tmp_path: Path, monkeypatch):
