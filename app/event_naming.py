@@ -4,7 +4,7 @@ from typing import Any
 import re
 
 
-DEFAULT_NO_EVENT_LABEL = "Ohne Ereignis"
+DEFAULT_NO_EVENT_LABEL = "No Event"
 
 # 0.43.0 stored one exclusive mode. Keep those values readable so existing
 # event snapshots never change their physical folder naming after the patch.
