@@ -56,3 +56,14 @@ def test_storage_rename_error_path_restores_confirmed_job_prefixes() -> None:
     assert "renamed_backup_root," in code
     assert "original_backup_root," in code
     assert "Datenbank-Pfadrückbau nicht vollständig" in code
+
+
+def test_reconciliation_commits_applied_state_with_paths() -> None:
+    code = (Path(__file__).resolve().parents[2] / "app" / "workspace_reconcile.py").read_text(
+        encoding="utf-8"
+    )
+    # The first commit must include the applied marker and mutation finish.
+    assert code.index("mark_job_mutation_completed(c, job_id)") < code.index(
+        "database_finalized = True"
+    )
+    assert "if database_finalized:\n            raise" in code
