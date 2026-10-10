@@ -2016,7 +2016,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         Number.isNaN(date.getTime())
           ? String(job.created_at || job.id)
           : new Intl.DateTimeFormat(
-              "de-DE",
+              (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
               {
                 dateStyle: "short",
                 timeStyle: "medium"
@@ -2049,7 +2049,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       );
 
       return new Intl.DateTimeFormat(
-        "de-DE",
+        (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
         {
           weekday: "long",
           day: "2-digit",
@@ -2087,7 +2087,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       return (
         new Intl.NumberFormat(
-          "de-DE",
+          (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
           {
             maximumFractionDigits: 1
           }
@@ -2936,7 +2936,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       return (
         startDate.toLocaleDateString(
-          "de-DE",
+          (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
           {
             day: "2-digit",
             month: "2-digit"
@@ -2944,7 +2944,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         )
         + "–"
         + endDate.toLocaleDateString(
-          "de-DE",
+          (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
           {
             day: "2-digit",
             month: "2-digit",
