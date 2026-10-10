@@ -2286,6 +2286,27 @@ def startup_database() -> None:
             ensure_library_database_schema(context)
             cancel_queue.recover_interrupted(context.database_path)
             release_queue.recover_releases(context.database_path)
+            # BA-01: Repair portable event.json files from committed SQLite
+            # outbox rows before accepting new background mutations.
+            try:
+                from app.event_document_sync import recover_event_document_sync_tasks
+                document_repairs = recover_event_document_sync_tasks(
+                    context.database_path, context.workspace_root,
+                    app_version=APP_VERSION,
+                )
+                if document_repairs["blocked"]:
+                    print(
+                        "Ereignisdokument-Wiederherstellung nicht vollständig: "
+                        f"{document_repairs['blocked']} offene Aufgaben in "
+                        f"Bibliothek {context.library_id}.",
+                        flush=True,
+                    )
+            except Exception as document_error:
+                print(
+                    f"Fehler bei der Ereignisdokument-Wiederherstellung "
+                    f"({context.library_id}): {document_error}",
+                    flush=True,
+                )
 
         WORKER_STOP.clear()
 

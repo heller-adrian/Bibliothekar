@@ -4027,6 +4027,15 @@ def update_event_definition(
                     "folder_unchanged": True, "applied_event": is_applied,
                 }, ensure_ascii=False), now),
             )
+            if is_applied and workspace_path is not None:
+                # BA-01: The durable repair intent and event revision are one
+                # SQLite commit. If the process crashes before event.json is
+                # replaced, startup can safely regenerate exactly this revision.
+                from app.event_document_sync import queue_event_document_sync
+                queue_event_document_sync(
+                    connection, job_id, event_id,
+                    int(event["revision"] or 1) + 1, now=now,
+                )
             connection.commit()
             row = connection.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
             metadata_result = {
@@ -4034,13 +4043,22 @@ def update_event_definition(
                 "resort_required": False, "removed_family_ids": [],
                 "reassignment_required": False,
             }
-            if workspace_path is not None:
-                from app.event_document import build_event_document_from_db, write_event_document
-                document = build_event_document_from_db(database_path, workspace_path, job_id, event_id)
-                if document is not None:
-                    document["resort_required"] = False
-                    metadata_result["event_document"] = str(
-                        write_event_document(workspace_path, document, app_version=app_version)
+            if workspace_path is not None and is_applied:
+                from app.event_document_sync import sync_event_document_task
+                sync_result = sync_event_document_task(
+                    database_path, workspace_path, event_id,
+                    app_version=app_version,
+                )
+                if sync_result["status"] == "completed":
+                    metadata_result["event_document"] = sync_result.get("path")
+                    metadata_result["event_document_sync_pending"] = False
+                else:
+                    # The edit was already committed. Do not raise a fake
+                    # pre-commit error or force the user to resubmit the stale
+                    # expected_revision. Make the durable pending work visible.
+                    metadata_result["event_document_sync_pending"] = True
+                    metadata_result["event_document_sync_error"] = str(
+                        sync_result.get("error") or "event.json konnte nicht synchronisiert werden"
                     )
             return metadata_result
         requested_ids = sorted({int(v) for v in preview.get("selected_family_ids", [])})
@@ -4787,6 +4805,24 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
         cleaned += reconcile_released_free_markers(connection)
         if cleaned:
             connection.commit()
+        # A failed durable event.json write must remain visible in the
+        # global task list until a later startup/retry repairs it.
+        for document_task in connection.execute(
+            """SELECT task.event_id,task.job_id,task.status,e.name AS event_name
+               FROM event_document_sync_tasks task
+               JOIN events e ON e.id=task.event_id
+               WHERE task.status IN ('pending','blocked')
+               ORDER BY task.updated_at,task.event_id"""
+        ).fetchall():
+            tasks.append({
+                'kind': 'event_document_sync',
+                'job_id': document_task['job_id'],
+                'event_id': document_task['event_id'],
+                'title': 'Ereignisdokument prüfen',
+                'detail': str(document_task['event_name']) + ' · event.json-Synchronisierung offen',
+                'count': 1,
+                'href': f"/events?job={document_task['job_id']}",
+            })
         active_reconcile_event_ids: set[str] = set()
         for active in connection.execute(
             """SELECT details_json FROM sort_runs

@@ -17,6 +17,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
+from contextlib import nullcontext
+import sqlite3
 import hashlib
 import json
 import os
@@ -101,6 +103,7 @@ def build_event_document_from_db(
     event_id: str,
     *,
     include_archived: bool = False,
+    transaction_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any] | None:
     """Eines Ereignisses aus dem lebhaften SQLite-Zustand bauen.
 
@@ -109,7 +112,11 @@ def build_event_document_from_db(
     (nur dann existiert ein Ereignisordner).
     """
 
-    with database_connection(database_path) as connection:
+    with (
+        database_connection(database_path)
+        if transaction_connection is None
+        else nullcontext(transaction_connection)
+    ) as connection:
         event = connection.execute(
             "SELECT * FROM events WHERE id = ? AND parent_event_id IS NULL",
             (event_id,),
