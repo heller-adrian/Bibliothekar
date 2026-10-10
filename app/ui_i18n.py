@@ -846,6 +846,23 @@ I18N_UI_JS = r"""
     updateChoiceButtons();
     window.dispatchEvent(new CustomEvent("bk-language-changed", {detail: {locale: next}}));
   }
+  // Native browser dialogs do not create DOM nodes. Localise only their
+  // visible messages, never confirmation return values or typed user input.
+  function dialogMessage(value) {
+    const text = String(value ?? "");
+    if (locale !== "en") return text;
+    return text.split(/(\r?\n)/u).map(part => part === "\n" || part === "\r\n" ? part : tr(part)).join("");
+  }
+  const originalAlert = window.alert.bind(window);
+  const originalConfirm = window.confirm.bind(window);
+  const originalPrompt = window.prompt.bind(window);
+  window.alert = function (message) { return originalAlert(dialogMessage(message)); };
+  window.confirm = function (message) { return originalConfirm(dialogMessage(message)); };
+  window.prompt = function (message, defaultValue) {
+    return arguments.length > 1
+      ? originalPrompt(dialogMessage(message), defaultValue)
+      : originalPrompt(dialogMessage(message));
+  };
   window.BibliothekarI18n = Object.freeze({
     t: (value) => locale === "en" ? tr(String(value)) : restoreGerman(String(value)),
     getLocale: () => locale,
