@@ -12,6 +12,16 @@ Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
 Geplanter Testimage-Tag (nach gesondertem Build): **`ghcr.io/heller-adrian/bibliothekar:patch-0.50.0`**
 
+### Schutz der Web-Oberfläche (BA-03)
+
+Ab dem Entwicklungsstand 0.50.0 ist die Web-Oberfläche einschließlich aller
+Bibliotheks-APIs **passwortgeschützt**. Vor der ersten Anmeldung muss ein
+Administratorpasswort konfiguriert werden; ohne Passwort startet die App
+mit gesperrtem Datenzugriff. Die TrueNAS-Custom-App verwendet bevorzugt eine
+Secret-Datei unter `/config/admin-password`. Alle Einrichtungs- und
+HTTPS-Hinweise: [Web-App- und API-Zugriffsschutz](docs/BA03_HTTP_SECURITY.md).
+
+
 ## Updates
 
 Für normale Installationen wird in TrueNAS als Image-Version **`latest`** verwendet. `latest` zeigt ausschließlich auf den zuletzt freigegebenen Stand von `main`.
