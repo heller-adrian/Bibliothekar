@@ -560,6 +560,49 @@ def reconcile_missing_files(
         if file_row is None:
             confirmed.append(file_id)
             continue
+        # Never remove a shared file/family record merely because this
+        # event's directory has disappeared. A foreign event's assignment
+        # is an independent ownership claim, even if its inventory has not
+        # been refreshed yet (for example after a manual move).
+        foreign_owner = connection.execute(
+            """SELECT 1 FROM event_assignments ea
+               JOIN events assigned ON assigned.id=ea.event_id
+               WHERE (ea.file_id=? OR (ea.family_id=? AND ea.family_id IS NOT NULL))
+                 AND COALESCE(assigned.parent_event_id,assigned.id)<>?
+               LIMIT 1""",
+            (file_id, file_row["family_id"], event_id),
+        ).fetchone()
+        if foreign_owner is not None:
+            record_notice(
+                connection,
+                notice_key=f"placement:{file_id}",
+                kind="placement_conflict",
+                root_kind=root_kind,
+                title="Gemeinsam zugeordnete Datei fehlt",
+                detail=(
+                    f"{file_row['original_filename']} wird auch von einem anderen "
+                    "Ereignis verwendet. Eine automatische Löschbestätigung "
+                    "ist ohne eindeutige Prüfung der Zuordnung nicht zulässig."
+                ),
+                job_id=str(file_row["job_id"]),
+                event_id=event_id,
+                file_id=file_id,
+                relative_path=str(file_row["current_relative_path"] or ""),
+                repairable=False,
+                action_required=True,
+                group_key="placement_conflict",
+                details={
+                    "expected_root_kind": root_kind,
+                    "expected_relative_path": str(file_row["current_relative_path"] or ""),
+                    "size_bytes": int(file_row["size_bytes"] or 0),
+                    "sha256": str(file_row["sha256_current"] or file_row["sha256_original"] or ""),
+                    "force_repair": True,
+                },
+                now=timestamp,
+            )
+            pending.append(file_id)
+            continue
+
         details = {
             "file_id": file_id,
             "family_id": int(file_row["family_id"]) if file_row["family_id"] is not None else None,
