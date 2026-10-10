@@ -157,3 +157,68 @@ def test_0500_successful_metadata_edit_finalizes_outbox(tmp_path):
             (event["id"],),
         ).fetchone()[:] == ("completed", 2)
         assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+
+
+def test_0500_crash_after_document_replace_before_sqlite_ack(tmp_path):
+    db, workspace, event, path = _applied_event(tmp_path)
+    child = """
+import os, sys
+from pathlib import Path
+from app.database import update_event_definition
+import app.event_document_sync as module
+original = module.write_event_document
+def replace_then_crash(*args, **kwargs):
+    original(*args, **kwargs)
+    os._exit(42)
+module.write_event_document = replace_then_crash
+update_event_definition(
+    Path(sys.argv[1]), "j", sys.argv[3], None,
+    event_name="Vor Quittierung", notes="replace erfolgt",
+    expected_revision=1, workspace_path=Path(sys.argv[2]),
+    app_version="0.50.0",
+)
+"""
+    process = subprocess.run(
+        [sys.executable, "-c", child, str(db), str(workspace), event["id"]],
+        capture_output=True, text=True, check=False,
+    )
+    assert process.returncode == 42, process.stderr
+    assert read_event_document(path)["event"]["revision"] == 2
+    with database_connection(db) as connection:
+        # The document was fsync'ed but the SQLite completion transaction
+        # was never committed. Recovery must tolerate and finish that state.
+        assert connection.execute(
+            "SELECT revision,status FROM event_document_sync_tasks WHERE event_id=?",
+            (event["id"],),
+        ).fetchone()[:] == (2, "pending")
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert recover_event_document_sync_tasks(db, workspace)["recovered"] == 1
+    assert read_event_document(path)["event"]["revision"] == 2
+    assert recover_event_document_sync_tasks(db, workspace) == {
+        "recovered": 0, "blocked": 0,
+    }
+
+
+def test_0500_later_edit_supersedes_pending_revision(tmp_path, monkeypatch):
+    db, workspace, event, path = _applied_event(tmp_path)
+    import app.event_document_sync as module
+
+    with monkeypatch.context() as faults:
+        faults.setattr(module, "write_event_document", lambda *_a, **_kw: (
+            (_ for _ in ()).throw(OSError("first write failed"))
+        ))
+        first = _rename(db, workspace, event, name="Zwischenstand")
+    assert first["event_document_sync_pending"] is True
+
+    next_edit = dict(first["event"])
+    second = _rename(db, workspace, next_edit, name="Endstand")
+    assert second["event"]["revision"] == 3
+    assert second["event_document_sync_pending"] is False
+    assert read_event_document(path)["event"]["name"] == "Endstand"
+    assert read_event_document(path)["event"]["revision"] == 3
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT revision,status FROM event_document_sync_tasks WHERE event_id=?",
+            (event["id"],),
+        ).fetchone()[:] == (3, "completed")
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
