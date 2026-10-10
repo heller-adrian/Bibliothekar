@@ -1305,7 +1305,7 @@ I18N_UI_JS = r"""
     // Normalize whitespace *only for exact dictionary lookups*, never for
     // user-supplied paths/filenames or captured dynamic values.
     let result = dictionary[core];
-    if (result === undefined) result = dictionary[core.replace(/\\s+/gu, " ")];
+    if (result === undefined) result = dictionary[core.replace(/\s+/gu, " ")];
     if (result === undefined) {
       for (const [pattern, translation] of patterns) {
         if (pattern.test(core)) { result = core.replace(pattern, translation); break; }
