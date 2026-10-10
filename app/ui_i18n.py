@@ -894,7 +894,7 @@ I18N_UI_JS = r"""
     const last = lastText.get(node);
     if (observed !== last) originalText.set(node, observed);
     const source = originalText.get(node) ?? observed;
-    const desired = locale === "en" ? tr(source) : restoreGerman(source);
+    const desired = locale === "en" ? tr(source) : (tr(source) !== source ? source : restoreGerman(source));
     lastText.set(node, desired);
     if (observed !== desired) node.nodeValue = desired;
   }
@@ -909,7 +909,7 @@ I18N_UI_JS = r"""
       const observed = element.getAttribute(name);
       if (observed !== latest.get(name)) originals.set(name, observed);
       const source = originals.get(name) ?? observed;
-      const desired = locale === "en" ? tr(source) : restoreGerman(source);
+      const desired = locale === "en" ? tr(source) : (tr(source) !== source ? source : restoreGerman(source));
       latest.set(name, desired);
       if (desired !== observed) element.setAttribute(name, desired);
     }
