@@ -14,7 +14,8 @@ def test_version_sources_are_consistent():
     main_source = source("app/main.py")
     assert "from app import __version__" in main_source
     assert "APP_VERSION = __version__" in main_source
-    assert f"Aktuelle veröffentlichte Version: **{package_version}**" in source("README.md")
+    assert f"Entwicklungsversion: **{package_version}**" in source("README.md")
+    assert "Aktuelle stabile Veröffentlichung: **" in source("README.md")
 
 
 def test_workspace_preview_preserves_tree_and_db_facts():

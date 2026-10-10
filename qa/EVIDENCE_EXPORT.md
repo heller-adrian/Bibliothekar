@@ -124,17 +124,17 @@ Der GitHub-Schreibzugriff gehört **nicht** zu `nas-agent` und nicht zu `qa-thin
 
 Aktuelle Zielarchitektur:
 
-1. Der lokale QA-Exporter auf GX10 liest ausschließlich abgeschlossene `qa-thinker`-Review-Metadaten mit `export_contract_version=1`.
+1. Ein getrennt betriebener QA-Exporter verarbeitet ausschließlich abgeschlossene, freigegebene Review-Metadaten mit `export_contract_version=1`.
 2. Er baut daraus einen sanitisierten Verified-Result-Datensatz.
 3. Ein eigener GitHub Deploy Key besitzt Schreibrecht ausschließlich auf das separate private QA-Ledger-Repository.
 4. Das Ledger enthält keinen Produktcode und keine NAS-Dateien.
-5. ChatGPT liest das private Ledger über den GitHub-Connector.
+5. Ein berechtigter QA-Reviewer kann die abgelegten Nachweise anschließend lesend auswerten.
 
 Damit bleibt die Sicherheitsrichtung strikt:
 
-`Hermes/NAS -> sanitizierte Evidence -> lokaler Exporter -> privates GitHub QA-Ledger -> ChatGPT liest GitHub`
+`Isolierter Test -> bereinigter Nachweis -> getrennter Exportprozess -> zugriffsgeschützter Prüfbericht -> lesende Auswertung`
 
-Es entsteht kein Rückkanal von GitHub/ChatGPT zum NAS.
+Der Exportmechanismus darf keinen schreibenden Rückkanal zur Produktivinstallation bereitstellen.
 
 ## 7. Zweck für die weitere Fehleranalyse
 

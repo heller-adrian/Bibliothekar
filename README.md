@@ -1,14 +1,16 @@
 # Bibliothekar
 
-> 0.50.0 ist im Audit-Entwicklungsbranch noch kein freigegebenes stabiles Release. Die `latest`-Beschreibung gilt erst nach dem Release-Gate.
+> Entwicklungsstand **0.50.0** (Audit-Branch, noch keine stabile Freigabe). Der stabile Update-Kanal bleibt bis zur erfolgreichen Abnahme unverändert.
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
-Aktuelle veröffentlichte Version: **0.50.0**
+Aktuelle stabile Veröffentlichung: **0.40.3**
+
+Entwicklungsversion: **0.50.0** – noch nicht als `latest` veröffentlicht.
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
-Aktuelles Testimage: **`ghcr.io/heller-adrian/bibliothekar:patch-0.50.0`**
+Geplanter Testimage-Tag (nach gesondertem Build): **`ghcr.io/heller-adrian/bibliothekar:patch-0.50.0`**
 
 ## Updates
 
@@ -214,13 +216,10 @@ Dateinamenerkennung, getrennten Bereichen „Bibliothek“/„Allgemein“ und
 verifiziertem Schreibworkflow.
 
 ### 1.0.0
-Stabiler Kamera-Kern ohne Immich und ohne KI-Vorsortierung.
+Stabiler Kamera-Kern mit geprüftem Import, sicherer Datei- und Metadatenverarbeitung, Ereignisverwaltung, kontrollierter Archivierung und zuverlässig wiederanlauffähigen Arbeitsabläufen.
 
-### danach
-Manuell startbare KI-Vorsortierung mit Open-Weight-Modell auf dem GX10.
-
-### später
-Immich-Anbindung.
+### Spätere Erweiterungen
+Optionale Anbindungen an externe Fotoverwaltungssysteme, sofern sie die Kernfunktionen und die Datenhoheit des Nutzers nicht beeinträchtigen.
 
 ## Status
 
