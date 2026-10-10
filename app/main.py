@@ -287,7 +287,6 @@ from app.event_suggestions import (
     accept_event_suggestion,
     list_event_suggestions,
 )
-from app.archive_cascade import prepare_archived_cascade_impacts
 from app.archive_change_assistant import build_archive_change_assistant
 from app.archive_reassignment import (
     list_archive_reassignments,
@@ -7257,14 +7256,6 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                     },
                 )
 
-        archive_bundle = None
-        if preview is not None and cascade_confirmed and cascade_preview.get("has_conflicts"):
-            archived_items = [item for item in cascade_preview.get("items", []) if str(item.get("status")) == "archived"]
-            if archived_items:
-                archive_bundle = prepare_archived_cascade_impacts(
-                    current_database_file(), job_id, event_id, preview, cascade_preview, current_workspace_root()
-                )
-
         old_status = str((context.get("event") or {}).get("status") or "")
         edit_reservation: dict[str, Any] | None = None
         if preview is not None:
@@ -7296,7 +7287,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                 notes=str(payload.get("notes") or ""),
                 expected_revision=int(payload.get("revision") or 0),
                 cascade_confirmed=cascade_confirmed,
-                allow_archived_manual=bool(archive_bundle),
+                allow_archived_manual=False,
             )
             claim_event_families(
                 REGISTRY_DATABASE_FILE,
