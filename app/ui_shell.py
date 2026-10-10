@@ -3,6 +3,7 @@ from __future__ import annotations
 from html import escape
 import re
 from app.library_runtime import get_current_library
+from app.ui_i18n import I18N_UI_JS
 
 
 BIBLIOTHEKAR_CSS = r"""
@@ -5654,10 +5655,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <section class="bk-settings-group">
         <strong>Sprache</strong>
         <div class="bk-choice-row">
-          <button type="button" class="active">Deutsch</button>
-          <button type="button" disabled title="Die vollständige englische Oberfläche folgt in einem eigenen Lokalisierungsschritt.">English</button>
+          <button type="button" data-bk-language-choice="de" aria-pressed="false">Deutsch</button>
+          <button type="button" class="active" data-bk-language-choice="en" aria-pressed="true">English</button>
         </div>
-        <div class="bk-language-note">Die Oberfläche ist vollständig deutsch. Englisch bleibt vorbereitet und wird erst aktiviert, wenn alle dynamischen Texte mitübersetzt sind.</div>
+        <div class="bk-language-note">Die Sprache betrifft die Oberfläche. Vorhandene Ordnernamen, Benutzereingaben und Dateipfade bleiben unverändert.</div>
       </section>
       <section class="bk-settings-group">
         <strong>Sitzung</strong>
@@ -5744,10 +5745,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <span>TrueNAS stellt nur diesen RW-Stamm bereit. Bibliothekar verwaltet die folgenden Unterordner.</span>
         </div>
         <div class="bk-library-form" style="margin-top:12px">
-          <label><span>SD-Kartensicherungen</span><input id="bk-storage-backup-name" value="SD-Kartensicherungen"></label>
-          <label><span>Bibliotheks-Arbeitsbereiche</span><input id="bk-storage-workspaces-name" value="Arbeitsbereiche"></label>
-          <label><span>Metadatenkorrektur</span><input id="bk-storage-metadata-name" value="Metadatenkorrektur"></label>
-          <label><span>Papierkorb</span><input id="bk-storage-trash-name" value="Papierkorb"></label>
+          <label><span>SD-Kartensicherungen</span><input id="bk-storage-backup-name" value="SD Card Backups"></label>
+          <label><span>Bibliotheks-Arbeitsbereiche</span><input id="bk-storage-workspaces-name" value="Library Workspaces"></label>
+          <label><span>Metadatenkorrektur</span><input id="bk-storage-metadata-name" value="Metadata Correction"></label>
+          <label><span>Papierkorb</span><input id="bk-storage-trash-name" value="Trash"></label>
         </div>
         <div class="bk-library-meta" style="margin-top:10px">
           <span id="bk-storage-backup-preview"></span>
@@ -7361,6 +7362,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         "</body>",
         f"<script>{BIBLIOTHEKAR_JS}</script>\n"
         f"<script>{BIBLIOTHEKAR_0444_JS}</script>\n"
+        f"<script>{I18N_UI_JS}</script>\n"
         '<script>document.getElementById("bk-sign-out")?.addEventListener("click",async()=>{'
         'try{await fetch("/auth/logout",{method:"POST"});}finally{location.replace("/login");}'
         '});</script>\n</body>',
