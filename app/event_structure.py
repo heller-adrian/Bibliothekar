@@ -190,7 +190,7 @@ def _build_no_event_preview(
             "Bitte für jeden Monat eine eigene Sammlung anlegen."
         )
     month_key = next(iter(months))
-    raw_naming = payload.get("folder_naming") or DEFAULT_EVENT_NAMING
+    raw_naming = payload.get("folder_naming") or normalize_event_naming({})
     naming = (
         dict(raw_naming)
         if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
@@ -218,7 +218,7 @@ def _build_no_event_preview(
     if str(naming.get("mode") or "") == "locked":
         parent_folder = str(naming.get("locked_folder_name") or "").strip()
         if not parent_folder:
-            parent_folder = render_no_event_folder_name(month_key, DEFAULT_EVENT_NAMING)
+            parent_folder = render_no_event_folder_name(month_key, normalize_event_naming({}))
         no_event_label = str(payload.get("event_name") or "Ohne Ereignis").strip() or "Ohne Ereignis"
     else:
         parent_folder = render_no_event_folder_name(month_key, naming)
@@ -415,7 +415,7 @@ def build_event_preview(
             + child_name
         ) if child_name else None
 
-    raw_naming = payload.get("folder_naming") or DEFAULT_EVENT_NAMING
+    raw_naming = payload.get("folder_naming") or normalize_event_naming({})
     naming = (
         dict(raw_naming)
         if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
@@ -544,7 +544,7 @@ def build_event_preview(
             parent_name = str(payload.get("event_name") or "Ohne Ereignis").strip() or "Ohne Ereignis"
             parent_folder = str(naming.get("locked_folder_name") or "").strip()
             if not parent_folder:
-                parent_folder = render_no_event_folder_name(start_date[:7], DEFAULT_EVENT_NAMING)
+                parent_folder = render_no_event_folder_name(start_date[:7], normalize_event_naming({}))
         else:
             parent_name = normalize_event_naming(naming)["no_event_label"]
             parent_folder = render_no_event_folder_name(start_date[:7], naming)
