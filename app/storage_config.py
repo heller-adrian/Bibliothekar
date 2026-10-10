@@ -37,6 +37,8 @@ def _effective_directory_default(setting: str) -> str:
     """
     english = ENGLISH_STORAGE_DEFAULTS[setting]
     legacy = LEGACY_STORAGE_DEFAULTS[setting]
+    if os.environ.get("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE") == "de":
+        return legacy
     workspace = Path(os.environ.get("KAMERA_WORKSPACE", "/workspace"))
     try:
         if (workspace / legacy).is_dir():
