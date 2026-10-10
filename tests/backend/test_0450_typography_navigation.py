@@ -18,9 +18,9 @@ def _render(area, subarea=None):
 
 
 def test_0450_version_and_existing_core_remain_separate():
-    assert __version__ == "0.50.2"
-    assert main.DEPLOYMENT_VERSION == "0.50.2"
-    assert main.RELEASE_VERSION == "0.50.2"
+    assert __version__ == "0.50.3"
+    assert main.DEPLOYMENT_VERSION == "0.50.3"
+    assert main.RELEASE_VERSION == "0.50.3"
 
 
 def test_0450_no_assistant_link_in_desktop_or_mobile_navigation():
