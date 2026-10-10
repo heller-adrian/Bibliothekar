@@ -8,6 +8,10 @@ services:
     environment:
       TZ: ${TZ:-Europe/Berlin}
       KAMERA_CONFIG: /config/settings.json
+      # BA-03: create this secret file under BIBLIOTHEKAR_CONFIG_DIR
+      # before exposing the service; no default password or anonymous mode.
+      BIBLIOTHEKAR_ADMIN_PASSWORD_FILE: /config/admin-password
+      BIBLIOTHEKAR_COOKIE_SECURE: ${BIBLIOTHEKAR_COOKIE_SECURE:-false}
       KAMERA_WORKSPACE: /workspace
       KAMERA_DATABASE_DIR: /database
       KAMERA_REGISTRY_DATABASE: /database/bibliothekar-global.sqlite3

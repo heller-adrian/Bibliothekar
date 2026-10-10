@@ -7291,7 +7291,7 @@ BIBLIOTHEKAR_0473_CSS = r"""
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
-        lambda match: match.group(0) + f"\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n<script>{BIBLIOTHEKAR_0470_HEAD_JS}</script>\n",
+        lambda match: match.group(0) + f'\n<script src="/auth/client.js"></script>\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n<script>{BIBLIOTHEKAR_0470_HEAD_JS}</script>\n',
         html,
         count=1,
         flags=re.IGNORECASE,

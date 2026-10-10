@@ -878,6 +878,7 @@ def _library_onboarding_html() -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bibliothekar · Bibliothek einrichten</title>
+<script src="/auth/client.js"></script>
 <style>
 :root{{color-scheme:dark;--bg:#0c1115;--surface:#172027;--border:#34414a;--text:#f2f4f5;--muted:#aeb8bf;--accent:#58aaf2;--danger:#ff716f}}
 *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif}}
@@ -4969,6 +4970,7 @@ def file_browser_interface() -> HTMLResponse:
   >
 
   <title>Dateiprüfung</title>
+  <script src="/auth/client.js"></script>
 
   <style>
     :root {
@@ -12648,3 +12650,11 @@ def api_archive_change(cr_id: str) -> JSONResponse:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# BA-03: The last registered HTTP middleware executes first. In particular,
+# authenticate BEFORE library-context resolution, onboarding or APIs.
+@app.middleware("http")
+async def owner_authentication_middleware(request: Request, call_next):
+    from app.security import protect_request
+    return await protect_request(request, call_next)
