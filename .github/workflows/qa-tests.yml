@@ -55,7 +55,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate archive QA shell syntax
         run: bash -n qa/archive_e2e/*.sh
+      - name: Build image from exactly this commit
+        run: docker build --build-arg SOURCE_REVISION="${GITHUB_SHA}" -t "bibliothekar-ci:${GITHUB_SHA}" .
       - name: Exercise isolated archive QA harness
+        env:
+          QA_IMAGE: bibliothekar-ci:${{ github.sha }}
+          QA_EXPECTED_REVISION: ${{ github.sha }}
         run: |
           CI_SOURCE=/mnt/storage/backup/kamera-sd-karten/CI_DUMMY
           sudo mkdir -p "$CI_SOURCE"
@@ -72,12 +77,13 @@ jobs:
           test -f "$QA_ROOT/runs/$QA_RUN_ID/database/kamera.sqlite3"
           python3 - "$QA_ROOT/runs/$QA_RUN_ID/isolation.json" <<'PY'
           import json
+          import os
           import sys
           from pathlib import Path
 
           data = json.loads(Path(sys.argv[1]).read_text())
           assert data['status'] == 'PASS'
-          assert data['product_revision'] == '627c5515e533e167e45354ccaa71f988f104ae08'
+          assert data['product_revision'] == os.environ['GITHUB_SHA']
           assert data['production_archive_mounted'] is False
           assert data['production_database_mounted'] is False
           run_root = data['workspace'].rsplit('/workspace', 1)[0]

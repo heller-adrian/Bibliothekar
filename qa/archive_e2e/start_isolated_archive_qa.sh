@@ -3,14 +3,14 @@ set -Eeuo pipefail
 
 QA_ROOT="${QA_ROOT:-/mnt/storage/ki-workspace/hermes/bibliothekar-qa}"
 ARCHIVE_ROOT="${KAMERA_QA_ARCHIVE_ROOT:-$QA_ROOT/archive-test-library}"
-RUN_ID="${QA_RUN_ID:-$(date '+%Y-%m-%d_%H%M%S')_0.21.2_ARCHIVE}"
+RUN_ID="${QA_RUN_ID:-$(date '+%Y-%m-%d_%H%M%S')_CURRENT_ARCHIVE}"
 RUN_ROOT="$QA_ROOT/runs/$RUN_ID"
 SOURCE_ROOT="${1:-/mnt/storage/backup/kamera-sd-karten/DEEPTEST_SD_02}"
 QA_PORT="${QA_PORT:-31044}"
 CONTAINER_NAME="${QA_CONTAINER_NAME:-bibliothekar-hermes-archive-qa}"
 
-EXPECTED_REVISION="627c5515e533e167e45354ccaa71f988f104ae08"
-IMAGE="ghcr.io/heller-adrian/bibliothekar@sha256:27554d9f6cc2b8a67f77cf01e856b837423974dca0cb6d6e03e8bc5cdb5dddb6"
+EXPECTED_REVISION="${QA_EXPECTED_REVISION:?QA_EXPECTED_REVISION (Commit SHA) muss gesetzt sein}"
+IMAGE="${QA_IMAGE:?QA_IMAGE (Image aus demselben Commit) muss gesetzt sein}"
 PRODUCTION_ARCHIVE="/mnt/storage/fotos/Kamerabibliothek"
 PRODUCTION_DATABASE="/mnt/apps/appdata/kamera-automatisierung/database"
 APP_DATABASE="$RUN_ROOT/database"
@@ -144,7 +144,9 @@ FILE_COUNT="$(find "$SOURCE_COPY" -type f | wc -l | tr -d ' ')"
 [[ "$FILE_COUNT" -gt 0 ]] || blocked "Die Testkopie enthält keine Dateien: $SOURCE_COPY"
 
 say "QA: ziehe unveränderliches Produktimage $IMAGE"
-docker pull "$IMAGE" >/dev/null
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  docker pull "$IMAGE" >/dev/null
+fi
 IMAGE_REVISION="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
 [[ "$IMAGE_REVISION" == "$EXPECTED_REVISION" ]] || blocked "Image-Revision stimmt nicht: erwartet $EXPECTED_REVISION, erhalten $IMAGE_REVISION"
 
@@ -178,6 +180,7 @@ docker run -d \
   -e "KAMERA_NAS_SOURCE_ROOT=$APP_NAS" \
   -e "KAMERA_POOL_PROBE=$APP_POOL_PROBE" \
   -e "KAMERA_SOURCE_HELPER_URL=http://127.0.0.1:9" \
+  -e "KAMERA_SOURCE_HELPER_ENABLED=false" \
   -e "BIBLIOTHEKAR_QA_MODE=archive-e2e" \
   -e "PYTHONDONTWRITEBYTECODE=1" \
   -v "$ARCHIVE_ROOT:$ARCHIVE_ROOT:rw" \

@@ -22,6 +22,9 @@ RUN apt-get update \
         util-linux \
     && rm -rf /var/lib/apt/lists/*
 
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision="${SOURCE_REVISION}"
+
 WORKDIR /opt/kamera
 
 COPY requirements.txt /opt/kamera/requirements.txt
