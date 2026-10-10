@@ -835,14 +835,19 @@ def apply_multiple_metadata_correction(
     )
     root = paths["root"]
     metadata_root = storage_paths(workspace_root)["metadata_root"].resolve(strict=False)
+    from app.metadata_swap_recovery import (
+        assert_no_pending_swaps, create_swap_journal, fsync_staged_file,
+        mark_swap_committed, recover_swap_journal,
+    )
+    assert_no_pending_swaps(metadata_root)
     work = (
         metadata_root / ".multiple-work" / ("MULTI_" + uuid.uuid4().hex.upper())
     ).resolve(strict=False)
     work.mkdir(parents=True, exist_ok=False)
 
     prepared: list[dict[str, Any]] = []
-    replaced: list[tuple[Path, Path]] = []
     incoming_paths: list[Path] = []
+    swap_journal: Path | None = None
     try:
         for row in preview["files"]:
             relative = _safe_relative(str(row["relative_path"]))
@@ -893,6 +898,7 @@ def apply_multiple_metadata_correction(
                 "output_size_bytes": int(temp.stat().st_size),
             })
 
+        swap_files: list[dict[str, Any]] = []
         for item in prepared:
             source = Path(item["source"])
             incoming = source.parent / (
@@ -903,28 +909,34 @@ def apply_multiple_metadata_correction(
             )
             incoming_paths.append(incoming)
             shutil.copyfile(Path(item["temp"]), incoming)
+            fsync_staged_file(incoming)
             if _sha256(incoming) != str(item["output_sha256"]):
                 raise MetadataCorrectionError(
                     "Korrigierte Arbeitsdatei stimmt vor dem Austausch nicht überein."
                 )
-            os.replace(source, backup)
+            item["incoming"] = incoming
+            item["backup"] = backup
+            swap_files.append({
+                "source": str(source), "incoming": str(incoming),
+                "backup": str(backup),
+                "before_sha": str(item["sha256"]),
+                "after_sha": str(item["output_sha256"]),
+            })
+        swap_journal = create_swap_journal(
+            metadata_root, kind="multiple", file_entries=swap_files,
+            data_root=root,
+        )
+        for item in prepared:
+            source = Path(item["source"])
+            os.replace(source, Path(item["backup"]))
             _fsync_directory(source.parent)
-            try:
-                os.replace(incoming, source)
-                _fsync_directory(source.parent)
-            except Exception:
-                if backup.exists() and not source.exists():
-                    os.replace(backup, source)
-                    _fsync_directory(source.parent)
-                raise
-            replaced.append((source, backup))
+            os.replace(Path(item["incoming"]), source)
+            _fsync_directory(source.parent)
 
-        for _source, backup in replaced:
-            try:
-                backup.unlink(missing_ok=True)
-                _fsync_directory(backup.parent)
-            except OSError:
-                pass
+        # A multiple-folder edit has no SQLite commit; the fsync'ed journal
+        # transition is its durable finish boundary.
+        mark_swap_committed(swap_journal, metadata_root)
+        recover_swap_journal(metadata_root, swap_journal)
         shutil.rmtree(work, ignore_errors=True)
         return {
             "status": "completed",
@@ -947,20 +959,45 @@ def apply_multiple_metadata_correction(
             ],
         }
     except Exception as error:
-        for incoming in incoming_paths:
+        if swap_journal is not None:
             try:
-                incoming.unlink(missing_ok=True)
-            except OSError:
-                pass
-        for source, backup in reversed(replaced):
-            try:
-                if backup.exists():
-                    if source.exists():
-                        source.unlink()
-                    os.replace(backup, source)
-                    _fsync_directory(source.parent)
-            except OSError:
-                pass
+                disposition = recover_swap_journal(metadata_root, swap_journal)
+                if disposition == "completed":
+                    # The transaction is already durable: report success
+                    # without re-running edits on an outdated preview.
+                    shutil.rmtree(work, ignore_errors=True)
+                    return {
+                        "status": "completed",
+                        "file_count": len(prepared),
+                        "total_file_count": int(preview["total_file_count"]),
+                        "selection_is_subset": bool(preview["selection_is_subset"]),
+                        "offset_seconds": int(preview["offset_seconds"]),
+                        "reference_relative_path": str(preview["reference_relative_path"]),
+                        "preview_fingerprint": str(preview["preview_fingerprint"]),
+                        "files": [
+                            {
+                                "relative_path": str(item["relative_path"]),
+                                "old_datetime": str(item["old_datetime"]),
+                                "new_datetime": str(item["new_datetime"]),
+                                "output_size_bytes": int(item["output_size_bytes"]),
+                                "output_sha256": str(item["output_sha256"]),
+                                "verification": item["verification"],
+                            }
+                            for item in prepared
+                        ],
+                    }
+            except Exception as recovery_error:
+                raise MetadataCorrectionError(
+                    "Mehrfachkorrektur unterbrochen: automatischer Rückbau "
+                    "gesperrt; Sicherheitskopien und Journal bleiben bestehen ("
+                    + str(recovery_error) + ")."
+                ) from error
+        else:
+            for incoming in incoming_paths:
+                try:
+                    incoming.unlink(missing_ok=True)
+                except OSError:
+                    pass
         shutil.rmtree(work, ignore_errors=True)
         if isinstance(error, MetadataCorrectionError):
             raise
