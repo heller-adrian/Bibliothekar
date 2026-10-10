@@ -369,7 +369,7 @@ def _create_new_event(
     clean_name = str(name or "").strip()
     if not clean_name:
         raise EventReassignmentError("Für das neue Ereignis fehlt ein Name.")
-    with nullcontext(transaction_connection) as connection:
+    with (database_connection(database_path) if transaction_connection is None else nullcontext(transaction_connection)) as connection:
         placeholders = ",".join("?" for _ in family_ids)
         rows = connection.execute(
             f"""
@@ -462,7 +462,7 @@ def _create_new_no_event(
     preserve_day_folders: bool = False,
     transaction_connection = None,
 ) -> dict[str, Any]:
-    with nullcontext(transaction_connection) as connection:
+    with (database_connection(database_path) if transaction_connection is None else nullcontext(transaction_connection)) as connection:
         rows = _selected_capture_rows(connection, job_id, family_ids)
         month = _capture_month(rows)
         existing = connection.execute(
