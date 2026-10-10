@@ -123,34 +123,48 @@ def test_0500_existing_no_event_target_rolls_back_if_queue_fails(tmp_path, monke
         ).fetchone()[0] == 1
 
 
-def test_0500_new_event_commit_in_external_transaction_can_be_reversed(tmp_path):
-    from app.database import create_planned_event
-    from app.event_structure import build_event_preview
-    from app.planning import list_job_available_families
 
-    db = tmp_path / "parent.sqlite3"
-    selected = seed(db, source_status="planned")
-    # Use only one family and explicitly ignore the existing source event;
-    # the parent write must stay pending inside the caller's transaction.
-    available = [
-        row for row in list_job_available_families(db, "j")
-        if int(row["family_id"]) == selected[0]
-    ]
-    if not available:
-        pytest.skip("fixture has no free family before editing")
-    preview = build_event_preview({
-        "event_kind": "event", "event_name": "Test",
-        "start_date": "2026-09-07", "end_date": "2026-09-07",
-        "start_time": "09:00", "end_time": "11:00",
-        "uses_time_range": True, "selected_family_ids": [selected[0]]
-    }, available)
-    with pytest.raises(RuntimeError, match="rollback marker"):
-        with database_connection(db) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            create_planned_event(
-                db, "j", preview, ignore_event_ids={"src"},
-                transaction_connection=connection,
-            )
-            raise RuntimeError("rollback marker")
+@pytest.mark.parametrize("target_mode", ["new_event", "new_no_event"])
+def test_0500_process_termination_before_commit_rolls_back_all(tmp_path, target_mode):
+    import subprocess
+    import sys
+
+    db, selected, segments = _applied_source(tmp_path)
     with database_connection(db) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM events WHERE name='Test'").fetchone()[0] == 0
+        before_events = connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        before_assignments = connection.execute("SELECT COUNT(*) FROM event_assignments").fetchone()[0]
+        pending_before = connection.execute(
+            "SELECT COUNT(*) FROM event_reapply_removed_families "
+            "WHERE event_id='b' AND target_event_id IS NULL"
+        ).fetchone()[0]
+    child = """
+import os, sys, json
+from pathlib import Path
+import app.event_mutation as mutation
+from app.event_reassignment import assign_event_reassignments
+mutation.advance_job_mutation_after_reassignment = (
+    lambda *_args, **_kwargs: os._exit(42)
+)
+assign_event_reassignments(
+    Path(sys.argv[1]), "j", "b", json.loads(sys.argv[2]),
+    target_mode=sys.argv[3],
+    new_event_name="Neuer Zeitabschnitt" if sys.argv[3] == "new_event" else None,
+    segments=json.loads(sys.argv[4]),
+)
+"""
+    process = subprocess.run([
+        sys.executable, "-c", child, str(db), json.dumps(selected),
+        target_mode, json.dumps(segments),
+    ], capture_output=True, text=True, check=False)
+    assert process.returncode == 42, process.stderr
+    with database_connection(db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == before_events
+        assert connection.execute("SELECT COUNT(*) FROM event_assignments").fetchone()[0] == before_assignments
+        assert connection.execute(
+            "SELECT COUNT(*) FROM event_reapply_removed_families "
+            "WHERE event_id='b' AND target_event_id IS NULL"
+        ).fetchone()[0] == pending_before
+        assert connection.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE action='event_families_reassigned'"
+        ).fetchone()[0] == 0
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
