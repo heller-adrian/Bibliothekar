@@ -1850,7 +1850,7 @@ EVENTS_HTML = r"""<!doctype html>
         Number.isNaN(date.getTime())
           ? String(job.created_at || job.id)
           : new Intl.DateTimeFormat(
-              "de-DE",
+              (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
               {
                 dateStyle: "short",
                 timeStyle: "medium"
@@ -1886,7 +1886,7 @@ EVENTS_HTML = r"""<!doctype html>
         && !raw.includes("T23:59:59");
 
       return new Intl.DateTimeFormat(
-        "de-DE",
+        (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
         hasMeaningfulTime
           ? {
               dateStyle: "medium",
@@ -1925,7 +1925,7 @@ EVENTS_HTML = r"""<!doctype html>
       }
 
       return `${current.toLocaleString(
-        "de-DE",
+        (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
         {
           maximumFractionDigits: 1
         }
