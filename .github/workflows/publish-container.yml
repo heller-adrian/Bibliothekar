@@ -99,7 +99,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=tag
-            type=raw,value=patch-${{ steps.version.outputs.version }},enable=${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
+            type=raw,value=patch-${{ steps.version.outputs.version }},enable=${{ startsWith(github.ref, 'refs/heads/patch/') }}
             type=raw,value=${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=v${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
@@ -110,6 +110,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
