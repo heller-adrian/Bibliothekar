@@ -7314,8 +7314,6 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                     pass
             _release_new_global_reservations(edit_reservation)
             raise
-        if archive_bundle:
-            result["archive_manual"] = archive_bundle
     except (ValueError, EventPreviewError, TypeError, LibraryRegistryError) as error:
         message = str(error)
         raise HTTPException(status_code=404 if "nicht gefunden" in message else 409, detail=message) from error
