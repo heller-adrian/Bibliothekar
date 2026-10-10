@@ -641,6 +641,18 @@ def detect_event_structure_change(
         # aufeinanderfolgende vollständige Scans bestätigen eine manuelle
         # Löschung. Bis dahin wird kein Benutzerauftrag erzeugt.
         if snapshot.get("missing_file_ids"):
+            # Preserve physical locations before reconcile_missing_files removes
+            # confirmed-deleted rows. Only directories containing those removed
+            # files may be treated as an intentional partial deletion.
+            missing_ids = [int(v) for v in snapshot["missing_file_ids"]]
+            placeholders = ",".join("?" for _ in missing_ids)
+            missing_previous_paths = {
+                int(row["id"]): str(row["current_relative_path"] or "")
+                for row in connection.execute(
+                    f"SELECT id,current_relative_path FROM files WHERE id IN ({placeholders})",
+                    tuple(missing_ids),
+                ).fetchall()
+            }
             from app.physical_state import reconcile_missing_files
             missing_state = reconcile_missing_files(
                 connection,
@@ -726,9 +738,88 @@ def detect_event_structure_change(
                     layout_state,
                     root_kind,
                 )
+                # Removing a populated *subdirectory* is not, by itself,
+                # a request to change the configured event folder layout.
+                # Persist the observed deletion as the same dismissible
+                # external-change notice used for removed full event roots.
+                event_prefix = (
+                    str(event.get("start_datetime") or "")[:4]
+                    + "/"
+                    + str(event.get("folder_name") or "")
+                    + "/"
+                )
+                deleted_ancestors: set[str] = set()
+                for deleted_id in missing_state["confirmed_deleted"]:
+                    old_path = missing_previous_paths.get(int(deleted_id), "")
+                    if not old_path.startswith(event_prefix):
+                        continue
+                    parts = PurePosixPath(old_path[len(event_prefix):]).parts
+                    for depth in range(1, len(parts)):
+                        deleted_ancestors.add(
+                            PurePosixPath(*parts[:depth]).as_posix()
+                        )
+                removed_dirs = [
+                    directory
+                    for directory in snapshot.get("directory_removed") or []
+                    if directory in deleted_ancestors
+                ]
+                if removed_dirs:
+                    record_notice(
+                        connection,
+                        notice_key=f"event-directory-deleted:{event_id}:{now[:19]}",
+                        kind="event_directory_deleted",
+                        root_kind=root_kind,
+                        title="Ereignis-Unterordner extern gelöscht",
+                        detail=(
+                            f"Im Ereignis „{event.get('name') or event_id}“ wurden "
+                            f"{len(removed_dirs)} Unterordner und "
+                            f"{len(missing_state['confirmed_deleted'])} Dateien "
+                            "außerhalb von Bibliothekar entfernt."
+                        ),
+                        job_id=str(event.get("job_id") or ""),
+                        event_id=event_id,
+                        relative_path=str(event.get("folder_name") or ""),
+                        repairable=False,
+                        action_required=False,
+                        group_key="deletion_notice",
+                        details={
+                            "directories": removed_dirs,
+                            "deleted_file_count": len(
+                                missing_state["confirmed_deleted"]
+                            ),
+                        },
+                        now=now,
+                    )
         else:
             from app.physical_state import reconcile_missing_files
             reconcile_missing_files(connection, event, root_kind, [], now=now)
+
+        # Previously acknowledged partial directory deletions remain valid
+        # physical IST observations across reloads. Only the subdirectories
+        # proven to have contained deleted files are ignored here; unrelated
+        # structural changes still use the ordinary structure-change workflow.
+        deleted_directory_notices = connection.execute(
+            """SELECT details_json FROM external_change_notices
+               WHERE event_id=? AND root_kind=?
+                 AND kind='event_directory_deleted'
+                 AND status IN ('open','dismissed')""",
+            (event_id, root_kind),
+        ).fetchall()
+        accepted_deleted_dirs: set[str] = set()
+        for deleted_notice in deleted_directory_notices:
+            try:
+                payload = json.loads(str(deleted_notice["details_json"] or "{}"))
+                accepted_deleted_dirs.update(
+                    str(value) for value in (payload.get("directories") or [])
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+        if accepted_deleted_dirs:
+            snapshot["directory_removed"] = [
+                directory
+                for directory in snapshot.get("directory_removed") or []
+                if directory not in accepted_deleted_dirs
+            ]
 
         # Bekannte Kameradateien dürfen innerhalb ihres fachlich erlaubten
         # Ereignis-/Unterereignis-/Tagesblatts frei in Organisationsordnern
