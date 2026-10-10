@@ -152,6 +152,8 @@ def _state(path: Path, item: dict[str, Any]) -> str:
     if path.is_symlink() or not path.is_file():
         raise MetadataSwapRecoveryError("Metadatenpfad ist kein regulärer Dateieintrag: " + str(path))
     digest = _sha(path)
+    if digest == item["before_sha"] == item["after_sha"]:
+        return "same"
     if digest == item["before_sha"]:
         return "before"
     if digest == item["after_sha"]:
@@ -214,15 +216,15 @@ def _preflight_rollback(data: dict[str, Any]) -> None:
         destination = Path(item["destination"]) if item.get("destination") else None
         ss, bs, ins = [_state(p, item) for p in (source, backup, incoming)]
         ds = _state(destination, item) if destination else "missing"
-        if bs == "before":
-            if ss not in {"after", "missing"} or ds not in {"after", "missing"}:
+        if bs in {"before", "same"}:
+            if ss not in {"after", "same", "missing"} or ds not in {"after", "same", "missing"}:
                 raise MetadataSwapRecoveryError("Metadaten-Rückbau mit widersprüchlicher Quelle.")
         elif bs == "missing":
-            if ss != "before" or ds not in {"after", "missing"}:
+            if ss not in {"before", "same"} or ds not in {"after", "same", "missing"}:
                 raise MetadataSwapRecoveryError("Metadaten-Rückbau ohne gesicherte Originalbytes.")
         else:
             raise MetadataSwapRecoveryError("Metadaten-Sicherung besitzt keinen Originalinhalt.")
-        if ins not in {"after", "missing"}:
+        if ins not in {"after", "same", "missing"}:
             raise MetadataSwapRecoveryError("Metadaten-Zwischendatei wurde verändert.")
 
 
@@ -248,13 +250,13 @@ def _preflight_finish(data: dict[str, Any]) -> None:
         source, backup, incoming = [Path(item[k]) for k in ("source", "backup", "incoming")]
         destination = Path(item["destination"]) if item.get("destination") else None
         if destination:
-            if _state(source, item) != "missing" or _state(destination, item) != "after":
+            if _state(source, item) != "missing" or _state(destination, item) not in {"after", "same"}:
                 raise MetadataSwapRecoveryError("Reintegration wurde nicht vollständig bestätigt.")
-        elif _state(source, item) != "after":
+        elif _state(source, item) not in {"after", "same"}:
             raise MetadataSwapRecoveryError("Metadaten-Austausch wurde nicht vollständig abgeschlossen.")
-        if _state(backup, item) not in {"before", "missing"}:
+        if _state(backup, item) not in {"before", "same", "missing"}:
             raise MetadataSwapRecoveryError("Metadaten-Sicherung wurde verändert.")
-        if _state(incoming, item) not in {"after", "missing"}:
+        if _state(incoming, item) not in {"after", "same", "missing"}:
             raise MetadataSwapRecoveryError("Metadaten-Zwischendatei wurde verändert.")
 
 
