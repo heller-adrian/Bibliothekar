@@ -2320,6 +2320,30 @@ def startup_database() -> None:
                     flush=True,
                 )
 
+        # BA-12: physical metadata swaps must be reconciled BEFORE a
+        # background worker or new correction can touch any file. Fail closed
+        # on foreign/ambiguous bytes, never overwrite them heuristically.
+        from app.metadata_swap_recovery import recover_metadata_swaps
+        from app.storage_config import storage_paths as metadata_storage_paths
+        metadata_db_allowlist = {DATABASE_FILE}
+        metadata_db_allowlist.update(
+            Path(str(row["database_path"]))
+            for row in list_libraries(
+                REGISTRY_DATABASE_FILE, active_only=False,
+                registered_only=False,
+            )
+            if str(row.get("database_path") or "").strip()
+        )
+        metadata_recovery = recover_metadata_swaps(
+            metadata_storage_paths(WORKSPACE_PATH)["metadata_root"],
+            allowed_databases=metadata_db_allowlist,
+        )
+        if metadata_recovery["blocked"]:
+            raise RuntimeError(
+                "Unterbrochene Metadatenkorrektur erfordert Prüfung: "
+                + " | ".join(metadata_recovery["errors"][:5])
+            )
+
         WORKER_STOP.clear()
 
         if (
