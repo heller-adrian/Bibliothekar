@@ -490,6 +490,37 @@ UI_TRANSLATIONS.update({
   "Quellen werden erneut per SHA-256 geprüft und sicher verschoben …": "Rechecking source SHA-256 hashes and moving files safely…"
 })
 
+UI_TRANSLATIONS.update({
+  "Geschützter Zugang zur Kamerabibliothek": "Secure access to your camera library",
+  "Zu viele Versuche. Bitte später erneut versuchen.": "Too many attempts. Please try again later.",
+  "Anmeldung fehlgeschlagen. Passwort oder Konfiguration prüfen.": "Sign-in failed. Check your password and configuration.",
+  "Es ist noch kein Administratorpasswort eingerichtet.": "No administrator password has been configured.",
+  "Erste Bibliothek einrichten": "Set up your first library",
+  "Bibliothek prüfen und anlegen": "Check and create library",
+  "Bibliothek wird geprüft …": "Checking library…",
+  "Bibliothek eingerichtet. Bibliothekar wird geöffnet …": "Library created. Opening Bibliothekar…",
+  "Bibliothekar besitzt noch keine Bibliothek. Lege jetzt Name, Arbeitsbereich und das in TrueNAS read-only gemountete Archiv fest. Es wird kein technischer": "Bibliothekar has no libraries yet. Configure a name, workspace and a read-only archive mounted in TrueNAS. No technical",
+  "Arbeitsordner angelegt.": "workspace folder will be created.",
+  "Leer lassen: Bibliothekar erzeugt unter": "Leave empty: Bibliothekar will create a folder under",
+  "automatisch einen Ordner aus dem Bibliotheksnamen.": "automatically from the library name.",
+  "Ordner wurden sicher aktualisiert; externe TrueNAS-Mounts bleiben unverändert.": "Folders updated safely; external TrueNAS mounts remain unchanged.",
+  "Bibliothek deaktivieren? Dateien, Datenbank und Archiv bleiben erhalten.": "Deactivate this library? Files, database and archive will be retained.",
+  "Bibliothek abmelden? Es werden keine Dateien, keine Datenbank und kein Archiv gelöscht.": "Unregister this library? No files, database or archive will be deleted.",
+  "Pfadänderungen verschieben keine Dateien. Ein externer Pfad muss zuvor in TrueNAS gemountet sein.": "Changing paths does not move files. External paths must first be mounted in TrueNAS.",
+  "Die Oberfläche wird in Englisch angezeigt. Bereits vorhandene Ordner und Dateien werden nicht umbenannt.": "The interface is displayed in English. Existing folders and files will not be renamed.",
+  "Die Sprache betrifft die Oberfläche. Vorhandene Ordnernamen, Benutzereingaben und Dateipfade bleiben unverändert.": "The language setting only changes the interface. Existing folder names, user input and file paths remain unchanged.",
+  "Der eingegebene Ereignisname bleibt Bestandteil des Ordnernamens. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand.": "The event name you enter remains part of the folder name. Existing events retain their saved names.",
+  "Der eingegebene Unterereignisname bleibt immer erhalten. Jahr, Uhrzeit und Von–bis lassen sich frei kombinieren. Im Ereignisfenster kann der Standard pro Ereignis mit „Präfix: an/aus“ überschrieben werden.": "The subevent name is always preserved. Year, time and date range can be combined freely. You can override the default prefix for each event.",
+  "Sammelordner werden monatsweise gebildet. Von–bis und Uhrzeit gehören deshalb nicht in ihre Ordnerbenennung.": "Collection folders are grouped by month, so date ranges and times are not included in their names.",
+  "So sehen Ordnerstruktur und Standardbenennung für neue Inhalte aus.": "This is how folder structure and default naming will look for new content.",
+  "Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts.": "These names apply only to folders managed by Bibliothekar inside the workspace mount.",
+  "Standardmäßig legt Bibliothekar den Arbeitsbereich unter dem konfigurierten Stamm „Bibliotheks-Arbeitsbereiche“ an.": "By default Bibliothekar creates the workspace inside the configured “Library Workspaces” directory.",
+  "Nur für einen externen Arbeitsbereich ist ein zusätzlicher RW-Host-Path in TrueNAS nötig.": "Only an external workspace needs an additional read-write host path in TrueNAS.",
+  "Das Archiv wird aus Sicherheitsgründen pro Bibliothek separat als Read Only Host Path eingebunden.": "For security, each library archive is mounted separately as a read-only host path.",
+  "Standardmäßig legt Bibliothekar den Arbeitsbereich unter dem konfigurierten Stamm „Bibliotheks-Arbeitsbereiche“ an. Nur für einen externen Arbeitsbereich ist ein zusätzlicher RW-Host-Path in TrueNAS nötig. Das Archiv wird aus Sicherheitsgründen pro Bibliothek separat als Read Only Host Path eingebunden.": "Bibliothekar creates a workspace under the configured “Library Workspaces” directory by default. Only external workspaces require an additional TrueNAS read-write mount. Each archive must be mounted separately read-only.",
+  "Die eingestellten Namen beeinflussen keine bestehenden Ordner.": "Configured names do not alter existing folders."
+})
+
 UI_PATTERNS = [
   [
     "^([0-9]+) Gruppen ausgewählt$",
@@ -549,6 +580,12 @@ I18N_UI_JS = r"""
 (function () {
   "use strict";
   const dictionary = __DICTIONARY__;
+  const reverseDictionary = Object.create(null);
+  for (const [german, english] of Object.entries(dictionary)) {
+    if (!Object.prototype.hasOwnProperty.call(reverseDictionary, english)) {
+      reverseDictionary[english] = german;
+    }
+  }
   const patterns = __PATTERNS__.map(([source, target]) => [new RegExp(source, "u"), target]);
   const key = "bibliothekar-language";
   let locale = "en";
@@ -573,6 +610,13 @@ I18N_UI_JS = r"""
     const lead = value.slice(0, value.indexOf(core));
     return lead + result + value.slice(value.indexOf(core) + core.length);
   }
+  function restoreGerman(value) {
+    if (typeof value !== "string" || !value) return value;
+    const core = value.trim();
+    if (!core || !Object.prototype.hasOwnProperty.call(reverseDictionary, core)) return value;
+    const offset = value.indexOf(core);
+    return value.slice(0, offset) + reverseDictionary[core] + value.slice(offset + core.length);
+  }
   function eligible(node) {
     const parent = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
     return !!parent && !parent.closest(ignored);
@@ -583,7 +627,7 @@ I18N_UI_JS = r"""
     const last = lastText.get(node);
     if (observed !== last) originalText.set(node, observed);
     const source = originalText.get(node) ?? observed;
-    const desired = locale === "en" ? tr(source) : source;
+    const desired = locale === "en" ? tr(source) : restoreGerman(source);
     lastText.set(node, desired);
     if (observed !== desired) node.nodeValue = desired;
   }
@@ -598,7 +642,7 @@ I18N_UI_JS = r"""
       const observed = element.getAttribute(name);
       if (observed !== latest.get(name)) originals.set(name, observed);
       const source = originals.get(name) ?? observed;
-      const desired = locale === "en" ? tr(source) : source;
+      const desired = locale === "en" ? tr(source) : restoreGerman(source);
       latest.set(name, desired);
       if (desired !== observed) element.setAttribute(name, desired);
     }
@@ -644,7 +688,7 @@ I18N_UI_JS = r"""
     window.dispatchEvent(new CustomEvent("bk-language-changed", {detail: {locale: next}}));
   }
   window.BibliothekarI18n = Object.freeze({
-    t: (german) => locale === "en" ? tr(String(german)) : String(german),
+    t: (value) => locale === "en" ? tr(String(value)) : restoreGerman(String(value)),
     getLocale: () => locale,
     setLocale,
   });
