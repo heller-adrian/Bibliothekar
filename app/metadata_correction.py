@@ -1496,14 +1496,19 @@ def _apply_library_metadata_correction(
     )
     central_root = paths["output_root"]
     metadata_root = storage_paths(workspace_root)["metadata_root"].resolve(strict=False)
+    from app.metadata_swap_recovery import (
+        assert_no_pending_swaps, create_swap_journal, fsync_staged_file,
+        mark_swap_committed, recover_swap_journal,
+    )
+    assert_no_pending_swaps(metadata_root)
     work = (metadata_root / ".work" / str(task["id"])).resolve(strict=False)
     if work.exists():
         shutil.rmtree(work)
     work.mkdir(parents=True, exist_ok=False)
 
     prepared: list[dict[str, Any]] = []
-    replaced: list[tuple[Path, Path]] = []
     incoming_paths: list[Path] = []
+    swap_journal: Path | None = None
     _mark_task_writing(database_path, str(task["id"]))
 
     try:
@@ -1567,9 +1572,9 @@ def _apply_library_metadata_correction(
                 "current_relative": current_relative.as_posix(),
             })
 
-        # Replace every visible source only after all family members were
-        # written and verified successfully.  The old bytes stay adjacent and
-        # recoverable until SQLite commits the new metadata state.
+        # Prepare and fsync ALL incoming copies BEFORE the first removal.
+        # The journal is fsync'ed before any original is moved aside.
+        swap_files: list[dict[str, Any]] = []
         for item in prepared:
             source = Path(item["source"])
             incoming = source.parent / (
@@ -1580,24 +1585,59 @@ def _apply_library_metadata_correction(
             )
             incoming_paths.append(incoming)
             shutil.copyfile(Path(item["temp"]), incoming)
+            fsync_staged_file(incoming)
             if _sha256(incoming) != str(item["output_sha"]):
                 raise MetadataCorrectionError(
                     "Korrigierte Arbeitsdatei stimmt vor dem Austausch nicht überein."
                 )
-            os.replace(source, backup)
-            _fsync_directory(source.parent)
-            try:
-                os.replace(incoming, source)
-                _fsync_directory(source.parent)
-            except Exception:
-                if backup.exists() and not source.exists():
-                    os.replace(backup, source)
-                    _fsync_directory(source.parent)
-                raise
-            replaced.append((source, backup))
+            item["incoming"] = incoming
             item["backup"] = backup
+            swap_files.append({
+                "source": str(source), "incoming": str(incoming),
+                "backup": str(backup),
+                "before_sha": str(item.get("sha256_current") or item.get("sha256_original")),
+                "after_sha": str(item["output_sha"]), "file_id": int(item["file_id"]),
+            })
 
         proposed = str(task["proposed_datetime"])[:19]
+        first = prepared[0]
+        verification = {
+            "family_id": family_id,
+            "job_id": job_id,
+            "family_key": family_key,
+            "proposed_datetime": proposed,
+            "reintegration_pending": True,
+            "members": [
+                {
+                    "file_id": int(item["file_id"]),
+                    "output_path": str(item["source"]),
+                    "output_relative_path": str(item["current_relative"]),
+                    "output_sha256": str(item["output_sha"]),
+                    "output_size_bytes": int(item["output_size"]),
+                    "metadata": item["verification"],
+                }
+                for item in prepared
+            ],
+        }
+        swap_journal = create_swap_journal(
+            metadata_root, kind="library", file_entries=swap_files,
+            data_root=central_root, database_path=database_path,
+            task_id=str(task["id"]), family_id=family_id,
+            proposed=proposed,
+            task_verification={
+                "output_path": str(first["source"]),
+                "output_size": sum(int(item["output_size"]) for item in prepared),
+                "output_sha": str(first["output_sha"]),
+                "verification": verification,
+            },
+        )
+        for item in prepared:
+            source = Path(item["source"])
+            os.replace(source, Path(item["backup"]))
+            _fsync_directory(source.parent)
+            os.replace(Path(item["incoming"]), source)
+            _fsync_directory(source.parent)
+
         now = _now()
         with database_connection(database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1654,56 +1694,39 @@ def _apply_library_metadata_correction(
                     )
             connection.commit()
 
-        for _source, backup in replaced:
-            backup.unlink(missing_ok=True)
-            _fsync_directory(backup.parent)
-        shutil.rmtree(work, ignore_errors=True)
-
-        first = prepared[0]
-        verification = {
-            "family_id": family_id,
-            "job_id": job_id,
-            "family_key": family_key,
-            "proposed_datetime": proposed,
-            "reintegration_pending": True,
-            "members": [
-                {
-                    "file_id": int(item["file_id"]),
-                    "output_path": str(item["source"]),
-                    "output_relative_path": str(item["current_relative"]),
-                    "output_sha256": str(item["output_sha"]),
-                    "output_size_bytes": int(item["output_size"]),
-                    "metadata": item["verification"],
-                }
-                for item in prepared
-            ],
-        }
-        return _complete_task(
-            database_path,
-            str(task["id"]),
-            output_path=Path(first["source"]),
-            output_size=sum(int(item["output_size"]) for item in prepared),
-            output_sha=str(first["output_sha"]),
-            verification=verification,
+        # The SQLite file/family updates have committed. Recovery detects
+        # that boundary even if the process dies before the journal marker.
+        mark_swap_committed(swap_journal, metadata_root)
+        recover_swap_journal(
+            metadata_root, swap_journal, allowed_databases={database_path},
         )
+        shutil.rmtree(work, ignore_errors=True)
+        return get_metadata_correction(database_path, str(task["id"]))
 
     except Exception as error:
-        for incoming in incoming_paths:
+        if swap_journal is not None:
             try:
-                incoming.unlink(missing_ok=True)
-            except OSError:
-                pass
-        for source, backup in reversed(replaced):
-            try:
-                if backup.exists():
-                    if source.exists():
-                        source.unlink()
-                    os.replace(backup, source)
-                    _fsync_directory(source.parent)
-            except OSError:
-                pass
+                disposition = recover_swap_journal(
+                    metadata_root, swap_journal, allowed_databases={database_path},
+                )
+                if disposition == "completed":
+                    shutil.rmtree(work, ignore_errors=True)
+                    return get_metadata_correction(database_path, str(task["id"]))
+            except Exception as recovery_error:
+                # Keep the journal AND original safety copies for restart/manual
+                # resolution. Never do an unjournaled destructive rollback.
+                raise MetadataCorrectionError(
+                    "Unterbrochene Dateikorrektur: Wiederherstellung gesperrt ("
+                    + str(recovery_error) + "). Bitte das Journal prüfen."
+                ) from error
+        else:
+            for incoming in incoming_paths:
+                try:
+                    incoming.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            _mark_task_blocked(database_path, str(task["id"]), error)
         shutil.rmtree(work, ignore_errors=True)
-        _mark_task_blocked(database_path, str(task["id"]), error)
         if isinstance(error, MetadataCorrectionError):
             raise
         raise MetadataCorrectionError(str(error)) from error
