@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.50.3 – Tiefenprüfung englische PWA-Oberfläche (11.10.2026)
+
+- Sechs reale iPhone-Screenshots gegen HTML-/JavaScript-Quelltexte geprüft: deutsche Import-Statuskarten, SD-Card-Hilfe, Filter/Zähler, Archivstatus, dynamische Anzeigen, Metadata-Correction-Titel und Quelle-/Pfadbeschriftungen lokalisiert.
+- Umfangreiche neue EN-Übersetzungen für systemeigene Importbezeichnungen (Folder Import / SD Card Import / Drive Import), Archiv-, Reassignment- und Recovery-Workflows, Sicherheitsbestätigungen und kontextuelle Fehlermeldungen.
+- Dynamische Anzeigetexte mit kontrollierten Mustern übersetzt, ohne benutzerdefinierte Dateinamen, Verzeichnisnamen, gespeicherte SQLite- oder event.json-Werte zu ändern.
+- Browser-Dokumenttitel bei EN↔DE-Wechsel übersetzt; Archivkarten schützen ihre echten Benutzer-/Ordnernamen explizit vor Übersetzung.
+- Screenshotbasierte Regressionstests, bestehende Sprachtests, gesamte Backend-QA und isolierte Archivprüfung als Release-Gates. Main, latest und v0.40.3 bleiben unverändert.
+- Standardnamen der konfigurierbaren Hauptverzeichnisse neuer Installationen weiterhin englisch; ältere interne physische Ordner bleiben aus Pfadkompatibilitätsgründen unverändert. Grenzen: docs/0503_I18N_SCREENSHOT_AUDIT.md.
+
+
 ## 0.50.2 – English-first UI, Lokalisierungsarbeit (10.10.2026)
 
 - Englisch wird Standard im Browser; Sprachumschalter Englisch/Deutsch in den Einstellungen freigeschaltet und Auswahl lokal im Browser gespeichert.
