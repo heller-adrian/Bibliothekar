@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.50.2 – English-first UI, Lokalisierungsarbeit (10.10.2026)
+
+- Englisch wird Standard im Browser; Sprachumschalter Englisch/Deutsch in den Einstellungen freigeschaltet und Auswahl lokal im Browser gespeichert.
+- Gemeinsame UI-Übersetzungsdatei mit dynamischer Beobachtung gerenderter Texte, Dialoge, Fehlermeldungen und Beschriftungen; keine Übersetzung gespeicherter Dateipfade, Event-IDs, SQL-Daten oder Benutzereingaben.
+- Anmeldung und erste Bibliothekseinrichtung an die Sprachwahl angebunden.
+- Englische Stammordnernamen ausschließlich für neue Installationen: SD Card Backups, Library Workspaces, Metadata Correction, Trash. Vorhandene deutsche Ordner und explizit konfigurierte Pfade bleiben erhalten; ältere Tests prüfen weiterhin ihre unveränderte deutsche Ablage.
+- Neue Monatssammlungen ohne Ereignis verwenden standardmäßig „No Event“, falls keine abweichende Bezeichnung eingestellt ist.
+- Umfangreiche Lokalisierungs- und Rückwärtskompatibilitätstests ergänzt; die vollständige Übersetzungsabdeckung weiterer dynamischer Fachdialoge erfordert abschließende Abnahme vor Testimage-Veröffentlichung.
+- Weder Produktivdaten noch Stable latest oder das bisherige Testimage werden geändert.
+
 ## 0.50.1 – Extern gelöschte Ereignisordner erkennen (10.10.2026)
 
 - Fehlende Ereigniswurzel in passiven Applied-/Archived-Inventuren nach kontrollierter Archivübernahmeprüfung als leeren realen IST-Bestand behandeln; die bisherigen strengen Archivoperationen bleiben unverändert.
