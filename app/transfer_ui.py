@@ -177,7 +177,7 @@ TRANSFER_HTML = r'''<!doctype html>
   const releasedCount=document.getElementById('released-count');
 
   function escapeHtml(value){return String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');}
-  function formatBytes(value){const n=Number(value||0);if(n<1024)return `${n} B`;const units=['KiB','MiB','GiB','TiB'];let v=n/1024;let i=0;while(v>=1024&&i<units.length-1){v/=1024;i+=1;}return `${v.toLocaleString('de-DE',{maximumFractionDigits:1})} ${units[i]}`;}
+  function formatBytes(value){const n=Number(value||0);if(n<1024)return `${n} B`;const units=['KiB','MiB','GiB','TiB'];let v=n/1024;let i=0;while(v>=1024&&i<units.length-1){v/=1024;i+=1;}return `${v.toLocaleString((document.documentElement.lang === "de" ? "de-DE" : "en-US"),{maximumFractionDigits:1})} ${units[i]}`;}
   async function getJson(url){const response=await fetch(url,{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
   async function postJson(url){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
 
@@ -216,7 +216,7 @@ TRANSFER_HTML = r'''<!doctype html>
     function formatDate(value){
     const date=new Date(value||'');
     if(Number.isNaN(date.getTime()))return 'Zeitpunkt unbekannt';
-    return new Intl.DateTimeFormat('de-DE',{dateStyle:'medium',timeStyle:'short'}).format(date);
+    return new Intl.DateTimeFormat((document.documentElement.lang === "de" ? "de-DE" : "en-US"),{dateStyle:'medium',timeStyle:'short'}).format(date);
   }
   function attachRecoveryAction(card,item){
     if(!Number(item.unresolved_recovery_count||0))return;
