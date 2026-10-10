@@ -7,6 +7,8 @@ in a normal running server.
 """
 from __future__ import annotations
 
+from app.ui_i18n import I18N_UI_JS
+
 from collections import defaultdict
 from datetime import datetime
 import hashlib
@@ -130,16 +132,15 @@ window.fetch=function(input,init){
 
 def _login_html(*, unavailable: bool = False) -> str:
     notice = (
-        "<p class='warning'>Es ist noch kein Administratorpasswort eingerichtet. "
-        "Lege im TrueNAS-Konfigurationsverzeichnis die Datei "
-        "<code>admin-password</code> mit einem starken Passwort von "
-        "mindestens 16 Zeichen an und starte den Container neu.</p>"
+        "<p class='warning'>No administrator password has been configured. "
+        "Create an <code>admin-password</code> file in the TrueNAS config directory "
+        "with a strong password of at least 16 characters and restart the container.</p>"
         if unavailable else ""
     )
-    return """<!doctype html><html lang="de"><head><meta charset="utf-8">
+    html = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>Bibliothekar · Anmelden</title>
+<title>Bibliothekar · Sign in</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,"Helvetica Neue",sans-serif}
 *{box-sizing:border-box}body{margin:0;background:#0c1115;color:#f4f1e8;
@@ -155,11 +156,11 @@ color:#fff;font-weight:700;font-size:1rem;width:100%;margin-top:16px}
 button:disabled{opacity:.5}.warning{color:#ffcc78}
 #error{color:#ff9393;min-height:22px}
 </style></head><body><main><h1>Bibliothekar</h1>
-<p>Geschützter Zugang zur Kamerabibliothek</p>""" + notice + """
-<form id="login"><label for="password">Administratorpasswort</label>
+<p>Secure access to your camera library</p>""" + notice + """
+<form id="login"><label for="password">Administrator password</label>
 <input id="password" type="password" autocomplete="current-password"
 required minlength="16" autofocus>
-<button type="submit">Anmelden</button><p id="error" role="alert"></p></form></main>
+<button type="submit">Sign in</button><p id="error" role="alert"></p></form></main>
 <script>
 document.getElementById("login").addEventListener("submit",async(e)=>{
  e.preventDefault();
@@ -170,8 +171,8 @@ document.getElementById("login").addEventListener("submit",async(e)=>{
   const result=await fetch("/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},
    body:JSON.stringify({password:document.getElementById("password").value}),
    credentials:"same-origin",cache:"no-store"});
-  if(!result.ok)throw Error(result.status===429?"Zu viele Versuche. Bitte später erneut versuchen.":
-    "Anmeldung fehlgeschlagen. Passwort oder Konfiguration prüfen.");
+  if(!result.ok)throw Error(result.status===429?"Too many attempts. Please try again later.":
+    "Sign-in failed. Check your password and configuration.");
   const next=new URLSearchParams(location.search).get("next")||"/";
   const target=new URL(next,location.origin);
   location.replace(target.origin===location.origin&&target.pathname.startsWith("/")?
@@ -179,6 +180,7 @@ document.getElementById("login").addEventListener("submit",async(e)=>{
  }catch(exc){error.textContent=exc.message;button.disabled=false;}
 });
 </script></body></html>"""
+    return html.replace("</body>", f"<script>{I18N_UI_JS}</script></body>")
 
 
 def _security_headers(response: Response) -> Response:
