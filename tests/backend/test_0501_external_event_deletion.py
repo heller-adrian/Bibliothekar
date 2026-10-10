@@ -185,6 +185,23 @@ def test_partial_directory_removal_does_not_delete_other_files(tmp_path: Path):
         assert connection.execute("SELECT 1 FROM events WHERE id=?", (event_id,)).fetchone()
     assert (root / "Alle" / "A.JPG").read_bytes() == b"kept"
     assert not (root / "Sortiert").exists()
+    state = list_external_change_state(db)
+    assert state["required_count"] == 0
+    notice = next(
+        item for item in state["informational"]
+        if item["kind"] == "event_directory_deleted"
+    )
+    assert notice["details"]["deleted_file_count"] == 1
+    assert notice["details"]["directories"] == ["Sortiert"]
+    acknowledge_external_notices(db, [notice["id"]])
+    assert list_external_change_state(db)["informational_count"] == 0
+    refresh_live_event_inventories(db, workspace, archive)
+    detect_all_event_structure_changes(db)
+    assert list_external_change_state(db)["informational_count"] == 0
+    assert all(
+        task["kind"] != "event_structure_change"
+        for task in list_global_tasks(db)
+    )
 
 
 def test_wrong_event_move_is_conflict_not_deleted(tmp_path: Path):
