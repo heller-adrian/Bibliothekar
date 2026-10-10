@@ -14,15 +14,24 @@ Diese Checkliste ist für die öffentliche Freigabe des Projekts bestimmt. Sie e
 
 ## Gate für einen stabilen 0.50.0-Release
 
-- [ ] BA-01: Datenbank- und Ereignisdokumente bei Fehler/Neustart konsistent halten.
-- [ ] BA-02: Sichere, wiederanlauffähige Löschtransaktionen.
-- [ ] BA-03: Schreibende APIs vor unberechtigtem Zugriff schützen.
-- [ ] BA-08: Zielzuordnung und Ursprungs-Warteschlange atomar und idempotent fortschreiben.
-- [ ] BA-12: Recovery nach Abbruch während der Metadatenkorrektur.
+- [x] BA-01: Datenbank- und Ereignisdokumente bei Fehler/Neustart konsistent halten.
+- [x] BA-02: Sichere, wiederanlauffähige Löschtransaktionen.
+- [x] BA-03: Schreibende APIs vor unberechtigtem Zugriff schützen.
+- [x] BA-08: Zielzuordnung und Ursprungs-Warteschlange atomar und idempotent fortschreiben.
+- [x] BA-12: Recovery nach Abbruch während der Metadatenkorrektur.
 - [ ] BA-07/10: vollständige dynamische Fehlerfall- und Neustartabnahme.
 - [ ] Sämtliche Backend-Tests, aktuelle Archiv-E2E, Upgrade- und Mehrbibliothekstests bestanden.
 - [ ] Verifizierten Commit einmalig als stabilen Release markieren; keine Force-Retags.
 - [ ] Versionstag und Build-Digest dokumentieren; erst dann `latest` veröffentlichen.
+
+**Stand der automatischen Prüfungen:** 995/995 Backend-Tests + isolierter
+Container-Authentisierung/CSRF-HTTP-Test grün. Die oben abgehakten BA-Punkte
+sind auf synthetischer Ebene umgesetzt und geprüft, ersetzen aber nicht
+die noch offenen TrueNAS-/iPhone-/Mehrbibliotheks-Praxistests.
+
+**Freigabeentscheidung:** Vorerst NO-GO für Merge / Stable-`latest`.
+Vollständiger Nachweis und offene Gates:
+[0.50.0 Freigabebericht](0500_RELEASE_GATE_REPORT.md).
 
 ## Separates Discover-Gate
 
