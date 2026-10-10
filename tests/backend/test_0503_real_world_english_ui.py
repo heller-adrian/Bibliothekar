@@ -82,6 +82,8 @@ const cases = [
   ["SD-Karte · MassStorageClass · 29.7 GiB · VFAT · Bereit zum Einbinden",
    "SD card · MassStorageClass · 29.7 GiB · VFAT · Ready to mount"],
   ["2 Einträge ausgewählt.", "2 entries selected."],
+  ["Die Vorschau zeigt nur die Planung.\n Es werden noch keine Ordner verändert.",
+   "The preview only shows the plan. No folders have been changed."],
   ["Metadatenquelle übernehmen (2)", "Use metadata source (2)"],
 ];
 for (const [raw, expected] of cases) {
@@ -98,7 +100,7 @@ console.log("PASS " + cases.length);
         encoding="utf-8",
     )
     result = subprocess.run([node, str(test_file)], check=True, capture_output=True, text=True)
-    assert result.stdout.strip() == "PASS 13"
+    assert result.stdout.strip() == "PASS 14"
 
 
 def test_0503_english_roots_only_for_fresh_workspace(tmp_path: Path, monkeypatch):
