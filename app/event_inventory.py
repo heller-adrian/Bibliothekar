@@ -446,6 +446,7 @@ def scan_event_inventory(
     update_known_file_locations: bool = False,
     event_prefix_override: str | PurePosixPath | None = None,
     fast_refresh: bool = False,
+    allow_missing_root: bool = False,
 ) -> dict[str, Any]:
     """Scan the *current* event tree.
 
@@ -527,6 +528,11 @@ def scan_event_inventory(
     current = root
     for part in prefix.parts:
         current = current / part
+        if current.is_symlink():
+            raise EventInventoryError(
+                "Symlinks sind als Ereignisordner nicht zulässig: "
+                + current.relative_to(root).as_posix()
+            )
         if not current.exists():
             continue
         info = os.lstat(current)
@@ -536,8 +542,21 @@ def scan_event_inventory(
                 + current.relative_to(root).as_posix()
             )
 
-    physical_files = _iter_regular_event_files(event_root)
-    physical_directories = _iter_regular_event_directories(event_root)
+    # The normal inventory contract remains strict. Only the passive live
+    # consistency scan may treat a *genuinely absent* event directory as an
+    # empty physical inventory. Never confuse an unavailable storage root,
+    # a broken symlink or a non-directory with an intentional deletion.
+    event_root_missing = not event_root.exists()
+    if event_root_missing and allow_missing_root:
+        if not root.is_dir() or root.is_symlink() or event_root.is_symlink():
+            raise EventInventoryError(
+                "Ereignisspeicher ist nicht sicher erreichbar: " + str(root)
+            )
+        physical_files: list[Path] = []
+        physical_directories: list[Path] = []
+    else:
+        physical_files = _iter_regular_event_files(event_root)
+        physical_directories = _iter_regular_event_directories(event_root)
 
     previous_by_relative: dict[str, dict[str, Any]] = {}
     known_by_current_relative: dict[str, dict[str, Any]] = {}
@@ -561,7 +580,7 @@ def scan_event_inventory(
 
     metadata_by_relative: dict[str, dict[str, Any]] = {}
     try:
-        analyzed = analyze_tree(event_root)
+        analyzed = analyze_tree(event_root) if not event_root_missing else {"files": []}
         metadata_by_relative = {
             str(row.get("relative_path") or ""): row
             for row in analyzed.get("files", [])
@@ -970,6 +989,7 @@ def scan_event_inventory(
     return {
         "event": event,
         "event_root": str(event_root),
+        "event_root_missing": event_root_missing,
         "directories": [
             directory.relative_to(event_root).as_posix()
             for directory in physical_directories
