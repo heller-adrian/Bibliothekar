@@ -5659,6 +5659,12 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         </div>
         <div class="bk-language-note">Die Oberfläche ist vollständig deutsch. Englisch bleibt vorbereitet und wird erst aktiviert, wenn alle dynamischen Texte mitübersetzt sind.</div>
       </section>
+      <section class="bk-settings-group">
+        <strong>Sitzung</strong>
+        <div class="bk-library-actions" style="margin-top:12px">
+          <button id="bk-sign-out" type="button">Abmelden</button>
+        </div>
+      </section>
     </div>
 
     <div class="bk-settings-panel" data-bk-settings-panel="folders" hidden>
@@ -7354,7 +7360,10 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     result = result.replace(
         "</body>",
         f"<script>{BIBLIOTHEKAR_JS}</script>\n"
-        f"<script>{BIBLIOTHEKAR_0444_JS}</script>\n</body>",
+        f"<script>{BIBLIOTHEKAR_0444_JS}</script>\n"
+        '<script>document.getElementById("bk-sign-out")?.addEventListener("click",async()=>{'
+        'try{await fetch("/auth/logout",{method:"POST"});}finally{location.replace("/login");}'
+        '});</script>\n</body>',
         1,
     )
     return result

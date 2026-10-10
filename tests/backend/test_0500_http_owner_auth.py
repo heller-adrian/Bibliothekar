@@ -151,6 +151,16 @@ def test_0500_password_file_overrides_env_and_rotates_after_restart(
     assert secure_client.get("/api/items").status_code == 503
 
 
+def test_0500_password_change_invalidates_existing_session(secure_client, monkeypatch):
+    monkeypatch.setenv("BIBLIOTHEKAR_ADMIN_PASSWORD", "first-owner-password-123456")
+    assert _login(secure_client, "first-owner-password-123456").status_code == 200
+    assert secure_client.get("/api/items").status_code == 200
+    monkeypatch.setenv("BIBLIOTHEKAR_ADMIN_PASSWORD", "second-owner-password-123456")
+    assert secure_client.get("/api/items").status_code == 401
+    assert _login(secure_client, "second-owner-password-123456").status_code == 200
+    assert secure_client.get("/api/items").status_code == 200
+
+
 def test_0500_login_cross_site_and_rate_limit(secure_client, monkeypatch):
     monkeypatch.setenv("BIBLIOTHEKAR_ADMIN_PASSWORD", "very-long-local-secret-123456789")
     assert secure_client.post(
@@ -187,6 +197,8 @@ def test_0500_pwa_fetch_has_csrf_header_in_all_shared_layouts():
         active_area="workspace",
     )
     assert '<script src="/auth/client.js"></script>' in html
+    assert 'id="bk-sign-out"' in html
+    assert 'fetch("/auth/logout",{method:"POST"})' in html
     js = _client_code()
     assert "X-Bibliothekar-CSRF" in js
     assert "credentials:\"same-origin\"" in js

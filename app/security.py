@@ -29,7 +29,7 @@ _MAX_FAILURES = 8
 _LOCK = RLock()
 # Session data is intentionally transient: restarting the server invalidates
 # login sessions, while the configured password persists through volume mounts.
-_SESSIONS: dict[str, tuple[float, str]] = {}
+_SESSIONS: dict[str, tuple[float, str, str]] = {}
 _FAILURES: dict[str, list[float]] = defaultdict(list)
 
 
@@ -173,7 +173,9 @@ document.getElementById("login").addEventListener("submit",async(e)=>{
   if(!result.ok)throw Error(result.status===429?"Zu viele Versuche. Bitte später erneut versuchen.":
     "Anmeldung fehlgeschlagen. Passwort oder Konfiguration prüfen.");
   const next=new URLSearchParams(location.search).get("next")||"/";
-  location.replace(next.startsWith("/")&&!next.startsWith("//")?next:"/");
+  const target=new URL(next,location.origin);
+  location.replace(target.origin===location.origin&&target.pathname.startsWith("/")?
+    target.pathname+target.search+target.hash:"/");
  }catch(exc){error.textContent=exc.message;button.disabled=false;}
 });
 </script></body></html>"""
@@ -188,7 +190,7 @@ def _security_headers(response: Response) -> Response:
     return response
 
 
-def _session_from_request(request: Request) -> tuple[str, str] | None:
+def _session_from_request(request: Request, password: str) -> tuple[str, str] | None:
     token = request.cookies.get(_SESSION_COOKIE) or ""
     if len(token) < 40:
         return None
@@ -198,23 +200,28 @@ def _session_from_request(request: Request) -> tuple[str, str] | None:
         item = _SESSIONS.get(key)
         if item is None:
             return None
-        expires, csrf = item
-        if now > expires:
+        expires, csrf, fingerprint = item
+        if now > expires or not hmac.compare_digest(
+            fingerprint, hashlib.sha256(password.encode("utf-8")).hexdigest()
+        ):
             _SESSIONS.pop(key, None)
             return None
         return key, csrf
 
 
-def _issue_session(request: Request) -> Response:
+def _issue_session(request: Request, password: str) -> Response:
     raw_token = secrets.token_urlsafe(48)
     csrf = secrets.token_urlsafe(32)
     now = time.time()
     key = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     with _LOCK:
-        expired = [k for k, (expiry, _) in _SESSIONS.items() if expiry <= now]
+        expired = [k for k, (expiry, _, _) in _SESSIONS.items() if expiry <= now]
         for item in expired:
             _SESSIONS.pop(item, None)
-        _SESSIONS[key] = (now + _SESSION_AGE, csrf)
+        _SESSIONS[key] = (
+            now + _SESSION_AGE, csrf,
+            hashlib.sha256(password.encode("utf-8")).hexdigest(),
+        )
     response = _security_headers(JSONResponse({"authenticated": True}))
     secure = _secure_cookie(request)
     response.set_cookie(
@@ -263,12 +270,20 @@ async def protect_request(request: Request, call_next):
         if blocked:
             return _security_headers(JSONResponse({"detail": "Zu viele Anmeldeversuche."}, status_code=429))
         try:
+            if int(request.headers.get("content-length") or "0") > 16384:
+                return _security_headers(JSONResponse(
+                    {"detail": "Anmeldeanfrage ist zu groß."}, status_code=413,
+                ))
             payload = await request.json()
             candidate = str(payload.get("password") or "") if isinstance(payload, dict) else ""
         except (ValueError, TypeError):
             candidate = ""
         # HMAC key comparison is constant-time and does not reveal the
         # actual secret even if candidates differ in length.
+        if len(candidate.encode("utf-8")) > 4096:
+            return _security_headers(JSONResponse(
+                {"detail": "Anmeldeanfrage ist zu groß."}, status_code=413,
+            ))
         digest = hashlib.sha256(candidate.encode("utf-8")).digest()
         expected = hashlib.sha256(configured.encode("utf-8")).digest()
         if not hmac.compare_digest(digest, expected):
@@ -277,7 +292,7 @@ async def protect_request(request: Request, call_next):
             return _security_headers(JSONResponse({"detail": "Anmeldung fehlgeschlagen."}, status_code=401))
         with _LOCK:
             _FAILURES.pop(address, None)
-        return _issue_session(request)
+        return _issue_session(request, configured)
 
     if method == "GET" and path in {"/auth/login", "/login"}:
         return _security_headers(HTMLResponse(_login_html(unavailable=not bool(configured))))
@@ -289,7 +304,7 @@ async def protect_request(request: Request, call_next):
             status_code=503,
         ))
 
-    active = _session_from_request(request)
+    active = _session_from_request(request, configured)
     if active is None:
         if method in {"GET", "HEAD"} and not path.startswith("/api/") and not path.startswith("/auth/"):
             from urllib.parse import quote
