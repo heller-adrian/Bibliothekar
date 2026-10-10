@@ -7,10 +7,43 @@ import os
 import tempfile
 
 
-DEFAULT_BACKUP_DIRECTORY_NAME = "SD-Kartensicherungen"
-DEFAULT_WORKSPACES_DIRECTORY_NAME = "Arbeitsbereiche"
-DEFAULT_METADATA_DIRECTORY_NAME = "Metadatenkorrektur"
-DEFAULT_TRASH_DIRECTORY_NAME = "Papierkorb"
+# Only genuinely new installations use English folder defaults. Existing
+# folders from German installations retain their established physical paths.
+DEFAULT_BACKUP_DIRECTORY_NAME = "SD Card Backups"
+DEFAULT_WORKSPACES_DIRECTORY_NAME = "Library Workspaces"
+DEFAULT_METADATA_DIRECTORY_NAME = "Metadata Correction"
+DEFAULT_TRASH_DIRECTORY_NAME = "Trash"
+
+LEGACY_STORAGE_DEFAULTS = {
+    "backup_directory_name": "SD-Kartensicherungen",
+    "workspaces_directory_name": "Arbeitsbereiche",
+    "metadata_directory_name": "Metadatenkorrektur",
+    "trash_directory_name": "Papierkorb",
+}
+
+ENGLISH_STORAGE_DEFAULTS = {
+    "backup_directory_name": DEFAULT_BACKUP_DIRECTORY_NAME,
+    "workspaces_directory_name": DEFAULT_WORKSPACES_DIRECTORY_NAME,
+    "metadata_directory_name": DEFAULT_METADATA_DIRECTORY_NAME,
+    "trash_directory_name": DEFAULT_TRASH_DIRECTORY_NAME,
+}
+
+
+def _effective_directory_default(setting: str) -> str:
+    """Avoid silently relocating existing German workspaces on upgrade.
+
+    The configured workspace mount is inspected without creating or moving
+    anything. Persisted user choices take precedence in load_storage_settings.
+    """
+    english = ENGLISH_STORAGE_DEFAULTS[setting]
+    legacy = LEGACY_STORAGE_DEFAULTS[setting]
+    workspace = Path(os.environ.get("KAMERA_WORKSPACE", "/workspace"))
+    try:
+        if (workspace / legacy).is_dir():
+            return legacy
+    except OSError:
+        pass
+    return english
 
 
 class StorageSettingsError(RuntimeError):
@@ -57,22 +90,22 @@ def load_storage_settings() -> dict[str, str]:
         "backup_directory_name": _clean_name(
             storage.get("backup_directory_name"),
             field="SD-Kartensicherungen",
-            default=DEFAULT_BACKUP_DIRECTORY_NAME,
+            default=_effective_directory_default("backup_directory_name"),
         ),
         "workspaces_directory_name": _clean_name(
             storage.get("workspaces_directory_name"),
             field="Arbeitsbereiche",
-            default=DEFAULT_WORKSPACES_DIRECTORY_NAME,
+            default=_effective_directory_default("workspaces_directory_name"),
         ),
         "metadata_directory_name": _clean_name(
             storage.get("metadata_directory_name"),
             field="Metadatenkorrektur",
-            default=DEFAULT_METADATA_DIRECTORY_NAME,
+            default=_effective_directory_default("metadata_directory_name"),
         ),
         "trash_directory_name": _clean_name(
             storage.get("trash_directory_name"),
             field="Papierkorb",
-            default=DEFAULT_TRASH_DIRECTORY_NAME,
+            default=_effective_directory_default("trash_directory_name"),
         ),
     }
 
@@ -96,22 +129,22 @@ def normalize_storage_settings(values: dict[str, Any]) -> dict[str, str]:
         "backup_directory_name": _clean_name(
             merged["backup_directory_name"],
             field="SD-Kartensicherungen",
-            default=DEFAULT_BACKUP_DIRECTORY_NAME,
+            default=_effective_directory_default("backup_directory_name"),
         ),
         "workspaces_directory_name": _clean_name(
             merged["workspaces_directory_name"],
             field="Arbeitsbereiche",
-            default=DEFAULT_WORKSPACES_DIRECTORY_NAME,
+            default=_effective_directory_default("workspaces_directory_name"),
         ),
         "metadata_directory_name": _clean_name(
             merged["metadata_directory_name"],
             field="Metadatenkorrektur",
-            default=DEFAULT_METADATA_DIRECTORY_NAME,
+            default=_effective_directory_default("metadata_directory_name"),
         ),
         "trash_directory_name": _clean_name(
             merged["trash_directory_name"],
             field="Papierkorb",
-            default=DEFAULT_TRASH_DIRECTORY_NAME,
+            default=_effective_directory_default("trash_directory_name"),
         ),
     }
     if len(set(cleaned.values())) != len(cleaned):
