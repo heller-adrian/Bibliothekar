@@ -60,6 +60,23 @@ def _atomic_json(path: Path, data: dict[str, Any], *, new: bool = False) -> None
         temp.unlink(missing_ok=True)
 
 
+def assert_no_pending_swaps(metadata_root: Path) -> None:
+    """Do not start another write while an interrupted multi-file edit exists."""
+    directory = _journal_dir(metadata_root)
+    if directory.exists():
+        if directory.is_symlink() or not directory.is_dir():
+            raise MetadataSwapRecoveryError("Metadatenjournal-Stamm ist unsicher.")
+        if any(directory.iterdir()):
+            raise MetadataSwapRecoveryError(
+                "Eine unterbrochene Metadatenkorrektur muss zuerst wiederhergestellt werden."
+            )
+
+
+def fsync_staged_file(path: Path) -> None:
+    with Path(path).open("rb") as stream:
+        os.fsync(stream.fileno())
+    _sync_dir(path.parent)
+
 def create_swap_journal(
     metadata_root: Path, *,
     kind: str, file_entries: list[dict[str, Any]],
