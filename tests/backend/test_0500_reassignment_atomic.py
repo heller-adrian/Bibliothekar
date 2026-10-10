@@ -168,3 +168,37 @@ assign_event_reassignments(
             "SELECT COUNT(*) FROM audit_log WHERE action='event_families_reassigned'"
         ).fetchone()[0] == 0
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+@pytest.mark.parametrize("target_mode", ["new_event", "new_no_event"])
+def test_0500_historical_receipt_is_not_replayed_after_target_is_undone(
+    tmp_path, target_mode,
+):
+    db, selected, segments = _applied_source(tmp_path)
+    kwargs = dict(
+        target_mode=target_mode,
+        new_event_name="Wiederherstellbares Ziel" if target_mode == "new_event" else None,
+        segments=segments,
+    )
+    first = assign_event_reassignments(db, "j", "b", selected, **kwargs)
+    original_target = first["target"]["event_id"]
+
+    # Synthetic cancellation: the prior target is removed and all families
+    # reopened for reassignment. The old receipt must not mask the new work.
+    with database_connection(db) as connection:
+        connection.execute(
+            "UPDATE event_reapply_removed_families "
+            "SET target_event_id=NULL,target_kind=NULL,target_status=NULL "
+            "WHERE event_id='b' AND family_id IN (" +
+            ",".join("?" for _ in selected) + ")",
+            selected,
+        )
+        connection.execute("DELETE FROM events WHERE id=?", (original_target,))
+    retry = assign_event_reassignments(db, "j", "b", selected, **kwargs)
+    assert not retry.get("idempotent_replay")
+    assert retry["target"]["event_id"] != original_target
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE action='event_families_reassigned'"
+        ).fetchone()[0] == 2
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
