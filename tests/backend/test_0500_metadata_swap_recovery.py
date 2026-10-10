@@ -179,3 +179,145 @@ def test_0500_normal_library_metadata_correction_finishes_without_journal(tmp_pa
     assert result["status"]=="completed"
     assert source.read_bytes()==OLD+b"|corrected"
     assert not list((storage_paths(ws)["metadata_root"]/".swap-journals").glob("*.json"))
+
+
+
+def _seed_multiple(tmp_path):
+    root=tmp_path/"Metadatenkorrektur"/"Mehrfachkorrektur"
+    root.mkdir(parents=True,exist_ok=True)
+    (root/"A.JPG").write_bytes(b"photo")
+    (root/"B.MP4").write_bytes(b"video")
+    return root
+
+
+def _child_multiple(mode):
+    return r"""
+import os,sys
+from pathlib import Path
+import app.metadata_correction as m
+from tests.backend.test_0340_patch import _fake_multiple_analysis
+m.analyze_tree=_fake_multiple_analysis
+m.write_metadata_datetime=lambda path,media_type,value: Path(path).write_bytes(
+    Path(path).read_bytes()+("|"+value).encode()
+)
+m.verify_metadata_datetime=lambda path,expected: {"expected_datetime":expected,"matching_tags":[{"tag":"test","value":expected}],"observed_tags":[]}
+preview=m.preview_multiple_metadata_correction(
+    workspace_root=Path(sys.argv[2]),library_id="main",
+    reference_relative_path="A.JPG",proposed_datetime="2026-07-21T12:30:00",
+)
+if sys.argv[3]=="after_backup":
+    original=m.os.replace
+    def abrupt(src,dst):
+        result=original(src,dst)
+        if ".multiple-before-" in str(dst):
+            os._exit(42)
+        return result
+    m.os.replace=abrupt
+elif sys.argv[3]=="after_all_swaps":
+    m.mark_swap_committed=lambda *_a,**_kw: os._exit(42)
+elif sys.argv[3]=="after_journal_commit":
+    m.recover_swap_journal=lambda *_a,**_kw: os._exit(42)
+m.apply_multiple_metadata_correction(
+    workspace_root=Path(sys.argv[2]),library_id="main",
+    reference_relative_path="A.JPG",proposed_datetime="2026-07-21T12:30:00",
+    expected_preview_fingerprint=preview["preview_fingerprint"],
+)
+""".replace("sys.argv[3]",repr(mode))
+
+
+@pytest.mark.parametrize("mode",[
+    "after_backup","after_all_swaps","after_journal_commit",
+])
+def test_0500_multiple_correction_recovers_at_all_commit_boundaries(tmp_path,mode):
+    root=_seed_multiple(tmp_path)
+    db=tmp_path/"unused.sqlite3"
+    _child(db,tmp_path,_child_multiple(mode))
+    metadata_root=storage_paths(tmp_path)["metadata_root"]
+    result=recover_metadata_swaps(metadata_root,allowed_databases=set())
+    assert result["blocked"]==0,result
+    if mode=="after_journal_commit":
+        assert result["completed"]==1
+        assert b"2026-07-21T12:30:00" in (root/"A.JPG").read_bytes()
+        assert b"2026-07-21T12:35:30" in (root/"B.MP4").read_bytes()
+    else:
+        assert result["rolled_back"]==1
+        assert (root/"A.JPG").read_bytes()==b"photo"
+        assert (root/"B.MP4").read_bytes()==b"video"
+    assert recover_metadata_swaps(metadata_root)["completed"]==0
+
+
+def _seed_reintegration(tmp_path):
+    db,ws,source,family_id,task_id=_seed_library(tmp_path)
+    with database_connection(db) as conn:
+        conn.execute(
+            "UPDATE file_families SET selected_capture_time=?,capture_time_confidence='high' WHERE id=?",
+            (PROPOSED,family_id),
+        )
+        conn.execute(
+            """UPDATE files SET selected_capture_time=?,selected_capture_source='metadata_correction',
+                   capture_time_confidence='high',metadata_write_status='written',
+                   review_status='corrected' WHERE family_id=?""",
+            (PROPOSED,family_id),
+        )
+    return db,ws,source,family_id
+
+
+def _child_reintegrate(mode,family_id):
+    return r"""
+import os,sys
+from pathlib import Path
+import app.metadata_correction as m
+m.write_metadata_datetime=lambda path,media_type,value: Path(path).write_bytes(
+    Path(path).read_bytes()+b"|normalized"
+)
+m.verify_metadata_datetime=lambda path,expected: {"expected_datetime":expected,"matching_tags":[{"tag":"test","value":expected}],"observed_tags":[]}
+m.analyze_tree=lambda root,include_other=False: {"files":[
+    {"relative_path":"DCIM/IMG_0001.JPG","filename":"IMG_0001.JPG",
+    "media_type":"jpeg","family_key":"DCIM/IMG_0001"}
+],"families":[{"family_key":"DCIM/IMG_0001"}]}
+m.build_folder_import_plan=lambda entries,analysis,root,**kw: ([
+    {"source_relative_path":"DCIM/IMG_0001.JPG",
+     "destination_relative_path":"2026/2026-07-20/20260720_141530_Test.JPG"}
+],[],{})
+if sys.argv[3]=="after_backup":
+    old=m.os.replace
+    def terminate(src,dst):
+        result=old(src,dst)
+        if ".reintegrate-before-" in str(dst):
+            os._exit(42)
+        return result
+    m.os.replace=terminate
+elif sys.argv[3]=="after_db_commit":
+    m.mark_swap_committed=lambda *_a,**_kw: os._exit(42)
+elif sys.argv[3]=="after_journal_commit":
+    m.recover_swap_journal=lambda *_a,**_kw: os._exit(42)
+m.reintegrate_library_metadata_family(
+    Path(sys.argv[1]),workspace_root=Path(sys.argv[2]),
+    library_id="main",family_id=int(sys.argv[4]),
+)
+""".replace("sys.argv[3]",repr(mode)).replace("sys.argv[4]",str(family_id))
+
+
+@pytest.mark.parametrize("mode",[
+    "after_backup","after_db_commit","after_journal_commit",
+])
+def test_0500_reintegration_survives_swap_and_db_commit_crashes(tmp_path,mode):
+    db,ws,source,family_id=_seed_reintegration(tmp_path)
+    _child(db,ws,_child_reintegrate(mode,family_id))
+    metadata_root=storage_paths(ws)["metadata_root"]
+    result=recover_metadata_swaps(metadata_root,allowed_databases={db})
+    assert result["blocked"]==0,result
+    destination=ws/"SD-Kartensicherungen"/"2026/2026-07-20/20260720_141530_Test.JPG"
+    with database_connection(db) as conn:
+        file=conn.execute("SELECT current_relative_path FROM files WHERE family_id=?",(family_id,)).fetchone()
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+    if mode=="after_backup":
+        assert result["rolled_back"]==1
+        assert source.read_bytes()==OLD
+        assert not destination.exists()
+        assert file["current_relative_path"]=="Ohne_Datum/IMG_0001.JPG"
+    else:
+        assert result["completed"]==1
+        assert not source.exists()
+        assert destination.read_bytes()==OLD+b"|normalized"
+        assert file["current_relative_path"]=="2026/2026-07-20/20260720_141530_Test.JPG"
