@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Iterator
 from datetime import datetime, timezone
@@ -2563,6 +2563,7 @@ def create_planned_event(
     preview: dict[str, Any],
     *,
     ignore_event_ids: set[str] | None = None,
+    transaction_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """
     Store a server-validated event plan.
@@ -2720,12 +2721,13 @@ def create_planned_event(
         for _ in requested_family_ids
     )
 
-    with database_connection(
-        database_path
+    with (
+        database_connection(database_path)
+        if transaction_connection is None
+        else nullcontext(transaction_connection)
     ) as connection:
-        connection.execute(
-            "BEGIN IMMEDIATE"
-        )
+        if transaction_connection is None:
+            connection.execute("BEGIN IMMEDIATE")
 
         job = connection.execute(
             """
@@ -3266,7 +3268,9 @@ def create_planned_event(
             ),
         )
 
-        connection.commit()
+        # The owner of the shared SQLite connection commits all dependent state.
+        if transaction_connection is None:
+            connection.commit()
 
         parent_row = connection.execute(
             """
