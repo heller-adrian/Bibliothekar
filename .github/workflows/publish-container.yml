@@ -69,6 +69,18 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Reject an existing stable version tag
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null; then
+            echo "Stable version v${VERSION} already exists; refusing to overwrite its image or tag." >&2
+            exit 1
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -115,8 +127,8 @@ jobs:
 
           TAG="v${VERSION}"
 
-          git tag -f "${TAG}" "${GITHUB_SHA}"
-          git push origin "refs/tags/${TAG}" --force
+          git tag "${TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG}"
 
           cat > /tmp/release-body.md <<EOF
           Bibliothekar ${TAG}
@@ -133,13 +145,7 @@ jobs:
           ${GITHUB_SHA}
           EOF
 
-          if RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null)"; then
-            RELEASE_ID="$(printf '%s' "${RELEASE_JSON}" | jq -r '.id')"
-            gh api               --method PATCH               "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"               -f target_commitish="${GITHUB_SHA}"               -F draft=false               -F prerelease=false               --raw-field make_latest=true               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
-            echo "Updated stable release ${TAG}."
-          else
-            gh api               --method POST               "repos/${GITHUB_REPOSITORY}/releases"               -f tag_name="${TAG}"               -f target_commitish="${GITHUB_SHA}"               -f name="${TAG}"               -F draft=false               -F prerelease=false               --raw-field make_latest=true               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
-            echo "Created stable release ${TAG}."
-          fi
+          # Published stable releases are immutable; never rewrite an existing tag or release.
+          gh release create "${TAG}" --title "${TAG}" --notes-file /tmp/release-body.md --latest
 
           echo "Stable release ${TAG} points to ${GITHUB_SHA}."

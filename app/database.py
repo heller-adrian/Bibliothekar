@@ -273,6 +273,16 @@ def initialize_database(
             connection
         )
 
+        # Never start an older binary on a database created by a newer release.
+        # Applying known migrations cannot make a future schema compatible.
+        known_versions = {version for version, _path in migrations}
+        unsupported_versions = sorted(current - known_versions)
+        if unsupported_versions:
+            raise DatabaseError(
+                "Diese Datenbank verwendet nicht unterstützte, neuere "
+                "Migrationsversionen: " + ", ".join(map(str, unsupported_versions))
+            )
+
         newly_applied: list[int] = []
 
         for version, path in migrations:
