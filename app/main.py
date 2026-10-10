@@ -2053,6 +2053,18 @@ def startup_database() -> None:
             return
 
         if existing_main is not None:
+            # BA-02: Resume/rollback crash-interrupted backup deletions
+            # BEFORE global projections and the import worker start.
+            from app.backup_management import recover_backup_deletions
+            deletion_recovery = recover_backup_deletions(
+                DATABASE_FILE, REGISTRY_DATABASE_FILE,
+                workspace_backup_root(WORKSPACE_PATH),
+            )
+            if deletion_recovery["blocked"]:
+                raise BackupDeletionError(
+                    "Unterbrochene Sicherungslöschung muss geprüft werden: "
+                    + " | ".join(deletion_recovery["errors"][:5])
+                )
             MAIN_LIBRARY_CONTEXT = resolve_library_context(
                 REGISTRY_DATABASE_FILE,
                 MAIN_LIBRARY_ID,
