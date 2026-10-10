@@ -604,6 +604,31 @@ def assign_event_reassignments(
             target = payload.get("target")
             if not isinstance(target, dict):
                 continue
+            # An old audit receipt is not proof that its target still exists:
+            # a later cancelled edit can delete that target and free the
+            # source queue again. Only replay when every selected family is
+            # still assigned to the recorded target root.
+            target_id = str(target.get("event_id") or "")
+            if not target_id:
+                continue
+            placeholders = ",".join("?" for _ in selected)
+            with database_connection(database_path) as check:
+                active_families = check.execute(
+                    f"""SELECT DISTINCT ea.family_id
+                        FROM event_assignments ea
+                        JOIN events e ON e.id=ea.event_id
+                        WHERE ea.family_id IN ({placeholders})
+                          AND COALESCE(e.parent_event_id,e.id)=?""",
+                    (*selected, target_id),
+                ).fetchall()
+                reopened = check.execute(
+                    f"""SELECT 1 FROM event_reapply_removed_families
+                        WHERE event_id=? AND family_id IN ({placeholders})
+                          AND target_event_id IS NULL LIMIT 1""",
+                    (event_id, *selected),
+                ).fetchone()
+            if reopened or {int(row["family_id"]) for row in active_families} != set(selected):
+                continue
             state = list_event_reassignments(database_path, job_id, event_id)
             return {
                 "status": "reassigned", "family_ids": selected,
