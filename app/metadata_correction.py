@@ -1785,6 +1785,11 @@ def reintegrate_library_metadata_family(
     )
     central_root = paths["output_root"]
     metadata_root = storage_paths(workspace_root)["metadata_root"].resolve(strict=False)
+    from app.metadata_swap_recovery import (
+        assert_no_pending_swaps, create_swap_journal, fsync_staged_file,
+        mark_swap_committed, recover_swap_journal,
+    )
+    assert_no_pending_swaps(metadata_root)
 
     with database_connection(database_path) as connection:
         family = connection.execute(
@@ -1827,7 +1832,8 @@ def reintegrate_library_metadata_family(
         / ("META_SORT_" + uuid.uuid4().hex.upper())
     ).resolve(strict=False)
     work.mkdir(parents=True, exist_ok=False)
-    moved: list[tuple[Path, Path, Path]] = []
+    incoming_paths: list[Path] = []
+    swap_journal: Path | None = None
 
     try:
         prepared: list[dict[str, Any]] = []
@@ -1973,45 +1979,51 @@ def reintegrate_library_metadata_family(
             item["destination"] = destination
             item["destination_relative"] = destination_relative.as_posix()
 
+        swap_files: list[dict[str, Any]] = []
         for item in prepared:
             source = Path(item["source"])
             destination = Path(item["destination"])
             destination.parent.mkdir(parents=True, exist_ok=True)
-
             incoming = source.parent / (
                 "." + source.name + ".reintegrate-" + uuid.uuid4().hex
             )
             backup = source.parent / (
                 "." + source.name + ".reintegrate-before-" + uuid.uuid4().hex
             )
+            incoming_paths.append(incoming)
             shutil.copyfile(Path(item["temp"]), incoming)
+            fsync_staged_file(incoming)
             if _sha256(incoming) != str(item["normalized_sha"]):
-                incoming.unlink(missing_ok=True)
                 raise MetadataCorrectionError(
                     "Normalisierte Reintegration stimmt vor dem Austausch nicht überein."
                 )
-
-            os.replace(source, backup)
-            _fsync_directory(source.parent)
-            try:
-                os.replace(incoming, source)
-                _fsync_directory(source.parent)
-                os.replace(source, destination)
-                _fsync_directory(source.parent)
-                _fsync_directory(destination.parent)
-            except Exception:
-                incoming.unlink(missing_ok=True)
-                if source.exists():
-                    source.unlink(missing_ok=True)
-                if destination.exists():
-                    destination.unlink(missing_ok=True)
-                if backup.exists():
-                    os.replace(backup, source)
-                    _fsync_directory(source.parent)
-                raise
-
+            item["incoming"] = incoming
             item["backup"] = backup
-            moved.append((source, destination, backup))
+            swap_files.append({
+                "source": str(source), "incoming": str(incoming),
+                "backup": str(backup), "destination": str(destination),
+                "before_sha": str(item["sha256_current"]),
+                "after_sha": str(item["normalized_sha"]),
+                "file_id": int(item["file_id"]),
+                "source_relative": str(item["current_relative"]),
+                "destination_relative": str(item["destination_relative"]),
+            })
+
+        swap_journal = create_swap_journal(
+            metadata_root, kind="reintegrate", file_entries=swap_files,
+            data_root=central_root, database_path=database_path,
+            family_id=int(family_id), proposed=proposed[:19],
+        )
+        for item in prepared:
+            source = Path(item["source"])
+            destination = Path(item["destination"])
+            os.replace(source, Path(item["backup"]))
+            _fsync_directory(source.parent)
+            os.replace(Path(item["incoming"]), source)
+            _fsync_directory(source.parent)
+            os.replace(source, destination)
+            _fsync_directory(source.parent)
+            _fsync_directory(destination.parent)
 
         now = _now()
         with database_connection(database_path) as connection:
@@ -2061,51 +2073,72 @@ def reintegrate_library_metadata_family(
                     )
             connection.commit()
 
-        for _source, _destination, backup in moved:
-            try:
-                backup.unlink(missing_ok=True)
-                _fsync_directory(backup.parent)
-            except OSError:
-                # The canonical destination and SQLite state are already
-                # committed. A stale hidden safety copy must not trigger a
-                # destructive rollback after commit.
-                pass
-
+        # SQLite changed the canonical source paths in one transaction.
+        # A crash before the journal marker can still be resolved by checking
+        # those canonical DB paths and hashes against the journal.
+        mark_swap_committed(swap_journal, metadata_root)
+        recover_swap_journal(
+            metadata_root, swap_journal, allowed_databases={database_path},
+        )
         shutil.rmtree(work, ignore_errors=True)
-        return {
-            "family_id": int(family_id),
-            "job_id": str(family["job_id"]),
-            "family_key": str(family["family_key"]),
-            "selected_capture_time": proposed[:19],
-            "file_count": len(prepared),
-            "files": [
-                {
-                    "file_id": int(item["file_id"]),
-                    "source_relative_path": str(item["current_relative"]),
-                    "destination_relative_path": str(item["destination_relative"]),
-                }
-                for item in prepared
-            ],
-        }
+        def result_payload() -> dict[str, Any]:
+            return {
+                "family_id": int(family_id),
+                "job_id": str(family["job_id"]),
+                "family_key": str(family["family_key"]),
+                "selected_capture_time": proposed[:19],
+                "file_count": len(prepared),
+                "files": [
+                    {
+                        "file_id": int(item["file_id"]),
+                        "source_relative_path": str(item["current_relative"]),
+                        "destination_relative_path": str(item["destination_relative"]),
+                    }
+                    for item in prepared
+                ],
+            }
+        return result_payload()
 
     except Exception as error:
-        for source, destination, backup in reversed(moved):
+        if swap_journal is not None:
             try:
-                if destination.exists():
-                    destination.unlink(missing_ok=True)
-                    _fsync_directory(destination.parent)
-                if source.exists():
-                    source.unlink(missing_ok=True)
-                if backup.exists():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(backup, source)
-                    _fsync_directory(source.parent)
-            except OSError:
-                pass
+                disposition = recover_swap_journal(
+                    metadata_root, swap_journal, allowed_databases={database_path},
+                )
+                if disposition == "completed":
+                    shutil.rmtree(work, ignore_errors=True)
+                    return {
+                        "family_id": int(family_id),
+                        "job_id": str(family["job_id"]),
+                        "family_key": str(family["family_key"]),
+                        "selected_capture_time": proposed[:19],
+                        "file_count": len(prepared),
+                        "files": [
+                            {
+                                "file_id": int(item["file_id"]),
+                                "source_relative_path": str(item["current_relative"]),
+                                "destination_relative_path": str(item["destination_relative"]),
+                            }
+                            for item in prepared
+                        ],
+                    }
+            except Exception as recovery_error:
+                raise MetadataCorrectionError(
+                    "Metadaten-Reintegration unterbrochen: "
+                    "Wiederherstellung gesperrt; geprüfte Sicherheitskopien "
+                    "und Journal bleiben erhalten (" + str(recovery_error) + ")."
+                ) from error
+        else:
+            for incoming in incoming_paths:
+                try:
+                    incoming.unlink(missing_ok=True)
+                except OSError:
+                    pass
         shutil.rmtree(work, ignore_errors=True)
         if isinstance(error, MetadataCorrectionError):
             raise
         raise MetadataCorrectionError(str(error)) from error
+
 
 def apply_metadata_correction(
     database_path: Path,
