@@ -4,7 +4,7 @@ from app.ui_shell import BIBLIOTHEKAR_0472_CSS, apply_shell
 
 
 def test_0472_runtime_and_logo_v2_intact():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.48.0"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.50.0"
     for area in ("import", "workspace", "archive", "metadata", "trash"):
         html = apply_shell("<html><head></head><body></body></html>", active_area=area)
         assert f"<style>{BIBLIOTHEKAR_0472_CSS}</style>" in html
