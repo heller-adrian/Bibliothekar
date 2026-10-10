@@ -32,6 +32,7 @@ def test_0402_mobile_no_event_range_has_one_heading_and_two_full_rows():
 
 def test_0402_readme_declares_latest_update_channel():
     source = Path("README.md").read_text(encoding="utf-8")
-    assert "Aktuelle veröffentlichte Version: **0.50.0**" in source
+    assert "Aktuelle stabile Veröffentlichung: **" in source
+    assert "Entwicklungsversion: **0.50.0**" in source
     assert "ghcr.io/heller-adrian/bibliothekar:latest" in source
     assert "latest" in source
