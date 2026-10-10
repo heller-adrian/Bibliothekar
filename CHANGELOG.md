@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.50.1 – Extern gelöschte Ereignisordner erkennen (10.10.2026)
+
+- Fehlende Ereigniswurzel in passiven Applied-/Archived-Inventuren nach kontrollierter Archivübernahmeprüfung als leeren realen IST-Bestand behandeln; die bisherigen strengen Archivoperationen bleiben unverändert.
+- Zwei bestätigende Prüfungen, quittierbare Hinweise für vollständig und teilweise entfernte Ereignisordner, korrekte SQLite-Bestandsbereinigung. Keine Wiederherstellung absichtlich gelöschter Dateien.
+- Nachvollziehbare Platzierungskonflikte und fremde Ereigniszuordnungen blockieren destruktive Löschannahmen.
+- Synthetische Regressionen für Verschiebungen, Renames, Teilbestände, fremde Ansprüche, Neustart/Quittierung und unerreichbare Wurzeln; kein Datenbankschemawechsel.
+- Separater Entwicklungstag `patch-0.50.1` vorgesehen; Stable `latest`, `main`, `v0.40.3` unverändert. Siehe `docs/0501_EVENT_DELETION_REPORT.md`.
+
 ## 0.48.0 – iOS-PWA: vollständige Karten- und Metadatenrahmen (10.10.2026)
 
 - Die Schnellauswahl per Halten und Ziehen animiert keine Tageskarten, Checkboxen oder umrandeten Metadatenstatus mehr mit `transform`. Der kurze Auswahlpuls wird als innenliegender Schatten (`box-shadow: inset`) gezeichnet.

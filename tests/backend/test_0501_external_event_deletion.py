@@ -240,3 +240,68 @@ def test_unavailable_root_is_not_interpreted_as_a_deletion(tmp_path: Path):
     with database_connection(db) as connection:
         assert connection.execute("SELECT 1 FROM events WHERE id=?", (event_id,)).fetchone()
         assert connection.execute("SELECT 1 FROM files WHERE id=?", (file_ids[0],)).fetchone()
+
+
+@pytest.mark.parametrize("status", ["applied", "archived"])
+def test_0501_manual_root_rename_is_not_deletion(tmp_path: Path, status: str):
+    import json
+    db, workspace, archive, work = _case(tmp_path)
+    root_base = archive if status == "archived" else work
+    event_id, root, file_ids = _event(
+        db, root_base, name="Renamed", day="2026-10-05",
+        items=[("A.JPG", b"renamed-not-deleted", "Alle")],
+        status=status,
+    )
+    (root / "event.json").write_text(
+        json.dumps({"event": {"id": event_id}}), encoding="utf-8",
+    )
+    renamed = root.with_name(root.name + " - renamed")
+    root.rename(renamed)
+    for _ in range(3):
+        summary = refresh_live_event_inventories(db, workspace, archive)
+        assert summary["errors"] == []
+        assert summary["events"][event_id]["known_file_count"] == 1
+        detect_all_event_structure_changes(db)
+    with database_connection(db) as c:
+        assert c.execute("SELECT 1 FROM events WHERE id=?", (event_id,)).fetchone()
+        assert c.execute("SELECT 1 FROM files WHERE id=?", (file_ids[0],)).fetchone()
+    assert (renamed / "Alle" / "A.JPG").read_bytes() == b"renamed-not-deleted"
+    assert all(
+        n["kind"] != "event_root_deleted"
+        for n in list_external_change_state(db)["informational"]
+    )
+
+
+def test_0501_foreign_assignment_survives_missing_event_root(tmp_path: Path):
+    db, workspace, archive, work = _case(tmp_path)
+    a, root_a, a_files = _event(
+        db, work, name="A", day="2026-10-05",
+        items=[("A.JPG", b"owned-a", "Alle")],
+    )
+    b, root_b, _ = _event(
+        db, work, name="B", day="2026-10-06",
+        items=[("B.JPG", b"owned-b", "Alle")],
+    )
+    with database_connection(db) as c:
+        family_id = c.execute(
+            "SELECT family_id FROM files WHERE id=?", (a_files[0],)
+        ).fetchone()[0]
+        c.execute(
+            """INSERT INTO event_assignments(
+                   event_id,family_id,assignment_source,created_at)
+               VALUES (?,?,'manual',?)""",
+            (b, family_id, NOW),
+        )
+    shutil.rmtree(root_a)
+    for _ in range(3):
+        refresh_live_event_inventories(db, workspace, archive)
+        detect_all_event_structure_changes(db)
+    with database_connection(db) as c:
+        assert c.execute("SELECT 1 FROM files WHERE id=?", (a_files[0],)).fetchone()
+        assert c.execute("SELECT 1 FROM events WHERE id=?", (a,)).fetchone()
+        assert c.execute(
+            "SELECT 1 FROM event_assignments WHERE event_id=? AND family_id=?",
+            (b, family_id),
+        ).fetchone()
+    assert (root_b / "Alle" / "B.JPG").read_bytes() == b"owned-b"
+    assert list_external_change_state(db)["required_count"] >= 1
