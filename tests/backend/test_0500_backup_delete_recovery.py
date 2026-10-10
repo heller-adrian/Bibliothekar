@@ -177,3 +177,102 @@ def test_0500_deletion_journal_not_necessary_after_clean_success(tmp_path):
     assert recover_backup_deletions(db, registry, root) == {
         "completed": 0, "rolled_back": 0, "blocked": 0, "errors": []
     }
+
+
+
+def _with_second_library(tmp_path):
+    from app.database import initialize_database
+    from app.library_registry import ensure_library_identity, register_library
+    from app.global_stock import project_import_job
+
+    db, registry, root, original, _ = _seed(tmp_path)
+    second_db = tmp_path / "second" / "kamera.sqlite3"
+    second_workspace = tmp_path / "second-workspace"
+    second_work_root = second_workspace / "Arbeitsbereich"
+    second_archive = tmp_path / "second-archive"
+    second_workspace.mkdir()
+    second_work_root.mkdir()
+    second_archive.mkdir()
+    initialize_database(second_db)
+    ensure_library_identity(second_db, "secondary")
+    register_library(
+        registry, library_id="secondary", display_name="Nebenbibliothek",
+        database_path=second_db, workspace_root=second_workspace,
+        work_root=second_work_root, archive_root=second_archive,
+    )
+    project_import_job(db, second_db, "IMPORT_0400")
+    assert get_job(second_db, "IMPORT_0400") is not None
+    return db, registry, root, original, second_db
+
+
+def test_0500_multilibrary_crash_after_secondary_delete_restores_projection(tmp_path):
+    db, registry, root, original, second = _with_second_library(tmp_path)
+    script = """
+import os, sys
+from pathlib import Path
+import app.backup_management as m
+main = Path(sys.argv[1]).resolve()
+actual = m._delete_job_row
+def crash_after_secondary(db, job):
+    if Path(db).resolve() == main:
+        os._exit(42)
+    return actual(db, job)
+m._delete_job_row = crash_after_secondary
+m.delete_backup(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), "IMPORT_0400")
+"""
+    _run_child(db, registry, root, script)
+    assert get_job(db, "IMPORT_0400") is not None
+    assert get_job(second, "IMPORT_0400") is None
+    assert not original.exists()
+    recovered = recover_backup_deletions(db, registry, root)
+    assert recovered["rolled_back"] == 1, recovered
+    assert original.read_bytes() == b"bibliothekar-0.40.0-backup"
+    assert get_job(second, "IMPORT_0400") is not None
+    with database_connection(second) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM files WHERE job_id='IMPORT_0400'"
+        ).fetchone()[0] == 1
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_0500_unknown_empty_subdirectory_blocks_deletion(tmp_path):
+    db, registry, root, original, _ = _seed(tmp_path)
+    script = """
+import os, sys
+from pathlib import Path
+import app.backup_management as m
+m._finish_deletion = lambda *_a, **_kw: os._exit(42)
+m.delete_backup(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), "IMPORT_0400")
+"""
+    _run_child(db, registry, root, script)
+    journal, stage = _journal("IMPORT_0400", root)
+    unexpected = stage / "unrelated-empty"
+    unexpected.mkdir()
+    recovered = recover_backup_deletions(db, registry, root)
+    assert recovered["blocked"] == 1
+    assert unexpected.exists()
+    assert journal.exists()
+    unexpected.rmdir()
+    assert recover_backup_deletions(db, registry, root)["completed"] == 1
+
+
+def test_0500_tampered_staged_file_is_never_deleted(tmp_path):
+    db, registry, root, original, _ = _seed(tmp_path)
+    script = """
+import os, sys
+from pathlib import Path
+import app.backup_management as m
+m._finish_deletion = lambda *_a, **_kw: os._exit(42)
+m.delete_backup(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), "IMPORT_0400")
+"""
+    _run_child(db, registry, root, script)
+    journal, stage = _journal("IMPORT_0400", root)
+    staged = stage / "2026/2026-10-04/20261004_120000_Test.JPG"
+    expected = staged.read_bytes()
+    staged.write_bytes(b"tampered")
+    state = recover_backup_deletions(db, registry, root)
+    assert state["blocked"] == 1, state
+    assert staged.read_bytes() == b"tampered"
+    assert journal.exists()
+    staged.write_bytes(expected)
+    assert recover_backup_deletions(db, registry, root)["completed"] == 1
