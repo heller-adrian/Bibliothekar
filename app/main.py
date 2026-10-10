@@ -5624,7 +5624,7 @@ def file_browser_interface() -> HTMLResponse:
       }
 
       return new Intl.DateTimeFormat(
-        "de-DE",
+        (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
         {
           dateStyle: "medium",
           timeStyle: "medium"
@@ -5653,7 +5653,7 @@ def file_browser_interface() -> HTMLResponse:
       }
 
       const timestamp = new Intl.DateTimeFormat(
-        "de-DE",
+        (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
         {
           dateStyle: "short",
           timeStyle: "medium"
@@ -6120,7 +6120,7 @@ def file_browser_interface() -> HTMLResponse:
             <strong>Dateigröße:</strong><br>
             ${
               new Intl.NumberFormat(
-                "de-DE"
+                (document.documentElement.lang === "de" ? "de-DE" : "en-US")
               ).format(file.size_bytes || 0)
             }
             Byte
@@ -10748,7 +10748,7 @@ def index() -> str:
       return (
         (value / Math.pow(1024, index))
           .toLocaleString(
-            "de-DE",
+            (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
             {
               maximumFractionDigits: 1
             }
@@ -10770,7 +10770,7 @@ def index() -> str:
       }
 
       return date.toLocaleString(
-        "de-DE",
+        (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
         {
           dateStyle: "medium",
           timeStyle: "medium"
@@ -11886,7 +11886,7 @@ def index() -> str:
         noticeElement.textContent =
           "Zuletzt aktualisiert: "
           + new Date().toLocaleTimeString(
-            "de-DE"
+            (document.documentElement.lang === "de" ? "de-DE" : "en-US")
           );
       } catch (error) {
         noticeElement.textContent =
