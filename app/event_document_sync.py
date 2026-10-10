@@ -15,6 +15,7 @@ from app.database import database_connection
 from app.event_document import (
     build_event_document_from_db,
     event_document_path,
+    read_event_document,
     write_event_document,
 )
 
@@ -106,7 +107,20 @@ def sync_event_document_task(
                 raise ValueError(
                     "Der physische Ereignisordner fehlt; Dokument nicht geschrieben."
                 )
-            write_event_document(workspace_root, document, app_version=app_version)
+            if document_path.exists():
+                # A file at this path must be a parseable, self-owned
+                # event.json for THIS event; preserve external/invalid files.
+                previous = read_event_document(document_path)
+                if (not isinstance(previous, dict)
+                    or str(previous.get("source") or "") != "kamera-automatisierung"
+                    or str((previous.get("event") or {}).get("id") or "") != event_id):
+                    raise ValueError(
+                        "Das bestehende event.json gehört nicht zu diesem Ereignis."
+                    )
+            write_event_document(
+                workspace_root, document, app_version=app_version,
+                require_existing_directory=True,
+            )
         except Exception as error:
             error_message = str(error)[:800] or type(error).__name__
 

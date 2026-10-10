@@ -222,3 +222,25 @@ def test_0500_later_edit_supersedes_pending_revision(tmp_path, monkeypatch):
             (event["id"],),
         ).fetchone()[:] == (3, "completed")
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+@pytest.mark.parametrize("existing_content", [
+    '{"source":"external","event":{"id":"stranger"}}',
+    '{"broken":',
+])
+def test_0500_foreign_or_corrupt_document_is_preserved(
+    tmp_path, existing_content,
+):
+    db, workspace, event, path = _applied_event(tmp_path)
+    path.write_text(existing_content, encoding="utf-8")
+    result = _rename(db, workspace, event)
+    assert result["event"]["revision"] == 2
+    assert result["event_document_sync_pending"] is True
+    assert path.read_text(encoding="utf-8") == existing_content
+    assert recover_event_document_sync_tasks(db, workspace)["blocked"] == 1
+    assert path.read_text(encoding="utf-8") == existing_content
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT status FROM event_document_sync_tasks WHERE event_id=?",
+            (event["id"],),
+        ).fetchone()[0] == "blocked"

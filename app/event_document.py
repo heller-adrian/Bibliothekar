@@ -1,11 +1,11 @@
 """Portable Ereignisbeschreibung: ``event.json``.
 
-Jedes Ereignis erhält im gemeinsamen Arbeitsbereich eine portable
-``event.json``. Sie ist die **primäre** Beschreibung des Ereignisses
-(Name, Zeitraum, Struktur, Unterereignis, Dateizuordnung mit Prüfsummen,
-Ordneroptionen). SQLite ist der **sekundäre Index** und wird konsistent
-nachgeführt; bei Abweichung regeneriert die App das Dokument aus dem
-lebhaften SQLite-Zustand.
+Angewendete Ereignisse erhalten im gemeinsamen Arbeitsbereich eine
+portable ``event.json`` (Name, Zeitraum, Struktur, Dateifamilien,
+Prüfsummen und Ordneroptionen). Für den bearbeitbaren App-Zustand ist
+SQLite maßgeblich; Änderungen werden über eine dauerhaft protokollierte
+Aufgabe in die portable Datei nachgeführt. Fremde oder beschädigte
+Ereignisdokumente werden dabei nicht blind überschrieben.
 
 Das Modul ist bewusst ohne Seiteneffekt auf SQLite *schreibend* gehalten:
 Es baut und schreibt Dokumente, lädt sie ein und erkennt Abweichungen.
@@ -329,6 +329,7 @@ def write_event_document(
     document: dict[str, Any],
     *,
     app_version: str | None = None,
+    require_existing_directory: bool = False,
 ) -> Path:
     """Ein Ereignisdokument atomar in seinen Ordner schreiben."""
 
@@ -347,7 +348,11 @@ def write_event_document(
         document["generated_at"] = datetime.now(timezone.utc).isoformat()
 
     path = event_document_path(workspace_root, year, folder_name)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if require_existing_directory:
+        if not path.parent.is_dir():
+            raise EventDocumentError("Der vorhandene Ereignisordner fehlt.")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True)
     encoded = payload.encode("utf-8")
