@@ -43,7 +43,7 @@ def test_search_events_and_expand_existing_no_event(tmp_path):
     eid=created['parent_event']['id']
     result=assign_free_families_to_existing_no_event(db,'j',eid,[{'day_key':'2026-07-16','start_time':'09:00','end_time':'11:00'}])
     assert result['assigned_family_count']==1
-    found=search_events(db,'No Event',25,0)
+    found=search_events(db,'Ohne',25,0)
     assert found['matching_count']==1
     assert found['events'][0]['id']==eid
     with database_connection(db) as c:
