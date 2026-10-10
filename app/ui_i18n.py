@@ -1161,8 +1161,6 @@ UI_PATTERNS = [
   ["^SD-Karte · (.+) · Bereit zum Einbinden$", "SD card · $1 · Ready to mount"],
   ["^SD-Karte · (.+) · Nur lesend eingebunden$", "SD card · $1 · Mounted read-only"],
   ["^SD-Karte · (.+)$", "SD card · $1"],
-  ["^([0-9]+) Familien · (.+)$", "$1 families · $2"],
-  ["^([0-9]+) Dateien · (.+)$", "$1 files · $2"],
   ["^([0-9]+) Familien · ([0-9]+) Dateien · ([0-9]+) (.+)$", "$1 families · $2 files · $3 $4"],
   ["^([0-9]+) freigegebene Ereignisse$", "$1 released events"],
   ["^([0-9]+) Sicherungen$", "$1 backups"],
