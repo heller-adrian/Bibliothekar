@@ -358,6 +358,10 @@ def _read_journal(path: Path, central_root: Path) -> dict[str, Any]:
         raise BackupDeletionError("Löschjournal gehört zu einem anderen Arbeitsbestand.")
     if not isinstance(manifest.get("files"), list) or not manifest["files"]:
         raise BackupDeletionError("Löschjournal besitzt keine gültige Dateiliste.")
+    if (not isinstance(manifest.get("libraries"), list)
+        or not manifest["libraries"]
+        or any(not isinstance(row, dict) for row in manifest["libraries"])):
+        raise BackupDeletionError("Löschjournal enthält keine gültige Bibliotheksliste.")
     if str(manifest.get("state")) not in {"prepared", "files_staged", "main_deleted"}:
         raise BackupDeletionError("Unbekannter Löschjournal-Zustand.")
     seen: set[str] = set()
@@ -406,11 +410,18 @@ def _check_staging_contents(stage_root: Path, files: list[dict[str, Any]]) -> No
     if not stage_root.is_dir():
         raise BackupDeletionError("Der Lösch-Stagingpfad ist kein Verzeichnis.")
     expected = {str(item["relative"]) for item in files}
+    expected_directories: set[str] = set()
+    for relative in expected:
+        parts = Path(relative).parts
+        for depth in range(1, len(parts)):
+            expected_directories.add(Path(*parts[:depth]).as_posix())
     for base, directories, names in os.walk(stage_root, followlinks=False):
         for name in directories:
             directory = Path(base) / name
             if directory.is_symlink():
                 raise BackupDeletionError("Fremder Symlink im Lösch-Staging.")
+            if directory.relative_to(stage_root).as_posix() not in expected_directories:
+                raise BackupDeletionError("Fremder Unterordner im Lösch-Staging.")
         for name in names:
             child = Path(base) / name
             relative = child.relative_to(stage_root).as_posix()
@@ -463,6 +474,10 @@ def _finish_deletion(
         _write_journal(journal, manifest)
 
     _check_staging_contents(stage_root, manifest["files"])
+    for item in manifest["files"]:
+        staged = stage_root / str(item["relative"])
+        if staged.exists():
+            _verify_journal_file(staged, item)
     # The deletion marker is durable BEFORE touching the staged file tree.
     for library in manifest["libraries"]:
         library_id = str(library.get("library_id") or MAIN_LIBRARY_ID)
@@ -492,6 +507,24 @@ def _recover_one_deletion(
         raise BackupDeletionError("Löschjournal gehört zu einer anderen Registry.")
     if not main_database.exists():
         raise BackupDeletionError("Hauptdatenbank für die Wiederherstellung fehlt.")
+    # The journal is recovery evidence, not authority to write arbitrary DBs
+    # or delete registry records. Compare against the live trusted registry.
+    expected_libraries = {
+        (str(row.get("library_id") or MAIN_LIBRARY_ID),
+         str(Path(str(row.get("database_path") or "")).resolve(strict=False)))
+        for row in _library_rows(registry_path, main_database)
+        if str(row.get("database_path") or "").strip()
+    }
+    journal_libraries = {
+        (str(row.get("library_id") or MAIN_LIBRARY_ID),
+         str(Path(str(row.get("database_path") or "")).resolve(strict=False)))
+        for row in manifest["libraries"]
+        if str(row.get("database_path") or "").strip()
+    }
+    if expected_libraries != journal_libraries:
+        raise BackupDeletionError(
+            "Bibliothekszuordnung hat sich seit dem Löschauftrag geändert. Manuelle Prüfung nötig."
+        )
     _, stage_root = _deletion_paths(central_root, job_id)
     with database_connection(main_database) as connection:
         exists = connection.execute("SELECT 1 FROM jobs WHERE id=?", (job_id,)).fetchone() is not None
