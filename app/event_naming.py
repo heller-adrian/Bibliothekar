@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from typing import Any
+import os
 import re
 
 
 DEFAULT_NO_EVENT_LABEL = "No Event"
+
+
+def _default_no_event_label() -> str:
+    # Preserve the German directory contract in explicitly legacy test/setup
+    # environments. Newly configured installations use the English default.
+    if os.environ.get("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE") == "de":
+        return "Ohne Ereignis"
+    return DEFAULT_NO_EVENT_LABEL
 
 # 0.43.0 stored one exclusive mode. Keep those values readable so existing
 # event snapshots never change their physical folder naming after the patch.
@@ -58,7 +67,7 @@ def normalize_event_naming(value: Any) -> dict[str, Any]:
     raw = value if isinstance(value, dict) else {}
 
     no_event_label = _clean_component(
-        raw.get("no_event_label", DEFAULT_NO_EVENT_LABEL),
+        raw.get("no_event_label", _default_no_event_label()),
         field="Bezeichnung für Ohne Ereignis",
     )
 
