@@ -1154,6 +1154,28 @@ UI_TRANSLATIONS.update({
   "Ereignisstatus": "Event status",
 })
 
+# All remaining literal German HTML labels and help attributes from the
+# audit of the seven browser page modules, excluding variable user data.
+UI_TRANSLATIONS.update({
+  "SD-Importe, Systemstatus und Prüfvorgänge an einem Ort": "SD imports, system status and verification in one place",
+  "Nur Dateien mit identischer Größe und identischem SHA-256 werden automatisch übersprungen.": "Only files with identical size and SHA-256 are automatically skipped.",
+  "Sicherung löschen": "Delete backup",
+  "werden ergänzt. Hardlinks werden bevorzugt; falls Quelle und Ziel auf unterschiedlichen Dateisystemen liegen, fragt Bibliothekar ausdrücklich nach": "will be added. Hard links are preferred; if source and destination are on different file systems, Bibliothekar explicitly asks for",
+  ": Die benötigten Zielordner unter": ": The required destination folders under",
+  "werden angelegt. Die Dateien selbst kopiert Bibliothekar erst im nächsten Schritt nach deiner ausdrücklichen Freigabe.": "will be created. Bibliothekar only copies files in the next step after your explicit approval.",
+  "Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.": "You may now manually remove only the originals listed below from the camera library. The app itself does not delete anything there.",
+  "Die Vorschau zeigt nur die Planung. Es werden noch keine Ordner verändert.": "The preview only shows the plan. No folders have been changed.",
+  "Nicht angehakte Tageskarten innerhalb sichtbarer Sicherungen werden automatisch nach Zeitraum einbezogen. Hier werden nur zusätzliche Aufnahmen aus aktuell ausgeblendeten aktiven Sicherungen bestätigt.": "Unselected day cards from visible backups are included automatically by date range. Only additional photos from currently hidden active backups are confirmed here.",
+  "Diese Dateien besitzen noch kein belastbares Aufnahmedatum und können deshalb keinem Ereignis zugeordnet werden.": "These files do not have a reliable capture date and cannot yet be assigned to an event.",
+  "Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Metadatenkorrektur → Allgemein liegt automatisch im Unterordner": "These names apply only to folders managed by Bibliothekar inside the workspace mount. Metadata Correction → General is automatically placed in the subfolder",
+  "Nach der Bestätigung werden alle Quelldateien vollständig per SHA-256 geprüft und erst danach innerhalb des SSD-Arbeitsbereichs ohne Überschreiben verschoben. Die Kamerabibliothek bleibt unberührt; bei einem Fehler wird automatisch zurückgerollt.": "After confirmation, all source files are fully verified by SHA-256 and then moved within the SSD workspace without overwriting existing files. The camera library remains unchanged; errors trigger an automatic rollback.",
+  "Die App prüft den realen Archivzustand read-only. Noch vorhandene Dateien werden an ihren ursprünglichen Ort zurückverschoben; fehlende Originale kommen aus dem vorbereiteten SSD-Rückbestand.": "The app verifies the actual archive state read-only. Files still present are moved back to their original location; missing originals come from the prepared SSD recovery inventory.",
+  "Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv. „Aktualisieren“ prüft den tatsächlichen Archivbestand und passt VON-Pfade sowie Erledigt-Status an.": "Released archive files are first recovered safely to SSD. Archive restructuring follows only afterward. Refresh checks the actual archive inventory and updates source paths and completion states.",
+  "Keine Dateien entsprechen den gewählten Filtern.": "No files match the selected filters.",
+  "Dateien entsprechen den gewählten Filtern.": "Files match the selected filters.",
+  "Metadatenkorrektur → Allgemein": "Metadata Correction → General",
+})
+
 UI_PATTERNS = [
   ["^Arbeitsbereich-Bestand für „(.+)“ freigeben\\? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt\\.$", "Release workspace files for “$1”? The camera library will be fully reverified first. Only confirmed workspace files will then be removed."],
   ["^([0-9]+)/([0-9]+) Dateien bestätigt; ([0-9]+) fehlen; ([0-9]+) weichen ab\\.$", "$1/$2 files verified; $3 missing; $4 mismatched."],
