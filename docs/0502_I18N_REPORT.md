@@ -19,6 +19,16 @@ Für neue Installationen ohne bestehende Daten gelten:
 
 Vorhandene deutsche Hauptverzeichnisse werden erkannt und weiterverwendet. Der Sprachschalter ist ausdrücklich **keine Umbenennungsfunktion**. Weitere historische und teilweise technische Unterordner mit fest eincodiertem Namen (z. B. `Alle`, `Sortiert`, `Ohne_Datum`, `Allgemein`) dürfen nicht rein kosmetisch im Dateisystem umbenannt werden, solange die Operationen nicht vollständig kompatibel gemacht und isoliert getestet wurden. Für diese Stellen besteht weiterhin Internationalisierungsbedarf.
 
+## Ergänzende UI-Absicherung für 0.50.2
+
+- Die Übersetzung läuft auf sichtbaren Beschriftungen und neuen Dialoginhalten; native Browserdialoge (`alert`, `confirm`, `prompt`) werden ebenfalls in der **Anzeige** übersetzt. Ihre Rückgabewerte und vom Benutzer eingegebene Antworten bleiben unverändert. Insbesondere ein abgelehntes Lösch-Confirm darf nicht zu einer Bestätigung werden.
+- Datums- und Zahlenformate in Ereignissen, Arbeitsbereich, Import und Archiv verwenden die aktive Browser-UI-Sprache. Interne Status- und Dateipfadvergleiche bleiben sprachunabhängig.
+- Der Wechsel Englisch ↔ Deutsch ist ohne Seitenneustart vorgesehen. Der Sprachlayer merkt sich die Originaltexte und stellt auch dynamische Zähler wie `3 Gruppen ausgewählt` beim Wechsel zurück.
+- Vorhandene Legacy-Regressionstests verwenden bewusst `BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE=de` und behalten ihre deutschen Erwartungen; die frische englische Ordnerbenennung wird separat ohne dieses Opt-in überprüft.
+- Neue synthetische Browser-JavaScript-Tests prüfen native Dialoge, Prompt-Eingaben, Warnungs-Cancel und dynamische EN→DE-Umschaltung. Zusätzliche Übersetzungen für Archivänderungsaufträge, Ereignisplanung und Metadatenverwaltung wurden ergänzt.
+
+**Qualitätsgrenze:** Wörterbuch-/DOM-Lokalisierung ist keine formale vollständige Internationalisierung aller Codepfade. Insbesondere benutzerdefinierte Ereignisnamen, weitere nicht katalogisierte API-Fehler und alle kontextabhängigen Interaktionen müssen im echten Browser auf Resttexte und Fehlzuordnungen geprüft werden. Der vollständige englische Umbau historischer innerer Verzeichnisnamen wäre ein eigener, migrationspflichtiger Dateioperations-Patch und ist nicht Teil dieses sicheren UI-Releases.
+
 ## Noch erforderlicher Freigabeumfang
 
 Das Wörterbuch ist eine Ausgangsbasis und darf **nicht** als Nachweis betrachtet werden, dass bereits jede Python-Fehlermeldung, jede nachgeladene UI-Meldung und jede variable Archiv-Abfolge in beiden Sprachen vollständig fachgerecht übersetzt ist. Browser-/PWA-Tests mit allen relevanten Zuständen, Prüfung auf deutsche Resttexte sowie neue englische Ende-zu-Ende-Dateipfadtests sind vor einer Qualitätsfreigabe erforderlich. Keine automatische Übersetzung fremder Dateinamen oder Benutzertexte. Benutzerbestätigungen vor destruktiven Aktionen müssen insbesondere geprüft werden.
