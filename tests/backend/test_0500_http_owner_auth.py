@@ -166,12 +166,17 @@ def test_0500_real_app_routes_are_behind_auth(monkeypatch):
     monkeypatch.delenv("BIBLIOTHEKAR_AUTH_TEST_BYPASS", raising=False)
     monkeypatch.setenv("BIBLIOTHEKAR_ADMIN_PASSWORD", "temporary-internal-test-secret-1234567")
     from app.main import app
-    with TestClient(app, follow_redirects=False) as client:
+    # Do not run the application's startup hooks in an auth-only test;
+    # no database, config, import paths or background worker may be touched.
+    client = TestClient(app, follow_redirects=False)
+    try:
         assert client.get("/healthz").status_code == 200
         assert client.get("/api/health").status_code == 401
         assert client.get("/api/jobs").status_code == 401
         assert client.post("/api/libraries", json={"display_name": "Unauthorized"}).status_code == 401
         assert client.delete("/api/jobs/unused/events/unused").status_code == 401
+    finally:
+        client.close()
 
 
 def test_0500_pwa_fetch_has_csrf_header_in_all_shared_layouts():
