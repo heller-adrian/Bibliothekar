@@ -1164,6 +1164,13 @@ I18N_UI_JS = r"""
   }
   const patterns = __PATTERNS__.map(([source, target]) => [new RegExp(source, "u"), target]);
   const key = "bibliothekar-language";
+  // Page titles are outside document.body and are not visited by the DOM walk.
+  const originalDocumentTitle = typeof document.title === "string" ? document.title : null;
+  function updateDocumentTitle() {
+    if (originalDocumentTitle !== null) {
+      document.title = locale === "en" ? tr(originalDocumentTitle) : originalDocumentTitle;
+    }
+  }
   let locale = "en";
   try { locale = localStorage.getItem(key) === "de" ? "de" : "en"; } catch (_) {}
   const originalText = new WeakMap();
@@ -1258,6 +1265,7 @@ I18N_UI_JS = r"""
     locale = next;
     document.documentElement.lang = next;
     document.documentElement.dataset.bkLocale = next;
+    updateDocumentTitle();
     try { localStorage.setItem(key, next); } catch (_) {}
     if (document.body) walk(document.body);
     updateChoiceButtons();
@@ -1287,6 +1295,7 @@ I18N_UI_JS = r"""
   });
   document.documentElement.lang = locale;
   document.documentElement.dataset.bkLocale = locale;
+  updateDocumentTitle();
   function init() {
     document.querySelectorAll("[data-bk-language-choice]").forEach(button => {
       button.addEventListener("click", () => setLocale(button.dataset.bkLanguageChoice));
