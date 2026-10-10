@@ -3673,11 +3673,13 @@ WORKSPACE_HTML = r"""<!doctype html>
         if(months.length>1){
           dialogError.hidden=false;
           dialogError.textContent="„Ohne Ereignis“ darf nur innerhalb eines Kalendermonats angelegt werden. Bitte die Monate getrennt zuordnen.";
+          dialogError.dataset.monthRangeError="1";
           saveEventButton.disabled=true;
         }else{
-          if(String(dialogError.textContent||"").includes("Kalendermonats")){
+          if(dialogError.dataset.monthRangeError==="1"){
             dialogError.hidden=true;
             dialogError.textContent="";
+            delete dialogError.dataset.monthRangeError;
           }
           saveEventButton.disabled=false;
         }
