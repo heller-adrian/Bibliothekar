@@ -77,9 +77,10 @@ def test_0502_language_switch_restores_dynamic_counter_text(tmp_path: Path):
         pytest.skip("Node.js not installed")
     harness = r'''
 globalThis.Node = {TEXT_NODE: 3, ELEMENT_NODE: 1};
+globalThis.NodeFilter = {SHOW_ELEMENT: 1, SHOW_TEXT: 4};
 const parent = {closest: () => null};
 const dynamic = {nodeType: 3, nodeValue: "3 Gruppen ausgewählt", parentElement: parent};
-const body = {nodeType: 1, closest: () => null};
+const body = {nodeType: 1, closest: () => null, hasAttribute: () => false};
 globalThis.document = {
   readyState: "loading",
   documentElement: {dataset: {}, lang: ""},
