@@ -296,8 +296,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.50.1"
-DEPLOYMENT_VERSION = "0.50.1"
+RELEASE_VERSION = "0.50.2"
+DEPLOYMENT_VERSION = "0.50.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -869,15 +869,16 @@ def _onboarding_required() -> bool:
 
 
 def _library_onboarding_html() -> str:
+    from app.ui_i18n import I18N_UI_JS
     workspaces_root = str(
         storage_paths(WORKSPACE_PATH)["workspaces_root"]
     )
-    return f"""<!doctype html>
-<html lang="de">
+    html = f"""<!doctype html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Bibliothekar · Bibliothek einrichten</title>
+<title>Bibliothekar · Set up library</title>
 <script src="/auth/client.js"></script>
 <style>
 :root{{color-scheme:dark;--bg:#0c1115;--surface:#172027;--border:#34414a;--text:#f2f4f5;--muted:#aeb8bf;--accent:#58aaf2;--danger:#ff716f}}
@@ -911,6 +912,7 @@ await json("/api/libraries",{{method:"POST",headers:{{"Content-Type":"applicatio
 statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";location.assign("/");
 }}catch(e){{statusEl.className="error";statusEl.textContent=e.message;button.disabled=false;}}}});
 </script></body></html>"""
+    return html.replace("</body>", f"<script>{I18N_UI_JS}</script></body>")
 
 
 @app.middleware("http")
