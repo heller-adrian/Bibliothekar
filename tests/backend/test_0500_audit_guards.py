@@ -46,3 +46,13 @@ def test_stable_release_workflow_never_force_retags() -> None:
     assert 'git tag -f' not in code
     assert 'refs/tags/${TAG}" --force' not in code
     assert 'Reject an existing stable version tag' in code
+
+
+def test_storage_rename_error_path_restores_confirmed_job_prefixes() -> None:
+    code = (Path(__file__).resolve().parents[2] / "app" / "main.py").read_text(
+        encoding="utf-8"
+    )
+    assert "path_rollback_errors: list[str] = []" in code
+    assert "renamed_backup_root," in code
+    assert "original_backup_root," in code
+    assert "Datenbank-Pfadrückbau nicht vollständig" in code

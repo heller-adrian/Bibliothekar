@@ -2843,6 +2843,29 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
                     current.rename(previous)
             except OSError:
                 pass
+        # BA-10: Die Jobpfade wurden je Bibliotheks-DB separat bestätigt.
+        # Ein Rückbau der Ordner/Settings muss diese Teil-Commits ebenfalls
+        # zurücknehmen, statt jobs.working_path auf verschwundene Ziele zu lassen.
+        path_rollback_errors: list[str] = []
+        if old_names["backup_directory_name"] != new_names["backup_directory_name"]:
+            original_backup_root = (root / old_names["backup_directory_name"]).resolve(strict=False)
+            renamed_backup_root = (root / new_names["backup_directory_name"]).resolve(strict=False)
+            if original_backup_root.is_dir() and not renamed_backup_root.exists():
+                for library in previous_rows:
+                    try:
+                        _rewrite_job_working_path_prefix(
+                            Path(str(library["database_path"])),
+                            renamed_backup_root,
+                            original_backup_root,
+                        )
+                    except Exception as rollback_error:
+                        path_rollback_errors.append(
+                            str(library["library_id"]) + ": " + str(rollback_error)
+                        )
+            else:
+                path_rollback_errors.append(
+                    "Sicherungsordner konnte physisch nicht vollständig zurückbenannt werden."
+                )
         # Registrypfade ebenfalls auf den vorherigen Stand zurückführen.
         for row in previous_rows:
             try:
@@ -2873,6 +2896,8 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
         except OSError:
             pass
         detail = str(error)
+        if path_rollback_errors:
+            detail += " Datenbank-Pfadrückbau nicht vollständig: " + " | ".join(path_rollback_errors)
         if isinstance(error, OSError):
             detail += (
                 " Der Ordner könnte als eigener TrueNAS-Hostpfad/Dataset-Mount "
