@@ -394,7 +394,7 @@ def test_reassignment_year_boundary_creates_separate_no_event_months(tmp_path):
         result = assign_event_reassignments(
             db, "j", "source", [fid], target_mode="new_no_event", segments=[segment],
         )
-        assert result["target"]["folder_name"] == f"{month} - No Event"
+        assert result["target"]["folder_name"] == f"{month} - Ohne Ereignis"
         with database_connection(db) as connection:
             target = connection.execute(
                 "SELECT start_datetime,event_kind FROM events WHERE id=?",
