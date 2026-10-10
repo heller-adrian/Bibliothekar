@@ -58,9 +58,12 @@ def _seed_library(tmp_path, *, two_files=False):
                 (family_id,len(b"synthetic-sidecar"),len(b"synthetic-sidecar"),
                  _hash(b"synthetic-sidecar"),_hash(b"synthetic-sidecar")),
             )
-        rows = [dict(r) for r in conn.execute(
-            "SELECT * FROM files WHERE family_id=? ORDER BY id", (family_id,)
-        ).fetchall()]
+        rows = [
+            {**dict(r), "file_id": int(r["id"])}
+            for r in conn.execute(
+                "SELECT * FROM files WHERE family_id=? ORDER BY id", (family_id,)
+            ).fetchall()
+        ]
         task_id = "META_BA12_TEST"
         conn.execute(
             """INSERT INTO metadata_corrections(
@@ -94,6 +97,7 @@ def _child_library(mode):
 import os,sys
 from pathlib import Path
 import app.metadata_correction as m
+import app.metadata_swap_recovery as recovery
 m.write_metadata_datetime = lambda path,media_type,value: Path(path).write_bytes(
     Path(path).read_bytes()+b"|corrected"
 )
@@ -107,9 +111,9 @@ if sys.argv[3] == "after_backup":
         return result
     m.os.replace=abrupt
 elif sys.argv[3] == "after_db_commit":
-    m.mark_swap_committed=lambda *_a,**_kw: os._exit(42)
+    recovery.mark_swap_committed=lambda *_a,**_kw: os._exit(42)
 elif sys.argv[3] == "after_journal_commit":
-    m.recover_swap_journal=lambda *_a,**_kw: os._exit(42)
+    recovery.recover_swap_journal=lambda *_a,**_kw: os._exit(42)
 m.apply_metadata_correction(Path(sys.argv[1]),"META_BA12_TEST",workspace_root=Path(sys.argv[2]),library_id="main")
 """.replace("sys.argv[3]",repr(mode))
 
@@ -195,6 +199,7 @@ def _child_multiple(mode):
 import os,sys
 from pathlib import Path
 import app.metadata_correction as m
+import app.metadata_swap_recovery as recovery
 from tests.backend.test_0340_patch import _fake_multiple_analysis
 m.analyze_tree=_fake_multiple_analysis
 m.write_metadata_datetime=lambda path,media_type,value: Path(path).write_bytes(
@@ -214,9 +219,9 @@ if sys.argv[3]=="after_backup":
         return result
     m.os.replace=abrupt
 elif sys.argv[3]=="after_all_swaps":
-    m.mark_swap_committed=lambda *_a,**_kw: os._exit(42)
+    recovery.mark_swap_committed=lambda *_a,**_kw: os._exit(42)
 elif sys.argv[3]=="after_journal_commit":
-    m.recover_swap_journal=lambda *_a,**_kw: os._exit(42)
+    recovery.recover_swap_journal=lambda *_a,**_kw: os._exit(42)
 m.apply_multiple_metadata_correction(
     workspace_root=Path(sys.argv[2]),library_id="main",
     reference_relative_path="A.JPG",proposed_datetime="2026-07-21T12:30:00",
@@ -267,6 +272,7 @@ def _child_reintegrate(mode,family_id):
 import os,sys
 from pathlib import Path
 import app.metadata_correction as m
+import app.metadata_swap_recovery as recovery
 m.write_metadata_datetime=lambda path,media_type,value: Path(path).write_bytes(
     Path(path).read_bytes()+b"|normalized"
 )
@@ -288,9 +294,9 @@ if sys.argv[3]=="after_backup":
         return result
     m.os.replace=terminate
 elif sys.argv[3]=="after_db_commit":
-    m.mark_swap_committed=lambda *_a,**_kw: os._exit(42)
+    recovery.mark_swap_committed=lambda *_a,**_kw: os._exit(42)
 elif sys.argv[3]=="after_journal_commit":
-    m.recover_swap_journal=lambda *_a,**_kw: os._exit(42)
+    recovery.recover_swap_journal=lambda *_a,**_kw: os._exit(42)
 m.reintegrate_library_metadata_family(
     Path(sys.argv[1]),workspace_root=Path(sys.argv[2]),
     library_id="main",family_id=int(sys.argv[4]),
