@@ -94,3 +94,52 @@ def test_0502_login_setup_and_settings_get_localisation():
     assert 'data-bk-language-choice="de"' in html
     assert "MutationObserver" in html
     assert 'data-bk-version>0.50.2</span>' in html
+
+
+def test_0502_english_new_install_inventory_reconcile(tmp_path: Path, monkeypatch):
+    from app.database import initialize_database, database_connection
+    from app.workspace_layout import ensure_workspace_layout
+    from app.central_stock_reconcile import reconcile_central_free_stock
+    from tests.backend.test_0412_consistency_semantics import _seed_free_file
+
+    workspace = tmp_path / "new-workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("KAMERA_WORKSPACE", str(workspace))
+    monkeypatch.setenv("KAMERA_CONFIG", str(tmp_path / "new-settings.json"))
+    monkeypatch.delenv("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE", raising=False)
+    db = tmp_path / "fresh.sqlite3"
+    initialize_database(db)
+    layout = ensure_workspace_layout(workspace)
+    central = Path(layout["backup_root"])
+    assert central.name == "SD Card Backups"
+    assert (workspace / "Library Workspaces").is_dir()
+    assert (workspace / "Metadata Correction").is_dir()
+    assert (workspace / "Trash").is_dir()
+
+    _family, file_id, relative = _seed_free_file(
+        db, family_key="ENGLISH", filename="ENGLISH.JPG",
+        day="2026-10-10", data=b"english-first-original",
+    )
+    source = central / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"english-first-original")
+    result = reconcile_central_free_stock(
+        db, workspace, library_id="main", excluded_family_ids=set()
+    )
+    assert result["ready"] is True
+    assert result["deleted_file_count"] == 0
+    assert result["misplaced_file_count"] == 0
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT 1 FROM files WHERE id=?", (file_id,)
+        ).fetchone()
+    assert source.read_bytes() == b"english-first-original"
+
+
+def test_0502_new_english_no_event_folder(tmp_path: Path, monkeypatch):
+    from app.event_naming import render_no_event_folder_name
+    monkeypatch.delenv("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE", raising=False)
+    assert render_no_event_folder_name("2026-10", {}) == "10 - No Event"
+    assert render_no_event_folder_name(
+        "2026-10", {"no_event_label": "My Unsorted Photos"}
+    ) == "10 - My Unsorted Photos"
