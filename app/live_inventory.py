@@ -126,6 +126,37 @@ def refresh_live_event_inventories(
                         continue
                 except (EventInventoryError, OSError):
                     pass
+
+            # A removed event root is a valid physical IST state, not a
+            # permanent scanner failure. Keep the archive-transfer check
+            # above first: files moved to the archive must not be recorded
+            # as deletions. The strict scanner remains the default for
+            # archive verification, editing and all other callers.
+            if (
+                isinstance(error, EventInventoryError)
+                and "Ereignisordner wurde nicht gefunden" in str(error)
+            ):
+                try:
+                    missing_inventory = scan_event_inventory(
+                        database_path,
+                        root,
+                        current_job_id,
+                        current_event_id,
+                        root_kind=root_kind,
+                        persist=True,
+                        update_known_file_locations=False,
+                        event_prefix_override=prefix,
+                        fast_refresh=False,
+                        allow_missing_root=True,
+                    )
+                    if missing_inventory.get("event_root_missing"):
+                        refreshed[current_event_id] = {
+                            **dict(missing_inventory.get("summary") or {}),
+                            "event_root_missing": True,
+                        }
+                        continue
+                except (EventInventoryError, WorkspaceLayoutError, OSError):
+                    pass
             errors.append({
                 "event_id": current_event_id,
                 "job_id": current_job_id,
