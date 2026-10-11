@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - patch/0.50.8
     tags:
       - 'v*'
   workflow_dispatch:

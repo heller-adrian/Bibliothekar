@@ -74,6 +74,20 @@ UI_0508_TRANSLATIONS = {
     "SSD-Freigabe vollständig abgeschlossen.": "SSD release completed successfully.",
 }
 
+# Additional literal copy discovered by the 0.50.8 page-template sweep.
+UI_0508_TRANSLATIONS.update({
+    "Datenbank-Zeitraum": "Database period",
+    "Verwerfen fehlgeschlagen": "Discard failed",
+    "werden unter": "will be placed under",
+    "Der Ordner ist leer.": "The folder is empty.",
+    "Prüfung/Korrektur erforderlich": "Review/correction required",
+    "korrigiert · wartet auf Einsortierung": "corrected · awaiting sorting",
+    "Metadaten erneut ändern": "Edit metadata again",
+    "Metadaten ändern": "Edit metadata",
+    "Aktiv": "Active",
+    "Öffnen": "Open",
+})
+
 UI_0508_PATTERNS = [
     # Path preservation: translate only the status prefix.
     [r"^Ereignisordner wurde nicht gefunden:\s*(.+)$",
