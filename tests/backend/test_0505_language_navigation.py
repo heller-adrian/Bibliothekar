@@ -77,3 +77,37 @@ console.log("PASS");
     script.write_text("const LANGUAGE = " + json.dumps(BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS) + ";\n" + js)
     completed = subprocess.run([node, str(script)], capture_output=True, text=True, check=True)
     assert completed.stdout.strip() == "PASS"
+
+
+def test_0505_each_interactive_page_has_valid_inline_javascript(tmp_path: Path):
+    """Catch JS syntax errors in actual rendered shell, import, workspace and archive."""
+    import re
+    from app import main
+    from app.events_ui import EVENTS_HTML
+    from app.transfer_ui import TRANSFER_HTML
+    from app.trash_ui import TRASH_HTML
+    from app.metadata_correction_ui import METADATA_CORRECTION_HTML
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is unavailable")
+    pages = {
+        "import": main.index(),
+        "workspace": apply_shell(WORKSPACE_HTML, active_area="workspace"),
+        "events": apply_shell(EVENTS_HTML, active_area="workspace", subarea="events"),
+        "archive": apply_shell(TRANSFER_HTML, active_area="archive"),
+        "trash": apply_shell(TRASH_HTML, active_area="trash"),
+        "metadata": apply_shell(METADATA_CORRECTION_HTML, active_area="metadata"),
+    }
+    count = 0
+    for page, html in pages.items():
+        for attrs, script in re.findall(r"<script([^>]*)>(.*?)</script>", html, flags=re.S | re.I):
+            if re.search(r"\\bsrc\\s*=", attrs, re.I) or "application/json" in attrs:
+                continue
+            if not script.strip():
+                continue
+            js = tmp_path / f"{page}-{count}.js"
+            js.write_text(script, encoding="utf-8")
+            completed = subprocess.run([node, "--check", str(js)], capture_output=True, text=True)
+            assert completed.returncode == 0, f"{page}: {completed.stderr}"
+            count += 1
+    assert count >= 15
