@@ -24,7 +24,17 @@ STAGING_DIRECTORY_NAME = "Später zuordnen"  # Legacy public constant; physical 
 
 def staging_directory_name(work_root: Path) -> str:
     from app.managed_directory_names import directory_name
-    return directory_name(Path(work_root), "assign_later")
+    root = Path(work_root)
+    # The historical fixed "Arbeitsbereich" workspace is a legacy layout.
+    # New registered library work roots use English on a clean installation.
+    # Explicit on-disk names always win; never rename existing directories.
+    if (
+        root.name == "Arbeitsbereich"
+        and not (root / "Später zuordnen").exists()
+        and not (root / "Assign Later").exists()
+    ):
+        return "Später zuordnen"
+    return directory_name(root, "assign_later")
 
 BRANCHES = ("Alle", "Sortiert", "Export")
 
