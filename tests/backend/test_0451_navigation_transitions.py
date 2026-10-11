@@ -7,8 +7,8 @@ from app.ui_shell import (
 
 
 def test_0451_versions():
-    assert __version__ == "0.50.4"
-    assert main.DEPLOYMENT_VERSION == "0.50.4"
+    assert __version__ == "0.50.5"
+    assert main.DEPLOYMENT_VERSION == "0.50.5"
 
 
 def test_0451_theme_script_is_in_head_before_all_styles():
@@ -16,8 +16,9 @@ def test_0451_theme_script_is_in_head_before_all_styles():
              '<body><main>x</main></body></html>'
     rendered = apply_shell(sample, active_area="workspace")
     head = rendered.split("</head>", 1)[0]
-    assert head.index('localStorage.getItem("bibliothekar-theme")') < head.index("<style>")
-    assert head.index("bk-tab-navigation-0451") < head.index("<style>")
+    assert head.index('localStorage.getItem("bibliothekar-language")') < head.index("<style>")
+    assert head.index('localStorage.getItem("bibliothekar-theme")') < head.index("<style>", head.index('localStorage.getItem("bibliothekar-theme")'))
+    assert head.index("bk-tab-navigation-0451") < head.index("<style>", head.index("bk-tab-navigation-0451"))
     assert head.index("<script>") < head.index("<style>")
     assert rendered.count('data-bk-area="workspace"') >= 1
 
@@ -41,7 +42,8 @@ def test_0451_navigation_has_single_press_and_arrival_motion():
     assert 'addEventListener("pointerup"' in script
     assert 'addEventListener("pointercancel"' in script
     assert 'bkTabNavigationStarted = true' in script
-    assert 'window.setTimeout(() => window.location.assign(href), 190)' in script
+    assert 'window.setTimeout(() => window.location.assign(href), 190)' not in script
+    assert 'window.location.assign(href);' in script
     assert 'sessionStorage.setItem("bk-tab-navigation-0451"' in script
     assert 'requestAnimationFrame(() => requestAnimationFrame(' in script
     assert 'window.addEventListener("pageshow", event =>' in script
