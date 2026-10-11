@@ -96,7 +96,7 @@ def test_0331_metadata_paths_never_create_technical_main_tree(tmp_path: Path):
         library_id="main",
         create=True,
     )
-    assert paths["root"] == workspace / "Metadatenkorrektur" / "Allgemein"
+    assert paths["root"] == workspace / "Metadatenkorrektur" / "General"
     assert paths["input_root"] == paths["root"]
     assert paths["output_root"] == paths["root"]
     assert not (workspace / "Metadatenkorrektur" / "Bibliothek" / "main").exists()
@@ -107,7 +107,7 @@ def test_0331_metadata_paths_never_create_technical_main_tree(tmp_path: Path):
         library_id="main",
         create=True,
     )
-    assert library["input_root"] == workspace / "SD-Kartensicherungen" / "Ohne_Datum"
+    assert library["input_root"] == workspace / "SD-Kartensicherungen" / "No Date"
     assert library["output_root"] == workspace / "SD-Kartensicherungen"
     assert not library["input_root"].exists()
 
