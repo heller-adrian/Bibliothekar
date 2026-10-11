@@ -1507,6 +1507,8 @@ I18N_UI_JS = r"""
         }
         return m[1] + labels[m[2]] + details;
       }
+      if (/^\s*bis [0-9]{4}-[0-9]{2}-[0-9]{2}/u.test(line))
+        return line.replace(/^(\s*)bis /u, "$1to ");
       if (/^\s*[0-9]{4}-[0-9]{2}-[0-9]{2} /u.test(line))
         return line.replace(/ bis (?=[0-9]{4}-[0-9]{2}-[0-9]{2})/u, " to ");
       return tr(line);

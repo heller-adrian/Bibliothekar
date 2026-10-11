@@ -103,7 +103,7 @@ eq(i18n.t("Ereignis bearbeiten · Test eng"), "Edit event · Test eng");
 eq(i18n.t("Änderungen anwenden · Test eng 2"), "Apply changes · Test eng 2");
 eq(i18n.previewText("Der gewählte Zeitraum ist ungültig."), "The selected date range is invalid.");
 eq(i18n.previewText("Zeitraum:\n2026-07-24 00:00\nbis 2026-07-24 23:59\nAuswahl: 16 Dateien, 8 Familien"),
-   "Period:\n2026-07-24 00:00\nbis 2026-07-24 23:59\nSelection: 16 files, 8 families");
+   "Period:\n2026-07-24 00:00\nto 2026-07-24 23:59\nSelection: 16 files, 8 families");
 eq(i18n.previewText("2026\n└── 07-24 - Test eng\n    ├── Alle\n    ├── Sortiert"),
    "2026\n└── 07-24 - Test eng\n    ├── Alle\n    ├── Sortiert");
 i18n.setLocale("de");
