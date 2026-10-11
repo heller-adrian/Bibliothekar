@@ -1,11 +1,17 @@
-0.50.7 separate test image, base 0.50.6.
-Source commit: e4b323be9a8d9ca05ffd45e59ee2cf77bb23024d.
-Tag: ghcr.io/heller-adrian/bibliothekar:patch-0.50.7
-Changes: desktop browser tab navigation without full-screen spinner,
-unchanged header animation, English import/SD-card/job progress and technical
-headings, English example event names, tests of new root directories under
-/workspace and preservation of configured legacy paths.
-Do not publish latest, do not merge main, do not mutate databases or files.
-QA gating: full backend regression + isolated archive harness must both pass.
-If CI infrastructure prevents QA, do not push or claim verified image.
+Bibliothekar 0.50.7 – publish a separate, QA-gated test image only.
+Base version: patch-0.50.6
+Approved source commit: 4722a82dc01efb6d0599099e222b4dbb3b72eec8
+Full source QA: https://github.com/heller-adrian/Bibliothekar/actions/runs/38141304454
+QA result: 1,039 backend tests passed, isolated archive harness passed.
+Target: ghcr.io/heller-adrian/bibliothekar:patch-0.50.7
+Changes: restore desktop tab animation and remove full-screen loading mask
+on desktop while retaining instant progress feedback in the installed PWA;
+English schema and SD-card/folder/drive-import messages, job progress,
+technical display labels and dynamic error states; English sample event
+names and new-install /workspace root directory defaults, preserving
+all existing user-configured directories and original archive data.
+No merge to main, no latest or stable tag, no productive NAS data changes.
+Rerun complete QA and isolated archive harness during this image publishing
+workflow; only push the image if both pass.
 Documentation: docs/0507_DESKTOP_I18N_IMPORT.md.
+Real-browser and iPhone manual approval before stable remains outstanding.
