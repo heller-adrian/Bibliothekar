@@ -194,3 +194,73 @@ def test_0509_archived_parent_and_child_replacement_is_read_only(tmp_path: Path)
         leafs=stored_leaf_layouts(conn,"e")
         assert leafs["child"]["input_path"]=="Alle"
     assert not helper.exists()
+
+
+def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path: Path):
+    """Finder/SMB placement does not authorize a semantic event edit."""
+    from app.event_structure_changes import (
+        EventStructureChangeError, get_structure_change,
+    )
+    import pytest
+
+    db=tmp_path/"db.sqlite3"
+    workspace=tmp_path/"workspace"
+    workspace.mkdir()
+    initialize_database(db)
+    ensure_workspace_layout(workspace)
+    work_root=shared_work_root(workspace)
+
+    with database_connection(db) as conn:
+        seed_job(conn)
+        seed_event(conn,status="applied")
+        conn.execute("""INSERT INTO events(
+           id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+           uses_time_range,folder_name,status,created_at,updated_at,event_kind,
+           preserve_day_folders,revision,applied_at,time_model_version,timeline_model
+        ) VALUES('child','j','e','child','Part B',
+         '2026-07-23T14:00:00','2026-07-23T20:00:00',1,
+         'Part B','applied',?,?,'event',0,1,?,2,'continuous')""",
+         (NOW,NOW,NOW))
+        family_id=conn.execute("""INSERT INTO file_families(
+             job_id,family_key,original_stem,status,selected_capture_time,
+             capture_time_confidence
+          ) VALUES('j','B','B','complete','2026-07-23T15:00:00','high')""").lastrowid
+        file_id=seed_file_for_family(conn,family_id=family_id,content=b"child",
+                 current_path="2026/07-23 - Trip/Part B/Alle/B.JPG",filename="B.JPG")
+        conn.execute("UPDATE files SET current_root_kind='shared_workspace' WHERE id=?",(file_id,))
+        conn.execute("""INSERT INTO event_assignments(event_id,family_id,file_id,
+                     assignment_source,created_at) VALUES('child',?,NULL,'manual',?)""",
+                     (family_id,NOW))
+        ensure_event_layout_snapshot(conn,"e",now=NOW)
+    root=work_root/"2026"/"07-23 - Trip"
+    for folder in ["Alle","Sortiert","Export","Part B/Alle","Part B/Sortiert","Part B/Export"]:
+        (root/folder).mkdir(parents=True,exist_ok=True)
+    (root/"Part B"/"Alle"/"B.JPG").write_bytes(b"child")
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    first=detect_event_structure_change(db,"e")
+    if first and first["status"]=="pending":
+        confirm_applied_structure_change(
+            db,workspace,first["id"],input_path="Alle",
+            input_paths={"child":"Alle"},app_version="0.50.9",
+        )
+
+    (root/"Part B"/"Alle"/"B.JPG").rename(root/"Alle"/"B.JPG")
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    task=detect_event_structure_change(db,"e")
+    assert task is not None and task["status"]=="blocked"
+    assert task["detected"]["semantic_change_candidates"]
+    assert task["detected"]["semantic_change_candidates"][0]["child_event_id"]=="child"
+    with pytest.raises(EventStructureChangeError):
+        confirm_applied_structure_change(
+            db,workspace,task["id"],input_path="Alle",
+            app_version="0.50.9"
+        )
+    with database_connection(db) as conn:
+        child=conn.execute("SELECT folder_name FROM events WHERE id='child'").fetchone()
+        assigned=conn.execute("SELECT event_id FROM event_assignments WHERE family_id=?",(family_id,)).fetchone()
+        assert child["folder_name"]=="Part B"
+        assert assigned["event_id"]=="child"
+    (root/"Alle"/"B.JPG").rename(root/"Part B"/"Alle"/"B.JPG")
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    assert detect_event_structure_change(db,"e") is None
+    assert get_structure_change(db,task["id"])["status"]=="cancelled"
