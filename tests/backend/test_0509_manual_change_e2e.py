@@ -290,6 +290,51 @@ def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path
         assigned=conn.execute("SELECT event_id FROM event_assignments WHERE family_id=?",(family_id,)).fetchone()
         assert child["folder_name"]=="Part B"
         assert assigned["event_id"]=="child"
+    # A reviewed, explicit edit may dissolve exactly that child. An ordinary
+    # edit without the matching task cannot bypass the physical conflict.
+    from app.event_structure_changes import (
+        validate_guided_structure_edit, assert_no_open_structure_change,
+    )
+    with database_connection(db) as conn:
+        rows=conn.execute("""SELECT DISTINCT ea.family_id FROM event_assignments ea
+                 JOIN events ev ON ev.id=ea.event_id
+                 WHERE COALESCE(ev.parent_event_id,ev.id)='e'""").fetchall()
+        family_ids=[int(row[0]) for row in rows]
+        parent=conn.execute("SELECT * FROM events WHERE id='e'").fetchone()
+        preview={
+            "event_kind":"event",
+            "parent_folder":str(parent["folder_name"]),
+            "start_date":str(parent["start_datetime"])[:10],
+            "end_date":str(parent["end_datetime"])[:10],
+            "selected_family_ids":family_ids,
+            "subevents":[],
+        }
+        with pytest.raises(EventStructureChangeError):
+            assert_no_open_structure_change(conn,"e")
+        confirmed=validate_guided_structure_edit(
+            conn,"e",task["id"],preview,expected_root_kind="shared_workspace"
+        )
+        assert confirmed["removed_child_ids"]==["child"]
+        assert_no_open_structure_change(
+            conn,"e",guided_change_id=task["id"],preview=preview
+        )
+        with pytest.raises(EventStructureChangeError):
+            validate_guided_structure_edit(
+                conn,"e",task["id"],{**preview,"selected_family_ids":[]}
+            )
+        with pytest.raises(EventStructureChangeError):
+            validate_guided_structure_edit(
+                conn,"e",task["id"],{**preview,"start_date":"2026-07-22"}
+            )
+        with pytest.raises(EventStructureChangeError):
+            validate_guided_structure_edit(
+                conn,"e",task["id"],{**preview,"subevents":[{
+                    "id":"child","name":"Part B",
+                    "start_datetime":"2026-07-23T14:00:00",
+                    "end_datetime":"2026-07-23T20:00:00"
+                }]}
+            )
+    # The preflight MUST NOT mutate any assignment or the event graph.
     (root/"Alle"/"B.JPG").rename(root/"Part B"/"Alle"/"B.JPG")
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
     assert detect_event_structure_change(db,"e") is None
