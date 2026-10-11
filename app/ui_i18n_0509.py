@@ -108,7 +108,15 @@ UI_0509_TRANSLATIONS = {
   "Die Sicherung wird bereits von mindestens einem Ereignis verwendet und kann deshalb nicht mehr vollständig gelöscht werden.": "This backup is already used by at least one event and therefore cannot be deleted completely.",
 }
 UI_0509_PATTERNS = [
-  [r"^([0-9]+) Dateien insgesamt · ([0-9]+) Medien · (.+?) · ([0-9]+) bereits gesichert · ([0-9]+) neu(?: · ([0-9]+) verändert/zu prüfen)?(?: · ([0-9]+) Verwaltungsdateien ignoriert)?(?: · Keine neuen Dateien)?$",
+  [r"^([0-9]+) Dateien insgesamt · ([0-9]+) Medien · (.+?) · ([0-9]+) bereits gesichert · ([0-9]+) neu · ([0-9]+) verändert/zu prüfen · ([0-9]+) Verwaltungsdateien ignoriert$",
+   "$1 total files · $2 media · $3 · $4 already backed up · $5 new · $6 changed/review required · $7 administrative files ignored"],
+  [r"^([0-9]+) Dateien insgesamt · ([0-9]+) Medien · (.+?) · ([0-9]+) bereits gesichert · ([0-9]+) neu · ([0-9]+) Verwaltungsdateien ignoriert$",
+   "$1 total files · $2 media · $3 · $4 already backed up · $5 new · $6 administrative files ignored"],
+  [r"^([0-9]+) Dateien insgesamt · ([0-9]+) Medien · (.+?) · ([0-9]+) bereits gesichert · ([0-9]+) neu · ([0-9]+) verändert/zu prüfen$",
+   "$1 total files · $2 media · $3 · $4 already backed up · $5 new · $6 changed/review required"],
+  [r"^([0-9]+) Dateien insgesamt · ([0-9]+) Medien · (.+?) · ([0-9]+) bereits gesichert · ([0-9]+) neu · Keine neuen Dateien$",
+   "$1 total files · $2 media · $3 · $4 already backed up · $5 new · No new files"],
+  [r"^([0-9]+) Dateien insgesamt · ([0-9]+) Medien · (.+?) · ([0-9]+) bereits gesichert · ([0-9]+) neu$",
    "$1 total files · $2 media · $3 · $4 already backed up · $5 new"],
   [r"^([0-9]+) Dateioperationen$", "$1 file operations"],
   [r"^([0-9]+) vorbereitete Elemente ins Archiv übernehmen$", "Copy $1 prepared items into archive"],
