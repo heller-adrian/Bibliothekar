@@ -84,8 +84,8 @@ UI_0505_TRANSLATIONS = {
 }
 UI_0505_PATTERNS = [
     [r"^Ohne passende Dateifamilien: (.+)$", "No matching file families: $1"],
-    [r"^Ereignis „(.+)“ löschen\\?$", "Delete event “$1”?"], 
-    [r"^Arbeitsbereich-Bestand für „(.+)“ freigeben\\? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt\\.$",
+    [r"^Ereignis „(.+)“ löschen\?$", "Delete event “$1”?"], 
+    [r"^Arbeitsbereich-Bestand für „(.+)“ freigeben\? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt\.$",
      "Release workspace inventory for “$1”? The camera library will be reverified before only confirmed workspace files are removed."],
     [r"^Hauptbibliothek · (aktiv|deaktiviert|aktuell)$",
      "Main library · $1"],
