@@ -147,7 +147,138 @@ def _in_flight(connection: Any, event: dict[str, Any]) -> bool:
     return False
 
 
-def assert_no_open_structure_change(connection: Any, event_id: str) -> None:
+def validate_guided_structure_edit(
+    connection: Any,
+    event_id: str,
+    change_id: str,
+    preview: dict[str, Any],
+    *,
+    expected_root_kind: str | None = None,
+) -> dict[str, Any]:
+    """Authorize ONLY the explicit removal of physically dissolved children.
+
+    A manually moved file does not itself change event ownership. This opt-in
+    check is executed again inside the normal editor transaction. The regular
+    edit/reassignment/archive workflow retains responsibility for the commit.
+    """
+    row = connection.execute(
+        """SELECT * FROM event_structure_changes
+           WHERE id=? AND event_id=? AND status='blocked'""",
+        (str(change_id), str(event_id)),
+    ).fetchone()
+    if row is None:
+        raise EventStructureChangeError("The manual change task is no longer active.")
+    row = dict(row)
+    if expected_root_kind is not None and row["root_kind"] != expected_root_kind:
+        raise EventStructureChangeError("The manual change belongs to another storage area.")
+    try:
+        detected = json.loads(str(row["detected_json"] or "{}"))
+    except (TypeError, ValueError) as exc:
+        raise EventStructureChangeError("The observed structure is invalid.") from exc
+    candidates = detected.get("semantic_change_candidates") or []
+    if not candidates or any(
+        (detected.get(key) or []) for key in (
+            "missing_file_ids", "duplicate_file_ids", "unclassified_directories",
+        )
+    ):
+        raise EventStructureChangeError("Manual structure changes are not unambiguous.")
+    event = connection.execute(
+        "SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",
+        (event_id,),
+    ).fetchone()
+    if event is None or str(event["event_kind"]) != "event":
+        raise EventStructureChangeError("Only normal parent events support this transition.")
+    event = dict(event)
+    if str(preview.get("parent_folder") or "") != str(event["folder_name"]):
+        raise EventStructureChangeError("Changing the parent folder requires a separate edit.")
+    if (
+        str(preview.get("start_date") or "") != str(event["start_datetime"])[:10]
+        or str(preview.get("end_date") or "") != str(event["end_datetime"])[:10]
+    ):
+        raise EventStructureChangeError("Changing the parent period requires a separate edit.")
+    children = [
+        dict(child) for child in connection.execute(
+            "SELECT id,name,start_datetime,end_datetime FROM events WHERE parent_event_id=?",
+            (event_id,),
+        ).fetchall()
+    ]
+    old_by_id = {str(child["id"]): child for child in children}
+    candidate_ids = {str(c["child_event_id"]) for c in candidates}
+    if not candidate_ids or not candidate_ids <= set(old_by_id):
+        raise EventStructureChangeError("A referenced subevent no longer exists.")
+    new_children = list(preview.get("subevents") or [])
+    remaining_ids = {str(c.get("id") or "") for c in new_children}
+    if (
+        len(remaining_ids) != len(new_children)
+        or any(not cid or cid not in old_by_id for cid in remaining_ids)
+        or remaining_ids != set(old_by_id) - candidate_ids
+    ):
+        raise EventStructureChangeError(
+            "Only the physically dissolved subevents may be removed in this guided edit."
+        )
+    for c in new_children:
+        old = old_by_id[str(c["id"])]
+        if (
+            str(c.get("name") or "") != str(old["name"])
+            or str(c.get("start_datetime") or "")[:19] != str(old["start_datetime"])[:19]
+            or str(c.get("end_datetime") or "")[:19] != str(old["end_datetime"])[:19]
+        ):
+            raise EventStructureChangeError("Other subevents must remain unchanged.")
+
+    known_ids = set()
+    for item in candidates:
+        if str(item.get("new_parent_folder") or "") not in {
+            "Alle", "All",
+            str((detected.get("current_input_path") or "")).split("/")[0],
+        }:
+            raise EventStructureChangeError("The destination is not a parent input folder.")
+        known_ids.update(int(v) for v in item.get("file_ids") or [])
+    if not known_ids:
+        raise EventStructureChangeError("No files were verified for the dissolved subevent.")
+    inventory = connection.execute(
+        """SELECT known_file_id,event_relative_path,sha256,size_bytes
+           FROM event_inventory_files
+           WHERE event_id=? AND root_kind=? AND known_file_id IS NOT NULL""",
+        (event_id, row["root_kind"]),
+    ).fetchall()
+    from collections import Counter
+    occurrences = Counter(int(v["known_file_id"]) for v in inventory)
+    if any(occurrences[file_id] != 1 for file_id in known_ids):
+        raise EventStructureChangeError("The moved files must each occur exactly once.")
+    for file_id in known_ids:
+        file_row = connection.execute(
+            """SELECT f.selected_capture_time,ff.selected_capture_time AS family_time
+               FROM files f LEFT JOIN file_families ff ON ff.id=f.family_id
+               WHERE f.id=?""",
+            (file_id,),
+        ).fetchone()
+        if file_row is None:
+            raise EventStructureChangeError("A moved file disappeared from the database.")
+        capture = str(file_row["selected_capture_time"] or file_row["family_time"] or "")[:19]
+        if not capture or not (
+            str(event["start_datetime"])[:19] <= capture <= str(event["end_datetime"])[:19]
+        ):
+            raise EventStructureChangeError("A moved photo is outside the parent event's time interval.")
+    # Preserve parent family ownership: changing family selection, root folder
+    # layouts or unrelated siblings must use the ordinary reviewed editor.
+    current_families = {
+        int(v["family_id"]) for v in connection.execute(
+            """SELECT DISTINCT ea.family_id FROM event_assignments ea
+               JOIN events e ON e.id=ea.event_id
+               WHERE COALESCE(e.parent_event_id,e.id)=? AND ea.family_id IS NOT NULL""",
+            (event_id,),
+        ).fetchall()
+    }
+    if {int(v) for v in preview.get("selected_family_ids") or []} != current_families:
+        raise EventStructureChangeError("Manual guided edits cannot add or remove families.")
+    return {"change_id": row["id"], "removed_child_ids": sorted(candidate_ids)}
+
+
+def assert_no_open_structure_change(
+    connection: Any, event_id: str, *,
+    guided_change_id: str | None = None,
+    preview: dict[str, Any] | None = None,
+) -> None:
     row = connection.execute(
         """SELECT id,status FROM event_structure_changes
            WHERE event_id=? AND status IN ('pending','prepared','verified','blocked')
@@ -155,6 +286,15 @@ def assert_no_open_structure_change(connection: Any, event_id: str) -> None:
         (event_id,),
     ).fetchone()
     if row is not None:
+        if (
+            guided_change_id and preview is not None
+            and str(row["id"]) == str(guided_change_id)
+        ):
+            validate_guided_structure_edit(
+                connection, event_id, guided_change_id, preview,
+                expected_root_kind="shared_workspace",
+            )
+            return
         raise EventStructureChangeError(
             "Für dieses Ereignis wurde eine manuelle Dateisystemänderung erkannt. "
             "Bitte zuerst die Aufgabe „Manuelle Ereignisänderung“ abschließen."
