@@ -8355,6 +8355,7 @@ def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any
             input_path=str(payload.get("input_path") or ""),
             input_paths=payload.get("input_paths") if isinstance(payload.get("input_paths"), dict) else None,
             app_version=RELEASE_VERSION,
+            work_root=current_library_context().work_root,
         )
     except EventStructureChangeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -8368,6 +8369,7 @@ def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
             current_archive_root(),
             current_workspace_root(),
             change_id,
+            work_root=current_library_context().work_root,
         )
     except EventStructureChangeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
