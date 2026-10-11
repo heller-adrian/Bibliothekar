@@ -6,13 +6,13 @@ from app import main, source_helper
 
 
 def test_0402_version_contract():
-    assert PACKAGE_VERSION == "0.50.5"
+    assert PACKAGE_VERSION == "0.50.6"
     assert main.APP_VERSION == PACKAGE_VERSION
     assert main.DEPLOYMENT_VERSION == PACKAGE_VERSION
     assert source_helper.app.version == PACKAGE_VERSION
     assert source_helper.healthz()["version"] == PACKAGE_VERSION
-    assert "patch-0.50.5" in Path("compose.example.yaml").read_text(encoding="utf-8")
-    assert "Version <span data-bk-version>0.50.5</span>" in Path("app/ui_shell.py").read_text(encoding="utf-8")
+    assert "patch-0.50.6" in Path("compose.example.yaml").read_text(encoding="utf-8")
+    assert "Version <span data-bk-version>0.50.6</span>" in Path("app/ui_shell.py").read_text(encoding="utf-8")
 
 
 def test_0402_mobile_no_event_range_has_one_heading_and_two_full_rows():
@@ -33,6 +33,6 @@ def test_0402_mobile_no_event_range_has_one_heading_and_two_full_rows():
 def test_0402_readme_declares_latest_update_channel():
     source = Path("README.md").read_text(encoding="utf-8")
     assert "Aktuelle stabile Veröffentlichung: **" in source
-    assert "Entwicklungsversion: **0.50.5**" in source
+    assert "Entwicklungsversion: **0.50.6**" in source
     assert "ghcr.io/heller-adrian/bibliothekar:latest" in source
     assert "latest" in source
