@@ -962,12 +962,17 @@ def _remove_empty_source_directories(
             continue
 
         current = source.parent
+        # Keep every managed helper root protected from empty-directory
+        # pruning, regardless of the language chosen when it was created.
         persistent_roots = [
-            (Path(plan["target_root"]) / "Später zuordnen").resolve(strict=False),
+            (Path(plan["target_root"]) / name).resolve(strict=False)
+            for name in ("Später zuordnen", "Assign Later")
+        ] + [
             (
                 Path(str(plan.get("central_stock_root") or plan["target_root"]))
-                / "Freigewordene Archivdateien"
-            ).resolve(strict=False),
+                / name
+            ).resolve(strict=False)
+            for name in ("Freigewordene Archivdateien", "Released Archive Files")
         ]
         for persistent_root in persistent_roots:
             if _is_relative_to(current, persistent_root):
