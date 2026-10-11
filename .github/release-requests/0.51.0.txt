@@ -1,0 +1,5 @@
+Bibliothekar 0.51.0 – GHCR patch image request
+Branch: patch/0.51.0
+QA: https://github.com/heller-adrian/Bibliothekar/actions/runs/38178391433
+Scope: guided manual subevent dissolution, archive change request provenance, English new-install work/metadata staging directories, historical naming compatibility.
+Publish only patch-0.51.0 and the patch branch tag; never main/latest.
