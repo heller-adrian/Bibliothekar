@@ -2692,12 +2692,12 @@ WORKSPACE_HTML = r"""<!doctype html>
               data-planned-event="${escapeHtml(event.id)}"
               data-planned-components="${escapeHtml(JSON.stringify((event.component_events || [{job_id:event.job_id,event_id:event.id,status:event.status}]).filter(component=>component.status==="planned")))}"
               checked>
-            <span>${escapeHtml(event.display_title || event.name)} · ${Number(event.assigned_family_count || 0)} Familien${(event.component_events||[]).length>1?" · mehrere Sicherungen":""}</span>
+            <span><span data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</span> · <span>${Number(event.assigned_family_count || 0)} Familien${(event.component_events||[]).length>1?" · mehrere Sicherungen":""}</span></span>
           </label>`).join("")
         + reconcileTargets.map(event => `
           <div class="planned-choice">
             <span>↳</span>
-            <span><strong>${escapeHtml(event.display_title || event.name)}</strong> · Ziel einer offenen gemeinsamen Nachsortierung</span>
+            <span><strong data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong> · <span>Ziel einer offenen gemeinsamen Nachsortierung</span></span>
           </div>`).join("");
 
       const families = planned.reduce((sum,event)=>sum+Number(event.assigned_family_count||0),0);
@@ -2822,7 +2822,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       structurePreview.classList.add("rich-preview");
       structurePreview.innerHTML =
-        `<div class="preview-root-title">${escapeHtml(event.name || "Gespeichertes Ereignis")}</div>`
+        `<div class="preview-root-title" data-bk-preserve-language>${escapeHtml(event.name || "Gespeichertes Ereignis")}</div>`
         + `<div class="stored-preview-meta">${details.join("")}</div>`
         + `<pre class="structure-lines">${escapeHtml(data?.structure_text || "Keine Struktur vorhanden.")}</pre>`;
       previewBody.hidden = false;
