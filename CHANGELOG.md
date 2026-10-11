@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.51.0 – Guided manual event edits and English storage defaults (development)
+
+- Added an explicit **Review as event edit** transition for manually dissolved subevents. The server validates the exact saved physical inventory, original family ownership, capture-time bounds, retained sibling events and a matching open manual-change task before permitting any edit.
+- Applied events use the established transactional event-edit mutation and mandatory reapply/reconcile workflow. An ordinary edit still cannot bypass an unresolved physical structure task; a reviewed guided task is completed only within the event-edit SQLite transaction.
+- Archived events are handed to the existing read-only archive change-request flow with the same narrow semantic preflight. Archive contents are not modified by the server.
+- Central managed internal folder names now default to English for newly created paths, with existing legacy folders preserved. Ambiguous simultaneous nonempty English and German roots fail closed rather than splitting the database's stock.
+- Metadata tools support `General`, `Batch Correction` and `No Date` while preserving existing German folder names and stored relative paths. New folder imports and simulated imports use the selected undated root.
+- Archive staging uses the selected library's actual work area, including `Assign Later`, `Released Archive Files` and compatible legacy staging paths; reversal chooses `Reversal` and `Restoration` on new setups.
+- New regression coverage includes direct applied-child dissolution, rejection without explicit approval, exact family retention, canonical workflow reentry, legacy/new directory names and collision handling.
+- **Release gate:** the patch remains isolated from `main`/`latest` until full GitHub QA and a separate test-image build complete. TrueNAS physical acceptance is still required.
+
 ## 0.50.9 – Getrennte Ereignisordner und sichere manuelle Änderungen (in Entwicklung)
 
 - Manuell erkannte unterschiedliche Organisationsstrukturen von Haupt-, Unter- und Tagesereignisblättern erhalten separate Input-Ordner. Die Blatt-Zuordnung verwendet stabile Ereignis-IDs statt Ordnernamen.
