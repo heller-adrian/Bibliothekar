@@ -819,6 +819,7 @@ def propose_event_change(
     notes: str = "",
     archive_root: Path | None = None,
     workspace_path: Path | None = None,
+    guided_structure_change_id: str | None = None,
 ) -> dict[str, Any]:
     """Change-Request fuer ein archiviertes Ereignis vorschlagen.
 
@@ -926,6 +927,12 @@ def propose_event_change(
     # ChangeRequest erstellen
     with database_connection(database_path) as connection:
         connection.execute('BEGIN IMMEDIATE')
+        if guided_structure_change_id:
+            from app.event_structure_changes import validate_guided_structure_edit
+            validate_guided_structure_edit(
+                connection, event_id, guided_structure_change_id, preview,
+                expected_root_kind="camera_archive",
+            )
         from app.event_timeline import assert_editable_normal, continuous_event_overlaps, no_event_segment_overlaps
         from app.archive_reassignment_segments import proposed_ranges
         if preview.get('child_segments'):
@@ -1017,7 +1024,7 @@ def propose_event_change(
             ),
         )
 
-        connection.execute('UPDATE event_change_requests SET time_model_version=2 WHERE id=?',(cr_id,))
+        connection.execute('UPDATE event_change_requests SET time_model_version=2, guided_structure_change_id=? WHERE id=?',(guided_structure_change_id,cr_id))
         # Datei-Bestaetigungen (loeschen/bewegen/behalten) fuer jede Familie
         for family_plan in plan["families_with_plans"]:
             fid = family_plan["family_id"]
