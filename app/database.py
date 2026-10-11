@@ -5053,7 +5053,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                WHERE f.current_root_kind='shared_workspace'
                  AND (
                    f.current_relative_path IN ('Ohne_Datum','No Date')
-                   OR f.(current_relative_path LIKE 'Ohne_Datum/%' OR current_relative_path LIKE 'No Date/%')
+                   OR (f.current_relative_path LIKE 'Ohne_Datum/%' OR f.current_relative_path LIKE 'No Date/%')
                  )
                  AND NOT EXISTS (
                    SELECT 1 FROM event_assignments ea
@@ -5180,7 +5180,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                      AND undated_file.current_root_kind='shared_workspace'
                      AND (
                        undated_file.current_relative_path IN ('Ohne_Datum','No Date')
-                       OR undated_file.(current_relative_path LIKE 'Ohne_Datum/%' OR current_relative_path LIKE 'No Date/%')
+                       OR (undated_file.current_relative_path LIKE 'Ohne_Datum/%' OR undated_file.current_relative_path LIKE 'No Date/%')
                      )
                  )
                  AND NOT EXISTS (
