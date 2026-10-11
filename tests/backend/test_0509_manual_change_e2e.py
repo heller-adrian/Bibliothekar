@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pytest
 from pathlib import Path
 
 from app.database import database_connection, initialize_database
@@ -123,7 +124,8 @@ def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path):
     assert json.loads(notice["details_json"])["reason"]=="capture_outside_subevent"
 
 
-def test_0509_archived_parent_and_child_replacement_is_read_only(tmp_path: Path):
+@pytest.mark.parametrize('english_work_root', [False, True])
+def test_0509_archived_parent_and_child_replacement_is_read_only(tmp_path: Path, english_work_root: bool):
     """A prepared archived multi-input change is committed only after SHA verification."""
     from app.event_structure_changes import (
         prepare_archived_structure_change,verify_archived_structure_change
@@ -135,6 +137,9 @@ def test_0509_archived_parent_and_child_replacement_is_read_only(tmp_path: Path)
     archive.mkdir()
     initialize_database(db)
     ensure_workspace_layout(workspace)
+    work_root = workspace / "Library Workspaces" / "main" if english_work_root else None
+    if work_root is not None:
+        work_root.mkdir(parents=True)
     with database_connection(db) as conn:
         seed_job(conn)
         seed_event(conn,status="archived")
@@ -179,14 +184,17 @@ def test_0509_archived_parent_and_child_replacement_is_read_only(tmp_path: Path)
     prepared=prepare_archived_structure_change(
         db,workspace,detected["id"],
         input_path="Alle",input_paths={"e":"Alle","child":"Alle"},
-        app_version="0.50.9",
+        app_version="0.50.9",work_root=work_root,
     )
     helper=Path(prepared["prepared_event_json_path"])
+    if work_root is not None:
+        assert helper.is_relative_to(work_root / "Assign Later")
+        assert not (workspace / "Arbeitsbereich" / "Später zuordnen").exists()
     assert helper.is_file()
     assert not (root/"event.json").exists()
     (root/"event.json").write_bytes(helper.read_bytes())
     confirmed=verify_archived_structure_change(
-        db,archive,workspace,detected["id"]
+        db,archive,workspace,detected["id"],work_root=work_root
     )
     assert confirmed["status"]=="completed"
     assert confirmed["archive_read_only"]
