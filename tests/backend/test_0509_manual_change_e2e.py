@@ -221,6 +221,14 @@ def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path
     with database_connection(db) as conn:
         seed_job(conn)
         seed_event(conn,status="applied")
+        _parent_family_id,parent_file_id=seed_family(
+            conn,content=b"parent",
+            current_path="2026/07-23 - Trip/Alle/A.JPG",
+        )
+        conn.execute(
+            "UPDATE files SET current_root_kind='shared_workspace' WHERE id=?",
+            (parent_file_id,),
+        )
         conn.execute("""INSERT INTO events(
            id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
            uses_time_range,folder_name,status,created_at,updated_at,event_kind,
@@ -243,6 +251,7 @@ def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path
     root=work_root/"2026"/"07-23 - Trip"
     for folder in ["Alle","Sortiert","Export","Part B/Alle","Part B/Sortiert","Part B/Export"]:
         (root/folder).mkdir(parents=True,exist_ok=True)
+    (root/"Alle"/"A.JPG").write_bytes(b"parent")
     (root/"Part B"/"Alle"/"B.JPG").write_bytes(b"child")
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
     first=detect_event_structure_change(db,"e")
