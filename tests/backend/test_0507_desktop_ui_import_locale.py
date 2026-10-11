@@ -37,10 +37,10 @@ def test_0507_import_messages_and_schema_are_in_catalog():
     assert main.RELEASE_VERSION == "0.50.7"
     assert main.DEPLOYMENT_VERSION == "0.50.7"
     # Database detail and import history are formatted by the app before rendering.
-    assert 'Schema version ' in main.INDEX_HTML
-    assert 'importUiText(job.progress_message || "Kein Statustext vorhanden.")' in main.INDEX_HTML
-    assert 'Technical ID: ' in main.INDEX_HTML
-    assert 'Job type: ' in main.INDEX_HTML
+    assert 'Schema version ' in main.index()
+    assert 'importUiText(job.progress_message || "Kein Statustext vorhanden.")' in main.index()
+    assert 'Technical ID: ' in main.index()
+    assert 'Job type: ' in main.index()
 
 def test_0507_fresh_top_level_workspace_folders_are_english(tmp_path: Path, monkeypatch):
     workspace = tmp_path / "workspace"

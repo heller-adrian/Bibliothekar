@@ -25,7 +25,7 @@ def test_0505_startup_language_resolved_before_body_first_paint():
     head = html.split("</head>", 1)[0]
     assert "BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS" not in head
     assert 'localStorage.getItem("bibliothekar-language")' in head
-    assert 'html[data-bk-i18n-pending="true"] body { visibility: hidden' in head
+    assert 'html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body { visibility: hidden' in head
     assert html.index("bkI18nPending") < html.index("<body")
     assert "delete document.documentElement.dataset.bkI18nPending;" in I18N_UI_JS
     assert html.index("bkI18nPending") < html.index("MutationObserver")
