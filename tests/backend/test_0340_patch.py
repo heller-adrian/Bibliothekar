@@ -56,8 +56,8 @@ def _fake_multiple_analysis(root: Path, include_other: bool = False) -> dict:
 
 def test_0340_multiple_folder_is_created_next_to_general(tmp_path: Path):
     ensure_workspace_layout(tmp_path)
-    general = tmp_path / "Metadatenkorrektur" / "Allgemein"
-    multiple = tmp_path / "Metadatenkorrektur" / "Mehrfachkorrektur"
+    general = tmp_path / "Metadatenkorrektur" / "General"
+    multiple = tmp_path / "Metadatenkorrektur" / "Batch Correction"
     assert general.is_dir()
     assert multiple.is_dir()
 
