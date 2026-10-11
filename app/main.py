@@ -10996,6 +10996,29 @@ def index() -> str:
       return window.BibliothekarI18n?.t?.(source) ?? source;
     }
 
+    // The technical panel is presentation-only. Translate known import-state
+    // fields in a shallow copy; never rewrite the original job, persisted
+    // source labels, filesystem paths, import IDs or JSON on the server.
+    function localizedTechnicalJob(job) {
+      if (document.documentElement.dataset.bkLocale === "de") return job;
+      const display = {...job};
+      for (const field of ["progress_message", "error_message"]) {
+        if (typeof display[field] === "string") {
+          display[field] = importUiText(display[field]);
+        }
+      }
+      if (job.result && typeof job.result === "object"
+          && !Array.isArray(job.result)) {
+        display.result = {...job.result};
+        for (const field of ["message", "progress_message", "error_message"]) {
+          if (typeof display.result[field] === "string") {
+            display.result[field] = importUiText(display.result[field]);
+          }
+        }
+      }
+      return display;
+    }
+
     function renderJob(job, isHidden=false) {
       const state =
         job.stage === "cancelled"
@@ -11201,7 +11224,7 @@ def index() -> str:
               + (job.operation || job.kind || "–")
               + "\\n\\n"
               + JSON.stringify(
-                  job,
+                  localizedTechnicalJob(job),
                   null,
                   2
                 )
