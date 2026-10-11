@@ -30,7 +30,7 @@ def test_0505_startup_language_resolved_before_body_first_paint():
     assert "delete document.documentElement.dataset.bkI18nPending;" in I18N_UI_JS
     assert html.index("bkI18nPending") < html.index("MutationObserver")
     assert "window.setTimeout(() => window.location.assign(href), 190)" not in html
-    assert "window.location.assign(href);" in BIBLIOTHEKAR_JS
+    assert "requestAnimationFrame(() => window.location.assign(href))" in BIBLIOTHEKAR_JS
     assert 'data-bk-version>0.50.6</span>' in html
 
 
