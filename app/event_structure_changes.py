@@ -326,7 +326,7 @@ def _snapshot_from_inventory(
 
     known_rows = connection.execute(
         """SELECT known_file_id,family_id,relative_path,event_relative_path,filename,
-                  size_bytes,sha256,asset_kind
+                  size_bytes,sha256,asset_kind,selected_capture_time
            FROM event_inventory_files
            WHERE event_id=? AND root_kind=?
            ORDER BY event_relative_path""",
@@ -499,6 +499,27 @@ def _snapshot_from_inventory(
 
     file_moves = []
     placement_conflicts = []
+    # A child's stored assignment alone is not sufficient: the observed
+    # capture time must also be within the child's actual temporal bounds.
+    child_intervals: dict[int, tuple[str, str]] = {}
+    for assignment in connection.execute(
+        """SELECT f.id AS file_id, assigned.start_datetime,assigned.end_datetime
+           FROM event_assignments ea
+           JOIN events assigned ON assigned.id=ea.event_id
+           JOIN files f ON (
+             ea.file_id=f.id OR (
+               ea.file_id IS NULL AND ea.family_id=f.family_id
+             )
+           )
+           WHERE assigned.parent_event_id=?
+           ORDER BY CASE WHEN ea.file_id IS NULL THEN 1 ELSE 0 END""",
+        (event_id,),
+    ).fetchall():
+        child_intervals[int(assignment["file_id"])] = (
+            str(assignment["start_datetime"] or "")[:19],
+            str(assignment["end_datetime"] or "")[:19],
+        )
+
     for file_id, observed in observed_known.items():
         expected = expected_files.get(file_id)
         if expected is None:
@@ -519,11 +540,19 @@ def _snapshot_from_inventory(
             event,
             file_id,
         )
-        if expected_prefix and not _is_within_prefix(
+        capture = str(observed.get("selected_capture_time") or "")[:19]
+        child_bounds = child_intervals.get(int(file_id))
+        outside_child_time = bool(
+            child_bounds and capture and
+            not (child_bounds[0] <= capture <= child_bounds[1])
+        )
+        if (expected_prefix and not _is_within_prefix(
             normalized_new,
             expected_prefix,
-        ):
+        )) or outside_child_time:
             placement_conflicts.append({
+                "reason": "capture_outside_subevent" if outside_child_time else "wrong_location",
+                "capture_time": capture,
                 "file_id": file_id,
                 "family_id": observed.get("family_id"),
                 "old_path": old,
@@ -902,6 +931,11 @@ def detect_event_structure_change(
                 f"{file_row['original_filename']} liegt unter „{observed}“. "
                 f"Die fachliche Zuordnung erlaubt nur „{item.get('expected_prefix') or ''} …“."
             )
+            if item.get("reason") == "capture_outside_subevent":
+                detail += (
+                    " Die tatsächliche Aufnahmezeit liegt außerhalb des "
+                    "Zeitfensters des zugeordneten Unterereignisses."
+                )
             if root_kind == "camera_archive":
                 detail += (
                     " Das Archiv ist schreibgeschützt; bitte die Datei manuell "
@@ -918,7 +952,7 @@ def detect_event_structure_change(
                 event_id=event_id,
                 file_id=file_id,
                 relative_path=observed,
-                repairable=root_kind == "shared_workspace",
+                repairable=root_kind == "shared_workspace" and item.get("reason") != "capture_outside_subevent",
                 action_required=True,
                 group_key="placement_conflict",
                 details={
@@ -927,6 +961,8 @@ def detect_event_structure_change(
                     "expected_relative_path": expected_path,
                     "observed_relative_path": observed,
                     "expected_prefix": str(item.get("expected_prefix") or ""),
+                    "reason": str(item.get("reason") or ""),
+                    "capture_time": str(item.get("capture_time") or ""),
                     "size_bytes": int(file_row["size_bytes"] or 0),
                     "sha256": str(file_row["sha256"] or ""),
                 },
