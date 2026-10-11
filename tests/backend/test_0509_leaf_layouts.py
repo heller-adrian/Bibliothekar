@@ -80,3 +80,34 @@ def test_0509_manual_structure_path_accepts_valid_unicode_and_nested_relative():
     assert _safe_rel("Sommer/Alle/A.JPG") == "Sommer/Alle/A.JPG"
     assert _safe_rel("2026/Skizzen – Δ") == "2026/Skizzen – Δ"
     assert _safe_rel("") == ""
+
+
+def test_0509_staged_event_document_preserves_foreign_file(tmp_path):
+    from app.event_structure_changes import (
+        EventStructureChangeError, _write_prepared_document,
+    )
+    target=tmp_path/"Assign Later"/"2026"/"07-23 - Trip"/"event.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"source":"someone-else","event":{"id":"e"}}')
+    original=target.read_bytes()
+    with pytest.raises(EventStructureChangeError, match="anderen Ereignis"):
+        _write_prepared_document(target,{"source":"kamera-automatisierung","event":{"id":"e"}})
+    assert target.read_bytes()==original
+
+
+def test_0509_staged_event_document_rejects_symlink_parent(tmp_path):
+    from app.event_structure_changes import (
+        EventStructureChangeError, _write_prepared_document,
+    )
+    import os
+    stage=tmp_path/"Assign Later"/"2026"
+    stage.mkdir(parents=True)
+    outside=tmp_path/"external"
+    outside.mkdir()
+    (stage/"07-23 - Trip").symlink_to(outside, target_is_directory=True)
+    target=stage/"07-23 - Trip"/"event.json"
+    with pytest.raises(EventStructureChangeError, match="symbolischen Link"):
+        _write_prepared_document(
+            target, {"source":"kamera-automatisierung","event":{"id":"e"}}
+        )
+    assert not (outside/"event.json").exists()
