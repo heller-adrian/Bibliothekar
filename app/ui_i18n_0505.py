@@ -68,7 +68,7 @@ UI_0505_PATTERNS = [
     [r"^([0-9]+) bereit zum Einsortieren$", "$1 ready to sort"],
     [r"^([0-9]+) Familie$", "$1 family"],
     [r"^([0-9]+) Familien$", "$1 families"],
-    [r"^([0-9]+) Ereignisse? mit ([0-9]+) Familien und ([0-9]+) Dateien jetzt anwenden\\? Der Server führt den Vorgang auch weiter, wenn diese Seite geschlossen wird\\.$",
+    [r"^([0-9]+) Ereignisse? mit ([0-9]+) Familien und ([0-9]+) Dateien jetzt anwenden\? Der Server führt den Vorgang auch weiter, wenn diese Seite geschlossen wird\.$",
      "Apply $1 events with $2 families and $3 files now? The server will continue even if this page is closed."],
     [r"^([0-9]+) Familien · Mehrere Aufnahmegeräte - (.+)$",
      "$1 families · Multiple cameras - $2"],
