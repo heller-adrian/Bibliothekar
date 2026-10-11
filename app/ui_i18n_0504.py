@@ -313,6 +313,5 @@ UI_0504_PATTERNS = [
     [r"^SHA-256 stimmt beim Bereinigen nicht mehr: (.+)$", "SHA-256 changed during cleanup: $1"],
     [r"^Quelle: (.+)$", "Source: $1"],
     [r"^Ordner: (.+)$", "Folder: $1"],
-    [r"^Status: (.+)$", "Status: $1"],
     [r"^([0-9]+) Familien · Mehrere Aufnahmegeräte(.*)$", "$1 families · Multiple cameras$2"],
 ]
