@@ -515,10 +515,10 @@ def _snapshot_from_inventory(
            ORDER BY CASE WHEN ea.file_id IS NULL THEN 1 ELSE 0 END""",
         (event_id,),
     ).fetchall():
-        child_intervals[int(assignment["file_id"])] = (
+        child_intervals.setdefault(int(assignment["file_id"]), (
             str(assignment["start_datetime"] or "")[:19],
             str(assignment["end_datetime"] or "")[:19],
-        )
+        ))
 
     for file_id, observed in observed_known.items():
         expected = expected_files.get(file_id)
