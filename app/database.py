@@ -3863,6 +3863,7 @@ def update_event_definition(
     app_version: str | None = None,
     cascade_confirmed: bool = False,
     allow_archived_manual: bool = False,
+    guided_structure_change_id: str | None = None,
 ) -> dict[str, Any]:
     """Edit an event transactionally; keep parent/child and index consistent.
 
@@ -3918,7 +3919,11 @@ def update_event_definition(
             raise ValueError("Archivierte Ereignisse können nicht mehr bearbeitet werden.")
 
         from app.event_structure_changes import assert_no_open_structure_change
-        assert_no_open_structure_change(connection, event_id)
+        assert_no_open_structure_change(
+            connection, event_id,
+            guided_change_id=guided_structure_change_id,
+            preview=preview,
+        )
 
         status = str(event["status"])
         is_applied = status == "applied" and event["applied_at"] is not None
@@ -4431,6 +4436,25 @@ def update_event_definition(
                 "applied_event": is_applied,
             }, ensure_ascii=False, sort_keys=True), now),
         )
+        if guided_structure_change_id:
+            # Finish the reviewed manual task atomically with the canonical
+            # event edit. A failed editor transaction leaves the task intact.
+            connection.execute(
+                """UPDATE event_structure_changes
+                   SET status='completed',updated_at=?,completed_at=?,error_message=NULL
+                   WHERE id=? AND event_id=? AND status='blocked'""",
+                (now, now, guided_structure_change_id, event_id),
+            )
+            connection.execute(
+                """INSERT INTO audit_log(
+                    job_id,action,entity_type,entity_id,details_json,created_at
+                ) VALUES (?,'manual_structure_guided_edit','event',?,?,?)""",
+                (job_id, event_id, json.dumps({
+                    "change_id":guided_structure_change_id,
+                    "mutation_id":mutation_id,
+                    "removed_subevents":True,
+                }, sort_keys=True), now),
+            )
         connection.commit()
         row = connection.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
 
