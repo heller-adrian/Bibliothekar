@@ -7177,6 +7177,12 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
     if get_job(current_database_file(), job_id) is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
     try:
+        manual_change_id = str(payload.get("manual_structure_change_id") or "").strip()
+        if manual_change_id:
+            refresh_live_event_inventories(
+                current_database_file(), current_workspace_root(),
+                current_archive_root(), job_id=job_id, event_id=event_id,
+            )
         context = get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
         payload = _event_payload_with_folder_layout(payload, event_id=event_id)
         preview = None
@@ -7363,6 +7369,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
                 current_database_file(), job_id, event_id, preview,
                 workspace_path=current_workspace_root(),
                 app_version=APP_VERSION,
+                guided_structure_change_id=manual_change_id or None,
                 event_name=str(payload.get("event_name") or context["event"]["name"]),
                 notes=str(payload.get("notes") or ""),
                 expected_revision=int(payload.get("revision") or 0),
@@ -7397,6 +7404,11 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
     except (ValueError, EventPreviewError, TypeError, LibraryRegistryError) as error:
         message = str(error)
         raise HTTPException(status_code=404 if "nicht gefunden" in message else 409, detail=message) from error
+    except Exception as error:
+        from app.event_structure_changes import EventStructureChangeError
+        if isinstance(error, EventStructureChangeError):
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        raise
     return {"status": "updated", **result}
 
 
@@ -12409,6 +12421,14 @@ def api_propose_event_change(
         # verändern. Automatische Archiv-Erweiterungen behalten ihren bisherigen
         # Layoutzustand und setzen dieses Kennzeichen bewusst nicht.
         preview["_folder_layout_explicit"] = True
+        manual_change_id = str(body.get("manual_structure_change_id") or "").strip()
+        if manual_change_id:
+            from app.event_structure_changes import validate_guided_structure_edit
+            with database_connection(current_database_file()) as connection:
+                validate_guided_structure_edit(
+                    connection, event_id, manual_change_id, preview,
+                    expected_root_kind="camera_archive",
+                )
         archive_reservation = _reserve_archive_change_preview(
             event_id,
             preview,
@@ -12430,6 +12450,9 @@ def api_propose_event_change(
     except EventChangeRequestError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
+        from app.event_structure_changes import EventStructureChangeError
+        if isinstance(exc, EventStructureChangeError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise HTTPException(status_code=500, detail=str(exc))
 
 
