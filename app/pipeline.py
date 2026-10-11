@@ -231,7 +231,10 @@ def recover_cross_device_protocol_failures(
         if not isinstance(entries, list) or not entries:
             continue
 
-        plan = _shared_destination_plan(build_organization_plan(entries))
+        from app.managed_directory_names import directory_name
+        plan = _shared_destination_plan(build_organization_plan(
+            entries, undated_name=directory_name(work_root, "undated")
+        ))
 
         for item in plan:
             destination = work_root / item["destination_relative_path"]
@@ -463,6 +466,7 @@ def copy_and_verify(
 
 def build_organization_plan(
     entries: list[dict[str, Any]],
+    *, undated_name: str = "No Date",
 ) -> list[dict[str, Any]]:
     families: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
@@ -509,7 +513,7 @@ def build_organization_plan(
             needs_review = False
         else:
             capture_time = None
-            day_folder = "Ohne_Datum"
+            day_folder = undated_name
             base_name = Path(
                 anchor["filename"]
             ).stem
@@ -527,7 +531,7 @@ def build_organization_plan(
     name_counts: dict[tuple[str, str], int] = defaultdict(int)
 
     for record in family_records:
-        if record["day_folder"] != "Ohne_Datum":
+        if record["day_folder"] not in {"Ohne_Datum", "No Date"}:
             key = (
                 record["day_folder"],
                 record["base_name"],
@@ -543,7 +547,7 @@ def build_organization_plan(
         key = (record["day_folder"], base_name)
 
         if (
-            record["day_folder"] != "Ohne_Datum"
+            record["day_folder"] not in {"Ohne_Datum", "No Date"}
             and name_counts[key] > 1
         ):
             name_indices[key] += 1
@@ -557,7 +561,7 @@ def build_organization_plan(
         ):
             original_name = member["filename"]
 
-            if record["day_folder"] == "Ohne_Datum":
+            if record["day_folder"] in {"Ohne_Datum", "No Date"}:
                 destination_name = original_name
             else:
                 destination_name = (
@@ -719,8 +723,8 @@ def _shared_destination_plan(
 
         day_folder = relative.parts[0]
 
-        if day_folder == "Ohne_Datum":
-            destination = Path("Ohne_Datum") / Path(*relative.parts[1:])
+        if day_folder in {"Ohne_Datum", "No Date"}:
+            destination = Path(day_folder) / Path(*relative.parts[1:])
         else:
             try:
                 year = day_folder[:4]
@@ -1059,8 +1063,11 @@ def run_simulated_job(
             "Tagesordner und Dateinamen werden geplant.",
         )
 
+        from app.managed_directory_names import directory_name
         plan = _shared_destination_plan(
-            build_organization_plan(entries)
+            build_organization_plan(
+                entries, undated_name=directory_name(work_root, "undated")
+            )
         )
 
         progress(
