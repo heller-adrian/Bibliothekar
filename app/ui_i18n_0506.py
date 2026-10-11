@@ -160,7 +160,7 @@ UI_0506_TRANSLATIONS = {
     "Noch kein analysierter Arbeitsbestand vorhanden.": "No analyzed workspace inventory yet.",
     "„Ohne Ereignis“ besteht aus einzelnen Tagen und Zeitsegmenten. Die Dateizugehörigkeit wird ausschließlich daraus berechnet.": "“No Event” consists of individual days and time segments. File membership is determined solely from these segments.",
     # Metadata correction controls and dynamic review indicators.
-    "Keine Ohne-Datum-Familien vorhanden.": "No undated families available.",
+    "Keine Ohne-Datum-Familien vorhanden.": "No undated families found.",
     "Der Ordner ist leer.": "This folder is empty.",
     "Metadatenquelle übernehmen": "Transfer metadata source",
     "In Tagesbestand übernehmen": "Move into daily inventory",
