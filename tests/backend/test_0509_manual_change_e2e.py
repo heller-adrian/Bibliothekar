@@ -99,3 +99,25 @@ def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path):
         for row in updated["files"]
     )
 
+
+    # An image physically located in a child event but captured outside its
+    # time window must NEVER be adopted as a permitted organization move.
+    with database_connection(db) as conn:
+        conn.execute(
+            "UPDATE file_families SET selected_capture_time='2026-07-24T15:00:00' WHERE id=?",
+            (family,),
+        )
+        conn.execute(
+            "UPDATE files SET selected_capture_time='2026-07-24T15:00:00' WHERE id=?",
+            (file_id,),
+        )
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    detect_event_structure_change(db,"e")
+    with database_connection(db) as conn:
+        notice=conn.execute(
+            "SELECT details_json,action_required FROM external_change_notices WHERE notice_key=?",
+            (f"placement:{file_id}",),
+        ).fetchone()
+    assert notice is not None
+    assert notice["action_required"] == 1
+    assert json.loads(notice["details_json"])["reason"]=="capture_outside_subevent"
