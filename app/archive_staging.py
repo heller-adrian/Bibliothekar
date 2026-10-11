@@ -19,7 +19,13 @@ from app.database import database_connection
 from app.workspace_layout import backup_root, shared_work_root
 
 
-STAGING_DIRECTORY_NAME = "Später zuordnen"
+STAGING_DIRECTORY_NAME = "Später zuordnen"  # Legacy public constant; physical path uses resolver.
+
+
+def staging_directory_name(work_root: Path) -> str:
+    from app.managed_directory_names import directory_name
+    return directory_name(Path(work_root), "assign_later")
+
 BRANCHES = ("Alle", "Sortiert", "Export")
 
 
@@ -64,7 +70,7 @@ def _workspace_source_path(
     # Freigewordene Archivdateien gehören definitionsgemäß zum globalen
     # Zentralbestand, auch wenn ein gleichnamiger Legacy-Pfad im Arbeitsbereich
     # existieren sollte.
-    if rel.parts and rel.parts[0] == "Freigewordene Archivdateien":
+    if rel.parts and rel.parts[0] in {"Freigewordene Archivdateien", "Released Archive Files"}:
         return central_candidate, central_root
 
     if central_exists and not work_exists:
@@ -770,7 +776,8 @@ def refresh_staged_event_document_after_verified_paths(
         return {"updated": False, "spec": None}
 
     work_root = shared_work_root(workspace_path).resolve(strict=False)
-    staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
+    staging_name = staging_directory_name(work_root)
+    staging_base = (work_root / staging_name).resolve(strict=False)
     target_rel = _safe_relative(str(new_spec["target_relative_path"]))
     document_path = (
         staging_base.joinpath(*target_rel.parts).resolve(strict=False)
@@ -812,7 +819,7 @@ def refresh_staged_event_document_after_verified_paths(
         "updated": True,
         "spec": {key: value for key, value in new_spec.items() if key != "payload"},
         "staged_event_document": (
-            PurePosixPath(STAGING_DIRECTORY_NAME) / target_rel
+            PurePosixPath(staging_name) / target_rel
         ).as_posix(),
     }
 
@@ -923,7 +930,8 @@ def prepare_archive_change_staging_for_request(
         }
 
     work_root = shared_work_root(workspace_path).resolve(strict=False)
-    staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
+    staging_name = staging_directory_name(work_root)
+    staging_base = (work_root / staging_name).resolve(strict=False)
     if not _inside(staging_base, work_root):
         raise ArchiveStagingError("Der Archiv-Hilfsbereich verlässt den Arbeitsbereich.")
 
@@ -932,7 +940,7 @@ def prepare_archive_change_staging_for_request(
         for value in description.get("helper_directories") or []
     }
     event_relative_root = _safe_relative(description["target_root"])
-    prepared_rel = PurePosixPath(STAGING_DIRECTORY_NAME) / event_relative_root
+    prepared_rel = PurePosixPath(staging_name) / event_relative_root
     prepared_root = work_root.joinpath(*prepared_rel.parts).resolve(strict=False)
     if not _inside(prepared_root, staging_base):
         raise ArchiveStagingError("Die vorbereitete Archivstruktur ist unsicher.")
@@ -982,7 +990,7 @@ def prepare_archive_change_staging_for_request(
                 workspace_path,
                 source_rel,
             )
-            staged_rel = PurePosixPath(STAGING_DIRECTORY_NAME) / target_rel
+            staged_rel = PurePosixPath(staging_name) / target_rel
             staged = work_root.joinpath(*staged_rel.parts).resolve(strict=False)
 
             if not _inside(source, source_root) or not _inside(staged, staging_base):
@@ -1028,7 +1036,7 @@ def prepare_archive_change_staging_for_request(
         staged_event_document = ""
         if event_document is not None:
             document_rel = (
-                PurePosixPath(STAGING_DIRECTORY_NAME)
+                PurePosixPath(staging_name)
                 / PurePosixPath(str(event_document["target_relative_path"]))
             )
             document_path = work_root.joinpath(*document_rel.parts).resolve(strict=False)
@@ -1133,16 +1141,18 @@ def cleanup_archive_change_staging(
 ) -> dict[str, Any]:
     """Remove only known helper links and, after verification, their SSD originals."""
     work_root = shared_work_root(workspace_path).resolve(strict=False)
-    staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
+    staging_name = staging_directory_name(work_root)
+    staging_base = (work_root / staging_name).resolve(strict=False)
     removed_staged = 0
     removed_originals = 0
     restored_originals = 0
     removed_empty_source_directories = 0
     warnings: list[str] = []
 
+    from app.managed_directory_names import directory_name
     central_root = backup_root(workspace_path).resolve(strict=False)
     release_root = (
-        central_root / "Freigewordene Archivdateien"
+        central_root / directory_name(central_root, "released_archive")
     ).resolve(strict=False)
 
     with database_connection(database_path) as connection:
@@ -1178,7 +1188,7 @@ def cleanup_archive_change_staging(
                     row["workspace_staging_path"] or ""
                 ) or (
                     (
-                        PurePosixPath(STAGING_DIRECTORY_NAME)
+                        PurePosixPath(staging_name)
                         / _safe_relative(str(row["new_path"] or ""))
                     ).as_posix()
                     if str(row["new_path"] or "").strip()
@@ -1399,7 +1409,7 @@ def cleanup_archive_change_staging(
             event_document = event_document_spec
         if event_document is not None:
             document_rel = (
-                PurePosixPath(STAGING_DIRECTORY_NAME)
+                PurePosixPath(staging_name)
                 / PurePosixPath(str(event_document["target_relative_path"]))
             )
             document_path = work_root.joinpath(*document_rel.parts).resolve(strict=False)
@@ -1444,7 +1454,7 @@ def cleanup_archive_change_staging(
         except Exception as exc:
             warnings.append("Leere vorbereitete Struktur konnte nicht vollständig entfernt werden: " + str(exc))
 
-    reversal_root = staging_base / "Rückänderung" / cr_id
+    reversal_root = staging_base / directory_name(staging_base, "reversal") / cr_id
     if reversal_root.exists() and reversal_root.is_dir():
         # Nur bekannte Rückänderungs-Hilfsdateien werden entfernt. Der komplette
         # Baum gehört ausschließlich zu diesem Change Request.
