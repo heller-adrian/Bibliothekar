@@ -3570,6 +3570,9 @@ EVENTS_HTML = r"""<!doctype html>
       const noEvent = context.event.event_kind === "no_event";
       const payload = {
         revision: Number(context.event.revision || 1),
+        ...(context._manual_structure_change_id
+          ? {manual_structure_change_id:context._manual_structure_change_id}
+          : {}),
         event_name: noEvent ? String(context.event.name || "Ohne Ereignis") : document.getElementById("edit-name").value,
         notes: document.getElementById("edit-notes").value,
       };
@@ -5284,18 +5287,83 @@ EVENTS_HTML = r"""<!doctype html>
             <select id="structure-change-input" ${blockers.length?"disabled":""}>${options}</select>
           </label>
           <div id="structure-change-input-error" class="error-box" hidden style="margin-top:10px"></div>`;
+      const semanticCandidates=d.semantic_change_candidates||[];
+      const guidedChoice=(change.status==="blocked" && semanticCandidates.length &&
+        !d.root_rename && !(d.child_renames||[]).length &&
+        !(d.missing_file_ids||[]).length && !(d.duplicate_file_ids||[]).length &&
+        !(d.unclassified_directories||[]).length)
+        ? `<div class="card" style="margin-top:12px">
+             <strong>Manually dissolved subevent</strong>
+             <p class="muted">The files were moved into the parent event. You can
+             restore the original folders, or open the guided event editor.
+             Saving the edit requires an explicit confirmation and another
+             check of capture times, family assignments and the physical inventory.</p>
+             <button type="button" class="plan-button" id="structure-guided-edit">Review as event edit</button>
+           </div>` : "";
       const preview=`
         <div class="card">
           <strong>Erkannte Änderungen</strong>
           ${changeDetails}
         </div>
         ${blockers.length?`<div class="error-box" style="margin-top:12px"><strong>Diese Änderung kann noch nicht übernommen werden.</strong>${blockers.map(x=>`<div style="margin-top:6px">${escapeHtml(x)}</div>`).join("")}</div>`:""}
+        ${guidedChoice}
         ${inputControl}`;
+            const bindGuidedEdit=()=>{
+        document.getElementById("structure-guided-edit")?.addEventListener("click",async(event)=>{
+          const button=event.currentTarget;
+          button.disabled=true;
+          try{
+            const confirmed=window.BibliothekarI18n?.confirmAsync
+              ? await window.BibliothekarI18n.confirmAsync(
+                  "Open the event editor to review the detected subevent dissolution? "+
+                  "No changes will be committed until you explicitly save and verify."
+                )
+              : window.confirm("Review the manual subevent change in the event editor?");
+            if(!confirmed){button.disabled=false;return;}
+            const removedIds=new Set(semanticCandidates.map(item=>String(item.child_event_id)));
+            const job=String(change.job_id||d.job_id||"");
+            if(!job)throw new Error("The change task does not identify its source job.");
+            structureChangeDialog.close();
+            await openEventEditor(String(change.event_id),job);
+            const ctx=currentEditContext;
+            if(!ctx||!ctx.structural_editable && !ctx.archived_change_request){
+              throw new Error("The event is not available for guided structural editing.");
+            }
+            ctx._manual_structure_change_id=String(changeId);
+            ctx._manual_removed_children=[...removedIds];
+            const rows=[...eventEditBody.querySelectorAll("[data-child-segment]")];
+            const found=new Set();
+            rows.forEach(row=>{
+              if(removedIds.has(String(row.dataset.childId))){
+                found.add(String(row.dataset.childId));
+                row.remove();
+              }
+            });
+            if(found.size!==removedIds.size){
+              throw new Error("The requested subevent is no longer in the editor. Reload.");
+            }
+            const notice=document.createElement("div");
+            notice.className="card";
+            notice.setAttribute("role","status");
+            notice.textContent="Guided manual change: only the selected subevents have been removed from this proposal. "+
+              "Review all dates and remaining subevents before saving. The normal apply/archive "+
+              "verification and recovery steps are still required.";
+            eventEditBody.prepend(notice);
+          }catch(error){
+            if(eventEditDialog.open)eventEditDialog.close();
+            if(!structureChangeDialog.open)structureChangeDialog.showModal();
+            setStatus(error.message,true);
+            button.disabled=false;
+          }
+        });
+      };
+
       if(change.root_kind==="shared_workspace"){
         structureChangeBody.innerHTML=preview+`
           <div class="edit-actions">
             <button type="button" id="structure-change-confirm" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>Änderungen übernehmen</button>
           </div>`;
+        bindGuidedEdit();
         document.getElementById("structure-change-confirm")?.addEventListener("click",async()=>{
           const selectedInputs=chosenStructureInputs();
           const input=selectedInputs.input_path;
@@ -5331,6 +5399,7 @@ EVENTS_HTML = r"""<!doctype html>
             <p>Ersetze damit die vorhandene <code>event.json</code> ${target}. Andere Archivdateien werden von Bibliothekar nicht verändert.</p>
           </div>
           <div class="edit-actions"><button type="button" id="structure-change-verify" class="plan-button bk-positive-action">Prüfen</button></div>`;
+        bindGuidedEdit();
         document.getElementById("structure-change-verify")?.addEventListener("click",async(event)=>{
           const button=event.currentTarget;
           button.disabled=true;
@@ -5358,6 +5427,7 @@ EVENTS_HTML = r"""<!doctype html>
         structureChangeBody.innerHTML=preview+`
           <div class="card" style="margin-top:14px"><strong>Archiv · Schritt 1 von 2</strong><p>Bibliothekar erzeugt eine neue event.json unter „Später zuordnen“. Die Kamerabibliothek bleibt read-only.</p></div>
           <div class="edit-actions"><button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>event.json vorbereiten</button></div>`;
+        bindGuidedEdit();
         document.getElementById("structure-change-prepare")?.addEventListener("click",async()=>{
           const selectedInputs=chosenStructureInputs();
           const input=selectedInputs.input_path;
