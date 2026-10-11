@@ -7967,7 +7967,7 @@ def api_search_events(
             db_path, current_workspace_root(), current_archive_root()
         )
         reconcile_global_central_stock_state(force=True)
-        detect_all_event_structure_changes(db_path)
+        detect_all_event_structure_changes(db_path, current_workspace_root())
         view_cache.mark_physical_checked(db_path)
         view_cache.invalidate(db_path)
     if not must_check:
@@ -8428,7 +8428,7 @@ def api_repair_all_external_changes() -> dict[str, Any]:
             force=True
         )
         detect_all_event_structure_changes(
-            current_database_file()
+            current_database_file(), current_workspace_root()
         )
         result["state"] = list_external_change_state(
             current_database_file()
@@ -8466,7 +8466,7 @@ def api_repair_external_change(
             force=True
         )
         detect_all_event_structure_changes(
-            current_database_file()
+            current_database_file(), current_workspace_root()
         )
         return result
     except ExternalChangeError as error:
@@ -8576,7 +8576,7 @@ def api_global_workspace_summary(
             force=True
         )
         detect_all_event_structure_changes(
-            current_database_file()
+            current_database_file(), current_workspace_root()
         )
         backfill_library_claims(
             REGISTRY_DATABASE_FILE,
