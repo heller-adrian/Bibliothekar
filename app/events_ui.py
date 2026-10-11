@@ -5248,7 +5248,7 @@ EVENTS_HTML = r"""<!doctype html>
           </details>`:""}`
         : '<div class="muted" style="margin-top:9px">Keine Pfadänderungen.</div>';
       const leafConfigs=d.leaf_layouts||[];
-      const usingLeafInputs=leafConfigs.length>1;
+      const usingLeafInputs=leafConfigs.length>1 || (leafConfigs.length===1 && Boolean(leafConfigs[0].leaf_prefix));
       const savedLeafInputs=d.selected_leaf_input_paths||{};
       const leafSelectors=usingLeafInputs ?
         '<div class="card" style="margin-top:14px"><strong>Input folders for each event area</strong>'+
