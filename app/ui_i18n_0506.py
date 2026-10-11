@@ -168,10 +168,10 @@ UI_0506_TRANSLATIONS = {
 
 UI_0506_PATTERNS = [
     [r"^([0-9]+) zusätzliche Datei(en)?$", "$1 additional files"],
-    [r"^([0-9]+) externe Änderungen übernommen\\.$", "$1 external changes accepted."],
-    [r"^Archivänderung verworfen\\. Eigene SSD-Kopien wurden entfernt; fremde oder unbekannte Inhalte blieben unangetastet: (.+)$",
+    [r"^([0-9]+) externe Änderungen übernommen\.$", "$1 external changes accepted."],
+    [r"^Archivänderung verworfen\. Eigene SSD-Kopien wurden entfernt; fremde oder unbekannte Inhalte blieben unangetastet: (.+)$",
      "Archive change discarded. Own SSD copies were removed; foreign or unknown content remained untouched: $1"],
-    [r"^Hardlinks sind zwischen diesen Speicherorten nicht möglich\\. (.+)$",
+    [r"^Hardlinks sind zwischen diesen Speicherorten nicht möglich\. (.+)$",
      "Hardlinks are not possible between these storage locations. $1"],
     # Anchored dynamic headings, preserve event name captures exactly.
     [r"^Ereignis bearbeiten · (.+)$", "Edit event · $1"],
@@ -183,7 +183,7 @@ UI_0506_PATTERNS = [
     [r"^Nachsortierplan · (.+)$", "Re-sorting plan · $1"],
     [r"^([0-9]+) Zielgruppen?$", "$1 destination groups"],
     [r"^Zielgruppen? · ([0-9]+)$", "Destination groups · $1"],
-    [r"^Geplante Ziele\\s*\\(([0-9]+)\\)$", "Planned destinations ($1)"],
+    [r"^Geplante Ziele\s*\(([0-9]+)\)$", "Planned destinations ($1)"],
     [r"^Ziel: (.+)$", "Destination: $1"],
     [r"^([0-9]+) Familien anzeigen$", "Show $1 families"],
     [r"^([0-9]+) Familien · ([0-9]+) Dateien · (.+)$", "$1 families · $2 files · $3"],
@@ -194,7 +194,7 @@ UI_0506_PATTERNS = [
     [r"^([0-9]+) Datei$", "$1 file"],
     [r"^([0-9]+) Familie$", "$1 family"],
     [r"^([0-9]+) Archivpfade anzeigen$", "Show $1 archive paths"],
-    [r"^([0-9]+) Dateien bestätigt\\.$", "$1 files verified."],
+    [r"^([0-9]+) Dateien bestätigt\.$", "$1 files verified."],
     [r"^Gleiches Dateisystem: (ja|nein)$", "Same file system: $1"],
     [r"^Familien auf mehrere Ziele verteilt: ([0-9]+)$", "Families split across destinations: $1"],
     [r"^Quelle: (.+)$", "Source: $1"],
