@@ -63,3 +63,20 @@ def test_0509_parent_rename_does_not_change_identity():
     db.execute("UPDATE events SET folder_name='New Name' WHERE id='child-id'")
     after=leaf_descriptors(db,{"id":"parent","preserve_day_folders":False},["New Name"])
     assert before[0]["leaf_key"]==after[0]["leaf_key"]=="child-id"
+
+
+@pytest.mark.parametrize("value", [
+    "/etc/passwd", "//shared/All", r"..\outside", "All/../Export",
+    "All/./Export", "All//Export", "./All", "All/",
+])
+def test_0509_manual_structure_path_rejects_ambiguous_or_absolute(value):
+    from app.event_structure_changes import EventStructureChangeError, _safe_rel
+    with pytest.raises(EventStructureChangeError):
+        _safe_rel(value)
+
+
+def test_0509_manual_structure_path_accepts_valid_unicode_and_nested_relative():
+    from app.event_structure_changes import _safe_rel
+    assert _safe_rel("Sommer/Alle/A.JPG") == "Sommer/Alle/A.JPG"
+    assert _safe_rel("2026/Skizzen – Δ") == "2026/Skizzen – Δ"
+    assert _safe_rel("") == ""
