@@ -1,0 +1,13 @@
+Bibliothekar 0.50.6: ausschließlich separates englisches PWA-Testimage.
+Ausgangsversion: patch-0.50.5.
+Letzter Code-/Testquellstand vor Release-Anforderung: c1b703bcb65ee90277cebb4eb0f1fcc2fdeed7a3.
+Zielcontainer: ghcr.io/heller-adrian/bibliothekar:patch-0.50.6.
+Änderungen: sichtbarer Ladeindikator für sofortiges Tap-Feedback, keine
+190-ms-Navigationswartezeit, vollständige zusätzliche UI-Übersetzungen für
+Screenshots/Archiv-Rückänderung, englische Ordner-Voreinstellungen nur bei
+Neuanlage einer Datenbank, responsive Workspace-Statistik und Vorschau,
+sprachabhängige Notfall-Eingabedialoge.
+Kein main/latest/stable-Tag, keine produktiven NAS-Daten anfassen.
+Der Publish-Workflow muss seine vollständige QA bestehen; sonst kein Push.
+Dokumentation: docs/0506_I18N_PWA_AND_NEW_INSTALL.md.
+Reale iPhone-PWA- und seltene Fehlermeldungsabnahme vor stable bleibt offen.
