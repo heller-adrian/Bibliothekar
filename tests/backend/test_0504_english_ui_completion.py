@@ -13,6 +13,7 @@ import pytest
 
 from app.ui_i18n import UI_TRANSLATIONS, UI_PATTERNS, I18N_UI_JS
 from app.ui_i18n_0504 import UI_0504_TRANSLATIONS, UI_0504_PATTERNS
+from app.ui_i18n_0507 import UI_0507_PATTERNS
 from app.events_ui import EVENTS_HTML
 
 
@@ -68,7 +69,11 @@ def test_0504_all_screenshot_literals_and_dynamic_patterns():
     assert len(UI_0504_TRANSLATIONS) >= 150
     assert len(UI_0504_PATTERNS) >= 50
     assert UI_TRANSLATIONS["Löschbare Planungen"] == "Deletable plans"
-    assert UI_PATTERNS[:len(UI_0504_PATTERNS)] == UI_0504_PATTERNS
+    # Later screenshot fixes may need higher-priority patterns, while 0.50.4
+    # patterns must remain intact and in their original relative order.
+    offset = len(UI_0507_PATTERNS)
+    assert UI_PATTERNS[:offset] == UI_0507_PATTERNS
+    assert UI_PATTERNS[offset:offset + len(UI_0504_PATTERNS)] == UI_0504_PATTERNS
     assert 'class="event-name" data-bk-preserve-language' in EVENTS_HTML
     assert 'class="event-folder" data-bk-preserve-language' in EVENTS_HTML
 
