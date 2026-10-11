@@ -379,8 +379,9 @@ def _scan_library_undated(
                       ON f.family_id=ff.id AND f.job_id=ff.job_id
                     WHERE f.current_root_kind='shared_workspace'
                       AND (
-                        f.current_relative_path='Ohne_Datum'
+                        f.current_relative_path IN ('Ohne_Datum','No Date')
                         OR f.current_relative_path LIKE 'Ohne_Datum/%'
+                        OR f.current_relative_path LIKE 'No Date/%'
                       )
                       {job_sql}
                       AND NOT EXISTS (
@@ -404,7 +405,7 @@ def _scan_library_undated(
     by_family: dict[int, list[dict[str, Any]]] = {}
     for row in rows:
         current = Path(str(row.get("current_relative_path") or ""))
-        if not current.parts or current.parts[0] != "Ohne_Datum":
+        if not current.parts or current.parts[0] != input_root.name:
             continue
         relative_inside = Path(*current.parts[1:]).as_posix()
         source = (central_root / current).resolve(strict=False)
@@ -1555,7 +1556,8 @@ def _apply_library_metadata_correction(
     try:
         for member in frozen_members:
             current_relative = _safe_relative(str(member.get("current_relative_path") or ""))
-            if not current_relative.parts or current_relative.parts[0] != "Ohne_Datum":
+            from app.managed_directory_names import is_undated_name
+            if not current_relative.parts or not is_undated_name(current_relative.parts[0]):
                 raise MetadataCorrectionError(
                     "Die Dateifamilie liegt nicht mehr im Ohne-Datum-Bestand."
                 )
@@ -1843,7 +1845,8 @@ def reintegrate_library_metadata_family(
         prepared: list[dict[str, Any]] = []
         for row in rows:
             current_relative = _safe_relative(str(row.get("current_relative_path") or ""))
-            if not current_relative.parts or current_relative.parts[0] != "Ohne_Datum":
+            from app.managed_directory_names import is_undated_name
+            if not current_relative.parts or not is_undated_name(current_relative.parts[0]):
                 raise MetadataCorrectionError(
                     "Die Dateifamilie liegt nicht vollständig im Ohne-Datum-Bestand."
                 )
@@ -1969,8 +1972,7 @@ def reintegrate_library_metadata_family(
                     "Reintegrationsziel verlässt den Zentralbestand."
                 )
             if (
-                destination_relative.as_posix() == "Ohne_Datum"
-                or destination_relative.as_posix().startswith("Ohne_Datum/")
+                destination_relative.parts and destination_relative.parts[0] in {"Ohne_Datum", "No Date"}
             ):
                 raise MetadataCorrectionError(
                     "Korrigierte Metadaten würden erneut in Ohne_Datum einsortiert."
