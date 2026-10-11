@@ -70,6 +70,7 @@ from app.event_layout import (
     set_global_default as set_global_event_folder_layout,
     update_event_layout,
     EventLayoutError,
+    ENGLISH_NEW_INSTALL_SETTING,
 )
 from app.event_structure_changes import (
     detect_all_event_structure_changes,
@@ -1996,9 +1997,18 @@ def startup_database() -> None:
     global WORKER_THREAD
 
     try:
+        main_database_was_new = not DATABASE_FILE.is_file() or DATABASE_FILE.stat().st_size == 0
         DATABASE_INITIALIZATION = initialize_database(
             DATABASE_FILE
         )
+        # Provision English event-folder names only for a genuinely new database.
+        # Existing databases and saved per-event layouts retain their exact paths.
+        if main_database_was_new:
+            with database_connection(DATABASE_FILE) as connection:
+                set_global_event_folder_layout(
+                    connection, ENGLISH_NEW_INSTALL_SETTING,
+                    updated_at=datetime.now(timezone.utc).isoformat(),
+                )
         _LIBRARY_SCHEMA_READY.add(
             str(DATABASE_FILE.expanduser().resolve(strict=False))
         )
@@ -3652,7 +3662,14 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         resolved_work = Path(str(checked["work_root"]))
         resolved_work.mkdir(parents=True, exist_ok=True)
+        new_library_database = not database_path.is_file() or database_path.stat().st_size == 0
         initialize_database(database_path)
+        if new_library_database:
+            with database_connection(database_path) as connection:
+                set_global_event_folder_layout(
+                    connection, ENGLISH_NEW_INSTALL_SETTING,
+                    updated_at=datetime.now(timezone.utc).isoformat(),
+                )
         ensure_library_identity(database_path, library_id)
         projection = (
             {"jobs": 0, "families": 0, "files": 0}
