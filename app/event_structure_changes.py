@@ -1430,11 +1430,22 @@ def _write_prepared_document(path: Path, document: dict[str, Any]) -> str:
     payload = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
     digest = hashlib.sha256(payload).hexdigest()
     tmp = path.with_name(path.name + ".tmp." + digest[:12])
-    try:
+    if tmp.exists() or tmp.is_symlink():
+        # A crash may leave our deterministic temporary file behind. Reuse
+        # only exact bytes for this document; never overwrite a foreign file.
+        if (
+            tmp.is_symlink() or not tmp.is_file()
+            or hashlib.sha256(tmp.read_bytes()).hexdigest() != digest
+        ):
+            raise EventStructureChangeError(
+                "Fremde oder abweichende temporäre event.json bleibt erhalten."
+            )
+    else:
         with tmp.open("xb") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
+    try:
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
