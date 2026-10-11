@@ -70,7 +70,8 @@ def _central_root(workspace_path: Path) -> Path:
 
 def _base(workspace_path: Path, cr_id: str) -> Path:
     root = _work_root(workspace_path)
-    staging = root / directory_name(root, "assign_later")
+    from app.archive_staging import staging_directory_name
+    staging = root / staging_directory_name(root)
     reversal = staging / directory_name(staging, "reversal")
     value = (reversal / cr_id).resolve(strict=False)
     try:
@@ -815,7 +816,8 @@ def cleanup_archive_reversal(workspace_path: Path, cr_id: str) -> None:
     except OSError:
         pass
     root = _work_root(workspace_path)
-    (root / directory_name(root, "assign_later")).mkdir(parents=True, exist_ok=True)
+    from app.archive_staging import staging_directory_name
+    (root / staging_directory_name(root)).mkdir(parents=True, exist_ok=True)
 
 
 def finish_archive_reversal(
