@@ -298,6 +298,8 @@ def build_folder_import_plan(
     for record in files:
         members_by_family[str(record["family_key"])].append(record)
 
+    from app.managed_directory_names import directory_name
+    undated_name = directory_name(shared_root, "undated")
     reserved: set[str] = set()
     plan: list[dict[str, Any]] = []
     review_family_count = 0
@@ -341,7 +343,7 @@ def build_folder_import_plan(
             for member in members:
                 source_relative = str(member["relative_path"])
                 original = Path(source_relative)
-                candidate = Path("Ohne_Datum") / original.name
+                candidate = Path(undated_name) / original.name
                 index = 0
                 while not _destination_is_free(
                     shared_root,
@@ -350,7 +352,7 @@ def build_folder_import_plan(
                 ):
                     index += 1
                     candidate = (
-                        Path("Ohne_Datum")
+                        Path(undated_name)
                         / f"{original.stem}_{index:03d}{original.suffix}"
                     )
                 reserved.add(candidate.as_posix())
