@@ -1185,6 +1185,30 @@ def finish_event_change(
                 now,
             ),
         )
+        guided_id = str(cr.get("guided_structure_change_id") or "")
+        if guided_id:
+            # Only a completely verified archive edit may acknowledge its
+            # originating manual structure task. Never acknowledge on proposal,
+            # confirmation, failed verification or a cancelled change request.
+            from app.event_structure_changes import EventStructureChangeError
+            updated = connection.execute(
+                """UPDATE event_structure_changes
+                   SET status='completed', updated_at=?, completed_at=?, error_message=NULL
+                   WHERE id=? AND event_id=? AND root_kind='camera_archive'
+                     AND status='blocked'""",
+                (now, now, guided_id, str(cr["event_id"])),
+            )
+            if updated.rowcount != 1:
+                raise EventChangeApplyError(
+                    "The originating manual archive task changed; reload before finalizing."
+                )
+            connection.execute(
+                """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
+                   VALUES (?,'manual_archive_structure_guided_edit','event',?,?,?)""",
+                (str(cr["job_id"]), str(cr["event_id"]),
+                 json.dumps({"change_request_id":cr_id,"structure_change_id":guided_id},sort_keys=True),
+                 now),
+            )
         connection.commit()
 
     ssd_cleanup = {
