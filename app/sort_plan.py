@@ -661,6 +661,8 @@ def build_event_sort_plan(
     """
 
     workspace_root = _resolve_workspace_root(workspace_path)
+    from app.archive_staging import staging_directory_name
+    staging_name = staging_directory_name(shared_work_root(workspace_root))
 
     # 0.28.0: Sicherung ist Herkunft, nicht Ereignisidentität. Alte
     # /api/jobs/...-Routen bleiben als Kompatibilität erhalten, aber der
@@ -1192,10 +1194,10 @@ def build_event_sort_plan(
         # 0.27.0: Die manuelle Archiv-Erweiterung liegt unter der kanonischen
         # Ereignishülle. Mehrere Nachtraege duerfen dort zusammenlaufen; echte
         # Dateikollisionen bleiben durch den No-Overwrite-Plan blockiert.
-        physical_parent_parts = ["Später zuordnen", parent_folder]
+        physical_parent_parts = [staging_name, parent_folder]
     else:
         physical_parent_parts = (
-            ["Später zuordnen", f"{parent_folder} - {job_token}"]
+            [staging_name, f"{parent_folder} - {job_token}"]
             if collision_redirected
             else [parent_folder]
         )
@@ -1507,7 +1509,7 @@ def build_event_sort_plan(
             file_preserve_day_folders = False
         elif reassignment:
             target_folder = _safe_component(
-                reassignment.get("target_folder_name") or "Später zuordnen",
+                reassignment.get("target_folder_name") or staging_name,
                 "Zielereignisordner",
             )
             target_linkage = str(reassignment.get("target_linkage_kind") or "")
@@ -1518,7 +1520,7 @@ def build_event_sort_plan(
             elif target_linkage == "applied_followup":
                 destination_parts = [year, "Nachträge", f"{target_folder} - {job_token}"]
             elif target_linkage == "archived_manual" or str(reassignment.get("target_status") or "") == "archived":
-                destination_parts = ["Später zuordnen", year, target_folder]
+                destination_parts = [staging_name, year, target_folder]
             else:
                 destination_parts = [year, target_folder]
             file_preserve_day_folders = bool(reassignment.get("target_preserve_day_folders"))
@@ -1528,7 +1530,7 @@ def build_event_sort_plan(
             # unter Arbeitsbereich. Die Jahresordner entstehen nur innerhalb
             # dieses Bereichs, damit die normalen Jahresordner auch langfristig
             # ausschließlich echte Ereignisse enthalten.
-            destination_parts = ["Später zuordnen", year, *physical_parent_parts[1:]]
+            destination_parts = [staging_name, year, *physical_parent_parts[1:]]
         else:
             destination_parts = [year, *physical_parent_parts]
 
