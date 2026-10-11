@@ -176,6 +176,24 @@ def validate_guided_structure_edit(
     except (TypeError, ValueError) as exc:
         raise EventStructureChangeError("The observed structure is invalid.") from exc
     candidates = detected.get("semantic_change_candidates") or []
+    # A front-end task is not an authorization token on its own: re-evaluate
+    # the current complete inventory in the same transaction and reject any
+    # snapshot that changed since the user reviewed it.
+    current_event, current_layout = _event_state(connection, event_id)
+    current = _snapshot_from_inventory(
+        connection, current_event, current_layout, str(row["root_kind"])
+    )
+    if (
+        str(current.get("signature") or "") != str(detected.get("signature") or "")
+        or current.get("semantic_change_candidates") != candidates
+    ):
+        raise EventStructureChangeError(
+            "The filesystem inventory changed. Reload before accepting the edit."
+        )
+    if detected.get("root_rename") or detected.get("child_renames"):
+        raise EventStructureChangeError(
+            "Folder renames must be resolved separately before this edit."
+        )
     if not candidates or any(
         (detected.get(key) or []) for key in (
             "missing_file_ids", "duplicate_file_ids", "unclassified_directories",
