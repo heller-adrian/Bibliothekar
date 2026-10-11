@@ -5225,7 +5225,8 @@ EVENTS_HTML = r"""<!doctype html>
         ...(d.missing_file_ids||[]).map(id=>`Kameraoriginal fehlt · Datei-ID ${id}`),
         ...(d.duplicate_file_ids||[]).map(id=>`Kameraoriginal mehrfach gefunden · Datei-ID ${id}`),
         ...(d.unclassified_directories||[]).map(path=>`Strukturpfad nicht eindeutig · ${path}`),
-        ...(d.inconsistent_leaf_layouts?["Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen."]:[])
+        ...(d.inconsistent_leaf_layouts?["Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen."]:[]),
+        ...(d.semantic_change_candidates||[]).map(item=>"Subevent "+item.old_folder+" was moved into "+item.new_parent_folder+". Restore the old folders and then use the guided event editor to change assignments.")
       ];
       const folderChangeCount=added.length+removed.length+(rootRename?1:0)+childRenames.length;
       const folderChanges=[
@@ -5246,7 +5247,34 @@ EVENTS_HTML = r"""<!doctype html>
             <div style="display:grid;gap:6px;margin-top:9px">${fileChanges}</div>
           </details>`:""}`
         : '<div class="muted" style="margin-top:9px">Keine Pfadänderungen.</div>';
-      const inputControl=change.status==="prepared"
+      const leafConfigs=d.leaf_layouts||[];
+      const usingLeafInputs=leafConfigs.length>1;
+      const savedLeafInputs=d.selected_leaf_input_paths||{};
+      const leafSelectors=usingLeafInputs ?
+        '<div class="card" style="margin-top:14px"><strong>Input folders for each event area</strong>'+
+        '<p class="muted">Each event and subevent can have its own input folder.</p>'+
+        leafConfigs.map(leaf=>{
+          const chosen=String(savedLeafInputs[leaf.leaf_key]||leaf.input_path||"");
+          const choices=leaf.structure_enabled?(leaf.input_options||[]):[""];
+          const missing=leaf.structure_enabled&&!choices.includes(chosen);
+          const optionsHtml=(missing?'<option value="__choose__" selected disabled>Select input folder</option>':"")+
+            choices.map(path=>'<option value="'+escapeHtml(path)+'"'+(path===chosen?' selected':'')+'>'+
+              escapeHtml(path||"Directly in event")+'</option>').join("");
+          return '<label class="edit-field"><span>'+escapeHtml(leaf.leaf_prefix||d.event_name||"Main event")+
+            '</span><select data-structure-leaf-key="'+escapeHtml(leaf.leaf_key)+'"'+
+            (change.status==="prepared"||blockers.length?' disabled':'')+'>'+optionsHtml+'</select></label>';
+        }).join("")+
+        '<div id="structure-change-input-error" class="error-box" hidden></div></div>' : "";
+      function chosenStructureInputs(){
+        if(!usingLeafInputs) return {input_path:document.getElementById("structure-change-input")?.value||"",input_paths:{}};
+        const input_paths={};
+        document.querySelectorAll("[data-structure-leaf-key]").forEach(select=>{
+          input_paths[select.dataset.structureLeafKey]=select.value;
+        });
+        return {input_path:input_paths[change.event_id]||d.current_input_path||"",input_paths};
+      }
+
+      const inputControl=usingLeafInputs ? leafSelectors : change.status==="prepared"
         ? `<div class="card" style="margin-top:14px">
             <strong>Input-Ordner</strong>
             <div style="margin-top:6px">${escapeHtml(structurePathLabel(preparedInput))}</div>
@@ -5269,9 +5297,11 @@ EVENTS_HTML = r"""<!doctype html>
             <button type="button" id="structure-change-confirm" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>Änderungen übernehmen</button>
           </div>`;
         document.getElementById("structure-change-confirm")?.addEventListener("click",async()=>{
-          const input=document.getElementById("structure-change-input").value;
+          const selectedInputs=chosenStructureInputs();
+          const input=selectedInputs.input_path;
+          const inputPaths=selectedInputs.input_paths;
           const inlineError=document.getElementById("structure-change-input-error");
-          if(input==="__choose__"){
+          if(input==="__choose__" || Object.values(inputPaths).includes("__choose__")){
             if(inlineError){inlineError.textContent="Bitte einen zukünftigen Input-Ordner wählen.";inlineError.hidden=false;}
             return;
           }
@@ -5279,7 +5309,7 @@ EVENTS_HTML = r"""<!doctype html>
           try{
             structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">event.json und SQLite werden aktualisiert …</p>');
             await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/confirm-applied`,{
-              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
+              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input,input_paths:inputPaths})
             });
             clearStructureTaskFromUrl(changeId);
             structureChangeDialog.close();
@@ -5329,16 +5359,18 @@ EVENTS_HTML = r"""<!doctype html>
           <div class="card" style="margin-top:14px"><strong>Archiv · Schritt 1 von 2</strong><p>Bibliothekar erzeugt eine neue event.json unter „Später zuordnen“. Die Kamerabibliothek bleibt read-only.</p></div>
           <div class="edit-actions"><button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>event.json vorbereiten</button></div>`;
         document.getElementById("structure-change-prepare")?.addEventListener("click",async()=>{
-          const input=document.getElementById("structure-change-input").value;
+          const selectedInputs=chosenStructureInputs();
+          const input=selectedInputs.input_path;
+          const inputPaths=selectedInputs.input_paths;
           const inlineError=document.getElementById("structure-change-input-error");
-          if(input==="__choose__"){
+          if(input==="__choose__" || Object.values(inputPaths).includes("__choose__")){
             if(inlineError){inlineError.textContent="Bitte einen zukünftigen Input-Ordner wählen.";inlineError.hidden=false;}
             return;
           }
           if(inlineError) inlineError.hidden=true;
           try{
             await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/prepare-archive`,{
-              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input})
+              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input,input_paths:inputPaths})
             });
             await showStructureChange(changeId);
             await refreshGlobalTasks();
