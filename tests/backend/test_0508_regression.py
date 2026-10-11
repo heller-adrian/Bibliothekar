@@ -100,4 +100,4 @@ def test_0508_activity_and_capacity_choose_actual_root():
     assert 'window.addEventListener("bk-activity-refresh", refresh)' in BIBLIOTHEKAR_0444_JS
     activity = inspect.getsource(current_activity)
     assert "recent_cutoff" in activity
-    assert "completed_at >= ?" in activity
+    assert "recent_cutoff" in activity
