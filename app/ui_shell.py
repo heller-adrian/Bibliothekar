@@ -4476,7 +4476,7 @@ BIBLIOTHEKAR_JS = r"""
         } catch (error) { setLibraryCardStatus(card, error.message); }
       });
       card.querySelector("[data-bk-library-deactivate]")?.addEventListener("click", async () => {
-        if (!confirm("Bibliothek deaktivieren? Dateien, Datenbank und Archiv bleiben erhalten.")) return;
+        if (!(await window.BibliothekarI18n.confirmAsync("Bibliothek deaktivieren? Dateien, Datenbank und Archiv bleiben erhalten."))) return;
         try {
           await bkJson("/api/libraries/"+encodeURIComponent(id)+"/deactivate", {method:"POST"});
           if (id === bkLibraryId) {
@@ -4493,7 +4493,7 @@ BIBLIOTHEKAR_JS = r"""
         } catch (error) { setLibraryCardStatus(card, error.message); }
       });
       card.querySelector("[data-bk-library-unregister]")?.addEventListener("click", async () => {
-        if (!confirm("Bibliothek abmelden? Es werden keine Dateien, keine Datenbank und kein Archiv gelöscht.")) return;
+        if (!(await window.BibliothekarI18n.confirmAsync("Bibliothek abmelden? Es werden keine Dateien, keine Datenbank und kein Archiv gelöscht."))) return;
         try {
           await bkJson("/api/libraries/"+encodeURIComponent(id)+"/unregister", {method:"POST"});
           if (id === bkLibraryId) {
@@ -5236,7 +5236,7 @@ BIBLIOTHEKAR_JS = r"""
       document.getElementById("bk-external-ignore")?.addEventListener(
         "click",
         async event => {
-          const ok = window.confirm(
+          const ok = await window.BibliothekarI18n.confirmAsync(
             "Die physische Ablage bleibt damit vorerst bestehen. " +
             "Die Aufgabe „Dateizuordnung prüfen“ bleibt offen, bis die " +
             "Dateien wieder fachlich passend liegen. Wirklich ignorieren?"

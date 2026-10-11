@@ -748,7 +748,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const question=state.area==="library"
       ?"Metadaten familienweise schreiben und vollständig prüfen? Die Familie bleibt danach in Ohne_Datum."
       :"Metadaten in einer Arbeitskopie schreiben, prüfen und die Datei danach atomar ersetzen?";
-    if(!confirm(question))return;
+    if(!(await window.BibliothekarI18n.confirmAsync(question)))return;
     setStatus("Korrektur wird geschrieben und vollständig geprüft …");
     try{
       await json("/api/metadata-correction/tasks/"+encodeURIComponent(id)+"/apply",{method:"POST"});

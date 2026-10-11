@@ -11696,12 +11696,12 @@ def index() -> str:
       }
 
       for(const button of host.querySelectorAll("[data-force-import]")) {
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
           const jobId = String(button.dataset.forceImport || "");
-          if(!jobId || !window.confirm(
+          if(!jobId || !(await window.BibliothekarI18n.confirmAsync(
             "Importabbruch erzwingen? Der laufende Import wird an sicheren Unterbrechungspunkten beendet. "
             + "Es werden nur eindeutig diesem Import gehörende Dateien bereinigt; fremde Dateien bleiben unangetastet."
-          )) return;
+          ))) return;
           cancelEscalationPrompted.add(jobId);
           button.disabled = true;
           void requestForcedImportCancel(jobId).catch(showError);
@@ -11712,7 +11712,7 @@ def index() -> str:
         button.addEventListener("click", async () => {
           const jobId = String(button.dataset.discardImport || "");
           if (!jobId) return;
-          const confirmed = window.confirm(
+          const confirmed = await window.BibliothekarI18n.confirmAsync(
             "Der unterbrochene bzw. fehlgeschlagene Import wird entfernt. "
             + "Temporäre Importdaten und der Verlaufseintrag werden gelöscht; "
             + "die ursprüngliche Quelle bleibt unverändert. Fortfahren?"
@@ -11742,7 +11742,7 @@ def index() -> str:
         button.addEventListener("click", async () => {
           const jobId = String(button.dataset.deleteBackup || "");
           if (!jobId) return;
-          const confirmed = window.confirm(
+          const confirmed = await window.BibliothekarI18n.confirmAsync(
             "Diese Sicherung wird vollständig aus dem Arbeitsbestand gelöscht. "
             + "Die zugehörigen Dateien werden unwiderruflich gelöscht. "
             + "Möchtest du wirklich fortfahren?"
@@ -11861,7 +11861,7 @@ def index() -> str:
           cancelEscalationPrompted.add(key);
           // Beim ersten erfolglosen Abbruch einmalig nachfragen; Nein bleibt
           // möglich, der sichtbare Eskalationsknopf bleibt verfügbar.
-          if(window.confirm("Der Import reagiert seit mindestens 15 Sekunden nicht auf den Abbruch. Abbruch erzwingen?")) {
+          if(await window.BibliothekarI18n.confirmAsync("Der Import reagiert seit mindestens 15 Sekunden nicht auf den Abbruch. Abbruch erzwingen?")) {
             void requestForcedImportCancel(key).catch(showError);
           }
         }

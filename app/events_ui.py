@@ -3538,10 +3538,10 @@ EVENTS_HTML = r"""<!doctype html>
       renderEventEditor(context);
     }
 
-    function confirmEditEmptySubevents(error) {
+    async function confirmEditEmptySubevents(error) {
       if (error?.data?.confirmation_required !== "empty_subevents") return false;
       const names=(error.data.empty_subevents||[]).map(item=>String(item.name||"Unterereignis"));
-      return window.confirm(
+      return window.BibliothekarI18n.confirmAsync(
         "Mindestens ein Unterereignis enthält aktuell keine passenden Dateifamilien."
         + (names.length ? "\n\nOhne passende Dateifamilien: "+names.join(", ") : "")
         + "\n\nDie leere Ordnerstruktur wird trotzdem angelegt. Trotzdem fortfahren?"
@@ -3558,7 +3558,7 @@ EVENTS_HTML = r"""<!doctype html>
       try {
         return await requestBody(payload);
       } catch (error) {
-        if (!confirmEditEmptySubevents(error)) throw error;
+        if (!(await confirmEditEmptySubevents(error))) throw error;
         return requestBody({...payload,confirm_empty_subevents:true});
       }
     }
@@ -3860,7 +3860,7 @@ EVENTS_HTML = r"""<!doctype html>
         : event.status === "applied"
           ? "Die Dateien werden nach deiner Bestätigung wieder in den freien Tagesbestand zurückgeführt. Anschließend wird das Ereignis wirklich entfernt. Dieser Vorgang muss jetzt angewendet oder verworfen werden."
           : "Für den archivierten Bestand wird ein manueller IST→SOLL-Löschauftrag erstellt. Die Kamerabibliothek bleibt read-only.";
-      const confirmed = window.confirm(`Ereignis „${event.name}“ löschen?\n\n${statusText}`);
+      const confirmed = await window.BibliothekarI18n.confirmAsync(`Ereignis „${event.name}“ löschen?\n\n${statusText}`);
 
       if (!confirmed) {
         return;
@@ -3940,12 +3940,12 @@ EVENTS_HTML = r"""<!doctype html>
 
 
     eventEditClose.addEventListener("click", () => eventEditDialog.close());
-    changeRequestClose.addEventListener("click", () => {
+    changeRequestClose.addEventListener("click", async () => {
       if (!mandatoryArchiveChangeContext) {
         changeRequestDialog.close();
         return;
       }
-      if (!window.confirm("Diese Archivänderung vollständig verwerfen?\n\nWenn du im Archiv bereits manuelle Änderungen vorgenommen hast, wird anschließend ein eigener Rückänderungsauftrag geöffnet. Er führt dich Schritt für Schritt durch die Wiederherstellung und prüft den ursprünglichen Zustand, bevor die Änderung endgültig verworfen wird.")) return;
+      if (!(await window.BibliothekarI18n.confirmAsync("Diese Archivänderung vollständig verwerfen?\n\nWenn du im Archiv bereits manuelle Änderungen vorgenommen hast, wird anschließend ein eigener Rückänderungsauftrag geöffnet. Er führt dich Schritt für Schritt durch die Wiederherstellung und prüft den ursprünglichen Zustand, bevor die Änderung endgültig verworfen wird."))) return;
       setEventOperationBusy("Archivänderung wird verworfen …");
       changeRequestAction(mandatoryArchiveChangeContext.crId, "cancel")
         .catch(error => {
@@ -3985,7 +3985,7 @@ EVENTS_HTML = r"""<!doctype html>
     async function discardMandatoryMutation() {
       const ctx=mandatoryMutationContext;
       if (!ctx) { sortPlanDialog.close(); return; }
-      if (!window.confirm("Diese Applied-Änderung vollständig verwerfen und den Zustand vor der Bearbeitung wiederherstellen?")) return;
+      if (!(await window.BibliothekarI18n.confirmAsync("Diese Applied-Änderung vollständig verwerfen und den Zustand vor der Bearbeitung wiederherstellen?"))) return;
       // Das Modal schließen und den Fortschritt direkt auf der Ereignisseite zeigen.
       sortPlanCloseButton.disabled=true;
       sortPlanDialog.close();
@@ -4032,7 +4032,7 @@ EVENTS_HTML = r"""<!doctype html>
 
     eventList.addEventListener(
       "click",
-      event => {
+      async event => {
         const viewButton = event.target.closest("[data-view-event]");
         if (viewButton && !viewButton.disabled) {
           openEventViewer(
@@ -4089,7 +4089,7 @@ EVENTS_HTML = r"""<!doctype html>
 
         const cancelMutationButton = event.target.closest("[data-cancel-mutation]");
         if (cancelMutationButton && !cancelMutationButton.disabled) {
-          if (!window.confirm("Diese noch nicht abgeschlossene Änderung vollständig verwerfen und den gespeicherten Ursprungszustand wiederherstellen?")) return;
+          if (!(await window.BibliothekarI18n.confirmAsync("Diese noch nicht abgeschlossene Änderung vollständig verwerfen und den gespeicherten Ursprungszustand wiederherstellen?"))) return;
           cancelMutationButton.disabled=true;
           setEventOperationBusy("Änderung wird verworfen …");
           requestJson(`/api/jobs/${encodeURIComponent(cancelMutationButton.dataset.jobId||"")}/event-mutations/${encodeURIComponent(cancelMutationButton.dataset.cancelMutation)}/cancel`, {method:"POST"})
@@ -4291,7 +4291,7 @@ EVENTS_HTML = r"""<!doctype html>
       html += '<div class="card" style="margin-top:10px;border-color:var(--bk-danger,#c75050)"><details><summary><strong>Notausstieg bei unmöglicher Rückänderung</strong></summary><p class="muted" style="margin-top:8px">Nur verwenden, wenn die Wiederherstellung unmöglich ist. Der Auftrag wird beendet, aber das Ereignis bleibt gesperrt, bis der Originalbestand gesondert geprüft wurde. Es werden keine Archivdateien verändert oder als geprüft markiert.</p><button type="button" class="plan-button danger-button" data-reversal-force>Abbrechen erzwingen · manuelle Klärung</button></details></div>';
       changeRequestBody.innerHTML = html;
       changeRequestBody.querySelector("[data-reversal-force]")?.addEventListener("click", async event => {
-        if (!window.confirm("NOTFALLABBRUCH: Der ursprüngliche Archivbestand ist danach NICHT als wiederhergestellt bestätigt. Das Ereignis bleibt bis zur erneuten Prüfung gesperrt. Fortfahren?")) return;
+        if (!(await window.BibliothekarI18n.confirmAsync("NOTFALLABBRUCH: Der ursprüngliche Archivbestand ist danach NICHT als wiederhergestellt bestätigt. Das Ereignis bleibt bis zur erneuten Prüfung gesperrt. Fortfahren?"))) return;
         const confirmation = window.prompt("Gib zur Bestätigung exakt NOTFALLABBRUCH ein:");
         if (confirmation !== "NOTFALLABBRUCH") return;
         const reason = window.prompt("Warum ist die Wiederherstellung nicht möglich?") || "";

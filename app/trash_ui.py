@@ -154,7 +154,7 @@ TRASH_HTML = r"""<!doctype html>
     catch(error){status.textContent=error.message;list.innerHTML="";}
   }
   emptyButton.addEventListener("click",async()=>{
-    if(!confirm("Papierkorb wirklich endgültig entleeren?\n\nAlle Dateien und Ordner darin werden unwiderruflich gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden.")) return;
+    if(!(await window.BibliothekarI18n.confirmAsync("Papierkorb wirklich endgültig entleeren?\n\nAlle Dateien und Ordner darin werden unwiderruflich gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden."))) return;
     emptyButton.disabled=true;
     status.textContent="Papierkorb wird endgültig geleert …";
     try{

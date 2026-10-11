@@ -4317,13 +4317,13 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
-    function confirmEmptySubevents(error) {
+    async function confirmEmptySubevents(error) {
       if (error?.data?.confirmation_required !== "empty_subevents") return false;
       const names=(error.data.empty_subevents||[]).map(item=>String(item.name||"Unterereignis"));
       const detail=names.length
         ? "\n\nOhne passende Dateifamilien: "+names.join(", ")
         : "";
-      return window.confirm(
+      return window.BibliothekarI18n.confirmAsync(
         "Mindestens ein Unterereignis enthält aktuell keine passenden Dateifamilien."
         + detail
         + "\n\nDie leere Ordnerstruktur wird trotzdem angelegt. Trotzdem fortfahren?"
@@ -4345,7 +4345,7 @@ WORKSPACE_HTML = r"""<!doctype html>
             current={...current,confirm_cross_backup_membership:true};
             continue;
           }
-          if(confirmEmptySubevents(error)){
+          if(await confirmEmptySubevents(error)){
             current={...current,confirm_empty_subevents:true};
             continue;
           }
