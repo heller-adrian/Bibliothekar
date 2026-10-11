@@ -9,9 +9,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0453_release_version():
-    assert __version__ == "0.50.7"
-    assert main.DEPLOYMENT_VERSION == "0.50.7"
-    assert "Version <span data-bk-version>0.50.7</span>" in apply_shell(
+    assert __version__ == "0.50.8"
+    assert main.DEPLOYMENT_VERSION == "0.50.8"
+    assert "Version <span data-bk-version>0.50.8</span>" in apply_shell(
         "<html><head></head><body></body></html>", active_area="import"
     )
 

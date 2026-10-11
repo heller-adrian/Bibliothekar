@@ -105,7 +105,7 @@ def test_0444_desktop_dock_and_minimize_behaviour():
     assert 'position:fixed' in BIBLIOTHEKAR_0444_CSS
     assert 'bottom:22px' in BIBLIOTHEKAR_0444_CSS
     assert 'top:auto' in BIBLIOTHEKAR_0444_CSS
-    assert 'max-width:1399px' in BIBLIOTHEKAR_0444_CSS
+    assert 'max-width:900px' in BIBLIOTHEKAR_0444_CSS
     assert '(hover:none)' in BIBLIOTHEKAR_0444_CSS
     assert 'bk-activity-collapsed' in BIBLIOTHEKAR_0444_JS
     assert 'setCollapsed(true)' in BIBLIOTHEKAR_0444_JS

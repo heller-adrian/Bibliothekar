@@ -5819,7 +5819,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.50.7</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.50.8</span></p>
   </div>
 </dialog>
 
@@ -6165,7 +6165,7 @@ BIBLIOTHEKAR_0444_JS = r"""
     icon.className = "bk-activity-icon";
     icon.setAttribute("aria-hidden", "true");
     icon.dataset.busy = String(!!item.active);
-    icon.textContent = item.active ? "" : item.status === "completed" ? "✓" : "!";
+    icon.textContent = item.active ? "" : ["completed", "applied"].includes(item.status) ? "✓" : "!";
     const link = document.createElement("a");
     link.className = "bk-activity-link";
     link.href = destination(item);

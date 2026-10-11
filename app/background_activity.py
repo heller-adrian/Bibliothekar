@@ -56,13 +56,19 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         })
 
     with database_connection(library_database) as connection:
-        batches = connection.execute(
-            """SELECT id,status,item_count,completed_item_count
-               FROM operation_batches
-               WHERE status IN ('queued','running','interrupted')
-                  OR (status IN ('applied','failed') AND completed_at >= ?)
-               ORDER BY created_at DESC,id DESC LIMIT 8""", (recent_cutoff,)
+        # SELECT * tolerates old SQLite schemas without completed_at/updated_at
+        # and legacy lightweight QA connections accepting only execute(sql).
+        batch_candidates = connection.execute(
+            """SELECT * FROM operation_batches
+               WHERE status IN ('queued','running','interrupted','applied','failed')
+               ORDER BY created_at DESC,id DESC LIMIT 12"""
         ).fetchall()
+        batches = [
+            row for row in batch_candidates
+            if str(row["status"]) in _BATCH_STATES or str(
+                dict(row).get("completed_at") or dict(row).get("updated_at") or ""
+            ) >= recent_cutoff
+        ]
         runs = connection.execute(
             """SELECT sr.id,sr.job_id,sr.event_id,sr.status,e.name AS event_name
                FROM sort_runs sr
