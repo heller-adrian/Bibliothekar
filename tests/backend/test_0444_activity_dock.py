@@ -120,4 +120,4 @@ def test_0444_links_to_import_and_events_preserve_library():
     assert 'return "/events?library=" + lib + job;' in BIBLIOTHEKAR_0444_JS
     assert 'new Event("bk-cancellation-queued")' not in BIBLIOTHEKAR_0444_JS
     assert "window.addEventListener(\"bk-cancellation-queued\", refresh)" in BIBLIOTHEKAR_0444_JS
-    assert main.DEPLOYMENT_VERSION == "0.50.8"
+    assert main.DEPLOYMENT_VERSION == "0.50.9"
