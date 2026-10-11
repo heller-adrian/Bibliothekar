@@ -11,8 +11,8 @@ from app.events_ui import EVENTS_HTML
 
 
 def test_0452_versions_and_reload_controls():
-    assert __version__ == "0.50.9"
-    assert main.DEPLOYMENT_VERSION == "0.50.9"
+    assert __version__ == "0.51.0"
+    assert main.DEPLOYMENT_VERSION == "0.51.0"
     assert 'id="day-reload"' in WORKSPACE_HTML
     assert 'id="event-reload"' in EVENTS_HTML
     assert "physicalRefresh:true" in WORKSPACE_HTML
