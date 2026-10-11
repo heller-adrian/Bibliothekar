@@ -18,6 +18,7 @@ import uuid
 
 from app.database import database_connection
 from app.event_access import event_file_rows
+from app.event_leaf_layouts import leaf_descriptors, stored_leaf_layouts, validate_leaf_choices, save_leaf_layouts
 from app.event_inventory import scan_event_inventory, EventInventoryError
 from app.event_layout import get_event_layout, layout_paths, layout_role_paths, update_event_layout
 from app.event_document import build_event_document_from_db, EVENT_DOCUMENT_FILENAME
@@ -314,6 +315,8 @@ def _snapshot_from_inventory(
 ) -> dict[str, Any]:
     event_id = str(event["id"])
     leaves = _leaf_prefixes(connection, event)
+    leaf_defs = leaf_descriptors(connection, event, leaves)
+    stored_leaves = stored_leaf_layouts(connection, event_id)
     dir_rows = connection.execute(
         """SELECT event_relative_path FROM event_inventory_directories
            WHERE event_id=? AND root_kind=? ORDER BY event_relative_path""",
@@ -429,6 +432,7 @@ def _snapshot_from_inventory(
         group["file_ids"].append(int(row["file_id"]))
 
     child_renames: list[dict[str, Any]] = []
+    semantic_change_candidates: list[dict[str, Any]] = []
     child_rename_by_file: dict[int, tuple[str, str]] = {}
     child_directory_map: dict[str, str] = {}
     for group in child_groups.values():
@@ -454,6 +458,18 @@ def _snapshot_from_inventory(
             or new_folder in existing_child_folders
             or not new_folder
         ):
+            continue
+        # Moving an entire child's contents into the parent's input is NOT
+        # a rename of the child to "All". This needs an explicit event edit.
+        if new_folder in set(layout_paths(layout_state["layout"])) or new_folder in {
+            "Alle", "All", "Sortiert", "Sorted", "Export"
+        }:
+            semantic_change_candidates.append({
+                "child_event_id": str(group["child_event_id"]),
+                "old_folder": old_folder,
+                "new_parent_folder": new_folder,
+                "file_ids": file_ids,
+            })
             continue
         child_renames.append({
             "child_event_id": str(group["child_event_id"]),
@@ -548,36 +564,67 @@ def _snapshot_from_inventory(
         if rest:
             by_leaf.setdefault(leaf, set()).add(rest)
 
-    nonempty_sets = [paths for paths in by_leaf.values()]
-    canonical_sets = {tuple(sorted(paths)) for paths in nonempty_sets}
-    inconsistent = len(canonical_sets) > 1
-    proposed_paths = sorted(next(iter(canonical_sets), ())) if not inconsistent else []
-    preserved_roles = {
-        "export": set(layout_role_paths(layout_state["layout"], "export")),
-    }
-    proposed_layout = _layout_from_paths(
-        proposed_paths,
-        role_paths=preserved_roles,
-    )
+    # Each parent/child/day leaf may have its own organization folders and
+    # input folder. Do not collapse distinct leaf layouts into a global one.
+    leaf_layouts: list[dict[str, Any]] = []
+    for leaf in leaf_defs:
+        prefix = leaf["leaf_prefix"]
+        paths = sorted(by_leaf.get(prefix, set()))
+        old_leaf = stored_leaves.get(leaf["leaf_key"])
+        prior_layout = old_leaf["layout"] if old_leaf else layout_state["layout"]
+        prior_input = str(
+            (old_leaf or layout_state).get("input_path") or ""
+        )
+        prior_export = set(layout_role_paths(prior_layout, "export"))
+        proposed_leaf_layout = _layout_from_paths(
+            paths, role_paths={"export": prior_export}
+        )
+        leaf_layouts.append({
+            **leaf,
+            "layout": proposed_leaf_layout,
+            "structure_enabled": bool(paths),
+            "input_path": prior_input if prior_input in paths else "",
+            "input_options": paths,
+        })
 
-    expected_org = set(layout_paths(layout_state["layout"])) if layout_state.get("structure_enabled") else set()
+    root_leaf = next(
+        (leaf for leaf in leaf_layouts if leaf["leaf_prefix"] == ""), None
+    )
+    proposed_layout = (
+        root_leaf["layout"] if root_leaf is not None
+        else layout_state["layout"]
+    )
+    proposed_paths = layout_paths(proposed_layout)
+    inconsistent = False  # Different leaves are explicitly supported.
+
     expected_dirs: set[str] = set()
-    for leaf in leaves:
-        if leaf:
-            expected_dirs.add(leaf)
+    for leaf in leaf_defs:
+        prefix = leaf["leaf_prefix"]
+        if prefix:
+            expected_dirs.add(prefix)
+        old_leaf = stored_leaves.get(leaf["leaf_key"])
+        effective = old_leaf if old_leaf is not None else layout_state
+        expected_org = (
+            layout_paths(effective["layout"])
+            if effective.get("structure_enabled") else []
+        )
         for org in expected_org:
-            value = PurePosixPath(*(PurePosixPath(leaf).parts if leaf else ()), *PurePosixPath(org).parts)
+            value = PurePosixPath(
+                *(PurePosixPath(prefix).parts if prefix else ()),
+                *PurePosixPath(org).parts,
+            )
             expected_dirs.add(value.as_posix())
     directory_added = sorted(set(normalized_dirs) - expected_dirs)
     directory_removed = sorted(expected_dirs - set(normalized_dirs))
 
-    blocked = bool(missing_ids or duplicate_ids or unclassified or inconsistent)
+    blocked = bool(missing_ids or duplicate_ids or unclassified or semantic_change_candidates)
     changed = bool(
         file_moves
         or directory_added
         or directory_removed
         or root_rename
         or child_renames
+        or semantic_change_candidates
     )
     signature_payload = {
         "observed_dirs": observed_dirs,
@@ -610,8 +657,10 @@ def _snapshot_from_inventory(
         "duplicate_file_ids": duplicate_ids,
         "unclassified_directories": unclassified,
         "inconsistent_leaf_layouts": inconsistent,
+        "semantic_change_candidates": semantic_change_candidates,
+        "leaf_layouts": leaf_layouts,
         "proposed_layout": proposed_layout,
-        "proposed_structure_enabled": bool(proposed_paths),
+        "proposed_structure_enabled": bool(root_leaf["structure_enabled"]) if root_leaf else bool(layout_state["structure_enabled"]),
         "input_options": ["", *layout_paths(proposed_layout)],
         "current_input_path": str(layout_state.get("input_path") or ""),
         "changed": changed,
@@ -930,6 +979,7 @@ def detect_event_structure_change(
             snapshot.get("duplicate_file_ids"),
             snapshot.get("unclassified_directories"),
             snapshot.get("inconsistent_leaf_layouts"),
+            snapshot.get("semantic_change_candidates"),
         ))
         snapshot["changed"] = bool(structural_changed)
 
@@ -1075,14 +1125,32 @@ def _apply_confirmed_state(
     *,
     input_path: str,
     now: str,
+    input_paths: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     detected = json.loads(str(row["detected_json"] or "{}"))
     if detected.get("blocked"):
         raise EventStructureChangeError("Die erkannte Struktur besitzt Blocker und kann nicht übernommen werden.")
     layout = json.loads(str(row["proposed_layout_json"] or "{}"))
-    structure_enabled, clean_input = _validated_structure_input(
-        detected, layout, input_path
-    )
+    leaves = list(detected.get("leaf_layouts") or [])
+    if len(leaves) > 1:
+        selected_leaves = validate_leaf_choices(leaves, input_paths, input_path)
+        root_leaf = next(
+            (leaf for leaf in selected_leaves if leaf["leaf_prefix"] == ""), None
+        )
+        if root_leaf is None:
+            structure_enabled = bool(get_event_layout(connection, str(row["event_id"]))["structure_enabled"])
+            clean_input = str(get_event_layout(connection, str(row["event_id"]))["input_path"])
+        else:
+            structure_enabled = bool(root_leaf["structure_enabled"])
+            clean_input = str(root_leaf["input_path"])
+            layout = root_leaf["layout"]
+        save_leaf_layouts(
+            connection, str(row["event_id"]), selected_leaves, now=now
+        )
+    else:
+        structure_enabled, clean_input = _validated_structure_input(
+            detected, layout, input_path
+        )
 
     def _safe_single_folder(value: Any, label: str) -> str:
         clean = str(value or "").strip()
@@ -1166,6 +1234,7 @@ def _apply_confirmed_state(
         "structure_enabled": structure_enabled,
         "input_path": clean_input,
         "layout": layout,
+        "leaf_layouts": selected_leaves if len(leaves) > 1 else [],
     }
 
 
@@ -1175,6 +1244,7 @@ def confirm_applied_structure_change(
     change_id: str,
     *,
     input_path: str,
+    input_paths: dict[str, str] | None = None,
     app_version: str | None = None,
 ) -> dict[str, Any]:
     """Commit observed Applied state, then durably refresh event.json.
@@ -1199,7 +1269,7 @@ def confirm_applied_structure_change(
         if state == "pending":
             connection.execute("BEGIN IMMEDIATE")
             layout_state = _apply_confirmed_state(
-                connection, row, input_path=input_path, now=now
+                connection, row, input_path=input_path, input_paths=input_paths, now=now
             )
             connection.execute(
                 """UPDATE event_structure_changes
@@ -1369,6 +1439,7 @@ def prepare_archived_structure_change(
     change_id: str,
     *,
     input_path: str,
+    input_paths: dict[str, str] | None = None,
     app_version: str | None = None,
 ) -> dict[str, Any]:
     now = _now()
@@ -1384,9 +1455,22 @@ def prepare_archived_structure_change(
         if detected.get("blocked"):
             raise EventStructureChangeError("Die erkannte Archivstruktur besitzt Blocker.")
         layout = json.loads(str(row["proposed_layout_json"] or "{}"))
-        _structure_enabled, clean_input = _validated_structure_input(
-            detected, layout, input_path
-        )
+        leaves = list(detected.get("leaf_layouts") or [])
+        if len(leaves) > 1:
+            selected_leaves = validate_leaf_choices(leaves, input_paths, input_path)
+            root_leaf = next(
+                (leaf for leaf in selected_leaves if leaf["leaf_prefix"] == ""), None
+            )
+            clean_input = str(root_leaf["input_path"]) if root_leaf is not None else str(
+                get_event_layout(connection, str(row["event_id"]))["input_path"]
+            )
+            if root_leaf is not None:
+                layout = root_leaf["layout"]
+        else:
+            selected_leaves = []
+            _structure_enabled, clean_input = _validated_structure_input(
+                detected, layout, input_path
+            )
         event = connection.execute(
             "SELECT * FROM events WHERE id=? AND parent_event_id IS NULL",
             (row["event_id"],),
@@ -1405,11 +1489,13 @@ def prepare_archived_structure_change(
         raise EventStructureChangeError("Die neue Archiv-event.json konnte nicht erzeugt werden.")
     document = dict(document)
     document["folder_layout"] = {
-        "structure_enabled": bool(detected.get("proposed_structure_enabled")),
+        "structure_enabled": bool(root_leaf["structure_enabled"]) if selected_leaves and root_leaf is not None else bool(detected.get("proposed_structure_enabled")),
         "input_path": clean_input,
         "layout": layout,
         "revision": int((document.get("folder_layout") or {}).get("revision") or 1) + 1,
     }
+    if selected_leaves:
+        document["leaf_folder_layouts"] = selected_leaves
     document["structure"] = _tree_text(detected.get("observed_directories") or [])
     if app_version:
         document["source_app_version"] = app_version
@@ -1429,6 +1515,7 @@ def prepare_archived_structure_change(
     detected["prepared_event_json_path"] = str(prepared)
     detected["prepared_event_json_sha256"] = digest
     detected["selected_input_path"] = clean_input
+    detected["selected_leaf_input_paths"] = {leaf["leaf_key"]: leaf["input_path"] for leaf in selected_leaves}
     with database_connection(database_path) as connection:
         connection.execute(
             """UPDATE event_structure_changes
@@ -1499,6 +1586,7 @@ def verify_archived_structure_change(
             connection,
             row,
             input_path=str(row.get("proposed_input_path") or ""),
+            input_paths=detected.get("selected_leaf_input_paths"),
             now=now,
         )
         connection.execute(
