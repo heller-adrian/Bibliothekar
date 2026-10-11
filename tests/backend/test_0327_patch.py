@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.archive_staging import staging_directory_name
+from app.workspace_layout import shared_work_root
+
 import errno
 import hashlib
 from pathlib import Path
@@ -384,7 +387,7 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
         if item["kind"] == "copy_helper_folders"
     )
 
-    helper_root = workspace / "Arbeitsbereich" / "Später zuordnen"
+    helper_root = shared_work_root(workspace) / staging_directory_name(shared_work_root(workspace))
     assert (
         helper_root
         / "2026"
