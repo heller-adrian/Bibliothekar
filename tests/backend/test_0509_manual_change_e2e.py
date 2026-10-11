@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.database import database_connection, initialize_database
 from app.event_inventory import scan_event_inventory
-from app.event_layout import ensure_event_layout_snapshot
+from app.event_layout import ensure_event_layout_snapshot, layout_paths
 from app.event_leaf_layouts import stored_leaf_layouts
 from app.event_structure_changes import detect_event_structure_change, confirm_applied_structure_change
 from app.workspace_layout import ensure_workspace_layout, shared_work_root
@@ -82,6 +82,20 @@ def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path):
         leaves=stored_leaf_layouts(conn,"e")
     assert leaves["e"]["input_path"]=="Alle"
     assert leaves["child"]["input_path"]=="Alle"
-    assert "Sortiert" not in leaves["child"]["layout"]["nodes"][0]["name"]
+    assert set(layout_paths(leaves["child"]["layout"])) == {"Alle", "Export"}
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
     assert detect_event_structure_change(db,"e") is None
+
+    # A file-only manual rename does not change the event's directory tree.
+    # It still has to update the portable document, not just SQLite paths.
+    old_file=event_root/"Part B"/"Alle"/"B.JPG"
+    old_file.rename(event_root/"Part B"/"Alle"/"B_renamed.JPG")
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    from app.event_structure_changes import detect_all_event_structure_changes
+    detect_all_event_structure_changes(db,workspace)
+    updated=json.loads((event_root/"event.json").read_text())
+    assert any(
+        row["relative_path"].endswith("/B_renamed.JPG")
+        for row in updated["files"]
+    )
+
