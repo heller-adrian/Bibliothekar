@@ -5393,8 +5393,8 @@ BIBLIOTHEKAR_JS = r"""
           href, area: tab.dataset.area, at: Date.now()
         }));
       } catch (_) {}
-      // Die CSS-Hubbewegung (150ms) vollständig zeigen, dann erst navigieren.
-      window.setTimeout(() => window.location.assign(href), 190);
+      // Do not hold back page navigation for animation: iPhone PWA must respond instantly.
+      window.location.assign(href);
     });
   });
 
@@ -5807,7 +5807,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.50.4</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.50.5</span></p>
   </div>
 </dialog>
 
@@ -7295,10 +7295,51 @@ BIBLIOTHEKAR_0473_CSS = r"""
 }
 """
 
+BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS = r"""
+/* Resolve the user's application-wide language before Safari's first paint. */
+(() => {
+  const root = document.documentElement;
+  let language = "en";
+  try { language = localStorage.getItem("bibliothekar-language") === "de" ? "de" : "en"; }
+  catch (_) {}
+  root.lang = language;
+  root.dataset.bkLocale = language;
+  if (language === "en") root.dataset.bkI18nPending = "true";
+  // If another unrelated script fails, never strand the user on a hidden page.
+  window.addEventListener("load", () => {
+    if (root.dataset.bkI18nPending === "true") {
+      window.setTimeout(() => { delete root.dataset.bkI18nPending; }, 1800);
+    }
+  }, {once: true});
+})();
+"""
+
+BIBLIOTHEKAR_0505_LANGUAGE_CSS = r"""
+/* English content stays concealed only until the initial synchronous translation.
+   This avoids presenting German content even for one frame on iPhone PWA reloads. */
+html[data-bk-i18n-pending="true"] body { visibility: hidden !important; }
+.bk-i18n-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  box-sizing: border-box;
+  border: 1px solid var(--bk-line);
+  border-radius: 18px;
+  padding: 23px;
+  color: var(--bk-ink);
+  background: var(--bk-surface);
+  box-shadow: 0 14px 44px rgba(0,0,0,.25);
+}
+.bk-i18n-dialog::backdrop { background: rgba(0,0,0,.62); }
+.bk-i18n-dialog-message { white-space: pre-wrap; line-height: 1.55; margin: 0 0 22px; overflow-wrap: anywhere; }
+.bk-i18n-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+.bk-i18n-dialog-actions button { padding: 10px 19px; min-height: 44px; border-radius: 10px; border: 1px solid var(--bk-line); }
+.bk-i18n-dialog-actions .bk-i18n-confirm { background: var(--bk-blue); color: #fff; border-color: var(--bk-blue); }
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
-        lambda match: match.group(0) + f'\n<script src="/auth/client.js"></script>\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n<script>{BIBLIOTHEKAR_0470_HEAD_JS}</script>\n',
+        lambda match: match.group(0) + f'\n<script src="/auth/client.js"></script>\n<script>{BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS}</script>\n<style>{BIBLIOTHEKAR_0505_LANGUAGE_CSS}</style>\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n<script>{BIBLIOTHEKAR_0470_HEAD_JS}</script>\n',
         html,
         count=1,
         flags=re.IGNORECASE,

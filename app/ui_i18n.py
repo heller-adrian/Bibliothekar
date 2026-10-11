@@ -1295,6 +1295,9 @@ UI_PATTERNS = [
 from app.ui_i18n_0504 import UI_0504_TRANSLATIONS, UI_0504_PATTERNS
 UI_TRANSLATIONS.update(UI_0504_TRANSLATIONS)
 UI_PATTERNS[:0] = UI_0504_PATTERNS
+from app.ui_i18n_0505 import UI_0505_TRANSLATIONS, UI_0505_PATTERNS
+UI_TRANSLATIONS.update(UI_0505_TRANSLATIONS)
+UI_PATTERNS[len(UI_0504_PATTERNS):len(UI_0504_PATTERNS)] = UI_0505_PATTERNS
 
 I18N_UI_JS = r"""
 (function () {
@@ -1436,10 +1439,55 @@ I18N_UI_JS = r"""
       ? originalPrompt(dialogMessage(message), defaultValue)
       : originalPrompt(dialogMessage(message));
   };
+  // Unlike native Safari confirm(), these buttons use the selected application
+  // language rather than the phone's system UI language.
+  function confirmAsync(message) {
+    if (!document.body || typeof document.createElement !== "function") {
+      return Promise.resolve(originalConfirm(dialogMessage(message)));
+    }
+    const dialog = document.createElement("dialog");
+    if (typeof dialog.showModal !== "function") {
+      return Promise.resolve(originalConfirm(dialogMessage(message)));
+    }
+    dialog.className = "bk-i18n-dialog";
+    dialog.setAttribute("aria-label", locale === "en" ? "Confirmation" : "Bestätigung");
+    const text = document.createElement("p");
+    text.className = "bk-i18n-dialog-message";
+    text.textContent = dialogMessage(message);
+    const actions = document.createElement("div");
+    actions.className = "bk-i18n-dialog-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = locale === "en" ? "Cancel" : "Abbrechen";
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.className = "bk-i18n-confirm";
+    accept.textContent = locale === "en" ? "Confirm" : "Bestätigen";
+    actions.append(cancel, accept);
+    dialog.append(text, actions);
+    return new Promise(resolve => {
+      let completed = false;
+      const finish = accepted => {
+        if (completed) return;
+        completed = true;
+        try { dialog.close(); } catch (_) {}
+        dialog.remove();
+        resolve(accepted);
+      };
+      cancel.addEventListener("click", () => finish(false));
+      accept.addEventListener("click", () => finish(true));
+      dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
+      dialog.addEventListener("close", () => finish(false));
+      document.body.appendChild(dialog);
+      try { dialog.showModal(); cancel.focus(); }
+      catch (_) { finish(originalConfirm(dialogMessage(message))); }
+    });
+  }
   window.BibliothekarI18n = Object.freeze({
     t: (value) => locale === "en" ? tr(String(value)) : restoreGerman(String(value)),
     getLocale: () => locale,
     setLocale,
+    confirmAsync,
   });
   document.documentElement.lang = locale;
   document.documentElement.dataset.bkLocale = locale;
@@ -1450,6 +1498,8 @@ I18N_UI_JS = r"""
     });
     updateChoiceButtons();
     walk(document.body);
+    // Reveal the page in the same task, before a German-language first paint.
+    delete document.documentElement.dataset.bkI18nPending;
     const observer = new MutationObserver(mutations => {
       for (const mutation of mutations) {
         if (mutation.type === "characterData") schedule(mutation.target);

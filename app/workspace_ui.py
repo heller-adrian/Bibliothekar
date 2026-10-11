@@ -4705,9 +4705,13 @@ WORKSPACE_HTML = r"""<!doctype html>
         0
       );
 
-      const ok = window.confirm(
-        `${selectedInputs.length} Ereignis${selectedInputs.length === 1 ? "" : "se"} mit ${familyCount} Familien und ${fileCount} Dateien jetzt anwenden? Der Server führt den Vorgang auch weiter, wenn diese Seite geschlossen wird.`
-      );
+      const german = window.BibliothekarI18n?.getLocale?.() === "de";
+      const confirmation = german
+        ? `${selectedInputs.length} Ereignis${selectedInputs.length === 1 ? "" : "se"} mit ${familyCount} Familien und ${fileCount} Dateien jetzt anwenden? Der Server führt den Vorgang auch weiter, wenn diese Seite geschlossen wird.`
+        : `Apply ${selectedInputs.length} event${selectedInputs.length === 1 ? "" : "s"} with ${familyCount} families and ${fileCount} files now? The server will continue the operation even if this page is closed.`;
+      const ok = window.BibliothekarI18n?.confirmAsync
+        ? await window.BibliothekarI18n.confirmAsync(confirmation)
+        : window.confirm(confirmation);
       if (!ok) {
         applySavedEventButton.disabled = false;
         applySavedEventStatus.textContent =
