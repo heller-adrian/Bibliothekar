@@ -4786,7 +4786,7 @@ BIBLIOTHEKAR_JS = r"""
     const subeventYear=document.getElementById("bk-subevent-include-year");
     const subeventTime=document.getElementById("bk-subevent-include-time");
     const subeventEnabled=document.getElementById("bk-subevent-prefix-enabled");
-    if(label)label.value=String(data.no_event_label||"Ohne Ereignis");
+    if(label)label.value=String(data.no_event_label||(document.documentElement.dataset.bkLocale==="de"?"Ohne Ereignis":"No Event"));
     if(range)range.checked=String(data.date_mode||"start")==="range";
     if(year)year.checked=Boolean(data.include_year);
     if(time)time.checked=Boolean(data.include_time);
@@ -4829,7 +4829,8 @@ BIBLIOTHEKAR_JS = r"""
   function bkUpdateSettingsPreview() {
     const preview=document.getElementById("bk-event-naming-preview");
     if(!preview)return;
-    const label=String(document.getElementById("bk-no-event-label")?.value||"Ohne Ereignis").trim()||"Ohne Ereignis";
+    const defaultCollectionLabel=document.documentElement.dataset.bkLocale==="de"?"Ohne Ereignis":"No Event";
+    const label=String(document.getElementById("bk-no-event-label")?.value||defaultCollectionLabel).trim()||defaultCollectionLabel;
     const range=Boolean(document.getElementById("bk-event-date-range")?.checked);
     const year=Boolean(document.getElementById("bk-event-include-year")?.checked);
     const time=Boolean(document.getElementById("bk-event-include-time")?.checked);
