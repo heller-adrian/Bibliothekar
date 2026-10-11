@@ -6,6 +6,7 @@ to run in their existing back-end workers and keep their existing safety rules.
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from sqlite3 import OperationalError
 from typing import Any
 
@@ -26,6 +27,8 @@ _BATCH_STATES = ("queued", "running", "interrupted")
 
 def current_activity(library_database: Path, global_import_database: Path) -> dict[str, Any]:
     operations: list[dict[str, Any]] = []
+    # Keep recently completed operations visible long enough for a 2.5s UI poll.
+    recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
 
     # Camera and folder imports are globally managed in the main DB, even
     # while a secondary library is selected in the browser.
@@ -57,7 +60,8 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             """SELECT id,status,item_count,completed_item_count
                FROM operation_batches
                WHERE status IN ('queued','running','interrupted')
-               ORDER BY created_at DESC,id DESC LIMIT 8"""
+                  OR (status IN ('applied','failed') AND completed_at >= ?)
+               ORDER BY created_at DESC,id DESC LIMIT 8""", (recent_cutoff,)
         ).fetchall()
         runs = connection.execute(
             """SELECT sr.id,sr.job_id,sr.event_id,sr.status,e.name AS event_name
@@ -95,7 +99,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             "detail": f"{int(row['completed_item_count'] or 0)} von {int(row['item_count'] or 0)} Ereignissen verarbeitet"
                 if row["status"] != "interrupted" else "Sortierung unterbrochen – Prüfung erforderlich",
             "href": "/events",
-            "active": row["status"] != "interrupted",
+            "active": row["status"] in ("queued", "running"),
         })
 
     for row in runs:
@@ -148,6 +152,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
                 "Freigabe wartet auf Verarbeitung" if status == "queued"
                 else "Freigabe läuft; Archiv und SSD werden geprüft"
                 if status == "running"
+                else "Freigabe abgeschlossen" if status == "completed"
                 else "Freigabe angehalten: " + str(task.get("error_message") or "Unbekannter Fehler")
             ),
             "href": "/archive",

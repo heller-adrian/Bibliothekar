@@ -297,8 +297,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.50.7"
-DEPLOYMENT_VERSION = "0.50.7"
+RELEASE_VERSION = "0.50.8"
+DEPLOYMENT_VERSION = "0.50.8"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -3183,7 +3183,9 @@ def get_health() -> dict[str, Any]:
             "configured": False,
         }
     else:
-        health_workspace = current_workspace_root()
+        # The compatibility root is a temporary filesystem holding symlinks.
+        # statvfs() must inspect the real shared dataset, not /tmp (often 64 MiB).
+        health_workspace = current_library_context().workspace_root
         try:
             health_backup_root = workspace_backup_root(health_workspace)
         except (WorkspaceLayoutError, StorageSettingsError, OSError):

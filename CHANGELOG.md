@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.50.8 – Hintergrundaufträge, Speicheranzeige und Internationalisierung
+
+- Der Systemstatus ermittelt freien Platz auf dem tatsächlichen Library-Workspace-Dataset anstelle der temporären Kompatibilitätsansicht unter /tmp.
+- Archiv-Freigabe bestätigt den Serverauftrag, fängt Fehler vor und nach dem Dialog ab und meldet diese sichtbar.
+- Hintergrund-Dock ist nicht mehr auf große Desktopfenster beschränkt; kurze, abgeschlossene Anwende- und Freigabeaufträge bleiben für die Abnahme kurz sichtbar.
+- Bereits vorhandene englische Standard-Unterordner `All` und `Sorted` werden bei der Inventarisierung korrekt klassifiziert.
+- Ergänzte und dynamische DE/EN-Übersetzungen für Laufwerksimport, Tageskarten, Ereignisvorschau und Archiv-Fehler; Dateipfade, Ereignisnamen und vorhandene Ordner bleiben unverändert.
+- Eigene isolierte Regressionstests ergänzt. Installations- und produktive Daten werden nicht migriert.
+
+
 ## 0.50.3 – Tiefenprüfung englische PWA-Oberfläche (11.10.2026)
 
 - Sechs reale iPhone-Screenshots gegen HTML-/JavaScript-Quelltexte geprüft: deutsche Import-Statuskarten, SD-Card-Hilfe, Filter/Zähler, Archivstatus, dynamische Anzeigen, Metadata-Correction-Titel und Quelle-/Pfadbeschriftungen lokalisiert.

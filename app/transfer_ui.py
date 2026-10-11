@@ -271,10 +271,24 @@ TRANSFER_HTML = r'''<!doctype html>
       const releaseButton=card.querySelector('.release');
       verifyButton.addEventListener('click',async(event)=>{const button=event.currentTarget;button.disabled=true;button.classList.add('bk-busy');button.setAttribute('aria-busy','true');result.hidden=false;result.textContent='Kamerabibliothek wird vollständig per Größe und SHA-256 geprüft …';try{const data=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/archive-verify`);result.className=`result ${data.verified?'success':'danger'}`;result.textContent=`${data.message} ${data.verified_file_count}/${data.file_count} Dateien bestätigt; ${data.missing_file_count} fehlen; ${data.mismatched_file_count} weichen ab.`;await load({forceRefresh:true});}catch(error){result.className='result danger';result.textContent=error.message;button.disabled=false;}finally{button.classList.remove('bk-busy');button.removeAttribute('aria-busy');}});
       releaseButton.addEventListener('click',async(event)=>{
-        if(!(await window.BibliothekarI18n.confirmAsync(`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.`)))return;
-        event.currentTarget.disabled=true;verifyButton.disabled=true;result.hidden=false;result.className='result';result.textContent='Kamerabibliothek und Arbeitsbereich-Dateien werden erneut per SHA-256 geprüft. Anschließend wird nur der bestätigte SSD-Ereignisbestand entfernt …';
-        try{await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);await followRelease(item.job_id,item.event_id,result,verifyButton,releaseButton);}
-        catch(error){result.className='result danger';result.textContent=error.message;event.currentTarget.disabled=false;verifyButton.disabled=false;}
+        const button=event.currentTarget;
+        try {
+          const question=`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.`;
+          const confirmation=window.BibliothekarI18n?.confirmAsync
+            ? await window.BibliothekarI18n.confirmAsync(question)
+            : window.confirm(window.BibliothekarI18n?.t?.(question) || question);
+          if (!confirmation) return;
+          button.disabled=true;verifyButton.disabled=true;
+          result.hidden=false;result.className='result';
+          result.textContent='Kamerabibliothek und Arbeitsbereich-Dateien werden erneut per SHA-256 geprüft. Anschließend wird nur der bestätigte SSD-Ereignisbestand entfernt …';
+          const response=await postJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release`);
+          if (!response.task_id) throw new Error('Der Freigabeauftrag wurde vom Server nicht bestätigt.');
+          window.dispatchEvent(new Event("bk-activity-refresh"));
+          await followRelease(item.job_id,item.event_id,result,verifyButton,releaseButton);
+        } catch(error) {
+          result.hidden=false;result.className='result danger';result.textContent=error.message || String(error);
+          button.disabled=false;verifyButton.disabled=false;
+        }
       });
       attachRecoveryAction(card,item);
       archiveList.appendChild(card);

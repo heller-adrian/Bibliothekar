@@ -4737,6 +4737,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       );
 
+      window.dispatchEvent(new Event("bk-activity-refresh"));
       await pollApplyBatch(response.batch.id);
     }
 

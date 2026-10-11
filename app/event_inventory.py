@@ -16,7 +16,7 @@ from app.event_layout import ensure_event_layout_snapshot, layout_role_paths
 from app.physical_state import organization_path_for_event_relative
 
 
-SORT_BRANCHES = {"Alle", "Sortiert", "Export"}
+SORT_BRANCHES = {"Alle", "Sortiert", "All", "Sorted", "Export"}
 IGNORED_EVENT_FILES = {"event.json", ".DS_Store"}
 
 

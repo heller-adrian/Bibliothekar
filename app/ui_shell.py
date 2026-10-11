@@ -6084,15 +6084,20 @@ BIBLIOTHEKAR_0444_CSS = r"""
   outline:2px solid var(--bk-blue);
   outline-offset:2px;
 }
-/* Nur echte, breite Desktop-Websites: weder Handy noch schmale Fenster. */
-@media (max-width:1399px), (max-height:619px), (hover:none), (pointer:coarse) {
-  #bk-background-cancel-notice {display:none!important}
+/* Background operations must remain discoverable on desktop, mobile web and PWA. */
+@media (max-width:900px), (max-height:520px), (hover:none), (pointer:coarse) {
+  #bk-background-cancel-notice {
+    width:min(390px,calc(100vw - 24px));right:12px;left:auto;
+    bottom:calc(12px + env(safe-area-inset-bottom,0px));
+    max-height:min(60dvh,440px);
+  }
+  #bk-background-cancel-notice .bk-activity-card {max-height:min(60dvh,440px);overflow:auto}
 }
 """
 
 BIBLIOTHEKAR_0444_JS = r"""
 (function() {
-  const desktop = window.matchMedia("(min-width: 1400px) and (min-height: 620px) and (hover: hover) and (pointer: fine)");
+  const desktop = window.matchMedia("(min-width: 0px)");
   document.body.insertAdjacentHTML("beforeend",
     '<aside id="bk-background-cancel-notice" aria-label="Hintergrundvorgänge" hidden></aside>');
   const box = document.getElementById("bk-background-cancel-notice");
@@ -6114,8 +6119,8 @@ BIBLIOTHEKAR_0444_JS = r"""
   document.body.appendChild(box);
 
   const library = () => encodeURIComponent(window.__bkLibraryId || "main");
-  let collapsed = false;
-  try { collapsed = sessionStorage.getItem("bk-activity-collapsed") === "1"; } catch (_) {}
+  let collapsed = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+  try { const saved = sessionStorage.getItem("bk-activity-collapsed"); if (saved !== null) collapsed = saved === "1"; } catch (_) {}
   let waiting = false;
   let lastSeen = [];
   function viewState() {
@@ -6148,6 +6153,7 @@ BIBLIOTHEKAR_0444_JS = r"""
   function destination(item) {
     const lib = library();
     if (item.kind === "import") return "/?library=" + lib;
+    if (item.kind === "release") return "/archive?library=" + lib;
     const job = item.job_id ? "&job=" + encodeURIComponent(item.job_id) : "";
     return "/events?library=" + lib + job;
   }
@@ -6231,6 +6237,7 @@ BIBLIOTHEKAR_0444_JS = r"""
   const mediaChange = () => { box.hidden = !desktop.matches || !lastSeen.length; if (desktop.matches) refresh(); };
   desktop.addEventListener?.("change", mediaChange);
   window.addEventListener("bk-cancellation-queued", refresh);
+  window.addEventListener("bk-activity-refresh", refresh);
   window.addEventListener("pageshow", refresh);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   refresh();
