@@ -12,14 +12,15 @@ def _layout_paths(layout_state=None):
     return paths or [""]
 
 
-def render_structure(year, folder, day_keys=(), children=(), preserve_days=False, layout_state=None):
+def render_structure(year, folder, day_keys=(), children=(), preserve_days=False, layout_state=None, *, leaf_layouts=(), parent_event_id=None):
     paths = []
     default_days = sorted(set(day_keys or ()))
     child_list = list(children or ())
     branches = []
+    leaf_by_key = {str(leaf.get('leaf_key')): leaf for leaf in (leaf_layouts or [])}
     # The parent branch represents files assigned directly to the parent.
     if default_days or not child_list:
-        branches.append(("", default_days))
+        branches.append(("", default_days, str(parent_event_id or "")))
     seen = {""}
     for child in child_list:
         branch = str(child.get("folder_name") or child.get("folder") or "")
@@ -31,13 +32,14 @@ def render_structure(year, folder, day_keys=(), children=(), preserve_days=False
             if "day_keys" in child
             else default_days
         )
-        branches.append((branch, child_days))
+        branches.append((branch, child_days, str(child.get("id") or "")))
 
-    layout = _layout_paths(layout_state)
-    for branch, branch_days in branches:
+    for branch, branch_days, owner_id in branches:
         rendered_days = branch_days if preserve_days and branch_days else [""]
         for day in rendered_days:
-            for leaf in layout:
+            key = owner_id + ('@' + day if day else '')
+            leaf_layout = leaf_by_key.get(key) or layout_state
+            for leaf in _layout_paths(leaf_layout):
                 parts = [str(year), str(folder), branch, day]
                 if leaf:
                     parts.extend(PurePosixPath(leaf).parts)
