@@ -296,8 +296,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.50.3"
-DEPLOYMENT_VERSION = "0.50.3"
+RELEASE_VERSION = "0.50.4"
+DEPLOYMENT_VERSION = "0.50.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
