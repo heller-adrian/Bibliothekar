@@ -2048,7 +2048,7 @@ EVENTS_HTML = r"""<!doctype html>
         const reconcileTargetNotice = isReconcileTarget ? `
           <div class="reassignment-resume"><span><strong>↳ Ziel einer offenen Nachsortierung</strong><br><span class="muted">Dieses geplante Ereignis wird nicht separat angewendet. Es wird zusammen mit dem bearbeiteten Ursprungsereignis im gemeinsamen Nachsortierplan geprüft und angewendet.</span></span></div>` : "";
         card.innerHTML = `
-          <div class="event-card-header"><div><strong class="event-name">${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder">${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
+          <div class="event-card-header"><div><strong class="event-name" data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder" data-bk-preserve-language>${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
           ${reconcileTargetNotice}
           <div class="event-card-actions" hidden>
             <button type="button" data-view-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Öffnen</button>
