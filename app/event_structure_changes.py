@@ -1404,15 +1404,40 @@ def confirm_applied_structure_change(
 
 
 def _write_prepared_document(path: Path, document: dict[str, Any]) -> str:
+    """Atomically stage only an event's own document, never a foreign file."""
+    expected_event_id = str((document.get("event") or {}).get("id") or "")
+    if not expected_event_id:
+        raise EventStructureChangeError("Die vorzubereitende event.json besitzt keine Ereignis-ID.")
+    # Symlinks below the staging root could redirect the new file to a
+    # different event or an external volume. The trusted root itself may be
+    # a historical compatibility symlink, hence check only year/event leaves.
+    if path.parent.is_symlink() or path.parent.parent.is_symlink() or path.is_symlink():
+        raise EventStructureChangeError("Die event.json-Hilfsstruktur enthält einen symbolischen Link.")
+    if path.exists():
+        if not path.is_file():
+            raise EventStructureChangeError("Das event.json-Hilfsziel ist keine reguläre Datei.")
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeError, OSError) as exc:
+            raise EventStructureChangeError("Fremde oder beschädigte vorbereitete event.json bleibt unverändert.") from exc
+        if (
+            not isinstance(previous, dict)
+            or str(previous.get("source") or "") != "kamera-automatisierung"
+            or str((previous.get("event") or {}).get("id") or "") != expected_event_id
+        ):
+            raise EventStructureChangeError("Vorhandene event.json gehört einem anderen Ereignis.")
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
     digest = hashlib.sha256(payload).hexdigest()
     tmp = path.with_name(path.name + ".tmp." + digest[:12])
-    with tmp.open("wb") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
+    try:
+        with tmp.open("xb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
     return digest
 
 
