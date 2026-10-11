@@ -121,3 +121,76 @@ def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path):
     assert notice is not None
     assert notice["action_required"] == 1
     assert json.loads(notice["details_json"])["reason"]=="capture_outside_subevent"
+
+
+def test_0509_archived_parent_and_child_replacement_is_read_only(tmp_path: Path):
+    """A prepared archived multi-input change is committed only after SHA verification."""
+    from app.event_structure_changes import (
+        prepare_archived_structure_change,verify_archived_structure_change
+    )
+    db=tmp_path/"archive.sqlite3"
+    workspace=tmp_path/"workspace"
+    archive=tmp_path/"archive"
+    workspace.mkdir()
+    archive.mkdir()
+    initialize_database(db)
+    ensure_workspace_layout(workspace)
+    with database_connection(db) as conn:
+        seed_job(conn)
+        seed_event(conn,status="archived")
+        seed_family(conn,content=b"parent",current_path="2026/07-23 - Trip/Alle/A.JPG")
+        conn.execute(
+            """INSERT INTO events(
+                 id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,
+                 uses_time_range,folder_name,status,created_at,updated_at,event_kind,
+                 preserve_day_folders,revision,applied_at,archived_at,time_model_version,timeline_model
+               ) VALUES ('child','j','e','child','Part B',
+                 '2026-07-23T14:00:00','2026-07-23T20:00:00',1,
+                 'Part B','archived',?,?,'event',0,1,?,?,2,'continuous')""",
+            (NOW,NOW,NOW,NOW),
+        )
+        family=conn.execute(
+            """INSERT INTO file_families(
+                 job_id,family_key,original_stem,status,selected_capture_time,
+                 capture_time_confidence
+               ) VALUES ('j','B','B','complete','2026-07-23T15:00:00','high')"""
+        ).lastrowid
+        fid=seed_file_for_family(
+            conn,family_id=family,content=b"child",
+            current_path="2026/07-23 - Trip/Part B/Alle/B.JPG",filename="B.JPG"
+        )
+        conn.execute("UPDATE files SET selected_capture_time='2026-07-23T15:00:00' WHERE id=?",(fid,))
+        conn.execute(
+            "INSERT INTO event_assignments(event_id,family_id,file_id,assignment_source,created_at) VALUES ('child',?,NULL,'manual',?)",
+            (family,NOW),
+        )
+        ensure_event_layout_snapshot(conn,"e",now=NOW)
+    root=archive/"2026"/"07-23 - Trip"
+    for leaf,names in [("",("Alle","Sortiert","Export")),("Part B",("Alle","Export"))]:
+        for name in names:
+            (root/leaf/name).mkdir(parents=True,exist_ok=True)
+    (root/"Alle"/"A.JPG").write_bytes(b"parent")
+    (root/"Part B"/"Alle"/"B.JPG").write_bytes(b"child")
+
+    scan_event_inventory(db,archive,"j","e",root_kind="camera_archive",persist=True,fast_refresh=False)
+    detected=detect_event_structure_change(db,"e")
+    assert detected and detected["status"]=="pending"
+    assert {row["leaf_key"] for row in detected["detected"]["leaf_layouts"]}=={"e","child"}
+    prepared=prepare_archived_structure_change(
+        db,workspace,detected["id"],
+        input_path="Alle",input_paths={"e":"Alle","child":"Alle"},
+        app_version="0.50.9",
+    )
+    helper=Path(prepared["prepared_event_json_path"])
+    assert helper.is_file()
+    assert not (root/"event.json").exists()
+    (root/"event.json").write_bytes(helper.read_bytes())
+    confirmed=verify_archived_structure_change(
+        db,archive,workspace,detected["id"]
+    )
+    assert confirmed["status"]=="completed"
+    assert confirmed["archive_read_only"]
+    with database_connection(db) as conn:
+        leafs=stored_leaf_layouts(conn,"e")
+        assert leafs["child"]["input_path"]=="Alle"
+    assert not helper.exists()
