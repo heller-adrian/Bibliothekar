@@ -984,6 +984,22 @@ def detect_event_structure_change(
         snapshot["changed"] = bool(structural_changed)
 
         if not snapshot["changed"]:
+            # Pure physical movements within an allowed leaf are accepted
+            # without a manual structure task. Queue a durable event.json
+            # projection in the same transaction as the observed SQLite paths.
+            if moves and root_kind == "shared_workspace" and not conflicts_by_id:
+                from app.event_document_sync import queue_event_document_sync
+                connection.execute(
+                    "UPDATE events SET revision=revision+1,updated_at=?,edited_at=? WHERE id=?",
+                    (now, now, event_id),
+                )
+                revision = connection.execute(
+                    "SELECT revision FROM events WHERE id=?", (event_id,)
+                ).fetchone()[0]
+                queue_event_document_sync(
+                    connection, str(event["job_id"]), event_id,
+                    int(revision), now=now,
+                )
             if current is not None and str(current["status"]) in {"pending", "blocked"}:
                 connection.execute(
                     """UPDATE event_structure_changes
@@ -1055,7 +1071,9 @@ def detect_event_structure_change(
         }
 
 
-def detect_all_event_structure_changes(database_path: Path) -> dict[str, Any]:
+def detect_all_event_structure_changes(
+    database_path: Path, workspace_path: Path | None = None,
+) -> dict[str, Any]:
     with database_connection(database_path) as connection:
         ids = [
             str(row["id"])
@@ -1076,6 +1094,12 @@ def detect_all_event_structure_changes(database_path: Path) -> dict[str, Any]:
                 detected.append(item)
         except (EventStructureChangeError, EventInventoryError, OSError) as error:
             errors.append({"event_id": event_id, "message": str(error)})
+    if workspace_path is not None:
+        from app.event_document_sync import recover_event_document_sync_tasks
+        try:
+            recover_event_document_sync_tasks(database_path, workspace_path)
+        except OSError as error:
+            errors.append({"event_id": "", "message": str(error)})
     return {"detected": detected, "errors": errors}
 
 
