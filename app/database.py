@@ -598,7 +598,7 @@ def _job_workflow_states(connection: sqlite3.Connection) -> dict[str, dict[str, 
                 FROM files f
                 WHERE f.family_id IN ({ph})
                   AND f.current_root_kind='shared_workspace'
-                  AND COALESCE(f.current_relative_path,'') NOT LIKE 'Freigewordene Archivdateien/%'""",
+                  AND COALESCE(f.current_relative_path,'') NOT LIKE 'Freigewordene Archivdateien/%' AND COALESCE(f.current_relative_path,'') NOT LIKE 'Released Archive Files/%'""",
             tuple(family_ids),
         ).fetchall()
         active_ids = {int(row["family_id"]) for row in active_rows if row["family_id"] is not None}
@@ -2080,8 +2080,8 @@ def list_job_day_groups(
               AND NOT (
                   current_root_kind='shared_workspace'
                   AND (
-                      current_relative_path='Ohne_Datum'
-                      OR current_relative_path LIKE 'Ohne_Datum/%'
+                      current_relative_path IN ('Ohne_Datum','No Date')
+                      OR (current_relative_path LIKE 'Ohne_Datum/%' OR current_relative_path LIKE 'No Date/%')
                   )
               )
               {exclusion_sql}
@@ -2129,8 +2129,8 @@ def list_job_day_groups(
                   OR (
                       current_root_kind='shared_workspace'
                       AND (
-                          current_relative_path='Ohne_Datum'
-                          OR current_relative_path LIKE 'Ohne_Datum/%'
+                          current_relative_path IN ('Ohne_Datum','No Date')
+                          OR (current_relative_path LIKE 'Ohne_Datum/%' OR current_relative_path LIKE 'No Date/%')
                       )
                   )
               )
@@ -5022,7 +5022,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                    SELECT 1 FROM files f
                    WHERE f.family_id=marker.family_id
                      AND f.current_root_kind='shared_workspace'
-                     AND f.current_relative_path LIKE 'Freigewordene Archivdateien/%'
+                     AND (f.current_relative_path LIKE 'Freigewordene Archivdateien/%' OR f.current_relative_path LIKE 'Released Archive Files/%')
                  )
                HAVING COUNT(DISTINCT marker.family_id) > 0"""
         ).fetchall():
@@ -5052,8 +5052,8 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
                WHERE f.current_root_kind='shared_workspace'
                  AND (
-                   f.current_relative_path='Ohne_Datum'
-                   OR f.current_relative_path LIKE 'Ohne_Datum/%'
+                   f.current_relative_path IN ('Ohne_Datum','No Date')
+                   OR f.(current_relative_path LIKE 'Ohne_Datum/%' OR current_relative_path LIKE 'No Date/%')
                  )
                  AND NOT EXISTS (
                    SELECT 1 FROM event_assignments ea
@@ -5179,8 +5179,8 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                      AND undated_file.job_id=ff.job_id
                      AND undated_file.current_root_kind='shared_workspace'
                      AND (
-                       undated_file.current_relative_path='Ohne_Datum'
-                       OR undated_file.current_relative_path LIKE 'Ohne_Datum/%'
+                       undated_file.current_relative_path IN ('Ohne_Datum','No Date')
+                       OR undated_file.(current_relative_path LIKE 'Ohne_Datum/%' OR current_relative_path LIKE 'No Date/%')
                      )
                  )
                  AND NOT EXISTS (
