@@ -12440,6 +12440,7 @@ def api_propose_event_change(
                 notes=body.get("notes", ""),
                 archive_root=current_archive_root(),
                 workspace_path=current_workspace_root(),
+                guided_structure_change_id=manual_change_id or None,
             )
         except Exception:
             _release_new_global_reservations(archive_reservation)
