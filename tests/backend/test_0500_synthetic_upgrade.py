@@ -44,7 +44,7 @@ def test_0500_upgrade_from_synthetic_040_preserves_job_and_event(tmp_path, monke
     assert migration["integrity"] == "ok"
     assert migration["foreign_key_errors"] == 0
     assert migration["newly_applied_versions"] == list(range(41, 54))
-    assert migration["applied_versions"] == list(range(1, 53))
+    assert migration["applied_versions"] == list(range(1, 54))
     with database_connection(path) as conn:
         event = conn.execute(
             "SELECT name,start_datetime,end_datetime,status "
