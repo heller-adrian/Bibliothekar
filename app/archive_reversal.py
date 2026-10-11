@@ -20,7 +20,8 @@ from app.database import database_connection
 from app.workspace_layout import backup_root, shared_work_root
 
 
-REVERSAL_DIRECTORY_NAME = "Rückänderung"
+REVERSAL_DIRECTORY_NAME = "Rückänderung"  # legacy fallback, never rename old data
+from app.managed_directory_names import directory_name
 REVERSAL_VERSION = 1
 
 
@@ -69,7 +70,9 @@ def _central_root(workspace_path: Path) -> Path:
 
 def _base(workspace_path: Path, cr_id: str) -> Path:
     root = _work_root(workspace_path)
-    value = (root / "Später zuordnen" / REVERSAL_DIRECTORY_NAME / cr_id).resolve(strict=False)
+    staging = root / directory_name(root, "assign_later")
+    reversal = staging / directory_name(staging, "reversal")
+    value = (reversal / cr_id).resolve(strict=False)
     try:
         value.relative_to(root)
     except ValueError as exc:
@@ -358,7 +361,7 @@ def prepare_archive_reversal(
 
     cr, _event, rows = _request_context(database_path, cr_id)
     base = _base(workspace_path, cr_id)
-    restore_root = base / "Wiederherstellung"
+    restore_root = base / directory_name(base, "restoration")
     work_root = _work_root(workspace_path)
     central_root = _central_root(workspace_path)
     prepared_targets: list[tuple[Path, int, str]] = []
@@ -546,7 +549,7 @@ def _reversal_state(
     _cr, _event, rows = _request_context(database_path, cr_id)
     work_root = _work_root(workspace_path)
     central_root = _central_root(workspace_path)
-    restore_root = _base(workspace_path, cr_id) / "Wiederherstellung"
+    restore_root = _base(workspace_path, cr_id) / directory_name(_base(workspace_path, cr_id), "restoration")
 
     operations: list[dict[str, Any]] = []
     move_groups: dict[tuple[str, str], list[str]] = {}
@@ -691,7 +694,7 @@ def build_archive_reversal_assistant(
             "original_stock_path": work_display_root + "/" + (
                 (
                     _base(workspace_path, cr_id)
-                    / "Wiederherstellung"
+                    / directory_name(_base(workspace_path, cr_id), "restoration")
                     / Path(str(manifest["original_root"]))
                 )
                 .relative_to(_work_root(workspace_path)).as_posix()
@@ -811,7 +814,8 @@ def cleanup_archive_reversal(workspace_path: Path, cr_id: str) -> None:
         parent.rmdir()
     except OSError:
         pass
-    ( _work_root(workspace_path) / "Später zuordnen").mkdir(parents=True, exist_ok=True)
+    root = _work_root(workspace_path)
+    (root / directory_name(root, "assign_later")).mkdir(parents=True, exist_ok=True)
 
 
 def finish_archive_reversal(
