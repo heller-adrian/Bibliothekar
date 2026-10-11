@@ -9,7 +9,7 @@ from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0352_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.50.9"
+    assert main.DEPLOYMENT_VERSION == "0.51.0"
 
 
 def test_0352_page_subtitles_remain_compact_help():
