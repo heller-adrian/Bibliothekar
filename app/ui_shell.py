@@ -7361,6 +7361,7 @@ html[data-bk-locale="de"][data-bk-i18n-pending="true"]::before {content:"Wird ge
 .bk-i18n-dialog::backdrop { background: rgba(0,0,0,.62); }
 .bk-i18n-dialog-message { white-space: pre-wrap; line-height: 1.55; margin: 0 0 22px; overflow-wrap: anywhere; }
 .bk-i18n-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+.bk-i18n-prompt-input { box-sizing:border-box; display:block; width:100%; min-width:0; padding:12px; margin:0 0 18px; border:1px solid var(--bk-line); border-radius:9px; color:var(--bk-ink); background:var(--bk-surface-2); }
 .bk-i18n-dialog-actions button { padding: 10px 19px; min-height: 44px; border-radius: 10px; border: 1px solid var(--bk-line); }
 .bk-i18n-dialog-actions .bk-i18n-confirm { background: var(--bk-blue); color: #fff; border-color: var(--bk-blue); }
 """

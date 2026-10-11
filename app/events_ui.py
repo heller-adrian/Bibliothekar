@@ -4292,9 +4292,9 @@ EVENTS_HTML = r"""<!doctype html>
       changeRequestBody.innerHTML = html;
       changeRequestBody.querySelector("[data-reversal-force]")?.addEventListener("click", async event => {
         if (!(await window.BibliothekarI18n.confirmAsync("NOTFALLABBRUCH: Der ursprüngliche Archivbestand ist danach NICHT als wiederhergestellt bestätigt. Das Ereignis bleibt bis zur erneuten Prüfung gesperrt. Fortfahren?"))) return;
-        const confirmation = window.prompt("Gib zur Bestätigung exakt NOTFALLABBRUCH ein:");
+        const confirmation = await window.BibliothekarI18n.promptAsync("Gib zur Bestätigung exakt NOTFALLABBRUCH ein:");
         if (confirmation !== "NOTFALLABBRUCH") return;
-        const reason = window.prompt("Warum ist die Wiederherstellung nicht möglich?") || "";
+        const reason = (await window.BibliothekarI18n.promptAsync("Warum ist die Wiederherstellung nicht möglich?")) || "";
         if (reason.trim().length < 8) return;
         const button = event.currentTarget;
         button.disabled = true;

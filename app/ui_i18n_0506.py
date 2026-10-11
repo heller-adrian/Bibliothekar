@@ -142,6 +142,23 @@ UI_0506_TRANSLATIONS = {
     "Archivbestand": "Archive inventory",
     "Arbeitsbereich": "Workspace",
     "Ereignis gelöscht": "Event deleted",
+    # Secondary/reassignment and archive detail labels.
+    "↳ Ziel einer offenen Nachsortierung": "↳ Destination of a pending re-sort",
+    "＋ Ordner:": "＋ Folder:",
+    "− Ordner:": "− Folder:",
+    "→ Datei:": "→ File:",
+    "Neue Monats-Sammlung / noch kein Ziel": "New monthly collection / no destination yet",
+    "Zusätzliche Datei": "Additional file",
+    "zusätzliche Datei": "additional file",
+    "Änderung": "Change",
+    "Öffnen": "Open",
+    "Eingabe erforderlich": "Input required",
+    "Metadatenkorrektur": "Metadata correction",
+    "Keine passenden Ereignisse gefunden.": "No matching events found.",
+    "Ereignisdaten werden geladen …": "Loading event data…",
+    "Angezeigte Ereignisse": "Displayed events",
+    "Noch kein analysierter Arbeitsbestand vorhanden.": "No analyzed workspace inventory yet.",
+    "„Ohne Ereignis“ besteht aus einzelnen Tagen und Zeitsegmenten. Die Dateizugehörigkeit wird ausschließlich daraus berechnet.": "“No Event” consists of individual days and time segments. File membership is determined solely from these segments.",
     # Header status and metadata
     "Status: angewendet": "Status: applied",
     "Erstellt": "Created",
@@ -150,6 +167,12 @@ UI_0506_TRANSLATIONS = {
 }
 
 UI_0506_PATTERNS = [
+    [r"^([0-9]+) zusätzliche Datei(en)?$", "$1 additional files"],
+    [r"^([0-9]+) externe Änderungen übernommen\\.$", "$1 external changes accepted."],
+    [r"^Archivänderung verworfen\\. Eigene SSD-Kopien wurden entfernt; fremde oder unbekannte Inhalte blieben unangetastet: (.+)$",
+     "Archive change discarded. Own SSD copies were removed; foreign or unknown content remained untouched: $1"],
+    [r"^Hardlinks sind zwischen diesen Speicherorten nicht möglich\\. (.+)$",
+     "Hardlinks are not possible between these storage locations. $1"],
     # Anchored dynamic headings, preserve event name captures exactly.
     [r"^Ereignis bearbeiten · (.+)$", "Edit event · $1"],
     [r"^Änderungen anwenden · (.+)$", "Apply changes · $1"],

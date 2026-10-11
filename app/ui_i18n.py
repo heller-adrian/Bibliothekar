@@ -1514,11 +1514,61 @@ I18N_UI_JS = r"""
       return tr(line);
     }).join("");
   }
+  // Application-owned prompt: Safari's native buttons follow the device
+  // locale rather than Bibliothekar's selected locale.
+  function promptAsync(message, defaultValue = "") {
+    if (!document.body || typeof document.createElement !== "function")
+      return Promise.resolve(originalPrompt(dialogMessage(message), defaultValue));
+    const dialog = document.createElement("dialog");
+    if (typeof dialog.showModal !== "function")
+      return Promise.resolve(originalPrompt(dialogMessage(message), defaultValue));
+    dialog.className = "bk-i18n-dialog";
+    dialog.setAttribute("aria-label", locale === "en" ? "Input required" : "Eingabe erforderlich");
+    const text = document.createElement("p");
+    text.className = "bk-i18n-dialog-message";
+    text.textContent = dialogMessage(message);
+    const input = document.createElement("input");
+    input.className = "bk-i18n-prompt-input";
+    input.type = "text";
+    input.value = String(defaultValue ?? "");
+    const actions = document.createElement("div");
+    actions.className = "bk-i18n-dialog-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = locale === "en" ? "Cancel" : "Abbrechen";
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.className = "bk-i18n-confirm";
+    accept.textContent = locale === "en" ? "Confirm" : "Bestätigen";
+    actions.append(cancel, accept);
+    dialog.append(text, input, actions);
+    return new Promise(resolve => {
+      let finished = false;
+      const finish = answer => {
+        if (finished) return;
+        finished = true;
+        try { dialog.close(); } catch (_) {}
+        dialog.remove();
+        resolve(answer);
+      };
+      cancel.addEventListener("click", () => finish(null));
+      accept.addEventListener("click", () => finish(input.value));
+      input.addEventListener("keydown", event => {
+        if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); finish(input.value); }
+      });
+      dialog.addEventListener("cancel", event => { event.preventDefault(); finish(null); });
+      dialog.addEventListener("close", () => finish(null));
+      document.body.appendChild(dialog);
+      try { dialog.showModal(); input.focus(); }
+      catch (_) { finish(originalPrompt(dialogMessage(message), defaultValue)); }
+    });
+  }
   window.BibliothekarI18n = Object.freeze({
     t: (value) => locale === "en" ? tr(String(value)) : restoreGerman(String(value)),
     getLocale: () => locale,
     setLocale,
     confirmAsync,
+    promptAsync,
     previewText,
   });
   document.documentElement.lang = locale;
