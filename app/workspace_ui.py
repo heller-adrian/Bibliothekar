@@ -4285,7 +4285,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
         lines.push("",`Fortführung · ${String(activeNoEventTarget?.status||"")}`);
         for (const segment of all) lines.push(`${segment.day_key} · ${segment.start_time}–${segment.end_time}${newKeys.has(`${segment.day_key}|${segment.start_time}|${segment.end_time}`)?" · NEU":" · bestehend"}`);
-        dialogPreview.textContent=lines.join("\n");
+        dialogPreview.textContent=window.BibliothekarI18n?.previewText?.(lines.join("\n")) ?? lines.join("\n");
         return;
       }
 
@@ -4304,7 +4304,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         const empty=(result.preview.empty_subevents||[]);
         dialogPreview.textContent =
-          result.preview.structure_text
+          (window.BibliothekarI18n?.previewText?.(result.preview.structure_text) ?? result.preview.structure_text)
           + (empty.length
             ? "\n\nHinweis: ohne passende Dateifamilien · "+empty.map(item=>item.name).join(", ")
             : "");
@@ -4312,7 +4312,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       } catch (error) {
         dialogPreview.textContent =
-          error.message;
+          window.BibliothekarI18n?.previewText?.(error.message) ?? error.message;
 
       } finally {
         calculatePreviewButton.disabled =

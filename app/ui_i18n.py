@@ -1486,11 +1486,38 @@ I18N_UI_JS = r"""
       catch (_) { finish(originalConfirm(dialogMessage(message))); }
     });
   }
+  // Translate generated preview labels while leaving actual paths and folder
+  // names unchanged (including legacy German directory names).
+  function previewText(value) {
+    const source = String(value ?? "");
+    if (locale !== "en") return source;
+    return source.split(/(\r?\n)/u).map(line => {
+      if (line === "\n" || line === "\r\n") return line;
+      const m = line.match(/^(\s*)(Zeitraum:|Auswahl:|Keine Zielstruktur vorhanden\.|Der gewählte Zeitraum ist ungültig\.)(.*)$/u);
+      if (m) {
+        const labels = {
+          "Zeitraum:": "Period:",
+          "Auswahl:": "Selection:",
+          "Keine Zielstruktur vorhanden.": "No destination structure available.",
+          "Der gewählte Zeitraum ist ungültig.": "The selected date range is invalid."
+        };
+        let details = m[3];
+        if (m[2] === "Auswahl:") {
+          details = details.replace(/([0-9]+) Dateien/u, "$1 files").replace(/([0-9]+) Familien/u, "$1 families");
+        }
+        return m[1] + labels[m[2]] + details;
+      }
+      if (/^\s*[0-9]{4}-[0-9]{2}-[0-9]{2} /u.test(line))
+        return line.replace(/ bis (?=[0-9]{4}-[0-9]{2}-[0-9]{2})/u, " to ");
+      return tr(line);
+    }).join("");
+  }
   window.BibliothekarI18n = Object.freeze({
     t: (value) => locale === "en" ? tr(String(value)) : restoreGerman(String(value)),
     getLocale: () => locale,
     setLocale,
     confirmAsync,
+    previewText,
   });
   document.documentElement.lang = locale;
   document.documentElement.dataset.bkLocale = locale;

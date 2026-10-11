@@ -2583,7 +2583,7 @@ EVENTS_HTML = r"""<!doctype html>
 
         <details class="sort-plan-section sort-plan-disclosure" open>
           <summary>Zielstruktur</summary>
-          <pre class="plan-tree">${escapeHtml(plan.structure_text)}</pre>
+          <pre class="plan-tree">${escapeHtml(window.BibliothekarI18n?.previewText?.(plan.structure_text) ?? plan.structure_text)}</pre>
         </details>
 
         <section class="sort-plan-section">
