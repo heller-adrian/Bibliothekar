@@ -1,0 +1,11 @@
+0.50.7 separate test image, base 0.50.6.
+Source commit: e4b323be9a8d9ca05ffd45e59ee2cf77bb23024d.
+Tag: ghcr.io/heller-adrian/bibliothekar:patch-0.50.7
+Changes: desktop browser tab navigation without full-screen spinner,
+unchanged header animation, English import/SD-card/job progress and technical
+headings, English example event names, tests of new root directories under
+/workspace and preservation of configured legacy paths.
+Do not publish latest, do not merge main, do not mutate databases or files.
+QA gating: full backend regression + isolated archive harness must both pass.
+If CI infrastructure prevents QA, do not push or claim verified image.
+Documentation: docs/0507_DESKTOP_I18N_IMPORT.md.
