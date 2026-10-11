@@ -5381,7 +5381,6 @@ BIBLIOTHEKAR_JS = r"""
         tab.classList.contains("active") || bkTabNavigationStarted
         || event.defaultPrevented || event.button !== 0
         || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
-        || bkTabReducedMotion()
       ) return;
       const href = tab.href;
       if (!href) return;
@@ -5397,7 +5396,7 @@ BIBLIOTHEKAR_JS = r"""
       // Do not hold back page navigation for animation: iPhone PWA must respond instantly.
       // Yield one visible animation frame for the loading indicator, then navigate.
       // No network fetch or page-readiness gate is introduced here.
-      requestAnimationFrame(() => window.location.assign(href));
+      requestAnimationFrame(() => requestAnimationFrame(() => window.location.assign(href)));
     });
   });
 

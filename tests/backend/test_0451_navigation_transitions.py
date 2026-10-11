@@ -43,7 +43,7 @@ def test_0451_navigation_has_single_press_and_arrival_motion():
     assert 'addEventListener("pointercancel"' in script
     assert 'bkTabNavigationStarted = true' in script
     assert 'window.setTimeout(() => window.location.assign(href), 190)' not in script
-    assert 'requestAnimationFrame(() => window.location.assign(href))' in script
+    assert 'requestAnimationFrame(() => requestAnimationFrame(() => window.location.assign(href)))' in script
     assert 'sessionStorage.setItem("bk-tab-navigation-0451"' in script
     assert 'requestAnimationFrame(() => requestAnimationFrame(' in script
     assert 'window.addEventListener("pageshow", event =>' in script
