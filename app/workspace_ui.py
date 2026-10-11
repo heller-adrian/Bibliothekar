@@ -199,6 +199,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       color: var(--danger);
     }
 
+    .summary > .card { min-width:0; overflow:hidden; }
+    .summary > .card > .muted { display:block; min-width:0; max-width:100%; font-size:clamp(.63rem, .84vw, .85rem); line-height:1.2; white-space:normal!important; overflow-wrap:anywhere; hyphens:auto; }
     .summary {
       display: grid;
       grid-template-columns:
@@ -671,7 +673,9 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
     .preview-family-stem { min-width:0; overflow:hidden; text-overflow:ellipsis; }
     .preview-family-time { white-space:nowrap; font-variant-numeric:tabular-nums; }
-    .preview-selection-note { margin-top:9px; color:var(--muted); font-size:.78rem; line-height:1.4; }
+    .preview-selection-note { margin-top:9px; color:var(--muted); font-size:.78rem; line-height:1.4; white-space:normal!important; overflow:visible!important; overflow-wrap:anywhere; word-break:normal; }
+    .preview-selection-note strong { white-space:normal; }
+    .preview-selection-note .preview-period-dates { display:inline; white-space:normal; overflow-wrap:anywhere; }
 
     .timeline-event-card {
       min-width: 0;
@@ -1419,7 +1423,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           id="preview-body"
           class="preview-body"
         >
-          <h2>Zielstruktur-Vorschau</h2>
+          <h2>Destination structure preview</h2>
 
           <p class="muted">
             Die Vorschau zeigt nur die Planung.
@@ -3546,7 +3550,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         selectedDatedGroups();
 
       let preview =
-        '<div class="preview-root-title">Arbeitsbestand</div><div class="preview-days">';
+        '<div class="preview-root-title">' + (document.documentElement.dataset.bkLocale==="de" ? "Arbeitsbestand" : "Workspace inventory") + '</div><div class="preview-days">';
 
       for (const group of groups) {
         const dayLabel = group.has_date ? formatDay(group.day_key) : "Ohne Datum";
@@ -3576,7 +3580,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       if (dated.length) {
         preview +=
-          `<div class="preview-selection-note"><strong>Auswahlzeitraum:</strong> ${escapeHtml(dated[0].day_key)} bis ${escapeHtml(dated[dated.length - 1].day_key)}</div>`;
+          `<div class="preview-selection-note"><strong>${document.documentElement.dataset.bkLocale==="de" ? "Auswahlzeitraum:" : "Selection period:"}</strong> <span class="preview-period-dates">${escapeHtml(dated[0].day_key)} ${document.documentElement.dataset.bkLocale==="de" ? "bis" : "to"} ${escapeHtml(dated[dated.length - 1].day_key)}</span></div>`;
       }
 
       structurePreview.innerHTML =
@@ -4130,7 +4134,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const defaultEnd=String(defaults.end_time||(
         ed===bounds.maxDate ? bounds.maxTime : "23:59"
       )||"23:59");
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Remove subevent</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       const syncDayDisplays=()=>{
         for(const [selector,displaySelector] of [
@@ -4266,7 +4270,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         const preserve=Boolean(payload.preserve_day_folders || activeNoEventTarget?.preserve_day_folders);
         const state=activeNoEventTarget?.id
           ? await getJson(`/api/events/${encodeURIComponent(activeNoEventTarget.id)}/folder-layout`)
-          : (globalFolderLayout || {structure_enabled:true,input_path:"Alle",layout:{nodes:[{name:"Alle",children:[]},{name:"Sortiert",children:[]},{name:"Export",children:[]}]}});
+          : (globalFolderLayout || {structure_enabled:true,input_path:"All",layout:{nodes:[{name:"All",children:[]},{name:"Sorted",children:[]},{name:"Export",children:[]}]}});
         const flatten=(nodes,prefix="")=>(nodes||[]).flatMap(node=>{
           const path=prefix?`${prefix}/${node.name}`:String(node.name||"");
           return [path,...flatten(node.children||[],path)];

@@ -8,14 +8,14 @@ import json
 DEFAULT_LAYOUT = {
     "version": 2,
     "nodes": [
-        {"id": "legacy-alle", "name": "Alle", "children": []},
-        {"id": "legacy-sortiert", "name": "Sortiert", "children": []},
+        {"id": "legacy-alle", "name": "All", "children": []},
+        {"id": "legacy-sortiert", "name": "Sorted", "children": []},
         {"id": "legacy-export", "name": "Export", "role": "export", "children": []},
     ],
 }
 DEFAULT_SETTING = {
     "structure_enabled": True,
-    "input_path": "Alle",
+    "input_path": "All",
     "layout": DEFAULT_LAYOUT,
 }
 RESERVED_NAMES = {"event.json"}
@@ -183,7 +183,7 @@ def get_global_default(connection: Any) -> dict[str, Any]:
         raise EventLayoutError("Die globale Ordnerstruktur ist beschädigt.") from exc
     layout = normalize_layout(data.get("layout") or DEFAULT_LAYOUT)
     enabled = bool(data.get("structure_enabled", True))
-    input_path = validate_input_path(layout, data.get("input_path", "Alle"), structure_enabled=enabled)
+    input_path = validate_input_path(layout, data.get("input_path", "Alle" if any(n.get("name") == "Alle" for n in layout["nodes"]) else "All"), structure_enabled=enabled)
     return {"structure_enabled": enabled, "input_path": input_path, "layout": layout}
 
 

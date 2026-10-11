@@ -5387,6 +5387,7 @@ BIBLIOTHEKAR_JS = r"""
       if (!href) return;
       event.preventDefault();
       bkTabNavigationStarted = true;
+      root.dataset.bkNavLoading = "true";
       tab.classList.add("is-navigating", "bk-tab-pressing");
       try {
         sessionStorage.setItem("bk-tab-navigation-0451", JSON.stringify({
@@ -5394,7 +5395,9 @@ BIBLIOTHEKAR_JS = r"""
         }));
       } catch (_) {}
       // Do not hold back page navigation for animation: iPhone PWA must respond instantly.
-      window.location.assign(href);
+      // Yield one visible animation frame for the loading indicator, then navigate.
+      // No network fetch or page-readiness gate is introduced here.
+      requestAnimationFrame(() => window.location.assign(href));
     });
   });
 
@@ -5418,6 +5421,7 @@ BIBLIOTHEKAR_JS = r"""
       tab.classList.remove("is-navigating", "bk-tab-pressing");
     });
     delete root.dataset.bkNavArriving;
+    delete root.dataset.bkNavLoading;
     try { sessionStorage.removeItem("bk-tab-navigation-0451"); } catch (_) {}
   });
 
@@ -5807,7 +5811,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.50.5</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.50.6</span></p>
   </div>
 </dialog>
 
@@ -7318,6 +7322,32 @@ BIBLIOTHEKAR_0505_LANGUAGE_CSS = r"""
 /* English content stays concealed only until the initial synchronous translation.
    This avoids presenting German content even for one frame on iPhone PWA reloads. */
 html[data-bk-i18n-pending="true"] body { visibility: hidden !important; }
+/* A visible loading indicator exists even before the destination body is parsed.
+   The same indicator responds at once to a navigation tap on the outgoing page. */
+html[data-bk-i18n-pending="true"]::before,
+html[data-bk-nav-loading="true"]::before {
+  content: "Loading…";
+  display:flex; align-items:center; justify-content:center;
+  position:fixed; inset:0; z-index:2147483645;
+  font: 700 1rem Futura,"Helvetica Neue",Arial,sans-serif;
+  color:var(--bk-ink,#192637); background:var(--bk-page-bg,var(--bk-paper,#f5f1e9));
+}
+html[data-bk-i18n-pending="true"]::after,
+html[data-bk-nav-loading="true"]::after {
+  content:""; position:fixed; z-index:2147483646;
+  top:calc(50% - 52px); left:calc(50% - 17px);
+  width:34px; height:34px; box-sizing:border-box;
+  border:4px solid color-mix(in srgb,var(--bk-blue,#1974c6) 22%,transparent);
+  border-top-color:var(--bk-blue,#1974c6); border-radius:50%;
+  animation:bk0506spin .75s linear infinite; pointer-events:none;
+}
+html[data-bk-locale="de"][data-bk-nav-loading="true"]::before,
+html[data-bk-locale="de"][data-bk-i18n-pending="true"]::before {content:"Wird geladen …";}
+@keyframes bk0506spin {to {transform:rotate(360deg);}}
+@media(prefers-reduced-motion: reduce) {
+  html[data-bk-i18n-pending="true"]::after,
+  html[data-bk-nav-loading="true"]::after {animation-duration:2.4s;}
+}
 .bk-i18n-dialog {
   width: min(520px, calc(100vw - 32px));
   max-height: calc(100dvh - 40px);
