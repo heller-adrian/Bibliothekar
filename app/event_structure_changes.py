@@ -1405,12 +1405,35 @@ def _write_prepared_document(path: Path, document: dict[str, Any]) -> str:
     return digest
 
 
+def _archive_structure_helper_root(
+    workspace_path: Path, work_root: Path | None = None,
+) -> Path:
+    """Choose a staging directory without migrating any existing folders.
+
+    The production caller supplies the selected library's real work_root.
+    Legacy direct callers retain their historical compatibility location.
+    Existing German staging directories always take precedence to avoid
+    splitting already started archive changes across physical directories.
+    """
+    base = Path(work_root) if work_root is not None else (
+        Path(workspace_path) / WORK_DIRECTORY_NAME
+    )
+    old = base / "Später zuordnen"
+    if old.is_dir() and not old.is_symlink():
+        return old
+    new = base / "Assign Later"
+    if new.is_dir() and not new.is_symlink():
+        return new
+    return new if work_root is not None else old
+
+
 def cleanup_completed_archived_structure_helpers(
     database_path: Path,
     workspace_path: Path,
     *,
     event_id: str | None = None,
     change_id: str | None = None,
+    work_root: Path | None = None,
 ) -> dict[str, Any]:
     """Remove only verified helper event.json files from completed archive tasks.
 
@@ -1421,11 +1444,18 @@ def cleanup_completed_archived_structure_helpers(
     recorded SHA-256 are accepted. Empty parent folders are then pruned up to,
     but never including, Später zuordnen.
     """
-    staging_root = (
-        Path(workspace_path)
-        / WORK_DIRECTORY_NAME
-        / "Später zuordnen"
-    ).resolve(strict=False)
+    base = Path(work_root) if work_root is not None else (
+        Path(workspace_path) / WORK_DIRECTORY_NAME
+    )
+    allowed_staging_roots = {
+        (base / name).resolve(strict=False)
+        for name in ("Später zuordnen", "Assign Later")
+    }
+    # Legacy records may have used the root compatibility alias even when
+    # the configured library work_root now points elsewhere.
+    allowed_staging_roots.add(
+        (Path(workspace_path) / WORK_DIRECTORY_NAME / "Später zuordnen").resolve(strict=False)
+    )
     removed_files = 0
     removed_directories = 0
     warnings: list[str] = []
@@ -1459,9 +1489,13 @@ def cleanup_completed_archived_structure_helpers(
             continue
 
         helper_path = Path(raw_path).expanduser().resolve(strict=False)
-        if helper_path == staging_root or staging_root not in helper_path.parents:
+        staging_root = next(
+            (root for root in allowed_staging_roots if root in helper_path.parents),
+            None,
+        )
+        if staging_root is None:
             warnings.append(
-                f"{row.get('id')}: gespeicherter Hilfsdateipfad liegt außerhalb von Später zuordnen."
+                f"{row.get('id')}: Hilfsdatei liegt außerhalb des erlaubten Assign-Later-Bereichs."
             )
             continue
 
@@ -1512,6 +1546,7 @@ def prepare_archived_structure_change(
     input_path: str,
     input_paths: dict[str, str] | None = None,
     app_version: str | None = None,
+    work_root: Path | None = None,
 ) -> dict[str, Any]:
     now = _now()
     with database_connection(database_path) as connection:
@@ -1575,9 +1610,7 @@ def prepare_archived_structure_change(
     year = str(event["start_datetime"] or "")[:4]
     folder = str(event["folder_name"])
     prepared = (
-        Path(workspace_path)
-        / WORK_DIRECTORY_NAME
-        / "Später zuordnen"
+        _archive_structure_helper_root(workspace_path, work_root)
         / year
         / folder
         / EVENT_DOCUMENT_FILENAME
@@ -1609,6 +1642,8 @@ def verify_archived_structure_change(
     archive_root: Path,
     workspace_path: Path,
     change_id: str,
+    *,
+    work_root: Path | None = None,
 ) -> dict[str, Any]:
     now = _now()
     with database_connection(database_path) as connection:
@@ -1672,6 +1707,7 @@ def verify_archived_structure_change(
         database_path,
         workspace_path,
         change_id=change_id,
+        work_root=work_root,
     )
     return {
         "status": "completed",
