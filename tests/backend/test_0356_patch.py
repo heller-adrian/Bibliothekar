@@ -6,7 +6,7 @@ from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0356_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.50.9"
+    assert main.DEPLOYMENT_VERSION == "0.51.0"
 
 
 def test_0356_browser_only_rules_do_not_touch_standalone_webapp():
