@@ -111,3 +111,24 @@ def test_0509_staged_event_document_rejects_symlink_parent(tmp_path):
             target, {"source":"kamera-automatisierung","event":{"id":"e"}}
         )
     assert not (outside/"event.json").exists()
+
+
+def test_0509_archive_staging_recovers_only_matching_temporary_file(tmp_path):
+    from app.event_structure_changes import EventStructureChangeError, _write_prepared_document
+    import hashlib, json
+    document={"source":"kamera-automatisierung","event":{"id":"e"}}
+    payload=json.dumps(document,ensure_ascii=False,indent=2,sort_keys=True).encode()
+    digest=hashlib.sha256(payload).hexdigest()
+    target=tmp_path/"Assign Later"/"2026"/"Trip"/"event.json"
+    target.parent.mkdir(parents=True)
+    tmp=target.with_name("event.json.tmp."+digest[:12])
+    tmp.write_bytes(payload)
+    assert _write_prepared_document(target,document)==digest
+    assert target.read_bytes()==payload
+    assert not tmp.exists()
+    target.unlink()
+    tmp.write_bytes(b"unrelated bytes")
+    with pytest.raises(EventStructureChangeError,match="temporäre"):
+        _write_prepared_document(target,document)
+    assert tmp.read_bytes()==b"unrelated bytes"
+    assert not target.exists()
