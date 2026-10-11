@@ -227,7 +227,7 @@ def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path
           ) VALUES('j','B','B','complete','2026-07-23T15:00:00','high')""").lastrowid
         file_id=seed_file_for_family(conn,family_id=family_id,content=b"child",
                  current_path="2026/07-23 - Trip/Part B/Alle/B.JPG",filename="B.JPG")
-        conn.execute("UPDATE files SET current_root_kind='shared_workspace' WHERE id=?",(file_id,))
+        conn.execute("UPDATE files SET current_root_kind='shared_workspace',selected_capture_time='2026-07-23T15:00:00' WHERE id=?",(file_id,))
         conn.execute("""INSERT INTO event_assignments(event_id,family_id,file_id,
                      assignment_source,created_at) VALUES('child',?,NULL,'manual',?)""",
                      (family_id,NOW))
