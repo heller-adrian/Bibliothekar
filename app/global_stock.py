@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+def _is_staging_path(value: str) -> bool:
+    normalized = str(value or "").replace("\\", "/").strip("/")
+    return any(
+        normalized == prefix or normalized.startswith(prefix + "/")
+        for prefix in ("Später zuordnen", "Assign Later")
+    )
+
+
 from pathlib import Path
 from typing import Any
 
@@ -373,7 +381,7 @@ def migrate_main_free_stock_to_central(
             )
 
         normalized = relative.as_posix()
-        if normalized == "Später zuordnen" or normalized.startswith("Später zuordnen/"):
+        if _is_staging_path(normalized):
             kept_staging += 1
             continue
         if bool(row["belongs_to_applied"]):
@@ -468,8 +476,7 @@ def synchronize_central_stock_projections(
                 continue
             normalized = relative.as_posix()
             if (
-                normalized == "Später zuordnen"
-                or normalized.startswith("Später zuordnen/")
+                _is_staging_path(normalized)
             ):
                 continue
             candidate = (central / relative).resolve(strict=False)
@@ -684,8 +691,7 @@ def synchronize_central_stock_projections(
 
                 current = str(row.get("current_relative_path") or "")
                 if (
-                    current == "Später zuordnen"
-                    or current.startswith("Später zuordnen/")
+                    _is_staging_path(current)
                 ):
                     continue
 
