@@ -192,7 +192,20 @@ def test_0509_archived_parent_and_child_replacement_is_read_only(tmp_path: Path,
         assert not (workspace / "Arbeitsbereich" / "Später zuordnen").exists()
     assert helper.is_file()
     assert not (root/"event.json").exists()
-    (root/"event.json").write_bytes(helper.read_bytes())
+    prepared_bytes=helper.read_bytes()
+    if english_work_root:
+        from app.event_structure_changes import EventStructureChangeError
+        (root/"event.json").write_bytes(b'{"source":"untrusted"}')
+        with pytest.raises(EventStructureChangeError, match="entspricht"):
+            verify_archived_structure_change(
+                db,archive,workspace,detected["id"],work_root=work_root
+            )
+        with database_connection(db) as conn:
+            assert conn.execute(
+                "SELECT status FROM event_structure_changes WHERE id=?",
+                (detected["id"],),
+            ).fetchone()[0]=="prepared"
+    (root/"event.json").write_bytes(prepared_bytes)
     confirmed=verify_archived_structure_change(
         db,archive,workspace,detected["id"],work_root=work_root
     )
