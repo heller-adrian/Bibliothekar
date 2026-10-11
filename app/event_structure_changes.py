@@ -35,12 +35,23 @@ def _now() -> str:
 
 
 def _safe_rel(value: Any) -> str:
-    raw = str(value or "").replace("\\", "/").strip("/")
-    if not raw:
+    original = str(value or "").replace("\\", "/")
+    if not original:
         return ""
-    path = PurePosixPath(raw)
-    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
-        raise EventStructureChangeError("Unsicherer relativer Strukturpfad: " + raw)
+    # Never silently strip an absolute root before checking it. PurePosixPath
+    # also normalizes repeated separators and "." components, so inspect the
+    # original components before constructing the path.
+    if original.startswith("/") or any(
+        part in {"", ".", ".."} for part in original.split("/")
+    ):
+        raise EventStructureChangeError(
+            "Unsicherer relativer Strukturpfad: " + original
+        )
+    path = PurePosixPath(original)
+    if path.is_absolute():
+        raise EventStructureChangeError(
+            "Unsicherer relativer Strukturpfad: " + original
+        )
     return path.as_posix()
 
 
