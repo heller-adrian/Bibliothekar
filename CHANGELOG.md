@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.50.9 – Getrennte Ereignisordner und sichere manuelle Änderungen (in Entwicklung)
+
+- Manuell erkannte unterschiedliche Organisationsstrukturen von Haupt-, Unter- und Tagesereignisblättern erhalten separate Input-Ordner. Die Blatt-Zuordnung verwendet stabile Ereignis-IDs statt Ordnernamen.
+- SQLite speichert die bestätigten Blatt-Layouts über die additive Migration 053. Die portable event.json enthält diese Blatt-Layouts und zeigt im Strukturbaum deren jeweilige Ordner.
+- Manuelle Applied-Dateiverschiebungen synchronisieren die ereignisbezogene SQLite-Revision über einen wiederholbaren event.json-Auftrag. Ein zeitlich falsch zugeordnetes Unterereignis bleibt ein Konflikt; vollständig in den Hauptordner verschobene Unterereignisse werden nicht stillschweigend umbenannt oder aufgelöst.
+- Archivierte Ereignisse bleiben read-only: Eine neue event.json wird zuerst in einem Hilfsbereich vorbereitet und erst nach exaktem SHA-256-Abgleich im Archiv übernommen. Der Hilfsbereich verwendet den tatsächlichen Bibliotheks-Arbeitsordner; neue Installationen erhalten `Assign Later`, vorhandene deutsche Hilfsordner bleiben kompatibel.
+- Fremde/beschädigte event.json-Dateien und symbolische Links dürfen im Hilfsbereich nicht überschrieben werden. Nach einem Absturz kann eine byteidentische temporäre Datei sicher weiterverwendet werden.
+- Zusätzliche englische UI-Texte für Rückänderung, Archiv, Dateioperationen und Importe. Die bisherigen englischen Standardordner für neue Installationen bleiben bestehen; bereits angelegte deutsche Ordner werden nicht automatisch umbenannt.
+- Isolierte Negativ- und Regressionstests prüfen Haupt-/Unterereignisse, abweichende Zeitfenster, nicht autorisierte Auflösung, zwei Archivpfadvarianten, manipulierte event.json, Fremddateien und Pfadtraversal.
+- **Noch offen:** Eine manuelle Auflösung eines Unterereignisses direkt als *fachliche* Ereignisänderung ist bewusst noch nicht freigeschaltet. Sie benötigt den atomaren, bestätigten Edit-/Reassignment-Workflow; bloße Finder-Bewegungen reichen nicht als Zustimmung. Eine pauschale Umbenennung aller übrigen historischen internen Ordner ist nicht Bestandteil dieses Patches.
+- Entwicklung nur in `patch/0.50.9`; keine automatische Migration bestehender Archive und kein Release auf `main`/`latest`.
+
 ## 0.50.8 – Hintergrundaufträge, Speicheranzeige und Internationalisierung
 
 - Der Systemstatus ermittelt freien Platz auf dem tatsächlichen Library-Workspace-Dataset anstelle der temporären Kompatibilitätsansicht unter /tmp.
