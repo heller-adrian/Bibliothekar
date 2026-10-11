@@ -39,7 +39,7 @@ def test_0442_applied_delete_opens_modal_before_async_delete():
     start = src.index('async function deleteEvent(eventId, jobId)')
     end = src.index('eventEditClose.addEventListener', start)
     body = src[start:end]
-    assert 'const confirmed = window.confirm(' in body
+    assert 'const confirmed = await window.BibliothekarI18n.confirmAsync(' in body
     assert 'if (preparingApplied) showSortPreparation(event.name, "Änderungen anwenden");' in body
     assert body.index('showSortPreparation(event.name') < body.index('result = await requestJson(')
     assert 'if (preparingArchived)' in body

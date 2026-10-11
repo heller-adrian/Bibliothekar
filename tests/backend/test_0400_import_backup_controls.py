@@ -141,7 +141,7 @@ def test_0400_import_ui_explains_copy_and_exposes_controls():
     assert "zusätzlichen Speicherplatz" in source
     assert 'data-cancel-import=' in source
     assert 'data-delete-backup=' in source
-    assert "window.confirm(" in source
+    assert "window.BibliothekarI18n.confirmAsync(" in source
     assert "/cancel" in source
     assert "/api/backups/" in source
 
