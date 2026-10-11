@@ -447,6 +447,12 @@ def event_document_matches_db(
     for key in ("document_version", "source_jobs", "folder_layout", "child_events", "no_event_segments", "structure", "files"):
         if document.get(key) != fresh.get(key):
             drift.append(key)
+    # New events may have independent parent/child/day layout snapshots.
+    # Keep old documents compatible, but do not ignore drift once such a
+    # snapshot exists on either side.
+    if "leaf_folder_layouts" in document or "leaf_folder_layouts" in fresh:
+        if document.get("leaf_folder_layouts") != fresh.get("leaf_folder_layouts"):
+            drift.append("leaf_folder_layouts")
 
     doc_families = {int(f.get("family_id")) for f in document.get("families") or []}
     fresh_families = {int(f["family_id"]) for f in fresh["families"]}
