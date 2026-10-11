@@ -1156,7 +1156,7 @@ def _apply_confirmed_state(
         raise EventStructureChangeError("Die erkannte Struktur besitzt Blocker und kann nicht übernommen werden.")
     layout = json.loads(str(row["proposed_layout_json"] or "{}"))
     leaves = list(detected.get("leaf_layouts") or [])
-    if len(leaves) > 1:
+    if len(leaves) > 1 or (leaves and leaves[0]["leaf_prefix"]):
         selected_leaves = validate_leaf_choices(leaves, input_paths, input_path)
         root_leaf = next(
             (leaf for leaf in selected_leaves if leaf["leaf_prefix"] == ""), None
@@ -1258,7 +1258,7 @@ def _apply_confirmed_state(
         "structure_enabled": structure_enabled,
         "input_path": clean_input,
         "layout": layout,
-        "leaf_layouts": selected_leaves if len(leaves) > 1 else [],
+        "leaf_layouts": selected_leaves if len(leaves) > 1 or (leaves and leaves[0]["leaf_prefix"]) else [],
     }
 
 
@@ -1480,7 +1480,7 @@ def prepare_archived_structure_change(
             raise EventStructureChangeError("Die erkannte Archivstruktur besitzt Blocker.")
         layout = json.loads(str(row["proposed_layout_json"] or "{}"))
         leaves = list(detected.get("leaf_layouts") or [])
-        if len(leaves) > 1:
+        if len(leaves) > 1 or (leaves and leaves[0]["leaf_prefix"]):
             selected_leaves = validate_leaf_choices(leaves, input_paths, input_path)
             root_leaf = next(
                 (leaf for leaf in selected_leaves if leaf["leaf_prefix"] == ""), None
