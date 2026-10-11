@@ -26,6 +26,7 @@ import os
 from app.database import database_connection
 from app.event_access import event_family_rows, event_file_rows, event_source_jobs
 from app.event_layout import ensure_event_layout_snapshot
+from app.event_leaf_layouts import stored_leaf_layouts
 
 from app.workspace_layout import WORK_DIRECTORY_NAME
 
@@ -144,6 +145,7 @@ def build_event_document_from_db(
         layout_state = ensure_event_layout_snapshot(
             connection, event_id, now=datetime.now(timezone.utc).isoformat()
         )
+        leaf_layouts = list(stored_leaf_layouts(connection, event_id).values())
 
         assignment_day_rows = connection.execute(
             """
@@ -293,6 +295,7 @@ def build_event_document_from_db(
             "layout": layout_state["layout"],
             "revision": int(layout_state["revision"]),
         },
+        **({"leaf_folder_layouts": leaf_layouts} if leaf_layouts else {}),
         "child_events": children,
         "no_event_segments": segments,
         "child_event": (
