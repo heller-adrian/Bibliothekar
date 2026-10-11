@@ -256,6 +256,8 @@ def build_event_document_from_db(
         structure_children,
         preserve_day_folders,
         layout_state=layout_state,
+        leaf_layouts=leaf_layouts,
+        parent_event_id=event_id,
     )
     return {
         "document_version": EVENT_DOCUMENT_VERSION,
