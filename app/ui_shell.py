@@ -4847,7 +4847,8 @@ BIBLIOTHEKAR_JS = r"""
         ? d1+" 14-00–"+d2+" 18-30"
         : d1+" · 14-00–18-30";
     }
-    const normal=datePart+" - Urlaub";
+    const englishExample=document.documentElement.dataset.bkLocale !== "de";
+    const normal=datePart+" - "+(englishExample?"Vacation":"Urlaub");
 
     const sd1=subeventYear?"2026-07-20":"07-20";
     const sd2=subeventYear?"2026-07-21":"07-21";
@@ -4857,7 +4858,7 @@ BIBLIOTHEKAR_JS = r"""
         ? sd1+" 14-00–"+sd2+" 18-30"
         : sd1+" · 14-00–18-30";
     }
-    const subevent=(subeventEnabled ? subeventPart+" - " : "")+"Stadtbesuch";
+    const subevent=(subeventEnabled ? subeventPart+" - " : "")+(englishExample?"City visit":"Stadtbesuch");
     const collection=(collectionYear?"2026-07":"07")+" - "+label;
 
     preview.innerHTML=
@@ -4866,6 +4867,7 @@ BIBLIOTHEKAR_JS = r"""
       +'<div class="bk-settings-preview-case"><strong>Sammelordner</strong><pre>'+bkEscape(bkPreviewStructure(collection))+'</pre></div>'
       +'</div>';
   }
+  window.addEventListener("bk-language-changed", bkUpdateSettingsPreview);
   async function bkLoadEventNaming() {
     if(!eventNamingSettings)return;
     const status=document.getElementById("bk-event-naming-status");
@@ -5386,7 +5388,8 @@ BIBLIOTHEKAR_JS = r"""
       if (!href) return;
       event.preventDefault();
       bkTabNavigationStarted = true;
-      root.dataset.bkNavLoading = "true";
+      const pwa = root.dataset.bkDisplayMode === "standalone";
+      if (pwa) root.dataset.bkNavLoading = "true";
       tab.classList.add("is-navigating", "bk-tab-pressing");
       try {
         sessionStorage.setItem("bk-tab-navigation-0451", JSON.stringify({
@@ -5396,7 +5399,12 @@ BIBLIOTHEKAR_JS = r"""
       // Do not hold back page navigation for animation: iPhone PWA must respond instantly.
       // Yield one visible animation frame for the loading indicator, then navigate.
       // No network fetch or page-readiness gate is introduced here.
-      requestAnimationFrame(() => requestAnimationFrame(() => window.location.assign(href)));
+      if (pwa) {
+        requestAnimationFrame(() => requestAnimationFrame(() => window.location.assign(href)));
+      } else {
+        // Desktop retains its classic hover/press/arrival transitions, with no overlay.
+        window.location.assign(href);
+      }
     });
   });
 
@@ -5810,7 +5818,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.50.6</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.50.7</span></p>
   </div>
 </dialog>
 
@@ -7320,19 +7328,21 @@ BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS = r"""
 BIBLIOTHEKAR_0505_LANGUAGE_CSS = r"""
 /* English content stays concealed only until the initial synchronous translation.
    This avoids presenting German content even for one frame on iPhone PWA reloads. */
-html[data-bk-i18n-pending="true"] body { visibility: hidden !important; }
+/* Full-page masking is exclusively for the installed PWA. Desktop can paint
+   its header, tabs and heading as soon as HTML begins arriving. */
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body { visibility: hidden !important; }
 /* A visible loading indicator exists even before the destination body is parsed.
    The same indicator responds at once to a navigation tap on the outgoing page. */
-html[data-bk-i18n-pending="true"]::before,
-html[data-bk-nav-loading="true"]::before {
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before,
+html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::before {
   content: "Loading…";
   display:flex; align-items:center; justify-content:center;
   position:fixed; inset:0; z-index:2147483645;
   font: 700 1rem Futura,"Helvetica Neue",Arial,sans-serif;
   color:var(--bk-ink,#192637); background:var(--bk-page-bg,var(--bk-paper,#f5f1e9));
 }
-html[data-bk-i18n-pending="true"]::after,
-html[data-bk-nav-loading="true"]::after {
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::after,
+html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after {
   content:""; position:fixed; z-index:2147483646;
   top:calc(50% - 52px); left:calc(50% - 17px);
   width:34px; height:34px; box-sizing:border-box;
@@ -7340,12 +7350,12 @@ html[data-bk-nav-loading="true"]::after {
   border-top-color:var(--bk-blue,#1974c6); border-radius:50%;
   animation:bk0506spin .75s linear infinite; pointer-events:none;
 }
-html[data-bk-locale="de"][data-bk-nav-loading="true"]::before,
-html[data-bk-locale="de"][data-bk-i18n-pending="true"]::before {content:"Wird geladen …";}
+html[data-bk-display-mode="standalone"][data-bk-locale="de"][data-bk-nav-loading="true"]::before,
+html[data-bk-display-mode="standalone"][data-bk-locale="de"][data-bk-i18n-pending="true"]::before {content:"Wird geladen …";}
 @keyframes bk0506spin {to {transform:rotate(360deg);}}
 @media(prefers-reduced-motion: reduce) {
-  html[data-bk-i18n-pending="true"]::after,
-  html[data-bk-nav-loading="true"]::after {animation-duration:2.4s;}
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::after,
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after {animation-duration:2.4s;}
 }
 .bk-i18n-dialog {
   width: min(520px, calc(100vw - 32px));

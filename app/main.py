@@ -297,8 +297,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.50.6"
-DEPLOYMENT_VERSION = "0.50.6"
+RELEASE_VERSION = "0.50.7"
+DEPLOYMENT_VERSION = "0.50.7"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -10991,6 +10991,11 @@ def index() -> str:
       return "";
     }
 
+    function importUiText(value) {
+      const source = String(value ?? "");
+      return window.BibliothekarI18n?.t?.(source) ?? source;
+    }
+
     function renderJob(job, isHidden=false) {
       const state =
         job.stage === "cancelled"
@@ -11042,7 +11047,7 @@ def index() -> str:
         job.error_message
         ? `
           <div class="message error-text">
-            ${escapeHtml(job.error_message)}
+            ${escapeHtml(importUiText(job.error_message))}
           </div>
         `
         : "";
@@ -11124,8 +11129,7 @@ def index() -> str:
 
           <div class="message">
             ${escapeHtml(
-              job.progress_message
-              || "Kein Statustext vorhanden."
+              importUiText(job.progress_message || "Kein Statustext vorhanden.")
             )}
           </div>
 
@@ -11191,9 +11195,9 @@ def index() -> str:
             </summary>
 
             <pre>${escapeHtml(
-              "Technische ID: "
+              (document.documentElement.dataset.bkLocale === "de" ? "Technische ID: " : "Technical ID: ")
               + (job.job_id || job.id || "–")
-              + "\\nAuftragsart: "
+              + (document.documentElement.dataset.bkLocale === "de" ? "\\nAuftragsart: " : "\\nJob type: ")
               + (job.operation || job.kind || "–")
               + "\\n\\n"
               + JSON.stringify(
@@ -11307,7 +11311,7 @@ def index() -> str:
         "database-detail"
       ).textContent =
         database.initialized
-        ? ("Schema " + schemaSummary)
+        ? ((document.documentElement.dataset.bkLocale === "de" ? "Schema " : "Schema version ") + schemaSummary)
         : (
           database.error
           || "Keine Verbindung"
