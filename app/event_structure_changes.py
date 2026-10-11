@@ -1204,6 +1204,17 @@ def _apply_confirmed_state(
             structure_enabled = bool(root_leaf["structure_enabled"])
             clean_input = str(root_leaf["input_path"])
             layout = root_leaf["layout"]
+        # A child folder may have been renamed physically. Keep the stable
+        # leaf key while updating the portable leaf prefix to the new folder.
+        child_prefix_renames = {
+            str(rename["old_folder"]): str(rename["new_folder"])
+            for rename in (detected.get("child_renames") or [])
+        }
+        for leaf in selected_leaves:
+            parts = str(leaf["leaf_prefix"]).split("/")
+            if parts and parts[0] in child_prefix_renames:
+                parts[0] = child_prefix_renames[parts[0]]
+                leaf["leaf_prefix"] = "/".join(parts)
         save_leaf_layouts(
             connection, str(row["event_id"]), selected_leaves, now=now
         )
