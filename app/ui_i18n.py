@@ -1292,6 +1292,10 @@ UI_PATTERNS = [
   ]
 ]
 
+from app.ui_i18n_0504 import UI_0504_TRANSLATIONS, UI_0504_PATTERNS
+UI_TRANSLATIONS.update(UI_0504_TRANSLATIONS)
+UI_PATTERNS[:0] = UI_0504_PATTERNS
+
 I18N_UI_JS = r"""
 (function () {
   "use strict";
