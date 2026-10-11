@@ -15,10 +15,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0454_version_and_style_is_loaded():
-    assert __version__ == "0.50.9"
-    assert main.DEPLOYMENT_VERSION == "0.50.9"
+    assert __version__ == "0.51.0"
+    assert main.DEPLOYMENT_VERSION == "0.51.0"
     page = apply_shell("<html><head></head><body></body></html>", active_area="workspace", subarea="events")
-    assert "Version <span data-bk-version>0.50.9</span>" in page
+    assert "Version <span data-bk-version>0.51.0</span>" in page
     assert f"<style>{BIBLIOTHEKAR_0454_CSS}</style>" in page
 
 
