@@ -297,8 +297,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.50.8"
-DEPLOYMENT_VERSION = "0.50.8"
+RELEASE_VERSION = "0.50.9"
+DEPLOYMENT_VERSION = "0.50.9"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -8338,6 +8338,7 @@ def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]
             current_workspace_root(),
             change_id,
             input_path=str(payload.get("input_path") or ""),
+            input_paths=payload.get("input_paths") if isinstance(payload.get("input_paths"), dict) else None,
             app_version=RELEASE_VERSION,
         )
     except EventStructureChangeError as error:
@@ -8352,6 +8353,7 @@ def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any
             current_workspace_root(),
             change_id,
             input_path=str(payload.get("input_path") or ""),
+            input_paths=payload.get("input_paths") if isinstance(payload.get("input_paths"), dict) else None,
             app_version=RELEASE_VERSION,
         )
     except EventStructureChangeError as error:
