@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.archive_staging import staging_directory_name
+from app.workspace_layout import shared_work_root
+
 from pathlib import Path
 
 from app.database import database_connection, initialize_database
@@ -456,7 +459,7 @@ def test_0283_legacy_manual_archive_helper_does_not_block_next_archive_change(tm
 
     spec = required_event_document_for_request(db, cr_id)
     assert spec is not None
-    staged = workspace / "Arbeitsbereich" / "Später zuordnen" / spec["target_relative_path"]
+    staged = shared_work_root(workspace) / staging_directory_name(shared_work_root(workspace)) / spec["target_relative_path"]
     assert staged.is_file()
     assert staged.read_bytes() != legacy_payload
 
@@ -729,7 +732,7 @@ def test_0283_archived_structure_off_finishes_without_followup_manual_task(tmp_p
 
     spec = required_event_document_for_request(db, cr_id)
     assert spec is not None
-    staged_document = workspace / "Arbeitsbereich" / "Später zuordnen" / spec["target_relative_path"]
+    staged_document = shared_work_root(workspace) / staging_directory_name(shared_work_root(workspace)) / spec["target_relative_path"]
     assert staged_document.is_file()
     (archive / spec["target_relative_path"]).write_bytes(staged_document.read_bytes())
 
