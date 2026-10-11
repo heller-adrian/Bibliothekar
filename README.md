@@ -1,16 +1,16 @@
 # Bibliothekar
 
-> Entwicklungsstand **0.50.3** (Audit-Branch, noch keine stabile Freigabe). Der stabile Update-Kanal bleibt bis zur erfolgreichen Abnahme unverändert.
+> Entwicklungsstand **0.50.4** (Audit-Branch, noch keine stabile Freigabe). Der stabile Update-Kanal bleibt bis zur erfolgreichen Abnahme unverändert.
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
 Aktuelle stabile Veröffentlichung: **0.40.3**
 
-Entwicklungsversion: **0.50.3** – noch nicht als `latest` veröffentlicht.
+Entwicklungsversion: **0.50.4** – noch nicht als `latest` veröffentlicht.
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
-Geplanter separater internationaler Testimage-Tag (noch nicht veröffentlicht): **`ghcr.io/heller-adrian/bibliothekar:patch-0.50.3`**
+Geplanter separater internationaler Testimage-Tag (noch nicht veröffentlicht): **`ghcr.io/heller-adrian/bibliothekar:patch-0.50.4`**
 
 ### Schutz der Web-Oberfläche (BA-03)
 
