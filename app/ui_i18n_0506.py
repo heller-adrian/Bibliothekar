@@ -159,6 +159,16 @@ UI_0506_TRANSLATIONS = {
     "Angezeigte Ereignisse": "Displayed events",
     "Noch kein analysierter Arbeitsbestand vorhanden.": "No analyzed workspace inventory yet.",
     "„Ohne Ereignis“ besteht aus einzelnen Tagen und Zeitsegmenten. Die Dateizugehörigkeit wird ausschließlich daraus berechnet.": "“No Event” consists of individual days and time segments. File membership is determined solely from these segments.",
+    # Metadata correction controls and dynamic review indicators.
+    "Keine Ohne-Datum-Familien vorhanden.": "No undated families available.",
+    "Der Ordner ist leer.": "This folder is empty.",
+    "Metadatenquelle übernehmen": "Transfer metadata source",
+    "In Tagesbestand übernehmen": "Move into daily inventory",
+    "korrigiert · wartet auf Einsortierung": "corrected · awaiting sorting",
+    "Prüfung/Korrektur erforderlich": "Verification/correction required",
+    "Metadaten erneut ändern": "Edit metadata again",
+    "Metadaten ändern": "Edit metadata",
+    "Einträge ausgewählt": "entries selected",
     # Header status and metadata
     "Status: angewendet": "Status: applied",
     "Erstellt": "Created",
@@ -167,6 +177,11 @@ UI_0506_TRANSLATIONS = {
 }
 
 UI_0506_PATTERNS = [
+    [r"^([0-9]+) Dateien · ([0-9]+) Ordner$", "$1 files · $2 folders"],
+    [r"^([0-9]+) Einträge ausgewählt\\.$", "$1 entries selected."],
+    [r"^Metadatenquelle übernehmen \\(([0-9]+)\\)$", "Transfer metadata source ($1)"],
+    [r"^In Tagesbestand übernehmen \\(([0-9]+)\\)$", "Move into daily inventory ($1)"],
+
     [r"^([0-9]+) zusätzliche Datei(en)?$", "$1 additional files"],
     [r"^([0-9]+) externe Änderungen übernommen\.$", "$1 external changes accepted."],
     [r"^Archivänderung verworfen\. Eigene SSD-Kopien wurden entfernt; fremde oder unbekannte Inhalte blieben unangetastet: (.+)$",
