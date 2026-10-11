@@ -135,14 +135,18 @@ def metadata_area_paths(
         # Undated camera material is global free stock. The technical library
         # id must never become a filesystem directory.
         central_root = paths["backup_root"].resolve(strict=False)
-        undated = (central_root / "Ohne_Datum").resolve(strict=False)
+        from app.managed_directory_names import directory_path
+        undated = directory_path(central_root, "undated").resolve(strict=False)
         return {
             "root": central_root,
             "input_root": undated,
             "output_root": central_root,
         }
 
-    folder_name = "Allgemein" if kind == "general" else "Mehrfachkorrektur"
+    from app.managed_directory_names import directory_name
+    folder_name = directory_name(
+        metadata_root, "metadata_general" if kind == "general" else "metadata_multiple"
+    )
     target = (metadata_root / folder_name).resolve(strict=False)
     if not _is_relative_to(target, metadata_root):
         raise MetadataCorrectionError("Metadatenpfad verlässt den konfigurierten Stamm.")
