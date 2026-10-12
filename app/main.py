@@ -8409,6 +8409,18 @@ def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.post("/api/event-structure-changes/{change_id}/restore-folders", tags=["Ereignisse"])
+def api_restore_empty_event_folders(change_id: str) -> dict[str, Any]:
+    """Safe Undo of missing EMPTY folders in an Applied event."""
+    from app.manual_structure_undo import undo_empty_folder_change
+    try:
+        return undo_empty_folder_change(
+            current_database_file(), current_library_context().work_root, change_id
+        )
+    except (EventStructureChangeError, OSError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.post("/api/event-structure-changes/{change_id}/restore-applied", tags=["Ereignisse"])
 def api_restore_applied_structure(change_id: str) -> dict[str, Any]:
     """Restore verified camera originals and even empty former subevent folders.
