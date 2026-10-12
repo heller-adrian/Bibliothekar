@@ -2832,11 +2832,29 @@ WORKSPACE_HTML = r"""<!doctype html>
       if (segmentCount) {
         details.push(`<div><strong>${bk0511PreviewLabel("Zeitsegmente:", "Time segments:")}</strong> ${segmentCount}</div>`);
       }
+      const physical=data?.physical_state||{};
+      const available=physical.available===true;
+      const actualTree=available
+        ? String(physical.tree_text||bk0511PreviewLabel("(keine Unterordner gefunden)","(no subfolders found)"))
+        : String(physical.reason||bk0511PreviewLabel("Physischer Bestand nicht prüfbar","Physical inventory unavailable"));
+      const observedPaths=new Set(physical.directories||[]);
+      const removed=(physical.directory_removed||[]).filter(path=>!observedPaths.has(String(path)));
+      const added=(physical.directory_added||[]).filter(path=>!removed.includes(String(path)));
+      const discrepancy=available && (removed.length>0 || added.length>0);
+      const note=discrepancy
+        ? `<div class="muted" role="status">${bk0511PreviewLabel("Physische Abweichung vom gespeicherten Ordnerlayout erkannt.","Physical directory layout differs from the saved event layout.")}`
+           + (removed.length ? `<div>${bk0511PreviewLabel("Fehlende Sollordner:","Missing expected folders:")} <code>${escapeHtml(removed.join(", "))}</code></div>` : "")
+           + (added.length ? `<div>${bk0511PreviewLabel("Zusätzliche IST-Ordner:","Additional physical folders:")} <code>${escapeHtml(added.join(", "))}</code></div>` : "")
+           + `</div>` : "";
       structurePreview.classList.add("rich-preview");
       structurePreview.innerHTML =
         `<div class="preview-root-title" data-bk-preserve-language>${escapeHtml(event.name || "Gespeichertes Ereignis")}</div>`
         + `<div class="stored-preview-meta">${details.join("")}</div>`
-        + `<pre class="structure-lines">${escapeHtml(data?.structure_text || "Keine Struktur vorhanden.")}</pre>`;
+        + `<div class="stored-preview-meta"><strong>${bk0511PreviewLabel("Physischer IST-Bestand","Physical actual inventory")}</strong></div>`
+        + `<pre class="structure-lines">${escapeHtml(actualTree)}</pre>`
+        + `<div class="stored-preview-meta"><strong>${bk0511PreviewLabel("Gespeicherter SOLL-Plan","Saved target structure")}</strong></div>`
+        + `<pre class="structure-lines">${escapeHtml(data?.structure_text || bk0511PreviewLabel("Keine gespeicherte Struktur","No saved structure"))}</pre>`
+        + note;
       previewBody.hidden = false;
       scheduleTreeFit(structurePreview);
     }
