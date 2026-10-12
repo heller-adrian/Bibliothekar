@@ -233,6 +233,38 @@ def validate_guided_structure_edit(
         or str(preview.get("end_date") or "") != str(event["end_datetime"])[:10]
     ):
         raise EventStructureChangeError("Changing the parent period requires a separate edit.")
+    # The physical arrangement was already performed. A guided dissolution
+    # MUST NOT smuggle in changes requiring a new sort or new folder creation.
+    if bool(preview.get("preserve_day_folders")) != bool(event["preserve_day_folders"]):
+        raise EventStructureChangeError(
+            "Day-folder settings must be edited separately from a manual dissolution."
+        )
+    if bool(preview.get("uses_time_range")):
+        proposed_start = str(preview.get("start_time") or "")[:5]
+        proposed_end = str(preview.get("end_time") or "")[:5]
+        if (
+            proposed_start != str(event["start_datetime"])[11:16]
+            or proposed_end != str(event["end_datetime"])[11:16]
+        ):
+            raise EventStructureChangeError(
+                "Changing parent time boundaries requires a separate edit."
+            )
+    elif (
+        str(event["start_datetime"])[11:19] != "00:00:00"
+        or str(event["end_datetime"])[11:19] != "23:59:59"
+    ):
+        raise EventStructureChangeError(
+            "The parent time boundaries may not change in this guided edit."
+        )
+    new_layout = preview.get("folder_layout")
+    if isinstance(new_layout, dict) and any((
+        bool(new_layout.get("structure_enabled")) != bool(current_layout["structure_enabled"]),
+        str(new_layout.get("input_path") or "") != str(current_layout.get("input_path") or ""),
+        new_layout.get("layout") != current_layout.get("layout"),
+    )):
+        raise EventStructureChangeError(
+            "Changing the parent folder layout requires a separate edit."
+        )
     children = [
         dict(child) for child in connection.execute(
             "SELECT id,name,start_datetime,end_datetime FROM events WHERE parent_event_id=?",
@@ -257,6 +289,7 @@ def validate_guided_structure_edit(
         old = old_by_id[str(c["id"])]
         if (
             str(c.get("name") or "") != str(old["name"])
+            or str(c.get("folder_name") or "") != str(old["folder_name"])
             or str(c.get("start_datetime") or "")[:19] != str(old["start_datetime"])[:19]
             or str(c.get("end_datetime") or "")[:19] != str(old["end_datetime"])[:19]
         ):
