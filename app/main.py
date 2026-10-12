@@ -6840,7 +6840,7 @@ def api_event_structure(job_id: str, event_id: str):
         assignment_days = assigned_day_keys_by_event(c, event_id)
         saved_leaf_layouts = list(stored_leaf_layouts(c, event_id).values())
         root_kind = "camera_archive" if str(event.get("status") or "") == "archived" else "shared_workspace"
-        scan_errors = [item for item in live_refresh.get("errors", []) if str(item.get("event_id")) == str(event_id)]
+        scan_errors = [item for item in (live_refresh or {}).get("errors", []) if str(item.get("event_id")) == str(event_id)]
         if str(event.get("status") or "") not in {"applied", "archived"}:
             physical_state = {
                 "available": False,
