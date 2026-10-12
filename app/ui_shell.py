@@ -4999,6 +4999,9 @@ BIBLIOTHEKAR_JS = r"""
   const externalChangeLead = document.getElementById("bk-external-change-lead");
   const externalChangeList = document.getElementById("bk-external-change-list");
   const externalChangeActions = document.getElementById("bk-external-change-actions");
+  // Prevent a concurrently scheduled poll from reopening the modal while
+  // the acknowledgement request is still in flight.
+  let bkExternalDismissInFlight = false;
 
   function bkEscapeNotice(value) {
     return String(value ?? "")
@@ -5132,7 +5135,7 @@ BIBLIOTHEKAR_JS = r"""
   async function bkRenderExternalChanges({
     forceRequired = false
   } = {}) {
-    if (!externalChangeDialog) return;
+    if (!externalChangeDialog || bkExternalDismissInFlight) return;
     const state = await bkExternalState();
     const requiredRows = state.required || [];
     const unseenRequired = state.unseen_required || [];
@@ -5286,13 +5289,26 @@ BIBLIOTHEKAR_JS = r"""
           );
           if (!ok) return;
           event.currentTarget.disabled = true;
+          bkExternalDismissInFlight = true;
+          // Immediate visible response after the user's Confirm. A rejected
+          // acknowledgement restores the dialog, never silently loses tasks.
+          externalChangeDialog.close();
           try {
-            await bkAcknowledgeNotices(allRows.map(row => row.id));
-            externalChangeDialog.close();
+            const after = await bkAcknowledgeNotices(allRows.map(row => row.id));
+            const remainingUnseen = new Set((after.unseen_required||[]).map(row=>String(row.id)));
+            if(allRows.some(row=>remainingUnseen.has(String(row.id)))){
+              throw new Error(bk0511NoticeLanguage(
+                "Der Hinweis konnte nicht dauerhaft bestätigt werden.",
+                "The notice could not be acknowledged persistently."
+              ));
+            }
             await refreshTasks();
           } catch (error) {
             event.currentTarget.disabled = false;
             alert(error.message);
+            if(!externalChangeDialog.open) externalChangeDialog.showModal();
+          } finally {
+            bkExternalDismissInFlight = false;
           }
         }
       );
