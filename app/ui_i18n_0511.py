@@ -33,7 +33,7 @@ UI_0511_TRANSLATIONS = {
     "Dateibestand aktualisiert": "File inventory updated",
     "NOCH ZU ENTFERNEN": "STILL TO REMOVE",
     "Direkt im Ereignis": "Directly in event",
-    "Unterordnerstruktur aktiv": "Folder structure enabled",
+    "Unterordnerstruktur aktiv": "Subfolder structure enabled",
     "Tagesordner bleiben erhalten": "Day folders preserved",
     "Ohne Tagesunterordner": "Without day subfolders",
     "Ordnerlogik:": "Folder logic:",
