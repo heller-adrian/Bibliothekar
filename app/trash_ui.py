@@ -189,7 +189,7 @@ TRASH_HTML = r"""<!doctype html>
     const count=Number(data.file_count||0);
     const folders=Number(data.directory_count||0);
     list.innerHTML=entries.length
-      ? '<details class="trash-content" data-trash-group="root"><summary><span class="trash-summary-label">Inhalt des Papierkorbs</span>'
+      ? '<details class="trash-content"><summary><span class="trash-summary-label">Inhalt des Papierkorbs</span>'
           +'<span class="trash-summary-count">'+count+' Dateien · '+folders+' Ordner</span></summary>'
           +'<div class="trash-content-body">'+renderChildren(makeTree(entries))+'</div></details>'
       : '<div class="trash-empty">Keine Dateien oder Ordner im Papierkorb.</div>';
@@ -197,6 +197,10 @@ TRASH_HTML = r"""<!doctype html>
       list.querySelectorAll("details[data-trash-group]").forEach(d=>{
         if(previousOpen.has(d.dataset.trashGroup))d.open=true;
       });
+    }
+    if(previousOpen.has("root")){
+      const panel=list.querySelector("details.trash-content");
+      if(panel)panel.open=true;
     }
     updateControls();
   }
