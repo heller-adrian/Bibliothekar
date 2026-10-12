@@ -194,6 +194,25 @@ def validate_guided_structure_edit(
         raise EventStructureChangeError(
             "Folder renames must be resolved separately before this edit."
         )
+    actual_directories = set(current.get("observed_directories") or [])
+    for candidate in candidates:
+        folder = str(candidate.get("old_folder") or "")
+        if not candidate.get("former_tree_physically_absent") or any(
+            directory == folder or directory.startswith(folder + "/")
+            for directory in actual_directories
+        ):
+            raise EventStructureChangeError(
+                "The former subevent folder, including empty folders, must be fully absent."
+            )
+    candidate_file_ids = {
+        int(fid) for candidate in candidates for fid in candidate.get("file_ids") or []
+    }
+    unresolved = [
+        item for item in current.get("placement_conflicts") or []
+        if int(item["file_id"]) not in candidate_file_ids
+    ]
+    if unresolved:
+        raise EventStructureChangeError("An unrelated file-placement conflict is still open.")
     if not candidates or any(
         (detected.get(key) or []) for key in (
             "missing_file_ids", "duplicate_file_ids", "unclassified_directories",
@@ -244,15 +263,43 @@ def validate_guided_structure_edit(
             raise EventStructureChangeError("Other subevents must remain unchanged.")
 
     known_ids = set()
+    parent_layout = current_layout["layout"]
+    allowed_parent_paths = set(layout_paths(parent_layout))
+    allowed_top_levels = {
+        str(PurePosixPath(path).parts[0])
+        for path in allowed_parent_paths if PurePosixPath(path).parts
+    }
+    if not allowed_top_levels:
+        raise EventStructureChangeError(
+            "A verified parent organization destination is required."
+        )
     for item in candidates:
-        if str(item.get("new_parent_folder") or "") not in {
-            "Alle", "All",
-            str((detected.get("current_input_path") or "")).split("/")[0],
-        }:
-            raise EventStructureChangeError("The destination is not a parent input folder.")
+        if str(item.get("new_parent_folder") or "") not in allowed_top_levels:
+            raise EventStructureChangeError(
+                "The files must all be inside a known parent organization folder."
+            )
         known_ids.update(int(v) for v in item.get("file_ids") or [])
     if not known_ids:
         raise EventStructureChangeError("No files were verified for the dissolved subevent.")
+    # Every original file and family of each child must be in the proposed
+    # relocation. Partial moves are placement conflicts, never dissolutions.
+    for candidate in candidates:
+        old_id = str(candidate["child_event_id"])
+        expected_child_ids = {
+            int(row["id"]) for row in connection.execute(
+                """SELECT DISTINCT f.id FROM files f
+                   JOIN event_assignments ea
+                      ON ea.file_id=f.id OR (ea.file_id IS NULL AND ea.family_id=f.family_id)
+                   WHERE ea.event_id=?""",
+                (old_id,),
+            ).fetchall()
+        }
+        if not expected_child_ids or expected_child_ids != {
+            int(value) for value in candidate.get("file_ids") or []
+        }:
+            raise EventStructureChangeError(
+                "Only a complete relocation of every known subevent file may be accepted."
+            )
     inventory = connection.execute(
         """SELECT known_file_id,event_relative_path,sha256,size_bytes
            FROM event_inventory_files
