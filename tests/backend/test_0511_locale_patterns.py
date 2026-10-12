@@ -13,7 +13,7 @@ def _translate(value: str) -> str:
         match = re.search(pattern, value)
         if match:
             return re.sub(
-                r"\\$(\\d+)",
+                r"\$(\d+)",
                 lambda token: match.group(int(token.group(1))) or "",
                 template,
             )
