@@ -350,3 +350,43 @@ def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path
     assert (root/"Part B"/"Sortiert").is_dir()
     assert not (root/"Alle"/"B.JPG").exists()
     assert get_structure_change(db,task["id"])["status"]=="cancelled"
+
+    # A second complete dissolution is now confirmed through the ordinary
+    # Applied event editor. It must reassign *all* child families atomically,
+    # drop ghost child leaves and write event.json without a second sort run.
+    (root/"Part B"/"Alle"/"B.JPG").rename(root/"Alle"/"B.JPG")
+    shutil.rmtree(root/"Part B")
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    proposal=detect_event_structure_change(db,"e")
+    assert proposal is not None and proposal["status"]=="blocked"
+    from app.database import update_event_definition
+    with database_connection(db) as conn:
+        parent=dict(conn.execute("SELECT * FROM events WHERE id='e'").fetchone())
+        all_families=[int(r[0]) for r in conn.execute(
+            "SELECT DISTINCT family_id FROM event_assignments WHERE family_id IS NOT NULL"
+        ).fetchall()]
+    edited=update_event_definition(
+        db,"j","e",{
+            "start_date":"2026-07-23","end_date":"2026-07-23",
+            "start_time":"00:00","end_time":"23:59","uses_time_range":False,
+            "parent_folder":parent["folder_name"],"event_kind":"event",
+            "preserve_day_folders":False,"subevents":[],
+            "selected_family_ids":all_families,
+        },event_name=str(parent["name"]),notes=str(parent["notes"] or ""),
+        expected_revision=int(parent["revision"]),
+        workspace_path=workspace,app_version="0.52.0",
+        guided_structure_change_id=proposal["id"],
+    )
+    assert not edited["resort_required"]
+    with database_connection(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM events WHERE parent_event_id='e'").fetchone()[0]==0
+        assert conn.execute("SELECT COUNT(*) FROM event_mutations WHERE status='pending_apply'").fetchone()[0]==0
+        assert conn.execute("SELECT COUNT(*) FROM event_leaf_folder_layouts WHERE parent_event_id='e' AND leaf_key='child'").fetchone()[0]==0
+        memberships={str(x[0]) for x in conn.execute(
+            "SELECT DISTINCT event_id FROM event_assignments WHERE family_id IS NOT NULL"
+        ).fetchall()}
+        assert memberships=={"e"}
+    new_document=json.loads((root/"event.json").read_text())
+    assert not new_document["child_events"]
+    assert "Part B" not in new_document["structure"]
+    assert get_structure_change(db,proposal["id"])["status"]=="completed"
