@@ -896,6 +896,20 @@ def _snapshot_from_inventory(
         for item in file_moves
         if int(item["file_id"]) in dissolve_ids
     }
+    # A user may move the files, trigger Refresh (creating ordinary placement
+    # notices), and only afterwards delete the empty child directory.
+    # SQLite already follows IST by then: recover the original SOLL location
+    # from the persistent placement notice, never from the new SQLite path.
+    for candidate in semantic_change_candidates:
+        child_folder = str(candidate.get("old_folder") or "")
+        for fid in candidate.get("file_ids") or []:
+            file_id = int(fid)
+            if str(file_id) in restore_original_paths:
+                continue
+            old_path = _open_placement_expected_path(connection, file_id)
+            expected_prefix = expected_root + "/" + child_folder + "/"
+            if old_path and old_path.startswith(expected_prefix):
+                restore_original_paths[str(file_id)] = old_path
     signature_payload = {
         "observed_dirs": observed_dirs,
         "files": [
