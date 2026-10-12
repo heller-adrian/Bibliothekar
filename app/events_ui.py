@@ -4241,12 +4241,33 @@ EVENTS_HTML = r"""<!doctype html>
     }
     function bk0511OperationDetail(op) {
       const source=String(op.detail||"");
+      if(document.documentElement.dataset.bkLocale === "de") return source;
       const count=Number(op.file_count||0);
-      if(op.kind==="copy_files") return bk0511EventLabel(source,
-        `Copy ${count} ${count===1?"file":"files"} into the destination folder.`);
-      if(op.kind==="move_archive_files") return bk0511EventLabel(source,
-        `Move ${count} ${count===1?"file":"files"} to the destination folder.`);
-      return bk0511EventLabel(source,window.BibliothekarI18n?.t?.(source)||source);
+      const detail={
+        remove_deleted_event_root:
+          "After safely recovering all archive files to the SSD, remove the previous event folder, including its event.json.",
+        replace_event_document:
+          "Replace the existing event.json with the prepared version. Do not leave a second event.json in the event folder.",
+        remove_directories:
+          "After moving the files, remove these old directories only when they are empty.",
+        restore_from_ssd:
+          "Restore missing original folders and files from the verified SSD inventory into the original archive structure.",
+        move_back:
+          "These files still exist in the archive and must be moved back to their original locations.",
+        remove_new_files:
+          "These files did not belong to the original archive state. Keep the original SSD files.",
+        remove_new_directories:
+          "After restoring file positions, remove the directories created by the discarded change."
+      }[String(op.kind||"")];
+      if(detail) return detail;
+      if(op.kind==="copy_helper_folders") return source.includes("event.json")
+        ? "Copy the prepared structure into the archive. Replace the existing event.json with the verified new version; never leave duplicate event.json files."
+        : "Copy the prepared folders into the archive together in one operation.";
+      if(op.kind==="copy_files")
+        return `Copy ${count} ${count===1?"file":"files"} into the existing destination folder.`;
+      if(op.kind==="move_archive_files")
+        return `Move ${count} ${count===1?"file":"files"} to the specified destination folder.`;
+      return window.BibliothekarI18n?.t?.(source) || source;
     }
     async function showArchiveReversalDetail(crId, options={}) {
       const assistant = options.assistant || await requestJson(
