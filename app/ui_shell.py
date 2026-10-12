@@ -5040,11 +5040,46 @@ BIBLIOTHEKAR_JS = r"""
     return data;
   }
 
+  // Keep persisted German notices and their structured paths in SQLite intact.
+  // Render known notice codes in English; unknown legacy diagnostics remain
+  // accessible as an original technical record rather than being mistranslated.
+  function bk0511NoticeLanguage(de,en) {
+    return document.documentElement.dataset.bkLocale === "de" ? de : en;
+  }
+
+  function bk0511NoticePresentation(row,field) {
+    const source=String(row[field]||"");
+    if(document.documentElement.dataset.bkLocale === "de") return source;
+    const translated=window.BibliothekarI18n?.t?.(source) || source;
+    if(translated !== source) return translated;
+    const details=row.details||{};
+    const kind=String(row.kind||"");
+    if(field==="title") {
+      const titles={
+        placement_conflict:"File assigned to the wrong location",
+        archive_transfer_candidate:"Potential archive transfer detected",
+        missing_file:"File missing from inventory",
+        external_event_deleted:"Event folder deleted externally"
+      };
+      return titles[kind] || "File inventory notice";
+    }
+    const observed=String(details.observed_relative_path||row.relative_path||"");
+    const expected=String(details.expected_relative_path||"");
+    if(kind==="placement_conflict"){
+      return "This file is in a location inconsistent with its event assignment."
+        +(observed ? " Actual: "+observed+"." : "")
+        +(expected ? " Expected: "+expected+"." : "");
+    }
+    if(kind==="archive_transfer_candidate")
+      return "Camera files have been found in the archive. Verify the archive before completing this event.";
+    return "An external file inventory change was detected. The original diagnostic is available below.";
+  }
+
   function bkNoticeRows(rows, required) {
     if (!rows.length) return "";
     const visible = rows.slice(0, 8);
     const items = visible.map(row => {
-      const detail = bkEscapeNotice(row.detail || "");
+      const detail = bkEscapeNotice(bk0511NoticePresentation(row,"detail"));
       const archiveButton = (
         !required
         && row.kind === "archive_transfer_candidate"
@@ -5063,11 +5098,16 @@ BIBLIOTHEKAR_JS = r"""
       return (
         '<div style="padding:10px 0;border-bottom:1px solid var(--bk-line)">' +
         '<strong style="display:block">' +
-        bkEscapeNotice(row.title || (required ? "Zuordnungsfehler" : "Hinweis")) +
+        bkEscapeNotice(bk0511NoticePresentation(row,"title")) +
         '</strong>' +
         '<span style="display:block;color:var(--bk-muted);font-size:.9rem;line-height:1.4;margin-top:3px">' +
         detail +
         '</span>' +
+        (document.documentElement.dataset.bkLocale === "en"
+          ? '<details style="margin-top:5px"><summary>Original technical notice</summary><code style="white-space:pre-wrap;word-break:break-word">'
+            + bkEscapeNotice(row.detail||"")
+            + '</code></details>'
+          : '') +
         (archiveButton
           ? '<div style="margin-top:8px">' + archiveButton + '</div>'
           : '') +
@@ -5079,10 +5119,10 @@ BIBLIOTHEKAR_JS = r"""
       items +
       '<details style="margin-top:8px"><summary>' +
       (rows.length - visible.length) +
-      ' weitere anzeigen</summary><div style="margin-top:6px">' +
+      bk0511NoticeLanguage(' weitere anzeigen',' more notices')+'</summary><div style="margin-top:6px">' +
       rows.slice(visible.length).map(row => (
         '<div style="padding:7px 0;color:var(--bk-muted);font-size:.9rem">' +
-        bkEscapeNotice(row.detail || row.title || "") +
+        bkEscapeNotice(bk0511NoticePresentation(row,row.detail ? "detail" : "title")) +
         '</div>'
       )).join("") +
       '</div></details>'
@@ -5114,26 +5154,26 @@ BIBLIOTHEKAR_JS = r"""
     const combined = displayedRequired.length && displayedInfo.length;
 
     externalChangeTitle.textContent = combined
-      ? "Dateibestand und Zuordnung prüfen"
+      ? bk0511NoticeLanguage("Dateibestand und Zuordnung prüfen","Review file inventory and assignments")
       : displayedRequired.length
-        ? "Dateizuordnung prüfen"
+        ? bk0511NoticeLanguage("Dateizuordnung prüfen","Review file assignments")
         : (
           displayedInfo.some(row => row.kind === "archive_transfer_candidate")
-            ? "Änderung im Dateibestand erkannt"
-            : "Dateibestand aktualisiert"
+            ? bk0511NoticeLanguage("Änderung im Dateibestand erkannt","File inventory change detected")
+            : bk0511NoticeLanguage("Dateibestand aktualisiert","File inventory updated")
         );
     externalChangeLead.textContent = combined
-      ? "Bibliothekar hat gleichzeitig fachliche Zuordnungsabweichungen und weitere externe Bestandsänderungen erkannt."
+      ? bk0511NoticeLanguage("Bibliothekar hat gleichzeitig fachliche Zuordnungsabweichungen und weitere externe Bestandsänderungen erkannt.","Bibliothekar detected both assignment conflicts and other external inventory changes.")
       : displayedRequired.length
         ? (
           displayedRequired.length === 1
-            ? "Eine Datei liegt an einem fachlich unpassenden Ort. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als Aufgabe offen."
-            : displayedRequired.length + " Dateien liegen an fachlich unpassenden Orten. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als eine Aufgabe offen."
+            ? bk0511NoticeLanguage("Eine Datei liegt an einem fachlich unpassenden Ort. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als Aufgabe offen.","One file is in the wrong location. The actual location was detected; an assignment task remains open.")
+            : bk0511NoticeLanguage(displayedRequired.length + " Dateien liegen an fachlich unpassenden Orten. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als eine Aufgabe offen.",displayedRequired.length + " files are in the wrong locations. The actual state was detected; an assignment task remains open.")
         )
         : (
           displayedInfo.length === 1
-            ? "Bibliothekar hat eine externe Änderung übernommen."
-            : "Bibliothekar hat " + displayedInfo.length + " externe Änderungen übernommen."
+            ? bk0511NoticeLanguage("Bibliothekar hat eine externe Änderung übernommen.","Bibliothekar accepted one external change.")
+            : bk0511NoticeLanguage("Bibliothekar hat " + displayedInfo.length + " externe Änderungen übernommen.","Bibliothekar accepted " + displayedInfo.length + " external changes.")
         );
 
     externalChangeList.innerHTML = (
