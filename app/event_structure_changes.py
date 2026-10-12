@@ -896,6 +896,10 @@ def _snapshot_from_inventory(
         for item in file_moves
         if int(item["file_id"]) in dissolve_ids
     }
+    restore_observed_paths = {
+        str(file_id): str(observed_known[file_id].get("relative_path") or "")
+        for file_id in dissolve_ids if file_id in observed_known
+    }
     # A user may move the files, trigger Refresh (creating ordinary placement
     # notices), and only afterwards delete the empty child directory.
     # SQLite already follows IST by then: recover the original SOLL location
@@ -943,6 +947,7 @@ def _snapshot_from_inventory(
         "inconsistent_leaf_layouts": inconsistent,
         "semantic_change_candidates": semantic_change_candidates,
         "restore_original_paths": restore_original_paths,
+        "restore_observed_paths": restore_observed_paths,
         "leaf_layouts": leaf_layouts,
         "proposed_layout": proposed_layout,
         "proposed_structure_enabled": bool(root_leaf["structure_enabled"]) if root_leaf else bool(layout_state["structure_enabled"]),
@@ -1317,6 +1322,8 @@ def detect_event_structure_change(
                 # Never erase the first captured original locations on a second scan.
                 for fid, previous_path in (prior.get("restore_original_paths") or {}).items():
                     snapshot["restore_original_paths"].setdefault(str(fid), str(previous_path))
+                for fid, previous_path in (prior.get("restore_observed_paths") or {}).items():
+                    snapshot["restore_observed_paths"].setdefault(str(fid), str(previous_path))
                 detected_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
                 if str(current["status"]) in {"prepared", "verified"}:
                     return {**dict(current), "detected": snapshot}
