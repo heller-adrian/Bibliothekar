@@ -95,26 +95,18 @@ def test_0510_dissolved_child_requires_explicit_safe_edit(tmp_path: Path):
     with database_connection(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM events WHERE id='child'").fetchone()[0]==1
 
-    result=update_event_definition(
-        db,"j","e",preview,event_name="Trip",notes="",
-        expected_revision=revision,workspace_path=workspace,
-        guided_structure_change_id=task["id"],
-    )
-    assert result["resort_required"] is False
-    assert not result["mutation_id"]
+    with pytest.raises(EventStructureChangeError):
+        update_event_definition(
+            db,"j","e",preview,event_name="Trip",notes="",
+            expected_revision=revision,workspace_path=workspace,
+            guided_structure_change_id=task["id"],
+        )
     with database_connection(db) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM events WHERE id='child'").fetchone()[0]==0
-        rows=conn.execute(
-            "SELECT event_id,family_id FROM event_assignments WHERE family_id IN (?,?)",
-            (parent_family,child_family),
-        ).fetchall()
-        assert {(r["event_id"],int(r["family_id"])) for r in rows}=={
-            ("e",parent_family),("e",child_family)
-        }
+        assert conn.execute("SELECT COUNT(*) FROM events WHERE id='child'").fetchone()[0]==1
         assert conn.execute(
-            "SELECT status FROM event_structure_changes WHERE id=?",
-            (task["id"],),
-        ).fetchone()[0]=="completed"
+            "SELECT status FROM event_structure_changes WHERE id=?", (task["id"],)
+        ).fetchone()[0]=="blocked"
+
 
 
 @pytest.mark.parametrize("kind,legacy,english",[
