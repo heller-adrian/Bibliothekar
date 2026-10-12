@@ -163,7 +163,7 @@ TRASH_HTML = r"""<!doctype html>
   function renderFolder(folder){
     const fileTotal=fileCount(folder);
     const label=fileTotal===1?"1 Datei":fileTotal+" Dateien";
-    return '<details class="trash-folder" data-trash-group="'+esc(folder.name)+'"><summary><strong class="trash-summary-label">'+esc(folder.name)+'</strong>'
+    return '<details class="trash-folder"><summary data-trash-group="'+esc(folder.name)+'"><strong class="trash-summary-label">'+esc(folder.name)+'</strong>'
       +'<span class="trash-summary-count">'+label+'</span></summary>'
       +'<div class="trash-folder-items">'+renderChildren(folder)+'</div></details>';
   }
@@ -179,7 +179,7 @@ TRASH_HTML = r"""<!doctype html>
     document.getElementById("trash-directories").textContent=Number(data.directory_count||0);
     document.getElementById("trash-size").textContent=bytes(data.total_size_bytes);
     const entries=data.entries||[];
-    const previousOpen=new Set([...list.querySelectorAll("details[open]")].map(d=>d.dataset.trashGroup||"root"));
+    const previousOpen=new Set([...list.querySelectorAll("details[open]")].map(d=>d.dataset.trashGroup||d.querySelector("summary")?.dataset.trashGroup||"root"));
     selectablePaths=entries.filter(e=>e.entry_type==="file").map(e=>String(e.relative_path));
     for(const path of [...selected]) if(!selectablePaths.includes(path))selected.delete(path);
     status.textContent=entries.length
@@ -194,8 +194,8 @@ TRASH_HTML = r"""<!doctype html>
           +'<div class="trash-content-body">'+renderChildren(makeTree(entries))+'</div></details>'
       : '<div class="trash-empty">Keine Dateien oder Ordner im Papierkorb.</div>';
     if(previousOpen.size){
-      list.querySelectorAll("details[data-trash-group]").forEach(d=>{
-        if(previousOpen.has(d.dataset.trashGroup))d.open=true;
+      list.querySelectorAll("details.trash-folder").forEach(d=>{
+        if(previousOpen.has(d.querySelector("summary")?.dataset.trashGroup))d.open=true;
       });
     }
     if(previousOpen.has("root")){
