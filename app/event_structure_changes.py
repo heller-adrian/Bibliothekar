@@ -628,6 +628,19 @@ def _snapshot_from_inventory(
             or not new_folder
         ):
             continue
+        # 0.52.0: moving all known files is not a dissolution if any part of
+        # the former child tree still exists (including empty Export folders).
+        # Neither an empty child shell nor remaining unknown assets may be
+        # silently reclassified as a deleted subevent.
+        former_tree_remains = any(
+            directory == old_folder or directory.startswith(old_folder + "/")
+            for directory in observed_dirs
+        ) or any(
+            str(item.get("event_relative_path") or "").startswith(old_folder + "/")
+            for item in assets
+        )
+        if former_tree_remains:
+            continue
         # Moving an entire child's contents into the parent's input is NOT
         # a rename of the child to "All". This needs an explicit event edit.
         if new_folder in set(layout_paths(layout_state["layout"])) or new_folder in {
@@ -637,7 +650,8 @@ def _snapshot_from_inventory(
                 "child_event_id": str(group["child_event_id"]),
                 "old_folder": old_folder,
                 "new_parent_folder": new_folder,
-                "file_ids": file_ids,
+                "file_ids": sorted(set(file_ids)),
+                "former_tree_physically_absent": True,
             })
             continue
         child_renames.append({
@@ -824,6 +838,17 @@ def _snapshot_from_inventory(
         or child_renames
         or semantic_change_candidates
     )
+    # Preserve original path evidence in the task so the complete physical
+    # tree can be restored, even after SQLite follows an observed Finder move.
+    dissolve_ids = {
+        int(fid) for candidate in semantic_change_candidates
+        for fid in (candidate.get("file_ids") or [])
+    }
+    restore_original_paths = {
+        str(item["file_id"]): str(item["old_path"])
+        for item in file_moves
+        if int(item["file_id"]) in dissolve_ids
+    }
     signature_payload = {
         "observed_dirs": observed_dirs,
         "files": [
@@ -856,6 +881,7 @@ def _snapshot_from_inventory(
         "unclassified_directories": unclassified,
         "inconsistent_leaf_layouts": inconsistent,
         "semantic_change_candidates": semantic_change_candidates,
+        "restore_original_paths": restore_original_paths,
         "leaf_layouts": leaf_layouts,
         "proposed_layout": proposed_layout,
         "proposed_structure_enabled": bool(root_leaf["structure_enabled"]) if root_leaf else bool(layout_state["structure_enabled"]),
@@ -1224,9 +1250,15 @@ def detect_event_structure_change(
                 prior = {}
             if (
                 str(prior.get("signature") or "") == snapshot["signature"]
-                and str(current["status"]) in {"prepared", "verified"}
+                and prior.get("semantic_change_candidates") == snapshot.get("semantic_change_candidates")
             ):
-                return {**dict(current), "detected": snapshot}
+                # The already accepted physical IST path replaces files.current_relative_path.
+                # Never erase the first captured original locations on a second scan.
+                for fid, previous_path in (prior.get("restore_original_paths") or {}).items():
+                    snapshot["restore_original_paths"].setdefault(str(fid), str(previous_path))
+                detected_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+                if str(current["status"]) in {"prepared", "verified"}:
+                    return {**dict(current), "detected": snapshot}
             connection.execute(
                 """UPDATE event_structure_changes
                    SET status=?,detected_json=?,proposed_layout_json=?,
