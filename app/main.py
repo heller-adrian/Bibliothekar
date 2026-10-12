@@ -11009,32 +11009,27 @@ def index() -> str:
       return "";
     }
 
+    function bk0511ImportLabel(german, english) {
+      return document.documentElement.dataset.bkLocale === "de" ? german : english;
+    }
+
     function importUiText(value) {
       const source = String(value ?? "");
-      return window.BibliothekarI18n?.t?.(source) ?? source;
+      const translated = window.BibliothekarI18n?.t?.(source) ?? source;
+      if (document.documentElement.dataset.bkLocale === "de" || translated !== source) return translated;
+      // An unknown German diagnostic is still available verbatim in raw JSON.
+      // Never attempt to translate file paths, user names or machine values.
+      return /\b(?:Fehler|fehlgeschlagen|konnte|wurden|wurde|nicht|Sicherung|abgebrochen)\b|[äöüß]/iu.test(source)
+        ? "A technical message is available in the original import log."
+        : source;
     }
 
     // The technical panel is presentation-only. Translate known import-state
-    // fields in a shallow copy; never rewrite the original job, persisted
-    // source labels, filesystem paths, import IDs or JSON on the server.
+    // Historical technical logs are raw evidence. Keep nested JSON, IDs,
+    // machine codes, user-defined names and filesystem paths byte-for-byte.
+    // Visible summaries are localized independently of this raw panel.
     function localizedTechnicalJob(job) {
-      if (document.documentElement.dataset.bkLocale === "de") return job;
-      const display = {...job};
-      for (const field of ["progress_message", "error_message"]) {
-        if (typeof display[field] === "string") {
-          display[field] = importUiText(display[field]);
-        }
-      }
-      if (job.result && typeof job.result === "object"
-          && !Array.isArray(job.result)) {
-        display.result = {...job.result};
-        for (const field of ["message", "progress_message", "error_message"]) {
-          if (typeof display.result[field] === "string") {
-            display.result[field] = importUiText(display.result[field]);
-          }
-        }
-      }
-      return display;
+      return job;
     }
 
     function renderJob(job, isHidden=false) {
@@ -11205,27 +11200,27 @@ def index() -> str:
 
           <div class="job-meta">
             <span>
-              Fortschritt gesamt:
+              ${bk0511ImportLabel("Fortschritt gesamt:", "Overall progress:")}
               ${percent} %
             </span>
 
             <span>
-              Restzeit:
+              ${bk0511ImportLabel("Restzeit:", "Time remaining:")}
               ${escapeHtml(remaining)}
             </span>
 
             <span>
-              Dateien:
+              ${bk0511ImportLabel("Dateien:", "Files:")}
               ${fileCount ?? "—"}
             </span>
 
             <span>
-              Größe:
+              ${bk0511ImportLabel("Größe:", "Size:")}
               ${formatBytes(sizeBytes)}
             </span>
 
             <span>
-              Stufe:
+              ${bk0511ImportLabel("Stufe:", "Stage:")}
               ${escapeHtml(job.stage || "—")}
             </span>
           </div>
@@ -11254,7 +11249,7 @@ def index() -> str:
       const isActive = activeStates.has(job.state);
       const expanded = openHistoryIds.has(jobId);
       const progressLabel = isDone
-        ? `Abgeschlossen · ${fileCount ?? "–"} Dateien`
+        ? `${bk0511ImportLabel("Abgeschlossen","Completed")} · ${fileCount ?? "–"} ${bk0511ImportLabel("Dateien","files")}`
         : (isActive ? `${escapeHtml(state)} · ${percent}% · ${escapeHtml(remaining)}` : escapeHtml(state));
       const actionMarkup = isHidden
         ? `<button type="button" class="secondary" data-history-unhide="${escapeHtml(jobId)}">Wieder einblenden</button>`
@@ -11269,7 +11264,7 @@ def index() -> str:
               ${thumbnail}
               <span class="bk-history-text">
                 <strong>${escapeHtml(presentation.title)}</strong>
-                <small>${isDone ? "Abgeschlossen" : progressLabel}${isDone ? " · " + (fileCount ?? "–") + " Dateien" : ""}</small>
+                <small>${isDone ? bk0511ImportLabel("Abgeschlossen","Completed") : progressLabel}${isDone ? " · " + (fileCount ?? "–") + " " + bk0511ImportLabel("Dateien","files") : ""}</small>
               </span>
               ${isActive ? '<span class="bk-history-spinner" aria-hidden="true"></span>' : ""}
             </button>
@@ -11414,7 +11409,7 @@ def index() -> str:
         deviceMountState.textContent = "Kein externes Laufwerk erkannt.";
       } else if (verifiedReadOnly) {
         deviceMountState.innerHTML =
-          `<strong>✓ Nur lesend eingebunden</strong><span>${escapeHtml(deviceLabel(device))}</span>`;
+          `<strong>${bk0511ImportLabel("✓ Nur lesend eingebunden", "✓ Mounted read-only")}</strong><span>${escapeHtml(deviceLabel(device))}</span>`;
       } else if (device.mounted) {
         deviceMountState.textContent = "Laufwerk ist eingebunden, Nur-Lese-Status aber noch nicht bestätigt.";
       } else {
@@ -11458,7 +11453,7 @@ def index() -> str:
         if (verifiedReadOnly) {
           const options = String(card.mount_options || "ro").split(",");
           const compact = ["ro", "nosuid", "nodev", "noexec"].filter(item => options.includes(item));
-          sdMountState.innerHTML = `<strong>✓ Nur lesend eingebunden</strong><span>${escapeHtml(card.fstype || "Dateisystem")} · ${escapeHtml(compact.join(", ") || "ro")}</span><details><summary>Technische Mount-Optionen</summary><code>${escapeHtml(card.mount_options || "ro")}</code></details>`;
+          sdMountState.innerHTML = `<strong>${bk0511ImportLabel("✓ Nur lesend eingebunden", "✓ Mounted read-only")}</strong><span>${escapeHtml(card.fstype || bk0511ImportLabel("Dateisystem","Filesystem"))} · ${escapeHtml(compact.join(", ") || "ro")}</span><details><summary>${bk0511ImportLabel("Technische Mount-Optionen","Technical mount options")}</summary><code>${escapeHtml(card.mount_options || "ro")}</code></details>`;
         } else {
           sdMountState.textContent = card.mounted ? "Einbindung erkannt, Nur-Lese-Status nicht bestätigt" : "SD-Karte noch nicht eingebunden";
         }
