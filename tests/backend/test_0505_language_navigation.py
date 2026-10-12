@@ -1,4 +1,4 @@
-"""0.51.0: pre-paint i18n, immediate PWA navigation and German-safe dialogs."""
+"""0.51.1: pre-paint i18n, immediate PWA navigation and German-safe dialogs."""
 from __future__ import annotations
 
 import json
@@ -31,7 +31,7 @@ def test_0505_startup_language_resolved_before_body_first_paint():
     assert html.index("bkI18nPending") < html.index("MutationObserver")
     assert "window.setTimeout(() => window.location.assign(href), 190)" not in html
     assert "requestAnimationFrame(() => requestAnimationFrame(() => window.location.assign(href)))" in BIBLIOTHEKAR_JS
-    assert 'data-bk-version>0.51.0</span>' in html
+    assert 'data-bk-version>0.51.1</span>' in html
 
 
 @pytest.mark.parametrize(("source", "expected"), [
