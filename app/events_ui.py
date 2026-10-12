@@ -5386,6 +5386,21 @@ EVENTS_HTML = r"""<!doctype html>
              </div>
              <div id="structure-guided-feedback" class="error-box" hidden></div>
            </div>` : "";
+      const canRestoreEmptyFolders=(
+        change.root_kind==="shared_workspace" && change.status==="pending" &&
+        removed.length>0 && !added.length && !moves.length &&
+        !rootRename && !childRenames.length &&
+        !blockers.length && !(d.placement_conflicts||[]).length
+      );
+      const folderUndoChoice=canRestoreEmptyFolders
+        ? `<div class="card" style="margin-top:10px">
+             <p class="muted">${bk0511EventLabel(
+               "Die gespeicherte Ordnerstruktur kann einschließlich leerer Input-, Export- und Sortierordner wiederhergestellt werden. Es werden keine vorhandenen Dateien überschrieben.",
+               "Restore all missing folders from the saved layout, including empty input, export and sorted folders. No existing files will be overwritten."
+             )}</p>
+             <button type="button" class="plan-button" id="structure-restore-empty">${bk0511EventLabel("Ursprüngliche Ordner wiederherstellen","Restore original folders")}</button>
+             <div id="structure-folder-undo-error" class="error-box" hidden></div>
+           </div>` : "";
       const preview=`
         <div class="card">
           <strong>Erkannte Änderungen</strong>
@@ -5393,6 +5408,7 @@ EVENTS_HTML = r"""<!doctype html>
         </div>
         ${blockers.length?`<div class="error-box" style="margin-top:12px"><strong>Diese Änderung kann noch nicht übernommen werden.</strong>${blockers.map(x=>`<div style="margin-top:6px">${escapeHtml(x)}</div>`).join("")}</div>`:""}
         ${guidedChoice}
+        ${folderUndoChoice}
         ${inputControl}`;
             const bindGuidedEdit=()=>{
         document.getElementById("structure-guided-restore")?.addEventListener("click",async(event)=>{
@@ -5450,6 +5466,25 @@ EVENTS_HTML = r"""<!doctype html>
             <button type="button" id="structure-change-confirm" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>Änderungen übernehmen</button>
           </div>`;
         bindGuidedEdit();
+        document.getElementById("structure-restore-empty")?.addEventListener("click",async(event)=>{
+          const button=event.currentTarget;
+          button.disabled=true;
+          try{
+            await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/restore-folders`,{method:"POST"});
+            clearStructureTaskFromUrl(changeId);
+            structureChangeDialog.close();
+            await loadEvents({reset:true});
+            await refreshGlobalTasks();
+            setStatus(bk0511EventLabel(
+              "Ursprüngliche Ordnerstruktur vollständig wiederhergestellt.",
+              "Original folder structure fully restored."
+            ),false,true);
+          }catch(error){
+            const feedback=document.getElementById("structure-folder-undo-error");
+            if(feedback){feedback.hidden=false;feedback.textContent=bk0520RestorationError(error.message);}
+            button.disabled=false;
+          }
+        });
         document.getElementById("structure-change-confirm")?.addEventListener("click",async()=>{
           const selectedInputs=chosenStructureInputs();
           const input=selectedInputs.input_path;
