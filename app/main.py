@@ -297,8 +297,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.52.0"
-DEPLOYMENT_VERSION = "0.52.0"
+RELEASE_VERSION = "0.52.1"
+DEPLOYMENT_VERSION = "0.52.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -7223,7 +7223,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
         if manual_change_id:
             from app.workspace_layout import shared_work_root
             from app.event_inventory import scan_event_inventory, EventInventoryError
-            # 0.52.0 P0: a guided structural shortcut must NEVER authorize
+            # 0.52.1 P0: a guided structural shortcut must NEVER authorize
             # family reassignment on a size-only fast refresh. Hash every
             # currently present file, including those whose path is unchanged.
             try:
