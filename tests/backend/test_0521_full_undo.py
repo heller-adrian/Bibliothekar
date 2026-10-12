@@ -129,6 +129,9 @@ def test_0521_missing_child_originals_are_notice_not_impossible_repair(tmp_path)
     deletion=[x for x in state["informational"] if x["kind"]=="event_directory_deleted"]
     assert deletion and deletion[0]["repairable"] is False
     assert not any(x.get("file_id")==file_id and x["repairable"] for x in state["required"])
+    assert detect_event_structure_change(db,"e") is None, (
+        "A confirmed deleted child with missing empty descendants is one informational loss, not a second structural change."
+    )
     acknowledged=acknowledge_external_notices(db,[deletion[0]["id"]])
     assert not any(x["id"]==deletion[0]["id"] for x in acknowledged["unseen_informational"])
 
