@@ -34,8 +34,8 @@ def test_0507_import_messages_and_schema_are_in_catalog():
     }
     for source, target in messages.items():
         assert UI_TRANSLATIONS[source] == target
-    assert main.RELEASE_VERSION in {"0.50.7", "0.51.0"}
-    assert main.DEPLOYMENT_VERSION in {"0.50.7", "0.51.0"}
+    assert main.RELEASE_VERSION in {"0.50.7", "0.51.1"}
+    assert main.DEPLOYMENT_VERSION in {"0.50.7", "0.51.1"}
     # Database detail and import history are formatted by the app before rendering.
     assert 'Schema version ' in main.index()
     assert 'importUiText(job.progress_message || "Kein Statustext vorhanden.")' in main.index()
@@ -69,11 +69,11 @@ def test_0507_existing_root_names_are_never_silently_renamed(tmp_path: Path, mon
     assert settings["workspaces_directory_name"] == "Library Workspaces"
     assert legacy.is_dir()
 
-def test_0507_technical_detail_text_is_localized_in_display_copy_only():
+def test_0507_technical_detail_retains_raw_evidence():
     html = main.index()
     assert "function localizedTechnicalJob(job)" in html
-    assert 'for (const field of ["progress_message", "error_message"])' in html
-    assert "display[field] = importUiText(display[field]);" in html
+    assert "function importUiText(value)" in html
+    assert "return job;" in html[html.index("function localizedTechnicalJob(job)"):][:100]
     assert "JSON.stringify(\n                  localizedTechnicalJob(job)" in html
-    assert "const display = {...job};" in html
+    assert "JSON.stringify(" in html
     assert 'const englishExample=document.documentElement.dataset.bkLocale !== "de";' in __import__("app.ui_shell", fromlist=["BIBLIOTHEKAR_JS"]).BIBLIOTHEKAR_JS
