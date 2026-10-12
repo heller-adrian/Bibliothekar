@@ -5279,7 +5279,10 @@ EVENTS_HTML = r"""<!doctype html>
         ...(d.duplicate_file_ids||[]).map(id=>`Kameraoriginal mehrfach gefunden · Datei-ID ${id}`),
         ...(d.unclassified_directories||[]).map(path=>`Strukturpfad nicht eindeutig · ${path}`),
         ...(d.inconsistent_leaf_layouts?["Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen."]:[]),
-        ...(d.semantic_change_candidates||[]).map(item=>"Subevent "+item.old_folder+" was moved into "+item.new_parent_folder+". Restore the old folders and then use the guided event editor to change assignments.")
+        ...(d.semantic_change_candidates||[]).map(item=>bk0511EventLabel(
+          "Unterereignis „"+item.old_folder+"“ wurde vollständig in „"+item.new_parent_folder+"“ verschoben. Bitte Wiederherstellen oder als geprüfte Ereignisänderung übernehmen.",
+          "Subevent “"+item.old_folder+"” was fully moved to “"+item.new_parent_folder+"”. Restore its former structure or review it as a verified event edit."
+        ))
       ];
       const folderChangeCount=added.length+removed.length+(rootRename?1:0)+childRenames.length;
       const folderChanges=[
@@ -5341,14 +5344,19 @@ EVENTS_HTML = r"""<!doctype html>
       const guidedChoice=(change.status==="blocked" && semanticCandidates.length &&
         !d.root_rename && !(d.child_renames||[]).length &&
         !(d.missing_file_ids||[]).length && !(d.duplicate_file_ids||[]).length &&
-        !(d.unclassified_directories||[]).length)
+        !(d.unclassified_directories||[]).length &&
+        semanticCandidates.every(item=>item.former_tree_physically_absent))
         ? `<div class="card" style="margin-top:12px">
-             <strong>Manually dissolved subevent</strong>
-             <p class="muted">The files were moved into the parent event. You can
-             restore the original folders, or open the guided event editor.
-             Saving the edit requires an explicit confirmation and another
-             check of capture times, family assignments and the physical inventory.</p>
-             <button type="button" class="plan-button" id="structure-guided-edit">Review as event edit</button>
+             <strong>${bk0511EventLabel("Unterereignis manuell aufgelöst","Manually dissolved subevent")}</strong>
+             <p class="muted">${bk0511EventLabel(
+              "Alle bekannten Dateien liegen im Hauptereignis und der ursprüngliche Unterereignisordner ist verschwunden. Du kannst die ursprünglichen Ordner und Dateien wiederherstellen oder die Auflösung durch den Ereigniseditor prüfen und übernehmen. Es wird nichts stillschweigend umgebucht.",
+              "All known files were found in the parent event and the original subevent tree is absent. You may restore the original folders and files or review the dissolution in the event editor. No assignments are changed without confirmation."
+             )}</p>
+             <div class="edit-actions">
+               <button type="button" class="plan-button" id="structure-guided-restore">${bk0511EventLabel("Originalzustand wiederherstellen","Restore original state")}</button>
+               <button type="button" class="plan-button bk-positive-action" id="structure-guided-edit">${bk0511EventLabel("Als Ereignisänderung prüfen","Review as event edit")}</button>
+             </div>
+             <div id="structure-guided-feedback" class="error-box" hidden></div>
            </div>` : "";
       const preview=`
         <div class="card">
@@ -5359,16 +5367,57 @@ EVENTS_HTML = r"""<!doctype html>
         ${guidedChoice}
         ${inputControl}`;
             const bindGuidedEdit=()=>{
+        document.getElementById("structure-guided-restore")?.addEventListener("click",async(event)=>{
+          const button=event.currentTarget;
+          const feedback=document.getElementById("structure-guided-feedback");
+          if(change.root_kind==="camera_archive"){
+            const restorePaths=d.restore_original_paths||{};
+            const relatedMoves=(d.file_moves||[]).filter(row=>restorePaths[String(row.file_id)]);
+            const examples=relatedMoves.map(row=>String(row.new_path)+" → "+String(restorePaths[String(row.file_id)]));
+            if(feedback){
+              feedback.hidden=false;
+              feedback.className="card";
+              feedback.textContent=bk0511EventLabel(
+                "Das Archiv bleibt schreibgeschützt. Verschiebe die geprüften Dateien im Finder zurück und stelle auch leere ursprüngliche Unterordner wieder her. Danach die Aufgabenansicht aktualisieren. Erwartete Wege: ",
+                "The archive remains read-only. Move the verified files back in Finder and restore all former folders, including empty ones. Then refresh Tasks. Expected paths: "
+              )+examples.join("; ");
+            }
+            return;
+          }
+          if(!window.confirm(bk0511EventLabel(
+              "Originale Dateien sicher zurückverschieben und auch die leeren Ordner wiederherstellen? Vor jedem Schritt wird der Dateibestand mit SHA-256 überprüft.",
+              "Move camera originals back and restore all former folders, including empty ones? A full SHA-256 preflight is required."
+          ))) return;
+          button.disabled=true;
+          try{
+            await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/restore-applied`,{method:"POST"});
+            clearStructureTaskFromUrl(changeId);
+            structureChangeDialog.close();
+            await loadEvents({reset:true});
+            await refreshGlobalTasks();
+            setStatus(bk0511EventLabel(
+              "Unterereignis und ursprüngliche Ordnerstruktur wurden wiederhergestellt.",
+              "Subevent and original folder structure restored."
+            ),false,true);
+          }catch(error){
+            if(feedback){feedback.hidden=false;feedback.textContent=error.message;}
+            button.disabled=false;
+          }
+        });
         document.getElementById("structure-guided-edit")?.addEventListener("click",async(event)=>{
           const button=event.currentTarget;
           button.disabled=true;
           try{
             const confirmed=window.BibliothekarI18n?.confirmAsync
               ? await window.BibliothekarI18n.confirmAsync(
-                  "Open the event editor to review the detected subevent dissolution? "+
-                  "No changes will be committed until you explicitly save and verify."
+                  bk0511EventLabel(
+                    "Erkannte Auflösung im Ereigniseditor prüfen? Erst nach ausdrücklichem Speichern und erneuter Prüfung werden Datenbank und event.json geändert.",
+                    "Review the detected subevent dissolution in the editor? Nothing changes until you explicitly save and verify."
+                  )
                 )
-              : window.confirm("Review the manual subevent change in the event editor?");
+              : window.confirm(bk0511EventLabel(
+                  "Unterereignisauflösung im Editor prüfen?", "Review the subevent dissolution in the editor?"
+                ));
             if(!confirmed){button.disabled=false;return;}
             const removedIds=new Set(semanticCandidates.map(item=>String(item.child_event_id)));
             const job=String(change.job_id||d.job_id||"");
@@ -5395,9 +5444,10 @@ EVENTS_HTML = r"""<!doctype html>
             const notice=document.createElement("div");
             notice.className="card";
             notice.setAttribute("role","status");
-            notice.textContent="Guided manual change: only the selected subevents have been removed from this proposal. "+
-              "Review all dates and remaining subevents before saving. The normal apply/archive "+
-              "verification and recovery steps are still required.";
+            notice.textContent=bk0511EventLabel(
+              "Geführte manuelle Änderung: Nur die erkannten Unterereignisse wurden aus diesem Vorschlag entfernt. Prüfe alle Zeiten und verbleibenden Unterereignisse, bevor du speicherst. Der reguläre Prüf- und Archivablauf bleibt verbindlich.",
+              "Guided manual change: only the detected subevents were removed from this proposal. Review all dates and remaining subevents before saving. Normal verification and archive safeguards still apply."
+            );
             eventEditBody.prepend(notice);
           }catch(error){
             if(eventEditDialog.open)eventEditDialog.close();
