@@ -18,7 +18,7 @@ from tests.backend.test_0263_event_inventory import (
 )
 
 
-def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path):
+def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path, monkeypatch):
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -85,6 +85,23 @@ def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path):
     assert leaves["e"]["input_path"]=="Alle"
     assert leaves["child"]["input_path"]=="Alle"
     assert set(layout_paths(leaves["child"]["layout"])) == {"Alle", "Export"}
+
+    # 0.52.0 screenshot regression: a deleted empty child Export must appear
+    # under Saved To Be, but NEVER under the physical IST inventory.
+    (event_root/"Part B"/"Export").rmdir()
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    from app import main
+    monkeypatch.setattr(main, "current_database_file", lambda: db)
+    monkeypatch.setattr(main, "current_workspace_root", lambda: workspace)
+    monkeypatch.setattr(main, "current_archive_root", lambda: tmp_path/"unused-archive")
+    monkeypatch.setattr(main, "refresh_live_event_inventories", lambda *a, **kw: {"errors":[]})
+    structure=main.api_event_structure("j","e")
+    assert "Part B" in structure["structure_text"] and "Export" in structure["structure_text"]
+    assert "Part B/Export" in structure["physical_state"]["directory_removed"]
+    assert "Part B/Export" not in structure["physical_state"]["directories"]
+    assert structure["physical_state"]["available"] is True
+
+    (event_root/"Part B"/"Export").mkdir()
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
     assert detect_event_structure_change(db,"e") is None
 
