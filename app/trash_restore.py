@@ -134,3 +134,5 @@ def restore_trash_files(
         goals: set[str] = set()
         identities: set[tuple[str, str]] = set()
         linked: list[tuple[Path, dict[str, Any]]] = []
+
+        # Later stage
