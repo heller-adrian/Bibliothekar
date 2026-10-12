@@ -9,11 +9,12 @@ import os
 
 from app.archive_staging import (
     BRANCHES,
-    STAGING_DIRECTORY_NAME,
+    staging_directory_name,
     describe_archive_change_staging_for_request,
 )
 from app.event_change_request import get_event_change_files, get_event_change_request
 from app.archive_release_stock import describe_archive_release_stock
+from app.workspace_layout import shared_work_root
 
 
 class ArchiveChangeAssistantError(RuntimeError):
@@ -241,6 +242,20 @@ def build_archive_change_assistant(
     target_root = str(description.get("target_root") or "")
     current_root = str(description.get("current_root") or "")
     helper_root = str(description.get("prepared_structure_path") or "")
+    # Use the physical workspace name, never the historical public constant.
+    # A prepared request retains its persisted staging path across upgrades.
+    work_root = shared_work_root(workspace_path).resolve(strict=False)
+    staging_name = staging_directory_name(work_root)
+    if helper_root:
+        helper_parts = PurePosixPath(helper_root.replace(chr(92), "/")).parts
+        if not helper_parts or helper_parts[0] not in {"Später zuordnen", "Assign Later"}:
+            raise ArchiveChangeAssistantError("Invalid persisted archive staging path.")
+        persisted_name = helper_parts[0]
+        persisted_root = work_root / persisted_name
+        if persisted_root.is_symlink():
+            raise ArchiveChangeAssistantError("Archive staging path must not be a symlink.")
+        if persisted_root.is_dir():
+            staging_name = persisted_name
     missing = list(description.get("missing_directories") or [])
     obsolete = list(description.get("obsolete_directories") or [])
     event_document = description.get("event_document")
@@ -348,7 +363,7 @@ def build_archive_change_assistant(
                 copy_state = "done" if directory_done and file_done else "pending"
 
             helper_sources = [
-                f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{value}"
+                f"{work_display_root}/{staging_name}/{value}"
                 for value in copy_roots
             ]
             helper_items = list(names)
@@ -357,7 +372,7 @@ def build_archive_change_assistant(
                 document_rel = str(event_document.get("target_relative_path") or "")
                 if document_rel:
                     helper_sources.append(
-                        f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{document_rel}"
+                        f"{work_display_root}/{staging_name}/{document_rel}"
                     )
                     helper_items.append("event.json")
                     includes_event_document = True
@@ -407,7 +422,7 @@ def build_archive_change_assistant(
         for row in remaining_workspace:
             source = _parent_dir(
                 row.get("workspace_staging_path")
-                or f"{STAGING_DIRECTORY_NAME}/{row.get('new_path') or ''}"
+                or f"{staging_name}/{row.get('new_path') or ''}"
             )
             target = _parent_dir(row.get("new_path"))
             grouped_workspace.setdefault((source, target), []).append(row)
@@ -460,7 +475,7 @@ def build_archive_change_assistant(
             operations.append({
                 "kind": "replace_event_document",
                 "title": "Aktuelle event.json ins Archiv übernehmen",
-                "source": f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{target_rel}",
+                "source": f"{work_display_root}/{staging_name}/{target_rel}",
                 "target": f"{archive_display_root}/{target_rel}",
                 "items": ["event.json"],
                 "file_count": 1,
@@ -588,6 +603,7 @@ def build_archive_change_assistant(
         "live_refreshed": bool(scan_live),
         "preparation": {
             "helper_root": f"{work_display_root}/{helper_root}" if helper_root else "",
+            "staging_root": f"{work_display_root}/{staging_name}",
             "incoming_file_count": int(description.get("incoming_file_count") or 0),
             "missing_directories": missing,
             "helper_directories": list(description.get("helper_directories") or []),
@@ -604,6 +620,7 @@ def build_archive_change_assistant(
         "path_labels": {
             "archive_root": archive_display_root,
             "work_root": work_display_root,
+            "staging_root": f"{work_display_root}/{staging_name}",
             "backup_root": backup_display_root,
         },
         "operations": operations,
