@@ -5372,15 +5372,24 @@ EVENTS_HTML = r"""<!doctype html>
           const feedback=document.getElementById("structure-guided-feedback");
           if(change.root_kind==="camera_archive"){
             const restorePaths=d.restore_original_paths||{};
-            const relatedMoves=(d.file_moves||[]).filter(row=>restorePaths[String(row.file_id)]);
-            const examples=relatedMoves.map(row=>String(row.new_path)+" → "+String(restorePaths[String(row.file_id)]));
+            const observedPaths=d.restore_observed_paths||{};
+            const examples=Object.entries(restorePaths).map(([id,target])=>
+              String(observedPaths[id]||bk0511EventLabel("Aktuellen Dateipfad prüfen","Check current file path"))+
+              " → "+String(target)
+            );
+            const originalFolders=(d.expected_directories||[]).filter(path=>
+              semanticCandidates.some(item=>String(path)===String(item.old_folder)||
+                String(path).startsWith(String(item.old_folder)+"/"))
+            );
             if(feedback){
               feedback.hidden=false;
               feedback.className="card";
               feedback.textContent=bk0511EventLabel(
                 "Das Archiv bleibt schreibgeschützt. Verschiebe die geprüften Dateien im Finder zurück und stelle auch leere ursprüngliche Unterordner wieder her. Danach die Aufgabenansicht aktualisieren. Erwartete Wege: ",
                 "The archive remains read-only. Move the verified files back in Finder and restore all former folders, including empty ones. Then refresh Tasks. Expected paths: "
-              )+examples.join("; ");
+              )+examples.join("; ")+bk0511EventLabel(
+                ". Wiederherzustellende Ordner: ", ". Folders to restore: "
+              )+originalFolders.join(", ");
             }
             return;
           }
