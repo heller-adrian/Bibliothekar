@@ -95,3 +95,4 @@ def _databases(values: Iterable[Path]) -> list[Path]:
     return result
 
 
+# Selection and canonical-target validation follows below.
