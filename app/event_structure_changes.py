@@ -1191,10 +1191,17 @@ def detect_event_structure_change(
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
         if accepted_deleted_dirs:
+            # If an entire child leaf vanished together with confirmed-lost
+            # originals, its formerly empty Export / Sorted descendants are
+            # part of the SAME loss, not a second user-approved layout edit.
+            # Keep unrelated missing directories as real structure tasks.
             snapshot["directory_removed"] = [
                 directory
                 for directory in snapshot.get("directory_removed") or []
-                if directory not in accepted_deleted_dirs
+                if not any(
+                    directory == deleted or directory.startswith(deleted + "/")
+                    for deleted in accepted_deleted_dirs
+                )
             ]
 
         # Bekannte Kameradateien dürfen innerhalb ihres fachlich erlaubten
