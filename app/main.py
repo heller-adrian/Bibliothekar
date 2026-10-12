@@ -7221,10 +7221,20 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
     try:
         manual_change_id = str(payload.get("manual_structure_change_id") or "").strip()
         if manual_change_id:
-            refresh_live_event_inventories(
-                current_database_file(), current_workspace_root(),
-                current_archive_root(), job_id=job_id, event_id=event_id,
-            )
+            from app.workspace_layout import shared_work_root
+            from app.event_inventory import scan_event_inventory
+            # 0.52.0 P0: a guided structural shortcut must NEVER authorize
+            # family reassignment on a size-only fast refresh. Hash every
+            # currently present file, including those whose path is unchanged.
+            try:
+                scan_event_inventory(
+                    current_database_file(), shared_work_root(current_workspace_root()),
+                    job_id, event_id, root_kind="shared_workspace",
+                    persist=True, fast_refresh=False,
+                    update_known_file_locations=False,
+                )
+            except EventInventoryError as error:
+                raise ValueError("Die Dateibestandsprüfung vor der manuellen Übernahme ist fehlgeschlagen: " + str(error)) from error
         context = get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
         payload = _event_payload_with_folder_layout(payload, event_id=event_id)
         preview = None
