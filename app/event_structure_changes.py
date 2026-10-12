@@ -155,12 +155,16 @@ def validate_guided_structure_edit(
     *,
     expected_root_kind: str | None = None,
 ) -> dict[str, Any]:
-    """Authorize ONLY the explicit removal of physically dissolved children.
+    """0.52.1: never interpret physical Finder moves as event reassignment.
 
-    A manually moved file does not itself change event ownership. This opt-in
-    check is executed again inside the normal editor transaction. The regular
-    edit/reassignment/archive workflow retains responsibility for the commit.
+    The normal editor can still change event ownership through its own fully
+    validated workflow, but a manual folder deletion is not an authorization
+    to dissolve a time-bounded subevent or silently rewrite SQL assignments.
     """
+    raise EventStructureChangeError(
+        "Automatic dissolution of subevents from Finder moves is disabled. "
+        "Restore the original folders and use the normal event editor for changes."
+    )
     row = connection.execute(
         """SELECT * FROM event_structure_changes
            WHERE id=? AND event_id=? AND status='blocked'""",
