@@ -4256,7 +4256,7 @@ def update_event_definition(
                 raise ValueError("Mindestens eine Familie liegt außerhalb der neuen Zeitdefinition.")
 
         mutation_id = None
-        if is_applied or (cascade_result and status in {"draft", "planned"}):
+        if (is_applied and not guided_structure_change_id) or (cascade_result and status in {"draft", "planned"}):
             affected_ids = [event_id]
             if cascade_result:
                 affected_ids.extend(str(v) for v in (cascade_result.get("affected_event_ids") or []))
@@ -4272,7 +4272,7 @@ def update_event_definition(
             """UPDATE events SET name = ?, start_datetime = ?, end_datetime = ?, folder_name = ?,
                event_kind = ?, preserve_day_folders = ?, notes = ?, revision = revision + 1,
                resort_required = ?, updated_at = ?, edited_at = ? WHERE id = ?""",
-            (clean_name, parent_start, parent_end, str(preview["parent_folder"]), str(preview["event_kind"]), int(bool(preview["preserve_day_folders"])), clean_notes, int(is_applied), now, now, event_id),
+            (clean_name, parent_start, parent_end, str(preview["parent_folder"]), str(preview["event_kind"]), int(bool(preview["preserve_day_folders"])), clean_notes, int(is_applied and not guided_structure_change_id), now, now, event_id),
         )
 
         if event_kind == "no_event":
@@ -4293,6 +4293,20 @@ def update_event_definition(
             naming=preview.get("folder_naming"),
         )
         children=store_subevents(connection,event_id,organizational,now)
+        if guided_structure_change_id:
+            # Removed physical child leaves must not survive as ghost folders
+            # in event.json or in the destination structure preview.
+            retained_children = {str(child["id"]) for child in children}
+            for old_child in connection.execute(
+                "SELECT leaf_key FROM event_leaf_folder_layouts WHERE parent_event_id=?",
+                (event_id,),
+            ).fetchall():
+                stable = str(old_child["leaf_key"]).split("@", 1)[0]
+                if stable != event_id and stable not in retained_children:
+                    connection.execute(
+                        "DELETE FROM event_leaf_folder_layouts WHERE parent_event_id=? AND leaf_key=?",
+                        (event_id, str(old_child["leaf_key"])),
+                    )
         assignment_rows=[(assignment_target(event_id,children,str(row['selected_capture_time'])[:19]),int(row['id']),'date_time_range',now) for row in rows]
         assignment_event_id = event_id
         # 0.26.11: A planned definition is only database planning. Saving an
@@ -4437,6 +4451,12 @@ def update_event_definition(
             }, ensure_ascii=False, sort_keys=True), now),
         )
         if guided_structure_change_id:
+            # The physical file moves have *already* happened and were
+            # cryptographically verified by the guided preflight. Do not
+            # enqueue a second sort/physical mutation of the same event.
+            if is_applied:
+                from app.event_document_sync import queue_event_document_sync
+                queue_event_document_sync(connection, job_id, event_id, int(event["revision"] or 1) + 1, now=now)
             # Finish the reviewed manual task atomically with the canonical
             # event edit. A failed editor transaction leaves the task intact.
             connection.execute(
@@ -4470,7 +4490,7 @@ def update_event_definition(
         "event": dict(row),
         "structural_changed": True,
         "assigned_family_ids": requested_ids,
-        "resort_required": bool(is_applied),
+        "resort_required": bool(is_applied and not guided_structure_change_id),
         "removed_family_ids": removed_ids,
         "reassignment_required": False,
         "cascade": cascade_result,
@@ -4481,6 +4501,9 @@ def update_event_definition(
 
     # A structural applied edit stores SOLL only in SQLite.  Its final portable
     # document is written after the explicitly confirmed physical reconcile.
+    if workspace_path is not None and guided_structure_change_id and is_applied:
+        from app.event_document_sync import recover_event_document_sync_tasks
+        recover_event_document_sync_tasks(database_path, workspace_path)
     if workspace_path is not None and not is_applied:
         from app.event_document import (
             build_event_document_from_db,
