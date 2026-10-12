@@ -143,3 +143,13 @@ def restore_trash_files(
                     " COALESCE(f.sha256_current,f.sha256_original,'') AS sha256,"
                     " COALESCE(ff.selected_capture_time,f.selected_capture_time,'') AS capture_time"
                     " FROM files f LEFT JOIN file_families ff ON ff.id=f.family_id"
+                    " WHERE f.current_root_kind='trash' AND f.current_relative_path=?",
+                    (name,),
+                ).fetchall()]
+                if len(matches) > 1:
+                    raise TrashError("Mehrdeutiger Katalogeintrag: " + name)
+                if not matches:
+                    continue
+                row = matches[0]
+                if size != int(row["size_bytes"]) or sha != str(row["sha256"]):
+                    raise TrashError("Größe oder Prüfsumme abweichend: " + name)
