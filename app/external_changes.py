@@ -442,6 +442,7 @@ def repair_external_conflicts(
     state = list_external_change_state(database_path)
     repaired: list[str] = []
     skipped: list[dict[str, str]] = []
+    affected_applied_events: set[str] = set()
     for notice in state["required"]:
         if not bool(notice.get("repairable")):
             skipped.append({
@@ -461,6 +462,11 @@ def repair_external_conflicts(
                 library_work_root=library_work_root,
             )
             repaired.append(str(notice["id"]))
+            if (
+                str(notice.get("event_id") or "")
+                and str((notice.get("details") or {}).get("expected_root_kind") or notice.get("root_kind")) == "shared_workspace"
+            ):
+                affected_applied_events.add(str(notice["event_id"]))
         except ExternalChangeError as error:
             details = dict(notice.get("details") or {})
             skipped.append({
@@ -471,9 +477,29 @@ def repair_external_conflicts(
                 "observed_root_kind": str(details.get("observed_root_kind") or notice.get("root_kind") or ""),
                 "observed_relative_path": str(details.get("observed_relative_path") or notice.get("relative_path") or ""),
             })
+    restored_directories: dict[str, list[str]] = {}
+    if affected_applied_events:
+        from app.manual_structure_undo import restore_applied_event_directories
+        # Each file move was SHA-256 verified and performed without overwrite.
+        # Now reconstruct the *entire* saved folder skeleton, not just a
+        # moved file's parent (e.g. missing empty child Export / Sorted).
+        try:
+            restored_directories = restore_applied_event_directories(
+                database_path, library_work_root, affected_applied_events
+            )
+        except (ExternalChangeError, ValueError, OSError) as error:
+            skipped.append({
+                "id": "directory-restoration",
+                "reason": str(error),
+                "expected_root_kind": "shared_workspace",
+                "expected_relative_path": "",
+                "observed_root_kind": "shared_workspace",
+                "observed_relative_path": "",
+            })
     return {
         "repaired_ids": repaired,
         "repaired_count": len(repaired),
+        "restored_directories": restored_directories,
         "skipped": skipped,
         "state": list_external_change_state(database_path),
     }
