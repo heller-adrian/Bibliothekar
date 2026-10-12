@@ -6841,7 +6841,12 @@ def api_event_structure(job_id: str, event_id: str):
         saved_leaf_layouts = list(stored_leaf_layouts(c, event_id).values())
         root_kind = "camera_archive" if str(event.get("status") or "") == "archived" else "shared_workspace"
         scan_errors = [item for item in live_refresh.get("errors", []) if str(item.get("event_id")) == str(event_id)]
-        if scan_errors:
+        if str(event.get("status") or "") not in {"applied", "archived"}:
+            physical_state = {
+                "available": False,
+                "reason": "Not applied yet – only the target structure exists.",
+            }
+        elif scan_errors:
             physical_state = {"available": False, "reason": str(scan_errors[0].get("message") or "Inventory unavailable")}
         else:
             event_row = c.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
