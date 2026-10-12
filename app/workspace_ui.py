@@ -2812,7 +2812,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         : bk0511PreviewLabel("Ereignis", "Event");
       const subfolders = event.folder_layout?.structure_enabled === false
         ? bk0511PreviewLabel("Direkt im Ereignis", "Directly in event")
-        : bk0511PreviewLabel("Unterordnerstruktur aktiv", "Folder structure enabled");
+        : bk0511PreviewLabel("Unterordnerstruktur aktiv", "Subfolder structure enabled");
       const dayFolders = event.preserve_day_folders
         ? bk0511PreviewLabel("Tagesordner bleiben erhalten", "Day folders preserved")
         : bk0511PreviewLabel("Ohne Tagesunterordner", "Without day subfolders");
