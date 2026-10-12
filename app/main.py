@@ -6814,7 +6814,7 @@ def api_event_structure(job_id: str, event_id: str):
     database facts next to the rendered tree prevents the UI from having to
     infer time boundaries from file names or from the folder layout.
     """
-    refresh_live_event_inventories(
+    live_refresh = refresh_live_event_inventories(
         current_database_file(),
         current_workspace_root(),
         current_archive_root(),
@@ -6824,6 +6824,8 @@ def api_event_structure(job_id: str, event_id: str):
     context = get_event_edit_context(current_database_file(), job_id, event_id, workspace_path=current_workspace_root())
     event = context["event"]
     from app.structure_view import render_structure
+    from app.event_leaf_layouts import stored_leaf_layouts
+    from app.event_structure_changes import _tree_text, _snapshot_from_inventory
 
     with database_connection(current_database_file()) as c:
         cr = c.execute(
@@ -6836,6 +6838,36 @@ def api_event_structure(job_id: str, event_id: str):
         ).fetchone()
         from app.event_structure import assigned_day_keys_by_event
         assignment_days = assigned_day_keys_by_event(c, event_id)
+        saved_leaf_layouts = list(stored_leaf_layouts(c, event_id).values())
+        root_kind = "camera_archive" if str(event.get("status") or "") == "archived" else "shared_workspace"
+        scan_errors = [item for item in live_refresh.get("errors", []) if str(item.get("event_id")) == str(event_id)]
+        if scan_errors:
+            physical_state = {"available": False, "reason": str(scan_errors[0].get("message") or "Inventory unavailable")}
+        else:
+            event_row = c.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+            try:
+                measured = _snapshot_from_inventory(c, dict(event_row), get_event_layout(c, event_id), root_kind)
+                # Real directory inventory, not the saved tree and not a projection of event.json.
+                observed = list(measured.get("observed_directories") or [])
+                observed_files = [str(row["event_relative_path"]) for row in c.execute(
+                    "SELECT event_relative_path FROM event_inventory_files WHERE event_id=? AND root_kind=?",
+                    (event_id, root_kind),
+                ).fetchall()]
+                actual_dirs = set(observed)
+                for rel in observed_files:
+                    parts = rel.split("/")
+                    for depth in range(1, len(parts)):
+                        actual_dirs.add("/".join(parts[:depth]))
+                physical_state = {
+                    "available": True,
+                    "directories": sorted(actual_dirs),
+                    "directory_added": measured.get("directory_added") or [],
+                    "directory_removed": measured.get("directory_removed") or [],
+                    "file_count": len(observed_files),
+                }
+                physical_state["tree_text"] = _tree_text(sorted(actual_dirs))
+            except (ValueError, TypeError) as exc:
+                physical_state = {"available": False, "reason": str(exc)}
 
     assigned_families = [
         family
@@ -6855,6 +6887,8 @@ def api_event_structure(job_id: str, event_id: str):
             children,
             bool(cr["preserve_day_folders"]),
             layout_state=context.get("folder_layout"),
+            leaf_layouts=saved_leaf_layouts,
+            parent_event_id=event_id,
         )
     else:
         structure_children = [
@@ -6871,6 +6905,8 @@ def api_event_structure(job_id: str, event_id: str):
             structure_children,
             bool(event["preserve_day_folders"]),
             layout_state=context.get("folder_layout"),
+            leaf_layouts=saved_leaf_layouts,
+            parent_event_id=event_id,
         )
 
     event_facts = {
@@ -6917,6 +6953,7 @@ def api_event_structure(job_id: str, event_id: str):
 
     return {
         "structure_text": "\n".join(lines),
+        "physical_state": physical_state,
         "planned_change": bool(cr or event.get("resort_required")),
         "event": event_facts,
     }
