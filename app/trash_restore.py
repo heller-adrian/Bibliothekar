@@ -96,3 +96,41 @@ def _databases(values: Iterable[Path]) -> list[Path]:
 
 
 # Selection and canonical-target validation follows below.
+
+def restore_trash_files(
+    database_paths: Iterable[Path], workspace_root: Path,
+    *, relative_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    """Restore all regular files or just selected paths to daily stock."""
+    databases = _databases(database_paths)
+    for database in databases:
+        reconcile_trash_inventory(database, workspace_root)
+    root, entries, _ = _physical_entries(workspace_root)
+    files = {str(e["relative_path"]) for e in entries if e["entry_type"] == "file"}
+    if relative_paths is None:
+        selection = sorted(files)
+    else:
+        if not isinstance(relative_paths, list) or any(
+            not isinstance(v, str) for v in relative_paths
+        ) or len(set(relative_paths)) != len(relative_paths):
+            raise TrashError("Ungültige oder doppelte Dateiauswahl.")
+        selection = sorted(relative_paths)
+    if not selection:
+        raise TrashError("Keine Dateien zum Wiederherstellen vorhanden.")
+    if len(selection) > 100000:
+        raise TrashError("Zu viele Dateien in einem Vorgang.")
+
+    central = storage_paths(workspace_root)["backup_root"]
+    if not central.is_dir() or central.is_symlink():
+        raise TrashError("Der zentrale Tagesbestand ist nicht sicher erreichbar.")
+    plans: list[dict[str, Any]] = []
+    targets: set[str] = set()
+    for name in selection:
+        rel = _relative(name)
+        if name not in files:
+            raise TrashError("Datei nicht mehr im Papierkorb: " + name)
+        src = _source(root, rel)
+        size, sha = src.stat().st_size, _sha256_file(src)
+        goals: set[str] = set()
+        identities: set[tuple[str, str]] = set()
+        linked: list[tuple[Path, dict[str, Any]]] = []
