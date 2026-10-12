@@ -5309,8 +5309,8 @@ EVENTS_HTML = r"""<!doctype html>
         ...(d.unclassified_directories||[]).map(path=>`Strukturpfad nicht eindeutig · ${path}`),
         ...(d.inconsistent_leaf_layouts?["Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen."]:[]),
         ...(d.semantic_change_candidates||[]).map(item=>bk0511EventLabel(
-          "Unterereignis „"+item.old_folder+"“ wurde vollständig in „"+item.new_parent_folder+"“ verschoben. Bitte Wiederherstellen oder als geprüfte Ereignisänderung übernehmen.",
-          "Subevent “"+item.old_folder+"” was fully moved to “"+item.new_parent_folder+"”. Restore its former structure or review it as a verified event edit."
+          "Unterereignis „"+item.old_folder+"“ ist nicht mehr vorhanden. Die Dateien liegen außerhalb ihrer gültigen Zuordnung. Stelle den ursprünglichen Ordner und seine Dateien wieder her.",
+          "Subevent “"+item.old_folder+"” is missing. Its files are outside their assigned area. Restore the original subevent folder and files."
         ))
       ];
       const folderChangeCount=added.length+removed.length+(rootRename?1:0)+childRenames.length;
@@ -5378,12 +5378,11 @@ EVENTS_HTML = r"""<!doctype html>
         ? `<div class="card" style="margin-top:12px">
              <strong>${bk0511EventLabel("Unterereignis manuell aufgelöst","Manually dissolved subevent")}</strong>
              <p class="muted">${bk0511EventLabel(
-              "Alle bekannten Dateien liegen im Hauptereignis und der ursprüngliche Unterereignisordner ist verschwunden. Du kannst die ursprünglichen Ordner und Dateien wiederherstellen oder die Auflösung durch den Ereigniseditor prüfen und übernehmen. Es wird nichts stillschweigend umgebucht.",
-              "All known files were found in the parent event and the original subevent tree is absent. You may restore the original folders and files or review the dissolution in the event editor. No assignments are changed without confirmation."
+              "Die Dateien liegen außerhalb des Unterereignisses. Stelle den ursprünglichen Ordner und die unveränderten Dateien wieder her. Eine Umbuchung von Unterereignissen ist ausschließlich über die reguläre Ereignisbearbeitung möglich.",
+              "These files are outside their subevent. Restore the original folders and verified files. A subevent reassignment is only possible through the regular event editor."
              )}</p>
              <div class="edit-actions">
                <button type="button" class="plan-button" id="structure-guided-restore">${bk0511EventLabel("Originalzustand wiederherstellen","Restore original state")}</button>
-               <button type="button" class="plan-button bk-positive-action" id="structure-guided-edit">${bk0511EventLabel("Als Ereignisänderung prüfen","Review as event edit")}</button>
              </div>
              <div id="structure-guided-feedback" class="error-box" hidden></div>
            </div>` : "";
@@ -5442,58 +5441,7 @@ EVENTS_HTML = r"""<!doctype html>
             button.disabled=false;
           }
         });
-        document.getElementById("structure-guided-edit")?.addEventListener("click",async(event)=>{
-          const button=event.currentTarget;
-          button.disabled=true;
-          try{
-            const confirmed=window.BibliothekarI18n?.confirmAsync
-              ? await window.BibliothekarI18n.confirmAsync(
-                  bk0511EventLabel(
-                    "Erkannte Auflösung im Ereigniseditor prüfen? Erst nach ausdrücklichem Speichern und erneuter Prüfung werden Datenbank und event.json geändert.",
-                    "Review the detected subevent dissolution in the editor? Nothing changes until you explicitly save and verify."
-                  )
-                )
-              : window.confirm(bk0511EventLabel(
-                  "Unterereignisauflösung im Editor prüfen?", "Review the subevent dissolution in the editor?"
-                ));
-            if(!confirmed){button.disabled=false;return;}
-            const removedIds=new Set(semanticCandidates.map(item=>String(item.child_event_id)));
-            const job=String(change.job_id||d.job_id||"");
-            if(!job)throw new Error("The change task does not identify its source job.");
-            structureChangeDialog.close();
-            await openEventEditor(String(change.event_id),job);
-            const ctx=currentEditContext;
-            if(!ctx||!ctx.structural_editable && !ctx.archived_change_request){
-              throw new Error("The event is not available for guided structural editing.");
-            }
-            ctx._manual_structure_change_id=String(changeId);
-            ctx._manual_removed_children=[...removedIds];
-            const rows=[...eventEditBody.querySelectorAll("[data-child-segment]")];
-            const found=new Set();
-            rows.forEach(row=>{
-              if(removedIds.has(String(row.dataset.childId))){
-                found.add(String(row.dataset.childId));
-                row.remove();
-              }
-            });
-            if(found.size!==removedIds.size){
-              throw new Error("The requested subevent is no longer in the editor. Reload.");
-            }
-            const notice=document.createElement("div");
-            notice.className="card";
-            notice.setAttribute("role","status");
-            notice.textContent=bk0511EventLabel(
-              "Geführte manuelle Änderung: Nur die erkannten Unterereignisse wurden aus diesem Vorschlag entfernt. Prüfe alle Zeiten und verbleibenden Unterereignisse, bevor du speicherst. Der reguläre Prüf- und Archivablauf bleibt verbindlich.",
-              "Guided manual change: only the detected subevents were removed from this proposal. Review all dates and remaining subevents before saving. Normal verification and archive safeguards still apply."
-            );
-            eventEditBody.prepend(notice);
-          }catch(error){
-            if(eventEditDialog.open)eventEditDialog.close();
-            if(!structureChangeDialog.open)structureChangeDialog.showModal();
-            setStatus(error.message,true);
-            button.disabled=false;
-          }
-        });
+
       };
 
       if(change.root_kind==="shared_workspace"){
