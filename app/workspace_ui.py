@@ -2798,31 +2798,39 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function bk0511PreviewLabel(german, english) {
+      return document.documentElement.dataset.bkLocale === "de" ? german : english;
+    }
+
     function renderStoredEventPreview(data) {
       const event = data?.event || {};
       const start = String(event.start_datetime || "");
       const end = String(event.end_datetime || "");
       const status = workspaceStatusLabel(event.status || "");
-      const kind = event.event_kind === "no_event" ? "Ohne Ereignis" : "Ereignis";
-      const subfolders = event.folder_layout?.structure_enabled === false ? "Direkt im Ereignis" : "Unterordnerstruktur aktiv";
+      const kind = event.event_kind === "no_event"
+        ? bk0511PreviewLabel("Ohne Ereignis", "Unassigned")
+        : bk0511PreviewLabel("Ereignis", "Event");
+      const subfolders = event.folder_layout?.structure_enabled === false
+        ? bk0511PreviewLabel("Direkt im Ereignis", "Directly in event")
+        : bk0511PreviewLabel("Unterordnerstruktur aktiv", "Folder structure enabled");
       const dayFolders = event.preserve_day_folders
-        ? "Tagesordner bleiben erhalten"
-        : "Ohne Tagesunterordner";
+        ? bk0511PreviewLabel("Tagesordner bleiben erhalten", "Day folders preserved")
+        : bk0511PreviewLabel("Ohne Tagesunterordner", "Without day subfolders");
       const childCount = Array.isArray(event.child_events) ? event.child_events.length : 0;
       const segmentCount = Array.isArray(event.time_segments) ? event.time_segments.length : 0;
       const details = [
         event.event_kind === "no_event"
-          ? `<div><strong>Datenbank-Zeitraum:</strong> mehrere gespeicherte Zeitsegmente</div>`
-          : `<div><strong>Datenbank-Zeitraum:</strong> von ${escapeHtml(formatStoredDateTime(start))} bis ${escapeHtml(formatStoredDateTime(end))}</div>`,
-        `<div><strong>Status:</strong> ${escapeHtml(status)} · ${escapeHtml(kind)}</div>`,
-        `<div><strong>Ordnerlogik:</strong> ${escapeHtml(dayFolders)} · ${escapeHtml(subfolders)}</div>`,
-        `<div><strong>Zugeordnet:</strong> ${Number(event.assigned_family_count || 0)} Familien</div>`
+          ? `<div><strong>${bk0511PreviewLabel("Datenbank-Zeitraum:", "Database period:")}</strong> ${bk0511PreviewLabel("mehrere gespeicherte Zeitsegmente", "multiple saved time segments")}</div>`
+          : `<div><strong>${bk0511PreviewLabel("Datenbank-Zeitraum:", "Database period:")}</strong> ${bk0511PreviewLabel("von", "from")} ${escapeHtml(formatStoredDateTime(start))} ${bk0511PreviewLabel("bis", "to")} ${escapeHtml(formatStoredDateTime(end))}</div>`,
+        `<div><strong>${bk0511PreviewLabel("Status:", "Status:")}</strong> ${escapeHtml(bk0511PreviewLabel(status, window.BibliothekarI18n?.t?.(status) || status))} · ${escapeHtml(kind)}</div>`,
+        `<div><strong>${bk0511PreviewLabel("Ordnerlogik:", "Folder logic:")}</strong> ${escapeHtml(dayFolders)} · ${escapeHtml(subfolders)}</div>`,
+        `<div><strong>${bk0511PreviewLabel("Zugeordnet:", "Assigned:")}</strong> ${Number(event.assigned_family_count || 0)} ${bk0511PreviewLabel("Familien", "families")}</div>`
       ];
       if (childCount) {
-        details.push(`<div><strong>Unterereignisse:</strong> ${childCount}</div>`);
+        details.push(`<div><strong>${bk0511PreviewLabel("Unterereignisse:", "Subevents:")}</strong> ${childCount}</div>`);
       }
       if (segmentCount) {
-        details.push(`<div><strong>Zeitsegmente:</strong> ${segmentCount}</div>`);
+        details.push(`<div><strong>${bk0511PreviewLabel("Zeitsegmente:", "Time segments:")}</strong> ${segmentCount}</div>`);
       }
       structurePreview.classList.add("rich-preview");
       structurePreview.innerHTML =
