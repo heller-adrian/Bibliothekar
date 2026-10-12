@@ -67,6 +67,13 @@ def test_0510_dissolved_child_requires_explicit_safe_edit(tmp_path: Path):
         )
     (root/"Part B"/"Alle"/"B.JPG").rename(root/"Alle"/"B.JPG")
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    incomplete=detect_event_structure_change(db,"e")
+    assert not (incomplete and incomplete["detected"].get("semantic_change_candidates"))
+    # Deleting the actual *whole* subtree, including empty Export/Sorted,
+    # is the security precondition newly required by 0.52.0.
+    import shutil
+    shutil.rmtree(root/"Part B")
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
     task=detect_event_structure_change(db,"e")
     assert task and task["status"]=="blocked"
     assert task["detected"]["semantic_change_candidates"]
@@ -93,8 +100,8 @@ def test_0510_dissolved_child_requires_explicit_safe_edit(tmp_path: Path):
         expected_revision=revision,workspace_path=workspace,
         guided_structure_change_id=task["id"],
     )
-    assert result["resort_required"] is True
-    assert result["mutation_id"]
+    assert result["resort_required"] is False
+    assert not result["mutation_id"]
     with database_connection(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM events WHERE id='child'").fetchone()[0]==0
         rows=conn.execute(
