@@ -4219,6 +4219,35 @@ EVENTS_HTML = r"""<!doctype html>
       }
     }
 
+    // Presentation-only translations: operation kinds are stable; paths are raw data.
+    function bk0511EventLabel(de,en) {
+      return document.documentElement.dataset.bkLocale === "de" ? de : en;
+    }
+    function bk0511OperationTitle(op) {
+      const source=String(op.title || "");
+      const english={
+        remove_deleted_event_root:"Remove the old event folder entirely",
+        copy_helper_folders:"Copy the prepared structure into the archive",
+        copy_files:"Copy new files into the existing archive folder",
+        replace_event_document:"Copy updated event.json into archive",
+        move_archive_files:"Move files within the camera library",
+        remove_directories:"Remove obsolete folders",
+        restore_from_ssd:"Restore files from SSD",
+        move_back:"Move archive files to their original locations",
+        remove_new_files:"Remove new archive files",
+        remove_new_directories:"Remove newly created directories"
+      }[String(op.kind || "")];
+      return bk0511EventLabel(source,english || window.BibliothekarI18n?.t?.(source) || source);
+    }
+    function bk0511OperationDetail(op) {
+      const source=String(op.detail||"");
+      const count=Number(op.file_count||0);
+      if(op.kind==="copy_files") return bk0511EventLabel(source,
+        `Copy ${count} ${count===1?"file":"files"} into the destination folder.`);
+      if(op.kind==="move_archive_files") return bk0511EventLabel(source,
+        `Move ${count} ${count===1?"file":"files"} to the destination folder.`);
+      return bk0511EventLabel(source,window.BibliothekarI18n?.t?.(source)||source);
+    }
     async function showArchiveReversalDetail(crId, options={}) {
       const assistant = options.assistant || await requestJson(
         `/api/change-requests/${encodeURIComponent(crId)}/reversal`
@@ -4235,7 +4264,7 @@ EVENTS_HTML = r"""<!doctype html>
       };
       changeRequestTitle.textContent = "Rückänderungsauftrag";
       changeRequestSubtitle.textContent =
-        `Ursprünglichen Archivzustand wiederherstellen · ${String(crId)}`;
+        `${bk0511EventLabel("Ursprünglichen Archivzustand wiederherstellen","Restore original archive state")} · ${String(crId)}`;
       changeRequestClose.textContent = "Rückänderung läuft";
       changeRequestClose.classList.remove("danger-button");
       changeRequestClose.disabled = true;
@@ -4247,9 +4276,9 @@ EVENTS_HTML = r"""<!doctype html>
       const logicalOrder = ["prepare","finder","verify"];
       const currentLogical = logicalOrder.indexOf(phase);
       const visualSteps = [
-        {phase:"verify", number:3, label:"Prüfen & Verwerfen"},
-        {phase:"finder", number:2, label:"Finder-Rückarbeit"},
-        {phase:"prepare", number:1, label:"Vorbereiten"}
+        {phase:"verify", number:3, label:bk0511EventLabel("Prüfen & Verwerfen","Verify & discard")},
+        {phase:"finder", number:2, label:bk0511EventLabel("Finder-Rückarbeit","Manual Finder restoration")},
+        {phase:"prepare", number:1, label:bk0511EventLabel("Vorbereiten","Prepare")}
       ];
 
       let html = '<div class="change-stepper reversal-stepper">';
@@ -4273,7 +4302,7 @@ EVENTS_HTML = r"""<!doctype html>
         html += `<div class="card"><strong>Ursprüngliches Ziel</strong><code style="display:block;margin-top:7px">${escapeHtml(reversalArchiveRoot)}/${escapeHtml(assistant.original_root || "")}</code><div class="muted" style="margin-top:7px">SSD-Rückbestand</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || "")}</code></div>`;
         let number=1;
         for (const operation of assistant.operations || []) {
-          html += `<details class="card change-operation" ${number===1?"open":""}><summary><span>${number}. ${escapeHtml(operation.title || "Rückarbeit")}</span><span class="badge warning">Ausstehend</span></summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
+          html += `<details class="card change-operation" ${number===1?"open":""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span><span class="badge warning">Ausstehend</span></summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
           if (operation.source) html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
           if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
           if ((operation.paths || []).length) html += `<div class="muted">ZU ENTFERNEN</div>${operation.paths.map(path=>`<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
@@ -4496,9 +4525,9 @@ EVENTS_HTML = r"""<!doctype html>
           `${assistant.event_name || cr.event_name || "Ereignis"} · ${cr.id}`;
 
         const labels = {
-          prepare: "Vorbereiten",
-          finder: "Finder-Arbeit",
-          verify: "Prüfen & Abschließen"
+          prepare: bk0511EventLabel("Vorbereiten","Prepare"),
+          finder: bk0511EventLabel("Finder-Arbeit","Finder work"),
+          verify: bk0511EventLabel("Prüfen & Abschließen","Verify & complete")
         };
         const currentIndex = sequence.indexOf(phase);
         let html = `<div class="change-stepper">`;
@@ -4517,7 +4546,7 @@ EVENTS_HTML = r"""<!doctype html>
             return action && action !== "keep";
           });
           if (!rows.length) return "";
-          let detail = `<details class="card change-disclosure"><summary><strong>Technische Details</strong> <span class="muted">· ${rows.length} Dateioperationen</span></summary><div style="margin-top:10px;display:grid;gap:8px">`;
+          let detail = `<details class="card change-disclosure"><summary><strong>Technische Details</strong> <span class="muted">· ${rows.length} ${bk0511EventLabel("Dateioperationen","file operations")}</span></summary><div style="margin-top:10px;display:grid;gap:8px">`;
           for (const row of rows) {
             const sourceRelative = row.source_root_kind === "shared_workspace"
               ? (row.workspace_staging_path || row.workspace_original_path || row.old_path || "—")
@@ -4532,7 +4561,7 @@ EVENTS_HTML = r"""<!doctype html>
             const actionText = releaseTarget
               ? "Freigewordene Archivdatei"
               : String(row.action || "Änderung");
-            detail += `<div class="card" style="padding:9px 10px"><strong>${escapeHtml(actionText)}</strong><div class="muted">IST</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code><div class="muted" style="margin-top:5px">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(targetText)}</code></div>`;
+            detail += `<div class="card" style="padding:9px 10px"><strong>${escapeHtml(actionText)}</strong><div class="muted">${bk0511EventLabel("IST","Actual")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code><div class="muted" style="margin-top:5px">${bk0511EventLabel("SOLL","To Be")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(targetText)}</code></div>`;
           }
           detail += `</div></details>`;
           return detail;
@@ -4542,7 +4571,7 @@ EVENTS_HTML = r"""<!doctype html>
           const prep = assistant.preparation || {};
           const missing = prep.missing_directories || [];
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Hilfsbereiche vorbereiten</h3><p class="muted">Die App bereitet nur SSD-Hilfsstrukturen vor. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.</p></div></div>`;
-          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} neue Dateien</strong> werden unter <em>Später zuordnen</em> vorbereitet · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt. Hardlinks werden bevorzugt; falls Quelle und Ziel auf unterschiedlichen Dateisystemen liegen, fragt Bibliothekar ausdrücklich nach <strong>Kopieren</strong> oder <strong>Verschieben</strong>.`;
+          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} ${bk0511EventLabel("neue Dateien","new files")}</strong> ${bk0511EventLabel("werden vorbereitet unter","will be prepared in")} <code>${escapeHtml(prep.staging_root || assistant.path_labels?.staging_root || "")}</code> · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt. Hardlinks werden bevorzugt; falls Quelle und Ziel auf unterschiedlichen Dateisystemen liegen, fragt Bibliothekar ausdrücklich nach <strong>Kopieren</strong> oder <strong>Verschieben</strong>.`;
           if (Number(prep.release_file_count || 0) > 0) {
             html += `<div style="margin-top:7px"><strong>${Number(prep.release_file_count)} freigewordene Archivdateien</strong>: Die benötigten Zielordner unter <em>Freigewordene Archivdateien</em> werden angelegt. Die Dateien selbst kopiert Bibliothekar erst im nächsten Schritt nach deiner ausdrücklichen Freigabe.</div>`;
           }
@@ -4629,7 +4658,7 @@ EVENTS_HTML = r"""<!doctype html>
                 : state === "pending" ? '<span class="badge warning">Ausstehend</span>'
                 : state === "attention" ? '<span class="badge danger">Prüfen</span>'
                 : "";
-              html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary><span>${number}. ${escapeHtml(operation.title || "Finder-Schritt")}</span>${stateBadge}</summary><div class="change-operation-body"><div>${escapeHtml(operation.detail || "")}</div>`;
+              html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span>${stateBadge}</summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
               if ((operation.sources || []).length) {
                 html += `<div class="muted">VON</div>${operation.sources.map(source => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code>`).join("")}`;
               } else if (operation.source) {
@@ -4640,7 +4669,7 @@ EVENTS_HTML = r"""<!doctype html>
               }
               if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
               if ((operation.paths || []).length) {
-                html += `<div class="muted">NOCH ZU ENTFERNEN</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
+                html += `<div class="muted">${bk0511EventLabel("NOCH ZU ENTFERNEN","STILL TO REMOVE")}</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
               } else if (operation.kind === "remove_directories" && state === "done") {
                 html += `<div class="success-text">Alle vorgesehenen alten Ordner sind bereits entfernt.</div>`;
               }
@@ -4673,13 +4702,13 @@ EVENTS_HTML = r"""<!doctype html>
         liveRefreshButton?.addEventListener("click", async () => {
           liveRefreshButton.disabled=true;
           liveRefreshButton.classList.add("loading");
-          liveRefreshButton.textContent="Aktualisiere …";
+          liveRefreshButton.textContent=bk0511EventLabel("Aktualisiere …","Refreshing…");
           try {
             await showChangeRequestDetail(crId,{phase:"finder",refreshLive:true});
           } catch (error) {
             liveRefreshButton.disabled=false;
             liveRefreshButton.classList.remove("loading");
-            liveRefreshButton.textContent="↻ Aktualisieren";
+            liveRefreshButton.textContent=bk0511EventLabel("↻ Aktualisieren","↻ Refresh");
             setStatus(error.message,true);
           }
         });
@@ -4986,7 +5015,7 @@ EVENTS_HTML = r"""<!doctype html>
                     : row.status === "sha256_mismatch" ? "SHA-256 abweichend"
                     : row.status === "needs_reassignment" ? "Noch neu zuzuordnen"
                     : (row.message || row.status || "Problem");
-                  return `<div class="card" style="margin-top:8px"><strong>${escapeHtml(problemLabel)}</strong>${row.message ? `<div class="muted">${escapeHtml(row.message)}</div>` : ""}<div class="muted" style="margin-top:5px">SOLL</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "—")}</code></div>`;
+                  return `<div class="card" style="margin-top:8px"><strong>${escapeHtml(problemLabel)}</strong>${row.message ? `<div class="muted">${escapeHtml(row.message)}</div>` : ""}<div class="muted" style="margin-top:5px">${bk0511EventLabel("SOLL","To Be")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "—")}</code></div>`;
                 }).join("");
                 const directoryHtml = directoryProblems.map(row =>
                   `<div class="card" style="margin-top:8px"><strong>Erforderlicher Ordner fehlt</strong><div class="muted">SOLL · Kamerabibliothek</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
@@ -5203,7 +5232,7 @@ EVENTS_HTML = r"""<!doctype html>
       if (!structureChangeDialog.open) structureChangeDialog.showModal();
       structureChangeBody.textContent="Änderung wird geladen …";
       const d=change.detected||{};
-      structureChangeSubtitle.textContent=(d.status==="archived"?"Archiviert":"Angewendet")+" · "+String(d.event_name||change.event_id||"");
+      structureChangeSubtitle.textContent=(d.status==="archived"?bk0511EventLabel("Archiviert","Archived"):bk0511EventLabel("Angewendet","Applied"))+" · "+String(d.event_name||change.event_id||"");
       const added=d.directory_added||[], removed=d.directory_removed||[], moves=d.file_moves||[];
       const rootRename=d.root_rename||null;
       const childRenames=d.child_renames||[];
@@ -5233,12 +5262,12 @@ EVENTS_HTML = r"""<!doctype html>
       ];
       const folderChangeCount=added.length+removed.length+(rootRename?1:0)+childRenames.length;
       const folderChanges=[
-        ...(rootRename?[ `<div>↪ Ereignisordner: <code>${escapeHtml(rootRename.old_folder||rootRename.old_path||"")}</code><br><span class="muted">nach</span> <code>${escapeHtml(rootRename.new_folder||rootRename.new_path||"")}</code></div>` ]:[]),
-        ...childRenames.map(row=>`<div>↪ Unterereignisordner: <code>${escapeHtml(row.old_folder||"")}</code><br><span class="muted">nach</span> <code>${escapeHtml(row.new_folder||"")}</code></div>`),
-        ...added.map(path=>`<div>＋ Ordner: <code>${escapeHtml(path)}</code></div>`),
-        ...removed.map(path=>`<div>− Ordner: <code>${escapeHtml(path)}</code></div>`)
+        ...(rootRename?[ `<div>↪ ${bk0511EventLabel("Ereignisordner:","Event folder:")} <code>${escapeHtml(rootRename.old_folder||rootRename.old_path||"")}</code><br><span class="muted">${bk0511EventLabel("nach","to")}</span> <code>${escapeHtml(rootRename.new_folder||rootRename.new_path||"")}</code></div>` ]:[]),
+        ...childRenames.map(row=>`<div>↪ ${bk0511EventLabel("Unterereignisordner:","Subevent folder:")} <code>${escapeHtml(row.old_folder||"")}</code><br><span class="muted">${bk0511EventLabel("nach","to")}</span> <code>${escapeHtml(row.new_folder||"")}</code></div>`),
+        ...added.map(path=>`<div>＋ ${bk0511EventLabel("Ordner:","Folder:")} <code>${escapeHtml(path)}</code></div>`),
+        ...removed.map(path=>`<div>− ${bk0511EventLabel("Ordner:","Folder:")} <code>${escapeHtml(path)}</code></div>`)
       ].join("");
-      const fileChanges=moves.map(row=>`<div>→ Datei: <code>${escapeHtml(row.old_path||"")}</code><br><span class="muted">nach</span> <code>${escapeHtml(row.new_path||"")}</code></div>`).join("");
+      const fileChanges=moves.map(row=>`<div>→ ${bk0511EventLabel("Datei:","File:")} <code>${escapeHtml(row.old_path||"")}</code><br><span class="muted">${bk0511EventLabel("nach","to")}</span> <code>${escapeHtml(row.new_path||"")}</code></div>`).join("");
       const changeDetails=(folderChangeCount||moves.length)
         ? `
           ${folderChangeCount?`<details class="card" style="margin:9px 0 0;padding:9px 11px">
