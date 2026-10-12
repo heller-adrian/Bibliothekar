@@ -22,7 +22,7 @@ def test_0272_finder_has_live_refresh_and_status_badges():
 def test_0272_workspace_explanations_are_compact_and_readable():
     source = (ROOT / "app" / "workspace_ui.py").read_text()
     assert "formatStoredDateTime" in source
-    assert "Datenbank-Zeitraum:</strong> von" in source
+    assert 'bk0511PreviewLabel("von", "from")' in source
     assert 'class="bk-help"' in source
     assert 'data-help="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand.' in source
     assert 'title="Sicher aus dem Archiv auf die SSD zurückgeholter freier Bestand.' not in source
