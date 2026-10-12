@@ -86,7 +86,7 @@ def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path, monk
     assert leaves["child"]["input_path"]=="Alle"
     assert set(layout_paths(leaves["child"]["layout"])) == {"Alle", "Export"}
 
-    # 0.52.0 screenshot regression: a deleted empty child Export must appear
+    # 0.52.1 screenshot regression: a deleted empty child Export must appear
     # under Saved To Be, but NEVER under the physical IST inventory.
     (event_root/"Part B"/"Export").rmdir()
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)

@@ -70,7 +70,7 @@ def test_0510_dissolved_child_requires_explicit_safe_edit(tmp_path: Path):
     incomplete=detect_event_structure_change(db,"e")
     assert not (incomplete and incomplete["detected"].get("semantic_change_candidates"))
     # Deleting the actual *whole* subtree, including empty Export/Sorted,
-    # is the security precondition newly required by 0.52.0.
+    # is the security precondition newly required by 0.52.1.
     import shutil
     shutil.rmtree(root/"Part B")
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
