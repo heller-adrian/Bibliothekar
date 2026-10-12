@@ -241,7 +241,7 @@ def build_archive_change_assistant(
     )
     target_root = str(description.get("target_root") or "")
     current_root = str(description.get("current_root") or "")
-    helper_root = str(description.get("prepared_structure_path") or "")
+    helper_root = str(cr.get("prepared_structure_path") or description.get("prepared_structure_path") or "")
     # Use the physical workspace name, never the historical public constant.
     # A prepared request retains its persisted staging path across upgrades.
     work_root = shared_work_root(workspace_path).resolve(strict=False)
