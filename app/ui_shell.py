@@ -5002,6 +5002,7 @@ BIBLIOTHEKAR_JS = r"""
   // Prevent a concurrently scheduled poll from reopening the modal while
   // the acknowledgement request is still in flight.
   let bkExternalDismissInFlight = false;
+  let bkExternalNoticeGeneration = 0;
 
   function bkEscapeNotice(value) {
     return String(value ?? "")
@@ -5136,7 +5137,9 @@ BIBLIOTHEKAR_JS = r"""
     forceRequired = false
   } = {}) {
     if (!externalChangeDialog || bkExternalDismissInFlight) return;
+    const generation = bkExternalNoticeGeneration;
     const state = await bkExternalState();
+    if(bkExternalDismissInFlight || generation !== bkExternalNoticeGeneration) return;
     const requiredRows = state.required || [];
     const unseenRequired = state.unseen_required || [];
     const infoRows = state.unseen_informational || [];
@@ -5290,6 +5293,7 @@ BIBLIOTHEKAR_JS = r"""
           if (!ok) return;
           event.currentTarget.disabled = true;
           bkExternalDismissInFlight = true;
+          ++bkExternalNoticeGeneration;
           // Immediate visible response after the user's Confirm. A rejected
           // acknowledgement restores the dialog, never silently loses tasks.
           externalChangeDialog.close();
