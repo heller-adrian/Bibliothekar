@@ -8394,6 +8394,22 @@ def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.post("/api/event-structure-changes/{change_id}/restore-applied", tags=["Ereignisse"])
+def api_restore_applied_structure(change_id: str) -> dict[str, Any]:
+    """Restore verified camera originals and even empty former subevent folders.
+
+    Unlike archive workflows, the shared workspace is writable. This action
+    requires a complete, unchanged content-addressed physical snapshot.
+    """
+    from app.manual_subevent_restoration import restore_applied_subevents
+    try:
+        return restore_applied_subevents(
+            current_database_file(), current_workspace_root(), change_id
+        )
+    except (EventStructureChangeError, OSError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.post("/api/event-structure-changes/{change_id}/prepare-archive", tags=["Ereignisse"])
 def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
