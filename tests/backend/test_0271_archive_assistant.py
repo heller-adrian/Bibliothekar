@@ -355,6 +355,7 @@ def test_0326_assistant_uses_explicit_library_path_labels(tmp_path: Path):
         "archive_root": "Testarchiv",
         "work_root": "Testarbeitsbereich",
         "backup_root": "SD-Kartensicherungen",
+        "staging_root": "Testarbeitsbereich/Später zuordnen",
     }
     operation = next(
         item for item in assistant["operations"]
