@@ -247,8 +247,14 @@ def build_archive_change_assistant(
     work_root = shared_work_root(workspace_path).resolve(strict=False)
     staging_name = staging_directory_name(work_root)
     if helper_root:
-        helper_parts = PurePosixPath(helper_root.replace(chr(92), "/")).parts
-        if not helper_parts or helper_parts[0] not in {"Später zuordnen", "Assign Later"}:
+        helper_path = PurePosixPath(helper_root.replace(chr(92), "/"))
+        helper_parts = helper_path.parts
+        if (
+            helper_path.is_absolute()
+            or ".." in helper_parts
+            or len(helper_parts) < 3
+            or helper_parts[0] not in {"Später zuordnen", "Assign Later"}
+        ):
             raise ArchiveChangeAssistantError("Invalid persisted archive staging path.")
         persisted_name = helper_parts[0]
         persisted_root = work_root / persisted_name
