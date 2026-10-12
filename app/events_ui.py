@@ -4223,6 +4223,35 @@ EVENTS_HTML = r"""<!doctype html>
     function bk0511EventLabel(de,en) {
       return document.documentElement.dataset.bkLocale === "de" ? de : en;
     }
+    function bk0520RestorationError(message) {
+      const text=String(message||"");
+      if(document.documentElement.dataset.bkLocale !== "de") return text;
+      const translations={
+        "Empty restoration path is not permitted.":"Leere Wiederherstellungspfade sind nicht zulässig.",
+        "A restoration path leaves the workspace.":"Ein Wiederherstellungspfad verlässt den Arbeitsbereich.",
+        "Symbolic links are not allowed during restoration.":"Symbolische Verknüpfungen sind bei dieser Wiederherstellung nicht zulässig.",
+        "No pending Applied subevent dissolution to restore.":"Keine offene Unterereignisauflösung im Arbeitsbereich gefunden.",
+        "The subevent restoration is not unambiguous.":"Die Wiederherstellung des Unterereignisses ist nicht eindeutig.",
+        "Automatic restoration is restricted to Applied events.":"Die automatische Wiederherstellung ist nur für angewendete Ereignisse erlaubt.",
+        "The original camera-file paths are not fully recorded.":"Nicht alle ursprünglichen Kameradateipfade sind nachweisbar.",
+        "The former child tree was not fully removed.":"Der ehemalige Unterereignisordner wurde nicht vollständig entfernt.",
+        "The subevent definition has changed.":"Die Unterereignisdefinition wurde zwischenzeitlich geändert.",
+        "The physical inventory changed after the proposal. Reload and review it.":"Der physische Bestand hat sich seit dem Vorschlag verändert. Bitte neu prüfen.",
+        "The proposed subevent change is no longer valid.":"Die vorgeschlagene Unterereignisänderung ist nicht mehr gültig.",
+        "An original file is missing from the current inventory.":"Eine ursprüngliche Datei fehlt im aktuellen Dateibestand.",
+        "The former child tree already exists.":"Der ursprüngliche Unterereignisordner existiert bereits.",
+        "A recorded original path is not in its former child.":"Ein gespeicherter Originalpfad liegt außerhalb des bisherigen Unterereignisses.",
+        "The file was not moved out of its former child.":"Die Datei wurde nicht aus ihrem ursprünglichen Unterereignis verschoben.",
+        "A restoration source is missing or its target is occupied.":"Eine Quelldatei fehlt oder ihr Wiederherstellungsziel ist bereits belegt.",
+        "A camera file failed the size/SHA-256 preflight.":"Eine Kameradatei hat die Größen-/SHA-256-Prüfung nicht bestanden.",
+        "A required folder path is occupied by a file.":"Ein benötigter Ordnerpfad ist von einer Datei belegt.",
+        "Physical restoration finished, but the subevent conflict remains.":"Die Dateien wurden wiederhergestellt, aber ein Unterereigniskonflikt ist noch offen.",
+      };
+      if(translations[text]) return translations[text];
+      const interrupted=text.match(/^Restoration interrupted after (\d+) files\. No files were overwritten\./);
+      if(interrupted) return "Wiederherstellung nach "+interrupted[1]+" Dateien unterbrochen. Keine vorhandene Datei wurde überschrieben. Bitte den physischen Bestand erneut prüfen.";
+      return text;
+    }
     function bk0511OperationTitle(op) {
       const source=String(op.title || "");
       const english={
@@ -5409,7 +5438,7 @@ EVENTS_HTML = r"""<!doctype html>
               "Subevent and original folder structure restored."
             ),false,true);
           }catch(error){
-            if(feedback){feedback.hidden=false;feedback.textContent=error.message;}
+            if(feedback){feedback.hidden=false;feedback.textContent=bk0520RestorationError(error.message);}
             button.disabled=false;
           }
         });
