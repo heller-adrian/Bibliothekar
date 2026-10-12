@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import pytest
 from pathlib import Path
 
@@ -276,6 +277,12 @@ def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path
 
     (root/"Part B"/"Alle"/"B.JPG").rename(root/"Alle"/"B.JPG")
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    shell_task=detect_event_structure_change(db,"e")
+    assert not (shell_task and shell_task["detected"]["semantic_change_candidates"]), (
+        "An empty but still existing child shell must NOT be treated as dissolved."
+    )
+    shutil.rmtree(root/"Part B")
+    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
     task=detect_event_structure_change(db,"e")
     assert task is not None and task["status"]=="blocked"
     assert task["detected"]["semantic_change_candidates"]
@@ -335,7 +342,11 @@ def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path
                 }]}
             )
     # The preflight MUST NOT mutate any assignment or the event graph.
-    (root/"Alle"/"B.JPG").rename(root/"Part B"/"Alle"/"B.JPG")
-    scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
-    assert detect_event_structure_change(db,"e") is None
+    from app.manual_subevent_restoration import restore_applied_subevents
+    restored=restore_applied_subevents(db,workspace,task["id"])
+    assert restored["file_count"]==1
+    assert (root/"Part B"/"Alle"/"B.JPG").read_bytes()==b"child"
+    assert (root/"Part B"/"Export").is_dir(), "Empty Export leaf must be restored."
+    assert (root/"Part B"/"Sortiert").is_dir()
+    assert not (root/"Alle"/"B.JPG").exists()
     assert get_structure_change(db,task["id"])["status"]=="cancelled"
