@@ -7222,7 +7222,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
         manual_change_id = str(payload.get("manual_structure_change_id") or "").strip()
         if manual_change_id:
             from app.workspace_layout import shared_work_root
-            from app.event_inventory import scan_event_inventory
+            from app.event_inventory import scan_event_inventory, EventInventoryError
             # 0.52.0 P0: a guided structural shortcut must NEVER authorize
             # family reassignment on a size-only fast refresh. Hash every
             # currently present file, including those whose path is unchanged.
