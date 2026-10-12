@@ -158,3 +158,11 @@ def restore_trash_files(
                 assigned = c.execute(
                     "SELECT 1 FROM event_assignments a JOIN events e ON e.id=a.event_id "
                     "WHERE a.family_id=? AND e.status IN "
+                    "('draft','planned','applied','archived') LIMIT 1",
+                    (row["family_id"],),
+                ).fetchone()
+                if assigned:
+                    raise TrashError("Noch einem Ereignis zugeordnet: " + name)
+                capture = str(row["capture_time"] or "")
+                if not capture:
+                    raise TrashError("Aufnahmezeit unbekannt: " + name)
