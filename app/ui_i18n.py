@@ -680,6 +680,20 @@ UI_TRANSLATIONS.update({
   "Der Pfad für SD-Kartensicherungen ist kein Ordner:": "The SD Card Backups path is not a directory:"
 })
 
+UI_TRANSLATIONS.update({
+  "Alle wiederherstellen": "Restore all",
+  "Auswahl wiederherstellen": "Restore selection",
+  "Auswahl beenden": "Finish selection",
+  "Auswahl aufheben": "Clear selection",
+  "Dateien werden in den Tagesbestand wiederhergestellt …": "Restoring files to daily inventory…",
+  "Datenabgleich prüfen:": "Check inventory synchronization:",
+  "Ausgewählte Dateien in den Tagesbestand wiederherstellen?": "Restore selected files to daily inventory?",
+  "Alle Dateien im Papierkorb in den Tagesbestand wiederherstellen?": "Restore all files in trash to daily inventory?",
+  "Wiederherstellung fehlgeschlagen:": "Restoration failed:",
+  "Nicht katalogisierte Datei:": "Uncatalogued file:",
+  "Zieldatei existiert bereits:": "Destination file already exists:",
+})
+
 # UI copy that was previously split across multiline HTML and browser alerts.
 UI_TRANSLATIONS.update({
   "Papierkorb wirklich endgültig entleeren?": "Permanently empty the trash?",

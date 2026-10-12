@@ -26,6 +26,7 @@ from app.events_ui import EVENTS_HTML
 from app.transfer_ui import TRANSFER_HTML
 from app.metadata_correction_ui import METADATA_CORRECTION_HTML
 from app.trash_ui import TRASH_HTML
+from app.trash_restore import restore_trash_files
 from app.trash import (
     TRASH_CONFIRMATION, TrashError, reconcile_trash_inventory,
     empty_trash_filesystem, purge_trash_database,
@@ -297,8 +298,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.52.1"
-DEPLOYMENT_VERSION = "0.52.1"
+RELEASE_VERSION = "0.53.0"
+DEPLOYMENT_VERSION = "0.53.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -4836,6 +4837,39 @@ def api_trash_inventory() -> dict[str, Any]:
         ),
         "entries": entries,
     }
+
+
+_TRASH_RESTORE_LOCK = Lock()
+
+
+@app.post("/api/trash/restore", tags=["Papierkorb"])
+def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
+    choice = payload.get("relative_paths", None)
+    if choice is not None and not isinstance(choice, list):
+        raise HTTPException(status_code=422, detail="Ungültige Dateiauswahl.")
+    with _TRASH_RESTORE_LOCK:
+        databases = {
+            Path(str(row["database_path"])).resolve(strict=False)
+            for row in list_libraries(
+                REGISTRY_DATABASE_FILE, active_only=False, registered_only=True
+            )
+            if Path(str(row["database_path"])).is_file()
+        }
+        databases.add(current_database_file().resolve(strict=False))
+        try:
+            result = restore_trash_files(
+                sorted(databases), WORKSPACE_PATH, relative_paths=choice
+            )
+        except (TrashError, OSError, ValueError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        for db in databases:
+            view_cache.invalidate(db)
+        try:
+            synchronize_global_central_stock()
+        except Exception as error:
+            result["synchronization_warning"] = str(error)
+        result["inventory"] = api_trash_inventory()
+        return result
 
 
 @app.post("/api/trash/empty", tags=["Papierkorb"])

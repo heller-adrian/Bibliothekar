@@ -173,3 +173,88 @@ def restore_trash_files(
                 goals.add((directory / src.name).as_posix())
                 identities.add((str(row["job_id"]), str(row["original_relative_path"])))
                 linked.append((database, row))
+
+        if not linked:
+            raise TrashError("Nicht katalogisierte Datei: " + name)
+        if len(goals) != 1 or len(identities) != 1:
+            raise TrashError("Bibliotheksübergreifend uneindeutige Zuordnung: " + name)
+        target_relative = next(iter(goals))
+        target = central / _relative(target_relative)
+        if target_relative in targets:
+            raise TrashError("Zwei Dateien mit demselben Tagesziel: " + target_relative)
+        targets.add(target_relative)
+        if target.exists() or target.is_symlink():
+            raise TrashError("Zieldatei existiert bereits: " + target_relative)
+        plans.append(dict(source=src, relative=name, target=target,
+                          target_relative=target_relative, sha256=sha, rows=linked))
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    moved: list[dict[str, Any]] = []
+    committed: list[tuple[Path, int, str]] = []
+    try:
+        for plan in plans:
+            _source(root, _relative(plan["relative"]))
+            if _sha256_file(plan["source"]) != plan["sha256"]:
+                raise TrashError("Quelldatei zwischenzeitlich verändert: " + plan["relative"])
+            _ensure_target_parent(central, plan["target"].relative_to(central))
+            _move_checked(plan["source"], plan["target"], plan["sha256"])
+            moved.append(plan)
+        for plan in plans:
+            for database, row in plan["rows"]:
+                with database_connection(database) as c:
+                    changed = c.execute(
+                        """UPDATE files SET current_root_kind='shared_workspace',
+                               current_relative_path=?,updated_at=?
+                           WHERE id=? AND current_root_kind='trash'
+                             AND current_relative_path=?""",
+                        (plan["target_relative"], timestamp, row["id"], plan["relative"]),
+                    )
+                    if changed.rowcount != 1:
+                        raise TrashError("Datei inzwischen geändert: " + plan["relative"])
+                    c.execute("DELETE FROM central_missing_file_observations WHERE file_id=?",
+                              (row["id"],))
+                    c.execute("DELETE FROM event_missing_file_observations WHERE file_id=?",
+                              (row["id"],))
+                    c.execute(
+                        """INSERT INTO audit_log(job_id,action,entity_type,entity_id,
+                                                 details_json,created_at)
+                           VALUES (?,'trash_file_restored','file',?,?,?)""",
+                        (row["job_id"], str(row["id"]),
+                         json.dumps({"source": plan["relative"],
+                                     "target": plan["target_relative"],
+                                     "sha256": plan["sha256"]},
+                                    ensure_ascii=False, sort_keys=True), timestamp),
+                    )
+                committed.append((database, int(row["id"]), plan["relative"]))
+    except Exception as error:
+        failures: list[str] = []
+        for plan in reversed(moved):
+            try:
+                _move_checked(plan["target"], plan["source"], plan["sha256"])
+            except Exception as undo_error:
+                failures.append(str(undo_error))
+        for database, file_id, old_path in reversed(committed):
+            try:
+                with database_connection(database) as c:
+                    c.execute(
+                        "UPDATE files SET current_root_kind='trash',"
+                        "current_relative_path=?,updated_at=? WHERE id=?",
+                        (old_path, timestamp, file_id),
+                    )
+            except Exception as undo_error:
+                failures.append(str(undo_error))
+        if failures:
+            raise TrashError("Wiederherstellung unterbrochen; bitte Konsistenz prüfen: "
+                             + " | ".join(failures[:3])) from error
+        raise TrashError("Wiederherstellung fehlgeschlagen: " + str(error)) from error
+
+    for plan in plans:
+        parent = plan["source"].parent
+        while parent != root:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+    return {"restored_file_count": len(plans),
+            "restored_paths": [plan["target_relative"] for plan in plans]}

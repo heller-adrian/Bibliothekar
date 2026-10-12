@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - patch/0.50.8
+      - patch/0.53.0
     tags:
       - 'v*'
   workflow_dispatch:

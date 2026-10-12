@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.53.0 – Papierkorb: selektive und vollständige Wiederherstellung (Entwicklung)
+
+- Ohne Auswahl: „Alle wiederherstellen“; mit ausgewählten Dateien: „Auswahl wiederherstellen“; Mehrfachauswahl wie in der Metadatenkorrektur, inklusive Umschalt-Klick und „Alle auswählen“.
+- Eindeutig katalogisierte Fotos gehen SHA-256-geprüft und ohne Überschreiben in den kanonischen zentralen Tagesbestand. Bibliotheksprojektionen und Historie werden aktualisiert; die Kamerabibliothek bleibt read-only.
+- Unbekannte, beschädigte, nicht eindeutig zugeordnete oder noch ereignisgebundene Dateien sowie Kollisionen werden vor der ersten Bewegung blockiert. Teilfehler führen zu einem kontrollierten Rückbauversuch.
+- Isolierte QA für Einzel-/Komplettwiederherstellung, Datenbanken, Prüfsummen, Kollisionen und Rollback.
+
+
 ## 0.51.0 – Guided manual event edits and English storage defaults (development)
 
 - Added an explicit **Review as event edit** transition for manually dissolved subevents. The server validates the exact saved physical inventory, original family ownership, capture-time bounds, retained sibling events and a matching open manual-change task before permitting any edit.

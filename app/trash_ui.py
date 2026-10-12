@@ -14,6 +14,15 @@ TRASH_HTML = r"""<!doctype html>
     .trash-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0 18px}
     .trash-stat{min-width:0;box-sizing:border-box;padding:14px 16px;border:1px solid var(--bk-line);border-radius:12px;background:var(--bk-surface)}
     .trash-stat strong{display:block;font-size:1.25rem;margin-top:5px;overflow-wrap:anywhere}
+    .trash-action{min-height:38px;padding:9px 15px;border:1px solid var(--bk-line);border-radius:10px;cursor:pointer;background:var(--bk-surface);color:var(--bk-ink)}
+    .trash-action-primary{background:var(--bk-blue);color:#fff;border-color:var(--bk-blue);font-weight:650}
+    .trash-action:disabled{opacity:.5;cursor:not-allowed}
+    .trash-toolbar-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .trash-file-main{display:flex;align-items:flex-start;gap:10px;min-width:0}
+    .trash-file-main>div{min-width:0}
+    .trash-checkbox{width:19px;height:19px;min-width:19px;min-height:19px;accent-color:var(--bk-blue);cursor:pointer}
+    .trash-row.trash-selected{border-color:var(--bk-blue);background:var(--bk-surface-2)}
+    .trash-row.trash-pickable{cursor:pointer}
     .trash-danger{min-height:38px;padding:9px 15px;border:1px solid var(--bk-danger);font-weight:600;cursor:pointer}
     .trash-danger:disabled{opacity:.55;cursor:not-allowed}
     .trash-content{border:1px solid var(--bk-line);border-radius:var(--bk-radius);background:var(--bk-surface);overflow:hidden}
@@ -58,7 +67,12 @@ TRASH_HTML = r"""<!doctype html>
       <div class="trash-root-label">Verwalteter Ordner</div>
       <div id="trash-root" class="trash-root"></div>
     </div>
-    <button id="trash-empty-button" type="button" class="danger-button trash-danger">Papierkorb entleeren</button>
+    <div class="trash-toolbar-actions">
+      <button id="trash-select-button" type="button" class="trash-action">Auswählen</button>
+      <button id="trash-select-all-button" type="button" class="trash-action" hidden>Alle auswählen</button>
+      <button id="trash-restore-button" type="button" class="trash-action trash-action-primary">Alle wiederherstellen</button>
+      <button id="trash-empty-button" type="button" class="danger-button trash-danger">Papierkorb entleeren</button>
+    </div>
   </div>
   <p id="trash-status" class="trash-status" role="status" aria-live="polite">Papierkorb wird geprüft …</p>
   <div class="trash-summary" aria-label="Papierkorb-Statistik">
@@ -73,6 +87,27 @@ TRASH_HTML = r"""<!doctype html>
   const status=document.getElementById("trash-status");
   const list=document.getElementById("trash-list");
   const emptyButton=document.getElementById("trash-empty-button");
+  const restoreButton=document.getElementById("trash-restore-button");
+  const selectButton=document.getElementById("trash-select-button");
+  const selectAllButton=document.getElementById("trash-select-all-button");
+  const selected=new Set();
+  let selectablePaths=[],selectMode=false,lastSelected=null,busy=false,lastInventory=null;
+  function updateControls(){
+    restoreButton.textContent=selected.size?"Auswahl wiederherstellen":"Alle wiederherstellen";
+    restoreButton.disabled=busy||!selectablePaths.length;
+    emptyButton.disabled=busy||!document.querySelector(".trash-content");
+    selectButton.disabled=busy||!selectablePaths.length;
+    selectButton.textContent=selectMode?"Auswahl beenden":"Auswählen";
+    selectAllButton.hidden=!selectMode;
+    selectAllButton.disabled=busy||!selectablePaths.length;
+    selectAllButton.textContent=selected.size===selectablePaths.length?"Auswahl aufheben":"Alle auswählen";
+    list.querySelectorAll("[data-trash-restore-path]").forEach(row=>{
+      const checked=selected.has(row.dataset.trashRestorePath);
+      row.classList.toggle("trash-selected",checked);
+      const input=row.querySelector(".trash-checkbox");
+      if(input)input.checked=checked;
+    });
+  }
   const esc=value=>String(value==null?"":value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const bytes=value=>{
     let n=Number(value||0); const units=["B","KB","MB","GB","TB"]; let i=0;
@@ -110,17 +145,25 @@ TRASH_HTML = r"""<!doctype html>
     return count;
   }
   function renderItem(item){
+    const path=String(item.relative_path||"");
+    const pickable=selectMode&&item.entry_type==="file";
+    const picked=selected.has(path);
+    const checkbox=pickable
+      ? '<input class="trash-checkbox" type="checkbox" aria-label="Datei auswählen" '+(picked?"checked":"")+'>'
+      : "";
     const kind=item.entry_type==="file"
       ? (item.tracked?"Katalogisiert":"Nur im Dateisystem")
       : item.entry_type==="symlink"?"Symbolischer Link":"Dateisystemeintrag";
     const showSize=item.entry_type==="file"||item.entry_type==="other";
-    return '<div class="trash-row"><div><strong class="trash-path" title="'+esc(item.relative_path)+'">'+esc(item.filename||item.relative_path)+'</strong><div class="trash-meta">'+kind+'</div></div>'
+    return '<div class="trash-row '+(pickable?"trash-pickable ":"")+(picked?"trash-selected":"")+'"'
+      +(pickable?' data-trash-restore-path="'+esc(path)+'" tabindex="0"':"")
+      +'><div class="trash-file-main">'+checkbox+'<div><strong class="trash-path" title="'+esc(item.relative_path)+'">'+esc(item.filename||item.relative_path)+'</strong><div class="trash-meta">'+kind+'</div></div></div>'
       +'<span class="trash-size">'+(showSize?esc(bytes(item.size_bytes)):"")+'</span></div>';
   }
   function renderFolder(folder){
     const fileTotal=fileCount(folder);
     const label=fileTotal===1?"1 Datei":fileTotal+" Dateien";
-    return '<details class="trash-folder"><summary><strong class="trash-summary-label">'+esc(folder.name)+'</strong>'
+    return '<details class="trash-folder" data-trash-group="'+esc(folder.name)+'"><summary><strong class="trash-summary-label">'+esc(folder.name)+'</strong>'
       +'<span class="trash-summary-count">'+label+'</span></summary>'
       +'<div class="trash-folder-items">'+renderChildren(folder)+'</div></details>';
   }
@@ -130,12 +173,15 @@ TRASH_HTML = r"""<!doctype html>
     return directories.concat(items).join("")||'<div class="trash-empty">Der Ordner ist leer.</div>';
   }
   function render(data){
+    lastInventory=data;
     document.getElementById("trash-root").textContent=data.root||"";
     document.getElementById("trash-files").textContent=Number(data.file_count||0);
     document.getElementById("trash-directories").textContent=Number(data.directory_count||0);
     document.getElementById("trash-size").textContent=bytes(data.total_size_bytes);
     const entries=data.entries||[];
-    emptyButton.disabled=entries.length===0;
+    const previousOpen=new Set([...list.querySelectorAll("details[open]")].map(d=>d.dataset.trashGroup||"root"));
+    selectablePaths=entries.filter(e=>e.entry_type==="file").map(e=>String(e.relative_path));
+    for(const path of [...selected]) if(!selectablePaths.includes(path))selected.delete(path);
     status.textContent=entries.length
       ? "Physischer Bestand geprüft · "+Number(data.tracked_file_count||0)+" bekannte Dateien"
         +(Number(data.untracked_file_count||0)?" · "+Number(data.untracked_file_count||0)+" nicht katalogisierte Dateien":"")
@@ -143,16 +189,79 @@ TRASH_HTML = r"""<!doctype html>
     const count=Number(data.file_count||0);
     const folders=Number(data.directory_count||0);
     list.innerHTML=entries.length
-      ? '<details class="trash-content"><summary><span class="trash-summary-label">Inhalt des Papierkorbs</span>'
+      ? '<details class="trash-content" data-trash-group="root"><summary><span class="trash-summary-label">Inhalt des Papierkorbs</span>'
           +'<span class="trash-summary-count">'+count+' Dateien · '+folders+' Ordner</span></summary>'
           +'<div class="trash-content-body">'+renderChildren(makeTree(entries))+'</div></details>'
       : '<div class="trash-empty">Keine Dateien oder Ordner im Papierkorb.</div>';
+    if(previousOpen.size){
+      list.querySelectorAll("details[data-trash-group]").forEach(d=>{
+        if(previousOpen.has(d.dataset.trashGroup))d.open=true;
+      });
+    }
+    updateControls();
   }
   async function load(){
     status.textContent="Papierkorb wird geprüft …";
     try{render(await json("/api/trash"));}
     catch(error){status.textContent=error.message;list.innerHTML="";}
   }
+  selectButton.addEventListener("click",()=>{
+    selectMode=!selectMode;
+    if(!selectMode){selected.clear();lastSelected=null;}
+    if(lastInventory)render(lastInventory);
+  });
+  selectAllButton.addEventListener("click",()=>{
+    if(selected.size===selectablePaths.length)selected.clear();
+    else selectablePaths.forEach(path=>selected.add(path));
+    updateControls();
+  });
+  list.addEventListener("click",event=>{
+    const row=event.target.closest("[data-trash-restore-path]");
+    if(!row||!selectMode||busy)return;
+    const path=row.dataset.trashRestorePath;
+    const index=selectablePaths.indexOf(path);
+    const input=event.target.closest(".trash-checkbox");
+    const wanted=input?input.checked:!selected.has(path);
+    if(event.shiftKey&&lastSelected!==null){
+      for(let i=Math.min(index,lastSelected);i<=Math.max(index,lastSelected);i++){
+        if(wanted)selected.add(selectablePaths[i]);
+        else selected.delete(selectablePaths[i]);
+      }
+    }else if(wanted)selected.add(path);
+    else selected.delete(path);
+    lastSelected=index;
+    updateControls();
+  });
+  list.addEventListener("keydown",event=>{
+    if(!selectMode||!["Enter"," "].includes(event.key))return;
+    const row=event.target.closest("[data-trash-restore-path]");
+    if(!row||event.target.matches("input"))return;
+    event.preventDefault();row.click();
+  });
+  restoreButton.addEventListener("click",async()=>{
+    const count=selected.size||selectablePaths.length;
+    if(!count||busy)return;
+    const question=selected.size
+      ? "Die "+count+" ausgewählten Dateien in den Tagesbestand wiederherstellen?"
+      : "Alle "+count+" Dateien im Papierkorb in den Tagesbestand wiederherstellen?";
+    if(!(await window.BibliothekarI18n.confirmAsync(question)))return;
+    busy=true;updateControls();
+    status.textContent="Dateien werden in den Tagesbestand wiederhergestellt …";
+    try{
+      const result=await json("/api/trash/restore",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({relative_paths:selected.size?[...selected]:null})
+      });
+      selected.clear();selectMode=false;lastSelected=null;
+      render(result.inventory);
+      status.textContent=result.restored_file_count+" Dateien wiederhergestellt."
+        +(result.synchronization_warning?" Datenabgleich prüfen: "+result.synchronization_warning:"");
+    }catch(error){
+      status.textContent=error.message;
+    }finally{
+      busy=false;updateControls();
+    }
+  });
   emptyButton.addEventListener("click",async()=>{
     if(!(await window.BibliothekarI18n.confirmAsync("Papierkorb wirklich endgültig entleeren?\n\nAlle Dateien und Ordner darin werden unwiderruflich gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden."))) return;
     emptyButton.disabled=true;
