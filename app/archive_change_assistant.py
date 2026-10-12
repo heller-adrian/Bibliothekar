@@ -262,6 +262,11 @@ def build_archive_change_assistant(
             raise ArchiveChangeAssistantError("Archive staging path must not be a symlink.")
         if persisted_root.is_dir():
             staging_name = persisted_name
+        elif status == "aenderbar_bestaetigt":
+            raise ArchiveChangeAssistantError(
+                "The prepared archive staging folder no longer exists. "
+                "Refresh and verify the request before following any Finder instructions."
+            )
     missing = list(description.get("missing_directories") or [])
     obsolete = list(description.get("obsolete_directories") or [])
     event_document = description.get("event_document")
