@@ -335,6 +335,15 @@ def test_0509_manual_child_dissolution_is_blocked_not_misread_as_rename(tmp_path
         }
         with pytest.raises(EventStructureChangeError):
             assert_no_open_structure_change(conn,"e")
+        with pytest.raises(EventStructureChangeError):
+            validate_guided_structure_edit(
+                conn,"e",task["id"],{**preview,"preserve_day_folders":True}
+            )
+        with pytest.raises(EventStructureChangeError):
+            validate_guided_structure_edit(
+                conn,"e",task["id"],{**preview,
+                    "uses_time_range":True,"start_time":"10:00","end_time":"23:59"}
+            )
         confirmed=validate_guided_structure_edit(
             conn,"e",task["id"],preview,expected_root_kind="shared_workspace"
         )
