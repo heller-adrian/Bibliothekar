@@ -26,12 +26,12 @@ def test_archive_document_instruction_uses_actual_staging_path(
         "event_name": "Historic event",
         "status": "aenderbar_bestaetigt",
         "delete_event": 0,
+        "prepared_structure_path": physical_name + "/2026/Event",
     }
     description = {
         "required": True,
         "target_root": "2026/Event",
         "current_root": "2026/Event",
-        "prepared_structure_path": physical_name + "/2026/Event",
         "missing_directories": [],
         "helper_directories": [],
         "desired_directories": [],
