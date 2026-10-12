@@ -153,3 +153,8 @@ def restore_trash_files(
                 row = matches[0]
                 if size != int(row["size_bytes"]) or sha != str(row["sha256"]):
                     raise TrashError("Größe oder Prüfsumme abweichend: " + name)
+                if row["family_id"] is None:
+                    raise TrashError("Datei ohne Kamerafamilie: " + name)
+                assigned = c.execute(
+                    "SELECT 1 FROM event_assignments a JOIN events e ON e.id=a.event_id "
+                    "WHERE a.family_id=? AND e.status IN "
