@@ -1,0 +1,8 @@
+Bibliothekar 0.51.1 – isolated GHCR patch image publication request
+Source branch: patch/0.51.1
+Source commit validated by QA: aa3243c65d15eaa2fb6c36324b760bf7344fb588
+Full backend QA and isolated archive/TrueNAS image harness: PASS
+QA run: https://github.com/heller-adrian/Bibliothekar/actions/runs/38282557084
+Scope: English UI dynamic text and notices, physical archive staging path correctness, legacy directory compatibility, archive/reversal workflow safety and regression tests.
+Publish only ghcr.io/heller-adrian/bibliothekar:patch-0.51.1 plus the patch branch tag.
+Never modify main, latest, stable version tags or any productive data.
