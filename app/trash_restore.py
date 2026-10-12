@@ -136,3 +136,10 @@ def restore_trash_files(
         linked: list[tuple[Path, dict[str, Any]]] = []
 
         # Later stage
+        for database in databases:
+            with database_connection(database) as c:
+                matches = [dict(r) for r in c.execute(
+                    "SELECT f.id,f.job_id,f.family_id,f.original_relative_path,f.size_bytes,"
+                    " COALESCE(f.sha256_current,f.sha256_original,'') AS sha256,"
+                    " COALESCE(ff.selected_capture_time,f.selected_capture_time,'') AS capture_time"
+                    " FROM files f LEFT JOIN file_families ff ON ff.id=f.family_id"
