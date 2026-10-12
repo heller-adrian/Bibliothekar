@@ -166,3 +166,10 @@ def restore_trash_files(
                 capture = str(row["capture_time"] or "")
                 if not capture:
                     raise TrashError("Aufnahmezeit unbekannt: " + name)
+                try:
+                    directory = canonical_free_directory(c, capture, physical=True)
+                except FreeStockLayoutError as error:
+                    raise TrashError(str(error) + " (" + name + ")") from error
+                goals.add((directory / src.name).as_posix())
+                identities.add((str(row["job_id"]), str(row["original_relative_path"])))
+                linked.append((database, row))
