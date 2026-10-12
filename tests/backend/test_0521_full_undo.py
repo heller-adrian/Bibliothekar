@@ -147,3 +147,35 @@ def test_0521_acknowledged_conflict_not_reopened_on_identical_repeat(tmp_path):
     again=list_external_change_state(db)
     assert any(n["id"]==notice["id"] for n in again["required"])
     assert not any(n["id"]==notice["id"] for n in again["unseen_required"])
+
+
+def test_0521_accepted_child_export_deletion_does_not_reopen(tmp_path):
+    db,workspace,work,root,_=_seed(tmp_path)
+    (root/"Part B"/"Export").rmdir()
+    scan_event_inventory(db,work,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    proposed=detect_event_structure_change(db,"e")
+    assert proposed and proposed["status"]=="pending"
+    result=confirm_applied_structure_change(
+        db,workspace,proposed["id"],input_path="Alle",
+        input_paths={"e":"Alle","child":"Alle"},app_version="0.52.1",
+    )
+    assert result["status"]=="completed"
+    scan_event_inventory(db,work,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    assert detect_event_structure_change(db,"e") is None
+    # The accepted SOLL no longer claims a physical child Export.
+    with database_connection(db) as conn:
+        from app.event_leaf_layouts import stored_leaf_layouts
+        from app.event_layout import layout_paths
+        assert "Export" not in layout_paths(stored_leaf_layouts(conn,"e")["child"]["layout"])
+
+
+def test_0521_undo_will_not_overwrite_occupied_original_target(tmp_path):
+    db,workspace,work,root,_=_seed(tmp_path)
+    (root/"Part B"/"Alle"/"B.JPG").rename(root/"Alle"/"B.JPG")
+    (root/"Part B"/"Alle"/"B.JPG").write_bytes(b"foreign-content")
+    scan_event_inventory(db,work,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
+    detect_event_structure_change(db,"e")
+    result=repair_external_conflicts(db,central_root=tmp_path/"unused",library_work_root=work)
+    assert result["skipped"],"A conflicting destination must never be overwritten."
+    assert (root/"Part B"/"Alle"/"B.JPG").read_bytes()==b"foreign-content"
+    assert (root/"Alle"/"B.JPG").read_bytes()==b"child"
