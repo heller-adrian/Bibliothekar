@@ -64,7 +64,7 @@ def test_0543_center_native_date_and_time_while_preserving_0542_fix():
     vertical = re.sub(r'\s+', '', centers[1]).lower()
     assert 'block-size:48px!important;' in vertical
     assert 'line-height:48px!important;' in vertical
-    pseudo = css[css.index('::-webkit-date-and-time-value', css.index('/* 0.54.4:')):]
+    pseudo = css[css.index('::-webkit-date-and-time-value', css.index('/* 0.54.3:')):]
     assert '::-webkit-datetime-edit' in pseudo
     assert 'align-items:center;' in pseudo
     assert 'justify-content:center;' in pseudo

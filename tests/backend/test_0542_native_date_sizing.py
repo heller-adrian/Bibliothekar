@@ -18,9 +18,9 @@ def _native_date_time_block() -> tuple[str, str]:
         r'#event-edit-dialog input\[type="time"\]\s*\{([^}]+)\}',
         re.S,
     )
-    # 0.54.4 adds a second, later rule solely for vertical centering.
+    # 0.54.3 adds a second, later rule solely for vertical centering.
     # Assert the original 0.54.2 native overflow mitigation remains intact.
-    section = source.split("/* 0.54.2:", 1)[1].split("/* 0.54.4:", 1)[0]
+    section = source.split("/* 0.54.2:", 1)[1].split("/* 0.54.3:", 1)[0]
     matches = list(pattern.finditer(section))
     assert len(matches) == 1, "Exactly one original 0.54.2 overflow reset is required"
     return source, matches[0].group(1)
