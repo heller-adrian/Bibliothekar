@@ -8,7 +8,7 @@ from app.ui_i18n import I18N_UI_JS
 
 
 def test_0552_version_and_early_shell_before_main():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.55.2"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.55.3"
     for area, subarea, heading in (
         ("import", None, "Import &amp; Prüfung"),
         ("workspace", "captures", "Aufnahmen"),

@@ -37,9 +37,9 @@ def translate(source: str) -> str:
 
 
 def test_0508_version_and_compatibility():
-    assert __version__ in {"0.50.8", "0.55.2"}
-    assert main.RELEASE_VERSION in {"0.50.8", "0.55.2"}
-    assert main.DEPLOYMENT_VERSION in {"0.50.8", "0.55.2"}
+    assert __version__ in {"0.50.8", "0.55.3"}
+    assert main.RELEASE_VERSION in {"0.50.8", "0.55.3"}
+    assert main.DEPLOYMENT_VERSION in {"0.50.8", "0.55.3"}
     assert _branch_for("2026/Test/All/photo.JPG") == "All"
     assert _branch_for("2026/Test/Sorted/photo.JPG") == "Sorted"
     assert _branch_for("2026/Test/Alle/photo.JPG") == "Alle"
