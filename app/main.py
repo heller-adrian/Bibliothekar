@@ -1518,6 +1518,16 @@ def process_claimed_job(
                     job_id,
                     folder_import_display_label(job, organization),
                 )
+            if managed_multiple_import or managed_general_import:
+                start_day=str(organization.get("capture_start_date") or "")
+                end_day=str(organization.get("capture_end_date") or "")
+                origin=("Mehrfachkorrektur" if managed_multiple_import
+                        else "Metadatenkorrektur · Allgemein")
+                if start_day:
+                    origin += " · " + start_day + (
+                        " – " + end_day if end_day and end_day != start_day else ""
+                    )
+                set_job_source_volume_label(database_file,job_id,origin)
             if managed_trash_import:
                 from app.trash_import import cleanup_successful_trash_import
                 try:

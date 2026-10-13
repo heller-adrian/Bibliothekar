@@ -1350,9 +1350,9 @@ UI_TRANSLATIONS.update({
     "Papierkorb-Löschjournal darf kein Symlink sein.": "The trash deletion journal must not be a symlink.",
 })
 UI_PATTERNS.extend([
-    [r"^Aus Papierkorb(?=\\s|$)", "From Trash"],
-    [r"^([0-9]+) Dateien wiederhergestellt\\.", "$1 files restored."],
-    [r"^([0-9]+) Dateien wiederhergestellt\\. ([0-9]+) unbekannte Dateien zur geprüften Übernahme vorgemerkt\\.", "$1 files restored. $2 previously unknown files queued for verified import."],
+    [r"^Aus Papierkorb(?=\s|$)", "From Trash"],
+    [r"^([0-9]+) Dateien wiederhergestellt\.", "$1 files restored."],
+    [r"^([0-9]+) Dateien wiederhergestellt\. ([0-9]+) unbekannte Dateien zur geprüften Übernahme vorgemerkt\\.", "$1 files restored. $2 previously unknown files queued for verified import."],
 ])
 
 I18N_UI_JS = r"""

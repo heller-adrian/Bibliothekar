@@ -54,7 +54,7 @@ def test_0301_critical_shell_initializers_are_present():
     assert "applyTheme(stored);" in script
     assert 'menuButton?.addEventListener("click"' in script
     assert "async function refreshTasks()" in script
-    assert 'fetch("/api/tasks", {cache: "no-store"})' in script
+    assert 'fetch("/api/tasks", {cache:"no-store", headers:{"X-Bibliothekar-Library":bkLibraryId}})' in script
     assert 'fetch("/api/health", {cache: "no-store"})' in script
 
 
