@@ -1,0 +1,1 @@
+Retry full backend, JavaScript and TrueNAS-compose QA after fixing escaped line breaks in import health diagnostics. Publish ghcr.io/heller-adrian/bibliothekar:patch-0.55.3 only on all-green results. No NAS mutation.
