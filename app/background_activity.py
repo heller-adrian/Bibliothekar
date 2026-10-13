@@ -210,6 +210,8 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             "active": status in ("queued", "running"),
         })
 
+    if all(item["active"] for item in operations):
+        return {"operations": operations, "active_count": len(operations)}
     # Nur exakt dieser beendete Versuch wird ausgeblendet. Nach einem Retry
     # erzeugt der neue Status/Zeitstempel einen anderen Sichtbarkeitsschluessel.
     try:

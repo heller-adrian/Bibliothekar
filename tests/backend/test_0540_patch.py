@@ -40,7 +40,7 @@ def _create_job(db: Path, job_id: str, state: str, updated: str):
             """INSERT INTO jobs
                (id,kind,trigger_type,state,stage,operation,created_at,updated_at,
                 source_volume_label,progress_current,progress_total)
-               VALUES (?,'folder','manual',?,'done','trash_import',?,?,?,0,1)""",
+               VALUES (?,'sd_import','manual',?,'done','trash_import',?,?,?,0,1)""",
             (job_id, state, updated, updated, "From Trash"),
         )
 

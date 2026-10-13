@@ -6256,7 +6256,7 @@ BIBLIOTHEKAR_0444_JS = r"""
       const busy = active.length > 0;
       icon.dataset.busy = String(busy);
       const hasFailure = lastSeen.some(item => ["failed", "interrupted"].includes(item.status));
-      mini.dataset.status = hasFailure ? "failed" : busy ? "running" : "completed";
+      mini.dataset.status = busy ? "running" : hasFailure ? "failed" : "completed";
       icon.textContent = busy ? "" : hasFailure ? "!" : "✓";
       const single = active.length === 1 ? active[0] : null;
       const hasPercent = !!(single && single.progress_percent !== null
