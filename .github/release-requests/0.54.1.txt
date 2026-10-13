@@ -1,0 +1,6 @@
+Bibliothekar 0.54.1
+Base: patch/0.54.0
+Scope: Provenance-verified startup identity reconciliation; fresh import source identity; localized health errors; responsive event modal container and WebKit native inputs.
+QA verified: 1120 backend tests passed, archive isolation harness passed on PR #24.
+Publish ghcr.io/heller-adrian/bibliothekar:patch-0.54.1 only after the image workflow repeats the QA successfully.
+Do not move main/latest or alter deployed data.
