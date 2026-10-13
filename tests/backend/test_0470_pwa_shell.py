@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0470_version_and_pwa_css_injected_after_branding():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.0"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.1"
     html = apply_shell("<html><head></head><body><main></main></body></html>", active_area="import")
     assert "<style>" + BIBLIOTHEKAR_0470_CSS + "</style>" in html
     assert "BIBLIOTHEKAR_0460_CSS" not in html

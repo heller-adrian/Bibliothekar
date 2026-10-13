@@ -26,7 +26,7 @@ def test_0460_svg_is_self_contained_white_and_font_independent():
 
 
 def test_0460_single_svg_in_all_shell_areas_and_dynamic_library():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.0"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.1"
     for area, subarea in [
         ("import", None), ("workspace", "captures"), ("workspace", "events"),
         ("archive", None), ("metadata", None), ("trash", None)

@@ -1,4 +1,4 @@
-"""0.55.0: Edit-only date/time pairs, vertical centering and iOS overflow safety."""
+"""0.55.1: Edit-only date/time pairs, vertical centering and iOS overflow safety."""
 from __future__ import annotations
 import re
 
@@ -69,4 +69,4 @@ def test_0543_center_native_date_and_time_while_preserving_0542_fix():
     assert 'align-items:center;' in pseudo
     assert 'justify-content:center;' in pseudo
     assert 'padding:0;' in pseudo
-    assert __version__ == main.DEPLOYMENT_VERSION == '0.55.0'
+    assert __version__ == main.DEPLOYMENT_VERSION == '0.55.1'
