@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.53.1 – Papierkorb, Herkunft, Aufgaben, manuelle Wiederherstellung (Entwicklung)
+## 0.53.2 – Papierkorb-Hintergrundwiederherstellung (Korrekturpatch)
+
+- Restore Selection und Restore All erzeugen einen dauerhaften Hintergrundauftrag; die HTTP-Anfrage verschiebt keine Fotos mehr.
+- Die geprüfte temporäre Importquelle im eigenen Metadatenverzeichnis wird auch von der Importvorprüfung sicher zugelassen.
+- Bekannte Originale behalten ihre bestehende Sicherungsidentität; neue Originale werden über den normalen Import nach Datum/Familie katalogisiert.
+- Der Hintergrundmonitor zeigt Papierkorbaufträge mit Fortschritt und Fehlerstatus.
+- Nicht abgeschlossene leere Papierkorb-Sicherungen werden nicht als aktive Sicherungen angeboten.
+- Die Aufgabe für freie Tagesbestände berücksichtigt gewöhnliche freigegebene Familien, schließt aber offene Neu-Zuordnungen und getrennte Archivfreigaben aus.
+- Bei Warteschlangen-Aufträgen schützt das System ausgewählte Quelldateien vor konkurrierendem endgültigem Löschen.
+- Nach Containerstart werden nur eindeutig unbegonnene Papierkorbaufträge fortgesetzt; unsichere Teiloperationen bleiben zur Prüfung gesperrt.
+- Der vollständige Durchlauf wird mit neuen realen Dateisystem- und Datenbank-Regressionstests geprüft.
+
+
+## 0.53.2 – Papierkorb, Herkunft, Aufgaben, manuelle Wiederherstellung (Entwicklung)
 
 - Papierkorb: neu importierte, nicht katalogisierte Dateien werden SHA-256-geprüft über eine versteckte Hintergrundsicherung in den Tagesbestand übernommen; Verwaltungsdateien wie .DS_Store bleiben aus dem Kameraimport ausgeschlossen.
 - Bekannte Dateien: Wiederherstellung bleibt prüfsummengesichert und behält ihre ursprüngliche Sicherungsidentität. Ausgewählte Dateien können unabhängig vom übrigen Papierkorb endgültig geleert werden.

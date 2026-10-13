@@ -298,8 +298,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.53.1"
-DEPLOYMENT_VERSION = "0.53.1"
+RELEASE_VERSION = "0.53.2"
+DEPLOYMENT_VERSION = "0.53.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1328,6 +1328,35 @@ def process_claimed_job(
             managed_trash_import = operation == "trash_import"
             managed_metadata_import = managed_multiple_import or managed_general_import or managed_trash_import
             if managed_trash_import:
+                # Restore requests are durable before any bytes are staged.
+                # All checksum work and catalogue changes happen in this worker.
+                from app.trash_import import prepare_queued_trash_restore
+                with _TRASH_RESTORE_LOCK:
+                    databases={
+                        Path(str(x["database_path"])).resolve(strict=False)
+                        for x in list_libraries(
+                            REGISTRY_DATABASE_FILE,active_only=False,registered_only=True
+                        )
+                        if Path(str(x["database_path"])).is_file()
+                    }
+                    databases.add(DATABASE_FILE.resolve(strict=False))
+                    prepared=prepare_queued_trash_restore(
+                        DATABASE_FILE,sorted(databases),workspace_path,job_id
+                    )
+                if int(prepared["unknown_file_count"])==0:
+                    complete_job(
+                        database_file,job_id,stage="organized_verified",
+                        result={"trash_restore":prepared},
+                        message="Bekannte Papierkorbdateien wurden wiederhergestellt."
+                    )
+                    for db in databases: view_cache.invalidate(db)
+                    synchronize_global_central_stock()
+                    return
+                report_progress(
+                    "copying","trash_staged",0,int(prepared["unknown_file_count"]),
+                    "Papierkorbdateien geprüft; Übernahme in den Tagesbestand beginnt."
+                )
+            if managed_trash_import:
                 from app.trash_import import stage_parent
                 expected_trash_root = stage_parent(workspace_path)
                 resolved_source = source.resolve(strict=False)
@@ -1699,6 +1728,8 @@ def process_claimed_job(
         )
 
         if is_import_operation:
+            if operation=="trash_import":
+                view_cache.invalidate(database_file)
             if database_file.resolve(strict=False) != DATABASE_FILE.resolve(strict=False):
                 raise RuntimeError(
                     "Globaler Kameraimport wurde unerwartet außerhalb der Main-Datenbank verarbeitet."
@@ -2280,6 +2311,11 @@ def startup_database() -> None:
         interrupted = mark_running_jobs_interrupted(
             DATABASE_FILE
         )
+        # Only requests that never touched the catalogue may resume automatically.
+        from app.trash_import import resume_safe_queued_trash_restores
+        restored_queue = resume_safe_queued_trash_restores(DATABASE_FILE, WORKSPACE_PATH)
+        if restored_queue:
+            print(f"{restored_queue} sichere Papierkorb-Aufträge fortgesetzt.",flush=True)
 
         if interrupted:
             print(
@@ -4897,57 +4933,33 @@ def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
         }
         databases.add(current_database_file().resolve(strict=False))
         from app.source_filter import should_ignore_source_relative
-        from app.trash_import import stage_trash_import
+        from app.trash_import import queue_trash_restore
         from app.trash import _physical_entries, reconcile_trash_inventory
         from app.trash_restore import _relative
         try:
             for db in databases:
-                reconcile_trash_inventory(db, WORKSPACE_PATH)
-            _root, entries, _dirs = _physical_entries(WORKSPACE_PATH)
-            physical = {str(e["relative_path"]) for e in entries if e["entry_type"] == "file"}
-            selected = sorted(physical) if choice is None else list(choice)
-            if not selected or len(set(selected)) != len(selected):
+                reconcile_trash_inventory(db,WORKSPACE_PATH)
+            _root,entries,_dirs=_physical_entries(WORKSPACE_PATH)
+            physical={str(e["relative_path"]) for e in entries if e["entry_type"]=="file"}
+            selected=sorted(physical) if choice is None else list(choice)
+            if not selected or len(set(selected))!=len(selected):
                 raise TrashError("Keine gültige Dateiauswahl.")
             for rel in selected:
                 _relative(rel)
                 if rel not in physical:
-                    raise TrashError("Datei nicht im Papierkorb: " + rel)
-            ignored = [rel for rel in selected if should_ignore_source_relative(rel)]
-            requested = [rel for rel in selected if rel not in ignored]
-            known, unknown = [], []
-            for rel in requested:
-                linked = False
-                for db in databases:
-                    with database_connection(db) as conn:
-                        if conn.execute(
-                            "SELECT 1 FROM files WHERE current_root_kind='trash' "
-                            "AND current_relative_path=? LIMIT 1", (rel,)
-                        ).fetchone():
-                            linked = True
-                            break
-                (known if linked else unknown).append(rel)
-            result = {"restored_file_count":0,"restored_paths":[],
-                      "queued_file_count":0,"skipped_paths":ignored}
-            # Stage unknown originals before touching any known catalogued ones.
-            # Source originals remain in trash until verified by the worker.
-            if unknown:
-                queued = stage_trash_import(DATABASE_FILE,WORKSPACE_PATH,unknown)
-                result["queued_file_count"] = int(queued["queued_file_count"])
-                result["queued_job_id"] = queued["job_id"]
-            if known:
-                try:
-                    restored = restore_trash_files(sorted(databases), WORKSPACE_PATH,
-                                                   relative_paths=known)
-                    result.update(restored)
-                except (TrashError, OSError, ValueError) as error:
-                    if unknown:
-                        result["restore_warning"] = str(error)
-                    else:
-                        raise
-            if not known and not unknown and ignored:
-                result["note"] = "Systemdateien wurden nicht als Aufnahmen importiert."
-        except (TrashError, OSError, ValueError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
+                    raise TrashError("Datei nicht im Papierkorb: "+rel)
+            ignored=[rel for rel in selected if should_ignore_source_relative(rel)]
+            requested=[rel for rel in selected if rel not in ignored]
+            if not requested:
+                result={"queued_file_count":0,"skipped_paths":ignored,
+                        "note":"Keine unterstützten Aufnahmen ausgewählt."}
+            else:
+                queued=queue_trash_restore(DATABASE_FILE,WORKSPACE_PATH,requested)
+                result={"job_id":queued["job_id"],"queued_job_id":queued["job_id"],
+                        "queued_file_count":queued["queued_file_count"],
+                        "skipped_paths":ignored,"status":"queued"}
+        except (TrashError,OSError,ValueError) as error:
+            raise HTTPException(status_code=409,detail=str(error)) from error
         for db in databases:
             view_cache.invalidate(db)
         try:
@@ -4975,6 +4987,10 @@ def api_empty_trash_selection(payload: dict[str, Any]) -> dict[str, Any]:
         databases.add(current_database_file().resolve(strict=False))
         databases.add(DATABASE_FILE.resolve(strict=False))
         try:
+            from app.trash_import import protected_trash_paths
+            reserved=protected_trash_paths(DATABASE_FILE,WORKSPACE_PATH)
+            if reserved.intersection(paths):
+                raise TrashError("Ausgewählte Dateien gehören zu einer laufenden Wiederherstellung.")
             result = delete_selected_trash_files(sorted(databases), WORKSPACE_PATH, paths)
         except (OSError, TrashError, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -4992,6 +5008,9 @@ def api_empty_trash(payload: dict[str, Any]) -> dict[str, Any]:
             detail="Die ausdrückliche Sicherheitsbestätigung fehlt.",
         )
     try:
+        from app.trash_import import protected_trash_paths
+        if protected_trash_paths(DATABASE_FILE,WORKSPACE_PATH):
+            raise TrashError("Wiederherstellung läuft; der Papierkorb kann noch nicht geleert werden.")
         api_trash_inventory()
         empty_trash_filesystem(WORKSPACE_PATH)
         # A failed/partial filesystem deletion raises and leaves DB rows

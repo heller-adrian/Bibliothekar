@@ -282,14 +282,15 @@ TRASH_HTML = r"""<!doctype html>
       });
       selected.clear();selectMode=false;lastSelected=null;
       render(result.inventory);
-      const restored=Number(result.restored_file_count||0);
       const queued=Number(result.queued_file_count||0);
       const skipped=(result.skipped_paths||[]).length;
       status.textContent=bilingual(
-        restored+" Dateien wiederhergestellt."+ (queued?" "+queued+" unbekannte Dateien zur geprüften Übernahme vorgemerkt.":"") +(skipped?" "+skipped+" Systemdateien übersprungen.":""),
-        restored+" files restored."+(queued?" "+queued+" previously unknown files queued for verified import.":"")+(skipped?" "+skipped+" system files skipped.":"")
-      )+(result.restore_warning?" "+localError(result.restore_warning):"")
-       +(result.synchronization_warning?" "+localError(result.synchronization_warning):"");
+        queued+" Dateien zur Wiederherstellung im Hintergrund vorgemerkt."+
+          (skipped?" "+skipped+" Systemdateien übersprungen.":""),
+        queued+" files queued for background restoration."+
+          (skipped?" "+skipped+" system files skipped.":"")
+      );
+      window.dispatchEvent(new Event("bk-activity-refresh"));
     }catch(error){
       status.textContent=localError(error.message);
     }finally{

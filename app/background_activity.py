@@ -34,25 +34,49 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
     # while a secondary library is selected in the browser.
     with database_connection(global_import_database) as connection:
         rows = connection.execute(
-            """SELECT id, state, stage, source_volume_label
+            """SELECT id,state,stage,source_volume_label,progress_current,
+                      progress_total,error_message,operation
                FROM jobs
                WHERE operation IN (
-                   'folder_import','metadata_multiple_import','metadata_general_import'
+                   'folder_import','metadata_multiple_import',
+                   'metadata_general_import','trash_import'
                )
-                 AND state IN ('queued','copying','verifying','backup_verified',
-                               'analyzing_metadata','organizing')
-               ORDER BY created_at DESC,id DESC LIMIT 8"""
+                 AND (
+                   state IN ('queued','copying','verifying','backup_verified',
+                             'analyzing_metadata','organizing')
+                   OR (operation='trash_import'
+                       AND state IN ('completed','failed','interrupted')
+                       AND updated_at>=?)
+                 )
+               ORDER BY updated_at DESC,id DESC LIMIT 12""",
+            (recent_cutoff,),
         ).fetchall()
     for row in rows:
+        status=str(row["state"])
+        is_trash=str(row["operation"])=="trash_import"
+        total=int(row["progress_total"] or 0)
+        current=int(row["progress_current"] or 0)
+        if is_trash:
+            detail=(
+                "Wiederherstellung fehlgeschlagen: "+str(row["error_message"] or "Unbekannter Fehler")
+                if status in {"failed","interrupted"}
+                else "Wiederherstellung abgeschlossen"
+                if status=="completed"
+                else "Wiederherstellung wartet auf Verarbeitung"
+                if status=="queued"
+                else "Dateien werden im Hintergrund wiederhergestellt"
+            )
+        else:
+            detail="Import läuft im Hintergrund" if status!="queued" else "Import wartet auf Verarbeitung"
         operations.append({
-            "kind": "import",
-            "id": str(row["id"]),
-            "status": str(row["state"]),
-            "label": str(row["source_volume_label"] or "Import"),
-            "detail": "Import läuft im Hintergrund" if row["state"] != "queued"
-                      else "Import wartet auf Verarbeitung",
-            "href": "/",
-            "active": True,
+            "kind":"trash_restore" if is_trash else "import",
+            "id":str(row["id"]),
+            "status":status,
+            "label":str(row["source_volume_label"] or ("Aus Papierkorb" if is_trash else "Import")),
+            "detail":detail,
+            "href":"/trash" if is_trash else "/",
+            "active":status in _IMPORT_STATES,
+            "progress_percent":min(100,round(current*100/total)) if total>0 else None,
         })
 
     with database_connection(library_database) as connection:

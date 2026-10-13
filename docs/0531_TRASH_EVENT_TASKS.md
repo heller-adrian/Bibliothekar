@@ -1,4 +1,4 @@
-# Bibliothekar 0.53.1 – Testnotizen und Wiederherstellung
+# Bibliothekar 0.53.2 – Testnotizen und Wiederherstellung
 
 Basis: patch/0.53.0, Commit c9332d5073e53bc5633c620f761adc124b8c1bf9.
 

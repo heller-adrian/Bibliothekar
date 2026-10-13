@@ -1,4 +1,4 @@
-"""0.53.1 regression tests: trash provenance, selection, rendering contracts."""
+"""0.53.2 regression tests: trash provenance, selection, rendering contracts."""
 from __future__ import annotations
 
 from pathlib import Path

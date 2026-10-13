@@ -1332,7 +1332,7 @@ from app.ui_i18n_0511 import UI_0511_TRANSLATIONS, UI_0511_PATTERNS
 UI_TRANSLATIONS.update(UI_0511_TRANSLATIONS)
 UI_PATTERNS.extend(UI_0511_PATTERNS)
 
-# 0.53.1 – trash selection, restoration, provenance, manual Undo and task labels.
+# 0.53.2 – trash selection, restoration, provenance, manual Undo and task labels.
 UI_TRANSLATIONS.update({
     "Gesamten Papierkorb leeren": "Empty entire trash",
     "Auswahl leeren": "Empty selection",

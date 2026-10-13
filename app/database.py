@@ -5131,9 +5131,10 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 "href": "/metadata-correction?area=library",
             })
 
-        # Freie Familien sind nur dann eine Aufgabe, wenn sie nicht bereits aus
-        # einer Ereignisänderung stammen (diese besitzen oben ihre eigene
-        # Neu-Zuordnungsaufgabe). So entstehen keine Doppelmeldungen.
+        # Freie Familien folgen den normalen Workspace-Tageskarten.
+        # Nur echte offene Neu-Zuordnungen oder gesondert angezeigte
+        # Archivfreigaben werden ausgeschlossen; ein alter gewöhnlicher
+        # released_free-Marker darf die Sammelaufgabe nicht unterdrücken.
         # Metadatenkorrekturen werden global nur pro Bereich gebündelt.
         # Einzeldateien bleiben auf der Metadatenseite nachvollziehbar, blähen
         # aber den allgemeinen Aufgabenindikator nicht mehr auf.
@@ -5238,6 +5239,14 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  AND NOT EXISTS (
                    SELECT 1 FROM released_free_families marker
                    WHERE marker.job_id=ff.job_id AND marker.family_id=ff.id
+                     AND COALESCE(marker.archive_origin,0)=1
+                     AND EXISTS (
+                       SELECT 1 FROM files released
+                       WHERE released.family_id=ff.id
+                         AND released.current_root_kind='shared_workspace'
+                         AND (released.current_relative_path LIKE 'Freigewordene Archivdateien/%'
+                           OR released.current_relative_path LIKE 'Released Archive Files/%')
+                     )
                  )"""
         ).fetchone()
         unassigned_count = int(row["n"] or 0) if row is not None else 0

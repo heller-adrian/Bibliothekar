@@ -62,6 +62,7 @@ def preflight_folder_import(
     max_scan_seconds: float = 8.0,
     max_entries: int = 200000,
     cancellation_callback: CancellationCallback | None = None,
+    allow_workspace_source: bool = False,
 ) -> dict[str, int]:
     """Vor einer Jobannahme nur Dateigrößen ermitteln, niemals SHA-256 lesen.
 
@@ -72,7 +73,8 @@ def preflight_folder_import(
     """
     source = source.resolve(strict=True)
     workspace = workspace.resolve(strict=True)
-    if source == workspace or source in workspace.parents or workspace in source.parents:
+    if (source == workspace or source in workspace.parents
+            or (workspace in source.parents and not allow_workspace_source)):
         raise PipelineError("Quelle und Kamera-Arbeitsbereich dürfen nicht ineinander liegen.")
     started = time.monotonic()
     count = 0
@@ -702,6 +704,7 @@ def run_folder_import_job(
             processing_buffer_percent=processing_buffer_percent,
             safety_reserve_gib=safety_reserve_gib,
             cancellation_callback=cancellation_callback,
+            allow_workspace_source=allow_workspace_source,
         )
         all_entries = source_manifest(
             source,

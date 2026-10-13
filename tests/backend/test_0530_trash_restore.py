@@ -1,4 +1,4 @@
-"""0.53.1: Papierkorb-Wiederherstellung ausschließlich mit isolierten QA-Dateien."""
+"""0.53.2: Papierkorb-Wiederherstellung ausschließlich mit isolierten QA-Dateien."""
 from __future__ import annotations
 
 import hashlib

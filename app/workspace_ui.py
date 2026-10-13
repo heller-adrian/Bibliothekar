@@ -2528,7 +2528,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         try {
           const saved = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
           if (Array.isArray(saved?.jobs)) {
-            jobs = saved.jobs.filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation));
+            jobs = saved.jobs.filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0));
             selectedJobIds = new Set(jobs.filter(job => job.workflow_status !== "archived").map(job => job.id));
             updateTechnicalAnchor(); renderBackupFilter();
             const ids = [...selectedJobIds];
@@ -2547,7 +2547,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const previous = new Set(selectedJobIds);
 
       jobs = (data.jobs || [])
-        .filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation))
+        .filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0))
         .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
 
       const active=jobs.filter(job=>job.workflow_status!=="archived");

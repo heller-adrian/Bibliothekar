@@ -18,7 +18,7 @@ def _page(area):
 
 
 def test_0473_version_and_logo_v2_unchanged():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.53.1"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.53.2"
     for area in ("import", "workspace", "archive", "metadata", "trash"):
         page = _page(area)
         assert page.count('src="/assets/bibliothekar-logo-v2.svg?v=0.47.3"') == 2
