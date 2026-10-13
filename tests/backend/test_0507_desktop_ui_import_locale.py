@@ -34,8 +34,8 @@ def test_0507_import_messages_and_schema_are_in_catalog():
     }
     for source, target in messages.items():
         assert UI_TRANSLATIONS[source] == target
-    assert main.RELEASE_VERSION in {"0.50.7", "0.54.1"}
-    assert main.DEPLOYMENT_VERSION in {"0.50.7", "0.54.1"}
+    assert main.RELEASE_VERSION in {"0.50.7", "0.54.2"}
+    assert main.DEPLOYMENT_VERSION in {"0.50.7", "0.54.2"}
     # Database detail and import history are formatted by the app before rendering.
     assert 'Schema version ' in main.index()
     assert 'importUiText(job.progress_message || "Kein Statustext vorhanden.")' in main.index()
