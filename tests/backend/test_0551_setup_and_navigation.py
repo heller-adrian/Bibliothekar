@@ -10,7 +10,7 @@ from app.workspace_layout import ensure_workspace_layout
 
 
 def test_0551_bilingual_first_run():
-    assert __version__ == "0.55.1"
+    assert __version__ == "0.55.2"
     for html in (_login_html(), _login_html(unavailable=True), _library_onboarding_html()):
         assert 'data-bk-setup-choice="en"' in html
         assert 'data-bk-setup-choice="de"' in html

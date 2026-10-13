@@ -51,7 +51,7 @@ def test_0506_nav_shows_feedback_without_network_gate():
     assert 'window.setTimeout(() => window.location.assign(href), 190)' not in BIBLIOTHEKAR_JS
     assert 'html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before' in rendered
     assert 'html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after' in BIBLIOTHEKAR_0505_LANGUAGE_CSS
-    assert 'data-bk-version>0.55.1</span>' in rendered
+    assert 'data-bk-version>0.55.2</span>' in rendered
 
 def test_0506_workspace_long_labels_fit_and_preview_dates_wrap():
     assert '.summary > .card > .muted' in WORKSPACE_HTML

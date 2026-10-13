@@ -49,4 +49,4 @@ def test_0550_no_event_css_and_persistence_remain_identical():
     assert 'day_key: row.querySelector("[data-segment-day]")?.value' in WORKSPACE_HTML
     assert 'start_time: row.querySelector("[data-segment-start]")?.value' in WORKSPACE_HTML
     assert 'end_time: row.querySelector("[data-segment-end]")?.value' in WORKSPACE_HTML
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.1"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.2"
