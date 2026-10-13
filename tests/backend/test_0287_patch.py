@@ -128,7 +128,7 @@ def test_0287_released_archive_groups_merge_same_interval_across_backups(tmp_pat
 
 
 def test_0287_day_controls_lock_month_and_year_and_archive_selection_stays_global():
-    assert main.RELEASE_VERSION == "0.55.1"
+    assert main.RELEASE_VERSION == "0.55.2"
     assert 'subeventDayControl("data-create-child-start-date"' in WORKSPACE_HTML
     assert "data-create-child-start-month-year" in WORKSPACE_HTML
     assert "data-create-child-end-month-year" in WORKSPACE_HTML
