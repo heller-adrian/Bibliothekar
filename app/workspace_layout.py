@@ -213,6 +213,17 @@ def ensure_workspace_layout(
                 "Der vorhandene Kompatibilitätsalias konnte nicht aktualisiert werden: "
                 + str(legacy_main)
             ) from error
+    elif (
+        main_work is None
+        and workspaces.name == "Arbeitsbereiche"
+        and not legacy_main.exists()
+        and not legacy_main.is_symlink()
+    ):
+        # Only historical German layouts retain the historical alias.
+        # Untouched English workspaces never create a German link.
+        legacy_main.symlink_to(workspaces, target_is_directory=True)
+        created.append(str(legacy_main))
+
     return {
         "workspace_root": str(root),
         "backup_root": str(backup),

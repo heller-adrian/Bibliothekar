@@ -46,6 +46,20 @@ def _fallback_branches(path: PurePosixPath) -> tuple[str, ...]:
     return LEGACY_BRANCHES if {"Alle", "Sortiert"}.intersection(path.parts) else BRANCHES
 
 
+def _plan_fallback_branches(plan: dict[str, Any]) -> tuple[str, ...]:
+    """Select one naming style per plan, including Export-only file rows."""
+    items = [*(plan.get("families_with_plans") or []),
+             *(plan.get("assets_with_plans") or [])]
+    for key in ("new_path", "old_path"):
+        paths = [PurePosixPath(str(item.get(key) or "").replace("\\", "/"))
+                 for item in items if str(item.get(key) or "").strip()]
+        if any({"All", "Sorted"}.intersection(path.parts) for path in paths):
+            return BRANCHES
+        if any({"Alle", "Sortiert"}.intersection(path.parts) for path in paths):
+            return LEGACY_BRANCHES
+    return BRANCHES
+
+
 class ArchiveStagingError(RuntimeError):
     pass
 
@@ -364,7 +378,7 @@ def _desired_directory_plan(
             continue
         container = PurePosixPath(*rel.parts[:branch_index])
         directories.add(container)
-        for branch in _fallback_branches(rel):
+        for branch in _plan_fallback_branches(plan):
             directories.add(container / branch)
     return directories
 
@@ -894,7 +908,7 @@ def required_target_directories_for_request(
             continue
         container = PurePosixPath(*rel.parts[:branch_index])
         touched.add(container)
-        for branch in _fallback_branches(rel):
+        for branch in _plan_fallback_branches(plan):
             touched.add(container / branch)
 
     return sorted(path.as_posix() for path in touched)

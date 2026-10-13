@@ -34,9 +34,12 @@ def test_0551_bottom_dock_is_interactive_before_navigation():
     assert 'inset:0 0 calc(112px + env(safe-area-inset-bottom)) 0!important;' in html
 
 
-def test_0551_empty_install_does_not_create_legacy_alias(tmp_path: Path):
+def test_0551_empty_install_does_not_create_legacy_alias(tmp_path: Path, monkeypatch):
     root=tmp_path/"workspace"
     root.mkdir()
+    monkeypatch.setenv("KAMERA_WORKSPACE", str(root))
+    monkeypatch.setenv("KAMERA_CONFIG", str(tmp_path/"config"/"settings.json"))
+    monkeypatch.delenv("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE", raising=False)
     result=ensure_workspace_layout(root)
     assert not (root/"Arbeitsbereich").exists()
     assert not (root/"Arbeitsbereich").is_symlink()
