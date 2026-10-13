@@ -8,10 +8,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0456_versions_and_shell_load_new_css_last():
-    assert __version__ == "0.53.0"
-    assert main.DEPLOYMENT_VERSION == "0.53.0"
+    assert __version__ == "0.53.1"
+    assert main.DEPLOYMENT_VERSION == "0.53.1"
     html = apply_shell("<html><head></head><body></body></html>", active_area="workspace")
-    assert "Version <span data-bk-version>0.53.0</span>" in html
+    assert "Version <span data-bk-version>0.53.1</span>" in html
     assert html.index(f"<style>{BIBLIOTHEKAR_0455_CSS}</style>") < html.index(
         f"<style>{BIBLIOTHEKAR_0456_CSS}</style>"
     )

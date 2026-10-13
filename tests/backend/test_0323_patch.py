@@ -85,8 +85,8 @@ def test_0323_shell_shows_current_library_and_old_review_route_is_removed():
     assert "Bibliothek …" not in shell
     assert "Hauptbibliothek" in shell
     assert "/api/libraries/current" in ui_shell.BIBLIOTHEKAR_JS
-    assert "Version <span data-bk-version>0.53.0</span>" in shell
-    assert main.DEPLOYMENT_VERSION == "0.53.0"
+    assert "Version <span data-bk-version>0.53.1</span>" in shell
+    assert main.DEPLOYMENT_VERSION == "0.53.1"
     assert "/review" not in {
         getattr(route, "path", None)
         for route in main.app.routes
