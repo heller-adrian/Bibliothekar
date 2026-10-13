@@ -21,7 +21,7 @@ def test_0540_version_and_mobile_editor_layout():
 
 def test_0540_centered_compact_status_and_localized_clear():
     assert "bk-activity-center" in BIBLIOTHEKAR_0444_JS
-    assert 'mini.dataset.status = hasFailure' in BIBLIOTHEKAR_0444_JS
+    assert 'mini.dataset.status = busy' in BIBLIOTHEKAR_0444_JS
     assert "bk-activity-mini-count" in BIBLIOTHEKAR_0444_CSS
     assert "transform:translate(-50%,-50%)" in BIBLIOTHEKAR_0444_CSS
     assert "bk-activity-clear" in BIBLIOTHEKAR_0444_JS
