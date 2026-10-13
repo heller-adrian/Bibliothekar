@@ -7,8 +7,8 @@ from app.ui_shell import (
 
 
 def test_0451_versions():
-    assert __version__ == "0.54.0"
-    assert main.DEPLOYMENT_VERSION == "0.54.0"
+    assert __version__ == "0.54.1"
+    assert main.DEPLOYMENT_VERSION == "0.54.1"
 
 
 def test_0451_theme_script_is_in_head_before_all_styles():
