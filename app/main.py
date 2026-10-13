@@ -11616,8 +11616,8 @@ def index() -> str:
           german ? "Ursachen anzeigen (" + healthIssues.length + ")"
                  : "Show reasons (" + healthIssues.length + ")";
         document.getElementById("application-health-errors").textContent =
-          healthIssues.join("\n");
-        applicationStatus.title = healthIssues.join("\n");
+          healthIssues.join("\\n");
+        applicationStatus.title = healthIssues.join("\\n");
       } else {
         healthDetails.open = false;
         applicationStatus.removeAttribute("title");
