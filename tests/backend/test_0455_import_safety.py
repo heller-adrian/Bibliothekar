@@ -16,9 +16,9 @@ from app.ui_shell import BIBLIOTHEKAR_0455_CSS, apply_shell
 
 
 def test_0455_version_and_phase_css():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.54.4"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.0"
     html = apply_shell("<html><head></head><body></body></html>", active_area="import")
-    assert "Version <span data-bk-version>0.54.4</span>" in html
+    assert "Version <span data-bk-version>0.55.0</span>" in html
     assert f"<style>{BIBLIOTHEKAR_0455_CSS}</style>" in html
     assert "--bk-ink) 2%)" in BIBLIOTHEKAR_0455_CSS
 
