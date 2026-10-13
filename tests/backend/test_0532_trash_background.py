@@ -150,12 +150,11 @@ def test_0532_staged_and_inflight_sources_cannot_be_deleted(tmp_path,monkeypatch
 def test_0532_actual_claimed_worker_finishes_trash_restore(tmp_path,monkeypatch):
     """Contract that failed in 0.53.1: queue -> main worker -> real SSD bytes."""
     from app import main
-    from app.library_registry import list_active_library_contexts
     from tests.backend.test_0400_import_backup_controls import _foundation
     from app.storage_config import storage_paths
 
     database,registry,workspace=_foundation(tmp_path)
-    contexts=list_active_library_contexts(registry)
+    contexts=main.list_active_library_contexts(registry)
     assert contexts
     context=next(x for x in contexts if x.library_id=="main")
     monkeypatch.setattr(main,"DATABASE_FILE",database)
