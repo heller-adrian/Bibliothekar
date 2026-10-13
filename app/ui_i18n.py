@@ -1662,7 +1662,7 @@ I18N_UI_JS = r"""
   // On normal PWA pages the shell is present before <main>. Translate it
   // immediately so the dock, subnav and title are usable during HTML parsing.
   // Sign-in/first-run pages keep their existing DOM-ready initialization.
-  if (document.readyState === "loading" && !document.querySelector(".bk-shell")) {
+  if (document.readyState === "loading" && !document.querySelector?.(".bk-shell")) {
     document.addEventListener("DOMContentLoaded", init, {once: true});
   } else {
     init();

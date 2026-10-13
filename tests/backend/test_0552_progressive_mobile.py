@@ -21,6 +21,7 @@ def test_0552_version_and_early_shell_before_main():
         assert html.index('<nav class="bk-pwa-dock"') < html.index(I18N_UI_JS[:80])
         assert html.index(I18N_UI_JS[:80]) < html.index("<main>Loading")
         assert html.count(I18N_UI_JS[:80]) == 1
+        assert 'BIBLIOTHEKAR_0552_EARLY_LINKS_JS' not in html
         assert heading in html
 
 
@@ -45,7 +46,8 @@ def test_0552_dock_accents_are_owned_by_destination_links():
 
 
 def test_0552_i18n_reveals_main_at_dom_ready_not_api_completion():
-    assert 'if (document.readyState === "loading" && !document.querySelector(".bk-shell"))' in I18N_UI_JS
+    assert 'if (document.readyState === "loading" && !document.querySelector?.(".bk-shell"))' in I18N_UI_JS
     assert 'document.addEventListener("DOMContentLoaded", () => {' in I18N_UI_JS
-    assert 'walk(document.body);\\n        delete document.documentElement.dataset.bkI18nPending;' in I18N_UI_JS
+    assert 'walk(document.body);' in I18N_UI_JS
+    assert 'delete document.documentElement.dataset.bkI18nPending;' in I18N_UI_JS
     assert 'fetch(' not in I18N_UI_JS.split('function init()',1)[1].split('})();',1)[0]

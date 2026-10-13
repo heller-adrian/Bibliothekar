@@ -7615,6 +7615,23 @@ BIBLIOTHEKAR_0551_DOCK_CSS = r"""
 """
 
 
+
+BIBLIOTHEKAR_0552_EARLY_LINKS_JS = r"""
+/* Make visible shell links library-safe before the page-specific JS is parsed.
+   Existing late href normalization remains idempotent. */
+(() => {
+  const library = window.__bkLibraryId || new URL(location.href).searchParams.get("library") || "main";
+  document.querySelectorAll(".bk-pwa-dock a[href^='/'], .bk-workspace-subnav a[href^='/']").forEach(link => {
+    const href = link.getAttribute("href");
+    if (!href) return;
+    const url = new URL(href, location.href);
+    if (url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
+    url.searchParams.set("library", library);
+    link.setAttribute("href", url.pathname + url.search + url.hash);
+  });
+})();
+"""
+
 BIBLIOTHEKAR_0552_PROGRESSIVE_CSS = r"""
 /* 0.55.2: no full-screen blocker on an outgoing or incoming PWA document.
    The shared shell is translated early, and the ordinary page components
@@ -7733,7 +7750,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         replacement_body + "\n"
         + f"<script>{BIBLIOTHEKAR_BOOTSTRAP_JS}</script>\n"
         + _shell_markup(area, subarea)
-        + f"<script>{I18N_UI_JS}</script>\n",
+        + f"<script>{BIBLIOTHEKAR_0552_EARLY_LINKS_JS}</script>\n"
+        + f"<script>{I18N_UI_JS}</script>\n"
         1,
     )
     result = result.replace(
