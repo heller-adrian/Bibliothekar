@@ -1,0 +1,1 @@
+Retry patch-0.55.1 full QA and conditional GHCR publication after fixes for historical workspace compatibility, mixed archive fallback paths and runtime/version test alignment. No production data changes.
