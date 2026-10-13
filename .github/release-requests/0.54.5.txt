@@ -1,0 +1,6 @@
+Bibliothekar 0.54.5
+Base: patch/0.54.4
+Purpose: Mobile Create event and newly created subevent cards display start date next to start time, and end date next to end time.
+Fix: Remove the later mobile-shell !important one-column override of the inner date/time pairs in app/ui_shell.py. Preserve the existing 0.54.4 workspace @container layout and the outer start/end groups. No-event day with a separate From/To row remains untouched.
+QA: PR #28 backend regressions passed 1131 tests (6 warnings), isolated archive harness passed.
+Publish ghcr.io/heller-adrian/bibliothekar:patch-0.54.5 only after repeat full CI passes. Do not update main/latest, installed containers or production data.
