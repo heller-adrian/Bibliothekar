@@ -7751,7 +7751,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         + f"<script>{BIBLIOTHEKAR_BOOTSTRAP_JS}</script>\n"
         + _shell_markup(area, subarea)
         + f"<script>{BIBLIOTHEKAR_0552_EARLY_LINKS_JS}</script>\n"
-        + f"<script>{I18N_UI_JS}</script>\n"
+        + f"<script>{I18N_UI_JS}</script>\n",
         1,
     )
     result = result.replace(
