@@ -178,7 +178,7 @@ def test_0440_menu_and_page_contract():
     assert 'id="bk-storage-trash-name"' in _shell_markup("trash", None)
     assert "/api/trash" in TRASH_HTML
     assert "/api/trash/empty" in TRASH_HTML
-    assert "Papierkorb entleeren" in TRASH_HTML
+    assert "Gesamten Papierkorb leeren" in TRASH_HTML
     assert "active_area=\"trash\"" in Path(main.__file__).read_text()
 
 

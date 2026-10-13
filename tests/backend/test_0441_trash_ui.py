@@ -41,10 +41,11 @@ def test_0441_statistics_and_destructive_confirmation_are_preserved():
         assert 'id="' + element_id + '"' in TRASH_HTML
     assert 'id="trash-empty-button"' in TRASH_HTML
     assert 'class="danger-button trash-danger"' in TRASH_HTML
-    assert 'window.BibliothekarI18n.confirmAsync("Papierkorb wirklich endgültig entleeren?' in TRASH_HTML
+    assert 'window.BibliothekarI18n.confirmAsync(prompt)' in TRASH_HTML
     assert 'confirmation:"PAPIERKORB ENDGÜLTIG LEEREN"' in TRASH_HTML
     assert '"/api/trash"' in TRASH_HTML
     assert '"/api/trash/empty"' in TRASH_HTML
+    assert '"/api/trash/empty-selection"' in TRASH_HTML
 
 
 def test_0441_responsive_spacing_and_unified_settings():

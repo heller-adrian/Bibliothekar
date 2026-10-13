@@ -5241,33 +5241,6 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  )"""
         ).fetchone()
         unassigned_count = int(row["n"] or 0) if row is not None else 0
-        # Families released from an Applied or Archive edit are still real free
-        # workspace stock.  A stale released_free_families marker must not hide
-        # the task forever when its original reassignment is no longer open.
-        released_active = connection.execute(
-            """SELECT COUNT(DISTINCT f.family_id)
-               FROM files f JOIN file_families ff ON ff.id=f.family_id
-               WHERE f.current_root_kind='shared_workspace'
-                 AND ff.selected_capture_time IS NOT NULL
-                 AND NOT EXISTS (
-                     SELECT 1 FROM event_assignments a JOIN events e ON a.event_id=e.id
-                     WHERE a.family_id=f.family_id
-                       AND e.status IN ('draft','planned','applied','archived')
-                 )
-                 AND EXISTS (
-                     SELECT 1 FROM released_free_families r
-                     WHERE r.family_id=f.family_id
-                 )
-                 AND NOT EXISTS (
-                     SELECT 1 FROM event_reapply_removed_families r
-                     WHERE r.family_id=f.family_id AND r.target_event_id IS NULL
-                       AND COALESCE(r.target_kind,'') <> 'released_free'
-                 )
-                 AND f.current_relative_path NOT LIKE 'Freigewordene Archivdateien/%'
-                 AND f.current_relative_path NOT LIKE 'Released Archive Files/%'
-            """
-        ).fetchone()
-        unassigned_count += int(released_active[0] or 0) if released_active else 0
         if unassigned_count:
             job_count = int(row["job_count"] or 0)
             suffix = (

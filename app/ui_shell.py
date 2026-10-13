@@ -4950,7 +4950,7 @@ BIBLIOTHEKAR_JS = r"""
     const countNodes = document.querySelectorAll("[data-bk-task-count]");
     const panel = document.getElementById("bk-task-panel");
     try {
-      const response = await fetch("/api/tasks", {cache: "no-store"});
+      const response = await fetch("/api/tasks", {cache:"no-store", headers:{"X-Bibliothekar-Library":bkLibraryId}});
       if (!response.ok) throw new Error();
       const data = await response.json();
       const tasks = data.tasks || [];
