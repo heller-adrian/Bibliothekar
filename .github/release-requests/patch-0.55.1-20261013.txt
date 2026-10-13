@@ -1,0 +1,4 @@
+Publish Bibliothekar patch/0.55.1 only after the existing publish-container workflow's complete backend QA passes.
+Base: patch/0.55.0 (b4c2aeedc854a6e37c283a0ca25be4e140664593).
+Changes: immediate PWA dock feedback, English defaults/legacy fallback, first-run and password screen language controls.
+No production data or NAS installations should be modified.
