@@ -1,0 +1,1 @@
+Run full backend QA and conditional patch-0.55.2 image publishing after syntax correction for early shell script insertion. No database or production filesystem changes.
