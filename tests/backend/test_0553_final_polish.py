@@ -52,7 +52,7 @@ def test_0553_general_new_and_legacy_folder_selection(tmp_path: Path):
 
 
 def test_0553_health_issues_are_shown_without_pretending_ok():
-    text=main.INDEX_HTML if hasattr(main,"INDEX_HTML") else ""
+    # The health API remains authoritative; UI exposes the returned error list.
     shell=apply_shell("<html><head></head><body><main>x</main></body></html>",active_area="import")
     assert "BIBLIOTHEKAR_0553_POLISH_CSS" not in shell
     assert "cursor:pointer!important;" in shell

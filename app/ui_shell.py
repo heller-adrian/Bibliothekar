@@ -5891,7 +5891,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <span id="bk-storage-metadata-preview"></span>
           <span id="bk-storage-trash-preview"></span>
         </div>
-        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Die allgemeine Metadatenkorrektur liegt automatisch im Unterordner <code>General</code> (bei bestehenden deutschen Installationen ggf. <code>Allgemein</code>); dafür ist kein zusätzlicher TrueNAS-Host-Path nötig.</p>
+        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Der Standardunterordner für allgemeine Metadatenkorrektur heißt <code>General</code>. Bereits vorhandene Ordnernamen bleiben unverändert; ein zusätzlicher TrueNAS-Host-Path ist nicht nötig.</p>
         <div class="bk-library-actions"><button id="bk-storage-save" type="button" class="bk-positive-action">Pfade speichern</button></div>
         <div id="bk-storage-status" class="bk-library-status"></div>
       </section>
