@@ -34,7 +34,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
     # while a secondary library is selected in the browser.
     with database_connection(global_import_database) as connection:
         sql = """SELECT id,state,stage,source_volume_label,progress_current,
-                      progress_total,error_message,operation
+                      progress_total,error_message,operation,updated_at
                FROM jobs
                WHERE operation IN (
                    'folder_import','metadata_multiple_import',
@@ -44,8 +44,8 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
                    state IN ('queued','copying','verifying','backup_verified',
                              'analyzing_metadata','organizing')
                    OR (operation='trash_import'
-                       AND state IN ('completed','failed','interrupted')
-                       AND updated_at>=?)
+                       AND (state IN ('failed','interrupted')
+                         OR (state='completed' AND updated_at>=?)))
                  )
                ORDER BY updated_at DESC,id DESC LIMIT 12"""
         try:
@@ -86,6 +86,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             detail="Import läuft im Hintergrund" if status!="queued" else "Import wartet auf Verarbeitung"
         operations.append({
             "kind":"trash_restore" if is_trash else "import",
+            "revision":status+":"+str(row["updated_at"] or "") if "updated_at" in fields else status+":",
             "id":str(row["id"]),
             "status":status,
             "label":str(row["source_volume_label"] or ("Aus Papierkorb" if is_trash else "Import")),
@@ -105,7 +106,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         ).fetchall()
         batches = [
             row for row in batch_candidates
-            if str(row["status"]) in _BATCH_STATES or str(
+            if str(row["status"]) in _BATCH_STATES or str(row["status"]) == "failed" or str(
                 dict(row).get("completed_at") or dict(row).get("updated_at") or ""
             ) >= recent_cutoff
         ]
@@ -140,6 +141,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             "progress_percent": progress_percent,
             "kind": "apply",
             "id": str(row["id"]),
+            "revision": str(row["status"])+":"+str(dict(row).get("updated_at") or ""),
             "status": str(row["status"]),
             "label": "Ereignisse anwenden",
             "detail": f"{int(row['completed_item_count'] or 0)} von {int(row['item_count'] or 0)} Ereignissen verarbeitet"
@@ -166,6 +168,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         operations.append({
             "kind": "cancel",
             "id": str(row["id"]),
+            "revision": status+":"+str(row.get("updated_at") or ""),
             "job_id": str(row["job_id"]),
             "mutation_id": str(row["mutation_id"]),
             "status": status,
@@ -192,6 +195,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         operations.append({
             "kind": "release",
             "id": str(task["id"]),
+            "revision": status+":"+str(task.get("updated_at") or ""),
             "status": status,
             "label": "Arbeitsbereich freigeben",
             "detail": (
@@ -206,7 +210,70 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             "active": status in ("queued", "running"),
         })
 
+    # Nur exakt dieser beendete Versuch wird ausgeblendet. Nach einem Retry
+    # erzeugt der neue Status/Zeitstempel einen anderen Sichtbarkeitsschluessel.
+    try:
+        with database_connection(global_import_database) as connection:
+            hidden = {
+                (str(row["kind"]), str(row["operation_id"]), str(row["revision"]))
+                for row in connection.execute(
+                    "SELECT kind,operation_id,revision FROM background_activity_dismissals"
+                )
+            }
+    except OperationalError as error:
+        if "no such table: background_activity_dismissals" not in str(error):
+            raise
+        hidden = set()
+    operations = [
+        item for item in operations
+        if item["active"] or (
+            str(item["kind"]), str(item["id"]), str(item.get("revision") or "")
+        ) not in hidden
+    ]
     return {
         "operations": operations,
         "active_count": sum(1 for item in operations if item["active"]),
     }
+
+
+def clear_finished_activity(library_database: Path, global_import_database: Path) -> dict[str, int]:
+    """Only hide terminal operations; never delete their records or media."""
+    terminal: set[tuple[str, str, str]] = set()
+    with database_connection(global_import_database) as connection:
+        for row in connection.execute(
+            """SELECT id,state,updated_at FROM jobs
+               WHERE operation='trash_import'
+                 AND state IN ('completed','failed','interrupted')"""
+        ):
+            terminal.add((
+                "trash_restore", str(row["id"]),
+                str(row["state"])+":"+str(row["updated_at"] or ""),
+            ))
+    with database_connection(library_database) as connection:
+        queries = (
+            ("apply", """SELECT id,status,updated_at FROM operation_batches
+                         WHERE status IN ('applied','failed','interrupted')"""),
+            ("cancel", """SELECT id,status,updated_at FROM background_mutation_cancellations
+                          WHERE status IN ('completed','failed')"""),
+            ("release", """SELECT id,status,updated_at FROM ssd_release_tasks
+                           WHERE status IN ('completed','failed')"""),
+        )
+        for kind, sql in queries:
+            try:
+                rows = connection.execute(sql).fetchall()
+            except OperationalError as error:
+                if "no such table" not in str(error):
+                    raise
+                continue
+            for row in rows:
+                terminal.add((
+                    kind, str(row["id"]),
+                    str(row["status"])+":"+str(row["updated_at"] or ""),
+                ))
+    with database_connection(global_import_database) as connection:
+        connection.executemany(
+            """INSERT OR IGNORE INTO background_activity_dismissals
+               (kind,operation_id,revision) VALUES(?,?,?)""",
+            sorted(terminal),
+        )
+    return {"cleared": len(terminal)}
