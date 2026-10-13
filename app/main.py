@@ -34,7 +34,7 @@ from app.trash import (
 from app.ui_shell import apply_shell
 from app import view_cache
 from app import background_mutation_cancel as cancel_queue
-from app.background_activity import current_activity
+from app.background_activity import current_activity, clear_finished_activity
 from app import ssd_release_background as release_queue
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
@@ -8795,6 +8795,12 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
 def api_background_activity() -> dict[str, Any]:
     """Kompakter, rein lesender Status für die Desktop-Hinweise."""
     return current_activity(current_database_file(), DATABASE_FILE)
+
+
+@app.post("/api/background-activity/clear", tags=["Aufträge"])
+def api_clear_background_activity() -> dict[str, int]:
+    """Entfernt nur beendete Meldungen aus dem Dock, nie Auftragsdaten oder Dateien."""
+    return clear_finished_activity(current_database_file(), DATABASE_FILE)
 
 
 @app.get("/api/background-cancellations", tags=["Ereignisse"])
