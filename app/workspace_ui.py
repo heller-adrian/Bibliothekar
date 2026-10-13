@@ -1350,6 +1350,47 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     }
 
+    /* 0.55.0: A measured-width fallback for the CREATE editor ONLY.
+       0.54.4 relied on a container query which did not enforce two columns
+       on all Firefox-iOS/mobile-app builds. No-event day rows are untouched.
+       Stronger selector and explicit auto placement prevent old 1fr grids. */
+    #event-dialog.bk-create-pairs #event-form .event-boundary,
+    #event-dialog.bk-create-pairs #event-form .create-subevent-boundary {
+      display:grid !important;
+      grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;
+      grid-auto-flow:row !important;
+      align-items:end;
+      gap:8px;
+      min-inline-size:0;
+      max-inline-size:100%;
+    }
+    #event-dialog.bk-create-pairs #event-form .event-boundary > label,
+    #event-dialog.bk-create-pairs #event-form .create-subevent-boundary > label {
+      grid-column:auto !important;
+      grid-row:auto !important;
+      inline-size:100%;
+      min-inline-size:0 !important;
+      max-inline-size:100%;
+      box-sizing:border-box;
+    }
+    #event-dialog.bk-create-pairs #event-form .event-boundary input[type="date"],
+    #event-dialog.bk-create-pairs #event-form .event-boundary input[type="time"],
+    #event-dialog.bk-create-pairs #event-form .create-subevent-boundary input[type="date"],
+    #event-dialog.bk-create-pairs #event-form .create-subevent-boundary input[type="time"] {
+      -webkit-appearance:none !important;
+      appearance:none !important;
+      width:calc(100% - 2px) !important;
+      inline-size:calc(100% - 2px) !important;
+      min-inline-size:0 !important;
+      max-inline-size:100% !important;
+      padding:0 !important;
+      box-sizing:border-box !important;
+      text-align:center;
+      block-size:48px;
+      line-height:48px;
+    }
+
+
   </style>
 </head>
 
@@ -1921,6 +1962,24 @@ WORKSPACE_HTML = r"""<!doctype html>
       document.getElementById("event-dialog");
     const eventForm =
       document.getElementById("event-form");
+
+    // 0.55.0: check ACTUAL dialog width, not just the viewport/container.
+    // Split-view on iPad and installed web apps can disagree with CSS
+    // viewport queries. Only parent/child date-time pairs are affected.
+    function syncCreateEventCompactPairs() {
+      if (!eventDialog || !eventDialog.open) return;
+      const dialogWidth=eventDialog.getBoundingClientRect().width;
+      const viewportWidth=document.documentElement.clientWidth;
+      const compact=dialogWidth>0 && (dialogWidth<=620 || viewportWidth<=820);
+      eventDialog.classList.toggle("bk-create-pairs", compact);
+    }
+    if (typeof ResizeObserver !== "undefined") {
+      const createDialogWidthObserver=new ResizeObserver(syncCreateEventCompactPairs);
+      createDialogWidthObserver.observe(eventDialog);
+    }
+    window.addEventListener("resize",syncCreateEventCompactPairs);
+
+
     const taskReassignDialog = document.getElementById("task-reassign-dialog");
     const taskReassignBody = document.getElementById("task-reassign-body");
     const taskReassignSubtitle = document.getElementById("task-reassign-subtitle");
@@ -4318,7 +4377,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
       else if(noEvent){renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));await autoAttachExistingNoEventCollection();}
       else{applyAutomaticFreeTimeSuggestion(dated);if(parentCandidates.length)applyExistingParentChoice();}
-      dialogPreview.textContent="Vorschau wird vorbereitet …";dialogPreview.hidden=true;calculatePreviewButton.textContent="Vorschau einblenden";saveResult.hidden=true;saveResult.textContent="";eventDialog.showModal();scheduleDialogPreview();
+      dialogPreview.textContent="Vorschau wird vorbereitet …";dialogPreview.hidden=true;calculatePreviewButton.textContent="Vorschau einblenden";saveResult.hidden=true;saveResult.textContent="";eventDialog.showModal();syncCreateEventCompactPairs();scheduleDialogPreview();
     }
 
     function collectEventPayload() {
