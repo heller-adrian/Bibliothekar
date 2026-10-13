@@ -6030,9 +6030,26 @@ BIBLIOTHEKAR_0444_CSS = r"""
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:12px;
+  gap:8px;
   padding:9px 11px 7px 13px;
   border-bottom:1px solid var(--bk-line);
+}
+#bk-background-cancel-notice .bk-activity-actions {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:6px;
+  flex:0 0 auto;
+}
+#bk-background-cancel-notice .bk-activity-clear {
+  border:1px solid var(--bk-line);
+  border-radius:8px;
+  padding:5px 8px;
+  min-height:30px;
+  background:var(--bk-surface-2);
+  color:var(--bk-ink);
+  cursor:pointer;
+  font-size:.75rem;
 }
 #bk-background-cancel-notice .bk-activity-header strong {
   font-size:.83rem;
@@ -6135,8 +6152,51 @@ BIBLIOTHEKAR_0444_CSS = r"""
   box-shadow:0 5px 18px rgba(0,0,0,.13);
   cursor:pointer;
 }
-#bk-background-cancel-notice .bk-activity-mini .bk-activity-icon {margin:0}
-#bk-background-cancel-notice .bk-activity-mini-count {font-size:.75rem}
+/* Zentrum ist fuer !, Haken, Spinner und 100%-Anzeige identisch. */
+#bk-background-cancel-notice .bk-activity-mini {
+  display:grid;
+  place-items:center;
+}
+#bk-background-cancel-notice .bk-activity-center {
+  position:relative;
+  display:grid;
+  place-items:center;
+  width:36px;
+  height:36px;
+  min-width:0;
+  flex:none;
+}
+#bk-background-cancel-notice .bk-activity-mini .bk-activity-icon {
+  width:27px;
+  height:27px;
+  flex:0 0 27px;
+  margin:0;
+  display:grid;
+  place-items:center;
+  box-sizing:border-box;
+  font-size:1.05rem;
+  line-height:1;
+}
+#bk-background-cancel-notice .bk-activity-mini .bk-activity-icon[data-busy="true"] {
+  width:27px;
+  height:27px;
+}
+#bk-background-cancel-notice .bk-activity-mini-count {
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  padding:1px 3px;
+  border-radius:4px;
+  background:var(--bk-surface);
+  color:var(--bk-ink);
+  white-space:nowrap;
+  font-size:.63rem;
+  line-height:1.2;
+  font-weight:750;
+  font-variant-numeric:tabular-nums;
+}
+#bk-background-cancel-notice .bk-activity-mini[data-status="failed"] .bk-activity-icon {color:var(--bk-danger)}
 #bk-background-cancel-notice [data-status="failed"] .bk-activity-icon {color:var(--bk-danger)}
 #bk-background-cancel-notice [data-status="completed"] .bk-activity-icon {color:var(--bk-green)}
 #bk-background-cancel-notice button:focus-visible,
@@ -6167,13 +6227,14 @@ BIBLIOTHEKAR_0444_JS = r"""
   mini.className = "bk-activity-mini";
   mini.setAttribute("aria-label", "Hintergrundvorgänge anzeigen");
   mini.setAttribute("title", "Hintergrundvorgänge anzeigen");
-  mini.innerHTML = '<span class="bk-activity-icon" aria-hidden="true"></span><span class="bk-activity-mini-count"></span>';
+  mini.innerHTML = '<span class="bk-activity-center"><span class="bk-activity-icon" aria-hidden="true"></span><span class="bk-activity-mini-count" aria-hidden="true"></span></span>';
   mini.hidden = true;
 
   const card = document.createElement("section");
   card.className = "bk-activity-card";
-  card.innerHTML = '<div class="bk-activity-header"><strong>Hintergrundvorgänge</strong><button class="bk-activity-collapse" type="button" aria-label="Hintergrundvorgänge verkleinern" title="Hintergrundvorgänge verkleinern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7"/></svg></button></div><div class="bk-activity-list"></div>';
+  card.innerHTML = '<div class="bk-activity-header"><strong>Hintergrundvorgänge</strong><div class="bk-activity-actions"><button class="bk-activity-clear" type="button" title="Beendete Meldungen ausblenden">Leeren</button><button class="bk-activity-collapse" type="button" aria-label="Hintergrundvorgänge verkleinern" title="Hintergrundvorgänge verkleinern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7"/></svg></button></div></div><div class="bk-activity-list"></div>';
   const collapse = card.querySelector(".bk-activity-collapse");
+  const clear = card.querySelector(".bk-activity-clear");
   const list = card.querySelector(".bk-activity-list");
   box.append(card, mini);
   document.body.appendChild(box);
@@ -6188,18 +6249,26 @@ BIBLIOTHEKAR_0444_JS = r"""
     card.hidden = collapsed;
     mini.hidden = !collapsed;
     mini.setAttribute("aria-expanded", String(!collapsed));
+    clear.hidden = !lastSeen.some(item => !item.active);
     if (collapsed) {
       const active = lastSeen.filter(item => item.active);
       const icon = mini.querySelector(".bk-activity-icon");
       const busy = active.length > 0;
       icon.dataset.busy = String(busy);
-      icon.textContent = busy ? "" : lastSeen.some(item => item.status === "failed") ? "!" : "✓";
+      const hasFailure = lastSeen.some(item => ["failed", "interrupted"].includes(item.status));
+      mini.dataset.status = hasFailure ? "failed" : busy ? "running" : "completed";
+      icon.textContent = busy ? "" : hasFailure ? "!" : "✓";
       const single = active.length === 1 ? active[0] : null;
-      const hasPercent = single && Number.isFinite(Number(single.progress_percent))
-        && single.progress_percent !== null && single.progress_percent !== undefined;
-      mini.querySelector(".bk-activity-mini-count").textContent =
-        hasPercent ? Math.round(Number(single.progress_percent)) + "%"
+      const hasPercent = !!(single && single.progress_percent !== null
+        && single.progress_percent !== undefined
+        && Number.isFinite(Number(single.progress_percent)));
+      const count = mini.querySelector(".bk-activity-mini-count");
+      count.hidden = !hasPercent && !(busy && active.length > 1);
+      count.textContent = hasPercent ? Math.round(Number(single.progress_percent)) + "%"
         : busy && active.length > 1 ? String(active.length) : "";
+      mini.setAttribute("aria-label", hasPercent
+        ? "Hintergrundvorgänge: " + Math.round(Number(single.progress_percent)) + " %"
+        : "Hintergrundvorgänge anzeigen");
     }
   }
   function setCollapsed(value) {
@@ -6209,6 +6278,19 @@ BIBLIOTHEKAR_0444_JS = r"""
   }
   collapse.addEventListener("click", () => setCollapsed(true));
   mini.addEventListener("click", () => setCollapsed(false));
+  clear.addEventListener("click", async () => {
+    clear.disabled = true;
+    try {
+      const response = await fetch("/api/background-activity/clear?library=" + library(),
+        {method:"POST"});
+      if (!response.ok) throw new Error("Meldungen konnten nicht entfernt werden.");
+      await refresh();
+    } catch (error) {
+      clear.title = String(error.message || error);
+    } finally {
+      clear.disabled = false;
+    }
+  });
 
   function destination(item) {
     const lib = library();
