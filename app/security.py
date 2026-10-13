@@ -180,6 +180,8 @@ document.getElementById("login").addEventListener("submit",async(e)=>{
  }catch(exc){error.textContent=exc.message;button.disabled=false;}
 });
 </script></body></html>"""
+    from app.setup_language import localize_setup_html
+    html = localize_setup_html(html, "login")
     return html.replace("</body>", f"<script>{I18N_UI_JS}</script></body>")
 
 

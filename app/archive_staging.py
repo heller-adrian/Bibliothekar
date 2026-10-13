@@ -36,7 +36,14 @@ def staging_directory_name(work_root: Path) -> str:
         return "Später zuordnen"
     return directory_name(root, "assign_later")
 
-BRANCHES = ("Alle", "Sortiert", "Export")
+# English clean-install fallback with read support for historical German paths.
+BRANCHES = ("All", "Sorted", "Export")
+LEGACY_BRANCHES = ("Alle", "Sortiert", "Export")
+KNOWN_BRANCHES = frozenset((*BRANCHES, *LEGACY_BRANCHES))
+
+
+def _fallback_branches(path: PurePosixPath) -> tuple[str, ...]:
+    return LEGACY_BRANCHES if {"Alle", "Sortiert"}.intersection(path.parts) else BRANCHES
 
 
 class ArchiveStagingError(RuntimeError):
@@ -349,7 +356,7 @@ def _desired_directory_plan(
             continue
 
         branch_index = next(
-            (index for index, part in enumerate(rel.parts) if part in BRANCHES),
+            (index for index, part in enumerate(rel.parts) if part in KNOWN_BRANCHES),
             None,
         )
         if branch_index is None:
@@ -357,7 +364,7 @@ def _desired_directory_plan(
             continue
         container = PurePosixPath(*rel.parts[:branch_index])
         directories.add(container)
-        for branch in BRANCHES:
+        for branch in _fallback_branches(rel):
             directories.add(container / branch)
     return directories
 
@@ -475,7 +482,7 @@ def _obsolete_directories_from_plan(
         if tuple(old_rel.parts[:2]) != tuple(current_root.parts):
             continue
         branch_index = next(
-            (index for index, part in enumerate(old_rel.parts) if part in BRANCHES),
+            (index for index, part in enumerate(old_rel.parts) if part in KNOWN_BRANCHES),
             None,
         )
         container = (
@@ -497,7 +504,12 @@ def _obsolete_directories_from_plan(
         # Sobald ein alter Container strukturell berührt wird, müssen auch
         # leere Schwesterzweige berücksichtigt werden. Sonst blieben z.B.
         # Sortiert/Export nach dem Wechsel auf Tagesordner unsichtbar zurück.
-        for branch in BRANCHES:
+        branches = (
+            LEGACY_BRANCHES
+            if {"Alle", "Sortiert"}.intersection(affected_branches.get(container, set()))
+            else BRANCHES
+        )
+        for branch in branches:
             branch_path = container / branch
             if branch_path not in desired_directories:
                 obsolete.add(branch_path)
@@ -874,7 +886,7 @@ def required_target_directories_for_request(
             continue
         touched.add(root)
         branch_index = next(
-            (index for index, part in enumerate(rel.parts) if part in BRANCHES),
+            (index for index, part in enumerate(rel.parts) if part in KNOWN_BRANCHES),
             None,
         )
         if branch_index is None:
@@ -882,7 +894,7 @@ def required_target_directories_for_request(
             continue
         container = PurePosixPath(*rel.parts[:branch_index])
         touched.add(container)
-        for branch in BRANCHES:
+        for branch in _fallback_branches(rel):
             touched.add(container / branch)
 
     return sorted(path.as_posix() for path in touched)

@@ -914,6 +914,8 @@ await json("/api/libraries",{{method:"POST",headers:{{"Content-Type":"applicatio
 statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";location.assign("/");
 }}catch(e){{statusEl.className="error";statusEl.textContent=e.message;button.disabled=false;}}}});
 </script></body></html>"""
+    from app.setup_language import localize_setup_html
+    html = localize_setup_html(html, "onboarding")
     return html.replace("</body>", f"<script>{I18N_UI_JS}</script></body>")
 
 

@@ -5417,6 +5417,69 @@ BIBLIOTHEKAR_JS = r"""
 
   // Der gehoverte Reiter wird beim Pressen nicht mehr auf seine Ruhelage entlassen.
   // Touch: 0 -> -8px; Maus: Hover -3px -> Klick -8px.
+  // 0.55.1: iPhone's bottom dock activates when touched, before page loading.
+  let bkDockNavigationStarted = false;
+  const bkDockLinks = [...document.querySelectorAll(".bk-pwa-dock a.bk-pwa-nav-item[data-area]")];
+  const bkDockCurrentArea = document.body?.dataset.bkArea || "";
+  const bkDockPwa = () => root.dataset.bkDisplayMode === "standalone";
+  function bkDockReset() {
+    bkDockLinks.forEach(item => {
+      item.classList.remove("is-navigating");
+      item.classList.toggle("active", item.dataset.area === bkDockCurrentArea);
+    });
+  }
+  function bkDockActivate(link) {
+    if (!bkDockPwa() || link.dataset.area === bkDockCurrentArea || bkDockNavigationStarted) return;
+    bkDockLinks.forEach(item => {
+      item.classList.toggle("active", item === link);
+      item.classList.toggle("is-navigating", item === link);
+    });
+  }
+  bkDockLinks.forEach(link => {
+    link.addEventListener("pointerdown", event => {
+      if (event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      bkDockActivate(link);
+    }, {passive:true});
+    let start=null;
+    link.addEventListener("touchstart", event => {
+      if (event.touches.length!==1) return;
+      start={x:event.touches[0].clientX,y:event.touches[0].clientY};
+      bkDockActivate(link);
+    }, {passive:true});
+    link.addEventListener("touchmove", event => {
+      if (!start || event.touches.length!==1) return;
+      const t=event.touches[0];
+      if (Math.hypot(t.clientX-start.x,t.clientY-start.y)>12) {
+        start=null;
+        if (!bkDockNavigationStarted) bkDockReset();
+      }
+    }, {passive:true});
+    link.addEventListener("touchcancel",()=>{start=null;if(!bkDockNavigationStarted)bkDockReset();},{passive:true});
+    link.addEventListener("pointercancel",()=>{if(!bkDockNavigationStarted)bkDockReset();});
+    link.addEventListener("click",event=>{
+      if (!bkDockPwa() || event.defaultPrevented || event.button!==0
+          || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if(link.dataset.area===bkDockCurrentArea){event.preventDefault();bkDockReset();return;}
+      event.preventDefault();
+      if(bkDockNavigationStarted)return;
+      const href=link.href;
+      if(!href){bkDockReset();return;}
+      bkDockActivate(link);
+      bkDockNavigationStarted=true;
+      root.dataset.bkNavLoading="true";
+      try{sessionStorage.setItem("bk-tab-navigation-0451",JSON.stringify({
+        href,area:link.dataset.area,at:Date.now()
+      }));}catch(_){}
+      // One frame to paint the highlighted dock; no fetch or timeout gate.
+      requestAnimationFrame(()=>window.location.assign(href));
+    });
+  });
+  window.addEventListener("pageshow",event=>{
+    if(!event.persisted)return;
+    bkDockNavigationStarted=false;
+    bkDockReset();
+  });
+
   let bkTabNavigationStarted = false;
   const bkTabReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.querySelectorAll(".bk-tab").forEach(tab => {
@@ -7527,6 +7590,25 @@ html[data-bk-display-mode="standalone"][data-bk-locale="de"][data-bk-i18n-pendin
 .bk-i18n-dialog-actions .bk-i18n-confirm { background: var(--bk-blue); color: #fff; border-color: var(--bk-blue); }
 """
 
+
+BIBLIOTHEKAR_0551_DOCK_CSS = r"""
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock a.bk-pwa-nav-item {
+    touch-action:manipulation;
+    -webkit-tap-highlight-color:transparent;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock a.bk-pwa-nav-item.is-navigating {
+    transition:none!important;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::before {
+    inset:0 0 calc(112px + env(safe-area-inset-bottom)) 0!important;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"] .bk-pwa-dock {
+    z-index:2147483647!important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -7566,6 +7648,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0470_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0472_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0473_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0551_DOCK_CSS}</style>\n"
         f"<script>{BIBLIOTHEKAR_0473_VIEWPORT_JS}</script>\n</head>",
         1,
     )

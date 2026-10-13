@@ -1,3 +1,11 @@
+## 0.55.1 – PWA-Navigation und Sprachwahl bei der Ersteinrichtung (13.10.2026)
+
+- Untere PWA-Navigation reagiert sofort auf Berühren; beim vollständigen Seitenwechsel bleibt der ausgewählte Dock-Reiter sichtbar, der Inhalt zeigt einen Ladezustand. Keine Änderungen an Datei- oder Bibliotheksoperationen.
+- Ersteinrichtung und Passwortseite bieten EN/DE direkt an; Sprachwahl wird in denselben Browser-Einstellungen wie bisher gespeichert und bei späteren Seitenaufrufen genutzt.
+- Keine neue deutsche \`Arbeitsbereich\`-Kompatibilitätsverknüpfung auf einem leeren Workspace; bestehende historische Verknüpfungen bleiben erhalten.
+- Neue Archiv-Hilfsfallbacks verwenden \`All / Sorted / Export\`; bestehende deutsche \`Alle / Sortiert / Export\`-Pfade werden weiter erkannt.
+- Isolierte Regressionstests ergänzt; keine automatische Migration oder Umbenennung von Nutzerdateien.
+
 # Changelog
 
 ## 0.53.2 – Papierkorb-Hintergrundwiederherstellung (Korrekturpatch)

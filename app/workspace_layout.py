@@ -213,18 +213,6 @@ def ensure_workspace_layout(
                 "Der vorhandene Kompatibilitätsalias konnte nicht aktualisiert werden: "
                 + str(legacy_main)
             ) from error
-    elif (
-        main_work is None
-        and not legacy_main.exists()
-        and not legacy_main.is_symlink()
-        and legacy_main.resolve(strict=False) != workspaces.resolve(strict=False)
-    ):
-        # Ohne Bibliothek zeigt der historische Singular-Pfad höchstens auf
-        # den neutralen Arbeitsbereiche-Stamm. Das ist keine Bibliothek und
-        # insbesondere niemals ein /main-Unterordner.
-        legacy_main.symlink_to(workspaces, target_is_directory=True)
-        created.append(str(legacy_main))
-
     return {
         "workspace_root": str(root),
         "backup_root": str(backup),

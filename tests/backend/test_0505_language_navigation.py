@@ -31,7 +31,7 @@ def test_0505_startup_language_resolved_before_body_first_paint():
     assert html.index("bkI18nPending") < html.index("MutationObserver")
     assert "window.setTimeout(() => window.location.assign(href), 190)" not in html
     assert "requestAnimationFrame(() => requestAnimationFrame(() => window.location.assign(href)))" in BIBLIOTHEKAR_JS
-    assert 'data-bk-version>0.55.0</span>' in html
+    assert 'data-bk-version>0.55.1</span>' in html
 
 
 @pytest.mark.parametrize(("source", "expected"), [
