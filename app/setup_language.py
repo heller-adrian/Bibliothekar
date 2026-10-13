@@ -11,6 +11,46 @@ _HEAD = r"""<script>
 document.documentElement.lang=l;document.documentElement.dataset.bkLocale=l})();
 </script>"""
 _CSS = r"""<style>
+
+/* Login and first-library onboarding share the original dark-blue brand field. */
+html:has(body.bk-setup-page) { background:#15222c; color-scheme:dark; }
+body.bk-setup-page {
+  min-height:100dvh;
+  display:flex!important;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  gap:16px;
+  margin:0!important;
+  padding:26px 16px!important;
+  background:#15222c!important;
+  color:#f4f1e8;
+}
+body.bk-setup-page .bk-setup-brand {
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  width:min(440px,calc(100vw - 32px));
+  margin:0 auto;
+  background:#15222c;
+}
+body.bk-setup-page .bk-setup-brand img {
+  display:block;
+  width:min(360px,78vw);
+  max-width:100%;
+  height:auto;
+  aspect-ratio:489.84 / 133.36;
+  object-fit:contain;
+}
+body.bk-setup-page main {
+  margin:0 auto!important;
+  max-width:calc(100vw - 32px);
+}
+body.bk-setup-page .bk-setup-lang { margin-bottom:16px; }
+@media(max-width:540px) {
+  body.bk-setup-page { justify-content:flex-start; padding-top: min(10vh,52px)!important; }
+  body.bk-setup-page .bk-setup-brand img {width:min(315px,82vw);}
+}
 .bk-setup-lang{display:flex;justify-content:flex-end;gap:6px;margin:0 0 18px}
 .bk-setup-lang button{width:auto!important;min-width:43px;margin:0!important;padding:7px 10px!important;
 border:1px solid #586774!important;border-radius:8px;background:transparent!important;font-size:.85rem!important}
@@ -62,7 +102,7 @@ def _label(en: str, de: str) -> str:
 def localize_setup_html(html: str, page: str) -> str:
     if page == "onboarding":
         html=html.replace('<body><main><section class="card">',
-            '<body data-bk-setup-title-en="Bibliothekar · Set up library" '
+            '<body class="bk-setup-page" data-bk-setup-title-en="Bibliothekar · Set up library" '
             'data-bk-setup-title-de="Bibliothekar · Bibliothek einrichten">'
             '<main><section class="card">'+_SWITCH,1)
         html=html.replace('<h1>Erste Bibliothek einrichten</h1>',
@@ -114,7 +154,7 @@ def localize_setup_html(html: str, page: str) -> str:
         html=html.replace('payload.display_name||"Bibliothek"', 'payload.display_name||"Library"',1)
     elif page == "login":
         html=html.replace('<body><main><h1>Bibliothekar</h1>',
-            '<body data-bk-setup-title-en="Bibliothekar · Sign in" '
+            '<body class="bk-setup-page" data-bk-setup-title-en="Bibliothekar · Sign in" '
             'data-bk-setup-title-de="Bibliothekar · Anmelden">'
             '<main>'+_SWITCH+'<h1>Bibliothekar</h1>',1)
         html=html.replace('<p>Secure access to your camera library</p>',
@@ -145,6 +185,13 @@ def localize_setup_html(html: str, page: str) -> str:
             '"Anmeldung fehlgeschlagen. Bitte prüfe Passwort und Konfiguration.")',1)
     else:
         raise ValueError(page)
+    html=html.replace(
+        "<main>",
+        '<div class="bk-setup-brand" aria-label="Bibliothekar">'
+        '<img src="/assets/bibliothekar-logo-v2.svg" alt="Bibliothekar" '
+        'width="360" height="98" decoding="async"></div><main>',
+        1,
+    )
     html=html.replace("</head>",_HEAD+_CSS+"</head>",1)
     html=html.replace("</body>",_JS+"</body>",1)
     return html

@@ -1,3 +1,12 @@
+## 0.55.3 – Feinschliff vor der Release-Prüfung (14.10.2026)
+
+- Login und Einrichtung zeigen das originale Bibliothekar-Logo groß vor dem Formular auf dem gleichen dunklen Markenblau (`#15222c`) wie der Desktop-Header; EN/DE-Schalter und Authentifizierung bleiben unverändert.
+- `Degraded` bleibt ein echter Health-Befund. Im Importbereich lassen sich die vom Backend gelieferten konkreten Ursachen direkt einblenden; kein künstliches Grün.
+- Desktop/Mac: Zeigefinger-Cursor auf aktiven Bedienelementen. Die alte bildschirmfüllende Standalone-Navigationsanimation wird ausschließlich für breite Mac-/Desktop-Fenster deaktiviert.
+- Settings → Paths beschreibt `General` und die mögliche historische Ausnahme; der alte `Allgemein`-API-Endpunkt nutzt nun die auf existierenden Ordnern basierende Pfadauflösung, ohne Dateien umzubenennen.
+- iPhone-PWA: kein schwarzer WebKit-Tap-Highlight bei Aufgaben/Menü; nur das Import-Docksymbol wird zu einer roten Festplatte.
+- Keine Migration; Datenbank, Import, Archivierung und bisherige mobile Navigation bleiben unangetastet.
+
 ## 0.55.2 – Schrittweises Laden der mobilen PWA (13.10.2026)
 
 - Die PWA zeigt Kopfzeile, obere Reiter, Überschrift und unteres Dock nach dem HTML-Empfang sofort an; der Hauptbereich wird erst nach seiner synchronen Übersetzung eingeblendet, ohne API-Anfragen abzuwarten.

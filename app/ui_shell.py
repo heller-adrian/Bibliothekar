@@ -5724,7 +5724,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
 <nav class="bk-pwa-dock" aria-label="Web-App-Navigation">
   <a class="bk-pwa-nav-item{' active' if active == 'import' else ''}" data-area="import" href="/">
-    <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="12" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg></span>
+    <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M4 14.5h16M7.5 17h.01M11 17h.01M7 9h10"/></svg></span>
     <span class="bk-pwa-label">Import</span>
   </a>
   <a class="bk-pwa-nav-item{' active' if active == 'workspace' else ''}" data-area="workspace" href="/workspace">
@@ -5891,7 +5891,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <span id="bk-storage-metadata-preview"></span>
           <span id="bk-storage-trash-preview"></span>
         </div>
-        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Metadatenkorrektur → Allgemein liegt automatisch im Unterordner <code>Allgemein</code>; dafür ist kein zusätzlicher TrueNAS-Host-Path nötig.</p>
+        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Die allgemeine Metadatenkorrektur liegt automatisch im Unterordner <code>General</code> (bei bestehenden deutschen Installationen ggf. <code>Allgemein</code>); dafür ist kein zusätzlicher TrueNAS-Host-Path nötig.</p>
         <div class="bk-library-actions"><button id="bk-storage-save" type="button" class="bk-positive-action">Pfade speichern</button></div>
         <div id="bk-storage-status" class="bk-library-status"></div>
       </section>
@@ -5942,7 +5942,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.55.2</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.55.3</span></p>
   </div>
 </dialog>
 
@@ -7687,6 +7687,55 @@ BIBLIOTHEKAR_0552_PROGRESSIVE_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0553_POLISH_CSS = r"""
+/* Desktop standalone is not the iPhone PWA. Don't show the legacy screen
+   blocker when navigating the installed Mac app. The iPhone rules remain. */
+@media (min-width:821px) {
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::before,
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::after {
+    content:none!important;
+    display:none!important;
+  }
+}
+/* Explicit pointer cursor, including nested icon and text targets. Limit
+   this to fine-pointer devices; keep disabled and busy cursor semantics. */
+@media (hover:hover) and (pointer:fine) {
+  body.bibliothekar-redesign a[href]:not([aria-disabled="true"]),
+  body.bibliothekar-redesign button:not(:disabled):not(.bk-busy),
+  body.bibliothekar-redesign summary,
+  body.bibliothekar-redesign select:not(:disabled),
+  body.bibliothekar-redesign label[for],
+  body.bibliothekar-redesign [role="button"]:not([aria-disabled="true"]) {
+    cursor:pointer!important;
+  }
+  body.bibliothekar-redesign button:disabled {
+    cursor:not-allowed!important;
+  }
+  body.bibliothekar-redesign button.bk-busy {
+    cursor:progress!important;
+  }
+}
+/* Safari's grey/black transient press tile is not a focus indicator.
+   Do not suppress focus-visible outlines for keyboard accessibility. */
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock
+  :is(.bk-pwa-task-toggle,.bk-pwa-menu-toggle) {
+    -webkit-tap-highlight-color:transparent!important;
+    -webkit-touch-callout:none;
+    touch-action:manipulation;
+    -webkit-appearance:none;
+    appearance:none;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock
+  :is(.bk-pwa-task-toggle,.bk-pwa-menu-toggle):focus:not(:focus-visible) {
+    outline:none!important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -7728,6 +7777,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0473_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0551_DOCK_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0552_PROGRESSIVE_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0553_POLISH_CSS}</style>\n"
         f"<script>{BIBLIOTHEKAR_0473_VIEWPORT_JS}</script>\n</head>",
         1,
     )

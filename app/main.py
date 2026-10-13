@@ -213,6 +213,7 @@ from app.workspace_layout import (
     resolve_library_work_root,
 )
 
+from app.managed_directory_names import directory_path as managed_directory_path
 from app.storage_config import (
     StorageSettingsError,
     default_library_work_root,
@@ -298,8 +299,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.55.2"
-DEPLOYMENT_VERSION = "0.55.2"
+RELEASE_VERSION = "0.55.3"
+DEPLOYMENT_VERSION = "0.55.3"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -921,6 +922,9 @@ statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";
 
 @app.middleware("http")
 async def library_context_middleware(request: Request, call_next):
+    # Public brand asset is also needed while no first library exists.
+    if request.method == "GET" and request.url.path == "/assets/bibliothekar-logo-v2.svg":
+        return await call_next(request)
     if _onboarding_required():
         path = request.url.path
         allowed_api = (
@@ -3066,8 +3070,8 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/settings/metadata-correction", tags=["Einstellungen"])
 def api_get_metadata_correction_settings() -> dict[str, Any]:
-    general = (
-        storage_paths(WORKSPACE_PATH)["metadata_root"] / "Allgemein"
+    general = managed_directory_path(
+        storage_paths(WORKSPACE_PATH)["metadata_root"], "metadata_general"
     ).resolve(strict=False)
     return {
         "general_root": str(general),
@@ -3083,13 +3087,13 @@ def api_set_metadata_correction_settings(payload: dict[str, Any]) -> dict[str, A
     # managed below /workspace/Metadatenkorrektur and cannot be redirected to
     # a technical "main" or external input/output tree.
     requested = str(payload.get("general_root") or "").strip()
-    managed = str(
-        (storage_paths(WORKSPACE_PATH)["metadata_root"] / "Allgemein").resolve(strict=False)
-    )
+    managed = str(managed_directory_path(
+        storage_paths(WORKSPACE_PATH)["metadata_root"], "metadata_general"
+    ).resolve(strict=False))
     if requested and Path(requested).expanduser().resolve(strict=False) != Path(managed):
         raise HTTPException(
             status_code=422,
-            detail="„Allgemein“ wird automatisch im Metadatenkorrektur-Ordner verwaltet.",
+            detail="Der Ordner für allgemeine Metadatenkorrektur wird automatisch verwaltet.",
         )
     return api_get_metadata_correction_settings()
 
@@ -10751,6 +10755,10 @@ def index() -> str:
           <div class="status-label">Anwendung</div>
           <div class="status-value" id="application-status">Wird geprüft …</div>
           <div class="status-detail" id="application-detail"></div>
+          <details id="application-health-details" hidden style="margin-top:5px;font-size:.78rem">
+            <summary id="application-health-summary" style="cursor:pointer"></summary>
+            <div id="application-health-errors" style="white-space:pre-line;overflow-wrap:anywhere;margin-top:4px"></div>
+          </details>
         </div>
       </article>
 
@@ -11594,6 +11602,26 @@ def index() -> str:
         health.status === "ok"
         ? "var(--success)"
         : "var(--warning)";
+
+      // A degraded health result must remain truthful and diagnosable.
+      // The API already provides exact errors; never invent a green status.
+      const healthIssues = Array.isArray(health.errors)
+        ? health.errors.filter(item => typeof item === "string" && item.trim())
+        : [];
+      const healthDetails = document.getElementById("application-health-details");
+      healthDetails.hidden = health.status === "ok" || healthIssues.length === 0;
+      if (!healthDetails.hidden) {
+        const german = document.documentElement.dataset.bkLocale === "de";
+        document.getElementById("application-health-summary").textContent =
+          german ? "Ursachen anzeigen (" + healthIssues.length + ")"
+                 : "Show reasons (" + healthIssues.length + ")";
+        document.getElementById("application-health-errors").textContent =
+          healthIssues.join("\n");
+        applicationStatus.title = healthIssues.join("\n");
+      } else {
+        healthDetails.open = false;
+        applicationStatus.removeAttribute("title");
+      }
 
       document.getElementById(
         "application-detail"
