@@ -1,4 +1,4 @@
-"""0.54.4: mobile editor and non-destructive background activity controls."""
+"""0.55.0: mobile editor and non-destructive background activity controls."""
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,7 +11,7 @@ from app.ui_shell import BIBLIOTHEKAR_0444_CSS, BIBLIOTHEKAR_0444_JS
 
 
 def test_0540_version_and_mobile_editor_layout():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.54.4"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.0"
     assert "@media (max-width:820px)" in EVENTS_HTML
     assert "#event-edit-dialog .edit-boundaries" in EVENTS_HTML
     assert "#event-edit-dialog .child-segment-boundary" in EVENTS_HTML

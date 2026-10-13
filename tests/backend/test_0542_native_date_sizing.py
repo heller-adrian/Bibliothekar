@@ -1,4 +1,4 @@
-"""0.54.4: Native iOS date/time overflow regression on event edit dialog.
+"""0.55.0: Native iOS date/time overflow regression on event edit dialog.
 
 WKWebKit may retain content-box sizing on native date/time inputs.
 The optional real-browser geometry smoke test was run separately; these
