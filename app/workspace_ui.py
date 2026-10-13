@@ -1229,6 +1229,127 @@ WORKSPACE_HTML = r"""<!doctype html>
         padding:7px 10px;
       }
     }
+
+    /* 0.54.4: Only the narrow CREATE dialog (including the phone web app).
+       Keep the working 0.54.3 edit-dialog and the wide desktop layout intact. */
+    #event-dialog { container-type:inline-size; container-name:mobile-event-create; }
+    @container mobile-event-create (max-width:620px) {
+      /* Start date | start time and end date | end time, also in new subevents.
+         Later, more specific rules override the old 460px stacking rule. */
+      #event-form .event-boundary,
+      #event-form .create-subevent-boundary {
+        display:grid;
+        grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;
+        gap:8px;
+        align-items:end;
+      }
+      #event-form .event-boundaries,
+      #event-form .create-subevent-boundaries,
+      #event-form .create-subevent-grid,
+      #event-form .create-subevent-card,
+      #event-form .event-boundary > label,
+      #event-form .create-subevent-boundary > label {
+        min-inline-size:0;
+        max-inline-size:100%;
+        box-sizing:border-box;
+      }
+      /* WKWebKit/Firefox-iOS can add native padding outside the border-box.
+         Match the proven 0.54.2/0.54.3 edit fix only inside this dialog. */
+      #event-form input[type="date"],
+      #event-form input[type="time"] {
+        -webkit-appearance:none !important;
+        appearance:none !important;
+        display:block;
+        box-sizing:border-box !important;
+        inline-size:calc(100% - 2px) !important;
+        width:calc(100% - 2px) !important;
+        min-inline-size:0 !important;
+        min-width:0 !important;
+        max-inline-size:100% !important;
+        max-width:100% !important;
+        padding:0 !important;
+        block-size:48px !important;
+        min-block-size:48px !important;
+        line-height:48px !important;
+        text-align:center;
+      }
+      #event-form input[type="date"]::-webkit-date-and-time-value,
+      #event-form input[type="time"]::-webkit-date-and-time-value,
+      #event-form input[type="date"]::-webkit-datetime-edit,
+      #event-form input[type="time"]::-webkit-datetime-edit {
+        box-sizing:border-box;
+        block-size:100%;
+        min-block-size:100%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:0;
+        line-height:normal;
+      }
+      /* "Ohne Ereignis": a single selected DAY, with both times BELOW it.
+         Hide the old second date mirror, never change canonical day_key data. */
+      #event-form .no-event-segment-fields {
+        display:grid;
+        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+        gap:8px;
+        align-items:end;
+      }
+      #event-form .no-event-mobile-range-title,
+      #event-form .no-event-end-date-mirror { display:none !important; }
+      #event-form .no-event-segment-fields > .no-event-day-field {
+        grid-column:1 / -1 !important;
+        grid-row:1 !important;
+        min-width:0;
+      }
+      #event-form .no-event-segment-fields > .no-event-start-field {
+        grid-column:1 !important;
+        grid-row:2 !important;
+        min-width:0;
+      }
+      #event-form .no-event-segment-fields > .no-event-end-field {
+        display:grid;
+        grid-template-columns:minmax(0,1fr);
+        grid-column:2 !important;
+        grid-row:2 !important;
+        min-width:0;
+      }
+      #event-form .no-event-segment-fields .no-event-desktop-caption {
+        display:block !important;
+      }
+      #event-form .no-event-segment-fields > .no-event-segment-remove {
+        grid-column:1 / -1 !important;
+        grid-row:3 !important;
+        justify-self:end;
+        width:auto;
+        min-width:0;
+      }
+      /* Day selection + fixed month/year form one visible date control. */
+      #event-form .no-event-day-controls {
+        display:grid;
+        grid-template-columns:76px minmax(0,1fr);
+        gap:0;
+        border:1px solid var(--border);
+        border-radius:12px;
+        background:var(--surface);
+        overflow:hidden;
+        min-width:0;
+      }
+      #event-form .no-event-day-controls > select,
+      #event-form .no-event-day-controls > input {
+        border:0;
+        border-radius:0;
+        background:transparent;
+        min-width:0;
+        width:100%;
+        padding:10px 8px;
+        box-sizing:border-box;
+      }
+      #event-form .no-event-day-controls > input:disabled {
+        opacity:1;
+        -webkit-text-fill-color:var(--text);
+      }
+    }
+
   </style>
 </head>
 
