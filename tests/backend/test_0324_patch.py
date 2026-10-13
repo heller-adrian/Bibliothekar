@@ -309,8 +309,8 @@ def test_0324_archived_delete_blocks_unresolved_user_file(tmp_path: Path):
 
 
 def test_0324_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.54.2"
-    assert "Version <span data-bk-version>0.54.2</span>" in ui_shell._shell_markup(
+    assert main.DEPLOYMENT_VERSION == "0.54.3"
+    assert "Version <span data-bk-version>0.54.3</span>" in ui_shell._shell_markup(
         "workspace",
         "events",
     )
