@@ -1636,8 +1636,17 @@ I18N_UI_JS = r"""
     });
     updateChoiceButtons();
     walk(document.body);
-    // Reveal the page in the same task, before a German-language first paint.
-    delete document.documentElement.dataset.bkI18nPending;
+    // The shell is already translated at this point. Keep only the not-yet-parsed
+    // main content hidden until DOMContentLoaded, then translate and reveal it
+    // in the same task. API fetching never gates the shell or the main content.
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => {
+        walk(document.body);
+        delete document.documentElement.dataset.bkI18nPending;
+      }, {once: true});
+    } else {
+      delete document.documentElement.dataset.bkI18nPending;
+    }
     const observer = new MutationObserver(mutations => {
       for (const mutation of mutations) {
         if (mutation.type === "characterData") schedule(mutation.target);
@@ -1650,8 +1659,14 @@ I18N_UI_JS = r"""
       attributes: true, attributeFilter: attributes,
     });
   }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, {once: true});
-  else init();
+  // On normal PWA pages the shell is present before <main>. Translate it
+  // immediately so the dock, subnav and title are usable during HTML parsing.
+  // Sign-in/first-run pages keep their existing DOM-ready initialization.
+  if (document.readyState === "loading" && !document.querySelector(".bk-shell")) {
+    document.addEventListener("DOMContentLoaded", init, {once: true});
+  } else {
+    init();
+  }
 })();
 """.replace("__DICTIONARY__", json.dumps(UI_TRANSLATIONS, ensure_ascii=False)).replace(
     "__PATTERNS__", json.dumps(UI_PATTERNS, ensure_ascii=False)

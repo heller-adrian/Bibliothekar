@@ -5942,7 +5942,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.55.1</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.55.2</span></p>
   </div>
 </dialog>
 
@@ -7544,7 +7544,12 @@ BIBLIOTHEKAR_0505_LANGUAGE_CSS = r"""
    This avoids presenting German content even for one frame on iPhone PWA reloads. */
 /* Full-page masking is exclusively for the installed PWA. Desktop can paint
    its header, tabs and heading as soon as HTML begins arriving. */
-html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body { visibility: hidden !important; }
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > main,
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > dialog {
+  visibility: hidden !important;
+}
+/* The common header, section tabs, page title and bottom dock are translated
+   immediately before <main> is parsed; they never wait for API responses. */
 /* A visible loading indicator exists even before the destination body is parsed.
    The same indicator responds at once to a navigation tap on the outgoing page. */
 html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before,
@@ -7609,6 +7614,62 @@ BIBLIOTHEKAR_0551_DOCK_CSS = r"""
 }
 """
 
+
+BIBLIOTHEKAR_0552_PROGRESSIVE_CSS = r"""
+/* 0.55.2: no full-screen blocker on an outgoing or incoming PWA document.
+   The shared shell is translated early, and the ordinary page components
+   retain their own inline loading/status placeholders while data fetches run. */
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::before,
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::after {
+    content:none!important;
+    display:none!important;
+  }
+  /* Never let the previous page's accent leak into the newly selected dock. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock .bk-pwa-nav-item[data-area="import"] {
+    --bk-area-accent:var(--bk-red);
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock .bk-pwa-nav-item[data-area="workspace"] {
+    --bk-area-accent:var(--bk-blue);
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock .bk-pwa-nav-item[data-area="archive"] {
+    --bk-area-accent:var(--bk-yellow);
+  }
+  /* On the outgoing document, don't allow stale content interactions while
+     navigation is pending; the shell and all its links remain touchable. */
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"] body > main {
+    opacity:.45;
+    pointer-events:none;
+  }
+  /* A local loading marker is separate from the title/subnavigation; it only
+     appears while the new document is being requested. */
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"] body > .bk-page-heading::after {
+    content:"";
+    display:inline-block;
+    vertical-align:middle;
+    width:14px;
+    height:14px;
+    margin-top:9px;
+    border:2px solid color-mix(in srgb,var(--bk-area-accent) 25%,transparent);
+    border-top-color:var(--bk-area-accent);
+    border-radius:50%;
+    animation:bk0506spin .75s linear infinite;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > .bk-page-heading,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > .bk-workspace-subnav,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > .bk-pwa-dock {
+    visibility:visible!important;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"] body > .bk-page-heading::after {
+    animation:none;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
@@ -7649,6 +7710,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0472_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0473_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0551_DOCK_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0552_PROGRESSIVE_CSS}</style>\n"
         f"<script>{BIBLIOTHEKAR_0473_VIEWPORT_JS}</script>\n</head>",
         1,
     )
@@ -7670,14 +7732,14 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         replacement_body,
         replacement_body + "\n"
         + f"<script>{BIBLIOTHEKAR_BOOTSTRAP_JS}</script>\n"
-        + _shell_markup(area, subarea),
+        + _shell_markup(area, subarea)
+        + f"<script>{I18N_UI_JS}</script>\n",
         1,
     )
     result = result.replace(
         "</body>",
         f"<script>{BIBLIOTHEKAR_JS}</script>\n"
         f"<script>{BIBLIOTHEKAR_0444_JS}</script>\n"
-        f"<script>{I18N_UI_JS}</script>\n"
         '<script>document.getElementById("bk-sign-out")?.addEventListener("click",async()=>{'
         'try{await fetch("/auth/logout",{method:"POST"});}finally{location.replace("/login");}'
         '});</script>\n</body>',

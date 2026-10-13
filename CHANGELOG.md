@@ -1,3 +1,11 @@
+## 0.55.2 – Schrittweises Laden der mobilen PWA (13.10.2026)
+
+- Die PWA zeigt Kopfzeile, obere Reiter, Überschrift und unteres Dock nach dem HTML-Empfang sofort an; der Hauptbereich wird erst nach seiner synchronen Übersetzung eingeblendet, ohne API-Anfragen abzuwarten.
+- Die Vollbild-Ladefläche bei der PWA-Navigation entfällt. Stattdessen bleiben vorhandene lokale Lade-/Platzhalteranzeigen der Datenbereiche sichtbar; ausgehende Datenbereiche werden während der Navigation gegen Interaktion gesperrt.
+- Der farbige Indikator am unteren Reiter richtet sich bereits beim Antippen nach der Farbe des **Zielreiters**, nicht der bisherigen Seite.
+- Bestehende vollständige Seitenwechsel und Daten-/Bibliothekslogik bleiben unverändert. **Kein SPA-Umbau (Stufe 2)** und keine Migration vorhandener Bestände.
+- Regressionstests für frühen Header, sprachsicheren First Paint, farbige Reiter und lokale Ladeanzeige.
+
 ## 0.55.1 – PWA-Navigation und Sprachwahl bei der Ersteinrichtung (13.10.2026)
 
 - Untere PWA-Navigation reagiert sofort auf Berühren; beim vollständigen Seitenwechsel bleibt der ausgewählte Dock-Reiter sichtbar, der Inhalt zeigt einen Ladezustand. Keine Änderungen an Datei- oder Bibliotheksoperationen.
