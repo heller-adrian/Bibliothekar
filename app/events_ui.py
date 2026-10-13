@@ -1509,6 +1509,32 @@ EVENTS_HTML = r"""<!doctype html>
       }
     }
 
+
+    /* 0.54.2: iOS Firefox/Safari/WKWebView may size native date/time
+       inputs as content-box even when the author asks for border-box.
+       Reset native appearance AND remove padding; the 2px safety reserve
+       also contains the border when the engine retains content-box.
+       Scope strictly to edit dialog, including added subevents. */
+    #event-edit-dialog input[type="date"],
+    #event-edit-dialog input[type="time"] {
+      -webkit-appearance:none !important;
+      appearance:none !important;
+      display:block;
+      box-sizing:border-box !important;
+      inline-size:calc(100% - 2px) !important;
+      width:calc(100% - 2px) !important;
+      min-inline-size:0 !important;
+      min-width:0 !important;
+      max-inline-size:100% !important;
+      max-width:100% !important;
+      padding:0 !important;
+      text-align:center;
+    }
+    #event-edit-dialog input[type="date"]::-webkit-date-and-time-value,
+    #event-edit-dialog input[type="time"]::-webkit-date-and-time-value {
+      text-align:center;
+    }
+
 /* 0.45.2: Neuladen neben der Suche, auch auf kleinen Geräten. */
 .event-browser-toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
 .event-browser-toolbar .event-browser-search { flex:1 1 220px; min-width:0; }
