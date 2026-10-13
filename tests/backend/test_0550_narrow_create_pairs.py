@@ -12,7 +12,7 @@ from app.workspace_ui import WORKSPACE_HTML
 
 def test_0550_compact_create_pairs_win_over_one_column_mobile_rules():
     css=WORKSPACE_HTML.split("<style>",1)[1].split("</style>",1)[0]
-    anchor="/* 0.55.1:"
+    anchor="/* 0.55.0:"
     assert anchor in css
     patch=css.split(anchor,1)[1]
     assert css.index("@media (max-width:460px)") < css.index(anchor)
@@ -42,7 +42,7 @@ def test_0550_dialog_width_measured_when_opening_and_resizing():
 
 
 def test_0550_no_event_css_and_persistence_remain_identical():
-    patch=WORKSPACE_HTML.split("/* 0.55.1:",1)[1].split("</style>",1)[0]
+    patch=WORKSPACE_HTML.split("/* 0.55.0:",1)[1].split("</style>",1)[0]
     assert ".no-event-" not in patch
     assert "#no-event-" not in patch
     assert '.no-event-segment-fields > .no-event-day-field' in WORKSPACE_HTML
