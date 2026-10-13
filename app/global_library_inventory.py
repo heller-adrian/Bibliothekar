@@ -237,6 +237,12 @@ def backfill_library_inventory(
                     "library_id": library_id,
                     "job_id": job_id,
                     "physical_source_identity": identity,
+                    # Only candidates actually used by the historical stale
+                    # job-snapshot fallback can be reconciled at startup.
+                    "legacy_import_identity": (
+                        str(first.get("source_device_id") or first.get("source_path") or "")
+                        if is_main_import else ""
+                    ),
                 },
             )
             backup_registered.add(backup_id)

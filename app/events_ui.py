@@ -1435,6 +1435,80 @@ EVENTS_HTML = r"""<!doctype html>
       }
     }
 
+
+    /* 0.54.1: Overflow fix must follow the *dialog's* actual width, not
+       the iPad/Safari outer viewport (which may report desktop dimensions).
+       Grid items and WebKit native date/time fields must shrink together. */
+    #event-edit-dialog,
+    #event-edit-dialog .sort-plan-content,
+    #event-edit-dialog .edit-grid,
+    #event-edit-dialog .edit-grid > *,
+    #event-edit-dialog #normal-event-segments,
+    #event-edit-dialog .child-segment-card,
+    #event-edit-dialog .child-segment-fields,
+    #event-edit-dialog .child-segment-top,
+    #event-edit-dialog .child-segment-boundaries,
+    #event-edit-dialog .child-segment-boundary,
+    #event-edit-dialog .edit-boundaries,
+    #event-edit-dialog .edit-boundary,
+    #event-edit-dialog .edit-field {
+      min-inline-size:0;
+      max-inline-size:100%;
+      box-sizing:border-box;
+    }
+    #event-edit-dialog .sort-plan-content {
+      inline-size:100%;
+      container-type:inline-size;
+      container-name:event-editor;
+      overflow-x:clip;
+      overflow-y:auto;
+      -webkit-overflow-scrolling:touch;
+    }
+    #event-edit-dialog .child-segment-card {
+      inline-size:100%;
+      margin-inline:0 !important;
+    }
+    #event-edit-dialog .child-segment-boundaries,
+    #event-edit-dialog .edit-boundaries {
+      grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));
+    }
+    #event-edit-dialog .child-segment-boundary,
+    #event-edit-dialog .edit-boundary {
+      grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));
+    }
+    #event-edit-dialog .child-segment-top {flex-wrap:wrap}
+    #event-edit-dialog .child-segment-name {min-inline-size:0}
+    #event-edit-dialog .edit-field > input:not([type="checkbox"]):not([type="radio"]),
+    #event-edit-dialog .edit-field > select,
+    #event-edit-dialog .edit-field > textarea {
+      display:block;
+      inline-size:100% !important;
+      min-inline-size:0 !important;
+      max-inline-size:100% !important;
+      box-sizing:border-box !important;
+    }
+    @container event-editor (max-width:720px) {
+      #normal-event-segments,
+      .child-segment-boundaries,
+      .child-segment-boundary,
+      .edit-boundaries,
+      .edit-boundary,
+      .child-segment-top {
+        grid-template-columns:minmax(0,1fr) !important;
+      }
+      .child-segment-top {
+        display:grid;
+        align-items:stretch;
+      }
+      .child-segment-name,
+      .child-segment-remove {
+        min-inline-size:0;
+        max-inline-size:100%;
+        inline-size:100%;
+        white-space:normal;
+      }
+    }
+
 /* 0.45.2: Neuladen neben der Suche, auch auf kleinen Geräten. */
 .event-browser-toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
 .event-browser-toolbar .event-browser-search { flex:1 1 220px; min-width:0; }

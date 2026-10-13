@@ -1061,7 +1061,7 @@ def register_source_backup(
         connection.execute("BEGIN IMMEDIATE")
         existing = connection.execute(
             """
-            SELECT source_kind, source_identity, backup_path, created_at
+            SELECT source_kind, source_identity, backup_path, metadata_json, created_at
             FROM source_backups
             WHERE backup_id = ?
             """,
@@ -1128,15 +1128,41 @@ def register_source_backup(
                     and clean_identity == metadata_library + ":" + physical_identity
                     and existing_path == clean_path
                 )
-                if not safe_legacy_upgrade:
+                # 0.54.1: Earlier import registration could have used
+                # the job's stale source_path/source_device_id while the
+                # persisted job already contained the measured SHA signature.
+                # Reconcile only this exact, provenance-matched legacy case.
+                # Arbitrary changed source identities remain forbidden.
+                try:
+                    old_metadata = json.loads(str(existing["metadata_json"] or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    old_metadata = {}
+                old_metadata = old_metadata if isinstance(old_metadata, dict) else {}
+                fallback_identity = str((metadata or {}).get("legacy_import_identity") or "")
+                matching_main_job = (
+                    metadata_library == MAIN_LIBRARY_ID
+                    and str((metadata or {}).get("job_id") or "")
+                    and str(old_metadata.get("library_id") or "") == metadata_library
+                    and str(old_metadata.get("job_id") or "") == str((metadata or {}).get("job_id") or "")
+                    and clean_backup_id == metadata_library + ":" + str((metadata or {}).get("job_id"))
+                )
+                safe_stale_import_upgrade = (
+                    existing_kind == clean_kind == "import"
+                    and matching_main_job
+                    and existing_path == clean_path
+                    and fallback_identity
+                    and existing_identity == fallback_identity
+                    and clean_identity == physical_identity
+                    and clean_identity != fallback_identity
+                )
+                if not (safe_legacy_upgrade or safe_stale_import_upgrade):
                     raise LibraryRegistryError(
                         "Eine bestehende Backup-ID darf nicht auf eine andere "
                         "Quelle umgebunden werden."
                     )
-                # 0.32.8-Kompatibilitätsmigration: Der alte Eintrag war bereits
-                # bibliotheksspezifisch in seiner Backup-ID, nur die Identität
-                # war noch nicht namespaced. Alle physischen Merkmale müssen
-                # deshalb unverändert sein.
+                # Both legacy upgrades preserve the same backup ID,
+                # original source path and proven job ownership; no files
+                # or ownership claims are changed.
                 connection.execute(
                     """
                     UPDATE source_backups

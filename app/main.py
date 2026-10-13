@@ -298,8 +298,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.54.0"
-DEPLOYMENT_VERSION = "0.54.0"
+RELEASE_VERSION = "0.54.1"
+DEPLOYMENT_VERSION = "0.54.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1408,13 +1408,20 @@ def process_claimed_job(
                     ),
                 )
 
+            # Use the freshly measured identity when registering the import.
+            # The claimed job snapshot predates identity_callback and can have
+            # a NULL source_signature (notably for queued Trash restores).
+            measured_source_signature: str | None = None
+
             def persist_identity(signature: str, fingerprint: str) -> None:
+                nonlocal measured_source_signature
                 set_job_source_identity(
                     database_file,
                     job_id,
                     source_signature=signature,
                     source_fingerprint=fingerprint,
                 )
+                measured_source_signature = signature
 
             def admit_families(
                 analysis: dict[str, Any],
@@ -1426,7 +1433,9 @@ def process_claimed_job(
                     library_id=context.library_id,
                     job_id=job_id,
                     source_identity=str(
-                        job.get("source_signature")
+                        measured_source_signature
+                        or (get_job(database_file, job_id) or {}).get("source_signature")
+                        or job.get("source_signature")
                         or job.get("source_device_id")
                         or source
                     ),
@@ -3224,6 +3233,17 @@ def tool_version(
         }
 
 
+def database_initialization_error_code(error: str | None) -> str | None:
+    """Expose stable codes to the UI, never infer success from an error string."""
+    if not error:
+        return None
+    if "Eine bestehende Backup-ID darf nicht auf eine andere Quelle umgebunden werden." in error:
+        return "backup_source_conflict"
+    if "Eine bestehende Backup-ID darf nicht auf einen anderen Quellentyp umgebunden werden." in error:
+        return "backup_kind_conflict"
+    return "database_initialization_error"
+
+
 def get_health() -> dict[str, Any]:
     errors: list[str] = []
 
@@ -3361,6 +3381,7 @@ def get_health() -> dict[str, Any]:
             "loaded": config_loaded,
         },
         "database": {
+            "error_code": database_initialization_error_code(DATABASE_INITIALIZATION_ERROR),
             "path": str(current_database_file()),
             "initialized":
                 DATABASE_INITIALIZATION_ERROR is None
@@ -11605,15 +11626,31 @@ def index() -> str:
         ? schemaVersions[0] + "–" + schemaVersions[schemaVersions.length - 1]
         : (schemaVersions.length ? String(schemaVersions[0]) : "–");
 
+      const isGerman = document.documentElement.dataset.bkLocale === "de";
+      const databaseErrorLabels = {
+        backup_source_conflict: {
+          de: "Eine bestehende Backup-ID darf nicht auf eine andere Quelle umgebunden werden.",
+          en: "An existing backup ID cannot be reassigned to a different source."
+        },
+        backup_kind_conflict: {
+          de: "Eine bestehende Backup-ID darf nicht auf einen anderen Quellentyp umgebunden werden.",
+          en: "An existing backup ID cannot be reassigned to a different source type."
+        },
+        database_initialization_error: {
+          de: "Datenbankinitialisierung fehlgeschlagen. Serverprotokoll prüfen.",
+          en: "Database initialization failed. Check the server logs."
+        }
+      };
+      const errorLabels = databaseErrorLabels[database.error_code] ||
+        databaseErrorLabels.database_initialization_error;
       document.getElementById(
         "database-detail"
       ).textContent =
         database.initialized
-        ? ((document.documentElement.dataset.bkLocale === "de" ? "Schema " : "Schema version ") + schemaSummary)
-        : (
-          database.error
-          || "Keine Verbindung"
-        );
+        ? ((isGerman ? "Schema " : "Schema version ") + schemaSummary)
+        : (database.error_code
+            ? errorLabels[isGerman ? "de" : "en"]
+            : (isGerman ? (database.error || "Keine Verbindung") : "Database not connected"));
 
       const workspace =
         health.paths?.workspace || {};
