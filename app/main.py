@@ -298,8 +298,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.53.0"
-DEPLOYMENT_VERSION = "0.53.0"
+RELEASE_VERSION = "0.53.1"
+DEPLOYMENT_VERSION = "0.53.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1138,6 +1138,7 @@ def process_claimed_job(
         "folder_import",
         "metadata_multiple_import",
         "metadata_general_import",
+        "trash_import",
     }
 
     try:
@@ -1324,7 +1325,14 @@ def process_claimed_job(
             source = Path(str(source_value))
             managed_multiple_import = operation == "metadata_multiple_import"
             managed_general_import = operation == "metadata_general_import"
-            managed_metadata_import = managed_multiple_import or managed_general_import
+            managed_trash_import = operation == "trash_import"
+            managed_metadata_import = managed_multiple_import or managed_general_import or managed_trash_import
+            if managed_trash_import:
+                from app.trash_import import stage_parent
+                expected_trash_root = stage_parent(workspace_path)
+                resolved_source = source.resolve(strict=False)
+                if resolved_source.parent != expected_trash_root or resolved_source.is_symlink() or resolved_source.name != job_id:
+                    raise RuntimeError("Unerwarteter Papierkorb-Stagingordner.")
             if managed_multiple_import:
                 expected_multiple_root = metadata_area_paths(
                     area="multiple",
@@ -1510,6 +1518,21 @@ def process_claimed_job(
                     job_id,
                     folder_import_display_label(job, organization),
                 )
+            if managed_trash_import:
+                from app.trash_import import cleanup_successful_trash_import
+                try:
+                    result["trash_source_cleanup"] = cleanup_successful_trash_import(
+                        workspace_path, job_id,
+                        list((result.get("organization") or {}).get("imported_source_files") or []),
+                    )
+                except (OSError, ValueError, RuntimeError) as cleanup_error:
+                    result["trash_source_cleanup"] = {"warning":str(cleanup_error)}
+                time_start=str(organization.get("capture_start_date") or "")
+                time_end=str(organization.get("capture_end_date") or "")
+                source_label="Aus Papierkorb"
+                if time_start:
+                    source_label += " · " + time_start + (" – " + time_end if time_end and time_end != time_start else "")
+                set_job_source_volume_label(database_file,job_id,source_label)
             if managed_metadata_import:
                 cleanup_removed = 0
                 cleanup_errors: list[str] = []
@@ -1590,6 +1613,8 @@ def process_claimed_job(
                 completion_prefix = (
                     "Mehrfachkorrektur wurde in den Tagesbestand übernommen."
                     if managed_multiple_import
+                    else "Ausgewählte Papierkorb-Dateien wurden in den Tagesbestand übernommen."
+                    if managed_trash_import
                     else "Ausgewählte Allgemein-Dateien wurden in den Tagesbestand übernommen."
                 )
             else:
@@ -1954,6 +1979,11 @@ def worker_loop() -> None:
                 global_import = claim_next_job(
                     DATABASE_FILE,
                     operation="metadata_general_import",
+                )
+            if global_import is None:
+                global_import = claim_next_job(
+                    DATABASE_FILE,
+                    operation="trash_import",
                 )
             if global_import is not None:
                 claimed = (MAIN_LIBRARY_CONTEXT, global_import)
@@ -4856,10 +4886,56 @@ def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
             if Path(str(row["database_path"])).is_file()
         }
         databases.add(current_database_file().resolve(strict=False))
+        from app.source_filter import should_ignore_source_relative
+        from app.trash_import import stage_trash_import
+        from app.trash import _physical_entries, reconcile_trash_inventory
+        from app.trash_restore import _relative
         try:
-            result = restore_trash_files(
-                sorted(databases), WORKSPACE_PATH, relative_paths=choice
-            )
+            for db in databases:
+                reconcile_trash_inventory(db, WORKSPACE_PATH)
+            _root, entries, _dirs = _physical_entries(WORKSPACE_PATH)
+            physical = {str(e["relative_path"]) for e in entries if e["entry_type"] == "file"}
+            selected = sorted(physical) if choice is None else list(choice)
+            if not selected or len(set(selected)) != len(selected):
+                raise TrashError("Keine gültige Dateiauswahl.")
+            for rel in selected:
+                _relative(rel)
+                if rel not in physical:
+                    raise TrashError("Datei nicht im Papierkorb: " + rel)
+            ignored = [rel for rel in selected if should_ignore_source_relative(rel)]
+            requested = [rel for rel in selected if rel not in ignored]
+            known, unknown = [], []
+            for rel in requested:
+                linked = False
+                for db in databases:
+                    with database_connection(db) as conn:
+                        if conn.execute(
+                            "SELECT 1 FROM files WHERE current_root_kind='trash' "
+                            "AND current_relative_path=? LIMIT 1", (rel,)
+                        ).fetchone():
+                            linked = True
+                            break
+                (known if linked else unknown).append(rel)
+            result = {"restored_file_count":0,"restored_paths":[],
+                      "queued_file_count":0,"skipped_paths":ignored}
+            # Stage unknown originals before touching any known catalogued ones.
+            # Source originals remain in trash until verified by the worker.
+            if unknown:
+                queued = stage_trash_import(DATABASE_FILE,WORKSPACE_PATH,unknown)
+                result["queued_file_count"] = int(queued["queued_file_count"])
+                result["queued_job_id"] = queued["job_id"]
+            if known:
+                try:
+                    restored = restore_trash_files(sorted(databases), WORKSPACE_PATH,
+                                                   relative_paths=known)
+                    result.update(restored)
+                except (TrashError, OSError, ValueError) as error:
+                    if unknown:
+                        result["restore_warning"] = str(error)
+                    else:
+                        raise
+            if not known and not unknown and ignored:
+                result["note"] = "Systemdateien wurden nicht als Aufnahmen importiert."
         except (TrashError, OSError, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         for db in databases:
@@ -4868,6 +4944,32 @@ def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
             synchronize_global_central_stock()
         except Exception as error:
             result["synchronization_warning"] = str(error)
+        result["inventory"] = api_trash_inventory()
+        return result
+
+
+@app.post("/api/trash/empty-selection", tags=["Papierkorb"])
+def api_empty_trash_selection(payload: dict[str, Any]) -> dict[str, Any]:
+    """Delete only explicitly selected regular trash files, retaining all others."""
+    from app.trash_selective import delete_selected_trash_files
+    paths = payload.get("relative_paths")
+    if not isinstance(paths, list):
+        raise HTTPException(status_code=422, detail="Ungültige Lösch-Auswahl.")
+    with _TRASH_RESTORE_LOCK:
+        databases = {
+            Path(str(row["database_path"])).resolve(strict=False)
+            for row in list_libraries(REGISTRY_DATABASE_FILE,
+                                      active_only=False,registered_only=True)
+            if Path(str(row["database_path"])).is_file()
+        }
+        databases.add(current_database_file().resolve(strict=False))
+        databases.add(DATABASE_FILE.resolve(strict=False))
+        try:
+            result = delete_selected_trash_files(sorted(databases), WORKSPACE_PATH, paths)
+        except (OSError, TrashError, ValueError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        for db in databases:
+            view_cache.invalidate(db)
         result["inventory"] = api_trash_inventory()
         return result
 
@@ -8440,6 +8542,17 @@ def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]
             app_version=RELEASE_VERSION,
         )
     except EventStructureChangeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/event-structure-changes/{change_id}/undo", tags=["Ereignisse"])
+def api_undo_manual_event_change(change_id: str) -> dict[str, Any]:
+    from app.manual_event_undo import undo_manual_applied_change
+    try:
+        return undo_manual_applied_change(
+            current_database_file(), current_workspace_root(), change_id
+        )
+    except (EventStructureChangeError, OSError, ValueError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

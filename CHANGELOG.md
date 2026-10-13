@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.53.1 – Papierkorb, Herkunft, Aufgaben, manuelle Wiederherstellung (Entwicklung)
+
+- Papierkorb: neu importierte, nicht katalogisierte Dateien werden SHA-256-geprüft über eine versteckte Hintergrundsicherung in den Tagesbestand übernommen; Verwaltungsdateien wie .DS_Store bleiben aus dem Kameraimport ausgeschlossen.
+- Bekannte Dateien: Wiederherstellung bleibt prüfsummengesichert und behält ihre ursprüngliche Sicherungsidentität. Ausgewählte Dateien können unabhängig vom übrigen Papierkorb endgültig geleert werden.
+- Der Sicherungsfilter zeigt auch Metadatenkorrektur- und Papierkorbimporte, während Import & Review diese Hintergrundwege weiterhin ausblendet.
+- Ereignisvorschau: nur physischer Ist-Bestand und bei Bedarf Abweichungsdiagnose statt doppelter Struktur.
+- Manuelle Applied-Änderungen: ergänzter Undo-Weg mit SHA-256-Prüfung; Archiv-Undo bleibt ein read-only-Manuellverfahren.
+- Aufgaben: noch offene Archivierungen werden sichtbar; freigegebene, nicht zugeordnete Aufnahmen werden zuverlässiger gezählt.
+- Zweisprachige Schaltflächen, Bestätigungen und Fehleranzeigen; isolierte Regressionstests.
+
+
 ## 0.53.0 – Papierkorb: selektive und vollständige Wiederherstellung (Entwicklung)
 
 - Ohne Auswahl: „Alle wiederherstellen“; mit ausgewählten Dateien: „Auswahl wiederherstellen“; Mehrfachauswahl wie in der Metadatenkorrektur, inklusive Umschalt-Klick und „Alle auswählen“.

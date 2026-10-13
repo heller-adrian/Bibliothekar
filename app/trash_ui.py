@@ -71,7 +71,7 @@ TRASH_HTML = r"""<!doctype html>
       <button id="trash-select-button" type="button" class="trash-action">Auswählen</button>
       <button id="trash-select-all-button" type="button" class="trash-action" hidden>Alle auswählen</button>
       <button id="trash-restore-button" type="button" class="trash-action trash-action-primary">Alle wiederherstellen</button>
-      <button id="trash-empty-button" type="button" class="danger-button trash-danger">Papierkorb entleeren</button>
+      <button id="trash-empty-button" type="button" class="danger-button trash-danger">Gesamten Papierkorb leeren</button>
     </div>
   </div>
   <p id="trash-status" class="trash-status" role="status" aria-live="polite">Papierkorb wird geprüft …</p>
@@ -92,10 +92,32 @@ TRASH_HTML = r"""<!doctype html>
   const selectAllButton=document.getElementById("trash-select-all-button");
   const selected=new Set();
   let selectablePaths=[],selectMode=false,lastSelected=null,busy=false,lastInventory=null;
+  const bilingual=(de,en)=>window.BibliothekarI18n?.getLocale?.()==="de"?de:en;
+  const localError=raw=>{
+    const value=String(raw||"");
+    const prefixes={
+      "Nicht katalogisierte Datei:":"Uncatalogued file:",
+      "Größe oder Prüfsumme abweichend:":"Size or checksum mismatch:",
+      "Zieldatei existiert bereits:":"Destination already exists:",
+      "Datei nicht mehr im Papierkorb:":"File no longer in trash:",
+      "Ungültige Dateiauswahl.":"Invalid file selection.",
+      "Aufnahmezeit unbekannt:":"Unknown capture time:",
+      "Noch einem Ereignis zugeordnet:":"Still assigned to an event:",
+      "Papierkorb konnte nicht sicher geleert werden:":"Could not empty trash safely:",
+      "Symbolische Links dürfen nicht wiederhergestellt werden.":"Symbolic links cannot be restored.",
+      "Diese Dateien werden bereits wiederhergestellt.":"These files are already being restored.",
+      "Ein Papierkorb-Importjournal ist nicht lesbar.":"A trash import journal cannot be read."
+    };
+    if(window.BibliothekarI18n?.getLocale?.()==="de")return value;
+    for(const [source,target] of Object.entries(prefixes))
+      if(value.startsWith(source))return target+value.slice(source.length);
+    return window.BibliothekarI18n?.t?.(value)||value;
+  };
   function updateControls(){
     restoreButton.textContent=selected.size?"Auswahl wiederherstellen":"Alle wiederherstellen";
     restoreButton.disabled=busy||!selectablePaths.length;
     emptyButton.disabled=busy||!document.querySelector(".trash-content");
+    emptyButton.textContent=selected.size?"Auswahl leeren":"Gesamten Papierkorb leeren";
     selectButton.disabled=busy||!selectablePaths.length;
     selectButton.textContent=selectMode?"Auswahl beenden":"Auswählen";
     selectAllButton.hidden=!selectMode;
@@ -246,8 +268,10 @@ TRASH_HTML = r"""<!doctype html>
     const count=selected.size||selectablePaths.length;
     if(!count||busy)return;
     const question=selected.size
-      ? "Die "+count+" ausgewählten Dateien in den Tagesbestand wiederherstellen?"
-      : "Alle "+count+" Dateien im Papierkorb in den Tagesbestand wiederherstellen?";
+      ? bilingual("Die "+count+" ausgewählten Dateien in den Tagesbestand wiederherstellen?",
+                  "Restore "+count+" selected files to the daily inventory?")
+      : bilingual("Alle "+count+" Dateien im Papierkorb in den Tagesbestand wiederherstellen?",
+                  "Restore all "+count+" files from trash to the daily inventory?");
     if(!(await window.BibliothekarI18n.confirmAsync(question)))return;
     busy=true;updateControls();
     status.textContent="Dateien werden in den Tagesbestand wiederhergestellt …";
@@ -258,29 +282,50 @@ TRASH_HTML = r"""<!doctype html>
       });
       selected.clear();selectMode=false;lastSelected=null;
       render(result.inventory);
-      status.textContent=result.restored_file_count+" Dateien wiederhergestellt."
-        +(result.synchronization_warning?" Datenabgleich prüfen: "+result.synchronization_warning:"");
+      const restored=Number(result.restored_file_count||0);
+      const queued=Number(result.queued_file_count||0);
+      const skipped=(result.skipped_paths||[]).length;
+      status.textContent=bilingual(
+        restored+" Dateien wiederhergestellt."+ (queued?" "+queued+" unbekannte Dateien zur geprüften Übernahme vorgemerkt.":"") +(skipped?" "+skipped+" Systemdateien übersprungen.":""),
+        restored+" files restored."+(queued?" "+queued+" previously unknown files queued for verified import.":"")+(skipped?" "+skipped+" system files skipped.":"")
+      )+(result.restore_warning?" "+localError(result.restore_warning):"")
+       +(result.synchronization_warning?" "+localError(result.synchronization_warning):"");
     }catch(error){
-      status.textContent=error.message;
+      status.textContent=localError(error.message);
     }finally{
       busy=false;updateControls();
     }
   });
   emptyButton.addEventListener("click",async()=>{
-    if(!(await window.BibliothekarI18n.confirmAsync("Papierkorb wirklich endgültig entleeren?\n\nAlle Dateien und Ordner darin werden unwiderruflich gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden."))) return;
-    emptyButton.disabled=true;
-    status.textContent="Papierkorb wird endgültig geleert …";
+    if(busy)return;
+    const selection=[...selected];
+    const isPartial=selection.length>0;
+    const prompt=isPartial
+      ? bilingual(
+          "Die "+selection.length+" ausgewählten Dateien endgültig löschen? Dies kann nicht rückgängig gemacht werden.",
+          "Permanently delete "+selection.length+" selected files? This cannot be undone."
+        )
+      : bilingual(
+          "Den gesamten Papierkorb endgültig leeren? Alle Dateien und Ordner werden unwiderruflich gelöscht.",
+          "Permanently empty the entire trash? All files and folders will be deleted and cannot be recovered."
+        );
+    if(!(await window.BibliothekarI18n.confirmAsync(prompt)))return;
+    busy=true;updateControls();
+    status.textContent=bilingual("Papierkorb wird geleert …","Emptying trash…");
     try{
-      const data=await json("/api/trash/empty",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({confirmation:"PAPIERKORB ENDGÜLTIG LEEREN"})
+      const data=await json(isPartial?"/api/trash/empty-selection":"/api/trash/empty",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(isPartial?{relative_paths:selection}:{confirmation:"PAPIERKORB ENDGÜLTIG LEEREN"})
       });
-      render(data);
-      status.textContent="Papierkorb wurde vollständig geleert und der Datenbankbestand synchronisiert.";
+      selected.clear();selectMode=false;lastSelected=null;
+      render(isPartial?data.inventory:data);
+      status.textContent=isPartial
+        ? bilingual("Ausgewählte Dateien endgültig gelöscht.","Selected files permanently deleted.")
+        : bilingual("Gesamter Papierkorb endgültig geleert.","Entire trash permanently emptied.");
     }catch(error){
-      status.textContent=error.message;
-      emptyButton.disabled=false;
+      status.textContent=localError(error.message);
+    }finally{
+      busy=false;updateControls();
     }
   });
   load();

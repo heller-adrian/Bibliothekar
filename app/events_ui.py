@@ -5407,8 +5407,7 @@ EVENTS_HTML = r"""<!doctype html>
           ${changeDetails}
         </div>
         ${blockers.length?`<div class="error-box" style="margin-top:12px"><strong>Diese Änderung kann noch nicht übernommen werden.</strong>${blockers.map(x=>`<div style="margin-top:6px">${escapeHtml(x)}</div>`).join("")}</div>`:""}
-        ${guidedChoice}
-        ${folderUndoChoice}
+        ${change.root_kind==="camera_archive"?guidedChoice:""}
         ${inputControl}`;
             const bindGuidedEdit=()=>{
         document.getElementById("structure-guided-restore")?.addEventListener("click",async(event)=>{
@@ -5463,9 +5462,32 @@ EVENTS_HTML = r"""<!doctype html>
       if(change.root_kind==="shared_workspace"){
         structureChangeBody.innerHTML=preview+`
           <div class="edit-actions">
+            <button type="button" id="structure-change-undo" class="plan-button">${bk0511EventLabel("Änderungen rückgängig machen","Undo changes")}</button>
             <button type="button" id="structure-change-confirm" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>Änderungen übernehmen</button>
           </div>`;
         bindGuidedEdit();
+        document.getElementById("structure-change-undo")?.addEventListener("click",async(event)=>{
+          if(!(await window.BibliothekarI18n.confirmAsync(bk0511EventLabel(
+            "Die physische Änderung vollständig rückgängig machen? Vorhandene Dateien werden niemals überschrieben.",
+            "Undo the physical event change? Existing files will never be overwritten."
+          ))))return;
+          const button=event.currentTarget;
+          button.disabled=true;
+          try{
+            await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/undo`,{method:"POST"});
+            clearStructureTaskFromUrl(changeId);
+            structureChangeDialog.close();
+            await loadEvents({reset:true});
+            await refreshGlobalTasks();
+            setStatus(bk0511EventLabel("Manuelle Änderung rückgängig gemacht.",
+                     "Manual changes undone."),false,true);
+          }catch(error){
+            const inlineError=document.getElementById("structure-change-input-error");
+            if(inlineError){inlineError.hidden=false;inlineError.textContent=bk0520RestorationError(error.message);}
+            else setStatus(bk0520RestorationError(error.message),true);
+            button.disabled=false;
+          }
+        });
         document.getElementById("structure-restore-empty")?.addEventListener("click",async(event)=>{
           const button=event.currentTarget;
           button.disabled=true;
@@ -5511,6 +5533,30 @@ EVENTS_HTML = r"""<!doctype html>
         });
         return;
       }
+      const archiveUndoButton=`<button type="button" id="structure-archive-undo" class="plan-button">${bk0511EventLabel("Änderungen rückgängig machen","Undo changes")}</button>`;
+      const bindArchiveUndo=()=>{
+        document.getElementById("structure-archive-undo")?.addEventListener("click",()=>{
+          const paths=(d.restore_original_paths||{});
+          const observed=d.restore_observed_paths||{};
+          const pairs=Object.entries(paths).map(([id,target])=>
+            escapeHtml(String(observed[id]||""))+" → "+escapeHtml(String(target)));
+          const missing=(d.directory_removed||[]).map(path=>escapeHtml(String(path)));
+          const renamed=[
+            ...(d.root_rename?[String(d.root_rename.new_path||"")+" → "+String(d.root_rename.old_path||"")]:[]),
+            ...(d.child_renames||[]).map(x=>String(x.new_folder)+" → "+String(x.old_folder))
+          ].map(escapeHtml);
+          const instruction=bk0511EventLabel(
+            "Das Archiv ist schreibgeschützt. Verschiebe veränderte Dateien und Ordner manuell an ihre ursprünglichen Orte zurück. Danach die Aufgaben neu prüfen.",
+            "The archive is read-only. Move changed files and folders back to their original locations manually, then refresh Tasks."
+          );
+          structureChangeBody.insertAdjacentHTML("beforeend",
+            '<div class="card" role="status"><strong>'+
+            bk0511EventLabel("Rückgängig-Anleitung","Undo instructions")+
+            '</strong><p>'+instruction+'</p>'+
+            [...renamed,...pairs,...missing].map(line=>'<code style="display:block;overflow-wrap:anywhere">'+line+'</code>').join("")+
+            '</div>');
+        });
+      };
       if(change.status==="prepared"){
         const prepared=friendlyWorkspacePath(d.prepared_event_json_path||"");
         const target=(String(d.event_name||"") && String(d.status||"")==="archived") ? "im Ereignisordner des Archivs" : "im Archiv";
@@ -5519,8 +5565,8 @@ EVENTS_HTML = r"""<!doctype html>
             <p>Vorbereitet:</p><code style="display:block;white-space:pre-wrap;word-break:break-all">${escapeHtml(prepared)}</code>
             <p>Ersetze damit die vorhandene <code>event.json</code> ${target}. Andere Archivdateien werden von Bibliothekar nicht verändert.</p>
           </div>
-          <div class="edit-actions"><button type="button" id="structure-change-verify" class="plan-button bk-positive-action">Prüfen</button></div>`;
-        bindGuidedEdit();
+          <div class="edit-actions">${archiveUndoButton}<button type="button" id="structure-change-verify" class="plan-button bk-positive-action">Prüfen</button></div>`;
+        bindGuidedEdit(); bindArchiveUndo();
         document.getElementById("structure-change-verify")?.addEventListener("click",async(event)=>{
           const button=event.currentTarget;
           button.disabled=true;
@@ -5547,8 +5593,8 @@ EVENTS_HTML = r"""<!doctype html>
       }else{
         structureChangeBody.innerHTML=preview+`
           <div class="card" style="margin-top:14px"><strong>Archiv · Schritt 1 von 2</strong><p>Bibliothekar erzeugt eine neue event.json unter „Später zuordnen“. Die Kamerabibliothek bleibt read-only.</p></div>
-          <div class="edit-actions"><button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>event.json vorbereiten</button></div>`;
-        bindGuidedEdit();
+          <div class="edit-actions">${archiveUndoButton}<button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>event.json vorbereiten</button></div>`;
+        bindGuidedEdit(); bindArchiveUndo();
         document.getElementById("structure-change-prepare")?.addEventListener("click",async()=>{
           const selectedInputs=chosenStructureInputs();
           const input=selectedInputs.input_path;

@@ -1332,6 +1332,29 @@ from app.ui_i18n_0511 import UI_0511_TRANSLATIONS, UI_0511_PATTERNS
 UI_TRANSLATIONS.update(UI_0511_TRANSLATIONS)
 UI_PATTERNS.extend(UI_0511_PATTERNS)
 
+# 0.53.1 – trash selection, restoration, provenance, manual Undo and task labels.
+UI_TRANSLATIONS.update({
+    "Gesamten Papierkorb leeren": "Empty entire trash",
+    "Auswahl leeren": "Empty selection",
+    "Aus Papierkorb": "From Trash",
+    "Ereignis archivieren": "Archive event",
+    "Dateien werden in den Tagesbestand wiederhergestellt …": "Restoring files to daily inventory…",
+    "Papierkorb wird geleert …": "Emptying trash…",
+    "Manuelle Änderung rückgängig gemacht.": "Manual changes undone.",
+    "Änderungen rückgängig machen": "Undo changes",
+    "Rückgängig-Anleitung": "Undo instructions",
+    "Nur im Dateisystem": "Only in the file system",
+    "Nicht katalogisierte Datei:": "Uncatalogued file:",
+    "Datei ist nicht mehr im Papierkorb:": "File is no longer in trash:",
+    "Ungültige Lösch-Auswahl.": "Invalid deletion selection.",
+    "Papierkorb-Löschjournal darf kein Symlink sein.": "The trash deletion journal must not be a symlink.",
+})
+UI_PATTERNS.extend([
+    [r"^Aus Papierkorb(?=\\s|$)", "From Trash"],
+    [r"^([0-9]+) Dateien wiederhergestellt\\.", "$1 files restored."],
+    [r"^([0-9]+) Dateien wiederhergestellt\\. ([0-9]+) unbekannte Dateien zur geprüften Übernahme vorgemerkt\\.", "$1 files restored. $2 previously unknown files queued for verified import."],
+])
+
 I18N_UI_JS = r"""
 (function () {
   "use strict";
