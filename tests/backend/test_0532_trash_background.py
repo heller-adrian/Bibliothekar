@@ -144,3 +144,53 @@ def test_0532_staged_and_inflight_sources_cannot_be_deleted(tmp_path,monkeypatch
     assert resume_safe_queued_trash_restores(db,workspace)==1
     assert get_job(db,queued["job_id"])["state"]=="queued"
     assert (root/"J.JPG").read_bytes()==b"reserved"
+
+
+
+def test_0532_actual_claimed_worker_finishes_trash_restore(tmp_path,monkeypatch):
+    """Contract that failed in 0.53.1: queue -> main worker -> real SSD bytes."""
+    from app import main
+    from app.library_registry import list_active_library_contexts
+    from tests.backend.test_0400_import_backup_controls import _foundation
+    from app.storage_config import storage_paths
+
+    database,registry,workspace=_foundation(tmp_path)
+    contexts=list_active_library_contexts(registry)
+    assert contexts
+    context=next(x for x in contexts if x.library_id=="main")
+    monkeypatch.setattr(main,"DATABASE_FILE",database)
+    monkeypatch.setattr(main,"REGISTRY_DATABASE_FILE",registry)
+    monkeypatch.setattr(main,"WORKSPACE_PATH",workspace)
+    monkeypatch.setattr(main,"LOG_PATH",tmp_path/"logs")
+    monkeypatch.setattr(main,"MAIN_LIBRARY_CONTEXT",context)
+    monkeypatch.setattr(main,"load_settings",
+                        lambda:{"storage":{"processing_buffer_percent":0,
+                                           "safety_reserve_gib":0}})
+    import app.metadata as metadata
+    monkeypatch.setattr(metadata,"run_exiftool",
+        lambda root,**kw:[
+            {"SourceFile":str(root/"2026-01-05"/"CAM.JPG"),
+             "EXIF:DateTimeOriginal":"2026:01:05 06:50:44"}
+        ])
+    trash=Path(storage_paths(workspace)["trash_root"])/"2026-01-05"
+    trash.mkdir(parents=True,exist_ok=True)
+    source=trash/"CAM.JPG"
+    data=b"\xff\xd8"+b"actual-worker-bytes"*20+b"\xff\xd9"
+    source.write_bytes(data)
+    info=queue_trash_restore(database,workspace,["2026-01-05/CAM.JPG"])
+    job_id=info["job_id"]
+    claimed=claim_next_job(database,operation="trash_import")
+    assert claimed and claimed["id"]==job_id
+    main.process_claimed_job(claimed,library_context=context)
+    final=get_job(database,job_id)
+    assert final["state"]=="completed",final.get("error_message")
+    with database_connection(database) as conn:
+        media=conn.execute(
+            "SELECT current_relative_path,current_root_kind FROM files "
+            "WHERE job_id=?",(job_id,)
+        ).fetchall()
+    assert len(media)==1
+    assert media[0]["current_root_kind"]=="shared_workspace"
+    assert (Path(storage_paths(workspace)["backup_root"])/
+            str(media[0]["current_relative_path"])).read_bytes()==data
+    assert not source.exists()
