@@ -1,6 +1,6 @@
 # Bibliothekar
 
-> Entwicklungsversion: **0.54.2** (Audit-Branch, noch keine stabile Freigabe). Der stabile Update-Kanal bleibt bis zur erfolgreichen Abnahme unverändert.
+> Entwicklungsversion: **0.54.3** (Audit-Branch, noch keine stabile Freigabe). Der stabile Update-Kanal bleibt bis zur erfolgreichen Abnahme unverändert.
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 

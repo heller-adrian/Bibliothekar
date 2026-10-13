@@ -1535,6 +1535,46 @@ EVENTS_HTML = r"""<!doctype html>
       text-align:center;
     }
 
+
+    /* 0.54.3: Keep each start/end date beside its time, including dynamically
+       inserted subevents. Earlier @media/@container rules forced ONE column
+       with !important; this later, ID-scoped rule intentionally wins.
+       minmax(0,...) prevents native date/time controls from widening a card. */
+    #event-edit-dialog .edit-boundary,
+    #event-edit-dialog .child-segment-boundary {
+      display:grid;
+      grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;
+      gap:8px;
+      align-items:end;
+    }
+    #event-edit-dialog .edit-boundary > .edit-field,
+    #event-edit-dialog .child-segment-boundary > .edit-field {
+      min-inline-size:0 !important;
+      max-inline-size:100%;
+    }
+    /* Preserve the 0.54.2 WebKit overflow fix and center the native
+       date/time text vertically without restoring horizontal padding. */
+    #event-edit-dialog input[type="date"],
+    #event-edit-dialog input[type="time"] {
+      block-size:48px !important;
+      min-block-size:48px !important;
+      line-height:48px !important;
+      vertical-align:middle;
+    }
+    #event-edit-dialog input[type="date"]::-webkit-date-and-time-value,
+    #event-edit-dialog input[type="time"]::-webkit-date-and-time-value,
+    #event-edit-dialog input[type="date"]::-webkit-datetime-edit,
+    #event-edit-dialog input[type="time"]::-webkit-datetime-edit {
+      box-sizing:border-box;
+      block-size:100%;
+      min-block-size:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:0;
+      line-height:normal;
+    }
+
 /* 0.45.2: Neuladen neben der Suche, auch auf kleinen Geräten. */
 .event-browser-toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
 .event-browser-toolbar .event-browser-search { flex:1 1 220px; min-width:0; }
