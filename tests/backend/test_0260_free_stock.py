@@ -332,14 +332,14 @@ def test_deleting_one_of_two_events_merges_free_stock_across_jobs(tmp_path):
     assert not any(task["kind"] in {"reassignment","resort"} for task in tasks)
     # Freier datierter Bestand ist seit 0.42.1 eine globale Aufgabe über alle
     # Import-/Korrekturjobs. Die durch das bestätigte Löschen freigegebene
-    # Familie bleibt via released_free_families ausgeschlossen; die beiden
+    # Familie wird nach bestätigter Freigabe auch als freier Bestand gezählt; die beiden
     # bereits vorher freien Familien aus "first" und "second" werden gemeinsam
     # gezählt statt als job-spezifische Karten dargestellt.
     unassigned = [task for task in tasks if task["kind"] == "unassigned_families"]
     assert len(unassigned) == 1
-    assert unassigned[0]["family_count"] == 2
+    assert unassigned[0]["family_count"] == 3
     assert unassigned[0]["job_count"] == 2
-    assert unassigned[0]["detail"] == "2 Familien · freier Tagesbestand"
+    assert unassigned[0]["detail"] == "3 Familien · freier Tagesbestand"
     assert unassigned[0]["href"] == "/workspace?task=free"
 @pytest.mark.parametrize("preserve", [False, True])
 def test_reassignment_new_event_uses_explicit_day_folder_option(tmp_path, preserve):

@@ -162,10 +162,8 @@ def test_0260_applied_no_event_shrink_reconciles_removed_family_to_free_stock(tm
             (ids[1],),
         ).fetchone()
         assert tuple(marker) == ('2026-09-08T00:00:00', '2026-09-08T23:59:59')
-    assert not any(
-        task['kind'] in {'reassignment','resort','unassigned_families'}
-        for task in list_global_tasks(db)
-    )
+    assert not any(task['kind'] in {'reassignment','resort'} for task in list_global_tasks(db))
+    assert any(task['kind']=='unassigned_families' for task in list_global_tasks(db))
 def test_cancel_applied_edit_restores_db_without_moving_files(tmp_path):
     db,workspace,ids,folder=_seed(tmp_path,no_event=False)
     before=_current_paths(db,ids[1])

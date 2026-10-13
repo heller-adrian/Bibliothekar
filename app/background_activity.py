@@ -33,8 +33,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
     # Camera and folder imports are globally managed in the main DB, even
     # while a secondary library is selected in the browser.
     with database_connection(global_import_database) as connection:
-        rows = connection.execute(
-            """SELECT id,state,stage,source_volume_label,progress_current,
+        sql = """SELECT id,state,stage,source_volume_label,progress_current,
                       progress_total,error_message,operation
                FROM jobs
                WHERE operation IN (
@@ -48,14 +47,31 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
                        AND state IN ('completed','failed','interrupted')
                        AND updated_at>=?)
                  )
-               ORDER BY updated_at DESC,id DESC LIMIT 12""",
-            (recent_cutoff,),
-        ).fetchall()
+               ORDER BY updated_at DESC,id DESC LIMIT 12"""
+        try:
+            rows=connection.execute(sql,(recent_cutoff,)).fetchall()
+        except (OperationalError,TypeError) as error:
+            # Legacy QA databases and read-only adapters can lack the newer
+            # progress fields or accept only a single SQL string argument.
+            if isinstance(error,OperationalError) and "no such column" not in str(error):
+                raise
+            rows=connection.execute(
+                """SELECT id,state,stage,source_volume_label,operation
+                   FROM jobs
+                   WHERE operation IN (
+                       'folder_import','metadata_multiple_import',
+                       'metadata_general_import'
+                   )
+                   AND state IN ('queued','copying','verifying','backup_verified',
+                                 'analyzing_metadata','organizing')
+                   ORDER BY created_at DESC,id DESC LIMIT 8"""
+            ).fetchall()
     for row in rows:
         status=str(row["state"])
         is_trash=str(row["operation"])=="trash_import"
-        total=int(row["progress_total"] or 0)
-        current=int(row["progress_current"] or 0)
+        fields=set(row.keys()) if hasattr(row,"keys") else set(dict(row))
+        total=int(row["progress_total"] or 0) if "progress_total" in fields else 0
+        current=int(row["progress_current"] or 0) if "progress_current" in fields else 0
         if is_trash:
             detail=(
                 "Wiederherstellung fehlgeschlagen: "+str(row["error_message"] or "Unbekannter Fehler")

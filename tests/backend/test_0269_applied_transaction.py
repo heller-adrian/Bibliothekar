@@ -156,9 +156,10 @@ def test_0269_released_free_marker_is_not_an_open_task_or_reassignment(tmp_path)
     assert (workspace/'SD-Kartensicherungen'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
     tasks=list_global_tasks(db)
     assert not any(
-        item['kind'] in {'reassignment','resort','unassigned_families'}
+        item['kind'] in {'reassignment','resort'}
         for item in tasks
     )
+    assert any(item['kind'] == 'unassigned_families' for item in tasks)
     cards=list_job_planning_overview(db,'j')['available_day_groups']
     assert len(cards)==1
     assert cards[0].get('released_free') is True

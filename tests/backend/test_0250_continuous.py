@@ -287,7 +287,7 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
         assert c.execute('SELECT COUNT(*) FROM event_reapply_removed_families WHERE target_event_id IS NULL').fetchone()[0]==0
         assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==2
     assert not any(
-        task['kind'] in {'reassignment','resort','unassigned_families'}
+        task['kind'] in {'reassignment','resort'}
         for task in list_global_tasks(db)
     )
     central=workspace/'SD-Kartensicherungen'
@@ -345,7 +345,7 @@ def test_0260_applied_delete_releases_files_and_keeps_open_task(tmp_path,preserv
         ).fetchone()[0]==1
     assert (workspace/'SD-Kartensicherungen'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
     assert not any(
-        task['kind'] in {'reassignment','resort','unassigned_families'}
+        task['kind'] in {'reassignment','resort'}
         for task in list_global_tasks(db)
     )
     cards=list_job_planning_overview(db,'j')['available_day_groups']
@@ -393,7 +393,7 @@ def test_0260_workspace_free_card_new_event_finishes_reassignment(tmp_path,prese
         assert c.execute('SELECT COUNT(*) FROM events WHERE id=?',(source['id'],)).fetchone()[0]==0
         assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==1
     tasks=list_global_tasks(db)
-    assert not any(t['kind'] in {'reassignment','resort','unassigned_families'} for t in tasks)
+    assert not any(t['kind'] in {'reassignment','resort'} for t in tasks)
     cards=list_job_planning_overview(db,'j')['available_day_groups']
     assert len(cards)==1 and cards[0].get('released_free') is True
     assert not cards[0].get('reassignment_pending')

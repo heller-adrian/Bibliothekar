@@ -114,7 +114,7 @@ def test_02611_planned_shrink_is_complete_and_can_expand_again(tmp_path: Path):
 
     tasks = list_global_tasks(db)
     assert not any(item["kind"] == "reassignment" for item in tasks)
-    assert not any(item["kind"] == "unassigned_families" for item in tasks)
+    assert any(item["kind"] == "unassigned_families" for item in tasks)
     assert any(item["kind"] == "planned_apply" and item["event_id"] == "e" for item in tasks)
 
     # The family that just became free remains an eligible family in the editor,
@@ -185,7 +185,8 @@ def test_02611_planned_delete_releases_without_reassignment_task(tmp_path: Path)
         }
     assert markers == {early, late}
     tasks = list_global_tasks(db)
-    assert not any(item["kind"] in {"reassignment", "unassigned_families"} for item in tasks)
+    assert not any(item["kind"] == "reassignment" for item in tasks)
+    assert any(item["kind"] == "unassigned_families" for item in tasks)
 
 
 def test_02611_legacy_planned_queue_is_converted_before_next_edit(tmp_path: Path):

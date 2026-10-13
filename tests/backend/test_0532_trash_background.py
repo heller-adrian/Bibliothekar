@@ -7,7 +7,7 @@ import pytest
 
 from app.database import (
     database_connection, get_job, claim_next_job,
-    store_metadata_analysis, update_import_file_paths,
+    store_metadata_analysis, update_import_file_paths, update_job_progress,
 )
 from app.folder_import import preflight_folder_import, run_folder_import_job, PipelineError
 from app.trash import reconcile_trash_inventory
@@ -67,7 +67,7 @@ def test_0532_end_to_end_unknown_jpeg_reaches_real_daily_stock(tmp_path,monkeypa
     assert stage_file.read_bytes()==data
     import app.metadata as metadata
     def fake_exif(root,**kwargs):
-        return [{"SourceFile":str(stage_file),"EXIF:DateTimeOriginal":"2026:01:05 06:50:44"}]
+        return [{"SourceFile":str(root/"2026-01-05"/original.name),"EXIF:DateTimeOriginal":"2026:01:05 06:50:44"}]
     monkeypatch.setattr(metadata,"run_exiftool",fake_exif)
     def persist_metadata(analysis,checksums):
         store_metadata_analysis(db,job["job_id"],analysis,checksums,finalize_job=False)
@@ -79,6 +79,9 @@ def test_0532_end_to_end_unknown_jpeg_reaches_real_daily_stock(tmp_path,monkeypa
         log_dir=tmp_path/"logs",processing_buffer_percent=0,safety_reserve_gib=0,
         job_id=job["job_id"],central_stock=True,allow_workspace_source=True,
         metadata_callback=persist_metadata,path_callback=persist_paths,
+        progress_callback=lambda state,stage,current,total,message:
+            update_job_progress(db,job["job_id"],state=state,stage=stage,
+                                current=current,total=total,message=message),
     )
     organization=result["organization"]
     assert organization["file_count"]==1

@@ -6213,6 +6213,7 @@ BIBLIOTHEKAR_0444_JS = r"""
   function destination(item) {
     const lib = library();
     if (item.kind === "import") return "/?library=" + lib;
+    if (item.kind === "trash_restore") return "/trash?library=" + lib;
     if (item.kind === "release") return "/archive?library=" + lib;
     const job = item.job_id ? "&job=" + encodeURIComponent(item.job_id) : "";
     return "/events?library=" + lib + job;
@@ -6236,7 +6237,7 @@ BIBLIOTHEKAR_0444_JS = r"""
     detail.textContent = item.detail || "";
     link.append(name, detail);
     row.append(icon, link);
-    if ((item.kind === "apply" || item.kind === "release") && item.progress_percent !== null
+    if ((item.kind === "apply" || item.kind === "release" || item.kind === "trash_restore") && item.progress_percent !== null
         && item.progress_percent !== undefined
         && Number.isFinite(Number(item.progress_percent))) {
       const progress = document.createElement("span");
