@@ -1376,6 +1376,65 @@ EVENTS_HTML = r"""<!doctype html>
       }
     }
 
+    /* 0.54.0: Die Ereignisbearbeitung hat einen eigenen Dialog.
+       Native iOS-Datum/Uhrzeitfelder duerfen keine Grid-Spalten aufweiten. */
+    @media (max-width:820px) {
+      #event-edit-dialog {
+        inline-size:calc(100dvw - 24px);
+        max-inline-size:calc(100dvw - 24px);
+        box-sizing:border-box;
+      }
+      #event-edit-dialog .sort-plan-content {
+        width:100%;
+        max-width:100%;
+        min-width:0;
+        box-sizing:border-box;
+        padding:clamp(12px,3.8vw,18px);
+        overflow-x:hidden;
+        overflow-y:auto;
+        -webkit-overflow-scrolling:touch;
+      }
+      #event-edit-dialog .edit-grid,
+      #event-edit-dialog .edit-boundaries,
+      #event-edit-dialog .edit-boundary,
+      #event-edit-dialog .child-segment-boundaries,
+      #event-edit-dialog .child-segment-boundary,
+      #event-edit-dialog .child-segment-top {
+        display:grid;
+        grid-template-columns:minmax(0,1fr) !important;
+      }
+      #event-edit-dialog .edit-grid > *,
+      #event-edit-dialog .edit-field,
+      #event-edit-dialog .edit-boundary,
+      #event-edit-dialog .child-segment-card,
+      #event-edit-dialog .child-segment-fields,
+      #event-edit-dialog .child-segment-boundary {
+        min-width:0 !important;
+        max-width:100%;
+        box-sizing:border-box;
+      }
+      #event-edit-dialog input:not([type="checkbox"]):not([type="radio"]),
+      #event-edit-dialog select,
+      #event-edit-dialog textarea {
+        box-sizing:border-box !important;
+        width:100%;
+        min-width:0 !important;
+        max-width:100% !important;
+        font-size:max(16px,1rem);
+      }
+      #event-edit-dialog .edit-date-entry {
+        width:100%;
+        min-width:0;
+        grid-template-columns:minmax(0,1fr) 42px;
+      }
+      #event-edit-dialog .child-segment-name {min-width:0;flex:auto}
+      #event-edit-dialog .child-segment-remove {
+        min-width:0;
+        max-width:100%;
+        white-space:normal;
+      }
+    }
+
 /* 0.45.2: Neuladen neben der Suche, auch auf kleinen Geräten. */
 .event-browser-toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
 .event-browser-toolbar .event-browser-search { flex:1 1 220px; min-width:0; }
