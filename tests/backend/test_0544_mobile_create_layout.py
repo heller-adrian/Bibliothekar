@@ -71,4 +71,4 @@ def test_0544_no_event_uses_one_day_and_a_separate_two_time_row():
     assert 'start_time: row.querySelector("[data-segment-start]")?.value' in WORKSPACE_HTML
     assert 'end_time: row.querySelector("[data-segment-end]")?.value' in WORKSPACE_HTML
     assert 'function syncNoEventDateMirror' in WORKSPACE_HTML
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.3"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.55.4"
