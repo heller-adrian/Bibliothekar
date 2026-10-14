@@ -81,7 +81,7 @@ def test_explicit_dynamic_label_contract_and_raw_logs() -> None:
     events = (repo / "app" / "events_ui.py").read_text()
     workspace = (repo / "app" / "workspace_ui.py").read_text()
     archive = (repo / "app" / "archive_change_assistant.py").read_text()
-    assert __version__ == "0.55.4"
+    assert __version__ == "0.56.0"
     assert "STAGING_DIRECTORY_NAME" not in archive
     assert "staging_directory_name(work_root)" in archive
     assert 'bk0511EventLabel("IST","Actual")' in events
