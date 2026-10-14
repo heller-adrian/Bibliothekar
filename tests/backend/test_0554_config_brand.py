@@ -16,7 +16,7 @@ from app.setup_language import _CSS
 
 
 def test_0554_version():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.55.4"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.0"
 
 
 def test_0554_creates_missing_settings_safely(tmp_path: Path):
@@ -67,7 +67,8 @@ def test_0554_desktop_logo_no_form_displacement_and_mobile_unchanged():
     assert '@media(min-width:821px)' in css
     desktop=css.split('@media(min-width:821px)', 1)[1].split('.bk-setup-lang{', 1)[0]
     assert "position:fixed;" in desktop
-    assert "left:clamp(28px,4vw,88px);" in desktop
+    assert "left:50%;" in desktop
+    assert "transform:translateX(-50%);" in desktop
     assert "width:min(830px,48vw);" in desktop
     assert "place-items:center;" in desktop
     assert "justify-self:center;" in desktop

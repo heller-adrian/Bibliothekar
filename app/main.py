@@ -299,8 +299,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.55.4"
-DEPLOYMENT_VERSION = "0.55.4"
+RELEASE_VERSION = "0.56.0"
+DEPLOYMENT_VERSION = "0.56.0"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -922,8 +922,16 @@ statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";
 
 @app.middleware("http")
 async def library_context_middleware(request: Request, call_next):
-    # Public brand asset is also needed while no first library exists.
-    if request.method == "GET" and request.url.path == "/assets/bibliothekar-logo-v2.svg":
+    # Allow only public static brand/icon assets during first-library setup.
+    if request.method == "GET" and request.url.path in {
+        "/assets/bibliothekar-logo-v2.svg",
+        "/assets/bibliothekar-logo-v3.svg",
+        "/assets/bibliothekar-logo-symbol.svg",
+        "/assets/bibliothekar-logo-symbol-background.svg",
+        "/assets/bibliothekar-icon-192.png",
+        "/apple-touch-icon.png",
+        "/manifest.webmanifest",
+    }:
         return await call_next(request)
     if _onboarding_required():
         path = request.url.path
@@ -10114,11 +10122,25 @@ def api_run_simulated_job() -> JSONResponse:
 
 
 @app.get(
-    "/assets/bibliothekar-logo-v2.svg",
+    "/assets/bibliothekar-logo-v3.svg",
     include_in_schema=False,
 )
 def bibliothekar_brand_logo() -> FileResponse:
-    """Derselbe freigestellte SVG-Schriftzug für alle Bibliothekar-Seiten."""
+    """Original V3 transparent vector wordmark for all branded screens."""
+    return FileResponse(
+        Path(__file__).with_name("bibliothekar-logo-v3.svg"),
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        },
+    )
+
+
+@app.get("/assets/bibliothekar-logo-v2.svg", include_in_schema=False)
+def bibliothekar_legacy_logo() -> FileResponse:
+    """Keep existing cached links to the old logo valid during upgrades."""
     return FileResponse(
         Path(__file__).with_name("bibliothekar-logo-v2.svg"),
         media_type="image/svg+xml",
@@ -10126,6 +10148,48 @@ def bibliothekar_brand_logo() -> FileResponse:
             "Cache-Control": "public, max-age=3600",
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        },
+    )
+
+
+@app.get("/assets/bibliothekar-logo-symbol.svg", include_in_schema=False)
+def bibliothekar_transparent_symbol() -> FileResponse:
+    """The original backgroundless icon is retained as a brand asset."""
+    return FileResponse(
+        Path(__file__).with_name("bibliothekar-logo-symbol.svg"),
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        },
+    )
+
+
+@app.get("/assets/bibliothekar-logo-symbol-background.svg", include_in_schema=False)
+def bibliothekar_app_icon_svg() -> FileResponse:
+    """Blue-background icon for favicon and installable web-app manifest."""
+    return FileResponse(
+        Path(__file__).with_name("bibliothekar-logo-symbol-background.svg"),
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        },
+    )
+
+
+@app.get("/assets/bibliothekar-icon-192.png", include_in_schema=False)
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+def bibliothekar_app_icon_png() -> FileResponse:
+    """Rasterized blue-background symbol for Apple touch and web-app icons."""
+    return FileResponse(
+        Path(__file__).with_name("bibliothekar-icon-192.png"),
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 
@@ -10154,6 +10218,20 @@ def web_app_manifest(request: Request) -> JSONResponse:
             "orientation": "portrait-primary" if is_iphone else "any",
             "theme_color": "#15222c",
             "background_color": "#15222c",
+            "icons": [
+                {
+                    "src": "/assets/bibliothekar-icon-192.png?v=0.56.0",
+                    "sizes": "192x192",
+                    "type": "image/png",
+                    "purpose": "any",
+                },
+                {
+                    "src": "/assets/bibliothekar-logo-symbol-background.svg?v=0.56.0",
+                    "sizes": "any",
+                    "type": "image/svg+xml",
+                    "purpose": "any",
+                },
+            ],
         },
         media_type="application/manifest+json",
         headers={

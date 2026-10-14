@@ -7,7 +7,7 @@ from app.ui_shell import apply_shell
 
 ASSETS = Path(__file__).resolve().parents[2] / "app"
 OLD = ASSETS / "bibliothekar-logo.svg"
-NEW = ASSETS / "bibliothekar-logo-v2.svg"
+NEW = ASSETS / "bibliothekar-logo-v3.svg"
 
 
 def test_0471_v2_logo_is_the_selected_asset():
@@ -23,7 +23,7 @@ def test_0471_v2_logo_is_the_selected_asset():
 def test_0471_header_and_about_use_v2_without_old_asset():
     for area in ("import", "workspace", "archive", "metadata", "trash"):
         html = apply_shell("<html><head></head><body></body></html>", active_area=area)
-        assert html.count('/assets/bibliothekar-logo-v2.svg?v=0.47.3') == 2
+        assert html.count('/assets/bibliothekar-logo-v3.svg?v=0.56.0') == 2
         assert '/assets/bibliothekar-logo.svg?v=' not in html
         assert html.count('id="bk-current-library-name"') == 1
 

@@ -253,7 +253,15 @@ async def protect_request(request: Request, call_next):
         return _security_headers(Response(
             _client_code(), media_type="application/javascript; charset=utf-8"
         ))
-    if path in {"/manifest.webmanifest", "/assets/bibliothekar-logo-v2.svg"} and method == "GET":
+    if path in {
+        "/manifest.webmanifest",
+        "/assets/bibliothekar-logo-v2.svg",
+        "/assets/bibliothekar-logo-v3.svg",
+        "/assets/bibliothekar-logo-symbol.svg",
+        "/assets/bibliothekar-logo-symbol-background.svg",
+        "/assets/bibliothekar-icon-192.png",
+        "/apple-touch-icon.png",
+    } and method == "GET":
         return await call_next(request)
 
     configured = _configured_password()

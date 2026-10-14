@@ -1,3 +1,12 @@
+## 0.56.0 – Transparente V3-Wortmarke und installierbares Web-App-Icon (14.10.2026)
+
+- Für Header, „Über Bibliothekar“ sowie Login und Ersteinrichtung gilt ab sofort das originale transparente `bibliothekar-logo-v3.svg` (ohne Farbflächen oder Neuzeichnen).
+- Auf breiten Einrichtungsseiten wird die große Wortmarke horizontal zentriert und bleibt räumlich unabhängig vom mittigen Formular. Mobile Ansicht unverändert.
+- Browser-Favicon und Web-App-Manifest verwenden `bibliothekar-logo-symbol-background.svg` mit dunkelblauer Fläche, einschließlich eines abgeleiteten PNG-Icons für Apple-Touch und installierte Anwendungen.
+- `bibliothekar-logo-symbol.svg` ohne Hintergrund bleibt zusätzlich als unverändertes Quellasset vorhanden; alte V2-URL wird aus Kompatibilitätsgründen weiter ausgeliefert.
+- Icons/Logo sind auch beim Login und vor Anlage der ersten Bibliothek erreichbar. Keine Änderung der Zugriffsrechte auf APIs oder private Medien.
+- Frühere Datenbank-, Ordner- und mobile PWA-Logik bleiben unverändert.
+
 ## 0.55.4 – Config-Bootstrap und eigenständiges Desktop-Logo (14.10.2026)
 
 - Ein fehlendes \`/config/settings.json\` wird beim Containerstart mit einem gültigen, minimalen JSON-Objekt und restriktiven Dateirechten automatisch erstellt. Damit meldet die Health-Anzeige bei einem vollständig neuen Setup nicht mehr allein wegen der fehlenden Settings-Datei \`Degraded\`. Existierende und auch fehlerhafte Konfigurationen bleiben ausdrücklich unverändert.

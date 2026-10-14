@@ -5673,7 +5673,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
     <span class="bk-brand-art">
       <img class="bk-brand-image"
-           src="/assets/bibliothekar-logo-v2.svg?v=0.47.3"
+           src="/assets/bibliothekar-logo-v3.svg?v=0.56.0"
            width="165" height="45" alt="Bibliothekar"
            decoding="async" draggable="false">
       <span id="bk-current-library-name" class="bk-brand-library">{escape((get_current_library().display_name if get_current_library() else "Hauptbibliothek"))}</span>
@@ -5936,13 +5936,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
       <div class="bk-about-title">
-        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo-v2.svg?v=0.47.3" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
+        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo-v3.svg?v=0.56.0" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
         <div class="bk-about-tagline">Sichern · Ordnen · Bewahren</div>
       </div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.55.4</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.56.0</span></p>
   </div>
 </dialog>
 
@@ -7747,6 +7747,8 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     result = result.replace(
         "</head>",
         '<link rel="manifest" href="/manifest.webmanifest">\n'
+        '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg?v=0.56.0">\n'
+        '<link rel="apple-touch-icon" sizes="192x192" href="/assets/bibliothekar-icon-192.png?v=0.56.0">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n'
         f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"

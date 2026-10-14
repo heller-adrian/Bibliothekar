@@ -69,11 +69,12 @@ body.bk-setup-page .bk-setup-lang { margin-bottom:16px; }
   body.bk-setup-page .bk-setup-brand {
     position:fixed;
     top:clamp(24px,4vh,64px);
-    left:clamp(28px,4vw,88px);
+    left:50%;
+    transform:translateX(-50%);
     width:min(830px,48vw);
     max-width:calc(100vw - 56px);
     margin:0;
-    justify-content:flex-start;
+    justify-content:center;
     pointer-events:none;
   }
   body.bk-setup-page .bk-setup-brand img {
@@ -219,10 +220,19 @@ def localize_setup_html(html: str, page: str) -> str:
     html=html.replace(
         "<main>",
         '<div class="bk-setup-brand" aria-label="Bibliothekar">'
-        '<img src="/assets/bibliothekar-logo-v2.svg" alt="Bibliothekar" '
+        '<img src="/assets/bibliothekar-logo-v3.svg?v=0.56.0" alt="Bibliothekar" '
         'width="360" height="98" decoding="async"></div><main>',
         1,
     )
-    html=html.replace("</head>",_HEAD+_CSS+"</head>",1)
+    html=html.replace(
+        "</head>",
+        '<link rel="icon" type="image/svg+xml" '
+        'href="/assets/bibliothekar-logo-symbol-background.svg?v=0.56.0">'
+        '<link rel="apple-touch-icon" sizes="192x192" '
+        'href="/assets/bibliothekar-icon-192.png?v=0.56.0">'
+        '<link rel="manifest" href="/manifest.webmanifest">'
+        + _HEAD + _CSS + "</head>",
+        1,
+    )
     html=html.replace("</body>",_JS+"</body>",1)
     return html
