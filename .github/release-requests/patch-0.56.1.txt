@@ -1,0 +1,6 @@
+Publish the targeted Bibliothekar 0.56.1 stability patch after complete QA.
+Basis: patch/0.56.0 at dcb11ba6c0a4db8e42fe70bc3ad7e8753c226597.
+Validated implementation: 19838987219201b30d865b932ec95f517e3f583c.
+Backend QA run 38569321792: all 1198 tests PASS; isolated archive container harness PASS.
+Scope: F1/F2 selective trash journal and idempotent catalogue compensation; F3 general metadata swap recovery; F4 raw root/symlink validation. Four original audit test bodies unchanged, 39 additional targeted tests. No schema/data migration and no production TrueNAS tests.
+Run the complete publishing QA gate on this branch head before publishing ghcr.io/heller-adrian/bibliothekar:patch-0.56.1. Preserve the 0.56.0 branch and audit evidence. Record the published digest and source revision.
