@@ -3,14 +3,14 @@ from app import __version__, main
 from app.ui_shell import BIBLIOTHEKAR_0472_CSS, apply_shell
 
 
-def test_0472_runtime_and_logo_v2_intact():
+def test_0472_runtime_and_logo_v3_intact():
     assert __version__ == main.DEPLOYMENT_VERSION == "0.56.0"
     for area in ("import", "workspace", "archive", "metadata", "trash"):
         html = apply_shell("<html><head></head><body></body></html>", active_area=area)
         assert f"<style>{BIBLIOTHEKAR_0472_CSS}</style>" in html
-        assert html.count('/assets/bibliothekar-logo-v2.svg?v=0.47.3') == 2
+        assert html.count('/assets/bibliothekar-logo-v3.svg?v=0.56.0') == 2
         assert html.count('id="bk-current-library-name"') == 1
-    assert main.bibliothekar_brand_logo().path.name == "bibliothekar-logo-v2.svg"
+    assert main.bibliothekar_brand_logo().path.name == "bibliothekar-logo-v3.svg"
 
 
 def test_0472_headings_and_subnav_move_up_in_document_flow():

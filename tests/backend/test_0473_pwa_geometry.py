@@ -17,11 +17,11 @@ def _page(area):
     )
 
 
-def test_0473_version_and_logo_v2_unchanged():
+def test_0473_version_and_logo_v3_unchanged():
     assert __version__ == main.DEPLOYMENT_VERSION == "0.56.0"
     for area in ("import", "workspace", "archive", "metadata", "trash"):
         page = _page(area)
-        assert page.count('src="/assets/bibliothekar-logo-v2.svg?v=0.47.3"') == 2
+        assert page.count('src="/assets/bibliothekar-logo-v3.svg?v=0.56.0"') == 2
         assert page.count('id="bk-current-library-name"') == 1
         assert "<style>" + BIBLIOTHEKAR_0473_CSS + "</style>" in page
 
