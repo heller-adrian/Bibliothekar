@@ -51,6 +51,37 @@ body.bk-setup-page .bk-setup-lang { margin-bottom:16px; }
   body.bk-setup-page { justify-content:flex-start; padding-top: min(10vh,52px)!important; }
   body.bk-setup-page .bk-setup-brand img {width:min(315px,82vw);}
 }
+/* Desktop: brand is a fixed, left-aligned page title independent of the
+   form. Keep the login and onboarding forms at their original center. */
+@media(min-width:821px) {
+  body.bk-setup-page {
+    display:grid!important;
+    place-items:center;
+    justify-content:initial;
+    align-items:initial;
+    padding:24px!important;
+  }
+  body.bk-setup-page main {
+    margin:0 auto!important;
+    justify-self:center;
+    align-self:center;
+  }
+  body.bk-setup-page .bk-setup-brand {
+    position:fixed;
+    top:clamp(24px,4vh,64px);
+    left:clamp(28px,4vw,88px);
+    width:min(830px,48vw);
+    max-width:calc(100vw - 56px);
+    margin:0;
+    justify-content:flex-start;
+    pointer-events:none;
+  }
+  body.bk-setup-page .bk-setup-brand img {
+    width:100%;
+    max-width:100%;
+    height:auto;
+  }
+}
 .bk-setup-lang{display:flex;justify-content:flex-end;gap:6px;margin:0 0 18px}
 .bk-setup-lang button{width:auto!important;min-width:43px;margin:0!important;padding:7px 10px!important;
 border:1px solid #586774!important;border-radius:8px;background:transparent!important;font-size:.85rem!important}

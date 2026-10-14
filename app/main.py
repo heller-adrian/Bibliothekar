@@ -299,8 +299,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.55.3"
-DEPLOYMENT_VERSION = "0.55.3"
+RELEASE_VERSION = "0.55.4"
+DEPLOYMENT_VERSION = "0.55.4"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -2082,6 +2082,17 @@ def startup_database() -> None:
     global LIBRARY_REGISTRY_ERROR
     global MAIN_LIBRARY_CONTEXT
     global WORKER_THREAD
+
+    # Fresh installations and clean slates lack /config/settings.json. The
+    # configuration must exist before any workers/API requests use load_settings().
+    # Never rewrite an existing settings file, even if malformed.
+    from app.config_bootstrap import ensure_settings_file
+    try:
+        ensure_settings_file(CONFIG_PATH)
+    except OSError as error:
+        # Keep startup diagnostics available (health reports unreadable config)
+        # without causing a second, unrelated database initialization error.
+        print("Unable to create initial application settings:", error, flush=True)
 
     try:
         main_database_was_new = not DATABASE_FILE.is_file() or DATABASE_FILE.stat().st_size == 0

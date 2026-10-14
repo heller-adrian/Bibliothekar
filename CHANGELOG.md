@@ -1,3 +1,10 @@
+## 0.55.4 – Config-Bootstrap und eigenständiges Desktop-Logo (14.10.2026)
+
+- Ein fehlendes \`/config/settings.json\` wird beim Containerstart mit einem gültigen, minimalen JSON-Objekt und restriktiven Dateirechten automatisch erstellt. Damit meldet die Health-Anzeige bei einem vollständig neuen Setup nicht mehr allein wegen der fehlenden Settings-Datei \`Degraded\`. Existierende und auch fehlerhafte Konfigurationen bleiben ausdrücklich unverändert.
+- Großes Bibliothekar-Logo auf breiten Desktop-Einrichtungsseiten, links oben fest positioniert; Login und Erstbibliotheksformular bleiben unabhängig davon mittig.
+- Schmale/mobile Passwort- und Einrichtungsseiten behalten vollständig das bewährte 0.55.3-Layout.
+- Keine Migration, keine Dateioperationen in Benutzer-Workspaces, kein Eingriff in das Administratorpasswort.
+
 ## 0.55.3 – Feinschliff vor der Release-Prüfung (14.10.2026)
 
 - Login und Einrichtung zeigen das originale Bibliothekar-Logo groß vor dem Formular auf dem gleichen dunklen Markenblau (`#15222c`) wie der Desktop-Header; EN/DE-Schalter und Authentifizierung bleiben unverändert.
