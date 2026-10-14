@@ -522,6 +522,20 @@ def move_import_into_workspace(
             "Temporäre Sicherung und Arbeitsbereich liegen nicht auf demselben Dateisystem."
         )
 
+    from app.trash_selective import _atomic_json, _sync_dir
+    # The original inode survives a same-filesystem rename. Persist ownership
+    # before the first move, including the gap before the path callback.
+    journal = temporary_original.parent / "move-journal.json"
+    ownership = []
+    for item in plan:
+        source = temporary_original / str(item["source_relative_path"])
+        info = source.stat()
+        ownership.append(dict(source_relative_path=str(item["source_relative_path"]),
+                              destination_relative_path=str(item["destination_relative_path"]),
+                              sha256=str(item["sha256"]), size_bytes=int(item["size_bytes"]),
+                              inode=[info.st_dev, info.st_ino]))
+    _atomic_json(journal, dict(format=1, root=str(shared_root.resolve()), files=ownership))
+    _sync_dir(journal.parent.parent)
     moved: list[tuple[Path, Path]] = []
     try:
         for item in plan:
@@ -535,6 +549,9 @@ def move_import_into_workspace(
                 raise PipelineError(f"Zieldatei existiert bereits: {destination}")
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.replace(source, destination)
+            from app.trash_selective import _sync_parents
+            _sync_parents(destination.parent, shared_root)
+            _sync_dir(source.parent)
             moved.append((source, destination))
 
         for item in plan:
@@ -583,6 +600,50 @@ def move_import_into_workspace(
                 + " | ".join(rollback_errors)
             )
         raise
+
+
+def discard_import_moves(central: Path, job_id: str, rows: list, *, verify_callback=None) -> int:
+    """Preflight every owned copy before deleting any; retain unknown bytes."""
+    import json
+    from app.trash_restore import _relative, _source
+    from app.trash_selective import _sync_dir
+    journal = central / ".incoming" / job_id / "move-journal.json"
+    candidates = {}
+    known = {str(row["original_relative_path"]): row for row in rows}
+    if journal.exists() or journal.is_symlink():
+        if journal.is_symlink() or not journal.is_file():
+            raise PipelineError("Unsicheres Import-Movejournal.")
+        data = json.loads(journal.read_text())
+        if data.get("format") != 1 or data.get("root") != str(central.resolve()) or not isinstance(data.get("files"), list):
+            raise PipelineError("Import-Movejournal passt nicht zum Bestand.")
+        for item in data["files"]:
+            row = known.get(str(item["source_relative_path"]))
+            if row is None or int(row["size_bytes"]) != item["size_bytes"] or str(row["sha256"]) != item["sha256"]:
+                raise PipelineError("Import-Movejournal passt nicht zum Katalog.")
+            rel = _relative(item["destination_relative_path"])
+            candidate = central / rel
+            if candidate.exists() or candidate.is_symlink():
+                candidate = _source(central, rel)
+                info = candidate.stat()
+                if [info.st_dev, info.st_ino] != item["inode"]:
+                    raise PipelineError("Importziel besitzt keinen nachgewiesenen Besitz.")
+                candidates[str(rel)] = (candidate, item["size_bytes"], item["sha256"])
+    for row in rows:
+        if row["current_root_kind"] != "shared_workspace": continue
+        rel = _relative(str(row["current_relative_path"]))
+        candidate = central / rel
+        if candidate.exists() or candidate.is_symlink():
+            candidate = _source(central, rel)
+            candidates[str(rel)] = (candidate, int(row["size_bytes"]), str(row["sha256"] or ""))
+    for path, size, sha in candidates.values():
+        if verify_callback is not None:
+            verify_callback(path, size, sha)
+        elif not sha or path.stat().st_size != size or sha256_file(path) != sha:
+            raise PipelineError("Importdatei wurde verändert; Bereinigung gesperrt: " + str(path))
+    for path, size, sha in candidates.values():
+        path.unlink()
+        _sync_dir(path.parent)
+    return len(candidates)
 
 
 def run_folder_import_job(
@@ -1021,6 +1082,7 @@ def run_folder_import_job(
         archive_protocol_directory(temporary_protocol, permanent_protocol)
         if temporary_job_root.exists():
             _remove_empty_directories(temporary_job_root)
+            (temporary_job_root / "move-journal.json").unlink(missing_ok=True)
             temporary_job_root.rmdir()
 
         finished_at = datetime.now(timezone.utc).astimezone().isoformat()

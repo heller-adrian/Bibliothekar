@@ -220,16 +220,16 @@ def localize_setup_html(html: str, page: str) -> str:
     html=html.replace(
         "<main>",
         '<div class="bk-setup-brand" aria-label="Bibliothekar">'
-        '<img src="/assets/bibliothekar-logo-v3.svg?v=0.56.1" alt="Bibliothekar" '
+        '<img src="/assets/bibliothekar-logo-v3.svg?v=0.56.2" alt="Bibliothekar" '
         'width="360" height="98" decoding="async"></div><main>',
         1,
     )
     html=html.replace(
         "</head>",
         '<link rel="icon" type="image/svg+xml" '
-        'href="/assets/bibliothekar-logo-symbol-background.svg?v=0.56.1">'
+        'href="/assets/bibliothekar-logo-symbol-background.svg?v=0.56.2">'
         '<link rel="apple-touch-icon" sizes="192x192" '
-        'href="/assets/bibliothekar-icon-192.png?v=0.56.1">'
+        'href="/assets/bibliothekar-icon-192.png?v=0.56.2">'
         '<link rel="manifest" href="/manifest.webmanifest">'
         + _HEAD + _CSS + "</head>",
         1,

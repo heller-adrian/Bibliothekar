@@ -1,4 +1,4 @@
-"""Focused fault injection for the four audited 0.56.1 corrections."""
+"""Focused fault injection for the four audited 0.56.2 corrections."""
 from pathlib import Path
 import json
 import sqlite3

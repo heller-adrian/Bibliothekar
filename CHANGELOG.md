@@ -1,4 +1,10 @@
+## 0.56.2
+
+- F5–F10 aus Audit Phase 3: frühe Sortier-/Reconcile-Recovery, dauerhafte Papierkorb-Restores und Import-Move-Nachweise, fortsetzbare SSD-Teilfreigabe mit vollständiger Archivprüfung sowie wiederholbare Metadatenpropagation und Arbeitskopienbereinigung.
+- Originale 65 Prozessabbruchfälle als Backend-Regressionen übernommen und Wiederanlauf-/Fremddatei-Gegenproben ergänzt.
+
 ## 0.56.1 – Stabilitätspatch nach Audit Phase 2 (14.10.2026)
+
 
 - F1/F2: Selektive Papierkorblöschung erhält ein atomar ersetztes, dauerhaft geschriebenes Journal mit gezielter Katalogsicherung. Teilcommits getrennter SQLite-Datenbanken werden wiederholbar kompensiert; Familien und abhängige Zuordnungen bleiben erhalten. Wiederherstellung blockiert bei widersprüchlichen Dateien oder Katalogen und bewahrt die Nachweise.
 - F3: Allgemeine Metadatenkorrektur verwendet die bestehende Austausch-Recovery mit gesicherten Originalbytes. Nach einem fehlgeschlagenen SQLite-Abschluss ist Rückbau und erneute Ausführung möglich; bestätigte Abschlüsse werden fertiggestellt.

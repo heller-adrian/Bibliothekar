@@ -1291,7 +1291,7 @@ def _exiftool_value(value: str) -> str:
 
 def write_metadata_datetime(path: Path, media_type: str, value: str) -> None:
     stamp = _exiftool_value(value)
-    command = ["exiftool", "-overwrite_original"]
+    command = ["exiftool", "-overwrite_original_in_place"]
 
     if media_type == "video":
         command += [
@@ -1414,6 +1414,10 @@ def _complete_task(
 ) -> dict[str, Any]:
     now = _now()
     with database_connection(database_path) as connection:
+        row = connection.execute("SELECT area FROM metadata_corrections WHERE id=?", (correction_id,)).fetchone()
+        verification = dict(verification)
+        if row and row["area"] == "library":
+            verification["projection_pending"] = True
         connection.execute(
             """UPDATE metadata_corrections
                SET status='completed',output_path=?,output_size_bytes=?,
@@ -1431,6 +1435,32 @@ def _complete_task(
             ),
         )
     return get_metadata_correction(database_path, correction_id)
+
+
+def finish_metadata_propagation(database_path: Path, task_id: str) -> None:
+    with database_connection(database_path) as connection:
+        row = connection.execute("SELECT verification_json FROM metadata_corrections WHERE id=? AND status='completed'", (task_id,)).fetchone()
+        if row:
+            details = json.loads(row["verification_json"] or "{}")
+            details.pop("projection_pending", None)
+            connection.execute("UPDATE metadata_corrections SET verification_json=? WHERE id=?", (json.dumps(details, ensure_ascii=False, sort_keys=True), task_id))
+
+
+def replay_pending_metadata_propagations(databases: list[Path]) -> int:
+    from app.global_stock import propagate_corrected_family
+    count = 0
+    for database in databases:
+        for task in list_metadata_corrections(database, include_completed=True):
+            if task["area"] != "library" or task["status"] != "completed" or not task.get("verification", {}).get("projection_pending"):
+                continue
+            detected = task.get("detected") or {}
+            job_id, family_key = str(detected.get("job_id") or ""), str(detected.get("family_key") or "")
+            if not job_id or not family_key:
+                raise MetadataCorrectionError("Ausstehende Metadatenpropagation ohne Familienidentität.")
+            propagate_corrected_family(database, databases, job_id=job_id, family_key=family_key)
+            finish_metadata_propagation(database, str(task["id"]))
+            count += 1
+    return count
 
 
 def _apply_general_metadata_correction(
@@ -1451,7 +1481,7 @@ def _apply_general_metadata_correction(
     metadata_root = storage_paths(workspace_root)["metadata_root"].resolve(strict=False)
     from app.metadata_swap_recovery import (
         assert_no_pending_swaps, create_swap_journal, fsync_staged_file,
-        mark_swap_committed, recover_swap_journal,
+        mark_swap_committed, recover_swap_journal, create_preparation_journal,
     )
     assert_no_pending_swaps(metadata_root)
     if not _is_relative_to(source, root) or not source.is_file():
@@ -1468,6 +1498,11 @@ def _apply_general_metadata_correction(
     temp = source.parent / ("." + source.name + ".metadata-" + uuid.uuid4().hex + source.suffix)
     backup = source.parent / ("." + source.name + ".metadata-before-" + uuid.uuid4().hex)
     swap_journal: Path | None = None
+    preparation = create_preparation_journal(
+        metadata_root, data_root=root, database_path=database_path,
+        task_id=str(task["id"]), source=source, incoming=temp, backup=backup,
+        before_sha=str(task["source_sha256"]),
+    )
     try:
         # TrueNAS/ZFS: nur Dateiinhalte kopieren. copy2()/copystat kann beim
         # Übertragen von Modus/ACL-Metadaten mit EPERM scheitern.
@@ -1490,7 +1525,7 @@ def _apply_general_metadata_correction(
         fsync_staged_file(temp)
         swap_journal = create_swap_journal(
             metadata_root, kind="general", data_root=root, database_path=database_path,
-            task_id=str(task["id"]), file_entries=[{
+            task_id=str(task["id"]), preparation=preparation, file_entries=[{
                 "source": str(source), "incoming": str(temp), "backup": str(backup),
                 "before_sha": str(task["source_sha256"]), "after_sha": output_sha,
             }],
@@ -1528,10 +1563,8 @@ def _apply_general_metadata_correction(
                     "Metadatenkorrektur unterbrochen; Sicherheitskopie und Journal bleiben erhalten: "
                     + str(recovery_error)
                 ) from error
-        try:
-            temp.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if swap_journal is None:
+            recover_swap_journal(metadata_root, preparation, allowed_databases={database_path})
         _mark_task_blocked(database_path, str(task["id"]), error)
         if isinstance(error, MetadataCorrectionError):
             raise

@@ -83,11 +83,19 @@ def create_swap_journal(
     data_root: Path, database_path: Path | None = None,
     task_id: str | None = None, family_id: int | None = None,
     proposed: str = "", task_verification: dict[str, Any] | None = None,
+    preparation: Path | None = None,
 ) -> Path:
     if kind not in {"library", "reintegrate", "multiple", "general"} or not file_entries:
         raise MetadataSwapRecoveryError("Ungültiger Metadaten-Austauschplan.")
-    record_id = uuid.uuid4().hex
+    record_id = uuid.uuid4().hex if preparation is None else preparation.stem
     journal = _journal_dir(metadata_root) / (record_id + ".json")
+    if preparation is not None:
+        previous = _load(preparation, metadata_root)
+        if previous["state"] != "preparing" or previous["task_id"] != task_id:
+            raise MetadataSwapRecoveryError("Falsches Vorbereitungsjournal.")
+        for key in ("source", "incoming", "backup", "before_sha"):
+            if previous["files"][0][key] != file_entries[0][key]:
+                raise MetadataSwapRecoveryError("Vorbereitungsplan wurde verändert.")
     data = {
         "format": 1, "id": record_id, "kind": kind,
         "state": "prepared", "root": str(Path(data_root).resolve(strict=False)),
@@ -97,8 +105,50 @@ def create_swap_journal(
         "files": file_entries,
     }
     _validate(journal, data, metadata_root)
-    _atomic_json(journal, data, new=True)
+    _atomic_json(journal, data, new=preparation is None)
     return journal
+
+
+def create_preparation_journal(metadata_root: Path, *, data_root: Path,
+                               database_path: Path, task_id: str, source: Path,
+                               incoming: Path, backup: Path, before_sha: str) -> Path:
+    # Record exclusive ownership before the first byte is copied. Partial
+    # native ExifTool output cannot be hashed in advance; its inode is recorded
+    # before copy/write and checked on cleanup. Unknown entries are retained.
+    ident = uuid.uuid4().hex
+    journal = _journal_dir(metadata_root) / (ident + ".json")
+    data = dict(format=1, id=ident, kind="general", state="preparing",
+                root=str(data_root.resolve()), database=str(database_path.resolve()),
+                task_id=task_id, files=[dict(source=str(source), incoming=str(incoming),
+                                            backup=str(backup), before_sha=before_sha)])
+    _validate(journal, data, metadata_root)
+    _atomic_json(journal, data, new=True)
+    _sync_dir(metadata_root)
+    fd = os.open(incoming, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        os.fsync(fd)
+        info = os.fstat(fd)
+        data["files"][0]["owned_inode"] = [info.st_dev, info.st_ino]
+        _sync_dir(incoming.parent)
+        _atomic_json(journal, data)
+    finally:
+        os.close(fd)
+    return journal
+
+
+def _recover_preparation(data: dict[str, Any]) -> None:
+    item = data["files"][0]
+    source, incoming, backup = [Path(item[key]) for key in ("source", "incoming", "backup")]
+    if source.is_symlink() or not source.is_file() or _sha(source) != item["before_sha"]:
+        raise MetadataSwapRecoveryError("Vorbereitung ohne unverändertes Original.")
+    if backup.exists() or backup.is_symlink():
+        raise MetadataSwapRecoveryError("Unerwartete Sicherheitskopie während Vorbereitung.")
+    if incoming.exists() or incoming.is_symlink():
+        info = incoming.lstat()
+        if incoming.is_symlink() or not incoming.is_file() or [info.st_dev, info.st_ino] != item.get("owned_inode"):
+            raise MetadataSwapRecoveryError("Arbeitskopie ohne nachgewiesenen Besitz; Prüfung erforderlich.")
+        incoming.unlink()
+        _sync_dir(incoming.parent)
 
 
 def _validate(journal: Path, data: dict[str, Any], metadata_root: Path) -> None:
@@ -111,7 +161,7 @@ def _validate(journal: Path, data: dict[str, Any], metadata_root: Path) -> None:
         raise MetadataSwapRecoveryError("Metadatenjournal liegt am falschen Ort.")
     if data.get("kind") not in {"library", "reintegrate", "multiple", "general"}:
         raise MetadataSwapRecoveryError("Unbekannte Metadatenkorrektur-Art.")
-    if data.get("state") not in {"prepared", "committed"}:
+    if data.get("state") not in {"preparing", "prepared", "committed"}:
         raise MetadataSwapRecoveryError("Unbekannter Metadatenjournal-Zustand.")
     root = Path(str(data.get("root") or "")).resolve(strict=False)
     if not root.is_absolute() or str(root) == "/" or root.is_symlink():
@@ -142,7 +192,7 @@ def _validate(journal: Path, data: dict[str, Any], metadata_root: Path) -> None:
         if paths[0] in seen:
             raise MetadataSwapRecoveryError("Metadatenquelle ist doppelt.")
         seen.update(paths)
-        for key in ("before_sha", "after_sha"):
+        for key in (("before_sha",) if data["state"] == "preparing" else ("before_sha", "after_sha")):
             if not re.fullmatch("[0-9a-f]{64}", str(item.get(key) or "")):
                 raise MetadataSwapRecoveryError("Metadatenjournal ohne gültige Prüfsumme.")
         if data["kind"] in {"library", "reintegrate"} and not isinstance(item.get("file_id"), int):
@@ -312,6 +362,17 @@ def recover_swap_journal(
         approved = {str(Path(p).resolve(strict=False)) for p in allowed_databases}
         if db not in approved:
             raise MetadataSwapRecoveryError("Metadatenjournal verweist auf eine nicht registrierte Datenbank.")
+    if data["state"] == "preparing":
+        # Validate task/source association independently of the unknown AFTER hash.
+        item = data["files"][0]
+        with database_connection(Path(db)) as conn:
+            row = conn.execute("SELECT source_path,source_sha256,status FROM metadata_corrections WHERE id=? AND area='general'", (data["task_id"],)).fetchone()
+            if row is None or row["source_path"] != item["source"] or row["source_sha256"] != item["before_sha"] or row["status"] not in {"prepared", "blocked", "writing"}:
+                raise MetadataSwapRecoveryError("Vorbereitungsjournal passt nicht zur Aufgabe.")
+        _recover_preparation(data)
+        journal.unlink()
+        _sync_dir(journal.parent)
+        return "rolled_back"
     decision = _database_state(data)
     if data["state"] == "committed" and decision != "committed":
         raise MetadataSwapRecoveryError("Metadatenjournal und SQLite-Commit widersprechen sich.")

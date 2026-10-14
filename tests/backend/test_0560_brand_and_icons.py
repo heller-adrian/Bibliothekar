@@ -1,4 +1,4 @@
-"""0.56.1: V3 brand asset, installable icon and stable responsive setup."""
+"""0.56.2: V3 brand asset, installable icon and stable responsive setup."""
 from pathlib import Path
 import struct
 import xml.etree.ElementTree as ET
@@ -15,7 +15,7 @@ ASSETS = Path(__file__).resolve().parents[2] / "app"
 
 
 def test_0560_assets_are_original_svg_and_blue_icon():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.1"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.2"
     wordmark = (ASSETS / "bibliothekar-logo-v3.svg").read_text(encoding="utf-8")
     background = (ASSETS / "bibliothekar-logo-symbol-background.svg").read_text(encoding="utf-8")
     transparent = (ASSETS / "bibliothekar-logo-symbol.svg").read_text(encoding="utf-8")
@@ -31,16 +31,16 @@ def test_0560_assets_are_original_svg_and_blue_icon():
 
 def test_0560_logo_v3_in_all_ui_surfaces():
     for page in (_login_html(), _library_onboarding_html()):
-        assert '/assets/bibliothekar-logo-v3.svg?v=0.56.1' in page
-        assert '/assets/bibliothekar-logo-symbol-background.svg?v=0.56.1' in page
+        assert '/assets/bibliothekar-logo-v3.svg?v=0.56.2' in page
+        assert '/assets/bibliothekar-logo-symbol-background.svg?v=0.56.2' in page
         assert 'rel="apple-touch-icon"' in page
         assert 'rel="manifest"' in page
     for area in ("import", "workspace", "archive"):
         html = apply_shell("<html><head></head><body><main></main></body></html>", active_area=area)
-        assert html.count('src="/assets/bibliothekar-logo-v3.svg?v=0.56.1"') == 2
-        assert '/assets/bibliothekar-logo-symbol-background.svg?v=0.56.1' in html
+        assert html.count('src="/assets/bibliothekar-logo-v3.svg?v=0.56.2"') == 2
+        assert '/assets/bibliothekar-logo-symbol-background.svg?v=0.56.2' in html
         assert 'rel="apple-touch-icon"' in html
-        assert "Version <span data-bk-version>0.56.1</span>" in html
+        assert "Version <span data-bk-version>0.56.2</span>" in html
 
 
 def test_0560_desktop_centering_without_touching_mobile():

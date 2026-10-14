@@ -249,8 +249,10 @@ def propagate_corrected_family(
     for raw in database_paths:
         target_path = Path(raw).resolve(strict=False)
         key = str(target_path)
-        if key in seen or target_path == source_resolved or not target_path.is_file():
+        if key in seen or target_path == source_resolved:
             continue
+        if not target_path.is_file():
+            raise GlobalStockError("Metadaten-Zieldatenbank fehlt: " + str(target_path))
         seen.add(key)
         with database_connection(target_path) as target:
             target_family = target.execute(
@@ -359,7 +361,11 @@ def migrate_main_free_stock_to_central(
                               (ea.family_id IS NOT NULL AND ea.family_id=f.family_id)
                               OR (ea.file_id IS NOT NULL AND ea.file_id=f.id)
                           )
-                    ) AS belongs_to_applied
+                    ) AS belongs_to_applied,
+                    EXISTS (
+                        SELECT 1 FROM event_reapply_removed_families pending
+                        WHERE pending.job_id=f.job_id AND pending.family_id=f.family_id
+                    ) AS pending_reconcile
                 FROM files f
                 WHERE f.current_root_kind='shared_workspace'
                   AND COALESCE(TRIM(f.current_relative_path),'') <> ''
@@ -384,7 +390,7 @@ def migrate_main_free_stock_to_central(
         if _is_staging_path(normalized):
             kept_staging += 1
             continue
-        if bool(row["belongs_to_applied"]):
+        if bool(row["belongs_to_applied"]) or bool(row["pending_reconcile"]):
             kept_applied += 1
             continue
 

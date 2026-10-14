@@ -64,7 +64,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backend-qa
-          path: /tmp/bibliothekar-qa.xml
+          path: |
+            /tmp/bibliothekar-qa.xml
+            /tmp/pytest-of-*/pytest-*/0562-evidence
 
       - name: Read application version
         id: version

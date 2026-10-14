@@ -216,6 +216,18 @@ def prepare_queued_trash_restore(
     data=json.loads(journal.read_text(encoding="utf-8"))
     if data.get("job_id")!=job_id or not isinstance(data.get("relative_paths"),list):
         raise TrashError("Ungültiges Papierkorb-Importjournal.")
+    if data.get("status") == "known_restored":
+        _finish_known_restore(workspace_root, job_id)
+        return {"unknown_file_count":len(data.get("files") or []), "known_restored_count":int(data.get("known_restored_count") or 0), "known_paths":list(data.get("known_paths") or [])}
+    if data.get("status") == "staged":
+        from app.trash_restore import restore_trash_files
+        from app.trash_selective import _atomic_json
+        known = list(data.get("known_paths") or [])
+        restored = restore_trash_files(sorted(all_databases), workspace_root, relative_paths=known, operation_id=job_id) if known else {"restored_file_count":0}
+        data.update(status="known_restored", known_restored_count=restored["restored_file_count"])
+        _atomic_json(journal, data)
+        _finish_known_restore(workspace_root, job_id)
+        return {"unknown_file_count":len(data.get("files") or []), "known_restored_count":restored["restored_file_count"], "known_paths":known}
     root=trash_root(workspace_root)
     known=[]
     unknown=[]
@@ -274,29 +286,31 @@ def prepare_queued_trash_restore(
     # attempt still has its original unknown files for a safe audit.
     data={**data,"files":copies,"known_paths":known,
           "status":"staged"}
-    tmp=journal.with_suffix(".tmp")
-    with tmp.open("x",encoding="utf-8") as handle:
-        json.dump(data,handle,ensure_ascii=False)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp,journal)
+    from app.trash_selective import _atomic_json
+    _atomic_json(journal, data)
     restored={"restored_file_count":0,"restored_paths":[]}
     if known:
         from app.trash_restore import restore_trash_files
         restored=restore_trash_files(
-            sorted(all_databases),workspace_root,relative_paths=known
+            sorted(all_databases),workspace_root,relative_paths=known,operation_id=job_id
         )
     data={**data,"known_restored_count":int(restored.get("restored_file_count",0)),
           "status":"known_restored"}
-    tmp=journal.with_suffix(".tmp")
-    with tmp.open("x",encoding="utf-8") as handle:
-        json.dump(data,handle,ensure_ascii=False)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp,journal)
+    from app.trash_selective import _atomic_json
+    _atomic_json(journal, data)
+    _finish_known_restore(workspace_root, job_id)
     return {"unknown_file_count":len(unknown),
             "known_restored_count":int(restored.get("restored_file_count",0)),
             "known_paths":known}
+
+
+def _finish_known_restore(workspace_root: Path, job_id: str) -> None:
+    from app.trash_restore import _restore_journal
+    from app.trash_selective import _sync_dir
+    path = _restore_journal(workspace_root, job_id)
+    if path.exists():
+        path.unlink()
+        _sync_dir(path.parent)
 
 
 def protected_trash_paths(database_path: Path, workspace_root: Path) -> set[str]:
@@ -333,7 +347,7 @@ def resume_safe_queued_trash_restores(database_path: Path, workspace_root: Path)
             if not path.is_file() or path.is_symlink():
                 continue
             data=json.loads(path.read_text(encoding="utf-8"))
-            if data.get("status")!="queued":
+            if data.get("status") not in {"queued", "staged", "known_restored"}:
                 continue
             if conn.execute("SELECT 1 FROM files WHERE job_id=? LIMIT 1",(jid,)).fetchone():
                 continue

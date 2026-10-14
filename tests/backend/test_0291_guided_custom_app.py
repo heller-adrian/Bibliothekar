@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_0291_keeps_frozen_camera_core_and_bumps_only_deployment():
     assert main.APP_VERSION == PACKAGE_VERSION
-    assert main.RELEASE_VERSION == "0.56.1"
+    assert main.RELEASE_VERSION == "0.56.2"
     assert tuple(map(int, main.DEPLOYMENT_VERSION.split("."))) >= (0, 29, 1)
 
 

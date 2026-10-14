@@ -299,8 +299,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.56.1"
-DEPLOYMENT_VERSION = "0.56.1"
+RELEASE_VERSION = "0.56.2"
+DEPLOYMENT_VERSION = "0.56.2"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -697,6 +697,7 @@ def _discard_terminal_import_job(job_id: str) -> dict[str, int]:
         rows = connection.execute(
             """
             SELECT
+                original_relative_path,
                 current_root_kind,
                 current_relative_path,
                 size_bytes,
@@ -708,44 +709,14 @@ def _discard_terminal_import_job(job_id: str) -> dict[str, int]:
             (job_id,),
         ).fetchall()
 
-    for row in rows:
-        if str(row["current_root_kind"] or "") != "shared_workspace":
-            continue
-        relative = str(row["current_relative_path"] or "").strip()
-        if not relative:
-            continue
-        candidate = (central_root / relative).resolve(strict=False)
-        try:
-            candidate.relative_to(central_root)
-        except ValueError as error:
-            raise ValueError(
-                "Unsicherer Dateipfad im unterbrochenen Import: " + relative
-            ) from error
-        if not candidate.exists():
-            continue
-        if not candidate.is_file() or candidate.is_symlink():
-            raise ValueError(
-                "Unerwarteter Eintrag im unterbrochenen Import: " + relative
-            )
-        expected_size = int(row["size_bytes"] or 0)
-        expected_sha = str(row["sha256"] or "")
-        if expected_size and candidate.stat().st_size != expected_size:
-            raise ValueError(
-                "Dateigröße stimmt beim Bereinigen nicht mehr: " + relative
-            )
-        if expected_sha and sha256_file(candidate) != expected_sha:
-            raise ValueError(
-                "SHA-256 stimmt beim Bereinigen nicht mehr: " + relative
-            )
-        candidate.unlink()
-        removed_files += 1
-        current = candidate.parent
-        while current != central_root:
-            try:
-                current.rmdir()
-            except OSError:
-                break
-            current = current.parent
+    from app.folder_import import discard_import_moves
+    def verify_candidate(candidate: Path, expected_size: int, expected_sha: str) -> None:
+        if not expected_sha or candidate.stat().st_size != expected_size:
+            raise ValueError("Dateigröße oder Prüfsumme fehlt bzw. weicht ab: " + str(candidate))
+        if sha256_file(candidate) != expected_sha:
+            raise ValueError("SHA-256 stimmt beim Bereinigen nicht mehr: " + str(candidate))
+
+    removed_files = discard_import_moves(central_root, job_id, rows, verify_callback=verify_candidate)
 
     incoming = (central_root / ".incoming" / job_id).resolve(strict=False)
     try:
@@ -2132,6 +2103,23 @@ def startup_database() -> None:
             if str(row.get("database_path") or "").strip()
         )
         recover_trash_deletions(WORKSPACE_PATH, allowed_databases=trash_databases)
+        # Recover physical moves before migration, inventory, claims or workers
+        # inspect paths that still refer to the pre-move catalogue.
+        recovery_databases = sorted({DATABASE_FILE} | {
+            Path(str(row["database_path"]))
+            for row in list_libraries(REGISTRY_DATABASE_FILE, active_only=False, registered_only=True)
+            if str(row.get("database_path") or "").strip()
+        })
+        for recovery_database in recovery_databases:
+            if not recovery_database.is_file():
+                raise RuntimeError("Registrierte Bibliotheksdatenbank fehlt: " + str(recovery_database))
+            initialize_database(recovery_database)
+            mark_incomplete_sort_runs_interrupted(recovery_database)
+            recovered_sort = recover_interrupted_sort_runs(recovery_database)
+            if recovered_sort["blocked"]:
+                raise RuntimeError("Sortier-Recovery wegen uneindeutiger Dateien gesperrt.")
+        from app.trash_restore import recover_trash_restores
+        recover_trash_restores(WORKSPACE_PATH, allowed_databases=trash_databases)
         # BA-12: physical metadata swaps must be reconciled BEFORE a
         # background worker or new correction can touch any file. Fail closed
         # on foreign/ambiguous bytes, never overwrite them heuristically.
@@ -2155,6 +2143,11 @@ def startup_database() -> None:
                 "Unterbrochene Metadatenkorrektur erfordert Prüfung: "
                 + " | ".join(metadata_recovery["errors"][:5])
             )
+
+        # The completed task and its pending projection marker share the local
+        # SQLite commit. Replay before catalogue consumers see stale hashes.
+        from app.metadata_correction import replay_pending_metadata_propagations
+        replay_pending_metadata_propagations(recovery_databases)
 
         existing_main = get_library(
             REGISTRY_DATABASE_FILE,
@@ -2389,33 +2382,6 @@ def startup_database() -> None:
             print(
                 f"{interrupted} unterbrochene Aufträge "
                 "wurden markiert.",
-                flush=True,
-            )
-
-        interrupted_sort_runs = (
-            mark_incomplete_sort_runs_interrupted(
-                DATABASE_FILE
-            )
-        )
-
-        if interrupted_sort_runs:
-            print(
-                f"{interrupted_sort_runs} unterbrochene Sortierläufe "
-                "wurden erkannt.",
-                flush=True,
-            )
-
-        sort_recovery = recover_interrupted_sort_runs(DATABASE_FILE)
-        if sort_recovery["recovered"]:
-            print(
-                f"{sort_recovery['recovered']} unterbrochene Sortierläufe "
-                "wurden anhand des Journals sicher zurückgesetzt.",
-                flush=True,
-            )
-        if sort_recovery["blocked"]:
-            print(
-                f"{sort_recovery['blocked']} unterbrochene Sortierläufe "
-                "bleiben wegen eines uneindeutigen Dateizustands gesperrt.",
                 flush=True,
             )
 
@@ -9151,6 +9117,8 @@ def _sync_completed_library_metadata_correction(
         job_id=job_id,
         family_key=family_key,
     )
+    from app.metadata_correction import finish_metadata_propagation
+    finish_metadata_propagation(context.database_path, str(task["id"]))
     synchronize_global_central_stock()
     task["projection_sync"] = propagation
     return task
@@ -10258,13 +10226,13 @@ def web_app_manifest(request: Request) -> JSONResponse:
             "background_color": "#15222c",
             "icons": [
                 {
-                    "src": "/assets/bibliothekar-icon-192.png?v=0.56.1",
+                    "src": "/assets/bibliothekar-icon-192.png?v=0.56.2",
                     "sizes": "192x192",
                     "type": "image/png",
                     "purpose": "any",
                 },
                 {
-                    "src": "/assets/bibliothekar-logo-symbol-background.svg?v=0.56.1",
+                    "src": "/assets/bibliothekar-logo-symbol-background.svg?v=0.56.2",
                     "sizes": "any",
                     "type": "image/svg+xml",
                     "purpose": "any",

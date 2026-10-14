@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - patch/0.56.1
+      - patch/0.56.2
     paths-ignore:
       - '.github/release-requests/**'
   pull_request:
@@ -54,7 +54,15 @@ jobs:
       - name: Collect complete backend regression suite
         run: pytest --collect-only -q -o addopts='' tests/backend
       - name: Run complete backend regression suite without fail-fast
-        run: pytest -q -o addopts='' tests/backend
+        run: pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
+      - name: Retain backend and process recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-qa
+          path: |
+            /tmp/bibliothekar-qa.xml
+            /tmp/pytest-of-*/pytest-*/0562-evidence
 
   archive-isolation-harness:
     runs-on: ubuntu-latest

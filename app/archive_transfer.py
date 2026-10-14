@@ -298,6 +298,7 @@ def verify_event_archive(
     event_id: str,
     *,
     workspace_path: Path | None = None,
+    resume_release_id: str | None = None,
 ) -> dict[str, Any]:
     archive_root = archive_root.expanduser().resolve(strict=False)
 
@@ -406,6 +407,28 @@ def verify_event_archive(
             and str(item.get("asset_kind") or "") in managed_asset_kinds
         ]
 
+    # Only a durable release plan can explain its own missing SSD entries.
+    # It is a frozen expectation, never a substitute for archive SHA checks.
+    release_files = {}
+    if resume_release_id is not None:
+        with database_connection(database_path) as connection:
+            release = connection.execute("SELECT * FROM event_ssd_releases WHERE id=? AND job_id=? AND event_id=? AND status!='completed'", (resume_release_id, job_id, event_id)).fetchone()
+            from app.workspace_layout import shared_work_root
+            if release is None or workspace_path is None or Path(str(release["workspace_root"])).resolve() != shared_work_root(workspace_path).resolve() or Path(str(release["archive_root"])).resolve() != archive_root:
+                raise ArchiveVerificationError("Freigabejournal passt nicht zum Archiv.")
+            release_files = {int(row["file_id"]): dict(row) for row in connection.execute("SELECT * FROM event_ssd_release_files WHERE release_id=?", (resume_release_id,))}
+            release_assets = [dict(row) for row in connection.execute("SELECT * FROM event_ssd_release_assets WHERE release_id=?", (resume_release_id,))]
+        if set(release_files) != {int(row["file_id"]) for row in files}:
+            raise ArchiveVerificationError("Freigabeplan und Kameraoriginale stimmen nicht überein.")
+        for row in files:
+            stored = release_files[int(row["file_id"])]
+            if (int(stored["expected_size_bytes"]) != int(row["size_bytes"]) or str(stored["expected_sha256"]) != str(row.get("sha256_current") or row.get("sha256_original") or "")):
+                raise ArchiveVerificationError("Freigabeplan und Dateikatalog widersprechen sich.")
+        observed_assets = {str(item["relative_path"]) for item in source_assets}
+        for stored in release_assets:
+            if stored["source_relative_path"] not in observed_assets:
+                source_assets.append(dict(known_file_id=None, relative_path=stored["source_relative_path"], event_relative_path=Path(stored["archive_relative_path"]).relative_to(str(inventory["event_prefix"])).as_posix(), size_bytes=stored["expected_size_bytes"], sha256=stored["expected_sha256"], asset_kind=stored["asset_kind"]))
+
     archive_assets_by_event_path = {
         str(item.get("event_relative_path") or ""): item
         for item in inventory["files"]
@@ -459,7 +482,7 @@ def verify_event_archive(
         try:
             file_id = int(row["file_id"])
             source_observed = source_known_by_file_id.get(file_id)
-            if source_known_by_file_id and source_observed is None:
+            if source_known_by_file_id and source_observed is None and file_id not in release_files:
                 relative_text = str(
                     row.get("current_relative_path")
                     or row.get("original_relative_path")
@@ -505,6 +528,11 @@ def verify_event_archive(
                     or row.get("original_relative_path")
                     or ""
                 ).replace("\\", "/").strip("/")
+
+            if file_id in release_files:
+                expected_relative = str(release_files[file_id]["archive_relative_path"])
+                expected_size = int(release_files[file_id]["expected_size_bytes"])
+                expected_sha256 = str(release_files[file_id]["expected_sha256"])
 
             if not expected_sha256:
                 raise ArchiveVerificationError("Gespeicherte SHA-256-Summe fehlt.")

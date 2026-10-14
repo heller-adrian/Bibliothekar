@@ -16,7 +16,7 @@ from app.setup_language import _CSS
 
 
 def test_0554_version():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.1"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.2"
 
 
 def test_0554_creates_missing_settings_safely(tmp_path: Path):

@@ -9,7 +9,7 @@ from app.ui_shell import (
 
 
 def test_0350_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.56.1"
+    assert main.DEPLOYMENT_VERSION == "0.56.2"
 
 
 def test_0350_detects_standalone_web_app_separately_from_browser():

@@ -885,13 +885,16 @@ def release_event_ssd(
     work_root = shared_work_root(workspace_path).resolve(strict=False)
     open_release = _latest_open_release(database_path, job_id, event_id)
 
+    verification_options = {"workspace_path": workspace_path}
+    if open_release is not None:
+        verification_options["resume_release_id"] = str(open_release["id"])
     try:
         verification = verify_event_archive(
             database_path,
             archive_root,
             job_id,
             event_id,
-            workspace_path=workspace_path,
+            **verification_options,
         )
     except ArchiveVerificationError as exc:
         raise SsdReleaseError(str(exc)) from exc
