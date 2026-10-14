@@ -47,6 +47,9 @@ jobs:
           BIBLIOTHEKAR_REMOVABLE_DIR: /tmp/bibliothekar/removable
         run: docker compose -f compose.example.yaml config -q
 
+      - name: Install metadata regression dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
+
       - name: Complete QA before publishing
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -54,7 +57,14 @@ jobs:
           pip install -r requirements.txt pytest httpx
           python -m compileall -q app qa
           bash -n qa/archive_e2e/*.sh
-          pytest -q -o addopts='' tests/backend
+          pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
+
+      - name: Retain QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-qa
+          path: /tmp/bibliothekar-qa.xml
 
       - name: Read application version
         id: version

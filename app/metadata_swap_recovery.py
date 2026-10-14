@@ -84,7 +84,7 @@ def create_swap_journal(
     task_id: str | None = None, family_id: int | None = None,
     proposed: str = "", task_verification: dict[str, Any] | None = None,
 ) -> Path:
-    if kind not in {"library", "reintegrate", "multiple"} or not file_entries:
+    if kind not in {"library", "reintegrate", "multiple", "general"} or not file_entries:
         raise MetadataSwapRecoveryError("Ungültiger Metadaten-Austauschplan.")
     record_id = uuid.uuid4().hex
     journal = _journal_dir(metadata_root) / (record_id + ".json")
@@ -109,7 +109,7 @@ def _validate(journal: Path, data: dict[str, Any], metadata_root: Path) -> None:
         raise MetadataSwapRecoveryError("Ungültige Metadatenjournal-ID.")
     if journal != _journal_dir(metadata_root) / (ident + ".json"):
         raise MetadataSwapRecoveryError("Metadatenjournal liegt am falschen Ort.")
-    if data.get("kind") not in {"library", "reintegrate", "multiple"}:
+    if data.get("kind") not in {"library", "reintegrate", "multiple", "general"}:
         raise MetadataSwapRecoveryError("Unbekannte Metadatenkorrektur-Art.")
     if data.get("state") not in {"prepared", "committed"}:
         raise MetadataSwapRecoveryError("Unbekannter Metadatenjournal-Zustand.")
@@ -150,6 +150,8 @@ def _validate(journal: Path, data: dict[str, Any], metadata_root: Path) -> None:
     if data["kind"] in {"library", "reintegrate"}:
         if not data.get("database") or not data.get("family_id"):
             raise MetadataSwapRecoveryError("Metadatenjournal ohne Datenbank-Zuordnung.")
+    if data["kind"] == "general" and (not data.get("database") or not data.get("task_id") or len(files) != 1):
+        raise MetadataSwapRecoveryError("Allgemeine Metadatenkorrektur ohne Aufgaben-Zuordnung.")
 
 
 def _load(journal: Path, metadata_root: Path) -> dict[str, Any]:
@@ -187,6 +189,19 @@ def _database_state(data: dict[str, Any]) -> str:
         raise MetadataSwapRecoveryError("Metadaten-Index fehlt; keine automatische Wiederherstellung.")
     results = []
     with database_connection(db) as conn:
+        if data["kind"] == "general":
+            row = conn.execute(
+                "SELECT status,source_path,source_sha256,output_sha256 FROM metadata_corrections WHERE id=? AND area='general'",
+                (data["task_id"],),
+            ).fetchone()
+            item = data["files"][0]
+            if row is None or str(row["source_path"]) != item["source"] or str(row["source_sha256"]) != item["before_sha"]:
+                raise MetadataSwapRecoveryError("Allgemeine Metadatenaufgabe passt nicht zum Journal.")
+            if row["status"] == "completed" and row["output_sha256"] == item["after_sha"]:
+                return "committed"
+            if row["status"] in {"writing", "blocked", "prepared"}:
+                return "prepared"
+            raise MetadataSwapRecoveryError("Allgemeine Metadatenaufgabe besitzt einen widersprüchlichen Zustand.")
         for item in data["files"]:
             row = conn.execute(
                 """SELECT current_relative_path,sha256_current,selected_capture_time
@@ -317,7 +332,7 @@ def recover_swap_journal(
         disposition = "completed"
     else:
         _rollback(data)
-        if data["kind"] == "library" and data.get("task_id"):
+        if data["kind"] in {"library", "general"} and data.get("task_id"):
             from app.metadata_correction import _mark_task_blocked
             _mark_task_blocked(
                 Path(db), str(data["task_id"]),

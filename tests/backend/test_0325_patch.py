@@ -283,8 +283,8 @@ def test_0325_late_resolved_library_database_gets_current_schema(
 
 
 def test_0325_ui_and_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.56.0"
-    assert "Version <span data-bk-version>0.56.0</span>" in ui_shell._shell_markup(
+    assert main.DEPLOYMENT_VERSION == "0.56.1"
+    assert "Version <span data-bk-version>0.56.1</span>" in ui_shell._shell_markup(
         "workspace",
         "events",
     )

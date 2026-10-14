@@ -1,3 +1,10 @@
+## 0.56.1 – Stabilitätspatch nach Audit Phase 2 (14.10.2026)
+
+- F1/F2: Selektive Papierkorblöschung erhält ein atomar ersetztes, dauerhaft geschriebenes Journal mit gezielter Katalogsicherung. Teilcommits getrennter SQLite-Datenbanken werden wiederholbar kompensiert; Familien und abhängige Zuordnungen bleiben erhalten. Wiederherstellung blockiert bei widersprüchlichen Dateien oder Katalogen und bewahrt die Nachweise.
+- F3: Allgemeine Metadatenkorrektur verwendet die bestehende Austausch-Recovery mit gesicherten Originalbytes. Nach einem fehlgeschlagenen SQLite-Abschluss ist Rückbau und erneute Ausführung möglich; bestätigte Abschlüsse werden fertiggestellt.
+- F4: Stammordnerumbenennung prüft ursprüngliche Workspace-Komponenten und alte sowie neue Ordner auf Symlinks vor Dateioperationen.
+- Vier unveränderte Audit-Reproduktionen und gezielte Unterbrechungs-/Negativtests als dauerhafte Regressionen. Keine Schema- oder Bestandsmigration.
+
 ## 0.56.0 – Transparente V3-Wortmarke und installierbares Web-App-Icon (14.10.2026)
 
 - Für Header, „Über Bibliothekar“ sowie Login und Ersteinrichtung gilt ab sofort das originale transparente `bibliothekar-logo-v3.svg` (ohne Farbflächen oder Neuzeichnen).

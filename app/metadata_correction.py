@@ -1448,6 +1448,12 @@ def _apply_general_metadata_correction(
     )
     source = Path(str(task["source_path"])).resolve(strict=False)
     root = paths["root"]
+    metadata_root = storage_paths(workspace_root)["metadata_root"].resolve(strict=False)
+    from app.metadata_swap_recovery import (
+        assert_no_pending_swaps, create_swap_journal, fsync_staged_file,
+        mark_swap_committed, recover_swap_journal,
+    )
+    assert_no_pending_swaps(metadata_root)
     if not _is_relative_to(source, root) or not source.is_file():
         raise MetadataCorrectionError("Die eingefrorene Datei fehlt.")
     if source.is_symlink():
@@ -1459,10 +1465,9 @@ def _apply_general_metadata_correction(
     if _sha256(source) != str(task["source_sha256"]):
         raise MetadataCorrectionError("Die SHA-256-Summe der Datei hat sich verändert.")
 
-    temp = source.parent / (
-        "." + source.stem + ".bibliothekar-" + uuid.uuid4().hex + source.suffix
-    )
-    _mark_task_writing(database_path, str(task["id"]))
+    temp = source.parent / ("." + source.name + ".metadata-" + uuid.uuid4().hex + source.suffix)
+    backup = source.parent / ("." + source.name + ".metadata-before-" + uuid.uuid4().hex)
+    swap_journal: Path | None = None
     try:
         # TrueNAS/ZFS: nur Dateiinhalte kopieren. copy2()/copystat kann beim
         # Übertragen von Modus/ACL-Metadaten mit EPERM scheitern.
@@ -1482,13 +1487,26 @@ def _apply_general_metadata_correction(
         )
         output_size = int(temp.stat().st_size)
         output_sha = _sha256(temp)
+        fsync_staged_file(temp)
+        swap_journal = create_swap_journal(
+            metadata_root, kind="general", data_root=root, database_path=database_path,
+            task_id=str(task["id"]), file_entries=[{
+                "source": str(source), "incoming": str(temp), "backup": str(backup),
+                "before_sha": str(task["source_sha256"]), "after_sha": output_sha,
+            }],
+        )
+        # Persist a newly created .swap-journals directory before moving originals.
+        _fsync_directory(metadata_root)
+        _mark_task_writing(database_path, str(task["id"]))
+        os.replace(source, backup)
+        _fsync_directory(source.parent)
         os.replace(temp, source)
         _fsync_directory(source.parent)
         if int(source.stat().st_size) != output_size or _sha256(source) != output_sha:
             raise MetadataCorrectionError(
                 "Die Datei hat sich nach dem atomaren Abschluss verändert."
             )
-        return _complete_task(
+        result = _complete_task(
             database_path,
             str(task["id"]),
             output_path=source,
@@ -1496,7 +1514,20 @@ def _apply_general_metadata_correction(
             output_sha=output_sha,
             verification=verification,
         )
+        mark_swap_committed(swap_journal, metadata_root)
+        recover_swap_journal(metadata_root, swap_journal, allowed_databases={database_path})
+        return result
     except Exception as error:
+        if swap_journal is not None:
+            try:
+                disposition = recover_swap_journal(metadata_root, swap_journal, allowed_databases={database_path})
+                if disposition == "completed":
+                    return get_metadata_correction(database_path, str(task["id"]))
+            except Exception as recovery_error:
+                raise MetadataCorrectionError(
+                    "Metadatenkorrektur unterbrochen; Sicherheitskopie und Journal bleiben erhalten: "
+                    + str(recovery_error)
+                ) from error
         try:
             temp.unlink(missing_ok=True)
         except OSError:

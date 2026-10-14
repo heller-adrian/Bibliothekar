@@ -8,11 +8,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0470_version_and_pwa_css_injected_after_branding():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.56.0"
+    assert __version__ == main.DEPLOYMENT_VERSION == "0.56.1"
     html = apply_shell("<html><head></head><body><main></main></body></html>", active_area="import")
     assert "<style>" + BIBLIOTHEKAR_0470_CSS + "</style>" in html
     assert "BIBLIOTHEKAR_0460_CSS" not in html
-    assert 'src="/assets/bibliothekar-logo-v3.svg?v=0.56.0"' in html
+    assert 'src="/assets/bibliothekar-logo-v3.svg?v=0.56.1"' in html
 
 
 def test_0470_about_modal_shows_white_vector_logo_on_dark_ground():
@@ -20,7 +20,7 @@ def test_0470_about_modal_shows_white_vector_logo_on_dark_ground():
     about = html.split('<dialog id="bk-about-dialog"', 1)[1].split("</dialog>", 1)[0]
     assert 'class="bk-about-logo-heading"' in about
     assert 'alt="Bibliothekar"' in about
-    assert 'src="/assets/bibliothekar-logo-v3.svg?v=0.56.0"' in about
+    assert 'src="/assets/bibliothekar-logo-v3.svg?v=0.56.1"' in about
     assert "<h2>Bibliothekar</h2>" not in about
     assert "Sichern · Ordnen · Bewahren" in about
     assert "background:#15222c" in BIBLIOTHEKAR_0470_CSS

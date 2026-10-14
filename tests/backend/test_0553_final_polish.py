@@ -10,14 +10,14 @@ from app.managed_directory_names import directory_path
 
 
 def test_0553_versions():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.0"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.1"
 
 
 def test_0553_setup_brand_is_visible_in_both_languages():
     for html in (_login_html(), _login_html(unavailable=True), _library_onboarding_html()):
         assert 'class="bk-setup-page"' in html
         assert 'class="bk-setup-brand"' in html
-        assert 'src="/assets/bibliothekar-logo-v3.svg?v=0.56.0"' in html
+        assert 'src="/assets/bibliothekar-logo-v3.svg?v=0.56.1"' in html
         assert 'background:#15222c!important' in html
         assert 'data-bk-setup-choice="en"' in html
         assert 'data-bk-setup-choice="de"' in html

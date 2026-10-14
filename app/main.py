@@ -299,8 +299,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "0.56.0"
-DEPLOYMENT_VERSION = "0.56.0"
+RELEASE_VERSION = "0.56.1"
+DEPLOYMENT_VERSION = "0.56.1"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -2122,6 +2122,40 @@ def startup_database() -> None:
         LIBRARY_REGISTRY_INITIALIZATION = initialize_library_registry(
             REGISTRY_DATABASE_FILE
         )
+        # Recover selected-trash partial commits before any worker or inventory
+        # can mistake staged originals for missing media.
+        from app.trash_selective import recover_trash_deletions
+        trash_databases = {DATABASE_FILE}
+        trash_databases.update(
+            Path(str(row["database_path"]))
+            for row in list_libraries(REGISTRY_DATABASE_FILE, active_only=False, registered_only=False)
+            if str(row.get("database_path") or "").strip()
+        )
+        recover_trash_deletions(WORKSPACE_PATH, allowed_databases=trash_databases)
+        # BA-12: physical metadata swaps must be reconciled BEFORE a
+        # background worker or new correction can touch any file. Fail closed
+        # on foreign/ambiguous bytes, never overwrite them heuristically.
+        from app.metadata_swap_recovery import recover_metadata_swaps
+        from app.storage_config import storage_paths as metadata_storage_paths
+        metadata_db_allowlist = {DATABASE_FILE}
+        metadata_db_allowlist.update(
+            Path(str(row["database_path"]))
+            for row in list_libraries(
+                REGISTRY_DATABASE_FILE, active_only=False,
+                registered_only=False,
+            )
+            if str(row.get("database_path") or "").strip()
+        )
+        metadata_recovery = recover_metadata_swaps(
+            metadata_storage_paths(WORKSPACE_PATH)["metadata_root"],
+            allowed_databases=metadata_db_allowlist,
+        )
+        if metadata_recovery["blocked"]:
+            raise RuntimeError(
+                "Unterbrochene Metadatenkorrektur erfordert Prüfung: "
+                + " | ".join(metadata_recovery["errors"][:5])
+            )
+
         existing_main = get_library(
             REGISTRY_DATABASE_FILE,
             MAIN_LIBRARY_ID,
@@ -2443,30 +2477,6 @@ def startup_database() -> None:
                     f"({context.library_id}): {document_error}",
                     flush=True,
                 )
-
-        # BA-12: physical metadata swaps must be reconciled BEFORE a
-        # background worker or new correction can touch any file. Fail closed
-        # on foreign/ambiguous bytes, never overwrite them heuristically.
-        from app.metadata_swap_recovery import recover_metadata_swaps
-        from app.storage_config import storage_paths as metadata_storage_paths
-        metadata_db_allowlist = {DATABASE_FILE}
-        metadata_db_allowlist.update(
-            Path(str(row["database_path"]))
-            for row in list_libraries(
-                REGISTRY_DATABASE_FILE, active_only=False,
-                registered_only=False,
-            )
-            if str(row.get("database_path") or "").strip()
-        )
-        metadata_recovery = recover_metadata_swaps(
-            metadata_storage_paths(WORKSPACE_PATH)["metadata_root"],
-            allowed_databases=metadata_db_allowlist,
-        )
-        if metadata_recovery["blocked"]:
-            raise RuntimeError(
-                "Unterbrochene Metadatenkorrektur erfordert Prüfung: "
-                + " | ".join(metadata_recovery["errors"][:5])
-            )
 
         WORKER_STOP.clear()
 
@@ -2893,7 +2903,14 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
     except StorageSettingsError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
-    root = WORKSPACE_PATH.expanduser().resolve(strict=False)
+    raw_root = WORKSPACE_PATH.expanduser().absolute()
+    # Retain the original components: resolve() would conceal a symlink.
+    current = Path(raw_root.anchor)
+    for part in raw_root.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise HTTPException(status_code=422, detail="Der Workspace-Pfad darf keine Symlink-Komponenten enthalten.")
+    root = raw_root.resolve(strict=False)
     if not root.is_dir():
         raise HTTPException(status_code=422, detail="Der Workspace-Mount ist nicht verfügbar.")
 
@@ -2903,6 +2920,13 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
         "metadata_directory_name": "metadata",
         "trash_directory_name": "trash",
     }
+    # Validate ALL raw old and new entries before any mutation or rollback.
+    # Keep these paths unresolved for the subsequent filesystem operations.
+    for names in (old_names, new_names):
+        for key in key_map:
+            path = root / names[key]
+            if path.is_symlink() or path.parent != root:
+                raise HTTPException(status_code=422, detail="Verwaltete Stammordner dürfen keine symbolischen Links sein.")
     moved: list[tuple[Path, Path]] = []
     previous_rows = list_libraries(
         REGISTRY_DATABASE_FILE,
@@ -2911,11 +2935,11 @@ def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
     )
     try:
         old_paths = {
-            key: (root / old_names[key]).resolve(strict=False)
+            key: root / old_names[key]
             for key in key_map
         }
         new_paths = {
-            key: (root / new_names[key]).resolve(strict=False)
+            key: root / new_names[key]
             for key in key_map
         }
 
@@ -4914,6 +4938,20 @@ def trash_interface() -> HTMLResponse:
 
 @app.get("/api/trash", tags=["Papierkorb"])
 def api_trash_inventory() -> dict[str, Any]:
+    from app.trash_selective import _operation_lock
+    with _operation_lock(WORKSPACE_PATH):
+        return _trash_inventory_locked()
+
+
+def _trash_inventory_locked() -> dict[str, Any]:
+    from app.trash_selective import recover_trash_deletions
+    allowed = {DATABASE_FILE, current_database_file()}
+    allowed.update(
+        Path(str(row["database_path"]))
+        for row in list_libraries(REGISTRY_DATABASE_FILE, active_only=False, registered_only=False)
+        if str(row.get("database_path") or "").strip()
+    )
+    recover_trash_deletions(WORKSPACE_PATH, allowed_databases=allowed)
     # The shared physical tree is the source of truth. Reconcile every
     # registered library so a Finder move cannot leave parallel active rows.
     results = []
@@ -10220,13 +10258,13 @@ def web_app_manifest(request: Request) -> JSONResponse:
             "background_color": "#15222c",
             "icons": [
                 {
-                    "src": "/assets/bibliothekar-icon-192.png?v=0.56.0",
+                    "src": "/assets/bibliothekar-icon-192.png?v=0.56.1",
                     "sizes": "192x192",
                     "type": "image/png",
                     "purpose": "any",
                 },
                 {
-                    "src": "/assets/bibliothekar-logo-symbol-background.svg?v=0.56.0",
+                    "src": "/assets/bibliothekar-logo-symbol-background.svg?v=0.56.1",
                     "sizes": "any",
                     "type": "image/svg+xml",
                     "purpose": "any",
