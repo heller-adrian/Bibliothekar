@@ -10,7 +10,7 @@ from app.managed_directory_names import directory_path
 
 
 def test_0553_versions():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.55.3"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.55.4"
 
 
 def test_0553_setup_brand_is_visible_in_both_languages():
