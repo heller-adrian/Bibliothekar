@@ -1200,11 +1200,17 @@ def release_event_ssd(
                     int(current.st_ino),
                     int(current.st_mtime_ns),
                     int(current.st_size),
+                    int(current.st_ctime_ns),
+                    int(current.st_nlink),
+                    int(current.st_mode),
                 ) != (
                     int(source_stat.st_dev),
                     int(source_stat.st_ino),
                     int(source_stat.st_mtime_ns),
                     int(source_stat.st_size),
+                    int(source_stat.st_ctime_ns),
+                    int(source_stat.st_nlink),
+                    int(source_stat.st_mode),
                 ):
                     raise SsdReleaseError(
                         "SSD-Datei änderte sich unmittelbar vor dem Löschen: " + str(source)
