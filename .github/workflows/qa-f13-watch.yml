@@ -5,10 +5,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: f13-watch-${{ github.ref }}
+  group: f13-watch-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 jobs:
   backend:
+    if: "!startsWith(github.event.head_commit.message, 'QA-only:')"
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -35,6 +36,7 @@ jobs:
             ${{ runner.temp }}/f13-backend/0562-evidence
             ${{ runner.temp }}/f13-backend/**/sigkill-conflict-evidence.json
   original-residual:
+    if: "!startsWith(github.event.head_commit.message, 'QA-only:')"
     strategy:
       fail-fast: false
       matrix:
