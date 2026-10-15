@@ -1271,13 +1271,16 @@ def release_event_ssd(
 
         archive_guard.check()
         removed = _remove_empty_event_tree(event_root, work_root)
-        return _finalize_release(
+        result = _finalize_release(
             database_path,
             release_id,
             job_id,
             event_id,
             removed,
         )
+
+        archive_guard.check()
+        return result
 
     except Exception as error:
         message = ("SSD-Freigabe gestoppt: " + str(error) +

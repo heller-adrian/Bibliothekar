@@ -371,3 +371,21 @@ else:
     with database_connection(db) as c:assert c.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
     import json
     (tmp_path/'sigkill-conflict-evidence.json').write_text(json.dumps(executions))
+
+
+def test_C_native_change_during_finalization_is_not_success(tmp_path,monkeypatch):
+    assert sys.platform=='linux','BLOCKED: native Linux required'
+    from app import ssd_release
+    from app.database import database_connection
+    db,ws,archive,rel=release_fixture(tmp_path)
+    real=ssd_release._finalize_release
+    def interleave(*args,**kwargs):
+        result=real(*args,**kwargs)
+        (archive/rel/'A.JPG').write_bytes(b'X'*11)
+        return result
+    monkeypatch.setattr(ssd_release,'_finalize_release',interleave)
+    with pytest.raises(ssd_release.SsdReleaseError):ssd_release.release_event_ssd(db,ws,archive,'j','e')
+    assert not (ws/'Arbeitsbereich'/rel/'A.JPG').exists()
+    with database_connection(db) as c:
+        row=c.execute('SELECT status,deleted_file_count FROM event_ssd_releases').fetchone()
+        assert row['status']=='failed' and row['deleted_file_count']==2
