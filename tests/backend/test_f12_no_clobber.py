@@ -68,7 +68,7 @@ def test_late_target_collision_never_overwrites_or_removes_source(tmp_path, monk
 
 
 @pytest.mark.parametrize('key', ['source_relative_path', 'destination_relative_path'])
-@pytest.mark.parametrize('value', ['', '../foreign', '/absolute', 'a//b', 'a\\b'])
+@pytest.mark.parametrize('value', ['', '../foreign', '/absolute', 'a//b', 'a\\b', '2030/T.JPG\0suffix'])
 def test_invalid_paths_are_rejected_before_publication(tmp_path, key, value):
     root, original, source, target, plan = seed(tmp_path)
     plan[0][key] = value

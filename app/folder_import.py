@@ -533,7 +533,7 @@ def move_import_into_workspace(
         for key in ('source_relative_path', 'destination_relative_path'):
             raw = str(item[key])
             relative = Path(raw)
-            if not raw or relative.is_absolute() or '\\' in raw or any(part in ('', '.', '..') for part in raw.split('/')):
+            if not raw or '\0' in raw or relative.is_absolute() or '\\' in raw or any(part in ('', '.', '..') for part in raw.split('/')):
                 raise PipelineError('Unsicherer relativer Importpfad: ' + raw)
         inode = import_identity(source, item)
         ownership.append(dict(source_relative_path=str(item["source_relative_path"]),

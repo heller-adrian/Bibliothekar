@@ -18,6 +18,8 @@ from app.pipeline import PipelineError
 
 @contextmanager
 def _parent(path: Path, *, create: bool = False):
+    if '\0' in os.fspath(path):
+        raise PipelineError('Unsicherer Importpfad: NUL-Zeichen ist nicht zulässig.')
     path = Path(os.path.abspath(path))
     fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
@@ -73,6 +75,8 @@ def import_identity(source: Path, item: dict) -> list[int]:
 
 
 def _native_rename(source_fd, source_name, destination_fd, destination_name):
+    if b'\0' in os.fsencode(source_name) or b'\0' in os.fsencode(destination_name):
+        raise PipelineError('Unsicherer Importname: NUL-Zeichen ist nicht zulässig.')
     # Both APIs implement exclusive rename in the kernel. Unsupported flags
     # or filesystems fail closed; no check-then-rename/copy/link fallback.
     libc = ctypes.CDLL(None, use_errno=True)
