@@ -51,8 +51,16 @@ jobs:
           F13_QA_MODE: ${{ matrix.mode }}
           F13_QA_ROOT: ${{ runner.temp }}/f13-original
         run: python qa/f13/run_original.py
+      - name: Strict mmap residual conservation assertion
+        if: always()
+        run: pytest -q -p no:cacheprovider -p qa.f13.f13_mode --basetemp="$RUNNER_TEMP/f13-mmap-${{ matrix.mode }}" --junitxml="$RUNNER_TEMP/mmap-${{ matrix.mode }}.xml" qa/f13/test_residual.py
+        env:
+          F13_QA_MODE: ${{ matrix.mode }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: f13-original-residual-${{ matrix.mode }}
-          path: ${{ runner.temp }}/f13-original
+          path: |
+            ${{ runner.temp }}/f13-original
+            ${{ runner.temp }}/mmap-${{ matrix.mode }}.xml
+            ${{ runner.temp }}/f13-mmap-${{ matrix.mode }}

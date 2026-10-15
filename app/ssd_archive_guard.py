@@ -107,7 +107,7 @@ class InotifyWatcher:
         if self.error:
             raise ArchiveConflict(self.error)
         try:
-            while True:
+            for _ in range(16):
                 try:
                     data = os.read(self.fd, 65536)
                 except BlockingIOError:
@@ -117,6 +117,7 @@ class InotifyWatcher:
                 if not data:
                     raise ArchiveConflict('Archivüberwachung unerwartet beendet.')
                 self._consume(data)
+            raise ArchiveConflict('Archivereignisqueue wird nicht ruhig; weitere Löschungen gesperrt.')
         except (OSError, ArchiveConflict) as exc:
             self.error = str(exc)
             raise ArchiveConflict(self.error) from exc
@@ -229,6 +230,7 @@ class ArchiveGuard:
             finally:
                 os.close(again)
             self.check()
+            return before
         except (OSError, KeyError) as exc:
             raise ArchiveConflict('Archivzustand ist nicht eindeutig lesbar: ' + str(exc)) from exc
         finally:

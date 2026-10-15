@@ -187,3 +187,89 @@ def test_recovery_pauses_and_explicit_enqueue_is_new(tmp_path):
     assert recover_releases(db) == 0
     second = enqueue_release(db,'old','archive')
     assert second['id'] != first['id']
+
+
+def release_fixture(tmp_path):
+    from app.database import initialize_database, database_connection
+    from tests.backend.test_0263_event_inventory import seed_job, seed_event, seed_family, seed_file_for_family
+    db = tmp_path/'db.sqlite3'; initialize_database(db)
+    ws = tmp_path/'workspace'; archive = tmp_path/'archive'
+    rel = '2026/07-23 - Trip/Alle/'
+    with database_connection(db) as c:
+        seed_job(c); seed_event(c,status='applied')
+        fid, _ = seed_family(c,content=b'synthetic-A',current_path=rel+'A.JPG')
+        seed_file_for_family(c,family_id=fid,content=b'synthetic-B',current_path=rel+'B.JPG',filename='B.JPG')
+        c.execute("UPDATE files SET current_root_kind='shared_workspace'")
+    for name in ['A.JPG','B.JPG']:
+        for root in [ws/'Arbeitsbereich',archive]:
+            p=root/rel/name; p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(('synthetic-'+name[0]).encode())
+    return db,ws,archive,rel
+
+
+def test_B_worker_change_before_last_hash_preserves_source(tmp_path, b_only, monkeypatch):
+    from app.ssd_release import release_event_ssd, SsdReleaseError
+    db,ws,archive,rel=release_fixture(tmp_path)
+    real=guard.ArchiveGuard.verify; calls=0
+    def changed(self,*args,**kwargs):
+        nonlocal calls
+        calls+=1
+        if calls==3: (archive/rel/'A.JPG').write_bytes(b'X'*11)
+        return real(self,*args,**kwargs)
+    monkeypatch.setattr(guard.ArchiveGuard,'verify',changed)
+    with pytest.raises(SsdReleaseError):release_event_ssd(db,ws,archive,'j','e')
+    assert (ws/'Arbeitsbereich'/rel/'A.JPG').read_bytes()==b'synthetic-A'
+    assert (ws/'Arbeitsbereich'/rel/'B.JPG').read_bytes()==b'synthetic-B'
+
+
+@pytest.mark.parametrize('persist_failure',[False,True])
+def test_C_native_partial_release_stops_next_file(tmp_path,monkeypatch,persist_failure):
+    assert sys.platform=='linux','BLOCKED: native Linux required'
+    from app import ssd_release
+    from app.database import database_connection
+    import sqlite3
+    db,ws,archive,rel=release_fixture(tmp_path)
+    src=ws/'Arbeitsbereich'/rel/'A.JPG';real=Path.unlink
+    def changed(path,*args,**kwargs):
+        value=real(path,*args,**kwargs)
+        if path==src: (archive/rel/'A.JPG').write_bytes(b'X'*11)
+        return value
+    monkeypatch.setattr(Path,'unlink',changed)
+    if persist_failure:
+        def failed(*args):raise sqlite3.OperationalError('synthetic write failure')
+        monkeypatch.setattr(ssd_release,'_mark_release_failed',failed)
+    with pytest.raises((ssd_release.SsdReleaseError,sqlite3.OperationalError)):
+        ssd_release.release_event_ssd(db,ws,archive,'j','e')
+    assert not src.exists()
+    assert (ws/'Arbeitsbereich'/rel/'B.JPG').read_bytes()==b'synthetic-B'
+    with database_connection(db) as c:
+        assert c.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+        if not persist_failure:
+            row=c.execute('SELECT status,deleted_file_count,error_message FROM event_ssd_releases').fetchone()
+            assert row['status']=='failed' and row['deleted_file_count']==1
+            assert 'nicht wiederhergestellt' in row['error_message']
+
+
+def test_C_native_real_queue_overflow(tmp_path):
+    assert sys.platform=='linux','BLOCKED: real Linux queue required'
+    limit=int(Path('/proc/sys/fs/inotify/max_queued_events').read_text())
+    assert limit<=32768,'BLOCKED: no unbounded overflow load permitted'
+    a=tmp_path/'a'; b=tmp_path/'b';a.write_bytes(b'a');b.write_bytes(b'b')
+    fds=[os.open(p,os.O_RDWR) for p in [a,b]]
+    w=guard.InotifyWatcher();overflow=None
+    try:
+        for fd in fds:w.watch(fd)
+        for i in range(limit+8):os.pwrite(fds[i%2],b'X',0)
+        while True:
+            try:data=os.read(w.fd,65536)
+            except BlockingIOError:break
+            pos=0
+            while pos<len(data):
+                wd,mask,cookie,length=struct.unpack_from('iIII',data,pos)
+                size=16+length
+                if mask&0x4000:overflow=data[pos:pos+size]
+                pos+=size
+        assert overflow is not None,'Real kernel overflow was not observed'
+        with pytest.raises(guard.ArchiveConflict,match='Queueüberlauf'):w._consume(overflow)
+    finally:
+        w.close()
+        for fd in fds:os.close(fd)

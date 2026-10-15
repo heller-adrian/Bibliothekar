@@ -367,7 +367,13 @@ def _verify_regular_file(
     expected_size: int,
     expected_sha256: str,
     label: str,
+    *,
+    archive_guard: ArchiveGuard | None = None,
+    archive_relative: PurePosixPath | None = None,
 ) -> tuple[os.stat_result, str]:
+    if archive_guard is not None:
+        checked = archive_guard.verify(archive_relative, expected_size, expected_sha256)
+        return checked, expected_sha256
     before = os.lstat(path)
 
     if not stat.S_ISREG(before.st_mode):
@@ -1053,7 +1059,8 @@ def release_event_ssd(
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
             _archive_stat, archive_hash = _verify_regular_file(
-                archive, expected_size, expected_hash, "Archivdatei"
+                archive, expected_size, expected_hash, "Archivdatei",
+                archive_guard=archive_guard, archive_relative=archive_rel,
             )
 
             source_exists = source.exists() or source.is_symlink()
@@ -1101,7 +1108,8 @@ def release_event_ssd(
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
             _archive_stat, archive_hash = _verify_regular_file(
-                archive, expected_size, expected_hash, "Archivdatei"
+                archive, expected_size, expected_hash, "Archivdatei",
+                archive_guard=archive_guard, archive_relative=archive_rel,
             )
 
             source_exists = source.exists() or source.is_symlink()
