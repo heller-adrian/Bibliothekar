@@ -35,6 +35,7 @@ jobs:
             ${{ runner.temp }}/backend.xml
             ${{ runner.temp }}/f13-backend/0562-evidence
             ${{ runner.temp }}/f13-backend/**/sigkill-conflict-evidence.json
+            ${{ runner.temp }}/f13-backend/**/followup-evidence.json
   original-residual:
     if: "!startsWith(github.event.head_commit.message, 'QA-only:')"
     strategy:
