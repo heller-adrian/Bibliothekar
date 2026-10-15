@@ -82,6 +82,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt pytest httpx
+      - name: Native hash-interleaving and watch-loss counterprobes
+        run: pytest -q -p no:cacheprovider --basetemp="$RUNNER_TEMP/f13-extra" --junitxml="$RUNNER_TEMP/f13-extra.xml" qa/f13/test_native_extra.py
       - name: Unchanged phase-4 root rename and inventory overlap assertions
         env:
           F13_QA_ROOT: ${{ runner.temp }}/f13-parallel
@@ -90,4 +92,6 @@ jobs:
         if: always()
         with:
           name: f13-parallel-combinations
-          path: ${{ runner.temp }}/f13-parallel
+          path: |
+            ${{ runner.temp }}/f13-parallel
+            ${{ runner.temp }}/f13-extra.xml
