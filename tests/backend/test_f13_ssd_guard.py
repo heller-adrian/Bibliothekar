@@ -273,3 +273,26 @@ def test_C_native_real_queue_overflow(tmp_path):
     finally:
         w.close()
         for fd in fds:os.close(fd)
+
+
+def test_B_source_disappearing_after_verification_is_not_already_released(tmp_path,b_only,monkeypatch):
+    from app import ssd_release
+    from app.database import database_connection
+    db,ws,archive,rel=release_fixture(tmp_path)
+    real=database_connection;fired=False
+    from contextlib import contextmanager
+    @contextmanager
+    def boundary(path):
+        nonlocal fired
+        with real(path) as c:
+            yield c
+        with real(path) as c:
+            row=c.execute("SELECT 1 FROM event_ssd_releases WHERE status='deleting'").fetchone()
+        if row and not fired:
+            fired=True
+            (ws/'Arbeitsbereich'/rel/'A.JPG').rename(ws/'moved-A.JPG')
+    monkeypatch.setattr(ssd_release,'database_connection',boundary)
+    with pytest.raises(ssd_release.SsdReleaseError,match='unerwartet verschwunden'):
+        ssd_release.release_event_ssd(db,ws,archive,'j','e')
+    assert (ws/'moved-A.JPG').read_bytes()==b'synthetic-A'
+    assert (ws/'Arbeitsbereich'/rel/'B.JPG').read_bytes()==b'synthetic-B'

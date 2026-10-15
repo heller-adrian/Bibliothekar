@@ -64,3 +64,24 @@ jobs:
             ${{ runner.temp }}/f13-original
             ${{ runner.temp }}/mmap-${{ matrix.mode }}.xml
             ${{ runner.temp }}/f13-mmap-${{ matrix.mode }}
+  parallel-combinations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Unchanged phase-4 root rename and inventory overlap assertions
+        env:
+          F13_QA_ROOT: ${{ runner.temp }}/f13-parallel
+        run: python qa/f13/run_parallel.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f13-parallel-combinations
+          path: ${{ runner.temp }}/f13-parallel

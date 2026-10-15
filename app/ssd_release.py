@@ -1071,6 +1071,7 @@ def release_event_ssd(
                 )
             elif open_release is None:
                 raise SsdReleaseError("SSD-Datei fehlt: " + str(source))
+            row["source_present_for_run"] = source_exists
 
             with database_connection(database_path) as connection:
                 connection.execute(
@@ -1120,6 +1121,7 @@ def release_event_ssd(
                 )
             elif open_release is None:
                 raise SsdReleaseError("SSD-Datei fehlt: " + str(source))
+            row["source_present_for_run"] = source_exists
 
             with database_connection(database_path) as connection:
                 connection.execute(
@@ -1223,6 +1225,8 @@ def release_event_ssd(
                 deleted_count += 1
                 deleted_bytes += expected_size
             else:
+                if row.get("source_present_for_run"):
+                    raise SsdReleaseError("Eine in diesem Lauf geprüfte SSD-Datei ist unerwartet verschwunden; weitere Löschungen gesperrt: " + str(source))
                 status_value = "already_released"
 
             with database_connection(database_path) as connection:
