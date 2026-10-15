@@ -13,6 +13,7 @@ import time
 
 from app.metadata import analyze_tree
 from app.source_filter import should_ignore_source_path
+from app.import_publication import import_identity, publish_import_file, rollback_import_file
 from app.pipeline import (
     PipelineError,
     append_log,
@@ -523,22 +524,27 @@ def move_import_into_workspace(
         )
 
     from app.trash_selective import _atomic_json, _sync_dir
-    # The original inode survives a same-filesystem rename. Persist ownership
+    # The original inode survives an exclusive same-filesystem rename. Persist ownership
     # before the first move, including the gap before the path callback.
     journal = temporary_original.parent / "move-journal.json"
     ownership = []
     for item in plan:
         source = temporary_original / str(item["source_relative_path"])
-        info = source.stat()
+        for key in ('source_relative_path', 'destination_relative_path'):
+            raw = str(item[key])
+            relative = Path(raw)
+            if not raw or relative.is_absolute() or '\\' in raw or any(part in ('', '.', '..') for part in raw.split('/')):
+                raise PipelineError('Unsicherer relativer Importpfad: ' + raw)
+        inode = import_identity(source, item)
         ownership.append(dict(source_relative_path=str(item["source_relative_path"]),
                               destination_relative_path=str(item["destination_relative_path"]),
                               sha256=str(item["sha256"]), size_bytes=int(item["size_bytes"]),
-                              inode=[info.st_dev, info.st_ino]))
+                              inode=inode))
     _atomic_json(journal, dict(format=1, root=str(shared_root.resolve()), files=ownership))
     _sync_dir(journal.parent.parent)
-    moved: list[tuple[Path, Path]] = []
+    moved: list[tuple[Path, Path, dict]] = []
     try:
-        for item in plan:
+        for item, owned in zip(plan, ownership, strict=True):
             if cancellation_callback is not None and cancellation_callback():
                 raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
             source = temporary_original / str(item["source_relative_path"])
@@ -547,12 +553,10 @@ def move_import_into_workspace(
                 raise PipelineError(f"Quelldatei fehlt: {source}")
             if destination.exists() or destination.is_symlink():
                 raise PipelineError(f"Zieldatei existiert bereits: {destination}")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(source, destination)
-            from app.trash_selective import _sync_parents
-            _sync_parents(destination.parent, shared_root)
-            _sync_dir(source.parent)
-            moved.append((source, destination))
+            # Record the attempt before any syscall/fsync can fail. Rollback
+            # accepts only our journaled inode and never replaces another name.
+            moved.append((source, destination, owned))
+            publish_import_file(source, destination, owned)
 
         for item in plan:
             if cancellation_callback is not None and cancellation_callback():
@@ -587,11 +591,9 @@ def move_import_into_workspace(
             post_move_callback(plan)
     except Exception:
         rollback_errors: list[str] = []
-        for source, destination in reversed(moved):
+        for source, destination, owned in reversed(moved):
             try:
-                if destination.exists() and not source.exists():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(destination, source)
+                rollback_import_file(source, destination, owned)
             except Exception as error:
                 rollback_errors.append(f"{destination} → {source}: {error}")
         if rollback_errors:
