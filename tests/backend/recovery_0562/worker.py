@@ -287,9 +287,12 @@ def instrument(kind):
         hook(pl,'sha256_file','import.hash1',predicate=lambda p,*a,**kw:'.incoming' in str(p),nth=1)
         # Preserve the same post-publication crash boundaries and assertions;
         # the unsafe os.replace primitive was removed by the F12 patch.
-        hook(fi,'publish_import_file','import.move1',predicate=lambda s,d,*a:'/Original/' in str(s) and '.incoming' not in str(d),nth=1)
-        hook(fi,'publish_import_file','import.move2',predicate=lambda s,d,*a:'/Original/' in str(s) and '.incoming' not in str(d),nth=2)
         import app.import_publication as publication
+        # Stop immediately AFTER the rename, BEFORE directory fsync, exactly
+        # as the former os.replace hooks did. This helper only moves import
+        # media, so journal replacements cannot consume these counters.
+        hook(publication,'_native_rename','import.move1',nth=1)
+        hook(publication,'_native_rename','import.move2',nth=2)
         hook(publication,'_native_rename','import.publish_before',when='before')
         hook(publication,'_native_rename','import.publish_after')
         if boundary=='import.rollback_after':
