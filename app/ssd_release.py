@@ -9,6 +9,7 @@ import os
 import stat
 import uuid
 
+from app.ssd_archive_guard import ArchiveGuard
 from app.archive_transfer import ArchiveVerificationError, verify_event_archive
 from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.database import database_connection
@@ -1024,7 +1025,9 @@ def release_event_ssd(
                 "asset_kind": str(stored["asset_kind"]),
             })
 
+    archive_guard = None
     try:
+        archive_guard = ArchiveGuard(archive_root, [row["archive_relative"] for row in prepared + asset_prepared])
         with database_connection(database_path) as connection:
             connection.execute(
                 """
@@ -1182,6 +1185,7 @@ def release_event_ssd(
                     expected_hash,
                     "SSD-Datei vor dem Löschen",
                 )
+                archive_guard.verify(row["archive_relative"], expected_size, expected_hash, source_stat)
                 current = os.lstat(source)
                 if (
                     int(current.st_dev),
@@ -1197,6 +1201,8 @@ def release_event_ssd(
                     raise SsdReleaseError(
                         "SSD-Datei änderte sich unmittelbar vor dem Löschen: " + str(source)
                     )
+                # Final non-atomic gate: external writers can still race unlink.
+                archive_guard.check()
                 source.unlink()
                 _fsync_directory(source.parent)
                 status_value = "deleted"
@@ -1232,6 +1238,8 @@ def release_event_ssd(
                     (deleted_count, deleted_bytes, _now(), release_id),
                 )
 
+            archive_guard.check()
+
         for row in prepared:
             delete_source(row, asset=False)
         for row in asset_prepared:
@@ -1243,6 +1251,7 @@ def release_event_ssd(
                 (_now(), release_id),
             )
 
+        archive_guard.check()
         removed = _remove_empty_event_tree(event_root, work_root)
         return _finalize_release(
             database_path,
@@ -1253,8 +1262,12 @@ def release_event_ssd(
         )
 
     except Exception as error:
-        _mark_release_failed(database_path, release_id, str(error))
-        if isinstance(error, SsdReleaseError):
-            raise
-        raise SsdReleaseError(str(error)) from error
+        message = ("SSD-Freigabe gestoppt: " + str(error) +
+                   " Noch vorhandene SSD-Dateien bleiben erhalten. Bereits entfernte Dateien werden nicht wiederhergestellt. "
+                   "Eine erneute Freigabe benötigt einen neuen Auftrag und vollständige Prüfung.")
+        _mark_release_failed(database_path, release_id, message)
+        raise SsdReleaseError(message) from error
+    finally:
+        if archive_guard is not None:
+            archive_guard.close()
 
