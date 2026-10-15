@@ -327,10 +327,28 @@ def protected_trash_paths(database_path: Path | None, workspace_root: Path, *, i
             if data.get("job_id") != journal.stem or not isinstance(paths,list) or not paths:
                 raise ValueError("Ungültiger Reservierungsnachweis")
             canonical={_relative(p).as_posix() for p in paths}
-            if data.get("cleanup_completed") is True:
-                canonical={_relative(p).as_posix() for p in data.get("skipped", [])}
-            elif data.get("status") == "known_restored" and data.get("files") == []:
-                canonical=set()
+            completed = data.get("cleanup_completed") is True
+            known_done = data.get("status") == "known_restored"
+            if completed or (known_done and data.get("files") == []):
+                # Release only a complete partition of the original intent.
+                # Missing cleanup fields are uncertainty, never an empty claim.
+                files = data["files"]
+                known = data.get("known_paths", []) if known_done else []
+                if not isinstance(files, list) or not isinstance(known, list):
+                    raise ValueError("Unvollständiger Abschlussnachweis")
+                staged = {_relative(item["relative_path"]).as_posix() for item in files}
+                restored = {_relative(p).as_posix() for p in known}
+                if staged.intersection(restored) or staged | restored != canonical:
+                    raise ValueError("Abschluss deckt Reservierung nicht vollständig ab")
+                if completed:
+                    skipped = data["skipped"]
+                    if not isinstance(skipped, list):
+                        raise ValueError("Unvollständiger Bereinigungsnachweis")
+                    canonical = {_relative(p).as_posix() for p in skipped}
+                    if not canonical.issubset(staged):
+                        raise ValueError("Unbekannter Bereinigungsrest")
+                else:
+                    canonical = set()
             if journal.stem != ignore_job_id:
                 protected.update(canonical)
         except (OSError,ValueError,KeyError,TypeError) as error:

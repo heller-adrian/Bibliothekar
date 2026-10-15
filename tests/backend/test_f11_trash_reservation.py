@@ -310,3 +310,19 @@ def test_f11_legacy_delete_reservation_conflict_preserves_evidence(tmp_path,monk
         assert recovery.business_rows(before)==recovery.business_rows(state)
         assert list(case.rglob('DELETE_*.json')) and list(case.rglob(owner+'.json'))
         for digest in data['expected'].values():assert len(matching(case,digest))==1
+
+
+@pytest.mark.parametrize('record',[
+    {'cleanup_completed':True,'files':[{'relative_path':'A.JPG'}]},
+    {'cleanup_completed':True,'skipped':[],'files':[]},
+    {'status':'known_restored','files':[]},
+    {'cleanup_completed':True,'skipped':['B.JPG'],'files':[{'relative_path':'A.JPG'}]},
+])
+def test_f11_incomplete_release_evidence_blocks_deletion(tmp_path,monkeypatch,record):
+    case,ev,data,db,ws=fixture(tmp_path,monkeypatch)
+    owner='TRASH_IMPORT_INCOMPLETE'
+    ts._atomic_json(ti.stage_parent(ws)/(owner+'.json'),{'job_id':owner,'relative_paths':['A.JPG'],**record})
+    for operation in (empty,lambda:ts.delete_selected_trash_files([db],ws,['A.JPG'])):
+        with pytest.raises((HTTPException,TrashError)):operation()
+    assert (ws/'Papierkorb/A.JPG').read_bytes()==b'synthetic-trash-A.JPG'
+    recovery.snapshot(case,ev/'blocked-incomplete-release.json')

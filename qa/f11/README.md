@@ -12,7 +12,9 @@ published until deletion has finished. There is no shared SQLite/WAL transaction
 
 A synced, atomically published restore intent precedes create_job's SQLite commit.
 An orphan, failed/completed-without-cleanup intent remains protective. Only proven
-cleanup or a committed known-file restore releases its paths. Unreadable evidence
+cleanup or a committed known-file restore releases its paths. Release evidence
+must cover the complete original selection with disjoint staged/restored paths;
+cleanup requires an explicit skipped list containing only staged paths. Unreadable evidence
 and overlapping legacy delete/restore journals fail closed; manual investigation
 is required. No automatic override or journal deletion is introduced.
 
