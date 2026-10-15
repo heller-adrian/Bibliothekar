@@ -1,0 +1,76 @@
+name: F12 exclusive publication QA (no publication)
+on:
+  push:
+    branches: [security/f12-no-clobber]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Complete backend suite
+        run: pytest -q -p no:cacheprovider -o addopts='' --basetemp="$RUNNER_TEMP/f12-backend" --junitxml="$RUNNER_TEMP/backend.xml" tests/backend
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f12-backend
+          path: |
+            ${{ runner.temp }}/backend.xml
+            ${{ runner.temp }}/f12-backend/0562-evidence
+            ${{ runner.temp }}/f12-backend/**/f12-evidence.json
+  historical-original:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [before, after]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Prepare immutable baseline
+        if: matrix.phase == 'before'
+        run: git worktree add --detach "$RUNNER_TEMP/f12-baseline" 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+      - name: Unchanged F12 original assertions (retain raw result)
+        env:
+          F12_QA_ROOT: ${{ runner.temp }}/f12-original-${{ matrix.phase }}
+          F12_QA_SOURCE_ROOT: ${{ matrix.phase == 'before' && format('{0}/f12-baseline', runner.temp) || github.workspace }}
+        run: python qa/f12/run_original.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f12-original-${{ matrix.phase }}
+          path: ${{ runner.temp }}/f12-original-${{ matrix.phase }}
+  semantic-reproduction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Original interleaving at exclusive publication boundary
+        env:
+          F12_QA_ROOT: ${{ runner.temp }}/f12-semantic
+        run: python qa/f12/run_original.py --semantic
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f12-semantic-reproduction
+          path: ${{ runner.temp }}/f12-semantic
