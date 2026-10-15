@@ -62,12 +62,16 @@ def enqueue_release(db: Path, job_id: str, event_id: str) -> dict[str, Any]:
 
 def recover_releases(db: Path) -> int:
     # A crashed process can never carry a running Python thread with it.
-    # Partially completed deletions remain in event_ssd_release_files and are
-    # handled idempotently by release_event_ssd on its next invocation.
+    # Watches do not survive a crash. Keep release journals, but never resume
+    # a running task automatically across an unobserved archive interval.
+    # An explicit new request revalidates every journaled archive member.
     with database_connection(db) as connection:
         cur = connection.execute(
-            """UPDATE ssd_release_tasks SET status='queued',updated_at=?
-               WHERE status='running'""", (_now(),)
+            """UPDATE ssd_release_tasks SET status='failed',updated_at=?,finished_at=?,
+               error_message=? WHERE status='running'""",
+            (_now(), _now(), 'SSD-Freigabe unterbrochen; Archivüberwachung war nicht durchgehend aktiv. '
+             'Keine automatische Fortsetzung. Bereits entfernte SSD-Dateien werden nicht wiederhergestellt. '
+             'Bitte Archiv prüfen und einen neuen Freigabeauftrag anfordern.')
         )
         return int(cur.rowcount)
 
