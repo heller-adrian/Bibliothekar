@@ -38,11 +38,79 @@ def mount_id(fd):
 
 
 class InotifyWatcher:
-    """Intermediate B-only step; replaced by native inotify in package B."""
-    count = 0
-    def watch(self, fd, children=None): pass
-    def check(self): pass
-    def close(self): pass
+    # No access/open/close-read events: our own hashes must not dirty the run.
+    MASK = 0x00000002 | 0x00000004 | 0x00000008 | 0x00000040 | 0x00000080 | 0x00000100 | 0x00000200 | 0x00000400 | 0x00000800
+    FATAL = 0x00002000 | 0x00004000 | 0x00008000  # unmount, overflow, ignored
+
+    def __init__(self):
+        self.fd = -1
+        self.scopes = {}
+        self.error = None
+        if sys.platform != 'linux':
+            raise ArchiveConflict('SSD-Freigabe gesperrt: Linux-inotify ist auf dieser Plattform nicht verfügbar. Kein automatischer Fallback auf reines Nachhashen.')
+        self.libc = ctypes.CDLL(None, use_errno=True)
+        self.libc.inotify_init1.argtypes = [ctypes.c_int]
+        self.libc.inotify_init1.restype = ctypes.c_int
+        self.libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+        self.libc.inotify_add_watch.restype = ctypes.c_int
+        self.fd = self.libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        if self.fd < 0:
+            raise OSError(ctypes.get_errno(), 'inotify_init1')
+
+    @property
+    def count(self):
+        return len(self.scopes)
+
+    def watch(self, fd, children=None):
+        # Follow only our already-open descriptor, not a newly resolved user path.
+        wd = self.libc.inotify_add_watch(self.fd, os.fsencode(f'/proc/self/fd/{fd}'), self.MASK)
+        if wd < 0:
+            raise OSError(ctypes.get_errno(), 'inotify_add_watch')
+        scope = None if children is None else set(children)
+        if wd in self.scopes:
+            old = self.scopes[wd]
+            scope = None if old is None or scope is None else old | scope
+        self.scopes[wd] = scope
+
+    def _consume(self, data):
+        offset = 0
+        while offset < len(data):
+            if len(data) - offset < 16:
+                raise ArchiveConflict('Unvollständiges inotify-Ereignis.')
+            wd, mask, cookie, length = struct.unpack_from('iIII', data, offset)
+            offset += 16
+            if length > len(data) - offset:
+                raise ArchiveConflict('Ungültiges inotify-Ereignis.')
+            name = os.fsdecode(data[offset:offset + length].split(b'\0', 1)[0])
+            offset += length
+            if mask & self.FATAL or wd not in self.scopes:
+                raise ArchiveConflict('Archivüberwachung verloren (Watchverlust/Queueüberlauf/Unmount).')
+            scope = self.scopes[wd]
+            if (mask & self.MASK) and (scope is None or not name or name in scope):
+                raise ArchiveConflict('Archivänderung während SSD-Freigabe beobachtet; weitere Löschungen gesperrt.')
+
+    def check(self):
+        if self.error:
+            raise ArchiveConflict(self.error)
+        try:
+            while True:
+                try:
+                    data = os.read(self.fd, 65536)
+                except BlockingIOError:
+                    return
+                except InterruptedError:
+                    continue
+                if not data:
+                    raise ArchiveConflict('Archivüberwachung unerwartet beendet.')
+                self._consume(data)
+        except (OSError, ArchiveConflict) as exc:
+            self.error = str(exc)
+            raise ArchiveConflict(self.error) from exc
+
+    def close(self):
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
 
 
 class ArchiveGuard:
