@@ -1,0 +1,49 @@
+name: F13 watch mitigation QA (no publication)
+on:
+  push:
+    branches: [security/f13-ssd-watch]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Complete unchanged backend suite plus F13 regressions
+        run: pytest -q -p no:cacheprovider -o addopts='' --basetemp="$RUNNER_TEMP/f13-backend" --junitxml="$RUNNER_TEMP/backend.xml" tests/backend
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f13-backend
+          path: |
+            ${{ runner.temp }}/backend.xml
+            ${{ runner.temp }}/f13-backend/0562-evidence
+  original-residual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+      F13_QA_ROOT: ${{ runner.temp }}/f13-original
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Unchanged original conservation assertion (no XFAIL or softened result)
+        run: python qa/f13/run_original.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f13-original-residual
+          path: ${{ runner.temp }}/f13-original
