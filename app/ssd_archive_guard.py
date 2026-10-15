@@ -37,6 +37,20 @@ def mount_id(fd):
     raise ArchiveConflict('Mountidentität des Archivzugangs ist nicht nachweisbar.')
 
 
+def require_local_filesystem(fd):
+    if sys.platform != 'linux':
+        return
+    mid = mount_id(fd)
+    for line in Path('/proc/self/mountinfo').read_text().splitlines():
+        left, right = line.split(' - ', 1)
+        if int(left.split()[0]) == mid:
+            fs = right.split()[0]
+            if fs not in {'ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'f2fs', 'zfs', 'tmpfs', 'overlay'}:
+                raise ArchiveConflict('Archiv-Dateisystem ' + fs + ' besitzt keinen zugelassenen lokalen inotify-Pfad; kein stiller B-Fallback.')
+            return fs
+    raise ArchiveConflict('Archiv-Mounttyp ist nicht nachweisbar.')
+
+
 class InotifyWatcher:
     # No access/open/close-read events: our own hashes must not dirty the run.
     MASK = 0x00000002 | 0x00000004 | 0x00000008 | 0x00000040 | 0x00000080 | 0x00000100 | 0x00000200 | 0x00000400 | 0x00000800
@@ -136,6 +150,7 @@ class ArchiveGuard:
                 try:
                     st = os.fstat(fd)
                     self._regular(st)
+                    require_local_filesystem(fd)
                     self.files[relative.as_posix()] = (version(st), mount_id(fd))
                     self.watcher.watch(fd)
                 finally:

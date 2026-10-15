@@ -18,6 +18,8 @@ jobs:
           python-version: '3.12'
       - run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
       - run: pip install -r requirements.txt pytest httpx
+      - name: Measure synthetic guard resources
+        run: python qa/f13/measure.py | tee "$RUNNER_TEMP/performance.json"
       - name: Complete unchanged backend suite plus F13 regressions
         run: pytest -q -p no:cacheprovider -o addopts='' --basetemp="$RUNNER_TEMP/f13-backend" --junitxml="$RUNNER_TEMP/backend.xml" tests/backend
       - uses: actions/upload-artifact@v4
@@ -25,9 +27,14 @@ jobs:
         with:
           name: f13-backend
           path: |
+            ${{ runner.temp }}/performance.json
             ${{ runner.temp }}/backend.xml
             ${{ runner.temp }}/f13-backend/0562-evidence
   original-residual:
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [B, C]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -41,10 +48,11 @@ jobs:
       - run: pip install -r requirements.txt pytest httpx
       - name: Unchanged original conservation assertion (no XFAIL or softened result)
         env:
+          F13_QA_MODE: ${{ matrix.mode }}
           F13_QA_ROOT: ${{ runner.temp }}/f13-original
         run: python qa/f13/run_original.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: f13-original-residual
+          name: f13-original-residual-${{ matrix.mode }}
           path: ${{ runner.temp }}/f13-original
