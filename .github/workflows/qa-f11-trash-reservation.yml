@@ -1,0 +1,60 @@
+name: F11 trash ownership QA
+on:
+  push:
+    branches: [security/f11-trash-reservation]
+permissions:
+  contents: read
+jobs:
+  backend:
+    if: "!startsWith(github.event.head_commit.message, 'QA-only:')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Complete unchanged backend suite plus F11 regressions
+        run: pytest -q -p no:cacheprovider -o addopts='' --basetemp="$RUNNER_TEMP/f11-backend" --junitxml="$RUNNER_TEMP/backend.xml" tests/backend
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f11-backend
+          path: |
+            ${{ runner.temp }}/backend.xml
+            ${{ runner.temp }}/f11-backend/0562-evidence
+            ${{ runner.temp }}/f11-backend/**/f11-evidence
+  original:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [before, after]
+        probe: [f11, neighbors, f24]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Prepare immutable baseline
+        if: matrix.phase == 'before'
+        run: |
+          git fetch --no-tags --depth=1 origin 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+          git worktree add --detach "$RUNNER_TEMP/f11-baseline" 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+      - name: Unmodified audit assertions (retain actual exit status)
+        env:
+          F11_QA_ROOT: ${{ runner.temp }}/f11-${{ matrix.phase }}-${{ matrix.probe }}
+          F11_QA_SOURCE_ROOT: ${{ matrix.phase == 'before' && format('{0}/f11-baseline', runner.temp) || github.workspace }}
+        run: python qa/f11/run_original.py ${{ matrix.probe }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f11-${{ matrix.phase }}-${{ matrix.probe }}
+          path: ${{ runner.temp }}/f11-${{ matrix.phase }}-${{ matrix.probe }}

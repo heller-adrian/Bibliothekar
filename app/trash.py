@@ -7,6 +7,10 @@ import hashlib
 import json
 import os
 import stat
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
+from inspect import signature
 
 from app.database import database_connection
 from app.external_changes import resolve_notice_key
@@ -20,6 +24,33 @@ TRASH_CONFIRMATION = "PAPIERKORB ENDGÜLTIG LEEREN"
 
 class TrashError(RuntimeError):
     pass
+
+
+def serialized_trash_operation(workspace_argument: str):
+    """All reservation, inventory and worker mutations share the existing lock."""
+    def decorate(function):
+        parameters = signature(function)
+        @wraps(function)
+        def locked(*args, **kwargs):
+            workspace = parameters.bind(*args, **kwargs).arguments[workspace_argument]
+            from app.trash_selective import _operation_lock
+            with _operation_lock(workspace):
+                return function(*args, **kwargs)
+        return locked
+    return decorate
+
+
+_EMPTY_DATABASES = ContextVar("trash_empty_databases", default=None)
+
+
+@contextmanager
+def trash_empty_databases(databases):
+    """Supply catalogue scope without changing the established filesystem hook."""
+    token = _EMPTY_DATABASES.set(tuple(databases))
+    try:
+        yield
+    finally:
+        _EMPTY_DATABASES.reset(token)
 
 
 def _now() -> str:
@@ -166,6 +197,7 @@ def _candidate_still_present(workspace_root: Path, row: dict[str, Any]) -> bool:
     return False
 
 
+@serialized_trash_operation("workspace_root")
 def reconcile_trash_inventory(
     database_path: Path,
     workspace_root: Path,
@@ -394,7 +426,39 @@ def _remove_tree_without_following_links(path: Path) -> None:
     path.rmdir()
 
 
+@serialized_trash_operation("workspace_root")
 def empty_trash_filesystem(workspace_root: Path) -> dict[str, int]:
+    # This check is inside the same process/thread lock as reservation
+    # publication, not the advisory HTTP preflight. Keep it through cleanup.
+    from app.trash_import import protected_trash_paths
+    if protected_trash_paths(None, workspace_root):
+        raise TrashError("Wiederherstellung reserviert Papierkorbdateien; Leeren gesperrt.")
+    databases = _EMPTY_DATABASES.get()
+    if databases is not None:
+        from app.trash_selective import recover_trash_deletions, delete_selected_trash_files
+        recover_trash_deletions(workspace_root, allowed_databases=databases)
+        root, entries, _ = _physical_entries(workspace_root)
+        # Do not route unknown special entries through regular-file journals.
+        if any(e['entry_type'] not in {'file', 'directory'} for e in entries):
+            raise TrashError("Papierkorb enthält Links oder spezielle Einträge; sichere manuelle Klärung erforderlich.")
+        paths = [e['relative_path'] for e in entries if e['entry_type'] == 'file']
+        for database in databases:
+            with database_connection(database) as connection:
+                missing = {str(row[0]) for row in connection.execute(
+                    "SELECT current_relative_path FROM files WHERE current_root_kind='trash'"
+                )} - set(paths)
+            if missing:
+                raise TrashError("Papierkorbkatalog enthält ungeklärte fehlende Dateien; Leeren gesperrt.")
+        result = delete_selected_trash_files(databases, workspace_root, paths) if paths else {'deleted_file_count': 0}
+        # Only remove empty directories. Never sweep a newly appeared file.
+        for e in sorted((e for e in entries if e['entry_type'] == 'directory'), key=lambda e: len(Path(e['relative_path']).parts), reverse=True):
+            try: (root / e['relative_path']).rmdir()
+            except FileNotFoundError: pass
+        if any(root.iterdir()):
+            raise TrashError("Papierkorb ist nicht vollständig leer; übrige Einträge bleiben erhalten.")
+        # The journalled purge already commits every selected row. Do not
+        # introduce an unjournalled multi-database tail after that fence.
+        return result
     root = trash_root(workspace_root)
     deleted_entries = 0
     for child in list(root.iterdir()):

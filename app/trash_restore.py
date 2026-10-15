@@ -285,6 +285,11 @@ def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
     # Shared deletion/restore lock also protects cross-process recovery.
     with _operation_lock(workspace_root):
         databases = _databases(database_paths)
+        from app.trash_import import protected_trash_paths
+        reserved = protected_trash_paths(None, workspace_root, ignore_job_id=operation_id)
+        selected = {_relative(p).as_posix() for p in relative_paths} if relative_paths is not None else reserved
+        if reserved.intersection(selected):
+            raise TrashError("Dateien gehören bereits zu einem anderen Wiederherstellungsauftrag.")
         journal = _restore_journal(workspace_root, operation_id or uuid.uuid4().hex)
         if not journal.exists():
             databases, root, central, plans = _plan_restore(databases, workspace_root, relative_paths=relative_paths)

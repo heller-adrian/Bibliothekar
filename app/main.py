@@ -4973,51 +4973,57 @@ def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
     choice = payload.get("relative_paths", None)
     if choice is not None and not isinstance(choice, list):
         raise HTTPException(status_code=422, detail="Ungültige Dateiauswahl.")
-    with _TRASH_RESTORE_LOCK:
-        databases = {
-            Path(str(row["database_path"])).resolve(strict=False)
-            for row in list_libraries(
-                REGISTRY_DATABASE_FILE, active_only=False, registered_only=True
-            )
-            if Path(str(row["database_path"])).is_file()
-        }
-        databases.add(current_database_file().resolve(strict=False))
-        from app.source_filter import should_ignore_source_relative
-        from app.trash_import import queue_trash_restore
-        from app.trash import _physical_entries, reconcile_trash_inventory
-        from app.trash_restore import _relative
-        try:
+    from app.trash_selective import _operation_lock
+    try:
+        with _operation_lock(WORKSPACE_PATH, blocking=False):
+            databases = {
+                Path(str(row["database_path"])).resolve(strict=False)
+                for row in list_libraries(
+                    REGISTRY_DATABASE_FILE, active_only=False, registered_only=True
+                )
+                if Path(str(row["database_path"])).is_file()
+            }
+            databases.update({DATABASE_FILE.resolve(strict=False), current_database_file().resolve(strict=False)})
+            from app.source_filter import should_ignore_source_relative
+            from app.trash_import import queue_trash_restore
+            from app.trash import _physical_entries, reconcile_trash_inventory
+            from app.trash_restore import _relative
+            try:
+                from app.trash_selective import recover_trash_deletions
+                recover_trash_deletions(WORKSPACE_PATH, allowed_databases=databases)
+                for db in databases:
+                    reconcile_trash_inventory(db,WORKSPACE_PATH)
+                _root,entries,_dirs=_physical_entries(WORKSPACE_PATH)
+                physical={str(e["relative_path"]) for e in entries if e["entry_type"]=="file"}
+                selected=sorted(physical) if choice is None else list(choice)
+                if not selected or len(set(selected))!=len(selected):
+                    raise TrashError("Keine gültige Dateiauswahl.")
+                for rel in selected:
+                    _relative(rel)
+                    if rel not in physical:
+                        raise TrashError("Datei nicht im Papierkorb: "+rel)
+                ignored=[rel for rel in selected if should_ignore_source_relative(rel)]
+                requested=[rel for rel in selected if rel not in ignored]
+                if not requested:
+                    result={"queued_file_count":0,"skipped_paths":ignored,
+                            "note":"Keine unterstützten Aufnahmen ausgewählt."}
+                else:
+                    queued=queue_trash_restore(DATABASE_FILE,WORKSPACE_PATH,requested)
+                    result={"job_id":queued["job_id"],"queued_job_id":queued["job_id"],
+                            "queued_file_count":queued["queued_file_count"],
+                            "skipped_paths":ignored,"status":"queued"}
+            except (TrashError,OSError,ValueError) as error:
+                raise HTTPException(status_code=409,detail=str(error)) from error
             for db in databases:
-                reconcile_trash_inventory(db,WORKSPACE_PATH)
-            _root,entries,_dirs=_physical_entries(WORKSPACE_PATH)
-            physical={str(e["relative_path"]) for e in entries if e["entry_type"]=="file"}
-            selected=sorted(physical) if choice is None else list(choice)
-            if not selected or len(set(selected))!=len(selected):
-                raise TrashError("Keine gültige Dateiauswahl.")
-            for rel in selected:
-                _relative(rel)
-                if rel not in physical:
-                    raise TrashError("Datei nicht im Papierkorb: "+rel)
-            ignored=[rel for rel in selected if should_ignore_source_relative(rel)]
-            requested=[rel for rel in selected if rel not in ignored]
-            if not requested:
-                result={"queued_file_count":0,"skipped_paths":ignored,
-                        "note":"Keine unterstützten Aufnahmen ausgewählt."}
-            else:
-                queued=queue_trash_restore(DATABASE_FILE,WORKSPACE_PATH,requested)
-                result={"job_id":queued["job_id"],"queued_job_id":queued["job_id"],
-                        "queued_file_count":queued["queued_file_count"],
-                        "skipped_paths":ignored,"status":"queued"}
-        except (TrashError,OSError,ValueError) as error:
-            raise HTTPException(status_code=409,detail=str(error)) from error
-        for db in databases:
-            view_cache.invalidate(db)
-        try:
-            synchronize_global_central_stock()
-        except Exception as error:
-            result["synchronization_warning"] = str(error)
-        result["inventory"] = api_trash_inventory()
-        return result
+                view_cache.invalidate(db)
+            try:
+                synchronize_global_central_stock()
+            except Exception as error:
+                result["synchronization_warning"] = str(error)
+            result["inventory"] = api_trash_inventory()
+            return result
+    except TrashError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/api/trash/empty-selection", tags=["Papierkorb"])
@@ -5027,27 +5033,31 @@ def api_empty_trash_selection(payload: dict[str, Any]) -> dict[str, Any]:
     paths = payload.get("relative_paths")
     if not isinstance(paths, list):
         raise HTTPException(status_code=422, detail="Ungültige Lösch-Auswahl.")
-    with _TRASH_RESTORE_LOCK:
-        databases = {
-            Path(str(row["database_path"])).resolve(strict=False)
-            for row in list_libraries(REGISTRY_DATABASE_FILE,
-                                      active_only=False,registered_only=True)
-            if Path(str(row["database_path"])).is_file()
-        }
-        databases.add(current_database_file().resolve(strict=False))
-        databases.add(DATABASE_FILE.resolve(strict=False))
-        try:
-            from app.trash_import import protected_trash_paths
-            reserved=protected_trash_paths(DATABASE_FILE,WORKSPACE_PATH)
-            if reserved.intersection(paths):
-                raise TrashError("Ausgewählte Dateien gehören zu einer laufenden Wiederherstellung.")
-            result = delete_selected_trash_files(sorted(databases), WORKSPACE_PATH, paths)
-        except (OSError, TrashError, ValueError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        for db in databases:
-            view_cache.invalidate(db)
-        result["inventory"] = api_trash_inventory()
-        return result
+    from app.trash_selective import _operation_lock
+    try:
+        with _operation_lock(WORKSPACE_PATH, blocking=False):
+            databases = {
+                Path(str(row["database_path"])).resolve(strict=False)
+                for row in list_libraries(REGISTRY_DATABASE_FILE,
+                                          active_only=False,registered_only=True)
+                if Path(str(row["database_path"])).is_file()
+            }
+            databases.add(current_database_file().resolve(strict=False))
+            databases.add(DATABASE_FILE.resolve(strict=False))
+            try:
+                from app.trash_import import protected_trash_paths
+                reserved=protected_trash_paths(DATABASE_FILE,WORKSPACE_PATH)
+                if reserved.intersection(paths):
+                    raise TrashError("Ausgewählte Dateien gehören zu einer laufenden Wiederherstellung.")
+                result = delete_selected_trash_files(sorted(databases), WORKSPACE_PATH, paths)
+            except (OSError, TrashError, ValueError) as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            for db in databases:
+                view_cache.invalidate(db)
+            result["inventory"] = api_trash_inventory()
+            return result
+    except TrashError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/api/trash/empty", tags=["Papierkorb"])
@@ -5058,28 +5068,23 @@ def api_empty_trash(payload: dict[str, Any]) -> dict[str, Any]:
             detail="Die ausdrückliche Sicherheitsbestätigung fehlt.",
         )
     try:
+        from app.trash_selective import _operation_lock
+        from app.trash import trash_empty_databases
         from app.trash_import import protected_trash_paths
-        if protected_trash_paths(DATABASE_FILE,WORKSPACE_PATH):
-            raise TrashError("Wiederherstellung läuft; der Papierkorb kann noch nicht geleert werden.")
-        api_trash_inventory()
-        empty_trash_filesystem(WORKSPACE_PATH)
-        # A failed/partial filesystem deletion raises and leaves DB rows
-        # untouched; only a fully empty physical root permits DB cleanup.
-        state = reconcile_trash_inventory(current_database_file(), WORKSPACE_PATH)
-        if state["entry_count"] or state["directory_count"]:
-            raise TrashError("Papierkorb ist noch nicht vollständig leer.")
         databases = {
             Path(str(row["database_path"])).resolve(strict=False)
-            for row in list_libraries(
-                REGISTRY_DATABASE_FILE,
-                active_only=False,
-                registered_only=True,
-            )
+            for row in list_libraries(REGISTRY_DATABASE_FILE, active_only=False, registered_only=True)
             if Path(str(row["database_path"])).is_file()
         }
-        databases.add(current_database_file().resolve(strict=False))
-        for database in sorted(databases):
-            purge_trash_database(database)
+        databases.update({DATABASE_FILE.resolve(strict=False), current_database_file().resolve(strict=False)})
+        # Advisory check only; the actual filesystem entry point reclaims the
+        # same lock and repeats the decision through journal/DB completion.
+        with _operation_lock(WORKSPACE_PATH, blocking=False):
+            if protected_trash_paths(None, WORKSPACE_PATH):
+                raise TrashError("Wiederherstellung läuft; der Papierkorb kann noch nicht geleert werden.")
+            api_trash_inventory()
+        with trash_empty_databases(sorted(databases)):
+            empty_trash_filesystem(WORKSPACE_PATH)
         return api_trash_inventory()
     except (OSError, TrashError, ValueError) as error:
         raise HTTPException(

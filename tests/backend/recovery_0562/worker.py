@@ -237,9 +237,14 @@ def configure_fixture(data):
 def instrument(kind):
     from app import trash_selective as ts,metadata_correction as mc,metadata_swap_recovery as ms,sort_apply as sa
     if kind=='trash':
+        if boundary.startswith('f11.reserve'):
+            from app import trash_import as ti
+            hook(ts, '_atomic_json', 'f11.reserve_before', when='before', predicate=lambda p,v: p.name.startswith('TRASH_IMPORT_'))
+            hook(ts, '_atomic_json', 'f11.reserve_after', predicate=lambda p,v: p.name.startswith('TRASH_IMPORT_'))
+            hook(ti, 'create_job', 'f11.reserve_committed')
         hook(ts,'_move_checked','trash.stage1',nth=1);hook(ts,'_purge_selected','trash.db1',nth=1);hook(ts,'_purge_selected','trash.db2',nth=2)
-        hook(ts,'_atomic_json','trash.prepared',predicate=lambda p,v:v['state']=='prepared')
-        hook(ts,'_atomic_json','trash.committed',predicate=lambda p,v:v['state']=='committed')
+        hook(ts,'_atomic_json','trash.prepared',predicate=lambda p,v:v.get('state')=='prepared')
+        hook(ts,'_atomic_json','trash.committed',predicate=lambda p,v:v.get('state')=='committed')
         hook(Path,'unlink','trash.cleanup1',predicate=lambda p,*a,**kw:'.trash-deletions' in str(p) and p.name=='A.JPG')
         hook(ts,'_restore_catalogue','trash.recover_db1',nth=1)
         hook(ts,'_return_checked','trash.recover_file1',nth=1)
@@ -399,6 +404,8 @@ try:
         elif action=='verify_archive':
             from app.archive_transfer import verify_event_archive
             result=verify_event_archive(DB,case/'archive',data['job'],data['event'],workspace_path=WS)
+        elif action=='full_empty':result=main.api_empty_trash({'confirmation':main.TRASH_CONFIRMATION})
+        elif action=='queue_restore':result=main.api_restore_trash({'relative_paths':['A.JPG']})
         elif action=='operate':result=operate(data['kind'])
         elif action=='control_restore':
             job=claim_next_job(DB,operation='trash_import');assert job
