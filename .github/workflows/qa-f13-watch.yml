@@ -4,6 +4,9 @@ on:
     branches: [security/f13-ssd-watch]
 permissions:
   contents: read
+concurrency:
+  group: f13-watch-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -30,6 +33,7 @@ jobs:
             ${{ runner.temp }}/performance.json
             ${{ runner.temp }}/backend.xml
             ${{ runner.temp }}/f13-backend/0562-evidence
+            ${{ runner.temp }}/f13-backend/**/sigkill-conflict-evidence.json
   original-residual:
     strategy:
       fail-fast: false

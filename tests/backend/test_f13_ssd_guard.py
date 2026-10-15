@@ -296,3 +296,78 @@ def test_B_source_disappearing_after_verification_is_not_already_released(tmp_pa
         ssd_release.release_event_ssd(db,ws,archive,'j','e')
     assert (ws/'moved-A.JPG').read_bytes()==b'synthetic-A'
     assert (ws/'Arbeitsbereich'/rel/'B.JPG').read_bytes()==b'synthetic-B'
+
+
+def test_C_native_worker_change_before_last_hash(tmp_path,monkeypatch):
+    assert sys.platform=='linux','BLOCKED: native Linux required'
+    # Same unchanged conservation assertions as B, using real inotify.
+    test_B_worker_change_before_last_hash_preserves_source(tmp_path,None,monkeypatch)
+
+
+def test_C_native_sigkill_conflict_and_recovery_commits(tmp_path):
+    assert sys.platform=='linux','BLOCKED: actual Linux/inotify/SIGKILL required'
+    import signal
+    from app.database import database_connection
+    from app.ssd_release_background import recover_releases,claim_release,enqueue_release,process_release,get_release_task
+    db,ws,archive,rel=release_fixture(tmp_path)
+    with database_connection(db) as c:
+        c.execute("CREATE TRIGGER synthetic_failure BEFORE UPDATE ON event_ssd_releases WHEN NEW.status='failed' BEGIN SELECT RAISE(ABORT, 'synthetic audit persistence failure'); END")
+    script=tmp_path/'crash_probe.py'
+    script.write_text('''import os,signal,sys,sqlite3
+from pathlib import Path
+from contextlib import contextmanager
+from app import ssd_release as sr,ssd_release_background as bg
+from app.database import database_connection
+db,ws,archive=map(Path,sys.argv[1:4]);mode=sys.argv[4];marker=Path(sys.argv[5])
+def stop():
+ marker.write_text(str(os.getpid()));os.kill(os.getpid(),signal.SIGSTOP)
+ raise RuntimeError('unexpected resume')
+if mode=='conflict':
+ task=bg.enqueue_release(db,'j','e');task=bg.claim_release(db)
+ real=Path.unlink
+ def changed(p,*a,**k):
+  result=real(p,*a,**k)
+  if p.name=='A.JPG':(archive/'2026/07-23 - Trip/Alle/A.JPG').write_bytes(b'X'*11)
+  return result
+ Path.unlink=changed
+ # A simulated DB-write failure reaches the durable task's still-running
+ # boundary; kill before background's error completion can be recorded.
+ real_failed=sr._mark_release_failed
+ def failed(*a):
+  try:real_failed(*a)
+  except sqlite3.Error:stop()
+ sr._mark_release_failed=failed
+ bg.process_release(db,ws,archive,task)
+else:
+ @contextmanager
+ def commit_then_stop(path):
+  with database_connection(path) as c:yield c
+  stop()
+ bg.database_connection=commit_then_stop
+ bg.recover_releases(db)
+''')
+    executions=[]
+    for index,mode in enumerate(['conflict','recovery','recovery']):
+        marker=tmp_path/f'marker{index}'
+        p=subprocess.Popen([sys.executable,str(script),str(db),str(ws),str(archive),mode,str(marker)],start_new_session=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        deadline=time.monotonic()+15
+        try:
+            while not marker.exists() and p.poll() is None and time.monotonic()<deadline:time.sleep(.01)
+            assert marker.exists(),p.communicate(timeout=1)
+            os.killpg(p.pid,signal.SIGKILL);p.communicate(timeout=5)
+            assert p.returncode==-signal.SIGKILL
+            executions.append({'mode':mode,'pid':p.pid,'returncode':p.returncode})
+        finally:
+            if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait(timeout=5)
+    assert recover_releases(db)==0 and claim_release(db) is None
+    assert get_release_task(db,'j','e')['status']=='failed'
+    assert not (ws/'Arbeitsbereich'/rel/'A.JPG').exists()
+    assert (ws/'Arbeitsbereich'/rel/'B.JPG').read_bytes()==b'synthetic-B'
+    explicit=enqueue_release(db,'j','e');task=claim_release(db)
+    assert task['id']==explicit['id']
+    process_release(db,ws,archive,task)
+    assert get_release_task(db,'j','e')['status']=='failed'
+    assert (ws/'Arbeitsbereich'/rel/'B.JPG').read_bytes()==b'synthetic-B'
+    with database_connection(db) as c:assert c.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+    import json
+    (tmp_path/'sigkill-conflict-evidence.json').write_text(json.dumps(executions))
