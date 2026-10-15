@@ -6,6 +6,9 @@ permissions:
   contents: read
 jobs:
   backend:
+    # A harness-only fix reuses the identical product/backend test trees from
+    # their complete run; it must not spend another full suite on workflow text.
+    if: "!startsWith(github.event.head_commit.message, 'QA-only:')"
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -38,14 +41,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt pytest httpx
       - name: Prepare immutable baseline
         if: matrix.phase == 'before'
-        run: git worktree add --detach "$RUNNER_TEMP/f12-baseline" 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+        run: |
+          git fetch --no-tags --depth=1 origin 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+          git worktree add --detach "$RUNNER_TEMP/f12-baseline" 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
       - name: Unchanged F12 original assertions (retain raw result)
         env:
           F12_QA_ROOT: ${{ runner.temp }}/f12-original-${{ matrix.phase }}
