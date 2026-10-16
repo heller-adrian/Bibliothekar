@@ -4,7 +4,7 @@ from pathlib import Path
 from app.trash_path_safety import DirectoryTree,identity
 
 out=Path(os.environ['F24_KERNEL_OUTPUT']);out.mkdir(parents=True,exist_ok=True);rows=[]
-for operation in ('rename','unlink','link','mkdir','copy','json'):
+for operation in ('rename','unlink','link','mkdir','copy','json','touch'):
  case=Path(tempfile.mkdtemp(prefix='f24-kernel-',dir='/tmp'));ws=case/'workspace';ws.mkdir();source=ws/'source';source.mkdir();private=ws/'private';private.mkdir(mode=0o700)
  (source/'A.JPG').write_bytes(b'original');(private/'A.JPG').write_bytes(b'private-original')
  with DirectoryTree(ws) as tree:
@@ -24,4 +24,4 @@ for operation in ('rename','unlink','link','mkdir','copy','json'):
   assert denied,(operation,code)
   assert (moved/'A.JPG').read_bytes()==expected and not (private/'captured.JPG').exists()
   rows.append({'operation':operation,'uid':os.geteuid(),'landlock_abi':proof['landlock_abi'],'positive_inside_rename':True,'after_last_check':True,'errno':code,'outside_bytes_retained':True,'case':str(case),'result':'PASS'})
-(out/'kernel-boundary.json').write_text(json.dumps(rows,indent=2));print('PASS: six real post-check kernel denials; outside bytes unchanged.')
+(out/'kernel-boundary.json').write_text(json.dumps(rows,indent=2));print('PASS: seven real post-check kernel denials; outside bytes unchanged.')

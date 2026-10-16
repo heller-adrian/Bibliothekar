@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import stat
+import sys
 from pathlib import Path
 import threading
 import uuid
@@ -40,7 +41,14 @@ def _operation_lock(workspace: Path):
             try:
                 path = _parent(workspace) / '.lock'
                 parent, name = tree.parent_fd(path)
-                fd = os.open(name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                if sys.platform.startswith('linux'):
+                    try:os.stat(name, dir_fd=parent, follow_symlinks=False)
+                    except FileNotFoundError:
+                        try:tree.native('touch', dst=parent, target=name)
+                        except FileExistsError:pass
+                    fd = os.open(name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=parent)
+                else:
+                    fd = os.open(name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=parent)
                 try:
                     info = os.fstat(fd)
                     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:

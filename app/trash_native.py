@@ -64,6 +64,11 @@ def execute(c):
             os.fsync(fd)
         finally:os.close(fd)
         os.fsync(c['dst'])
+    elif op=='touch':
+        fd=os.open(name(c['target']),os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=c['dst'])
+        try:os.fsync(fd)
+        finally:os.close(fd)
+        os.fsync(c['dst'])
     elif op=='json':
         temporary='.'+uuid.uuid4().hex+'.tmp';fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=c['dst'])
         try:

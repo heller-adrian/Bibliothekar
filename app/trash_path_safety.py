@@ -90,6 +90,7 @@ class DirectoryTree:
         self.directories = {}
 
     def native(self, operation, **fields):
+        self.check_anchor()
         command = {'op': operation, 'root': self.directories[self.workspace], **fields}
         fds = {command['root']} | {value for key,value in fields.items() if key in {'src','dst'}}
         process = subprocess.run([sys.executable, '-B', str(Path(__file__).with_name('trash_native.py'))],
@@ -105,11 +106,14 @@ class DirectoryTree:
             raise OSError(code, result.get('error','Kernel-Dateioperation abgewiesen'))
         return result
 
-    def enable_confinement(self):
+    def check_anchor(self):
         root = os.fstat(self.directories[self.workspace])
         parent = os.fstat(self.directories[self.workspace.parent])
         if parent.st_uid not in {0, os.geteuid()} or (parent.st_mode & 0o022 and not (parent.st_mode & stat.S_ISVTX and root.st_uid in {0, os.geteuid()})):
             raise TrashError('Workspace-Anker ist extern austauschbar; sichere Löschung gesperrt.')
+
+    def enable_confinement(self):
+        self.check_anchor()
         if sys.platform.startswith('linux'):
             self.qualify_filesystem(self.directories[self.workspace.parent])
             self.native('probe')
@@ -144,9 +148,13 @@ class DirectoryTree:
             self.directories[path] = fd
         else:
             parent = self.directory(path.parent, create=create)
+            missing = False
             if create:
+                try:os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:missing = True
+            if missing:
                 try:
-                    if sys.platform.startswith('linux') and self.confined:
+                    if sys.platform.startswith('linux'):
                         self.native('mkdir',dst=parent,target=path.name)
                     else:
                         os.mkdir(path.name, 0o700, dir_fd=parent)
