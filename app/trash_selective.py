@@ -410,6 +410,8 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
         not isinstance(p,str) for p in relative_paths
     ) or len(set(relative_paths))!=len(relative_paths):
         raise TrashError("Ungültige Lösch-Auswahl.")
+    from app.trash_restore import assert_restore_paths_available
+    assert_restore_paths_available(workspace,relative_paths)
     databases = sorted({Path(p).resolve() for p in databases})
     _recover_trash_deletions(workspace, allowed_databases=databases)
     root, entries, _ = _physical_entries(workspace)

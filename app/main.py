@@ -4910,6 +4910,13 @@ def api_trash_inventory() -> dict[str, Any]:
 
 
 def _trash_inventory_locked() -> dict[str, Any]:
+    from app.trash_restore import restore_reservations
+    result = _trash_inventory_without_conflicts()
+    result['restore_conflicts'] = [item for item in restore_reservations(WORKSPACE_PATH) if item['state']=='conflict']
+    return result
+
+
+def _trash_inventory_without_conflicts() -> dict[str, Any]:
     from app.trash_selective import recover_trash_deletions
     allowed = {DATABASE_FILE, current_database_file()}
     allowed.update(

@@ -6,6 +6,8 @@ wie beim regulären zentralen Kamerabestand.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextvars import ContextVar
+from contextlib import ExitStack
 import errno
 import json
 import os
@@ -19,6 +21,24 @@ from app.database import database_connection
 from app.free_stock_layout import FreeStockLayoutError, canonical_free_directory
 from app.storage_config import storage_paths
 from app.trash import TrashError, _physical_entries, _sha256_file, reconcile_trash_inventory
+
+
+_MOVE_RECEIPT = ContextVar('restore_move_receipt', default=None)
+
+
+class RestoreCollision(TrashError):
+    """A target is not proven to belong to this restore operation."""
+
+
+def _identity(path):
+    info = os.lstat(path)
+    return [info.st_dev, info.st_ino]
+
+
+def _published(source, target, ident):
+    callback = _MOVE_RECEIPT.get()
+    if callback is not None:
+        callback(source, target, ident)
 
 
 def _relative(value: Any) -> Path:
@@ -60,10 +80,16 @@ def _ensure_target_parent(root: Path, relative: Path) -> None:
 def _move_checked(source: Path, target: Path, sha256: str) -> None:
     """No overwrite, SHA check before removing source; EXDEV copy is exclusive."""
     created = False
+    created_identity = None
+    original_identity = _identity(source)
     try:
         try:
             os.link(source, target, follow_symlinks=False)
             created = True
+            created_identity = original_identity
+            if _identity(target) != created_identity:
+                raise RestoreCollision("Restore-Ziel wurde nach Veröffentlichung ersetzt.")
+            _published(source, target, created_identity)
         except OSError as error:
             if error.errno != errno.EXDEV:
                 raise
@@ -72,6 +98,11 @@ def _move_checked(source: Path, target: Path, sha256: str) -> None:
                 flags |= os.O_NOFOLLOW
             fd = os.open(target, flags, 0o640)
             created = True
+            created_identity = [os.fstat(fd).st_dev, os.fstat(fd).st_ino]
+            try:_published(source, target, created_identity)
+            except BaseException:
+                os.close(fd)
+                raise
             with os.fdopen(fd, "wb") as out, source.open("rb") as inp:
                 shutil.copyfileobj(inp, out, length=1024 * 1024)
                 out.flush()
@@ -88,7 +119,7 @@ def _move_checked(source: Path, target: Path, sha256: str) -> None:
     except Exception:
         # A directory-fsync error can occur AFTER source.unlink(). Never
         # remove the surviving copy merely because the move raised.
-        if created and source.is_file() and not source.is_symlink() and _sha256_file(source) == sha256:
+        if created and target.exists() and _identity(target) == created_identity and source.is_file() and not source.is_symlink() and _sha256_file(source) == sha256:
             target.unlink(missing_ok=True)
         raise
 
@@ -148,7 +179,7 @@ def _plan_restore(
         for database in databases:
             with database_connection(database) as c:
                 matches = [dict(r) for r in c.execute(
-                    "SELECT f.id,f.job_id,f.family_id,f.original_relative_path,f.size_bytes,"
+                    "SELECT f.id,f.job_id,f.family_id,ff.family_key,f.original_relative_path,f.size_bytes,"
                     " COALESCE(f.sha256_current,f.sha256_original,'') AS sha256,"
                     " COALESCE(ff.selected_capture_time,f.selected_capture_time,'') AS capture_time"
                     " FROM files f LEFT JOIN file_families ff ON ff.id=f.family_id"
@@ -194,7 +225,7 @@ def _plan_restore(
         targets.add(target_relative)
         if target.exists() or target.is_symlink():
             raise TrashError("Zieldatei existiert bereits: " + target_relative)
-        plans.append(dict(source=src, relative=name, target=target,
+        plans.append(dict(source=src, source_identity=_identity(src), relative=name, target=target,
                           target_relative=target_relative, sha256=sha, rows=linked))
 
     return databases, root, central, plans
@@ -222,7 +253,7 @@ def _load_restore(journal: Path, workspace: Path, databases: list[Path]):
     central = storage_paths(workspace)["backup_root"]
     if data.get("operation_id") not in {None, journal.stem}:
         raise TrashError("Restore-Journal besitzt eine falsche Identität.")
-    if data.get("format") != 1 or data.get("state") not in {"prepared", "rolling_back", "completed"} or not data.get("plans"):
+    if data.get("format") not in {1, 2} or data.get("state") not in {"prepared", "rolling_back", "completed", "conflict"} or not data.get("plans"):
         raise TrashError("Ungültiger Restore-Plan.")
     allowed = {str(p.resolve()): p for p in databases}
     plans = []
@@ -245,29 +276,103 @@ def _load_restore(journal: Path, workspace: Path, databases: list[Path]):
     return data, root, central, plans
 
 
+def _check_catalogue(plan, *, only_trash=False):
+    for database, row in plan["rows"]:
+        with database_connection(database) as c:
+            current = c.execute("SELECT *,COALESCE(sha256_current,sha256_original,'') AS expected_sha FROM files WHERE id=?", (row["id"],)).fetchone()
+            positions = {("trash", plan["relative"])}
+            if not only_trash:positions.add(("shared_workspace", plan["target_relative"]))
+            if current is None or any(current[key] != row[key] for key in ("job_id", "family_id", "original_relative_path", "size_bytes")) or current["expected_sha"] != plan["sha256"] or (current["current_root_kind"], current["current_relative_path"]) not in positions:
+                raise TrashError("Restore-Katalog wurde verändert; sichere Isolation nicht möglich.")
+            family = c.execute("SELECT id,job_id,family_key FROM file_families WHERE id=?", (row['family_id'],)).fetchone()
+            if family is None or family["job_id"] != row["job_id"] or (row.get("family_key") is not None and family["family_key"] != row["family_key"]):raise TrashError("Restore-Dateifamilie wurde verändert.")
+            if only_trash and c.execute("SELECT 1 FROM event_assignments WHERE family_id=? LIMIT 1",(row['family_id'],)).fetchone():
+                raise TrashError("Restore-Dateifamilie wurde inzwischen zugeordnet.")
+
+
 def _preflight_restore(plans, root, central):
-    # Validate the ENTIRE plan and every catalogue before the first mutation.
+    # Content equality alone must never claim or remove an existing target.
     for plan in plans:
         found = False
-        for base, rel in ((root, plan["relative"]), (central, plan["target_relative"])):
-            path = base / _relative(rel)
-            if path.exists() or path.is_symlink():
-                path = _source(base, _relative(rel))
-                if _sha256_file(path) != plan["sha256"]:
-                    raise TrashError("Restore-Datei besitzt fremden Inhalt: " + rel)
-                found = True
-        if not found:
-            raise TrashError("Restore ohne gesicherte Datei.")
-        for database, row in plan["rows"]:
-            with database_connection(database) as c:
-                current = c.execute("SELECT *,COALESCE(sha256_current,sha256_original,'') AS expected_sha FROM files WHERE id=?", (row["id"],)).fetchone()
-                if current is None or any(current[key] != row[key] for key in ("job_id", "family_id", "original_relative_path", "size_bytes")) or current["expected_sha"] != plan["sha256"] or (current["current_root_kind"], current["current_relative_path"]) not in {("trash", plan["relative"]), ("shared_workspace", plan["target_relative"])}:
-                    raise TrashError("Restore-Katalog wurde verändert.")
+        source = plan['source']
+        if source.exists() or source.is_symlink():
+            source = _source(root, _relative(plan['relative']))
+            if _sha256_file(source) != plan['sha256'] or (plan.get('source_identity') is not None and _identity(source) != plan['source_identity']):
+                raise TrashError("Papierkorboriginal wurde verändert.")
+            found = True
+        target = plan['target']
+        if target.exists() or target.is_symlink():
+            try:target = _source(central, _relative(plan['target_relative']))
+            except (TrashError,OSError) as error:raise RestoreCollision("Fremdes oder unsicheres Restore-Ziel: " + plan['target_relative']) from error
+            if plan.get('target_identity') is None or _identity(target) != plan['target_identity']:
+                raise RestoreCollision("Restore-Ziel besitzt keinen passenden Veröffentlichungsnachweis: " + plan['target_relative'])
+            if _sha256_file(target) != plan['sha256']:
+                raise RestoreCollision("Restore-Ziel besitzt fremden Inhalt: " + plan['target_relative'])
+            found = True
+        if not found:raise TrashError("Restore ohne gesicherte Datei.")
+        _check_catalogue(plan)
+
+
+def _conflict_invariants(data, plans, root, databases, *, existing=False):
+    # Lock all registered catalogue writers during the isolation decision.
+    evidence = {}
+    with ExitStack() as stack:
+        for db in sorted(databases):
+            conn = stack.enter_context(database_connection(db));conn.execute('BEGIN IMMEDIATE')
+            for plan in plans:
+                if conn.execute("SELECT 1 FROM files WHERE current_root_kind='shared_workspace' AND current_relative_path=? LIMIT 1",(plan['target_relative'],)).fetchone():
+                    raise TrashError("Konfliktziel wird bereits katalogisiert; globale Recovery-Prüfung erforderlich.")
+        for plan in plans:
+            try:path = _source(root, _relative(plan['relative']))
+            except OSError as error:raise TrashError('Papierkorboriginal ist nicht gesichert erreichbar: '+plan['relative']) from error
+            before = os.stat(path);ident = [before.st_dev,before.st_ino]
+            if _sha256_file(path) != plan['sha256'] or (plan.get('source_identity') is not None and ident != plan['source_identity']):
+                raise TrashError("Konflikt ohne gesichertes unverändertes Papierkorboriginal.")
+            after = path.stat()
+            if _identity(path) != ident or (after.st_size,after.st_mtime_ns,after.st_ctime_ns) != (before.st_size,before.st_mtime_ns,before.st_ctime_ns):
+                raise TrashError("Papierkorboriginal während Konfliktprüfung verändert.")
+            if existing and data.get('conflict_sources',{}).get(plan['relative']) != {'identity':ident,'sha256':plan['sha256'],'size':before.st_size}:
+                raise TrashError("Gesicherter Restore-Konflikt wurde nachträglich verändert.")
+            _check_catalogue(plan, only_trash=True)
+            evidence[plan['relative']] = {'identity':ident,'sha256':plan['sha256'],'size':before.st_size}
+    return evidence
+
+
+def _isolate_conflict(journal, data, plans, root, databases, error):
+    from app.trash_selective import _atomic_json
+    sources = _conflict_invariants(data,plans,root,databases)
+    data.update(state='conflict', conflict_reason=str(error), conflict_sources=sources,
+                conflict_detected_at=datetime.now(timezone.utc).isoformat())
+    _atomic_json(journal,data)
+
+
+def restore_reservations(workspace, *, exclude=None):
+    # These persistent journals reserve sources even if their job is terminal.
+    result = []
+    for journal in sorted(_restore_parent(workspace).glob('*.json')):
+        if journal.stem == exclude:continue
+        if journal.is_symlink():raise TrashError('Unsicheres Restore-Journal.')
+        data=json.loads(journal.read_text())
+        if data.get('format') not in {1,2} or data.get('state') not in {'prepared','rolling_back','completed','conflict'} or not data.get('plans'):
+            raise TrashError('Unklarer Restore-Zustand; weitere Papierkorboperation gesperrt.')
+        if data['state']=='completed':continue
+        paths=[_relative(p['relative']).as_posix() for p in data['plans']]
+        targets=[_relative(p['target_relative']).as_posix() for p in data['plans']]
+        result.append({'operation_id':journal.stem,'state':data['state'],'relative_paths':paths,'target_paths':targets,
+                       'message':str(data.get('conflict_reason') or 'Wiederherstellung ist noch nicht abgeschlossen.')})
+    return result
+
+
+def assert_restore_paths_available(workspace, paths=None, *, exclude=None):
+    for record in restore_reservations(workspace,exclude=exclude):
+        if paths is None or set(paths).intersection(record['relative_paths']):
+            raise TrashError('Dateien sind durch eine unvollständige Wiederherstellung gesperrt: '+record['operation_id'])
 
 
 def _rollback_restore(plans, root, central):
     _preflight_restore(plans, root, central)
     for plan in reversed(plans):
+        _preflight_restore([plan],root,central)
         if plan["target"].exists():
             if plan["source"].exists():
                 plan["target"].unlink()
@@ -287,8 +392,9 @@ def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
         databases = _databases(database_paths)
         journal = _restore_journal(workspace_root, operation_id or uuid.uuid4().hex)
         if not journal.exists():
+            assert_restore_paths_available(workspace_root,relative_paths)
             databases, root, central, plans = _plan_restore(databases, workspace_root, relative_paths=relative_paths)
-            data = dict(format=1, state="prepared", operation_id=operation_id,
+            data = dict(format=2, state="prepared", operation_id=operation_id,
                         databases={str(db): [db.stat().st_dev, db.stat().st_ino] for db in databases},
                         plans=[{k: ([[str(db), row] for db, row in value] if k == "rows" else value)
                                 for k, value in plan.items() if k not in {"source", "target"}}
@@ -298,7 +404,13 @@ def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
         data, root, central, plans = _load_restore(journal, workspace_root, databases)
         if relative_paths is not None and sorted(relative_paths) != sorted(p["relative"] for p in plans):
             raise TrashError("Restore-Auswahl widerspricht dem Journal.")
-        _preflight_restore(plans, root, central)
+        if data['state']=='conflict':
+            _conflict_invariants(data,plans,root,databases,existing=True)
+            raise TrashError('Wiederherstellung bleibt wegen Zielkonflikt gesperrt: '+str(data.get('conflict_reason','')))
+        try:_preflight_restore(plans, root, central)
+        except RestoreCollision as error:
+            _isolate_conflict(journal,data,plans,root,databases,error)
+            raise TrashError('Wiederherstellung wegen Zielkonflikt isoliert: '+str(error)) from error
         if data["state"] == "rolling_back":
             _rollback_restore(plans, root, central)
             journal.unlink()
@@ -306,11 +418,19 @@ def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
             return restore_trash_files(databases, workspace_root, relative_paths=relative_paths, operation_id=operation_id)
         timestamp = datetime.now(timezone.utc).isoformat()
         committed = []
+        def receipt(source, target, ident):
+            for plan, saved in zip(plans,data['plans']):
+                if target == plan['target']:
+                    plan['target_identity'] = saved['target_identity'] = ident
+                    _atomic_json(journal,data)
+                    return
+        token = _MOVE_RECEIPT.set(receipt)
         try:
             for plan in plans:
                 _ensure_target_parent(central, _relative(plan["target_relative"]))
                 if plan["source"].exists():
                     if plan["target"].exists():
+                        _preflight_restore([plan],root,central)
                         # Interrupted link/unlink: both hashes passed preflight.
                         with plan["target"].open("rb") as h: os.fsync(h.fileno())
                         plan["source"].unlink()
@@ -339,10 +459,15 @@ def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
             if not committed and not any(_catalogue_restored(p) for p in plans):
                 data["state"] = "rolling_back"
                 _atomic_json(journal, data)
-                _rollback_restore(plans, root, central)
+                try:_rollback_restore(plans, root, central)
+                except RestoreCollision as collision:
+                    _isolate_conflict(journal,data,plans,root,databases,collision)
+                    raise TrashError('Wiederherstellung fehlgeschlagen; Zielkonflikt isoliert: '+str(collision)) from error
                 journal.unlink()
                 _sync_dir(journal.parent)
             raise TrashError("Wiederherstellung fehlgeschlagen; Journal zur Fortsetzung erhalten: " + str(error)) from error
+        finally:
+            _MOVE_RECEIPT.reset(token)
         if operation_id is None:
             journal.unlink()
             _sync_dir(journal.parent)
@@ -363,6 +488,9 @@ def recover_trash_restores(workspace_root: Path, *, allowed_databases: set[Path]
     with _operation_lock(workspace_root):
         for journal in sorted(_restore_parent(workspace_root).glob("*.json")):
             data, root, central, plans = _load_restore(journal, workspace_root, _databases(allowed_databases))
+            if data['state']=='conflict':
+                _conflict_invariants(data,plans,root,_databases(allowed_databases),existing=True)
+                continue
             if data["state"] == "completed" and data.get("operation_id"):
                 from app.trash_import import stage_parent
                 request = stage_parent(workspace_root) / (str(data["operation_id"]) + ".json")
@@ -371,6 +499,10 @@ def recover_trash_restores(workspace_root: Path, *, allowed_databases: set[Path]
                 if request.is_file() and json.loads(request.read_text()).get("status") == "known_restored":
                     journal.unlink(); _sync_dir(journal.parent)
                     continue
+            try:_preflight_restore(plans,root,central)
+            except RestoreCollision as error:
+                _isolate_conflict(journal,data,plans,root,_databases(allowed_databases),error)
+                continue
             if data["state"] == "rolling_back":
                 _rollback_restore(plans, root, central)
                 journal.unlink(); _sync_dir(journal.parent)

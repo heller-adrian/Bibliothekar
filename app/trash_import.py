@@ -42,6 +42,8 @@ def stage_trash_import(
     if not relative_paths or len(relative_paths) != len(set(relative_paths)):
         raise TrashError("Ungültige Papierkorb-Auswahl.")
     root = trash_root(workspace_root)
+    from app.trash_restore import assert_restore_paths_available
+    assert_restore_paths_available(workspace_root,relative_paths)
     parent = stage_parent(workspace_root)
     # Avoid two live imports of the same file if a user clicks twice.
     wanted = set(relative_paths)
@@ -97,7 +99,13 @@ def stage_trash_import(
         raise
 
 
-def cleanup_successful_trash_import(
+def cleanup_successful_trash_import(workspace_root: Path, job_id: str, imported_entries: list[dict]) -> dict:
+    from app.trash_selective import _operation_lock
+    with _operation_lock(workspace_root):
+        return _cleanup_successful_trash_import_locked(workspace_root,job_id,imported_entries)
+
+
+def _cleanup_successful_trash_import_locked(
     workspace_root: Path,
     job_id: str,
     imported_entries: list[dict],
@@ -114,6 +122,8 @@ def cleanup_successful_trash_import(
     data = json.loads(record_path.read_text(encoding="utf-8"))
     if str(data.get("job_id")) != job_id:
         raise TrashError("Papierkorb-Importjournal passt nicht zum Auftrag.")
+    from app.trash_restore import assert_restore_paths_available
+    assert_restore_paths_available(workspace_root,[str(item['relative_path']) for item in data.get('files') or []])
     imported = {
         (str(item.get("relative_path") or ""),str(item.get("sha256") or ""))
         for item in imported_entries
@@ -153,6 +163,8 @@ def queue_trash_restore(
         or any(not isinstance(v,str) for v in relative_paths)
         or len(relative_paths)!=len(set(relative_paths))):
         raise TrashError("Ungültige Papierkorb-Auswahl.")
+    from app.trash_restore import assert_restore_paths_available
+    assert_restore_paths_available(workspace_root,relative_paths)
     parent=stage_parent(workspace_root)
     root=trash_root(workspace_root)
     selected=sorted(relative_paths)
@@ -309,13 +321,16 @@ def _finish_known_restore(workspace_root: Path, job_id: str) -> None:
     from app.trash_selective import _sync_dir
     path = _restore_journal(workspace_root, job_id)
     if path.exists():
+        if path.is_symlink() or json.loads(path.read_text()).get('state') != 'completed':
+            raise TrashError('Unvollständiges Restore-Journal bleibt erhalten.')
         path.unlink()
         _sync_dir(path.parent)
 
 
 def protected_trash_paths(database_path: Path, workspace_root: Path) -> set[str]:
     """Return files reserved by queued/running restores, including staging."""
-    protected=set()
+    from app.trash_restore import restore_reservations
+    protected={path for record in restore_reservations(workspace_root) for path in record['relative_paths']}
     for journal in stage_parent(workspace_root).glob("TRASH_IMPORT_*.json"):
         if journal.is_symlink():
             raise TrashError("Unsicheres Papierkorb-Importjournal.")
@@ -347,6 +362,9 @@ def resume_safe_queued_trash_restores(database_path: Path, workspace_root: Path)
             if not path.is_file() or path.is_symlink():
                 continue
             data=json.loads(path.read_text(encoding="utf-8"))
+            from app.trash_restore import restore_reservations
+            if any(item['operation_id']==jid and item['state']=='conflict' for item in restore_reservations(workspace_root)):
+                continue
             if data.get("status") not in {"queued", "staged", "known_restored"}:
                 continue
             if conn.execute("SELECT 1 FROM files WHERE job_id=? LIMIT 1",(jid,)).fetchone():

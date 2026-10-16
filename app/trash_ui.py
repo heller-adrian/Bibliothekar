@@ -208,6 +208,8 @@ TRASH_HTML = r"""<!doctype html>
       ? "Physischer Bestand geprüft · "+Number(data.tracked_file_count||0)+" bekannte Dateien"
         +(Number(data.untracked_file_count||0)?" · "+Number(data.untracked_file_count||0)+" nicht katalogisierte Dateien":"")
       : "Der Papierkorb ist leer.";
+    const conflicts=data.restore_conflicts||[];
+    if(conflicts.length)status.textContent+=" · Wiederherstellung blockiert: "+conflicts.map(c=>c.operation_id+" – "+c.message).join("; ");
     const count=Number(data.file_count||0);
     const folders=Number(data.directory_count||0);
     list.innerHTML=entries.length

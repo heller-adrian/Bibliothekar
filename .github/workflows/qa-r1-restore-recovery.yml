@@ -1,0 +1,66 @@
+name: R1 restore conflict recovery QA
+on:
+  push:
+    branches: [security/r1-restore-recovery]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Record environment
+        run: |
+          python --version > "$RUNNER_TEMP/environment.txt"
+          uname -a >> "$RUNNER_TEMP/environment.txt"
+          exiftool -ver >> "$RUNNER_TEMP/environment.txt"
+          pip freeze >> "$RUNNER_TEMP/environment.txt"
+      - name: Full backend suite
+        run: pytest -q -p no:cacheprovider -o addopts='' --basetemp="$RUNNER_TEMP/r1-backend" --junitxml="$RUNNER_TEMP/backend.xml" tests/backend
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r1-backend
+          path: |
+            ${{ runner.temp }}/backend.xml
+            ${{ runner.temp }}/environment.txt
+            ${{ runner.temp }}/r1-backend/0562-evidence
+            ${{ runner.temp }}/r1-backend/**/r1-evidence
+  original:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [before, after]
+        probe: [r1, neighbors]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Immutable baseline
+        if: matrix.phase == 'before'
+        run: |
+          git fetch --no-tags --depth=1 origin 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+          git worktree add --detach "$RUNNER_TEMP/r1-baseline" 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+      - name: Unmodified original assertions
+        env:
+          R1_QA_ROOT: ${{ runner.temp }}/r1-${{ matrix.phase }}-${{ matrix.probe }}
+          R1_QA_SOURCE_ROOT: ${{ matrix.phase == 'before' && format('{0}/r1-baseline', runner.temp) || github.workspace }}
+        run: python qa/r1/run_original.py ${{ matrix.probe }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r1-${{ matrix.phase }}-${{ matrix.probe }}
+          path: ${{ runner.temp }}/r1-${{ matrix.phase }}-${{ matrix.probe }}

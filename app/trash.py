@@ -395,6 +395,14 @@ def _remove_tree_without_following_links(path: Path) -> None:
 
 
 def empty_trash_filesystem(workspace_root: Path) -> dict[str, int]:
+    from app.trash_selective import _operation_lock
+    from app.trash_restore import assert_restore_paths_available
+    with _operation_lock(workspace_root):
+        assert_restore_paths_available(workspace_root)
+        return _empty_trash_filesystem_locked(workspace_root)
+
+
+def _empty_trash_filesystem_locked(workspace_root):
     root = trash_root(workspace_root)
     deleted_entries = 0
     for child in list(root.iterdir()):
