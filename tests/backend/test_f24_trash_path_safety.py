@@ -250,3 +250,16 @@ def test_f24_legacy_dual_copy_ownership(tmp_path,hardlink):
         for key in ('source_identity','staged_identity','link_path'):item.pop(key,None)
     path.write_text(json.dumps(record));starts(case,ev,blocked=not hardlink);originals(data,ws)
     if not hardlink:assert path.exists() and hashlib.sha256(target.read_bytes()).hexdigest()==data['expected']['A.JPG']
+
+
+def test_f24_untrusted_workspace_ancestor(tmp_path):
+    case,ev,data,ws=seed(tmp_path);source=ws/'Papierkorb/A.JPG';before=source.read_bytes()
+    # Workspace parent belongs to the app and is not writable; its parent is.
+    original_mode=tmp_path.stat().st_mode & 0o7777
+    tmp_path.chmod(0o777)
+    try:
+        with pytest.raises(TrashError,match='Workspace-Anker'):delete(data,ws)
+        assert source.read_bytes()==before
+        r.snapshot(case,ev/'unsafe-grandparent-denied.json')
+    finally:tmp_path.chmod(original_mode)
+    starts(case,ev);originals(data,ws)

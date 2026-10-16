@@ -107,10 +107,16 @@ class DirectoryTree:
         return result
 
     def check_anchor(self):
-        root = os.fstat(self.directories[self.workspace])
-        parent = os.fstat(self.directories[self.workspace.parent])
-        if parent.st_uid not in {0, os.geteuid()} or (parent.st_mode & 0o022 and not (parent.st_mode & stat.S_ISVTX and root.st_uid in {0, os.geteuid()})):
-            raise TrashError('Workspace-Anker ist extern austauschbar; sichere Löschung gesperrt.')
+        # Every ancestor can reparent its child; checking only the immediate
+        # workspace parent would leave a writable grandparent escape.
+        child = self.workspace
+        while child != child.parent:
+            parent = child.parent
+            parent_info = os.fstat(self.directories[parent])
+            child_info = os.fstat(self.directories[child])
+            if parent_info.st_uid not in {0, os.geteuid()} or (parent_info.st_mode & 0o022 and not (parent_info.st_mode & stat.S_ISVTX and child_info.st_uid in {0, os.geteuid()})):
+                raise TrashError('Workspace-Anker ist extern austauschbar; sichere Löschung gesperrt.')
+            child = parent
 
     def enable_confinement(self):
         self.check_anchor()
