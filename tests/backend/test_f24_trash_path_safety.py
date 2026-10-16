@@ -117,8 +117,27 @@ def test_f24_stage_swap(tmp_path,monkeypatch,boundary):
         monkeypatch.setattr(ts,'rename_exclusive',wrapped)
     with pytest.raises((TrashError,OSError)):delete(data,ws)
     assert victim.read_bytes()==before;r.snapshot(case,ev/'after-stage-conflict.json');starts(case,ev,True)
-    entry,saved=swapped;entry.unlink();saved.rename(entry);starts(case,ev)
-    assert victim.read_bytes()==before;originals(data,ws)
+    entry,saved=swapped
+    if boundary=='before_private_unlink':
+        journal=next(case.rglob('DELETE_*.json'));record=json.loads(journal.read_text());assert record['state']=='committed'
+        for copy in (saved/'A.JPG',saved/'.captured/A.JPG'):assert hashlib.sha256(copy.read_bytes()).hexdigest()==data['expected']['A.JPG']
+        assert hashlib.sha256((ws/'Papierkorb/B.JPG').read_bytes()).hexdigest()==data['expected']['B.JPG']
+        for db in data['dbs']:
+            with database_connection(db) as c:assert [row[0] for row in c.execute('SELECT current_relative_path FROM files')]==['B.JPG']
+        r.snapshot(case,ev/'committed-blocked-original-bytes-retained.json')
+    entry.unlink();saved.rename(entry);state=starts(case,ev)
+    assert victim.read_bytes()==before
+    if boundary=='before_private_unlink':
+        assert not (ws/'Papierkorb/A.JPG').exists()
+        assert hashlib.sha256((ws/'Papierkorb/B.JPG').read_bytes()).hexdigest()==data['expected']['B.JPG']
+        assert not list(case.rglob('DELETE_*.json'))
+        baseline=json.loads((ev/'before.json').read_text())
+        for db in ('kamera.sqlite3','second1.sqlite3'):
+            expected_files=[row for row in r.db_rows(baseline,'files',db) if row['current_relative_path']=='B.JPG']
+            assert r.db_rows(state,'files',db)==expected_files
+            families={row['family_id'] for row in expected_files}
+            assert r.db_rows(state,'file_families',db)==[row for row in r.db_rows(baseline,'file_families',db) if row['id'] in families]
+    else:originals(data,ws)
 
 
 def test_f24_no_public_unlink(tmp_path,monkeypatch):
