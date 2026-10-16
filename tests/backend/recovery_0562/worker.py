@@ -240,7 +240,14 @@ def instrument(kind):
         hook(ts,'_move_checked','trash.stage1',nth=1);hook(ts,'_purge_selected','trash.db1',nth=1);hook(ts,'_purge_selected','trash.db2',nth=2)
         hook(ts,'_atomic_json','trash.prepared',predicate=lambda p,v:v['state']=='prepared')
         hook(ts,'_atomic_json','trash.committed',predicate=lambda p,v:v['state']=='committed')
-        hook(Path,'unlink','trash.cleanup1',predicate=lambda p,*a,**kw:'.trash-deletions' in str(p) and p.name=='A.JPG')
+        from app.trash_path_safety import DirectoryTree
+        hook(DirectoryTree,'unlink_private','trash.cleanup1',predicate=lambda self,p,*a,**kw:'.trash-deletions' in str(p) and p.name=='A.JPG' and '.captured' not in p.parts)
+        hook(DirectoryTree,'link','f24.link',nth=1)
+        hook(ts,'_atomic_json','f24.staged',predicate=lambda p,v:any(item.get('staged_identity') for item in v.get('files',[])))
+        hook(ts,'rename_exclusive','f24.capture',nth=1)
+        hook(DirectoryTree,'unlink_private','f24.capture_unlink',predicate=lambda self,p,*a,**kw:'.captured' in p.parts and p.name=='A.JPG')
+        hook(ts,'rename_exclusive','f24.recover_publish',nth=1)
+        hook(ts,'_remove_empty_staging','f24.recover_cleanup',when='before')
         hook(ts,'_restore_catalogue','trash.recover_db1',nth=1)
         hook(ts,'_return_checked','trash.recover_file1',nth=1)
         hook(ts,'_remove_empty_staging','trash.recover_cleanup')
@@ -399,6 +406,9 @@ try:
         elif action=='verify_archive':
             from app.archive_transfer import verify_event_archive
             result=verify_event_archive(DB,case/'archive',data['job'],data['event'],workspace_path=WS)
+        elif action=='recover_trash_only':
+            from app.trash_selective import recover_trash_deletions
+            result=recover_trash_deletions(WS,allowed_databases=[Path(p) for p in data['databases']])
         elif action=='operate':result=operate(data['kind'])
         elif action=='control_restore':
             job=claim_next_job(DB,operation='trash_import');assert job

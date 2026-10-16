@@ -346,17 +346,20 @@ def test_trash_recovery_handles_dual_copy_stage_boundary(tmp_path, monkeypatch, 
     source = Path(paths['trash_root'])/'A.JPG'
     with monkeypatch.context() as m:
         if boundary == 'link':
-            real = ts.os.link
+            from app.trash_path_safety import DirectoryTree
+            real = DirectoryTree.link
             def stop(*a, **kw):
                 real(*a, **kw)
                 raise Interrupted()
-            m.setattr(ts.os, 'link', stop)
+            m.setattr(DirectoryTree, 'link', stop)
         else:
-            real = Path.unlink
-            def stop(path, *a, **kw):
-                real(path, *a, **kw)
-                if path == source: raise Interrupted()
-            m.setattr(Path, 'unlink', stop)
+            # F24 replaces public source.unlink with atomic private capture.
+            # Preserve the same interruption + byte/catalogue assertions.
+            real = ts.rename_exclusive
+            def stop(*a, **kw):
+                real(*a, **kw)
+                if a[1] == source.name: raise Interrupted()
+            m.setattr(ts, 'rename_exclusive', stop)
         with pytest.raises(Interrupted): ts.delete_selected_trash_files([db, other], workspace, ['A.JPG'])
     ts.recover_trash_deletions(workspace, allowed_databases={db, other})
     assert source.read_bytes() == payload
@@ -385,7 +388,8 @@ def test_trash_stage_and_return_cross_mount_fallback(tmp_path, monkeypatch):
     import errno
     db, other, workspace, paths, payload = trash_case(tmp_path, monkeypatch, two=True)
     before = [catalogue(p) for p in (db, other)]
-    monkeypatch.setattr(ts.os, 'link', lambda *a, **k: (_ for _ in ()).throw(OSError(errno.EXDEV, 'synthetic bind-mount boundary')))
+    from app.trash_path_safety import DirectoryTree
+    monkeypatch.setattr(DirectoryTree, 'link', lambda *a, **k: (_ for _ in ()).throw(OSError(errno.EXDEV, 'synthetic bind-mount boundary')))
     interrupt_after_first_db(db, other, workspace, monkeypatch)
     ts.recover_trash_deletions(workspace, allowed_databases={db, other})
     assert (Path(paths['trash_root'])/'A.JPG').read_bytes() == payload

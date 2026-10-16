@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from pathlib import Path
 import threading
 import uuid
@@ -19,6 +20,7 @@ from app.database import database_connection
 from app.storage_config import storage_paths
 from app.trash import TrashError, _physical_entries, _sha256_file, trash_root
 from app.trash_restore import _relative, _source, _ensure_target_parent
+from app.trash_path_safety import ACTIVE, DirectoryTree, identity, digest_fd, rename_exclusive
 
 
 _RECOVERY_LOCK = threading.RLock()
@@ -27,28 +29,39 @@ _HELD_LOCKS = threading.local()
 
 @contextmanager
 def _operation_lock(workspace: Path):
-    # Inventory recovery must not roll back a live deletion. flock also covers
-    # a second web process; the OS releases it when a process dies.
     with _RECOVERY_LOCK:
-        path = _parent(workspace) / ".lock"
-        held = getattr(_HELD_LOCKS, "paths", set())
-        if path in held:
+        active = ACTIVE.get()
+        if active is not None and active.workspace == Path(os.path.abspath(workspace)):
+            active.verify()
             yield
             return
-        fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            _HELD_LOCKS.paths = held | {path}
-            yield
-        finally:
-            _HELD_LOCKS.paths = held
-            os.close(fd)
+        with DirectoryTree(workspace) as tree:
+            token = ACTIVE.set(tree)
+            try:
+                path = _parent(workspace) / '.lock'
+                parent, name = tree.parent_fd(path)
+                fd = os.open(name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                try:
+                    info = os.fstat(fd)
+                    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+                        raise TrashError('Unsicherer Besitzer der Papierkorbsperre.')
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                    tree.verify()
+                    yield
+                finally:
+                    os.close(fd)
+            finally:
+                ACTIVE.reset(token)
 
 
 _PURGE_SNAPSHOTS: ContextVar[dict] = ContextVar("trash_purge_snapshots", default={})
 
 
 def _sync_dir(path: Path) -> None:
+    tree = ACTIVE.get()
+    if tree is not None and Path(os.path.abspath(path)).is_relative_to(tree.workspace):
+        os.fsync(tree.directory(path))
+        return
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         os.fsync(fd)
@@ -68,43 +81,91 @@ def _sync_parents(path: Path, root: Path) -> None:
 
 
 def _move_checked(source: Path, target: Path, sha256: str, *, durable_root: Path) -> None:
-    # Publish and sync the staged copy BEFORE unlinking the trash entry.
-    # A stop between link and unlink leaves two verified copies for recovery.
+    tree = ACTIVE.get()
+    if tree is None:
+        raise TrashError('Dateiübernahme ohne gebundenen Workspace verweigert.')
+    tree.verify()
+    item = tree.item(source, target)
+    source_fd = tree.open_file(source, expected=item.get('source_identity'))
+    if digest_fd(source_fd) != sha256:
+        raise TrashError('Original vor der Übernahme verändert.')
+    src_parent, src_name = tree.parent_fd(source)
+    dst_parent, dst_name = tree.parent_fd(target, create=True)
+    tree.check_private(dst_parent)
+    if os.fstat(source_fd).st_dev != os.fstat(dst_parent).st_dev:
+        raise TrashError('Dateisystemgrenze erlaubt keine atomare Löschübernahme; Original bleibt erhalten.')
+    # Retain the historical link checkpoint, but never make the permanent
+    # staging snapshot an alias writable through an external source handle.
+    temporary = target.with_name('.link-' + uuid.uuid4().hex)
+    item['link_path'] = temporary.relative_to(tree.private_root / tree.record['id']).as_posix()
+    _atomic_json(tree.journal, tree.record)
+    linked = False
     try:
-        os.link(source, target, follow_symlinks=False)
+        tree.link(src_name, temporary.name, src_dir_fd=src_parent, dst_dir_fd=dst_parent, follow_symlinks=False)
+        linked = True
+        if identity(tree.info(temporary)) != identity(os.fstat(source_fd)):
+            raise TrashError('Fremder Hardlink im Zwischenbestand; keine Bereinigung.')
     except OSError as error:
         if error.errno != errno.EXDEV:
             raise
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o640)
-        with os.fdopen(fd, "wb") as out, source.open("rb") as inp:
-            shutil.copyfileobj(inp, out, length=1024 * 1024)
-            out.flush()
-            os.fsync(out.fileno())
-    if _sha256_file(target) != sha256:
-        raise TrashError("Prüfsummenfehler im Lösch-Zwischenbestand.")
-    with target.open("rb") as staged_file:
-        os.fsync(staged_file.fileno())
-    # Include all new nested directory entries and the DELETE_* directory.
+    tree.copy(source_fd, dst_name, dst_parent)
+    if tree.sha(target) != sha256:
+        raise TrashError('Prüfsummenfehler im Lösch-Zwischenbestand.')
+    item['staged_identity'] = identity(tree.info(target))
+    if linked:
+        tree.unlink_private(temporary, expected=identity(os.fstat(source_fd)))
     _sync_parents(target.parent, durable_root)
-    source.unlink()
+    _atomic_json(tree.journal, tree.record)
+    capture = tree.private_root / tree.record['id'] / '.captured' / _relative(item['path'])
+    capture_parent, capture_name = tree.parent_fd(capture, create=True)
+    tree.check_private(capture_parent)
+    tree.verify()
+    rename_exclusive(src_parent, src_name, capture_parent, capture_name)
+    os.fsync(src_parent)
+    os.fsync(capture_parent)
+    if identity(tree.info(capture)) != identity(os.fstat(source_fd)):
+        # Return an inadvertently captured replacement without overwriting any
+        # newer name. If that is impossible, retain it and the journal as-is.
+        try:
+            rename_exclusive(capture_parent, capture_name, src_parent, src_name)
+            os.fsync(src_parent)
+            os.fsync(capture_parent)
+        except OSError:
+            pass
+        raise TrashError('Quellname wurde gleichzeitig ersetzt; fremde Datei bleibt erhalten.')
+    tree.verify()
+    if tree.sha(capture, expected=item['source_identity']) != sha256:
+        raise TrashError('Original während der atomaren Übernahme verändert.')
+    tree.unlink_private(capture, expected=item['source_identity'])
     _sync_dir(source.parent)
 
 
 def _return_checked(source: Path, target: Path, sha256: str, root: Path) -> None:
-    if _sha256_file(source) != sha256:
-        raise TrashError("Zwischenbestand während der Wiederherstellung verändert.")
-    if target.exists():
-        if target.is_symlink() or _sha256_file(target) != sha256:
-            raise TrashError("Ziel während der Wiederherstellung verändert.")
-        # Both copies were verified in the all-file recovery preflight.
-        # Sync the surviving copy before removing the staging link.
-        with target.open("rb") as handle:
-            os.fsync(handle.fileno())
+    tree = ACTIVE.get()
+    tree.verify()
+    item = tree.item(source, target)
+    source_info = tree.info(source)
+    if tree.sha(source) != sha256:
+        raise TrashError('Zwischenbestand während der Wiederherstellung verändert.')
+    target_info = tree.info(target)
+    if target_info is not None:
+        allowed = [item.get('source_identity'), item.get('staged_identity')]
+        if not stat.S_ISREG(target_info.st_mode) or identity(target_info) not in allowed or tree.sha(target) != sha256:
+            raise TrashError('Fremdes Restore-Ziel bleibt unverändert; Journal bleibt erhalten.')
+        fd = tree.open_file(target, expected=identity(target_info))
+        os.fsync(fd)
         _sync_parents(target.parent, root)
-        source.unlink()
-        _sync_dir(source.parent)
+        tree.unlink_private(source, expected=identity(source_info))
     else:
-        _move_checked(source, target, sha256, durable_root=root)
+        src_parent, src_name = tree.private_path(source)
+        dst_parent, dst_name = tree.parent_fd(target, create=True)
+        tree.verify()
+        rename_exclusive(src_parent, src_name, dst_parent, dst_name)
+        os.fsync(src_parent)
+        os.fsync(dst_parent)
+        if tree.sha(target, expected=identity(source_info)) != sha256:
+            raise TrashError('Restore-Datei wurde nach der Veröffentlichung verändert.')
+
 
 def _quote(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
@@ -244,15 +305,23 @@ def _restore_catalogue(database: dict, operation_id: str) -> None:
 
 
 def _parent(workspace: Path) -> Path:
-    root = storage_paths(workspace)["metadata_root"] / ".trash-deletions"
-    if root.is_symlink():
-        raise TrashError("Papierkorb-Löschjournal darf kein Symlink sein.")
-    root.mkdir(parents=True, exist_ok=True)
-    _sync_dir(root.parent)
-    return root.resolve(strict=True)
+    from app.storage_config import load_storage_settings
+    tree = ACTIVE.get()
+    if tree is None:
+        with DirectoryTree(workspace) as temporary:
+            root = temporary.workspace / load_storage_settings()['metadata_directory_name'] / '.trash-deletions'
+            temporary.directory(root, create=True, private=True)
+            return root
+    root = tree.workspace / load_storage_settings()['metadata_directory_name'] / '.trash-deletions'
+    tree.directory(root, create=True, private=True)
+    tree.private_root = root
+    return root
 
 
 def _atomic_json(path: Path, value: dict) -> None:
+    if ACTIVE.get() is not None:
+        ACTIVE.get().atomic_json(path, value)
+        return
     temporary = path.with_name("." + uuid.uuid4().hex + ".tmp")
     try:
         with temporary.open("x", encoding="utf-8") as handle:
@@ -273,12 +342,17 @@ def recover_trash_deletions(workspace: Path, *, allowed_databases: Iterable[Path
 
 def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict:
     parent = _parent(workspace)
-    root = trash_root(workspace)
+    from app.storage_config import load_storage_settings
+    tree = ACTIVE.get()
+    root = tree.workspace / load_storage_settings()['trash_directory_name']
+    tree.directory(root, create=True)
     recovered = []
-    for journal in sorted(parent.glob("DELETE_*.json")):
+    for journal in sorted(parent / name for name in os.listdir(tree.directory(parent)) if name.startswith("DELETE_") and name.endswith(".json")):
         if journal.is_symlink():
             raise TrashError("Unsicheres Löschjournal.")
-        data = json.loads(journal.read_text(encoding="utf-8"))
+        tree.qualify_filesystem(tree.directory(parent))
+        tree.enable_confinement()
+        data = tree.read_json(journal)
         ident = str(data.get("id") or "")
         if ident != journal.stem or len(ident) != 39 or not ident.startswith("DELETE_") or any(c not in "0123456789ABCDEF" for c in ident[7:]):
             raise TrashError("Ungültige Löschjournal-ID.")
@@ -290,27 +364,52 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
             raise TrashError("Löschjournal verweist auf eine nicht registrierte Datenbank.")
         staged = parent / ident
         expected = {str(item["path"]): item for item in data["files"]}
+        tree.record, tree.journal = data, journal
+        if data.get("format") == 3:
+            bindings = data.get("directory_identities")
+            if not isinstance(bindings, dict) or "." not in bindings:
+                raise TrashError("Löschjournal enthält keine belastbare Workspace-Bindung.")
+            for relative, expected_id in bindings.items():
+                bound = tree.workspace if relative == "." else tree.workspace / _relative(relative)
+                if bound.is_relative_to(staged) and tree.info(bound) is None:
+                    continue  # interrupted cleanup may already remove private dirs
+                if identity(os.fstat(tree.directory(bound))) != expected_id:
+                    raise TrashError("Verzeichnisidentität des Löschjournals wurde verändert.")
         for name in expected:
             _relative(name)
         if staged.is_symlink():
             raise TrashError("Unsicherer Lösch-Zwischenbestand.")
         if staged.exists():
-            for p in staged.rglob("*"):
-                if p.is_symlink() or (p.is_file() and p.relative_to(staged).as_posix() not in expected):
+            tree.directory(staged, private=True)
+            for p, info in tree.walk(staged):
+                relative = p.relative_to(staged).as_posix()
+                capture_name = relative.removeprefix(".captured/")
+                link_names = {item.get("link_path") for item in expected.values()}
+                if stat.S_ISLNK(info.st_mode) or (not stat.S_ISDIR(info.st_mode) and (not stat.S_ISREG(info.st_mode) or (relative not in expected and relative not in link_names and not (relative.startswith(".captured/") and capture_name in expected)))):
                     raise TrashError("Fremder Eintrag im Lösch-Zwischenbestand.")
-        if data.get("format") != 2 and data["state"] == "prepared":
+        if data.get("format") not in {2, 3} and data["state"] == "prepared":
             raise TrashError("Altes Löschjournal ohne Katalogsicherung erfordert manuelle Prüfung.")
         # Check ALL bytes before any database or filesystem recovery mutation.
         for name, item in expected.items():
             rel = _relative(name)
             candidates = [(staged, staged / rel)]
+            if data.get("format") == 3:
+                candidates.append((staged, staged / ".captured" / rel))
+                if item.get("link_path"):
+                    candidates.append((staged, staged / _relative(item["link_path"])))
             if data["state"] == "prepared":
                 candidates.append((root, root / rel))
             found = 0
             for candidate_root, candidate in candidates:
                 if candidate.exists() or candidate.is_symlink():
-                    _source(candidate_root, rel)
-                    if _sha256_file(candidate) != item["sha256"]:
+                    info = tree.info(candidate)
+                    if not stat.S_ISREG(info.st_mode):
+                        raise TrashError("Nicht reguläre Datei im Löschjournal.")
+                    expected_identity = item.get("source_identity") if candidate.is_relative_to(root) or ".captured" in candidate.parts or candidate.name.startswith(".link-") else item.get("staged_identity")
+                    allowed_identities = [item.get("source_identity"), item.get("staged_identity")] if candidate.is_relative_to(root) else [expected_identity]
+                    if expected_identity is not None and identity(info) not in allowed_identities:
+                        raise TrashError("Fremde Datei im Löschjournal; bleibt erhalten: " + name)
+                    if tree.sha(candidate) != item["sha256"]:
                         raise TrashError("Veränderte Datei im Löschjournal: " + name)
                     found += 1
             if not found and data["state"] == "prepared":
@@ -318,16 +417,20 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
         if data.get("state") == "committed":
             # Also covers an interrupted/failed fsync after atomic replacement.
             # Never destroy originals until this observed commit fence is durable.
-            with journal.open("rb") as committed_journal:
-                os.fsync(committed_journal.fileno())
+            os.fsync(tree.open_file(journal))
             _sync_dir(parent)
             for name in expected:
                 path = staged / _relative(name)
                 if path.exists():
-                    path.unlink()
-                    _sync_dir(path.parent)
+                    tree.unlink_private(path, expected=expected[name].get("staged_identity"))
+                link = expected[name].get("link_path")
+                if link and tree.info(staged / _relative(link)) is not None:
+                    tree.unlink_private(staged / _relative(link), expected=expected[name].get("source_identity"))
+                capture = staged / ".captured" / _relative(name)
+                if tree.info(capture) is not None:
+                    tree.unlink_private(capture, expected=expected[name].get("source_identity"))
             _remove_empty_staging(staged)
-            journal.unlink()
+            tree.unlink_private(journal)
             _sync_dir(parent)
             continue
         for database in databases:
@@ -336,25 +439,33 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
             rel = _relative(str(item["path"]))
             src = staged / rel
             dst = root / rel
-            if src.exists():
-                _ensure_target_parent(root,rel)
+            capture = staged / ".captured" / rel
+            if tree.info(capture) is not None:
+                tree.parent_fd(dst, create=True)
+                _return_checked(capture, dst, str(item["sha256"]), root)
+            link = item.get("link_path")
+            if link and tree.info(staged / _relative(link)) is not None:
+                tree.parent_fd(dst, create=True)
+                _return_checked(staged / _relative(link), dst, str(item["sha256"]), root)
+            if tree.info(src) is not None:
+                tree.parent_fd(dst, create=True)
                 _sync_parents((root / rel).parent, root)
                 _return_checked(src, dst, str(item["sha256"]), root)
                 recovered.append(rel.as_posix())
         _remove_empty_staging(staged)
-        journal.unlink()
+        tree.unlink_private(journal)
         _sync_dir(parent)
     return {"recovered_paths":recovered}
 
 
 def _remove_empty_staging(staged: Path) -> None:
-    if not staged.exists():
+    tree = ACTIVE.get()
+    if tree.info(staged) is None:
         return
-    for p in sorted(staged.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if p.is_dir() and not p.is_symlink():
-            p.rmdir()
-    staged.rmdir()
-    _sync_dir(staged.parent)
+    for path, info in sorted(tree.walk(staged), key=lambda item: len(item[0].parts), reverse=True):
+        if stat.S_ISDIR(info.st_mode):
+            tree.rmdir(path)
+    tree.rmdir(staged)
 
 
 def _purge_selected(db: Path, paths: list[str]) -> None:
@@ -411,6 +522,8 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
     ) or len(set(relative_paths))!=len(relative_paths):
         raise TrashError("Ungültige Lösch-Auswahl.")
     databases = sorted({Path(p).resolve() for p in databases})
+    ACTIVE.get().qualify_filesystem(ACTIVE.get().directory(_parent(workspace)))
+    ACTIVE.get().enable_confinement()
     _recover_trash_deletions(workspace, allowed_databases=databases)
     root, entries, _ = _physical_entries(workspace)
     physical = {str(e["relative_path"]) for e in entries if e["entry_type"] == "file"}
@@ -419,12 +532,14 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
         rel = _relative(path)
         if path not in physical:
             raise TrashError("Datei ist nicht mehr im Papierkorb: " + path)
-        source = _source(root,rel)
-        candidates.append({"path":path,"sha256":_sha256_file(source)})
+        source = root / rel
+        tree = ACTIVE.get()
+        fd = tree.open_file(source)
+        candidates.append({"path":path,"sha256":digest_fd(fd),"source_identity":identity(os.fstat(fd))})
     parent = _parent(workspace)
     op_id = "DELETE_" + uuid.uuid4().hex.upper()
     staging = parent / op_id
-    staging.mkdir(mode=0o700)
+    ACTIVE.get().directory(staging, create=True, private=True)
     journal = parent / (op_id + ".json")
     snapshots = []
     for db in databases:
@@ -435,16 +550,22 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
             snapshot = _catalogue_snapshot(c, relative_paths)
         info = db.stat()
         snapshots.append({"path": str(db), "identity": [info.st_dev, info.st_ino], "snapshot": snapshot})
-    record = {"format":2,"id":op_id,"state":"prepared","files":candidates,"databases":snapshots}
+    record = {"format":3,"id":op_id,"state":"prepared","files":candidates,"databases":snapshots}
+    tree = ACTIVE.get()
+    record["directory_identities"] = {
+        path.relative_to(tree.workspace).as_posix(): identity(os.fstat(fd))
+        for path, fd in tree.directories.items() if path.is_relative_to(tree.workspace)
+    }
+    tree.record, tree.journal = record, journal
     _atomic_json(journal,record)
     token = _PURGE_SNAPSHOTS.set({db["path"]: db["snapshot"] for db in snapshots})
     try:
         for item in candidates:
             rel = _relative(item["path"])
             target = staging / rel
-            _ensure_target_parent(staging,rel)
-            source = _source(root,rel)
-            if _sha256_file(source) != item["sha256"]:
+            ACTIVE.get().parent_fd(target, create=True)
+            source = root / rel
+            if ACTIVE.get().sha(source, expected=item["source_identity"]) != item["sha256"]:
                 raise TrashError("Datei vor dem Löschen verändert: " + item["path"])
             _move_checked(source,target,item["sha256"],durable_root=parent)
         for db in databases:
@@ -453,12 +574,8 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
         record["state"] = "committed"
         _atomic_json(journal,record)
         _recover_trash_deletions(workspace, allowed_databases=databases)
-        for item in candidates:
-            parent_dir = (root / _relative(item["path"])).parent
-            while parent_dir != root:
-                try: parent_dir.rmdir()
-                except OSError: break
-                parent_dir = parent_dir.parent
+        # Public empty parent names remain externally mutable. Never rmdir a
+        # name based on a previous check; harmless empty directories remain.
         return {"deleted_file_count":len(candidates)}
     except Exception:
         # The journal enables safe restoration on the next operation, including

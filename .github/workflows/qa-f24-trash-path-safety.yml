@@ -1,0 +1,82 @@
+name: F24 bounded trash filesystem QA
+on:
+  push:
+    branches: [security/f24-trash-path-safety]
+permissions:
+  contents: read
+jobs:
+  backend:
+    if: "!startsWith(github.event.head_commit.message, 'QA-only:')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Full backend suite
+        run: pytest -q -p no:cacheprovider -o addopts='' --basetemp="$RUNNER_TEMP/f24-backend" --junitxml="$RUNNER_TEMP/backend.xml" tests/backend
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f24-backend
+          path: |
+            ${{ runner.temp }}/backend.xml
+            ${{ runner.temp }}/f24-backend/0562-evidence
+            ${{ runner.temp }}/f24-backend/**/f24-evidence
+  effective-uid-boundary:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Private staging against a separate unprivileged UID
+        run: python qa/f24/check_distinct_uid.py "$RUNNER_TEMP/f24-uid"
+      - name: Kernel denial after final directory validation
+        env:
+          F24_KERNEL_OUTPUT: ${{ runner.temp }}/f24-uid
+        run: python qa/f24/check_kernel_boundary.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f24-distinct-uid
+          path: ${{ runner.temp }}/f24-uid
+  original:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [before, after]
+        probe: [f24, neighbors]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest httpx
+      - name: Immutable baseline
+        if: matrix.phase == 'before'
+        run: |
+          git fetch --no-tags --depth=1 origin 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+          git worktree add --detach "$RUNNER_TEMP/f24-baseline" 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+      - name: Unmodified original assertions
+        env:
+          F24_QA_ROOT: ${{ runner.temp }}/f24-${{ matrix.phase }}-${{ matrix.probe }}
+          F24_QA_SOURCE_ROOT: ${{ matrix.phase == 'before' && format('{0}/f24-baseline', runner.temp) || github.workspace }}
+        run: python qa/f24/run_original.py ${{ matrix.probe }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f24-${{ matrix.phase }}-${{ matrix.probe }}
+          path: ${{ runner.temp }}/f24-${{ matrix.phase }}-${{ matrix.probe }}
