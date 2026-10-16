@@ -146,7 +146,13 @@ def test_f24_snapshot_independent_of_source_hardlink(tmp_path,monkeypatch):
         staged=next(case.rglob('DELETE_*/A.JPG'));assert staged.stat().st_ino!=inode
         outside.write_bytes(b'external-in-place-edit');assert hashlib.sha256(staged.read_bytes()).hexdigest()==data['expected']['A.JPG']
         return real(*a)
-    monkeypatch.setattr(ts,'_purge_selected',observe);delete(data,ws);starts(case,ev);assert outside.read_bytes()==b'external-in-place-edit'
+    monkeypatch.setattr(ts,'_purge_selected',observe)
+    with pytest.raises(TrashError):delete(data,ws)
+    assert outside.read_bytes()==b'external-in-place-edit'
+    staged=next(case.rglob('DELETE_*/A.JPG'));assert hashlib.sha256(staged.read_bytes()).hexdigest()==data['expected']['A.JPG']
+    r.snapshot(case,ev/'independent-snapshot-after-external-edit.json')
+    # Explicit synthetic operator repair restores the changed original version.
+    outside.write_bytes(b'synthetic-trash-A.JPG');starts(case,ev);originals(data,ws)
 
 
 @pytest.mark.parametrize('guard',['private_permissions','unknown_acl','unsupported_filesystem','cross_mount_capture'])
@@ -167,7 +173,7 @@ def test_f24_unclear_boundary(tmp_path,monkeypatch,guard):
 def test_f24_sigkill(tmp_path,boundary):
     case,ev,data,ws=seed(tmp_path);before=r.snapshot(case,ev/'before-kill.json')
     r.invoke(case,'operate',boundary,ev/'kill',kill=True);r.snapshot(case,ev/'after-kill.json');state=starts(case,ev)
-    committed=boundary in {'trash.committed','trash.cleanup1'}
+    committed=boundary in {'trash.committed','trash.cleanup1','f24.capture_unlink'}
     for db in ('kamera.sqlite3','second1.sqlite3'):
         for table in ('files','file_families'):assert r.db_rows(state,table,db)==([] if committed else r.db_rows(before,table,db))
     if committed:assert not (ws/'Papierkorb/A.JPG').exists() and not (ws/'Papierkorb/B.JPG').exists()
@@ -187,6 +193,10 @@ def test_f24_legacy_v2(tmp_path):
     path=next(case.rglob('DELETE_*.json'));record=json.loads(path.read_text());record['format']=2
     for item in record['files']:
         for key in ('source_identity','staged_identity','link_path'):item.pop(key,None)
+    for item in record['files']:
+        staged=path.with_suffix('')/item['path'];capture=path.with_suffix('')/'.captured'/item['path']
+        if capture.exists():
+            staged.rename(case/('preserved-prototype-snapshot-'+Path(item['path']).name));capture.rename(staged)
     path.write_text(json.dumps(record));r.snapshot(case,ev/'legacy-v2.json');starts(case,ev);originals(data,ws)
 
 
@@ -211,3 +221,32 @@ def test_f24_parallel_stage_and_selected_delete(tmp_path,monkeypatch):
     release.set();first.join(15);second.join(15);assert not first.is_alive() and not second.is_alive()
     assert results==[{'deleted_file_count':1},{'deleted_file_count':1}],results
     starts(case,ev);assert not list(case.rglob('DELETE_*.json'))
+
+
+def test_f24_rollback_preserves_original_inode_and_attributes(tmp_path):
+    case,ev,data,ws=seed(tmp_path);source=ws/'Papierkorb/A.JPG';source.chmod(0o640);os.utime(source,ns=(1600000000000000000,1600000001000000000));before=source.stat()
+    r.invoke(case,'operate','trash.db1',ev/'kill',kill=True);r.snapshot(case,ev/'after-kill.json');starts(case,ev)
+    after=source.stat()
+    assert (after.st_dev,after.st_ino,after.st_uid,after.st_gid,after.st_mode&0o777,after.st_mtime_ns)==(before.st_dev,before.st_ino,before.st_uid,before.st_gid,before.st_mode&0o777,before.st_mtime_ns)
+    originals(data,ws)
+
+
+def test_f24_missing_original_preserves_snapshot_and_journal(tmp_path):
+    case,ev,data,ws=seed(tmp_path);r.invoke(case,'operate','f24.staged',ev/'kill',kill=True)
+    source=ws/'Papierkorb/A.JPG';source.rename(case/'external-moved-original.JPG')
+    starts(case,ev,True);assert list(case.rglob('DELETE_*.json'))
+    staged=next(case.rglob('DELETE_*/A.JPG'));assert hashlib.sha256(staged.read_bytes()).hexdigest()==data['expected']['A.JPG']
+    (case/'external-moved-original.JPG').rename(source);starts(case,ev);originals(data,ws)
+
+
+@pytest.mark.parametrize('hardlink',[True,False])
+def test_f24_legacy_dual_copy_ownership(tmp_path,hardlink):
+    case,ev,data,ws=seed(tmp_path);r.invoke(case,'operate','f24.link',ev/'kill',kill=True)
+    path=next(case.rglob('DELETE_*.json'));record=json.loads(path.read_text());stage=path.with_suffix('');record['format']=2
+    first=record['files'][0];link=stage/first['link_path'];target=stage/first['path']
+    if hardlink:link.rename(target)
+    else:target.write_bytes(link.read_bytes());link.rename(case/'preserved-link-evidence.JPG')
+    for item in record['files']:
+        for key in ('source_identity','staged_identity','link_path'):item.pop(key,None)
+    path.write_text(json.dumps(record));starts(case,ev,blocked=not hardlink);originals(data,ws)
+    if not hardlink:assert path.exists() and hashlib.sha256(target.read_bytes()).hexdigest()==data['expected']['A.JPG']

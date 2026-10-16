@@ -10,6 +10,9 @@ unexpected captured entry is returned with no-replace; if that conflicts, it and
 the journal remain untouched for manual resolution. The durable staging snapshot
 is an independent application-owned 0600 copy, not an externally writable alias.
 New format-3 journals bind workspace/directories and source/staged inode IDs.
+The captured original inode is retained until commit so rollback preserves its
+owner, permissions and mtime. A missing original in prepared state blocks
+automatic recovery while keeping the independent snapshot.
 
 Private namespace ownership is a prerequisite explicitly authorized by the user.
 It excludes untrusted processes sharing the app UID or DAC-bypass privileges.

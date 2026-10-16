@@ -106,7 +106,7 @@ def _move_checked(source: Path, target: Path, sha256: str, *, durable_root: Path
         if identity(tree.info(temporary)) != identity(os.fstat(source_fd)):
             raise TrashError('Fremder Hardlink im Zwischenbestand; keine Bereinigung.')
     except OSError as error:
-        if error.errno != errno.EXDEV:
+        if error.errno not in {errno.EXDEV, errno.EPERM}:
             raise
     tree.copy(source_fd, dst_name, dst_parent)
     if tree.sha(target) != sha256:
@@ -136,7 +136,8 @@ def _move_checked(source: Path, target: Path, sha256: str, *, durable_root: Path
     tree.verify()
     if tree.sha(capture, expected=item['source_identity']) != sha256:
         raise TrashError('Original während der atomaren Übernahme verändert.')
-    tree.unlink_private(capture, expected=item['source_identity'])
+    # Keep the original inode/ownership/timestamps until the durable DB commit.
+    # Prepared recovery returns it before discarding the independent snapshot.
     _sync_dir(source.parent)
 
 
@@ -149,7 +150,7 @@ def _return_checked(source: Path, target: Path, sha256: str, root: Path) -> None
         raise TrashError('Zwischenbestand während der Wiederherstellung verändert.')
     target_info = tree.info(target)
     if target_info is not None:
-        allowed = [item.get('source_identity'), item.get('staged_identity')]
+        allowed = [item.get('source_identity'), item.get('staged_identity'), identity(source_info)]
         if not stat.S_ISREG(target_info.st_mode) or identity(target_info) not in allowed or tree.sha(target) != sha256:
             raise TrashError('Fremdes Restore-Ziel bleibt unverändert; Journal bleibt erhalten.')
         fd = tree.open_file(target, expected=identity(target_info))
@@ -412,6 +413,12 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
                     if tree.sha(candidate) != item["sha256"]:
                         raise TrashError("Veränderte Datei im Löschjournal: " + name)
                     found += 1
+            if data.get("format") == 2 and data["state"] == "prepared":
+                original_info, staged_info = tree.info(root / rel), tree.info(staged / rel)
+                if original_info is not None and staged_info is not None and identity(original_info) != identity(staged_info):
+                    raise TrashError("Altes Journal mit unklarer Doppelkopie; beide Dateien bleiben erhalten.")
+            if data.get("format") == 3 and data["state"] == "prepared" and tree.info(root / rel) is None and tree.info(staged / ".captured" / rel) is None:
+                raise TrashError("Originalidentität fehlt; unabhängige Sicherung und Journal bleiben erhalten.")
             if not found and data["state"] == "prepared":
                 raise TrashError("Original und Zwischenbestand fehlen: " + name)
         if data.get("state") == "committed":
@@ -420,15 +427,15 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
             os.fsync(tree.open_file(journal))
             _sync_dir(parent)
             for name in expected:
-                path = staged / _relative(name)
-                if path.exists():
-                    tree.unlink_private(path, expected=expected[name].get("staged_identity"))
-                link = expected[name].get("link_path")
-                if link and tree.info(staged / _relative(link)) is not None:
-                    tree.unlink_private(staged / _relative(link), expected=expected[name].get("source_identity"))
                 capture = staged / ".captured" / _relative(name)
                 if tree.info(capture) is not None:
                     tree.unlink_private(capture, expected=expected[name].get("source_identity"))
+                link = expected[name].get("link_path")
+                if link and tree.info(staged / _relative(link)) is not None:
+                    tree.unlink_private(staged / _relative(link), expected=expected[name].get("source_identity"))
+                path = staged / _relative(name)
+                if tree.info(path) is not None:
+                    tree.unlink_private(path, expected=expected[name].get("staged_identity"))
             _remove_empty_staging(staged)
             tree.unlink_private(journal)
             _sync_dir(parent)
@@ -569,6 +576,11 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
                 raise TrashError("Datei vor dem Löschen verändert: " + item["path"])
             _move_checked(source,target,item["sha256"],durable_root=parent)
         for db in databases:
+            ACTIVE.get().verify()
+            for item in candidates:
+                rel = _relative(item["path"])
+                if ACTIVE.get().sha(staging / rel, expected=item["staged_identity"]) != item["sha256"] or ACTIVE.get().sha(staging / ".captured" / rel, expected=item["source_identity"]) != item["sha256"]:
+                    raise TrashError("Dateiversion vor Datenbankabschluss verändert; weitere Löschung gesperrt.")
             _purge_selected(Path(db),[item["path"] for item in candidates])
         # Once the DB no longer references the files, the deletion is durable.
         record["state"] = "committed"
