@@ -365,3 +365,29 @@ def test_r1_exdev_receipt_and_partial_copy(tmp_path,monkeypatch,interrupted):
         assert digest(ws/'Papierkorb/A.JPG')==data['expected']['A.JPG'];record=json.loads(journal(case).read_text());assert record['state']=='conflict'
         target=ws/'SD-Kartensicherungen'/record['plans'][0]['target_relative'];assert target.read_bytes()==b'' and tr._identity(target)==record['plans'][0]['target_identity']
     else:assert not list(case.rglob('.trash-restores/*.json')) and any(digest(p)==data['expected']['A.JPG'] for p in (ws/'SD-Kartensicherungen').rglob('A.JPG'))
+
+
+def test_r1_sqlite_writers_wait_for_durable_conflict(tmp_path,monkeypatch):
+    import sqlite3
+    case,ev,data,ws=seed(tmp_path,monkeypatch);reached=threading.Event();release=threading.Event();attempt=threading.Event();acquired=threading.Event();results=[];writer_results=[];write=ts._atomic_json
+    def durable(path,value):
+        if path.parent.name=='.trash-restores' and value.get('state')=='conflict':reached.set();assert release.wait(20)
+        return write(path,value)
+    monkeypatch.setattr(ts,'_atomic_json',durable)
+    def restore():
+        try:results.append(collision(data,ws,monkeypatch))
+        except Exception as e:results.append(e)
+    first=threading.Thread(target=restore);first.start();assert reached.wait(20)
+    with sqlite3.connect(data['dbs'][1],timeout=0) as probe:
+        with pytest.raises(sqlite3.OperationalError,match='locked'):probe.execute('BEGIN IMMEDIATE')
+    def writer():
+        try:
+            with sqlite3.connect(data['dbs'][1],timeout=20) as c:
+                c.set_trace_callback(lambda statement:attempt.set() if statement=='BEGIN IMMEDIATE' else None)
+                c.execute('BEGIN IMMEDIATE');acquired.set();writer_results.append(json.loads(journal(case).read_text())['state'])
+        except Exception as e:writer_results.append(e)
+    second=threading.Thread(target=writer);second.start();assert attempt.wait(20);assert not acquired.is_set()
+    r.snapshot(case,ev/'writer-waits-for-durable-conflict.json');release.set();first.join(20);second.join(20);assert not first.is_alive() and not second.is_alive()
+    assert len(results)==1 and isinstance(results[0],Path),results
+    assert writer_results==['conflict'],writer_results
+    monkeypatch.setattr(ts,'_atomic_json',write);starts(case,ev);preserved(data,ws,results[0])

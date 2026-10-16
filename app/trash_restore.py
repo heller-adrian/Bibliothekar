@@ -314,7 +314,7 @@ def _preflight_restore(plans, root, central):
         _check_catalogue(plan)
 
 
-def _conflict_invariants(data, plans, root, databases, *, existing=False):
+def _conflict_invariants(data, plans, root, databases, *, existing=False, on_verified=None):
     # Lock all registered catalogue writers during the isolation decision.
     evidence = {}
     with ExitStack() as stack:
@@ -340,15 +340,17 @@ def _conflict_invariants(data, plans, root, databases, *, existing=False):
                 raise TrashError("Gesicherter Restore-Konflikt wurde nachträglich verändert.")
             _check_catalogue(plan, only_trash=True)
             evidence[plan['relative']] = {'identity':ident,'sha256':plan['sha256'],'size':before.st_size}
+        if on_verified is not None:on_verified(evidence)
     return evidence
 
 
 def _isolate_conflict(journal, data, plans, root, databases, error):
     from app.trash_selective import _atomic_json
-    sources = _conflict_invariants(data,plans,root,databases)
-    data.update(state='conflict', conflict_reason=str(error), conflict_sources=sources,
-                conflict_detected_at=datetime.now(timezone.utc).isoformat())
-    _atomic_json(journal,data)
+    def persist(sources):
+        data.update(state='conflict', conflict_reason=str(error), conflict_sources=sources,
+                    conflict_detected_at=datetime.now(timezone.utc).isoformat())
+        _atomic_json(journal,data)
+    _conflict_invariants(data,plans,root,databases,on_verified=persist)
 
 
 def restore_reservations(workspace, *, exclude=None):
