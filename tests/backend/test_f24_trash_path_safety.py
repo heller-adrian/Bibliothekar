@@ -263,3 +263,53 @@ def test_f24_untrusted_workspace_ancestor(tmp_path):
         r.snapshot(case,ev/'unsafe-grandparent-denied.json')
     finally:tmp_path.chmod(original_mode)
     starts(case,ev);originals(data,ws)
+
+
+def test_f24_native_child_retains_lock_after_parent_sigkill(tmp_path):
+    import fcntl,signal,time
+    case,ev,data,ws=seed(tmp_path)
+    child_code="""import json,os,sys,time
+from pathlib import Path
+command=json.load(sys.stdin);root=Path(sys.argv[1])
+if sys.platform.startswith('linux'):
+ from app.trash_native import install,execute
+ install(command['root']);execute(command)
+(root/'child-ready.json').write_text(json.dumps({'pid':os.getpid(),'fds':list(map(int,os.listdir('/dev/fd')))}))
+end=time.monotonic()+8
+while not (root/'child-release').exists() and time.monotonic()<end:time.sleep(.02)
+print(json.dumps({'ok':True}))
+"""
+    parent_code="""import subprocess,sys
+from pathlib import Path
+from app import trash_selective as ts
+from app.trash_path_safety import ACTIVE
+root=Path(sys.argv[1]);child_code=sys.argv[2];actual=subprocess.run
+with ts._operation_lock(root):
+ tree=ACTIVE.get()
+ def launch(args,**kw):
+  assert tree.lock_fd in kw['pass_fds']
+  return actual([sys.executable,'-c',child_code,str(root)],**kw)
+ subprocess.run=launch
+ tree.native('probe')
+"""
+    process=subprocess.Popen([sys.executable,'-c',parent_code,str(ws),child_code],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    try:
+        end=time.monotonic()+7
+        while not (ws/'child-ready.json').exists() and process.poll() is None and time.monotonic()<end:time.sleep(.02)
+        assert (ws/'child-ready.json').exists(),process.communicate(timeout=2)
+        ready=json.loads((ws/'child-ready.json').read_text());os.kill(process.pid,signal.SIGKILL);stdout,stderr=process.communicate(timeout=3);assert process.returncode==-signal.SIGKILL
+        lock=ws/'Metadatenkorrektur/.trash-deletions/.lock';fd=os.open(lock,os.O_RDONLY)
+        try:
+            with pytest.raises(BlockingIOError):fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            (ws/'child-release').write_text('synthetic release')
+            end=time.monotonic()+5
+            while True:
+                try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+                except BlockingIOError:
+                    assert time.monotonic()<end;time.sleep(.02)
+        finally:os.close(fd)
+        (ev/'native-parent-kill.json').write_text(json.dumps({'parent_pid':process.pid,'returncode':process.returncode,'child':ready,'lock_retained_until_child_exit':True,'stdout':stdout,'stderr':stderr}))
+        starts(case,ev);originals(data,ws)
+    finally:
+        if process.poll() is None:process.kill();process.wait(timeout=3)
+        (ws/'child-release').write_text('synthetic cleanup')

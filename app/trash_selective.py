@@ -54,9 +54,11 @@ def _operation_lock(workspace: Path):
                     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
                         raise TrashError('Unsicherer Besitzer der Papierkorbsperre.')
                     fcntl.flock(fd, fcntl.LOCK_EX)
+                    tree.lock_fd = fd
                     tree.verify()
                     yield
                 finally:
+                    tree.lock_fd = None
                     os.close(fd)
             finally:
                 ACTIVE.reset(token)

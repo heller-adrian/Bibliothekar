@@ -71,6 +71,7 @@ class DirectoryTree:
         self.journal = None
         self.private_root = None
         self.confined = False
+        self.lock_fd = None
 
     def __enter__(self):
         try:
@@ -93,6 +94,8 @@ class DirectoryTree:
         self.check_anchor()
         command = {'op': operation, 'root': self.directories[self.workspace], **fields}
         fds = {command['root']} | {value for key,value in fields.items() if key in {'src','dst'}}
+        if self.lock_fd is not None:
+            fds.add(self.lock_fd)  # flock remains held if the parent is SIGKILLed
         process = subprocess.run([sys.executable, '-B', str(Path(__file__).with_name('trash_native.py'))],
             input=json.dumps(command), capture_output=True, text=True, pass_fds=tuple(fds), timeout=10)
         try:
