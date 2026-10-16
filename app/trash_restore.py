@@ -271,6 +271,7 @@ def _load_restore(journal: Path, workspace: Path, databases: list[Path]):
             if [info.st_dev, info.st_ino] != data["databases"][db]:
                 raise TrashError("Restore-Datenbank wurde ersetzt.")
             linked.append((allowed[db], row))
+        if not linked:raise TrashError("Restore-Plan ohne Katalog-/Herkunftsnachweis.")
         plan["rows"] = linked
         plans.append(plan)
     return data, root, central, plans
@@ -322,6 +323,10 @@ def _conflict_invariants(data, plans, root, databases, *, existing=False):
             for plan in plans:
                 if conn.execute("SELECT 1 FROM files WHERE current_root_kind='shared_workspace' AND current_relative_path=? LIMIT 1",(plan['target_relative'],)).fetchone():
                     raise TrashError("Konfliktziel wird bereits katalogisiert; globale Recovery-Prüfung erforderlich.")
+                known = conn.execute("SELECT f.job_id,f.original_relative_path,f.size_bytes,COALESCE(f.sha256_current,f.sha256_original,'') AS sha256 FROM files f WHERE current_root_kind='trash' AND current_relative_path=?",(plan['relative'],)).fetchall()
+                origin = plan['rows'][0][1]
+                if len(known)>1 or any((row['job_id'],row['original_relative_path'],row['size_bytes'],row['sha256']) != (origin['job_id'],origin['original_relative_path'],origin['size_bytes'],plan['sha256']) for row in known):
+                    raise TrashError("Bibliotheksübergreifend widersprüchliche Restore-Herkunft.")
         for plan in plans:
             try:path = _source(root, _relative(plan['relative']))
             except OSError as error:raise TrashError('Papierkorboriginal ist nicht gesichert erreichbar: '+plan['relative']) from error
