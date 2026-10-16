@@ -17,11 +17,13 @@ for operation in ('rename','unlink','link','mkdir','copy','json','touch'):
   expected=(moved/'A.JPG').read_bytes();arguments={'dst':src,'target':'A.JPG'}
   if operation in {'rename','link'}:arguments={'src':src,'source':'A.JPG','dst':dst,'target':'captured.JPG'}
   elif operation=='mkdir':arguments['target']='new-directory'
+  elif operation=='touch':arguments['target']='new-lock'
   elif operation=='copy':arguments['src']=tree.open_file(private/'A.JPG');arguments['target']='new-copy.JPG'
   elif operation=='json':arguments['value']={'synthetic':True}
   try:tree.native(operation,**arguments);denied=False;code=None
   except OSError as error:denied=error.errno in (errno.EACCES,errno.EPERM,errno.EXDEV);code=error.errno
   assert denied,(operation,code)
+  assert not (moved/'new-lock').exists() and not (moved/'new-directory').exists() and not (moved/'new-copy.JPG').exists()
   assert (moved/'A.JPG').read_bytes()==expected and not (private/'captured.JPG').exists()
   rows.append({'operation':operation,'uid':os.geteuid(),'landlock_abi':proof['landlock_abi'],'positive_inside_rename':True,'after_last_check':True,'errno':code,'outside_bytes_retained':True,'case':str(case),'result':'PASS'})
 (out/'kernel-boundary.json').write_text(json.dumps(rows,indent=2));print('PASS: seven real post-check kernel denials; outside bytes unchanged.')
