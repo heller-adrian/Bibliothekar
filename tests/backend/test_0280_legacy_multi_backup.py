@@ -1,6 +1,8 @@
 """0.28.0: safe normalization of DB-only legacy multi-backup extensions."""
 from __future__ import annotations
 
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 from pathlib import Path
 import hashlib
 
@@ -307,6 +309,7 @@ def test_0280_physical_legacy_extension_reconciles_into_one_event(tmp_path: Path
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     initialize_database(db)
 

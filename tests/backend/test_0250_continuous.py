@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 """0.25 product invariants. Every database and file is isolated by tmp_path."""
 import json
 from pathlib import Path
@@ -240,6 +241,7 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
     from app.sort_apply import CONFIRMATION_PHRASE, SortApplyError
     from app.event_document import build_event_document_from_db,write_event_document
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00','2026-07-23T14:00:00','2026-07-23T18:00:00'])
     event=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,event['id'])
@@ -314,6 +316,7 @@ def test_0260_applied_delete_releases_files_and_keeps_open_task(tmp_path,preserv
     from app.sort_plan import build_event_sort_plan
     from app.sort_apply import CONFIRMATION_PHRASE,prepare_sort_run,execute_sort_run
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00'])
     event=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,event['id'])
@@ -378,6 +381,7 @@ def test_0260_workspace_free_card_new_event_finishes_reassignment(tmp_path,prese
     from app.sort_plan import build_event_sort_plan
     from app.sort_apply import CONFIRMATION_PHRASE,prepare_sort_run,execute_sort_run
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00'])
     source=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,source['id'])
@@ -428,6 +432,7 @@ def test_0260_applied_year_change_document_lifecycle(tmp_path,cancel):
     from app.workspace_reconcile import build_workspace_reconcile_plan,prepare_workspace_reconcile_run,execute_workspace_reconcile_run
     from app.sort_apply import CONFIRMATION_PHRASE
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2025-12-31T10:00:00','2026-01-01T14:00:00'])
     event=create(db,payload('2025-12-31T00:00','2026-01-01T23:59'))['parent_event']
     attach_files(db,workspace,event['id'])
@@ -560,6 +565,7 @@ def test_0260_archived_no_event_two_same_day_segments_reassigns_removed_segment(
     from app.archive_reassignment import assign_archive_reassignments,list_archive_reassignments
     from app.event_change_apply import confirm_event_change,verify_event_change,finish_event_change
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00','2026-07-23T18:00:00'])
     original_segments=[
         {'day_key':'2026-07-23','start_time':'09:00','end_time':'11:00'},

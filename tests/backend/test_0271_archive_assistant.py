@@ -1,6 +1,8 @@
 """0.27.1: variabler Archiv-Assistent und echte IST→SOLL-Hilfsstruktur."""
 from __future__ import annotations
 
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 import hashlib
 import shutil
 from pathlib import Path
@@ -23,6 +25,7 @@ def _seed(tmp_path: Path, *, full_archive_triplet: bool = False):
     work.mkdir(parents=True)
     archive.mkdir()
     initialize_database(db)
+    provision_legacy_storage(workspace)
 
     folder = "07-22 - Test Archiv 2"
     old_rel = f"2026/{folder}/Alle/alt.JPG"

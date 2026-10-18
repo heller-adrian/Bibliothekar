@@ -20,7 +20,7 @@ if (case/'case.json').exists():
     database_parent=Path(locations['db']).parent
     os.environ['KAMERA_DATABASE_DIR']=str(database_parent)
     os.environ['KAMERA_WORKSPACE']=locations['workspace']
-    os.environ['KAMERA_REGISTRY_DATABASE']=str(database_parent/'registry.sqlite3')
+    os.environ['KAMERA_REGISTRY_DATABASE']=str(locations.get('registry',database_parent/'registry.sqlite3'))
     os.environ['KAMERA_CONFIG']=str(database_parent/'settings.json')
 
 from app import main
@@ -61,6 +61,9 @@ def foundation():
     case.mkdir(exist_ok=True)
     (case/'settings.json').write_text(json.dumps({'storage':{'processing_buffer_percent':0,'safety_reserve_gib':0}}))
     for p in (WS,case/'archive',case/'logs',case/'card'):p.mkdir(exist_ok=True)
+    # Explicit complete legacy installation, before creating its catalogue.
+    for name in ['SD-Kartensicherungen','Arbeitsbereiche','Metadatenkorrektur','Papierkorb']:
+        (WS/name).mkdir(exist_ok=True)
     (WS/'Arbeitsbereich').mkdir(exist_ok=True)
     ensure_workspace_layout(WS,configured_main_work_root=WS/'Arbeitsbereich')
     initialize_database(DB);initialize_library_registry(REG)
@@ -112,6 +115,12 @@ def seed(kind):
             if kind in {'library_metadata','metadata_projection'}:db,ws,src,fid,task=_seed_library(temp)
             else:
                 db,ws,src,fid=_seed_reintegration(temp);task='META_BA12_TEST'
+            # This second workspace represents the same explicit legacy installation
+            # as foundation(). Complete its fixture before operating or crashing;
+            # recovery must never manufacture the missing administrative roots.
+            from app.storage_config import LEGACY_STORAGE_DEFAULTS
+            for directory in LEGACY_STORAGE_DEFAULTS.values():
+                (ws/directory).mkdir(exist_ok=True)
             Image.new('RGB',(16,16),(30,60,90)).save(src)
             if kind=='reintegrate':mc.write_metadata_datetime(src,'jpeg','2026-07-20T14:15:30')
             digest=hashlib.sha256(src.read_bytes()).hexdigest();size=src.stat().st_size
@@ -124,7 +133,9 @@ def seed(kind):
                 c.execute('UPDATE metadata_corrections SET source_size_bytes=?,source_sha256=?,detected_json=? WHERE id=?',(size,digest,json.dumps(detected),task))
                 c.execute("UPDATE jobs SET state='completed',stage='organized_verified',operation='folder_import'")
             (ws/'Arbeitsbereich').mkdir(exist_ok=True)
-            (temp/'settings.json').write_text((case/'settings.json').read_text())
+            fixture_settings=json.loads((case/'settings.json').read_text())
+            fixture_settings.setdefault('storage',{}).update(LEGACY_STORAGE_DEFAULTS)
+            (temp/'settings.json').write_text(json.dumps(fixture_settings))
             initialize_library_registry(temp/'registry.sqlite3')
             adopt_main_library(temp/'registry.sqlite3',database_path=db,workspace_root=ws,work_root=ws/'Arbeitsbereich',archive_root=case/'archive')
             data.update(db=str(db),workspace=str(ws),source=str(src),task=task,family=fid,job='JOB')
@@ -178,6 +189,8 @@ def seed(kind):
             from tests.backend.test_0500_reconcile_crash import _seed_reconcile
             temp=case/'fixture';temp.mkdir()
             db,ws,plan,run=_seed_reconcile(temp)
+            # The nested historical fixture also needs all established roots.
+            for root in storage_paths(ws).values():root.mkdir(exist_ok=True)
             # Keep actual fixture paths; startup uses the same db via directory env.
             data.update(db=str(db),workspace=str(ws),job=run['job_id'],plan=plan,run=run['id'])
             (case/'fixture'/'settings.json').write_text((case/'settings.json').read_text())
@@ -312,15 +325,32 @@ def instrument(kind):
 
 
 
+# Exact between-chunk boundaries follow source statements, not historic line
+# numbers. Conditions and original SIGKILL/test assertions remain unchanged.
+def pipeline_loop_boundary(function):
+    import ast, inspect, textwrap
+    source, first = inspect.getsourcelines(function)
+    tree = ast.parse(textwrap.dedent(''.join(source)))
+    loop = next(node for node in ast.walk(tree) if isinstance(node, ast.While) and any(
+        isinstance(child, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'block' for target in child.targets)
+        for child in node.body
+    ))
+    return first + loop.body[0].lineno - 1
+
+from app import pipeline as _pipeline_boundaries
+PIPELINE_COPY_BETWEEN_CHUNKS = pipeline_loop_boundary(_pipeline_boundaries.copy_and_verify)
+PIPELINE_HASH_BETWEEN_CHUNKS = pipeline_loop_boundary(_pipeline_boundaries.sha256_file)
+
+
 def trace_probe(frame,event,arg):
     if event != 'line':return trace_probe
     module=frame.f_globals.get('__name__')
     function=frame.f_code.co_name
     loc=frame.f_locals
     if module=='app.pipeline':
-        if boundary=='import.copy_chunk' and function=='copy_and_verify' and frame.f_lineno==408 and len(loc.get('block',b''))>=1024*1024:
+        if boundary=='import.copy_chunk' and function=='copy_and_verify' and frame.f_lineno==PIPELINE_COPY_BETWEEN_CHUNKS and len(loc.get('block',b''))>=1024*1024:
             stop(boundary)
-        if boundary=='import.hash_chunk' and function=='sha256_file' and frame.f_lineno==67 and '.incoming' in str(loc.get('path','')) and len(loc.get('block',b''))>=1024*1024:
+        if boundary=='import.hash_chunk' and function=='sha256_file' and frame.f_lineno==PIPELINE_HASH_BETWEEN_CHUNKS and '.incoming' in str(loc.get('path','')) and len(loc.get('block',b''))>=1024*1024:
             stop(boundary)
     if module=='app.database' and function=='complete_job' and boundary=='import.in_tx' and frame.f_lineno==1001:
         assert loc['connection'].in_transaction

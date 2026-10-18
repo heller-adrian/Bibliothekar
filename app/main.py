@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import time
+import tempfile
 
 from PIL import Image, ImageOps
 
@@ -33,6 +34,7 @@ from app.trash import (
 )
 from app.ui_shell import apply_shell
 from app import view_cache
+from app.root_operations import RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
 from app import ssd_release_background as release_queue
@@ -218,8 +220,6 @@ from app.storage_config import (
     StorageSettingsError,
     default_library_work_root,
     load_storage_settings,
-    normalize_storage_settings,
-    save_storage_settings,
     storage_paths,
     load_metadata_correction_settings,
     save_metadata_correction_settings,
@@ -415,6 +415,18 @@ _CENTRAL_RECONCILE_LAST = 0.0
 _CENTRAL_RECONCILE_RESULT: dict[str, Any] = {}
 
 
+def _root_background(fn=None, *, allow_missing_legacy=False):
+    if fn is None:
+        return lambda target: _root_background(target, allow_missing_legacy=allow_missing_legacy)
+    from functools import wraps
+    @wraps(fn)
+    def guarded(context,*args,**kwargs):
+        with admission(context,allow_missing_legacy=allow_missing_legacy):return fn(context,*args,**kwargs)
+    return guarded
+
+
+
+@_root_background(allow_missing_legacy=True)
 def ensure_library_database_schema(context: LibraryContext) -> dict[str, Any] | None:
     database_path = context.database_path.expanduser().resolve(strict=False)
     key = str(database_path)
@@ -437,6 +449,44 @@ def current_library_context() -> LibraryContext:
     # aktuellen Main-Konstanten kompatibel. Im echten Request setzt die
     # Middleware immer den Registry-basierten LibraryContext.
     return build_main_library_context()
+
+
+def _root_request_context():
+    current = get_current_library()
+    if current is not None:
+        return current
+    from app.library_context import _context_from_row
+    from app.root_operations import _registered
+    row = _registered(DATABASE_FILE)
+    return _context_from_row(row) if row else build_main_library_context()
+
+
+def _root_request(fn):
+    """Prevent root changes through the complete planning/queue transaction."""
+    from functools import wraps
+    @wraps(fn)
+    def guarded(*args,**kwargs):
+        try:
+            with admission(_root_request_context()):
+                return fn(*args,**kwargs)
+        except RootOperationError as error:
+            raise HTTPException(status_code=409,detail=str(error)) from error
+    return guarded
+
+
+
+
+def _root_thumbnail(fn):
+    # Thumbnails only read original media and write disposable cache files.
+    # A process death therefore needs no media-operation recovery journal.
+    from functools import wraps
+    @wraps(fn)
+    def guarded(job_id, *, library_context=None):
+        context = library_context or _root_request_context()
+        with admission(context,allow_missing_legacy=True):
+            return fn(job_id,library_context=context)
+    return guarded
+
 
 
 def current_database_file() -> Path:
@@ -506,11 +556,12 @@ def _ensure_compatibility_link(link: Path, target: Path) -> None:
     link.symlink_to(resolved_target, target_is_directory=True)
 
 
+@protect(kind='compatibility', context_provider=lambda a: a['context'])
 def compatibility_workspace_root(context: LibraryContext) -> Path:
     # Alle Bibliotheken – auch die primäre – erhalten für Altcode intern eine
     # kleine Kompatibilitätsansicht. Dadurch hängt kein Arbeitsablauf mehr von
     # /workspace/Arbeitsbereich oder /workspace/Arbeitsbereiche/main ab.
-    root = Path("/tmp/bibliothekar-library-workspaces") / re.sub(
+    root = Path(tempfile.gettempdir()).resolve(strict=True) / "bibliothekar-library-workspaces" / re.sub(
         r"[^A-Za-z0-9._-]+",
         "-",
         context.library_id,
@@ -532,6 +583,12 @@ def compatibility_workspace_root(context: LibraryContext) -> Path:
             root / configured_backup,
             workspace_backup_root(context.workspace_root),
         )
+    from app.root_operations import bind_compatibility_view
+    bind_compatibility_view(root, context, {
+        WORK_DIRECTORY_NAME: context.work_root,
+        BACKUP_DIRECTORY_NAME: workspace_backup_root(context.workspace_root),
+        configured_backup: workspace_backup_root(context.workspace_root),
+    })
     return root
 
 
@@ -644,6 +701,7 @@ def _clear_import_cancel(job_id: str) -> None:
         _import_cancel_marker(job_id, force=force).unlink(missing_ok=True)
 
 
+@protect(kind='import_cleanup', context_provider=lambda a: _root_request_context(), error_type=ValueError)
 def _remove_cancelled_import_job(job_id: str) -> None:
     """Remove only DB/registry traces after the file pipeline rolled back safely."""
     remove_source_backup(
@@ -668,6 +726,7 @@ def _remove_cancelled_import_job(job_id: str) -> None:
         pass
 
 
+@protect(kind='import_cleanup', context_provider=lambda a: _root_request_context(), error_type=ValueError)
 def _discard_terminal_import_job(job_id: str) -> dict[str, int]:
     """Remove a failed/interrupted folder import and safe remnants.
 
@@ -748,6 +807,7 @@ def _thumbnail_path(
     return LOG_PATH / "thumbnails" / f"{digest}.jpg"
 
 
+@_root_thumbnail
 def ensure_job_thumbnail(
     job_id: str,
     *,
@@ -904,6 +964,15 @@ async def library_context_middleware(request: Request, call_next):
         "/manifest.webmanifest",
     }:
         return await call_next(request)
+    from app.managed_storage_health import inspect_storage
+    storage = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
+    if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck"}:
+        return await call_next(request)
+    if not storage['ready']:
+        if request.method == "GET" and not request.url.path.startswith("/api/"):
+            from app.storage_warning_ui import storage_warning_html
+            return HTMLResponse(storage_warning_html(storage),status_code=200)
+        return JSONResponse(status_code=409,content={'detail':'Verwaltungsordner fehlen oder sind nicht eindeutig verfügbar. Vorgänge sind gesperrt.','storage_health':storage})
     if _onboarding_required():
         path = request.url.path
         allowed_api = (
@@ -956,6 +1025,8 @@ async def library_context_middleware(request: Request, call_next):
 
     try:
         ensure_library_database_schema(context)
+    except RootOperationError as error:
+        return JSONResponse(status_code=409,content={'detail':str(error)})
     except Exception as error:
         return JSONResponse(
             status_code=503,
@@ -978,6 +1049,8 @@ async def library_context_middleware(request: Request, call_next):
 
 DATABASE_INITIALIZATION: dict[str, Any] | None = None
 DATABASE_INITIALIZATION_ERROR: str | None = None
+_STORAGE_STARTUP_PAUSED = False
+_STORAGE_RECHECK_LOCK = Lock()
 WORKSPACE_LAYOUT_INITIALIZATION: dict[str, Any] | None = None
 WORKSPACE_LAYOUT_ERROR: str | None = None
 LIBRARY_REGISTRY_INITIALIZATION: dict[str, Any] | None = None
@@ -1101,6 +1174,7 @@ def folder_import_display_label(
     return base
 
 
+@protect(kind='import', context_provider=lambda a: a.get('library_context') or build_main_library_context())
 def process_claimed_job(
     job: dict[str, Any],
     *,
@@ -1853,6 +1927,13 @@ def ordered_worker_contexts(
     return list(contexts)
 
 
+def _claim_context_job(context, *, operation=None):
+    # Legacy direct callers may claim SQL-only fixtures without a mounted
+    # workspace. Registered workers and every physical operation stay strict.
+    with admission(context,allow_missing_legacy=True):
+        return claim_next_job(context.database_path) if operation is None else claim_next_job(context.database_path,operation=operation)
+
+
 def claim_next_library_job(
     contexts: list[LibraryContext],
 ) -> tuple[LibraryContext, dict[str, Any]] | None:
@@ -1866,9 +1947,7 @@ def claim_next_library_job(
             continue
 
         try:
-            job = claim_next_job(
-                context.database_path
-            )
+            job = _claim_context_job(context)
         except Exception as error:
             print(
                 "Bibliotheks-Queue konnte nicht gelesen werden "
@@ -1884,41 +1963,45 @@ def claim_next_library_job(
 
 
 def process_background_mutation_cancel() -> bool:
-    """Bearbeite einen dauerhaften Verwerfauftrag unabhängig vom HTTP-Request."""
-    from app.event_mutation import cancel_mutation
     for context in list_active_library_contexts(REGISTRY_DATABASE_FILE):
-        ensure_library_database_schema(context)
-        row = cancel_queue.claim_next(context.database_path)
-        if row is None:
-            continue
-        try:
-            with database_connection(context.database_path) as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                if not cancel_queue.mutation_already_cancelled(
-                    connection, row["mutation_id"], row["job_id"]
-                ):
-                    cancel_mutation(
-                        connection, row["mutation_id"], row["job_id"],
-                        workspace_path=context.workspace_root,
-                    )
-                connection.commit()
-
-            # Auch nach einem Neustart zwischen SQLite-COMMIT und dem
-            # zentralen Claims-Abgleich ist dieser Schritt wiederholbar.
-            backfill_library_claims(
-                REGISTRY_DATABASE_FILE,
-                database_path=context.database_path,
-                library_id=context.library_id,
-            )
-            synchronize_global_central_stock()
-            cancel_queue.finish(context.database_path, row["id"])
-        except Exception as error:
-            cancel_queue.finish(
-                context.database_path, row["id"], error=str(error)
-            )
-            print("Hintergrund-Verwerfen fehlgeschlagen:", error, flush=True)
-        return True
+        if _cancel_for_context(context):return True
     return False
+
+
+@_root_background
+def _cancel_for_context(context) -> bool:
+    from app.event_mutation import cancel_mutation
+    ensure_library_database_schema(context)
+    row = cancel_queue.claim_next(context.database_path)
+    if row is None:
+        return False
+    try:
+        with database_connection(context.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not cancel_queue.mutation_already_cancelled(
+                connection, row["mutation_id"], row["job_id"]
+            ):
+                cancel_mutation(
+                    connection, row["mutation_id"], row["job_id"],
+                    workspace_path=context.workspace_root,
+                )
+            connection.commit()
+
+        # Auch nach einem Neustart zwischen SQLite-COMMIT und dem
+        # zentralen Claims-Abgleich ist dieser Schritt wiederholbar.
+        backfill_library_claims(
+            REGISTRY_DATABASE_FILE,
+            database_path=context.database_path,
+            library_id=context.library_id,
+        )
+        synchronize_global_central_stock()
+        cancel_queue.finish(context.database_path, row["id"])
+    except Exception as error:
+        cancel_queue.finish(
+            context.database_path, row["id"], error=str(error)
+        )
+        print("Hintergrund-Verwerfen fehlgeschlagen:", error, flush=True)
+    return True
 
 
 RELEASE_WORKER_STOP = Event()
@@ -1927,18 +2010,22 @@ RELEASE_WORKER_THREAD: Thread | None = None
 
 
 def process_background_release() -> bool:
-    """Claim one persisted SSD release without relying on an HTTP connection."""
     for context in list_active_library_contexts(REGISTRY_DATABASE_FILE):
-        ensure_library_database_schema(context)
-        task = release_queue.claim_release(context.database_path)
-        if task is None:
-            continue
-        release_queue.process_release(
-            context.database_path, compatibility_workspace_root(context),
-            context.archive_root, task,
-        )
-        return True
+        if _release_for_context(context):return True
     return False
+
+
+@_root_background
+def _release_for_context(context) -> bool:
+    ensure_library_database_schema(context)
+    task = release_queue.claim_release(context.database_path)
+    if task is None:
+        return False
+    release_queue.process_release(
+        context.database_path, compatibility_workspace_root(context),
+        context.archive_root, task,
+    )
+    return True
 
 
 def release_worker_loop() -> None:
@@ -2001,27 +2088,16 @@ def worker_loop() -> None:
             # Bibliotheks-Registry wiederentdeckt. Ein fehlerhafter oder
             # vorübergehend unvollständiger Sekundärkontext kann den globalen
             # Import damit nicht mehr dauerhaft auf "queued" halten.
-            global_import = claim_next_job(
-                DATABASE_FILE,
-                operation="folder_import",
-            )
-            if global_import is None:
-                global_import = claim_next_job(
-                    DATABASE_FILE,
-                    operation="metadata_multiple_import",
-                )
-            if global_import is None:
-                global_import = claim_next_job(
-                    DATABASE_FILE,
-                    operation="metadata_general_import",
-                )
-            if global_import is None:
-                global_import = claim_next_job(
-                    DATABASE_FILE,
-                    operation="trash_import",
-                )
+            from app.library_context import _context_from_row
+            row = get_library(REGISTRY_DATABASE_FILE,MAIN_LIBRARY_ID,active_only=False)
+            import_context = _context_from_row(row) if row else build_main_library_context()
+            with admission(import_context):
+                global_import = None
+                for operation in ['folder_import','metadata_multiple_import','metadata_general_import','trash_import']:
+                    global_import = claim_next_job(DATABASE_FILE,operation=operation)
+                    if global_import is not None:break
             if global_import is not None:
-                claimed = (MAIN_LIBRARY_CONTEXT, global_import)
+                claimed = (import_context, global_import)
             else:
                 contexts = ordered_worker_contexts(
                     list_active_library_contexts(
@@ -2051,7 +2127,52 @@ def worker_loop() -> None:
             WORKER_STOP.wait(2.0)
 
 
+def _coordinate_startup(fn):
+    from functools import wraps
+    @wraps(fn)
+    def coordinated():
+        global DATABASE_INITIALIZATION_ERROR, _STORAGE_STARTUP_PAUSED
+        try:
+            from app.managed_storage_health import require_storage
+            try:
+                preflight=require_storage(WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
+            except RootOperationError:
+                # Only a preflight refusal before any startup operation is
+                # eligible for explicit retry. Other recovery errors stay blocked.
+                _STORAGE_STARTUP_PAUSED = True
+                raise
+            _STORAGE_STARTUP_PAUSED = False
+            assert_workspace_startable(WORKSPACE_PATH)
+            from app.root_operations import _registered
+            from app.storage_config import load_storage_settings
+            def bindings():
+                paths = [WORKSPACE_PATH, *(WORKSPACE_PATH / name for name in load_storage_settings(workspace_root=WORKSPACE_PATH).values())]
+                row = _registered(DATABASE_FILE)
+                if row:
+                    paths.append(Path(row['work_root']))
+                return paths
+            with reserve(WORKSPACE_PATH, library_id=MAIN_LIBRARY_ID, paths=bindings, database=DATABASE_FILE, kind='startup', ids={'initialize_storage':True} if preflight['can_initialize'] else None):
+                # Initialize only a preflight-proven empty installation, before
+                # domain recovery or DB initialization can recreate missing roots.
+                ensure_workspace_layout(WORKSPACE_PATH)
+                result=fn()
+                if preflight['can_initialize']:
+                    if DATABASE_INITIALIZATION_ERROR:raise RootOperationError(DATABASE_INITIALIZATION_ERROR)
+                    from app.root_operations import _control_location,_read,_write,_lock
+                    parent=_control_location(WORKSPACE_PATH)
+                    with _lock(parent/'state.lock',exclusive=True,wait=True):
+                        state=_read(parent/'state.json')
+                        state['storage_initialization']['phase']='completed'
+                        _write(parent/'state.json',state)
+                return result
+        except RootOperationError as error:
+            DATABASE_INITIALIZATION_ERROR = "Startup: " + str(error)
+            print(DATABASE_INITIALIZATION_ERROR, flush=True)
+    return coordinated
+
+
 @app.on_event("startup")
+@_coordinate_startup
 def startup_database() -> None:
     global DATABASE_INITIALIZATION
     global DATABASE_INITIALIZATION_ERROR
@@ -2074,7 +2195,8 @@ def startup_database() -> None:
         print("Unable to create initial application settings:", error, flush=True)
 
     try:
-        main_database_was_new = not DATABASE_FILE.is_file() or DATABASE_FILE.stat().st_size == 0
+        from app.managed_storage_health import catalog_has_history
+        main_database_was_new = not catalog_has_history(DATABASE_FILE)
         DATABASE_INITIALIZATION = initialize_database(
             DATABASE_FILE
         )
@@ -2824,36 +2946,24 @@ def _storage_settings_state() -> dict[str, Any]:
     }
 
 
-def _rewrite_job_working_path_prefix(
-    database_path: Path,
-    old_root: Path,
-    new_root: Path,
-) -> None:
-    if not database_path.is_file():
-        return
-    old_text = str(old_root.resolve(strict=False))
-    new_text = str(new_root.resolve(strict=False))
-    with database_connection(database_path) as connection:
-        rows = connection.execute(
-            "SELECT id,working_path FROM jobs WHERE working_path IS NOT NULL"
-        ).fetchall()
-        for row in rows:
-            value = str(row["working_path"] or "")
-            if value == old_text:
-                replacement = new_text
-            elif value.startswith(old_text.rstrip("/") + "/"):
-                replacement = new_text.rstrip("/") + value[len(old_text):]
-            else:
-                continue
-            connection.execute(
-                "UPDATE jobs SET working_path=?,updated_at=? WHERE id=?",
-                (
-                    replacement,
-                    datetime.now(timezone.utc).isoformat(),
-                    str(row["id"]),
-                ),
-            )
-        connection.commit()
+@app.get("/api/settings/storage-health", tags=["Einstellungen"])
+def api_storage_health() -> dict[str, Any]:
+    from app.managed_storage_health import inspect_storage
+    return inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
+
+
+@app.post("/api/settings/storage-recheck", tags=["Einstellungen"])
+def api_recheck_storage() -> dict[str, Any]:
+    """Explicitly retry startup only when storage preflight stopped it entirely."""
+    with _STORAGE_RECHECK_LOCK:
+        status = api_storage_health()
+        if not status['ready']:
+            raise HTTPException(status_code=409, detail='Verwaltungsordner sind weiterhin nicht eindeutig verfügbar.')
+        if _STORAGE_STARTUP_PAUSED:
+            startup_database()
+        if DATABASE_INITIALIZATION_ERROR:
+            raise HTTPException(status_code=409, detail='Die Wiederanlaufprüfung ist noch gesperrt: ' + DATABASE_INITIALIZATION_ERROR)
+        return status
 
 
 @app.get("/api/settings/storage-paths", tags=["Einstellungen"])
@@ -2863,218 +2973,16 @@ def api_get_storage_paths() -> dict[str, Any]:
 
 @app.put("/api/settings/storage-paths", tags=["Einstellungen"])
 def api_set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
-    try:
-        old_names = load_storage_settings()
-        new_names = normalize_storage_settings(payload)
-    except StorageSettingsError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+    return _set_storage_paths(payload)
 
-    raw_root = WORKSPACE_PATH.expanduser().absolute()
-    # Retain the original components: resolve() would conceal a symlink.
-    current = Path(raw_root.anchor)
-    for part in raw_root.parts[1:]:
-        current = current / part
-        if current.is_symlink():
-            raise HTTPException(status_code=422, detail="Der Workspace-Pfad darf keine Symlink-Komponenten enthalten.")
-    root = raw_root.resolve(strict=False)
-    if not root.is_dir():
-        raise HTTPException(status_code=422, detail="Der Workspace-Mount ist nicht verfügbar.")
 
-    key_map = {
-        "backup_directory_name": "backup",
-        "workspaces_directory_name": "workspaces",
-        "metadata_directory_name": "metadata",
-        "trash_directory_name": "trash",
-    }
-    # Validate ALL raw old and new entries before any mutation or rollback.
-    # Keep these paths unresolved for the subsequent filesystem operations.
-    for names in (old_names, new_names):
-        for key in key_map:
-            path = root / names[key]
-            if path.is_symlink() or path.parent != root:
-                raise HTTPException(status_code=422, detail="Verwaltete Stammordner dürfen keine symbolischen Links sein.")
-    moved: list[tuple[Path, Path]] = []
-    previous_rows = list_libraries(
-        REGISTRY_DATABASE_FILE,
-        active_only=False,
-        registered_only=True,
+def _set_storage_paths(payload: dict[str, Any]) -> dict[str, Any]:
+    # Retained only to reject old internal callers and old clients explicitly.
+    # There is no filesystem, registry, configuration or generation mutation.
+    raise HTTPException(
+        status_code=410,
+        detail="Die Verwaltungsordnernamen sind nicht mehr änderbar. Bestehende Pfade bleiben erhalten.",
     )
-    try:
-        old_paths = {
-            key: root / old_names[key]
-            for key in key_map
-        }
-        new_paths = {
-            key: root / new_names[key]
-            for key in key_map
-        }
-
-        # Alle vier Namen vor dem ersten Dateisystemeingriff prüfen.
-        for key in key_map:
-            old_path = old_paths[key]
-            new_path = new_paths[key]
-            if old_path == new_path:
-                continue
-            if new_path.exists():
-                raise StorageSettingsError(
-                    "Der neue Ordnername ist bereits belegt: " + str(new_path)
-                )
-            if old_path.exists():
-                if old_path.is_symlink() or not old_path.is_dir():
-                    raise StorageSettingsError(
-                        "Der bisherige verwaltete Pfad ist kein normaler Ordner: "
-                        + str(old_path)
-                    )
-
-        # App-eigene Stammordner dürfen innerhalb desselben Workspace-Mounts
-        # atomar umbenannt werden. Kein Dateiinhalt wird kopiert.
-        for key in key_map:
-            old_path = old_paths[key]
-            new_path = new_paths[key]
-            if old_path == new_path:
-                continue
-            if old_path.exists():
-                old_path.rename(new_path)
-                moved.append((new_path, old_path))
-            else:
-                new_path.mkdir(parents=True, exist_ok=True)
-                moved.append((new_path, old_path))
-
-        save_storage_settings(new_names)
-
-        old_workspaces = old_paths["workspaces_directory_name"]
-        new_workspaces = new_paths["workspaces_directory_name"]
-        if old_workspaces != new_workspaces:
-            for row in previous_rows:
-                old_work = Path(str(row["work_root"])).resolve(strict=False)
-                try:
-                    relative = old_work.relative_to(old_workspaces)
-                except ValueError:
-                    continue
-                replacement = (new_workspaces / relative).resolve(strict=False)
-                update_library_paths(
-                    REGISTRY_DATABASE_FILE,
-                    str(row["library_id"]),
-                    work_root=replacement,
-                )
-
-        # Den Legacy-Alias auf frischen Installationen nach einer
-        # Umbenennung des Arbeitsbereiche-Stamms auf die neue kanonische
-        # Main-Wurzel nachziehen. Ein echter historischer Arbeitsbereich wird
-        # niemals angefasst.
-        legacy_alias = root / WORK_DIRECTORY_NAME
-        if legacy_alias.is_symlink():
-            main_row = get_library(
-                REGISTRY_DATABASE_FILE,
-                MAIN_LIBRARY_ID,
-                active_only=False,
-            )
-            if main_row is not None:
-                legacy_alias.unlink()
-                legacy_alias.symlink_to(
-                    Path(str(main_row["work_root"])).resolve(strict=False),
-                    target_is_directory=True,
-                )
-
-        old_backup = old_paths["backup_directory_name"]
-        new_backup = new_paths["backup_directory_name"]
-        if old_backup != new_backup:
-            for row in previous_rows:
-                _rewrite_job_working_path_prefix(
-                    Path(str(row["database_path"])),
-                    old_backup,
-                    new_backup,
-                )
-
-        global MAIN_LIBRARY_CONTEXT
-        current_main = get_library(
-            REGISTRY_DATABASE_FILE,
-            MAIN_LIBRARY_ID,
-            active_only=False,
-        )
-        MAIN_LIBRARY_CONTEXT = (
-            resolve_library_context(
-                REGISTRY_DATABASE_FILE,
-                MAIN_LIBRARY_ID,
-            )
-            if current_main is not None and bool(current_main.get("is_active"))
-            else build_main_library_context()
-        )
-        return _storage_settings_state()
-    except Exception as error:
-        # Best effort: Konfiguration und atomare Verzeichnis-Renames zurück.
-        try:
-            save_storage_settings(old_names)
-        except Exception:
-            pass
-        for current, previous in reversed(moved):
-            try:
-                if current.exists() and not previous.exists():
-                    current.rename(previous)
-            except OSError:
-                pass
-        # BA-10: Die Jobpfade wurden je Bibliotheks-DB separat bestätigt.
-        # Ein Rückbau der Ordner/Settings muss diese Teil-Commits ebenfalls
-        # zurücknehmen, statt jobs.working_path auf verschwundene Ziele zu lassen.
-        path_rollback_errors: list[str] = []
-        if old_names["backup_directory_name"] != new_names["backup_directory_name"]:
-            original_backup_root = (root / old_names["backup_directory_name"]).resolve(strict=False)
-            renamed_backup_root = (root / new_names["backup_directory_name"]).resolve(strict=False)
-            if original_backup_root.is_dir() and not renamed_backup_root.exists():
-                for library in previous_rows:
-                    try:
-                        _rewrite_job_working_path_prefix(
-                            Path(str(library["database_path"])),
-                            renamed_backup_root,
-                            original_backup_root,
-                        )
-                    except Exception as rollback_error:
-                        path_rollback_errors.append(
-                            str(library["library_id"]) + ": " + str(rollback_error)
-                        )
-            else:
-                path_rollback_errors.append(
-                    "Sicherungsordner konnte physisch nicht vollständig zurückbenannt werden."
-                )
-        # Registrypfade ebenfalls auf den vorherigen Stand zurückführen.
-        for row in previous_rows:
-            try:
-                update_library_paths(
-                    REGISTRY_DATABASE_FILE,
-                    str(row["library_id"]),
-                    work_root=Path(str(row["work_root"])),
-                    archive_root=Path(str(row["archive_root"])),
-                )
-            except Exception:
-                pass
-        try:
-            legacy_alias = root / WORK_DIRECTORY_NAME
-            if legacy_alias.is_symlink():
-                old_main = next(
-                    (
-                        row for row in previous_rows
-                        if str(row["library_id"]) == MAIN_LIBRARY_ID
-                    ),
-                    None,
-                )
-                if old_main is not None:
-                    legacy_alias.unlink()
-                    legacy_alias.symlink_to(
-                        Path(str(old_main["work_root"])).resolve(strict=False),
-                        target_is_directory=True,
-                    )
-        except OSError:
-            pass
-        detail = str(error)
-        if path_rollback_errors:
-            detail += " Datenbank-Pfadrückbau nicht vollständig: " + " | ".join(path_rollback_errors)
-        if isinstance(error, OSError):
-            detail += (
-                " Der Ordner könnte als eigener TrueNAS-Hostpfad/Dataset-Mount "
-                "eingebunden sein. Solche Mounts werden in TrueNAS umgestellt, "
-                "nicht durch Bibliothekar umbenannt."
-            )
-        raise HTTPException(status_code=422, detail=detail) from error
 
 
 @app.get("/api/settings/metadata-correction", tags=["Einstellungen"])
@@ -3117,6 +3025,7 @@ def api_get_event_naming() -> dict[str, Any]:
 
 
 @app.put("/api/settings/event-naming", tags=["Einstellungen"])
+@_root_request
 def api_set_event_naming(payload: dict[str, Any]) -> dict[str, Any]:
     context = current_library_context()
     try:
@@ -3144,6 +3053,7 @@ def api_get_event_folder_layout() -> dict[str, Any]:
 
 
 @app.put("/api/settings/event-folder-layout", tags=["Einstellungen"])
+@_root_request
 def api_set_event_folder_layout(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         with database_connection(current_database_file()) as connection:
@@ -3728,6 +3638,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     if not display_name:
         raise HTTPException(status_code=422, detail="Anzeigename fehlt.")
 
+    expected_generation = generation(WORKSPACE_PATH,'shared')
     existing_registered = list_libraries(
         REGISTRY_DATABASE_FILE,
         active_only=False,
@@ -3774,81 +3685,92 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     )
     registration_created = False
 
+    known = list_libraries(REGISTRY_DATABASE_FILE,active_only=False,registered_only=False)
+    databases = list(dict.fromkeys([Path(row['database_path']) for row in known]+([DATABASE_FILE] if DATABASE_FILE.is_file() else [])))
     try:
-        resolved_work = Path(str(checked["work_root"]))
-        resolved_work.mkdir(parents=True, exist_ok=True)
-        new_library_database = not database_path.is_file() or database_path.stat().st_size == 0
-        initialize_database(database_path)
-        if new_library_database:
-            with database_connection(database_path) as connection:
-                set_global_event_folder_layout(
-                    connection, ENGLISH_NEW_INSTALL_SETTING,
-                    updated_at=datetime.now(timezone.utc).isoformat(),
-                )
-        ensure_library_identity(database_path, library_id)
-        projection = (
-            {"jobs": 0, "families": 0, "files": 0}
-            if first_library
-            else project_all_imports(
-                DATABASE_FILE,
-                database_path,
-            )
-        )
-        row = register_library(
-            REGISTRY_DATABASE_FILE,
-            library_id=library_id,
-            display_name=display_name,
-            database_path=database_path,
-            workspace_root=WORKSPACE_PATH,
-            work_root=resolved_work,
-            archive_root=Path(str(checked["archive_root"])),
-            is_main=first_library,
-            is_active=True,
-            settings={
-                "created_by": f"bibliothekar-{DEPLOYMENT_VERSION}",
-                "projected_imports": projection,
-                "managed_default_work_root": bool(
-                    checked.get("managed_default_work_root")
-                ),
-                "user_created_primary_library": bool(first_library),
-            },
-        )
-        registration_created = True
-        backfill_library_inventory(
-            REGISTRY_DATABASE_FILE,
-            database_path=database_path,
-            library_id=library_id,
-            claim_all_owned=False,
-        )
-        synchronize_global_central_stock()
-        if first_library:
-            global MAIN_LIBRARY_CONTEXT
-            MAIN_LIBRARY_CONTEXT = resolve_library_context(
-                REGISTRY_DATABASE_FILE,
-                MAIN_LIBRARY_ID,
-            )
-    except Exception as error:
-        # Eine fehlgeschlagene Neuanlage darf keinen Registry-Zombie
-        # hinterlassen. Auch die erste, intern als Primärbibliothek geführte
-        # Bibliothek wird aus der Registry zurückgerollt; die globale SQLite
-        # selbst bleibt dabei erhalten.
-        if registration_created:
+        with mutate(WORKSPACE_PATH,databases=databases,expected_generation=expected_generation,
+                    details={'operation':'create_library','library_id':library_id,'registry_before':known,
+                             'requested_work':checked['work_root'],'requested_archive':checked['archive_root']}):
             try:
-                remove_library_registration(
-                    REGISTRY_DATABASE_FILE,
-                    library_id,
-                    allow_main=first_library,
+                resolved_work = Path(str(checked["work_root"]))
+                resolved_work.mkdir(parents=True, exist_ok=True)
+                new_library_database = not database_path.is_file() or database_path.stat().st_size == 0
+                initialize_database(database_path)
+                if new_library_database:
+                    with database_connection(database_path) as connection:
+                        set_global_event_folder_layout(
+                            connection, ENGLISH_NEW_INSTALL_SETTING,
+                            updated_at=datetime.now(timezone.utc).isoformat(),
+                        )
+                ensure_library_identity(database_path, library_id)
+                projection = (
+                    {"jobs": 0, "families": 0, "files": 0}
+                    if first_library
+                    else project_all_imports(
+                        DATABASE_FILE,
+                        database_path,
+                    )
                 )
-            except Exception:
-                pass
-        if created_database:
-            for candidate in (
-                database_path,
-                Path(str(database_path) + "-wal"),
-                Path(str(database_path) + "-shm"),
-            ):
-                candidate.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=str(error)) from error
+                row = register_library(
+                    REGISTRY_DATABASE_FILE,
+                    library_id=library_id,
+                    display_name=display_name,
+                    database_path=database_path,
+                    workspace_root=WORKSPACE_PATH,
+                    work_root=resolved_work,
+                    archive_root=Path(str(checked["archive_root"])),
+                    is_main=first_library,
+                    is_active=True,
+                    settings={
+                        "created_by": f"bibliothekar-{DEPLOYMENT_VERSION}",
+                        "projected_imports": projection,
+                        "managed_default_work_root": bool(
+                            checked.get("managed_default_work_root")
+                        ),
+                        "user_created_primary_library": bool(first_library),
+                    },
+                )
+                registration_created = True
+                backfill_library_inventory(
+                    REGISTRY_DATABASE_FILE,
+                    database_path=database_path,
+                    library_id=library_id,
+                    claim_all_owned=False,
+                )
+                synchronize_global_central_stock()
+                if first_library:
+                    global MAIN_LIBRARY_CONTEXT
+                    MAIN_LIBRARY_CONTEXT = resolve_library_context(
+                        REGISTRY_DATABASE_FILE,
+                        MAIN_LIBRARY_ID,
+                    )
+            except Exception as error:
+                # Eine fehlgeschlagene Neuanlage darf keinen Registry-Zombie
+                # hinterlassen. Auch die erste, intern als Primärbibliothek geführte
+                # Bibliothek wird aus der Registry zurückgerollt; die globale SQLite
+                # selbst bleibt dabei erhalten.
+                if registration_created:
+                    try:
+                        remove_library_registration(
+                            REGISTRY_DATABASE_FILE,
+                            library_id,
+                            allow_main=first_library,
+                        )
+                    except Exception:
+                        pass
+                if created_database:
+                    for candidate in (
+                        database_path,
+                        Path(str(database_path) + "-wal"),
+                        Path(str(database_path) + "-shm"),
+                    ):
+                        candidate.unlink(missing_ok=True)
+                raise HTTPException(status_code=422, detail=str(error)) from error
+
+    except RootOperationError as error:
+        raise HTTPException(status_code=409,detail=str(error)) from error
+    if first_library:
+        MAIN_LIBRARY_CONTEXT = resolve_library_context(REGISTRY_DATABASE_FILE,MAIN_LIBRARY_ID)
 
     return {"library": _public_library_row(row)}
 
@@ -3858,6 +3780,35 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     tags=["Bibliotheken"],
 )
 def api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    global MAIN_LIBRARY_CONTEXT
+    if not ({"work_root", "archive_root"} & payload.keys()):
+        return _api_update_library(library_id, payload)
+    before = get_library(REGISTRY_DATABASE_FILE, library_id, active_only=False)
+    if before is None:
+        return _api_update_library(library_id, payload)
+    if bool(before.get('is_active')):
+        try:
+            _, before = _resolve_registered_library_database(before)
+        except LibraryRegistryError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+    workspace = Path(before['workspace_root'])
+    fields = ['workspace_root', 'work_root', 'archive_root', 'database_path']
+    expected = generation(workspace, library_id)
+    def unchanged():
+        row = get_library(REGISTRY_DATABASE_FILE, library_id, active_only=False)
+        return row is not None and all(row[k] == before[k] for k in fields)
+    changes = {Path(before[k]): Path(str(payload[k])).expanduser().resolve(strict=False) for k in ['work_root', 'archive_root'] if k in payload and str(payload[k]) != str(before[k])}
+    try:
+        with mutate(workspace, library_id=library_id, databases=[Path(before['database_path'])], changed_paths=changes, rollback_check=unchanged, expected_generation=expected, precondition=unchanged, details={'registry_before': {k: str(before[k]) for k in fields}, 'requested_paths': {k: str(payload[k]) for k in ['work_root', 'archive_root'] if k in payload}}):
+            result = _api_update_library(library_id, payload)
+        if library_id == MAIN_LIBRARY_ID:
+            MAIN_LIBRARY_CONTEXT = resolve_library_context(REGISTRY_DATABASE_FILE, MAIN_LIBRARY_ID)
+        return result
+    except RootOperationError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+def _api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     row = get_library(
         REGISTRY_DATABASE_FILE,
         library_id,
@@ -3933,6 +3884,7 @@ def api_update_library(library_id: str, payload: dict[str, Any]) -> dict[str, An
     "/api/libraries/{library_id}/deactivate",
     tags=["Bibliotheken"],
 )
+@_root_request
 def api_deactivate_library(library_id: str) -> dict[str, Any]:
     try:
         row = set_library_active(
@@ -3950,6 +3902,21 @@ def api_deactivate_library(library_id: str) -> dict[str, Any]:
     tags=["Bibliotheken"],
 )
 def api_activate_library(library_id: str) -> dict[str, Any]:
+    from app.library_context import _context_from_row
+    row = get_library(REGISTRY_DATABASE_FILE,library_id,active_only=False)
+    if row is None or not row.get('is_registered',True):
+        return _api_activate_library(library_id)
+    try:
+        _, row = _resolve_registered_library_database(row)
+        with admission(_context_from_row(row)):
+            return _api_activate_library(library_id)
+    except RootOperationError as error:
+        raise HTTPException(status_code=409,detail=str(error)) from error
+    except LibraryRegistryError as error:
+        raise HTTPException(status_code=422,detail=str(error)) from error
+
+
+def _api_activate_library(library_id: str) -> dict[str, Any]:
     try:
         existing = get_library(
             REGISTRY_DATABASE_FILE,
@@ -4002,6 +3969,7 @@ def api_activate_library(library_id: str) -> dict[str, Any]:
     "/api/libraries/{library_id}/unregister",
     tags=["Bibliotheken"],
 )
+@_root_request
 def api_unregister_library(library_id: str) -> dict[str, Any]:
     try:
         row = unregister_library(
@@ -4365,6 +4333,7 @@ def _folder_import_runtime_blocker() -> str | None:
     tags=["Import"],
     status_code=202,
 )
+@_root_request
 def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     blocker = _folder_import_runtime_blocker()
     if blocker:
@@ -4510,6 +4479,7 @@ def api_import_history(
 
 
 @app.post("/api/import-history/{job_id}/visibility", tags=["Import"])
+@_root_request
 def api_import_history_visibility(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     hidden = payload.get("hidden")
     if not isinstance(hidden, bool):
@@ -4633,6 +4603,7 @@ def api_jobs() -> dict[str, Any]:
     tags=["Import"],
     status_code=202,
 )
+@_root_request
 def api_cancel_import(job_id: str, force: bool = False) -> JSONResponse:
     job = get_job(DATABASE_FILE, job_id)
     if job is None:
@@ -4711,6 +4682,7 @@ def api_cancel_import(job_id: str, force: bool = False) -> JSONResponse:
     "/api/jobs/{job_id}/discard",
     tags=["Import"],
 )
+@_root_request
 def api_discard_terminal_import(job_id: str) -> dict[str, Any]:
     try:
         result = _discard_terminal_import_job(job_id)
@@ -4731,6 +4703,7 @@ def api_discard_terminal_import(job_id: str) -> dict[str, Any]:
     "/api/backups/{job_id}",
     tags=["Sicherungen"],
 )
+@_root_request
 def api_delete_backup(job_id: str) -> dict[str, Any]:
     library_ids = [
         str(row.get("library_id") or MAIN_LIBRARY_ID)
@@ -4838,6 +4811,7 @@ def api_archive_summary(force_refresh: bool = False) -> dict[str, Any]:
     "/api/jobs/{job_id}/events/{event_id}/archive-verify",
     tags=["Archivübernahme"],
 )
+@_root_request
 def api_archive_verify(
     job_id: str,
     event_id: str,
@@ -4874,6 +4848,7 @@ def api_archive_verify(
     tags=["Archivübernahme"],
     status_code=202,
 )
+@_root_request
 def api_ssd_release(job_id: str, event_id: str) -> dict[str, Any]:
     """Only enqueue. Worker verifies archive and performs durable SSD cleanup."""
     try:
@@ -4969,6 +4944,7 @@ _TRASH_RESTORE_LOCK = Lock()
 
 
 @app.post("/api/trash/restore", tags=["Papierkorb"])
+@_root_request
 def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
     choice = payload.get("relative_paths", None)
     if choice is not None and not isinstance(choice, list):
@@ -5021,6 +4997,7 @@ def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/trash/empty-selection", tags=["Papierkorb"])
+@_root_request
 def api_empty_trash_selection(payload: dict[str, Any]) -> dict[str, Any]:
     """Delete only explicitly selected regular trash files, retaining all others."""
     from app.trash_selective import delete_selected_trash_files
@@ -5051,6 +5028,7 @@ def api_empty_trash_selection(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/trash/empty", tags=["Papierkorb"])
+@_root_request
 def api_empty_trash(payload: dict[str, Any]) -> dict[str, Any]:
     if str(payload.get("confirmation") or "") != TRASH_CONFIRMATION:
         raise HTTPException(
@@ -6630,6 +6608,7 @@ def api_event_suggestions(job_id: str) -> dict[str, Any]:
     "/api/jobs/{job_id}/event-suggestions/accept",
     tags=["Ereignisse"],
 )
+@_root_request
 def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     job = get_job(current_database_file(), job_id)
     if job is None:
@@ -6807,6 +6786,7 @@ def api_archive_change_reviews(
     "/api/jobs/{job_id}/events",
     tags=["Ereignisse"],
 )
+@_root_request
 def api_create_event(
     job_id: str,
     payload: dict[str, Any],
@@ -7430,6 +7410,7 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
     "/api/jobs/{job_id}/events/{event_id}",
     tags=["Ereignisse"],
 )
+@_root_request
 def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
     if get_job(current_database_file(), job_id) is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")
@@ -7683,6 +7664,7 @@ def api_update_event(job_id: str, event_id: str, payload: dict[str, Any]):
     "/api/jobs/{job_id}/events/{event_id}",
     tags=["Ereignisse"],
 )
+@_root_request
 def api_delete_event(
     job_id: str,
     event_id: str,
@@ -7781,6 +7763,7 @@ def _apply_batch_thread_target(
         )
 
 
+@protect(kind='sort', context_provider=lambda a: a['library_context'])
 def _sort_run_thread_target(
     run_id: str,
     library_context: LibraryContext,
@@ -7835,6 +7818,7 @@ def _reconcile_run_thread_target(
     tags=["Sortierung"],
     status_code=202,
 )
+@_root_request
 def api_create_apply_batch(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
@@ -7950,6 +7934,7 @@ def api_event_sort_plan(
     tags=["Sortierung"],
     status_code=202,
 )
+@_root_request
 def api_apply_event_sort(
     job_id: str,
     event_id: str,
@@ -8033,6 +8018,7 @@ def api_event_reconcile_plan(
     tags=["Sortierung"],
     status_code=202,
 )
+@_root_request
 def api_event_reconcile_sort(job_id: str, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     job = get_job(current_database_file(), job_id)
     if job is None:
@@ -8093,6 +8079,7 @@ def api_event_reapply_plan(
     tags=["Sortierung"],
     status_code=202,
 )
+@_root_request
 def api_event_reapply(
     job_id: str,
     event_id: str,
@@ -8185,6 +8172,7 @@ def api_latest_event_sort_run(
     "/api/jobs/{job_id}/event-preview",
     tags=["Arbeitsbereich"],
 )
+@_root_request
 def api_event_preview(
     job_id: str,
     payload: dict[str, Any],
@@ -8316,6 +8304,7 @@ def api_canonical_event_sort_plan(
 
 
 @app.post("/api/events/{event_id}/apply", tags=["Sortierung"], status_code=202)
+@_root_request
 def api_canonical_event_apply(event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     return api_apply_event_sort(
         _canonical_event_anchor_job_id(event_id),
@@ -8337,6 +8326,7 @@ def api_canonical_event_reconcile_plan(
 
 
 @app.post("/api/events/{event_id}/reconcile", tags=["Sortierung"], status_code=202)
+@_root_request
 def api_canonical_event_reconcile(
     event_id: str,
     payload: dict[str, Any],
@@ -8361,6 +8351,7 @@ def api_canonical_event_reapply_plan(
 
 
 @app.post("/api/events/{event_id}/reapply", tags=["Sortierung"], status_code=202)
+@_root_request
 def api_canonical_event_reapply(
     event_id: str,
     payload: dict[str, Any],
@@ -8379,6 +8370,7 @@ def api_no_event_targets(job_id: str, months: str = "") -> dict[str, Any]:
 
 
 @app.post("/api/jobs/{job_id}/no-event/assign-existing", tags=["Ereignisse"])
+@_root_request
 def api_assign_existing_no_event(job_id: str, body: dict) -> dict[str, Any]:
     target_event_id = str(body.get("target_event_id") or "")
     segments = list(body.get("segments") or [])
@@ -8581,6 +8573,7 @@ def api_legacy_multi_backup_plan(legacy_event_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/legacy-multi-backup/{legacy_event_id}/apply", tags=["Ereignisse"])
+@_root_request
 def api_legacy_multi_backup_apply(
     legacy_event_id: str,
     payload: dict[str, Any],
@@ -8610,6 +8603,7 @@ def api_event_structure_change(change_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/event-structure-changes/{change_id}/confirm-applied", tags=["Ereignisse"])
+@_root_request
 def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         return confirm_applied_structure_change(
@@ -8625,6 +8619,7 @@ def api_confirm_applied_structure_change(change_id: str, payload: dict[str, Any]
 
 
 @app.post("/api/event-structure-changes/{change_id}/undo", tags=["Ereignisse"])
+@_root_request
 def api_undo_manual_event_change(change_id: str) -> dict[str, Any]:
     from app.manual_event_undo import undo_manual_applied_change
     try:
@@ -8636,6 +8631,7 @@ def api_undo_manual_event_change(change_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/event-structure-changes/{change_id}/restore-folders", tags=["Ereignisse"])
+@_root_request
 def api_restore_empty_event_folders(change_id: str) -> dict[str, Any]:
     """Safe Undo of missing EMPTY folders in an Applied event."""
     from app.manual_structure_undo import undo_empty_folder_change
@@ -8648,6 +8644,7 @@ def api_restore_empty_event_folders(change_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/event-structure-changes/{change_id}/restore-applied", tags=["Ereignisse"])
+@_root_request
 def api_restore_applied_structure(change_id: str) -> dict[str, Any]:
     """Restore verified camera originals and even empty former subevent folders.
 
@@ -8664,6 +8661,7 @@ def api_restore_applied_structure(change_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/event-structure-changes/{change_id}/prepare-archive", tags=["Ereignisse"])
+@_root_request
 def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         return prepare_archived_structure_change(
@@ -8680,6 +8678,7 @@ def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any
 
 
 @app.post("/api/event-structure-changes/{change_id}/verify-archive", tags=["Ereignisse"])
+@_root_request
 def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
     try:
         return verify_archived_structure_change(
@@ -8713,6 +8712,7 @@ def api_external_change_state() -> dict[str, Any]:
     "/api/external-change-notices/acknowledge",
     tags=["Aufgaben"],
 )
+@_root_request
 def api_acknowledge_external_changes(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
@@ -8730,6 +8730,7 @@ def api_acknowledge_external_changes(
     "/api/external-change-notices/repair-all",
     tags=["Aufgaben"],
 )
+@_root_request
 def api_repair_all_external_changes() -> dict[str, Any]:
     try:
         result = repair_external_conflicts(
@@ -8765,6 +8766,7 @@ def api_repair_all_external_changes() -> dict[str, Any]:
     "/api/external-change-notices/{notice_id}/repair",
     tags=["Aufgaben"],
 )
+@_root_request
 def api_repair_external_change(
     notice_id: str,
 ) -> dict[str, Any]:
@@ -8800,6 +8802,7 @@ def api_repair_external_change(
     "/api/external-change-notices/{notice_id}/dismiss",
     tags=["Aufgaben"],
 )
+@_root_request
 def api_dismiss_external_change(
     notice_id: str,
 ) -> dict[str, Any]:
@@ -8831,6 +8834,7 @@ def api_active_event_mutation(job_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/jobs/{job_id}/event-mutations/{mutation_id}/cancel", tags=["Ereignisse"], status_code=202)
+@_root_request
 def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
     """Bestätigt die Annahme; Ausführung ist unabhängig vom Browser."""
     try:
@@ -8848,6 +8852,7 @@ def api_background_activity() -> dict[str, Any]:
 
 
 @app.post("/api/background-activity/clear", tags=["Aufträge"])
+@_root_request
 def api_clear_background_activity() -> dict[str, int]:
     """Entfernt nur beendete Meldungen aus dem Dock, nie Auftragsdaten oder Dateien."""
     return clear_finished_activity(current_database_file(), DATABASE_FILE)
@@ -9233,6 +9238,7 @@ def api_metadata_correction_scan(area: str = "library") -> dict[str, Any]:
 
 
 @app.post("/api/metadata-correction/multiple/preview", tags=["Metadatenkorrektur"])
+@_root_request
 def api_preview_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     context = current_library_context()
     try:
@@ -9257,6 +9263,7 @@ def api_preview_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/metadata-correction/multiple/apply", tags=["Metadatenkorrektur"])
+@_root_request
 def api_apply_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     context = current_library_context()
     mode = str(payload.get("mode") or "apply").strip().lower()
@@ -9345,6 +9352,7 @@ def api_apply_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/metadata-correction/correct-batch", tags=["Metadatenkorrektur"])
+@_root_request
 def api_correct_metadata_batch(payload: dict[str, Any]) -> dict[str, Any]:
     """Apply one metadata source type to many files without rescanning per item."""
     area = str(payload.get("area") or "").strip().lower()
@@ -9554,6 +9562,7 @@ def api_correct_metadata_batch(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/metadata-correction/correct", tags=["Metadatenkorrektur"])
+@_root_request
 def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     """Write and verify one explicitly confirmed correction in one request."""
     area = str(payload.get("area") or "library").strip().lower()
@@ -9616,6 +9625,7 @@ def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/metadata-correction/general/reintegrate", tags=["Metadatenkorrektur"], status_code=202)
+@_root_request
 def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     """Queue selected corrected General files for the verified day-stock import path."""
     raw_items = payload.get("items")
@@ -9727,39 +9737,44 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
         metadata_root = storage_paths(context.workspace_root)["metadata_root"].resolve(strict=False)
         stage_parent = (metadata_root / ".general-import").resolve(strict=False)
-        stage_parent.mkdir(parents=True, exist_ok=True)
         job_id = datetime.now().astimezone().strftime("GENERAL_IMPORT_%Y%m%d_%H%M%S_%f")
         stage = (stage_parent / job_id).resolve(strict=False)
-        stage.mkdir(parents=True, exist_ok=False)
-        try:
-            for relative, source, _row in selected:
-                target = (stage / Path(relative)).resolve(strict=False)
-                target.relative_to(stage)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source, target)
-                if (
-                    int(target.stat().st_size) != int(source.stat().st_size)
-                    or sha256_file(target) != sha256_file(source)
-                ):
-                    raise MetadataCorrectionError(
-                        "Staging-Kopie konnte nicht verifiziert werden: " + relative
-                    )
-            signature = quick_source_signature(stage)
-            job = create_job(
-                DATABASE_FILE,
-                job_id=job_id,
-                kind="sd_import",
-                trigger_type="manual",
-                source_path=str(stage),
-                working_path=str(workspace_backup_root(WORKSPACE_PATH)),
-                operation="metadata_general_import",
-                source_volume_label="Metadatenkorrektur · Allgemein",
-                source_signature=signature,
-                source_device_id=None,
-            )
-        except Exception:
-            shutil.rmtree(stage, ignore_errors=True)
-            raise
+        with reserve(context.workspace_root,library_id=context.library_id,database=DATABASE_FILE,
+                     kind='import',ids={'job_id':job_id,'function':'app.main.api_reintegrate_general_metadata','source_stage':str(stage)},
+                     paths=[context.workspace_root,metadata_root,stage_parent,workspace_backup_root(WORKSPACE_PATH)],shared=True):
+            stage_parent.mkdir(parents=True, exist_ok=True)
+            stage.mkdir(parents=True, exist_ok=False)
+            try:
+                for relative, source, _row in selected:
+                    from app.root_operations import validate_active_roots
+                    validate_active_roots()
+                    target = (stage / Path(relative)).resolve(strict=False)
+                    target.relative_to(stage)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source, target)
+                    if (
+                        int(target.stat().st_size) != int(source.stat().st_size)
+                        or sha256_file(target) != sha256_file(source)
+                    ):
+                        raise MetadataCorrectionError(
+                            "Staging-Kopie konnte nicht verifiziert werden: " + relative
+                        )
+                signature = quick_source_signature(stage)
+                job = create_job(
+                    DATABASE_FILE,
+                    job_id=job_id,
+                    kind="sd_import",
+                    trigger_type="manual",
+                    source_path=str(stage),
+                    working_path=str(workspace_backup_root(WORKSPACE_PATH)),
+                    operation="metadata_general_import",
+                    source_volume_label="Metadatenkorrektur · Allgemein",
+                    source_signature=signature,
+                    source_device_id=None,
+                )
+            except Exception:
+                shutil.rmtree(stage, ignore_errors=True)
+                raise
 
         return {
             "queued": True,
@@ -9777,6 +9792,7 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/metadata-correction/reintegrate", tags=["Metadatenkorrektur"])
+@_root_request
 def api_reintegrate_metadata_families(payload: dict[str, Any]) -> dict[str, Any]:
     """Explicitly move corrected Ohne_Datum families into canonical day stock."""
     raw_items = payload.get("items")
@@ -9873,6 +9889,7 @@ def api_metadata_correction_tasks(include_completed: bool = False) -> dict[str, 
 
 
 @app.post("/api/metadata-correction/tasks", tags=["Metadatenkorrektur"], status_code=201)
+@_root_request
 def api_prepare_metadata_correction(payload: dict[str, Any]) -> dict[str, Any]:
     area = str(payload.get("area") or "library").strip().lower()
     try:
@@ -9919,6 +9936,7 @@ def api_prepare_metadata_correction(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/metadata-correction/tasks/{correction_id}/apply", tags=["Metadatenkorrektur"])
+@_root_request
 def api_apply_metadata_correction(correction_id: str) -> dict[str, Any]:
     try:
         context, before = _metadata_task_location(correction_id)
@@ -9935,6 +9953,7 @@ def api_apply_metadata_correction(correction_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/metadata-correction/tasks/{correction_id}/cancel", tags=["Metadatenkorrektur"])
+@_root_request
 def api_cancel_metadata_correction(correction_id: str) -> dict[str, Any]:
     try:
         context, _task = _metadata_task_location(correction_id)
@@ -10021,6 +10040,7 @@ def api_file_metadata(
     tags=["Metadaten"],
     status_code=202,
 )
+@_root_request
 def api_run_metadata_test() -> JSONResponse:
     now = datetime.now().astimezone()
 
@@ -10078,6 +10098,7 @@ def api_run_metadata_test() -> JSONResponse:
     tags=["Aufträge"],
     status_code=202,
 )
+@_root_request
 def api_run_simulated_job() -> JSONResponse:
     now = datetime.now().astimezone()
 
@@ -12614,6 +12635,7 @@ def api_list_event_reassignments(job_id: str, event_id: str) -> JSONResponse:
 
 
 @app.post("/api/jobs/{job_id}/events/{event_id}/reassignments")
+@_root_request
 def api_assign_event_reassignments(job_id: str, event_id: str, body: dict) -> JSONResponse:
     try:
         from app.event_reassignment import assign_event_reassignments, EventReassignmentError
@@ -12763,6 +12785,7 @@ def api_get_change_request_preview(cr_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{event_id}/propose")
+@_root_request
 def api_propose_event_change(
     event_id: str,
     body: dict,
@@ -12885,6 +12908,7 @@ def api_change_request_reassignments(cr_id: str):
 
 
 @app.post("/api/change-requests/{cr_id}/reassignments")
+@_root_request
 def api_change_request_reassignments_assign(cr_id: str, payload: dict[str, Any]):
     raise HTTPException(
         status_code=409,
@@ -12897,6 +12921,7 @@ def api_change_request_reassignments_assign(cr_id: str, payload: dict[str, Any])
 
 
 @app.post("/api/change-requests/{cr_id}/confirm")
+@_root_request
 def api_confirm_change(cr_id: str, body: dict[str, Any] | None = None) -> JSONResponse:
     """Aenderungsauftrag bestaetigen."""
     try:
@@ -12919,6 +12944,7 @@ def api_confirm_change(cr_id: str, body: dict[str, Any] | None = None) -> JSONRe
 
 
 @app.post("/api/change-requests/{cr_id}/cancel")
+@_root_request
 def api_cancel_change(cr_id: str) -> JSONResponse:
     """Aenderungsauftrag abbrechen."""
     try:
@@ -12971,6 +12997,7 @@ def api_get_change_reversal(cr_id: str, refresh: bool = False) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/reversal/prepare")
+@_root_request
 def api_prepare_change_reversal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_reversal import prepare_archive_reversal
@@ -12994,6 +13021,7 @@ def api_prepare_change_reversal(cr_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/reversal/verify")
+@_root_request
 def api_verify_change_reversal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_reversal import verify_archive_reversal
@@ -13005,6 +13033,7 @@ def api_verify_change_reversal(cr_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/reversal/finish")
+@_root_request
 def api_finish_change_reversal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_reversal import finish_archive_reversal
@@ -13016,6 +13045,7 @@ def api_finish_change_reversal(cr_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/reversal/force-stop")
+@_root_request
 def api_force_stop_change_reversal(
     cr_id: str, body: dict[str, Any],
 ) -> JSONResponse:
@@ -13042,6 +13072,7 @@ def api_archive_recovery_status(event_id: str) -> JSONResponse:
 
 
 @app.post("/api/archive/recovery/{event_id}/verify-and-unlock")
+@_root_request
 def api_archive_recovery_verify_and_unlock(event_id: str) -> JSONResponse:
     from app.archive_recovery import resolve_recovery_incident
     try:
@@ -13055,6 +13086,7 @@ def api_archive_recovery_verify_and_unlock(event_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/release-copy/create")
+@_root_request
 def api_create_archive_release_copy(cr_id: str) -> JSONResponse:
     """Freigewordene Archivdateien nach ausdrücklicher Freigabe auf die SSD kopieren."""
     try:
@@ -13068,6 +13100,7 @@ def api_create_archive_release_copy(cr_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/release-copy/verify")
+@_root_request
 def api_verify_archive_release_copy(cr_id: str) -> JSONResponse:
     """Freigewordene Archivdateien auf der SSD gegen gespeicherte SHA-256 prüfen."""
     try:
@@ -13081,6 +13114,7 @@ def api_verify_archive_release_copy(cr_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/release-removal/verify")
+@_root_request
 def api_verify_archive_release_removal(cr_id: str) -> JSONResponse:
     """Nach bestätigter SSD-Kopie prüfen, dass die Archivoriginale entfernt wurden."""
     try:
@@ -13094,6 +13128,7 @@ def api_verify_archive_release_removal(cr_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/verify")
+@_root_request
 def api_verify_change(cr_id: str) -> JSONResponse:
     """Manuelle Archivänderung rein lesend gegen die Kamerabibliothek prüfen."""
     try:
@@ -13108,6 +13143,7 @@ def api_verify_change(cr_id: str) -> JSONResponse:
 
 
 @app.post("/api/change-requests/{cr_id}/archive")
+@_root_request
 def api_archive_change(cr_id: str) -> JSONResponse:
     """Geprüften manuellen Änderungsauftrag abschließen; Archiv bleibt read-only."""
     try:

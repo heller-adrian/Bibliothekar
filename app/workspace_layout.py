@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.root_operations import validate_active_roots
+
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -46,6 +48,7 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 
 def _safe_relative(value: Any) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").strip().replace("\\", "/")
     path = PurePosixPath(raw)
 
@@ -64,6 +67,7 @@ def _safe_relative(value: Any) -> PurePosixPath:
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
 
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             chunk = handle.read(1024 * 1024)
@@ -82,6 +86,7 @@ def _fsync_directory(path: Path) -> None:
     if hasattr(os, "O_DIRECTORY"):
         flags |= os.O_DIRECTORY
 
+    validate_active_roots()
     descriptor = os.open(path, flags)
 
     try:
@@ -112,6 +117,8 @@ def ensure_workspace_layout(
     configured_main_work_root: Path | None = None,
     create_default_main: bool = False,
 ) -> dict[str, Any]:
+    from app.managed_storage_health import require_storage
+    require_storage(workspace_path,allow_new=True)
     root = resolve_workspace_root(workspace_path)
     configured = storage_paths(root)
     backup = configured["backup_root"]
@@ -146,6 +153,7 @@ def ensure_workspace_layout(
                 + str(directory)
             )
         if not directory.exists():
+            validate_active_roots()
             directory.mkdir(mode=0o775, parents=True)
             _fsync_directory(directory.parent)
             created.append(str(directory))
@@ -169,6 +177,7 @@ def ensure_workspace_layout(
                 "Ein benötigter Metadatenpfad ist kein Ordner: " + str(target)
             )
         if not target.exists():
+            validate_active_roots()
             target.mkdir(mode=0o775, parents=True)
             _fsync_directory(target.parent)
             created.append(str(target))
@@ -190,6 +199,7 @@ def ensure_workspace_layout(
                     "Der gespeicherte Haupt-Arbeitsbereich ist nicht verfügbar: "
                     + str(main_work)
                 )
+            validate_active_roots()
             main_work.mkdir(mode=0o775, parents=True)
             _fsync_directory(main_work.parent)
             created.append(str(main_work))
@@ -206,7 +216,9 @@ def ensure_workspace_layout(
     if main_work is not None and legacy_main.is_symlink():
         try:
             if legacy_main.resolve(strict=False) != main_work:
+                validate_active_roots()
                 legacy_main.unlink(missing_ok=True)
+                validate_active_roots()
                 legacy_main.symlink_to(main_work, target_is_directory=True)
         except OSError as error:
             raise WorkspaceLayoutError(
@@ -221,6 +233,7 @@ def ensure_workspace_layout(
     ):
         # Only historical German layouts retain the historical alias.
         # Untouched English workspaces never create a German link.
+        validate_active_roots()
         legacy_main.symlink_to(workspaces, target_is_directory=True)
         created.append(str(legacy_main))
 
@@ -233,7 +246,7 @@ def ensure_workspace_layout(
         # Ohne Bibliothek ist dies nur der neutrale, konfigurierte
         # Arbeitsbereiche-Stamm – ausdrücklich kein Bibliotheks-Unterordner.
         "work_root": str(main_work if main_work is not None else workspaces),
-        "storage_names": load_storage_settings(),
+        "storage_names": load_storage_settings(workspace_root=root),
         "created_directories": created,
     }
 
@@ -298,6 +311,7 @@ def resolve_library_work_root(
             _is_relative_to(target, configured_workspaces)
             and target.name.casefold() != "main"
         ):
+            validate_active_roots()
             target.mkdir(parents=True, exist_ok=True)
         else:
             raise WorkspaceLayoutError(
@@ -330,7 +344,7 @@ def backup_root(workspace_path: Path) -> Path:
     if legacy_entry.is_symlink():
         target = legacy_entry.resolve(strict=False)
     else:
-        configured_name = load_storage_settings()["backup_directory_name"]
+        configured_name = load_storage_settings(workspace_root=root)["backup_directory_name"]
         configured_entry = root / configured_name
         if configured_entry.exists() or configured_name != BACKUP_DIRECTORY_NAME:
             target = configured_entry.resolve(strict=False)
@@ -339,6 +353,7 @@ def backup_root(workspace_path: Path) -> Path:
 
     if not target.exists():
         try:
+            validate_active_roots()
             target.mkdir(mode=0o775, parents=True)
             _fsync_directory(target.parent)
         except OSError as error:
@@ -502,8 +517,11 @@ def _rollback_moved(entries: list[tuple[Path, Path]]) -> list[str]:
             destination_exists = destination.exists() or destination.is_symlink()
 
             if destination_exists and not source_exists:
+                validate_active_roots()
                 source.parent.mkdir(parents=True, exist_ok=True)
+                validate_active_roots()
                 os.link(destination, source, follow_symlinks=False)
+                validate_active_roots()
                 destination.unlink()
                 _fsync_directory(source.parent)
                 _fsync_directory(destination.parent)
@@ -517,6 +535,7 @@ def _rollback_moved(entries: list[tuple[Path, Path]]) -> list[str]:
                     int(source_stat.st_dev) == int(destination_stat.st_dev)
                     and int(source_stat.st_ino) == int(destination_stat.st_ino)
                 ):
+                    validate_active_roots()
                     destination.unlink()
                     _fsync_directory(destination.parent)
                     continue
@@ -566,6 +585,7 @@ def _remove_empty_legacy_event_directories(
             reverse=True,
         ):
             try:
+                validate_active_roots()
                 directory.rmdir()
                 removed.append(str(directory))
                 _fsync_directory(directory.parent)
@@ -578,6 +598,7 @@ def _remove_empty_legacy_event_directories(
             and year_root != workspace_root
         ):
             try:
+                validate_active_roots()
                 year_root.rmdir()
                 removed.append(str(year_root))
                 _fsync_directory(year_root.parent)
@@ -711,6 +732,7 @@ def migrate_legacy_applied_files(
                             "Ein bereits verlinktes Ziel hat eine falsche Prüfsumme: "
                             + str(destination)
                         )
+                    validate_active_roots()
                     source.unlink()
                     _fsync_directory(source.parent)
                     recovered_count += 1
@@ -759,7 +781,9 @@ def migrate_legacy_applied_files(
                         "auf demselben Dateisystem."
                     )
 
+                validate_active_roots()
                 destination.parent.mkdir(parents=True, exist_ok=True)
+                validate_active_roots()
                 os.link(source, destination, follow_symlinks=False)
                 destination_stat = destination.stat()
 
@@ -767,6 +791,7 @@ def migrate_legacy_applied_files(
                     int(source_stat.st_dev) != int(destination_stat.st_dev)
                     or int(source_stat.st_ino) != int(destination_stat.st_ino)
                 ):
+                    validate_active_roots()
                     destination.unlink(missing_ok=True)
                     raise WorkspaceLayoutError(
                         "Der atomare Migrationslink konnte nicht bestätigt werden: "
@@ -774,12 +799,14 @@ def migrate_legacy_applied_files(
                     )
 
                 if _sha256_file(destination) != expected_checksum:
+                    validate_active_roots()
                     destination.unlink(missing_ok=True)
                     raise WorkspaceLayoutError(
                         "Die Prüfsumme des Migrationsziels stimmt nicht: "
                         + str(destination)
                     )
 
+                validate_active_roots()
                 source.unlink()
                 _fsync_directory(source.parent)
                 _fsync_directory(destination.parent)
@@ -802,6 +829,7 @@ def migrate_legacy_applied_files(
             if destination.parent.name == "Alle":
                 container = destination.parent.parent
                 for name in ("Alle", "Sortiert", "Export"):
+                    validate_active_roots()
                     (container / name).mkdir(parents=True, exist_ok=True)
 
         with database_connection(database_path) as connection:

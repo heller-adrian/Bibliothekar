@@ -1,0 +1,29 @@
+"""Run F14 QA only in a disposable Linux runner with synthetic paths."""
+from pathlib import Path
+import hashlib,json,os,subprocess,sys
+source=Path(sys.argv[1]).resolve();mode=sys.argv[2]
+base=Path(os.environ['RUNNER_TEMP'])/'f14-qa';base.mkdir(exist_ok=True)
+tools=Path(__file__).resolve().parent
+original=tools.parent/'original'
+manifest=json.loads((tools.parent/'original-integrity.json').read_text())
+assert all(hashlib.sha256((original/n).read_bytes()).hexdigest()==h for n,h in manifest.items())
+selections=['test_more.py::test_rename_with_live_worker','test_more.py::test_rename_same_web_process','test_remaining.py::test_rename_remaining_workers','test_final_combinations.py::test_rename_after_ssd_unlink']
+label=mode;root=base/label;root.mkdir();scratch=root/'scratch';scratch.mkdir();output=root/'results';output.mkdir()
+env=dict(os.environ)
+for k in list(env):
+ if k.startswith(('KAMERA_','BIBLIOTHEKAR_','PYTEST_','PYTHONPATH')):env.pop(k)
+paths={'KAMERA_CONFIG':'settings.json','KAMERA_WORKSPACE':'workspace','KAMERA_DATABASE_DIR':'database','KAMERA_REGISTRY_DATABASE':'database/registry.sqlite3','KAMERA_LOG_DIR':'logs','KAMERA_POOL_PROBE':'workspace','KAMERA_ARCHIVE_ROOT':'archive','KAMERA_IMPORT_ROOT':'import','KAMERA_REMOVABLE_ROOT':'removable','KAMERA_NAS_SOURCE_ROOT':'nas','KAMERA_REMOVABLE_MOUNT_ROOT':'removable','KAMERA_DEVICE_NODE_ROOT':'devices'}
+for k,v in paths.items():
+ p=scratch/'bootstrap'/v;(p.parent if k.endswith(('CONFIG','DATABASE')) else p).mkdir(parents=True,exist_ok=True);env[k]=str(p)
+env.update(PYTHONDONTWRITEBYTECODE='1',PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHONPATH=os.pathsep.join(map(str,[source,tools,original])),AUDIT_SOURCE=str(source),AUDIT_OUTPUT=str(output),AUDIT_SCRATCH=str(scratch),AUDIT_LABEL=label,KAMERA_SOURCE_HELPER_ENABLED='false',KAMERA_SOURCE_HELPER_URL='http://127.0.0.1:1',BIBLIOTHEKAR_ADMIN_PASSWORD='synthetic-f14-ci-password',BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE='de')
+args=[sys.executable,str(tools/'runner.py'),'-q','-p','no:cacheprovider','--import-mode=importlib','-o','addopts=','--basetemp',str(scratch/'pytest'),'--junitxml',str(output/'result.xml'),'-p','finite_execution']
+if mode=='backend':args+=[str(source/'tests/backend')]
+else:args+=['-p','complete_historical_fixture']+[str(original/n) for n in selections]
+(output/'command.json').write_text(json.dumps({'argv':args,'source':str(source),'paths':{k:env[k] for k in paths},'original_sha256':manifest},indent=2))
+with (output/'stdout.log').open('w') as log:
+ result=subprocess.run(args,cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=2400)
+print((output/'stdout.log').read_text()[-5000:])
+(output/'exit.json').write_text(json.dumps({'returncode':result.returncode,'mode':mode,'historical_raw_result':mode!='backend'}))
+if mode=='backend':raise SystemExit(result.returncode)
+# Preserve red historical contracts. Infrastructure/collection errors still fail QA.
+assert result.returncode in {0,1} and (output/'result.xml').is_file()

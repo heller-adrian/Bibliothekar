@@ -29,7 +29,7 @@ ENGLISH_STORAGE_DEFAULTS = {
 }
 
 
-def _effective_directory_default(setting: str) -> str:
+def _effective_directory_default(setting: str, workspace_root: Path | None = None) -> str:
     """Avoid silently relocating existing German workspaces on upgrade.
 
     The configured workspace mount is inspected without creating or moving
@@ -37,9 +37,7 @@ def _effective_directory_default(setting: str) -> str:
     """
     english = ENGLISH_STORAGE_DEFAULTS[setting]
     legacy = LEGACY_STORAGE_DEFAULTS[setting]
-    if os.environ.get("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE") == "de":
-        return legacy
-    workspace = Path(os.environ.get("KAMERA_WORKSPACE", "/workspace"))
+    workspace = Path(workspace_root) if workspace_root is not None else Path(os.environ.get("KAMERA_WORKSPACE", "/workspace"))
     try:
         if (workspace / legacy).is_dir():
             return legacy
@@ -71,7 +69,7 @@ def _clean_name(value: Any, *, field: str, default: str) -> str:
     return name
 
 
-def load_storage_settings() -> dict[str, str]:
+def load_storage_settings(*, workspace_root: Path | None = None) -> dict[str, str]:
     path = _config_path()
     data: dict[str, Any] = {}
     try:
@@ -92,22 +90,22 @@ def load_storage_settings() -> dict[str, str]:
         "backup_directory_name": _clean_name(
             storage.get("backup_directory_name"),
             field="SD-Kartensicherungen",
-            default=_effective_directory_default("backup_directory_name"),
+            default=_effective_directory_default("backup_directory_name", workspace_root),
         ),
         "workspaces_directory_name": _clean_name(
             storage.get("workspaces_directory_name"),
             field="Arbeitsbereiche",
-            default=_effective_directory_default("workspaces_directory_name"),
+            default=_effective_directory_default("workspaces_directory_name", workspace_root),
         ),
         "metadata_directory_name": _clean_name(
             storage.get("metadata_directory_name"),
             field="Metadatenkorrektur",
-            default=_effective_directory_default("metadata_directory_name"),
+            default=_effective_directory_default("metadata_directory_name", workspace_root),
         ),
         "trash_directory_name": _clean_name(
             storage.get("trash_directory_name"),
             field="Papierkorb",
-            default=_effective_directory_default("trash_directory_name"),
+            default=_effective_directory_default("trash_directory_name", workspace_root),
         ),
     }
 
@@ -157,47 +155,17 @@ def normalize_storage_settings(values: dict[str, Any]) -> dict[str, str]:
 
 
 def save_storage_settings(values: dict[str, Any]) -> dict[str, str]:
-    cleaned = normalize_storage_settings(values)
-    path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data: dict[str, Any] = {}
-    if path.is_file():
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            raise StorageSettingsError(
-                "Die Anwendungskonfiguration muss ein JSON-Objekt sein."
-            )
-        data = raw
-    existing_storage = data.get("storage")
-    if not isinstance(existing_storage, dict):
-        existing_storage = {}
-    data["storage"] = {**existing_storage, **cleaned}
+    """Reject the retired storage-name mutator, including internal callers.
 
-    encoded = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    descriptor, temp_name = tempfile.mkstemp(
-        prefix=".settings-",
-        suffix=".json",
-        dir=str(path.parent),
-        text=True,
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_name, path)
-    except Exception:
-        try:
-            os.unlink(temp_name)
-        except OSError:
-            pass
-        raise
-    return cleaned
+    Existing persisted custom names remain readable. This function never
+    rewrites them, including when a caller submits an identical payload.
+    """
+    raise StorageSettingsError("Die Verwaltungsordnernamen sind nicht mehr änderbar.")
 
 
 def storage_paths(workspace_root: Path) -> dict[str, Path]:
     root = workspace_root.expanduser().resolve(strict=False)
-    settings = load_storage_settings()
+    settings = load_storage_settings(workspace_root=root)
     return {
         "workspace_root": root,
         "backup_root": (root / settings["backup_directory_name"]).resolve(strict=False),

@@ -6,6 +6,10 @@ ausgeführt hat, und aktualisiert anschließend ausschließlich die Datenbank.
 """
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -34,6 +38,7 @@ def _now() -> str:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -44,6 +49,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_archive_path(archive_root: Path, relative_value: Any) -> Path:
+    validate_active_roots()
     raw = str(relative_value or "").strip().replace("\\", "/")
     try:
         return archive_path_without_symlinks(archive_root, raw)
@@ -115,6 +121,7 @@ def _collision_verified_archive_target(
     return resolved, relative
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=EventChangeApplyError, db_only_if_no_roots=True)
 def confirm_event_change(
     database_path: Path,
     cr_id: str,
@@ -345,6 +352,7 @@ def cancel_event_change(
         "cleanup_warnings": cleanup_warnings,
     }
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=EventChangeApplyError)
 def verify_event_change(
     database_path: Path,
     cr_id: str,
@@ -702,6 +710,7 @@ def verify_event_change(
     }
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=EventChangeApplyError)
 def finish_event_change(
     database_path: Path,
     cr_id: str,
@@ -1009,6 +1018,7 @@ def finish_event_change(
                 import uuid
                 child_id=str(segment.get("id") or ("EVENT_"+uuid.uuid4().hex.upper()))
                 seg_start=segment.get('start_datetime') or f"{start_date}T{segment['start_time']}:00"; seg_end=segment.get('end_datetime') or f"{end_date}T{segment['end_time']}:59"
+                validate_active_roots()
                 folder=str(segment.get("folder_name") or segment.get("folder") or f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}")
                 connection.execute(
                     """INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,notes,edited_at,timeline_model)

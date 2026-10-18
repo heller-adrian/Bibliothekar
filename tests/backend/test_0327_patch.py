@@ -101,6 +101,13 @@ def _family(family_id: int, capture: str, *, file_count: int = 2) -> dict:
     }
 
 
+
+def _provisioned_storage(workspace, language='legacy'):
+    from app.storage_config import LEGACY_STORAGE_DEFAULTS, ENGLISH_STORAGE_DEFAULTS
+    names=LEGACY_STORAGE_DEFAULTS if language=='legacy' else ENGLISH_STORAGE_DEFAULTS
+    for name in names.values():(workspace/name).mkdir(exist_ok=True)
+
+
 def test_0327_time_range_trims_selected_day_stock_instead_of_rejecting_it():
     preview = build_event_preview(
         {
@@ -127,10 +134,13 @@ def test_0327_time_range_trims_selected_day_stock_instead_of_rejecting_it():
     assert preview["selected_file_count"] == 4
 
 
-def test_0327_released_archive_group_counts_assets_and_honors_exclusion(tmp_path: Path):
+@pytest.mark.parametrize("root_language",["legacy","english"])
+def test_0327_released_archive_group_counts_assets_and_honors_exclusion(tmp_path: Path, root_language):
     db = tmp_path / "kamera.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    _provisioned_storage(workspace,root_language)
+    released_name="Freigewordene Archivdateien" if root_language=="legacy" else "Released Archive Files"
     ensure_workspace_layout(workspace)
     initialize_database(db)
     payload = b"camera"
@@ -144,7 +154,7 @@ def test_0327_released_archive_group_counts_assets_and_honors_exclusion(tmp_path
             job_id="new",
             family_key="REL",
             capture="2026-07-25T11:38:13",
-            relative_path="Freigewordene Archivdateien/2026/2026-07-25/rel.JPG",
+            relative_path=f"{released_name}/2026/2026-07-25/rel.JPG",
             payload=payload,
             root_kind="shared_workspace",
         )
@@ -171,7 +181,7 @@ def test_0327_released_archive_group_counts_assets_and_honors_exclusion(tmp_path
                 family_id,
                 file_id,
                 "xmp",
-                "Freigewordene Archivdateien/2026/2026-07-25/rel.XMP",
+                f"{released_name}/2026/2026-07-25/rel.XMP",
                 len(asset),
                 _sha(asset),
                 "CR_OLD",
@@ -180,13 +190,14 @@ def test_0327_released_archive_group_counts_assets_and_honors_exclusion(tmp_path
             ),
         )
 
-    central = workspace / "SD-Kartensicherungen"
-    camera_path = central / "Freigewordene Archivdateien/2026/2026-07-25/rel.JPG"
+    from app.storage_config import storage_paths
+    central = Path(storage_paths(workspace)["backup_root"])
+    camera_path = central / f"{released_name}/2026/2026-07-25/rel.JPG"
     camera_path.parent.mkdir(parents=True, exist_ok=True)
     camera_path.write_bytes(payload)
-    xmp_path = central / "Freigewordene Archivdateien/2026/2026-07-25/rel.XMP"
+    xmp_path = central / f"{released_name}/2026/2026-07-25/rel.XMP"
     xmp_path.write_bytes(asset)
-    export_path = central / "Freigewordene Archivdateien/2026/2026-07-25/rel_Export.JPG"
+    export_path = central / f"{released_name}/2026/2026-07-25/rel_Export.JPG"
     export_path.write_bytes(export)
 
     groups = list_global_released_archive_groups(
@@ -205,13 +216,24 @@ def test_0327_released_archive_group_counts_assets_and_honors_exclusion(tmp_path
     ) == []
 
 
+    with database_connection(db) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+    for physical in central.rglob("*"):
+        if physical.is_file():assert physical.stat().st_size>0
+
+
+@pytest.mark.parametrize("root_language",["legacy","english"])
 def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock(
     tmp_path: Path,
+    root_language,
 ):
     db = tmp_path / "kamera.sqlite3"
     workspace = tmp_path / "workspace"
     archive = tmp_path / "archive"
     workspace.mkdir()
+    _provisioned_storage(workspace,root_language)
+    released_name="Freigewordene Archivdateien" if root_language=="legacy" else "Released Archive Files"
     ensure_workspace_layout(workspace)
     archive.mkdir()
     initialize_database(db)
@@ -222,10 +244,10 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
 
     old_rel = "2026/07.25 - Test/Alle/old.JPG"
     incoming_rel = (
-        "Freigewordene Archivdateien/2026/2026-07-25/incoming.JPG"
+        f"{released_name}/2026/2026-07-25/incoming.JPG"
     )
     xmp_rel = (
-        "Freigewordene Archivdateien/2026/2026-07-25/incoming.XMP"
+        f"{released_name}/2026/2026-07-25/incoming.XMP"
     )
 
     with database_connection(db) as connection:
@@ -304,7 +326,8 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
     archive_file.parent.mkdir(parents=True, exist_ok=True)
     archive_file.write_bytes(old_payload)
 
-    central = workspace / "SD-Kartensicherungen"
+    from app.storage_config import storage_paths
+    central = Path(storage_paths(workspace)["backup_root"])
     incoming_path = central / incoming_rel
     incoming_path.parent.mkdir(parents=True, exist_ok=True)
     incoming_path.write_bytes(incoming_payload)
@@ -431,6 +454,13 @@ def test_0327_archive_extension_stages_released_camera_and_xmp_from_global_stock
         / "incoming.XMP"
     ).exists()
 
+
+
+    with database_connection(db) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+    for physical in central.rglob("*"):
+        if physical.is_file():assert physical.stat().st_size>0
 
 
 def test_0327_cross_dataset_staging_requires_explicit_choice_and_verifies_copy_move(

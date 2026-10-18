@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 from pathlib import Path
 from types import SimpleNamespace
 import json
@@ -46,6 +47,7 @@ def _foundation(tmp_path: Path):
     archive.mkdir()
 
     initialized = initialize_database(database_file)
+    provision_legacy_storage(workspace)
     initialize_library_registry(registry_file)
     adopted = adopt_main_library(
         registry_file,
@@ -627,9 +629,11 @@ def test_0300_main_adoption_preserves_user_metadata(tmp_path):
 def test_0300_library_work_root_isolated_below_shared_work_area(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
 
     business_root = workspace / "Arbeitsbereich" / "Business"
+    business_root.mkdir(parents=True)
     resolved = resolve_library_work_root(
         workspace,
         business_root,

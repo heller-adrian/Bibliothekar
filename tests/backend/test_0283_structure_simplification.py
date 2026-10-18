@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 
 from app.archive_staging import staging_directory_name
 from app.workspace_layout import shared_work_root
@@ -36,6 +37,7 @@ from tests.backend.test_0263_event_inventory import (
 
 def _seed_applied_workspace(db: Path, workspace: Path) -> tuple[Path, int]:
     initialize_database(db)
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     work_root = shared_work_root(workspace)
     with database_connection(db) as connection:
@@ -472,6 +474,7 @@ def _seed_archived_layout_event(
     structure_enabled: bool,
 ) -> tuple[Path, int, dict]:
     initialize_database(db)
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     with database_connection(db) as connection:
         seed_job(connection)

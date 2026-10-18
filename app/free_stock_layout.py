@@ -182,7 +182,11 @@ def released_origin_directory(
     capture_time: str,
     *,
     physical: bool,
+    release_name: str = "Released Archive Files",
 ) -> PurePosixPath | None:
+    from app.managed_directory_names import NAME_PAIRS
+    if release_name not in NAME_PAIRS["released_archive"]:
+        raise FreeStockLayoutError("Unknown released archive directory name.")
     bounds = effective_released_range(
         connection, family_id, capture_time, physical=physical
     )
@@ -198,7 +202,7 @@ def released_origin_directory(
             f"{_filesystem_time(start, end=False)}–"
             f"{_filesystem_time(end, end=True)}"
         )
-    return PurePosixPath("Freigewordene Archivdateien", day_key[:4], folder)
+    return PurePosixPath(release_name, day_key[:4], folder)
 
 
 def canonical_free_directory(

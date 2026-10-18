@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from app.managed_directory_names import directory_path as managed_directory_path
+
+from app.root_operations import protect, validate_active_roots
+
+
+
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +68,7 @@ def sha256_file(
     cancellation_callback: Callable[[], None] | None = None,
 ) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             if cancellation_callback is not None:
@@ -78,6 +85,7 @@ def sha256_file(
 def atomic_json(path: Path, data: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
 
+    validate_active_roots()
     with temporary.open("w", encoding="utf-8") as handle:
         json.dump(
             data,
@@ -89,13 +97,16 @@ def atomic_json(path: Path, data: dict[str, Any]) -> None:
         handle.flush()
         os.fsync(handle.fileno())
 
+    validate_active_roots()
     temporary.replace(path)
 
 
 def append_log(log_dir: Path, record: dict[str, Any]) -> None:
+    validate_active_roots()
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "jobs.jsonl"
 
+    validate_active_roots()
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(
             json.dumps(
@@ -149,6 +160,7 @@ def archive_protocol_directory(source: Path, target: Path) -> None:
     if target.exists() or target.is_symlink():
         raise PipelineError(f"Protokollziel existiert bereits: {target}")
 
+    validate_active_roots()
     target.parent.mkdir(parents=True, exist_ok=True)
     expected = _tree_digest(source)
     staging_parent = Path(
@@ -171,6 +183,7 @@ def archive_protocol_directory(source: Path, target: Path) -> None:
                 "Kopiertes Protokoll stimmt nicht mit der Quelle überein."
             )
 
+        validate_active_roots()
         os.replace(staging, target)
 
         if _tree_digest(target) != expected:
@@ -187,6 +200,7 @@ def archive_protocol_directory(source: Path, target: Path) -> None:
         shutil.rmtree(staging_parent, ignore_errors=True)
 
 
+@protect(workspace_arg='workspace', database_arg='None', kind='recovery', error_type=PipelineError)
 def recover_cross_device_protocol_failures(
     workspace: Path,
     log_dir: Path,
@@ -204,7 +218,7 @@ def recover_cross_device_protocol_failures(
             continue
 
         job_id = temporary_job_root.name
-        protocol = temporary_job_root / "Protokoll"
+        protocol = managed_directory_path(temporary_job_root, "import_protocol")
         original = temporary_job_root / "Original"
         status_path = protocol / "status.json"
         manifest_path = protocol / "manifest.json"
@@ -254,6 +268,7 @@ def recover_cross_device_protocol_failures(
         archive_protocol_directory(protocol, permanent_protocol)
         _remove_empty_directories(temporary_job_root)
         if temporary_job_root.exists():
+            validate_active_roots()
             temporary_job_root.rmdir()
 
         finished_at = datetime.now(timezone.utc).astimezone().isoformat()
@@ -382,6 +397,7 @@ def copy_and_verify(
             f"Sicherungsziel existiert bereits: {destination}"
         )
 
+    validate_active_roots()
     destination.mkdir(parents=True)
 
     total_entries = len(entries)
@@ -393,6 +409,7 @@ def copy_and_verify(
         source_path = source / relative
         destination_path = destination / relative
 
+        validate_active_roots()
         destination_path.parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -403,6 +420,7 @@ def copy_and_verify(
         source_stat = source_path.stat()
 
         # Blöcke begrenzen die Wartezeit bis zum sicheren Abbruch.
+        validate_active_roots()
         with source_path.open("rb") as src, destination_path.open("xb") as dst:
             while True:
                 if cancellation_callback is not None:
@@ -605,6 +623,7 @@ def organize_and_verify(
             f"Arbeitsbestand existiert bereits: {working_root}"
         )
 
+    validate_active_roots()
     os.replace(
         backup_root,
         working_root,
@@ -631,11 +650,13 @@ def organize_and_verify(
                 f"Zieldatei existiert bereits: {new_path}"
             )
 
+        validate_active_roots()
         new_path.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
 
+        validate_active_roots()
         os.replace(
             old_path,
             new_path,
@@ -686,6 +707,7 @@ def organize_and_verify(
 
     for directory in directories:
         try:
+            validate_active_roots()
             directory.rmdir()
         except OSError:
             pass
@@ -703,6 +725,7 @@ def _remove_empty_directories(root: Path) -> None:
 
     for directory in directories:
         try:
+            validate_active_roots()
             directory.rmdir()
         except OSError:
             pass
@@ -755,6 +778,7 @@ def move_backup_into_shared_workspace(
             f"Temporäre Sicherung fehlt: {backup_root}"
         )
 
+    validate_active_roots()
     shared_root.mkdir(parents=True, exist_ok=True)
 
     if int(backup_root.stat().st_dev) != int(shared_root.stat().st_dev):
@@ -780,7 +804,9 @@ def move_backup_into_shared_workspace(
                     f"Zieldatei existiert bereits: {destination}"
                 )
 
+            validate_active_roots()
             destination.parent.mkdir(parents=True, exist_ok=True)
+            validate_active_roots()
             os.replace(source, destination)
             moved.append((source, destination))
 
@@ -815,6 +841,7 @@ def move_backup_into_shared_workspace(
             )
 
         _remove_empty_directories(backup_root)
+        validate_active_roots()
         backup_root.rmdir()
 
     except Exception:
@@ -823,7 +850,9 @@ def move_backup_into_shared_workspace(
         for source, destination in reversed(moved):
             try:
                 if destination.exists() and not source.exists():
+                    validate_active_roots()
                     source.parent.mkdir(parents=True, exist_ok=True)
+                    validate_active_roots()
                     os.replace(destination, source)
             except Exception as rollback_error:
                 rollback_errors.append(
@@ -839,6 +868,7 @@ def move_backup_into_shared_workspace(
         raise
 
 
+@protect(workspace_arg='workspace', database_arg='None', kind='import', error_type=PipelineError)
 def run_simulated_job(
     workspace: Path,
     pool_probe_path: Path,
@@ -877,11 +907,8 @@ def run_simulated_job(
             message,
         )
 
-    template = (
-        workspace
-        / "_test"
-        / "SD_SIM_001"
-        / "simulierte-sd"
+    template = managed_directory_path(
+        workspace / "_test" / "SD_SIM_001", "simulated_sd"
     )
 
     backups_root = workspace_backup_root(workspace)
@@ -891,7 +918,7 @@ def run_simulated_job(
     )
     temporary_job_root = backups_root / job_id
     temporary_original = temporary_job_root / "Original"
-    temporary_protocol = temporary_job_root / "Protokoll"
+    temporary_protocol = managed_directory_path(temporary_job_root, "import_protocol")
     permanent_protocol = log_dir / "backups" / job_id
     status_path = temporary_protocol / "status.json"
     manifest_path = temporary_protocol / "manifest.json"
@@ -907,6 +934,7 @@ def run_simulated_job(
             f"Protokollziel existiert bereits: {permanent_protocol}"
         )
 
+    validate_active_roots()
     temporary_protocol.mkdir(parents=True)
 
     status: dict[str, Any] = {
@@ -1110,11 +1138,13 @@ def run_simulated_job(
         })
         atomic_json(status_path, status)
 
+        validate_active_roots()
         permanent_protocol.parent.mkdir(parents=True, exist_ok=True)
         archive_protocol_directory(temporary_protocol, permanent_protocol)
 
         if temporary_job_root.exists():
             _remove_empty_directories(temporary_job_root)
+            validate_active_roots()
             temporary_job_root.rmdir()
 
         finished_at = datetime.now(timezone.utc).astimezone().isoformat()
@@ -1172,6 +1202,7 @@ def run_simulated_job(
             if permanent_protocol.exists()
             else status_path
         )
+        validate_active_roots()
         active_status_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_json(active_status_path, status)
 

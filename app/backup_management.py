@@ -6,6 +6,7 @@ import os
 import shutil
 
 from app.database import database_connection
+from app.root_operations import protect, validate_active_roots, active_backup_reservation, finish_backup_reservation
 from app.global_library_inventory import backfill_library_inventory
 from app.global_stock import project_import_job
 from app.library_registry import (
@@ -219,7 +220,7 @@ def backup_deletion_status(
         relative = str(row.get("current_relative_path") or "").strip()
         if (
             not relative
-            or relative.startswith("Freigewordene Archivdateien/")
+            or relative.startswith(("Freigewordene Archivdateien/", "Released Archive Files/"))
             or relative in seen
         ):
             return {
@@ -485,6 +486,9 @@ def _finish_deletion(
     if stage_root.exists():
         shutil.rmtree(stage_root, ignore_errors=False)
         _sync_dir(stage_root.parent)
+    finish_backup_reservation(manifest.get('root_reservation'), database=main_database,
+                              central_root=central_root, job_id=str(manifest['job_id']),
+                              journal=journal, disposition='completed')
     journal.unlink()
     _sync_dir(journal.parent)
     try:
@@ -559,10 +563,27 @@ def _recover_one_deletion(
             _sync_dir(staged.parent)
 
     _restore_library_projections(main_database, registry_path, job_id, manifest["libraries"])
+    expected = {(item['relative'], item['bytes'], item['sha256'].lower()) for item in manifest['files']}
+    for item in manifest['files']:
+        if not _verify_journal_file(_safe_central_file(central_root,item['relative']),item):
+            raise BackupDeletionError('Rückbau-Datei besteht die Abschlussprüfung nicht.')
+    for library in manifest['libraries']:
+        db = Path(library['database_path'])
+        with database_connection(db) as c:
+            if c.execute('PRAGMA integrity_check').fetchone()[0] != 'ok' or c.execute('PRAGMA foreign_key_check').fetchone():
+                raise BackupDeletionError('Rückbau-Datenbank besteht die Abschlussprüfung nicht.')
+            actual = {(str(row['current_relative_path']),int(row['size_bytes']),str(row['sha256']).lower())
+                      for row in _main_file_rows(db,job_id)}
+            if actual != expected or not c.execute('SELECT 1 FROM jobs WHERE id=?',(job_id,)).fetchone():
+                raise BackupDeletionError('Rückbau-Katalog stimmt nicht mit dem Löschjournal überein.')
+
     _check_staging_contents(stage_root, manifest["files"])
     if stage_root.exists():
         shutil.rmtree(stage_root)
         _sync_dir(stage_root.parent)
+    finish_backup_reservation(manifest.get('root_reservation'), database=main_database,
+                              central_root=central_root, job_id=job_id,
+                              journal=journal, disposition='rolled_back')
     journal.unlink()
     _sync_dir(journal.parent)
     try:
@@ -572,6 +593,7 @@ def _recover_one_deletion(
     return "rolled_back"
 
 
+@protect(workspace_arg='central_root', database_arg='main_database', kind='backup', error_type=BackupDeletionError)
 def recover_backup_deletions(
     main_database: Path,
     registry_path: Path,
@@ -594,6 +616,7 @@ def recover_backup_deletions(
     return result
 
 
+@protect(workspace_arg='central_root', database_arg='main_database', kind='backup', error_type=BackupDeletionError)
 def delete_backup(
     main_database: Path,
     registry_path: Path,
@@ -640,6 +663,7 @@ def delete_backup(
         "registry_database": str(registry_path.resolve(strict=False)),
         "libraries": library_rows,
         "files": entries, "state": "prepared",
+        "root_reservation": active_backup_reservation(main_database,central_root,job_id),
     }
     _write_journal(journal, manifest, new=True)
     try:

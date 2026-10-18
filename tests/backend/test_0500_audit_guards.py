@@ -49,13 +49,16 @@ def test_stable_release_workflow_never_force_retags() -> None:
 
 
 def test_storage_rename_error_path_restores_confirmed_job_prefixes() -> None:
-    code = (Path(__file__).resolve().parents[2] / "app" / "main.py").read_text(
-        encoding="utf-8"
-    )
-    assert "path_rollback_errors: list[str] = []" in code
-    assert "renamed_backup_root," in code
-    assert "original_backup_root," in code
-    assert "Datenbank-Pfadrückbau nicht vollständig" in code
+    # Historical rename/rollback contract is preserved in the QA package.
+    # Its replacement must have no filesystem or SQL mutation path at all.
+    import ast
+    code=(Path(__file__).resolve().parents[2]/"app"/"main.py").read_text()
+    tree=ast.parse(code)
+    function=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="_set_storage_paths")
+    assert len(function.body)==1 and isinstance(function.body[0],ast.Raise)
+    assert "410" in ast.unparse(function.body[0])
+    assert "path_rollback_errors: list[str] = []" not in code
+    assert "renamed_backup_root," not in code
 
 
 def test_reconciliation_commits_applied_state_with_paths() -> None:

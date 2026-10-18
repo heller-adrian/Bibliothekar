@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -172,6 +175,7 @@ def _set_batch_failed(database_path: Path, batch_id: str, message: str, *, item_
         )
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='batch', error_type=RuntimeError)
 def execute_apply_batch(
     database_path: Path,
     batch_id: str,

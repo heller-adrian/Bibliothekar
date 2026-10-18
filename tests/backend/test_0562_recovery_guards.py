@@ -49,6 +49,9 @@ def test_startup_recovers_registered_databases_only(tmp_path,monkeypatch,registe
     from app.library_registry import register_library,unregister_library
     from tests.backend.test_0400_import_backup_controls import _foundation
     db,registry,workspace=_foundation(tmp_path)
+    monkeypatch.setenv("KAMERA_REGISTRY_DATABASE",str(registry))
+    monkeypatch.setenv("KAMERA_WORKSPACE",str(workspace))
+    monkeypatch.setenv("KAMERA_CONFIG",str(tmp_path/"settings.json"))
     missing=tmp_path/'removed-library.sqlite3'
     register_library(registry,library_id='removed',display_name='Removed',database_path=missing,
                      workspace_root=workspace,work_root=workspace/'Arbeitsbereiche/Removed',archive_root=tmp_path/'other-archive',is_active=False)

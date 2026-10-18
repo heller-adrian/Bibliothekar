@@ -7,6 +7,8 @@ No archive files, unrelated paths, or user-owned metadata are deleted.
 """
 from __future__ import annotations
 
+from app.root_operations import validate_active_roots
+
 from pathlib import Path
 from typing import Any
 import hashlib
@@ -25,6 +27,7 @@ class MetadataSwapRecoveryError(RuntimeError):
 
 def _sha(path: Path) -> str:
     h = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as f:
         for block in iter(lambda: f.read(1048576), b""):
             h.update(block)
@@ -32,6 +35,7 @@ def _sha(path: Path) -> str:
 
 
 def _sync_dir(path: Path) -> None:
+    validate_active_roots()
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         os.fsync(fd)
@@ -44,19 +48,23 @@ def _journal_dir(metadata_root: Path) -> Path:
 
 
 def _atomic_json(path: Path, data: dict[str, Any], *, new: bool = False) -> None:
+    validate_active_roots()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, ensure_ascii=False, sort_keys=True).encode("utf-8")
     temp = path.with_name("." + uuid.uuid4().hex + ".tmp")
     try:
+        validate_active_roots()
         with temp.open("xb") as f:
             f.write(payload)
             f.flush()
             os.fsync(f.fileno())
         if new and (path.exists() or path.is_symlink()):
             raise MetadataSwapRecoveryError("Ein Metadatenjournal existiert bereits.")
+        validate_active_roots()
         os.replace(temp, path)
         _sync_dir(path.parent)
     finally:
+        validate_active_roots()
         temp.unlink(missing_ok=True)
 
 
@@ -73,6 +81,7 @@ def assert_no_pending_swaps(metadata_root: Path) -> None:
 
 
 def fsync_staged_file(path: Path) -> None:
+    validate_active_roots()
     with Path(path).open("rb") as stream:
         os.fsync(stream.fileno())
     _sync_dir(path.parent)
@@ -124,6 +133,7 @@ def create_preparation_journal(metadata_root: Path, *, data_root: Path,
     _validate(journal, data, metadata_root)
     _atomic_json(journal, data, new=True)
     _sync_dir(metadata_root)
+    validate_active_roots()
     fd = os.open(incoming, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
         os.fsync(fd)
@@ -147,6 +157,7 @@ def _recover_preparation(data: dict[str, Any]) -> None:
         info = incoming.lstat()
         if incoming.is_symlink() or not incoming.is_file() or [info.st_dev, info.st_ino] != item.get("owned_inode"):
             raise MetadataSwapRecoveryError("Arbeitskopie ohne nachgewiesenen Besitz; Prüfung erforderlich.")
+        validate_active_roots()
         incoming.unlink()
         _sync_dir(incoming.parent)
 
@@ -316,13 +327,16 @@ def _rollback(data: dict[str, Any]) -> None:
         source, backup, incoming = [Path(item[k]) for k in ("source", "backup", "incoming")]
         destination = Path(item["destination"]) if item.get("destination") else None
         if backup.exists():
+            validate_active_roots()
             os.replace(backup, source)
             _sync_dir(source.parent)
         if destination and destination.exists():
             # The destination is a verified AFTER copy; the original is now safe.
+            validate_active_roots()
             destination.unlink()
             _sync_dir(destination.parent)
         if incoming.exists():
+            validate_active_roots()
             incoming.unlink()
             _sync_dir(incoming.parent)
 
@@ -348,6 +362,7 @@ def _finish(data: dict[str, Any]) -> None:
         for key in ("backup", "incoming"):
             path = Path(item[key])
             if path.exists():
+                validate_active_roots()
                 path.unlink()
                 _sync_dir(path.parent)
 
@@ -370,6 +385,7 @@ def recover_swap_journal(
             if row is None or row["source_path"] != item["source"] or row["source_sha256"] != item["before_sha"] or row["status"] not in {"prepared", "blocked", "writing"}:
                 raise MetadataSwapRecoveryError("Vorbereitungsjournal passt nicht zur Aufgabe.")
         _recover_preparation(data)
+        validate_active_roots()
         journal.unlink()
         _sync_dir(journal.parent)
         return "rolled_back"
@@ -402,6 +418,7 @@ def recover_swap_journal(
                 ),
             )
         disposition = "rolled_back"
+    validate_active_roots()
     journal.unlink()
     _sync_dir(journal.parent)
     return disposition

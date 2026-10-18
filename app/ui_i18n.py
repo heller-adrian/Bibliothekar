@@ -8,6 +8,14 @@ from __future__ import annotations
 import json
 
 UI_TRANSLATIONS = {
+  "Speicherordner nicht verfügbar": "Storage folder unavailable",
+  "Ein benötigter Verwaltungsordner fehlt, wurde verschoben oder ist nicht eindeutig zugänglich.": "A required storage folder is missing, has been moved, or cannot be accessed reliably.",
+  "Betroffene Vorgänge sind zum Schutz Ihrer Dateien angehalten.": "Affected operations have been paused to protect your files.",
+  "Bitte stellen Sie den ursprünglichen Ordner gegebenenfalls außerhalb der App im NAS-Dateisystem wieder her. Prüfen Sie die Einbindung und den erwarteten Pfad. Es werden keine Ordner automatisch ersetzt.": "If necessary, restore the original folder outside the app in the NAS filesystem. Check the mount and the expected path. No folders will be replaced automatically.",
+  "Erneut prüfen": "Check Again",
+
+  "Verwaltungsordnernamen sind fest vorgegeben. Neue Installationen verwenden englische Namen. Bestehende Ordner und gespeicherte Pfade bleiben unverändert.": "Storage folder names are fixed. New installations use English names. Existing folders and saved paths remain unchanged.",
+  "Die Verwaltungsordnernamen sind nicht mehr änderbar. Bestehende Pfade bleiben erhalten.": "Storage folder names can no longer be changed. Existing paths are preserved.",
   "Einstellungen": "Settings",
   "Darstellung, Sprache, Ordner, Speicherpfade und Bibliotheken": "Appearance, language, folders, storage paths and libraries",
   "Erscheinungsbild": "Appearance",
@@ -170,7 +178,6 @@ UI_TRANSLATIONS = {
   "Wird geladen …": "Loading…",
   "Laden …": "Loading…",
   "Bitte warten …": "Please wait…",
-  "Erneut prüfen": "Verify again",
   "Noch nicht geprüft": "Not yet verified",
   "Vollständig geprüft": "Fully verified",
   "Bestand prüfen": "Verify inventory",
@@ -1359,6 +1366,8 @@ UI_PATTERNS.extend([
     [r"^([0-9]+) Dateien wiederhergestellt\.", "$1 files restored."],
     [r"^([0-9]+) Dateien wiederhergestellt\. ([0-9]+) unbekannte Dateien zur geprüften Übernahme vorgemerkt\\.", "$1 files restored. $2 previously unknown files queued for verified import."],
 ])
+
+UI_TRANSLATIONS["Erneut prüfen"] = "Check Again"
 
 I18N_UI_JS = r"""
 (function () {

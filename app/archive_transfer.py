@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -30,6 +34,7 @@ def _now() -> str:
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
 
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -41,6 +46,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: Any) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").strip().replace("\\", "/")
     path = PurePosixPath(raw)
 
@@ -291,6 +297,7 @@ def list_archive_candidates(
     }
 
 
+@protect(workspace_arg='archive_root', database_arg='database_path', kind='verification', error_type=ArchiveVerificationError)
 def verify_event_archive(
     database_path: Path,
     archive_root: Path,
@@ -510,6 +517,7 @@ def verify_event_archive(
             if source_observed is not None:
                 expected_size = int(source_observed.get("size_bytes") or 0)
                 expected_sha256 = str(source_observed.get("sha256") or "").strip()
+                validate_active_roots()
                 source_event_relative = str(
                     source_observed.get("event_relative_path") or ""
                 ).replace("\\", "/").strip("/")
@@ -523,6 +531,7 @@ def verify_event_archive(
                     or row.get("sha256_original")
                     or ""
                 ).strip()
+                validate_active_roots()
                 expected_relative = str(
                     row.get("current_relative_path")
                     or row.get("original_relative_path")
@@ -548,6 +557,7 @@ def verify_event_archive(
                 )
                 missing_count += 1
             else:
+                validate_active_roots()
                 actual_relative = str(observed["relative_path"]).replace("\\", "/").strip("/")
                 relative_text = expected_relative
                 candidate = archive_path_without_symlinks(

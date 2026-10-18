@@ -7,10 +7,11 @@ from typing import Any
 from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.archive_reassignment_segments import ArchiveSegmentError, build_archive_reassignment_segments
 from app.database import database_connection
+from app.managed_directory_names import directory_name, NAME_PAIRS
 from app.workspace_layout import WorkspaceLayoutError, backup_root
 
 
-RELEASE_DIRECTORY_NAME = "Freigewordene Archivdateien"
+RELEASE_DIRECTORY_NAME = "Released Archive Files"
 class ArchiveReleaseStockError(ValueError):
     pass
 
@@ -64,7 +65,7 @@ def _segment_folder(segment: dict[str, Any]) -> str:
     return f"{day} · {start.replace(':','-')}–{end.replace(':','-')}"
 
 
-def _release_context(database_path: Path, cr_id: str) -> dict[str, Any]:
+def _release_context(database_path: Path, cr_id: str, workspace_path: Path | None = None) -> dict[str, Any]:
     with database_connection(database_path) as connection:
         cr_row = connection.execute(
             "SELECT * FROM event_change_requests WHERE id=?", (cr_id,)
@@ -196,8 +197,12 @@ def _release_context(database_path: Path, cr_id: str) -> dict[str, Any]:
         if not filename:
             raise ArchiveReleaseStockError("Eine freigewordene Archivdatei besitzt keinen Dateinamen.")
 
+        stored = str(row.get("workspace_release_path") or "").strip()
+        release_name = PurePosixPath(stored).parts[0] if stored else (directory_name(backup_root(workspace_path),"released_archive") if workspace_path is not None else RELEASE_DIRECTORY_NAME)
+        if release_name not in NAME_PAIRS['released_archive']:
+            raise ArchiveReleaseStockError('Unbekannter gespeicherter Rückkehrpfad.')
         release_directory = PurePosixPath(
-            RELEASE_DIRECTORY_NAME,
+            release_name,
             year_by_family[family_id],
             _segment_folder(segment),
         )
@@ -330,7 +335,7 @@ def prepare_archive_release_stock(
     workspace_path: Path,
     cr_id: str,
 ) -> dict[str, Any]:
-    context = _release_context(database_path, cr_id)
+    context = _release_context(database_path, cr_id, workspace_path)
     rows = context["rows"]
     created_directories: list[str] = []
     if not rows:
@@ -446,7 +451,7 @@ def verify_archive_release_copies(
     workspace_path: Path,
     cr_id: str,
 ) -> dict[str, Any]:
-    context = _release_context(database_path, cr_id)
+    context = _release_context(database_path, cr_id, workspace_path)
     rows = context["rows"]
     now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
     results = []
@@ -489,7 +494,7 @@ def verify_archive_release_removal(
     workspace_path: Path,
     cr_id: str,
 ) -> dict[str, Any]:
-    context = _release_context(database_path, cr_id)
+    context = _release_context(database_path, cr_id, workspace_path)
     rows = context["rows"]
     now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
     results = []
@@ -559,9 +564,9 @@ def cleanup_archive_release_stock(
     request-owned SSD copies are checked BEFORE deleting the first one.
     A failed check leaves the request open, not silently marked cancelled.
     """
-    context = _release_context(database_path, cr_id)
+    context = _release_context(database_path, cr_id, workspace_path)
     root = backup_root(workspace_path).resolve(strict=False)
-    release_root = root / RELEASE_DIRECTORY_NAME
+    release_root = root / directory_name(root,"released_archive")
     prepared: list[tuple[Path, Path, str]] = []
     parents: set[Path] = set()
 
@@ -572,7 +577,7 @@ def cleanup_archive_release_stock(
         if not relative:
             continue
         rel = _safe_relative(relative)
-        if not rel.parts or rel.parts[0] != RELEASE_DIRECTORY_NAME:
+        if not rel.parts or rel.parts[0] != release_root.name:
             raise ArchiveReleaseStockError(
                 "SSD-Rückkehrpfad gehört nicht zum freigewordenen Archivbestand: " + relative
             )

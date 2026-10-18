@@ -1,3 +1,4 @@
+from tests.backend.default_constant_fixture import shipped_constants
 from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
@@ -22,7 +23,8 @@ def test_0291_image_starts_single_container_supervisor_as_root():
     assert 'CMD ["uvicorn", "app.main:app"' not in dockerfile
 
 
-def test_0291_supervisor_separates_root_helper_from_web_uid():
+def test_0291_supervisor_separates_root_helper_from_web_uid(monkeypatch):
+    for name,value in shipped_constants(container_supervisor,["WEB_UID","WEB_GID","HELPER_ENABLED"]).items():monkeypatch.setattr(container_supervisor,name,value)
     assert container_supervisor.WEB_UID == 568
     assert container_supervisor.WEB_GID == 568
     assert container_supervisor.HELPER_ENABLED is True
@@ -38,7 +40,8 @@ def test_0291_supervisor_separates_root_helper_from_web_uid():
     ]
 
 
-def test_0291_source_helper_mounts_directly_without_host_namespace():
+def test_0291_source_helper_mounts_directly_without_host_namespace(monkeypatch):
+    for name,value in shipped_constants(source_helper,["MOUNT_ROOT","HOST_MOUNT_ROOT"]).items():monkeypatch.setattr(source_helper,name,value)
     helper_source = (REPO_ROOT / "app" / "source_helper.py").read_text()
     assert "nsenter" not in helper_source
     assert str(source_helper.MOUNT_ROOT) == "/sources/removable"

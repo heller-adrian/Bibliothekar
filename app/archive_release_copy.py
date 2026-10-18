@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 import hashlib
 import os
 from pathlib import Path
@@ -15,6 +19,7 @@ from app.archive_release_stock import (
 from app.database import database_connection
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveReleaseStockError)
 def create_archive_release_copies(
     database_path: Path,
     archive_root: Path,
@@ -79,10 +84,12 @@ def create_archive_release_copies(
                 raise ArchiveReleaseStockError(
                     "Am SSD-Rückkehrpfad existiert bereits ein Eintrag: " + release_rel
                 )
+            validate_active_roots()
             target.parent.mkdir(parents=True, exist_ok=True)
 
             digest = hashlib.sha256()
             copied_size = 0
+            validate_active_roots()
             with source.open("rb") as src, target.open("xb") as dst:
                 created_paths.append(target)
                 while True:
@@ -120,6 +127,7 @@ def create_archive_release_copies(
         for target in reversed(created_paths):
             try:
                 if target.is_file() and not target.is_symlink():
+                    validate_active_roots()
                     target.unlink()
             except OSError:
                 pass

@@ -28,7 +28,7 @@ from app.event_access import event_family_rows, event_file_rows, event_source_jo
 from app.event_layout import ensure_event_layout_snapshot
 from app.event_leaf_layouts import stored_leaf_layouts
 
-from app.workspace_layout import WORK_DIRECTORY_NAME
+from app.workspace_layout import shared_work_root
 
 EVENT_DOCUMENT_VERSION = 3
 EVENT_DOCUMENT_FILENAME = "event.json"
@@ -45,7 +45,7 @@ def event_document_path(
 ) -> Path:
     """Pfad einer event.json aus Jahr + Ereignisordnername."""
 
-    work_root = Path(workspace_root) / WORK_DIRECTORY_NAME
+    work_root = shared_work_root(Path(workspace_root))
     return work_root / str(year)[:4] / str(folder_name) / EVENT_DOCUMENT_FILENAME
 
 
@@ -364,7 +364,7 @@ def write_event_document(
     digest_prefix = hashlib.sha256(encoded).hexdigest()[:12]
 
     target = path.resolve(strict=False)
-    work_root = (Path(workspace_root) / WORK_DIRECTORY_NAME).resolve(strict=False)
+    work_root = (shared_work_root(Path(workspace_root))).resolve(strict=False)
     try:
         target.relative_to(work_root)
     except ValueError as error:
@@ -390,7 +390,7 @@ def read_event_document(path: Path) -> dict[str, Any]:
 
 
 def discover_event_documents(workspace_root: Path) -> Iterator[Path]:
-    work_root = Path(workspace_root) / WORK_DIRECTORY_NAME
+    work_root = shared_work_root(Path(workspace_root))
     if not work_root.is_dir():
         return
     yield from sorted(work_root.glob(f"*/*/{EVENT_DOCUMENT_FILENAME}"))

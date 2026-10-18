@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 NAME_PAIRS = {
+    "import_protocol": ("Protokoll", "Protocol"),
+    "simulated_sd": ("simulierte-sd", "simulated-sd"),
     "undated": ("Ohne_Datum", "No Date"),
     "metadata_general": ("Allgemein", "General"),
     "metadata_multiple": ("Mehrfachkorrektur", "Batch Correction"),

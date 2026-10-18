@@ -1,6 +1,9 @@
 """Crash-recoverable selected-file trash deletion (no symlink traversal)."""
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -35,6 +38,7 @@ def _operation_lock(workspace: Path):
         if path in held:
             yield
             return
+        validate_active_roots()
         fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
@@ -49,6 +53,7 @@ _PURGE_SNAPSHOTS: ContextVar[dict] = ContextVar("trash_purge_snapshots", default
 
 
 def _sync_dir(path: Path) -> None:
+    validate_active_roots()
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         os.fsync(fd)
@@ -71,21 +76,26 @@ def _move_checked(source: Path, target: Path, sha256: str, *, durable_root: Path
     # Publish and sync the staged copy BEFORE unlinking the trash entry.
     # A stop between link and unlink leaves two verified copies for recovery.
     try:
+        validate_active_roots()
         os.link(source, target, follow_symlinks=False)
     except OSError as error:
         if error.errno != errno.EXDEV:
             raise
+        validate_active_roots()
         fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o640)
+        validate_active_roots()
         with os.fdopen(fd, "wb") as out, source.open("rb") as inp:
             shutil.copyfileobj(inp, out, length=1024 * 1024)
             out.flush()
             os.fsync(out.fileno())
     if _sha256_file(target) != sha256:
         raise TrashError("Prüfsummenfehler im Lösch-Zwischenbestand.")
+    validate_active_roots()
     with target.open("rb") as staged_file:
         os.fsync(staged_file.fileno())
     # Include all new nested directory entries and the DELETE_* directory.
     _sync_parents(target.parent, durable_root)
+    validate_active_roots()
     source.unlink()
     _sync_dir(source.parent)
 
@@ -98,15 +108,18 @@ def _return_checked(source: Path, target: Path, sha256: str, root: Path) -> None
             raise TrashError("Ziel während der Wiederherstellung verändert.")
         # Both copies were verified in the all-file recovery preflight.
         # Sync the surviving copy before removing the staging link.
+        validate_active_roots()
         with target.open("rb") as handle:
             os.fsync(handle.fileno())
         _sync_parents(target.parent, root)
+        validate_active_roots()
         source.unlink()
         _sync_dir(source.parent)
     else:
         _move_checked(source, target, sha256, durable_root=root)
 
 def _quote(name: str) -> str:
+    validate_active_roots()
     return '"' + name.replace('"', '""') + '"'
 
 
@@ -247,6 +260,7 @@ def _parent(workspace: Path) -> Path:
     root = storage_paths(workspace)["metadata_root"] / ".trash-deletions"
     if root.is_symlink():
         raise TrashError("Papierkorb-Löschjournal darf kein Symlink sein.")
+    validate_active_roots()
     root.mkdir(parents=True, exist_ok=True)
     _sync_dir(root.parent)
     return root.resolve(strict=True)
@@ -255,16 +269,20 @@ def _parent(workspace: Path) -> Path:
 def _atomic_json(path: Path, value: dict) -> None:
     temporary = path.with_name("." + uuid.uuid4().hex + ".tmp")
     try:
+        validate_active_roots()
         with temporary.open("x", encoding="utf-8") as handle:
             json.dump(value, handle, ensure_ascii=False, sort_keys=True)
             handle.flush()
             os.fsync(handle.fileno())
+        validate_active_roots()
         os.replace(temporary, path)
         _sync_dir(path.parent)
     finally:
+        validate_active_roots()
         temporary.unlink(missing_ok=True)
 
 
+@protect(workspace_arg='workspace', database_arg='None', kind='recovery', error_type=TrashError)
 def recover_trash_deletions(workspace: Path, *, allowed_databases: Iterable[Path] | None = None) -> dict:
     """Return uncommitted staged originals without losing any data."""
     with _operation_lock(workspace):
@@ -318,15 +336,18 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
         if data.get("state") == "committed":
             # Also covers an interrupted/failed fsync after atomic replacement.
             # Never destroy originals until this observed commit fence is durable.
+            validate_active_roots()
             with journal.open("rb") as committed_journal:
                 os.fsync(committed_journal.fileno())
             _sync_dir(parent)
             for name in expected:
                 path = staged / _relative(name)
                 if path.exists():
+                    validate_active_roots()
                     path.unlink()
                     _sync_dir(path.parent)
             _remove_empty_staging(staged)
+            validate_active_roots()
             journal.unlink()
             _sync_dir(parent)
             continue
@@ -342,6 +363,7 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
                 _return_checked(src, dst, str(item["sha256"]), root)
                 recovered.append(rel.as_posix())
         _remove_empty_staging(staged)
+        validate_active_roots()
         journal.unlink()
         _sync_dir(parent)
     return {"recovered_paths":recovered}
@@ -352,7 +374,9 @@ def _remove_empty_staging(staged: Path) -> None:
         return
     for p in sorted(staged.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         if p.is_dir() and not p.is_symlink():
+            validate_active_roots()
             p.rmdir()
+    validate_active_roots()
     staged.rmdir()
     _sync_dir(staged.parent)
 
@@ -396,6 +420,7 @@ def _purge_selected(db: Path, paths: list[str]) -> None:
         connection.commit()
 
 
+@protect(workspace_arg='workspace', database_arg='None', kind='trash', error_type=TrashError)
 def delete_selected_trash_files(
     databases: Iterable[Path],
     workspace: Path,
@@ -424,6 +449,7 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
     parent = _parent(workspace)
     op_id = "DELETE_" + uuid.uuid4().hex.upper()
     staging = parent / op_id
+    validate_active_roots()
     staging.mkdir(mode=0o700)
     journal = parent / (op_id + ".json")
     snapshots = []

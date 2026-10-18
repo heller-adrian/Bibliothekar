@@ -43,6 +43,8 @@ def _load_family_stats(
                          AND (
                              f.current_relative_path='Ohne_Datum'
                              OR f.current_relative_path LIKE 'Ohne_Datum/%'
+                             OR f.current_relative_path='No Date'
+                             OR f.current_relative_path LIKE 'No Date/%'
                          )
                         THEN 1 ELSE 0
                     END
@@ -314,7 +316,7 @@ def _released_archive_family_ids(
                JOIN files f ON f.family_id=marker.family_id
                WHERE marker.job_id=?
                  AND f.current_root_kind='shared_workspace'
-                 AND f.current_relative_path LIKE 'Freigewordene Archivdateien/%'""",
+                 AND (f.current_relative_path LIKE 'Freigewordene Archivdateien/%' OR f.current_relative_path LIKE 'Released Archive Files/%')""",
             (job_id,),
         ).fetchall()
     return {int(row["family_id"]) for row in rows}
@@ -357,7 +359,7 @@ def list_global_released_archive_groups(
                      SELECT 1 FROM files rf
                      WHERE rf.family_id=ff.id
                        AND rf.current_root_kind='shared_workspace'
-                       AND rf.current_relative_path LIKE 'Freigewordene Archivdateien/%'
+                       AND (rf.current_relative_path LIKE 'Freigewordene Archivdateien/%' OR rf.current_relative_path LIKE 'Released Archive Files/%')
                  )
                GROUP BY marker.job_id,marker.family_id,
                         marker.released_start_datetime,marker.released_end_datetime,

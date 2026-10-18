@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -28,6 +32,7 @@ def _now() -> str:
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
 
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -39,6 +44,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: Any) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").strip().replace("\\", "/")
     path = PurePosixPath(raw)
 
@@ -71,6 +77,7 @@ def _fsync_directory(path: Path) -> None:
     if hasattr(os, "O_DIRECTORY"):
         flags |= os.O_DIRECTORY
 
+    validate_active_roots()
     descriptor = os.open(path, flags)
     try:
         os.fsync(descriptor)
@@ -420,6 +427,7 @@ def _remove_empty_event_tree(event_root: Path, work_root: Path) -> list[str]:
         if not _is_release_companion_file(entry):
             remaining_unexpected.append(str(entry.relative_to(work_root)))
             continue
+        validate_active_roots()
         entry.unlink()
         _fsync_directory(entry.parent)
         removed.append(str(entry.relative_to(work_root)))
@@ -436,6 +444,7 @@ def _remove_empty_event_tree(event_root: Path, work_root: Path) -> list[str]:
         for name in directories:
             child = current_path / name
             try:
+                validate_active_roots()
                 child.rmdir()
                 _fsync_directory(child.parent)
                 removed.append(str(child.relative_to(work_root)))
@@ -443,6 +452,7 @@ def _remove_empty_event_tree(event_root: Path, work_root: Path) -> list[str]:
                 pass
 
     try:
+        validate_active_roots()
         event_root.rmdir()
         _fsync_directory(event_root.parent)
         removed.append(str(event_root.relative_to(work_root)))
@@ -611,6 +621,7 @@ def _finalize_release(
     return result
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='ssd', error_type=SsdReleaseError)
 def finalize_manually_moved_event_if_verified(
     database_path: Path,
     workspace_path: Path,
@@ -834,6 +845,7 @@ def finalize_manually_moved_event_if_verified(
     }
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='ssd', error_type=SsdReleaseError)
 def release_event_ssd(
     database_path: Path,
     workspace_path: Path,
@@ -1197,6 +1209,7 @@ def release_event_ssd(
                     raise SsdReleaseError(
                         "SSD-Datei änderte sich unmittelbar vor dem Löschen: " + str(source)
                     )
+                validate_active_roots()
                 source.unlink()
                 _fsync_directory(source.parent)
                 status_value = "deleted"

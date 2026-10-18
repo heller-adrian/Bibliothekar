@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.managed_directory_names import directory_name as managed_directory_name
+
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -948,6 +950,7 @@ def build_event_sort_plan(
                         record_family_id,
                         capture_value,
                         physical=True,
+                        release_name=managed_directory_name(workspace_backup_root(workspace_root),'released_archive'),
                     )
                     if record_family_id is not None
                     else None
@@ -995,7 +998,7 @@ def build_event_sort_plan(
                 and all(
                     str(row.get("current_root_kind") or "") == "shared_workspace"
                     and str(row.get("current_relative_path") or "").replace("\\", "/").startswith(
-                        "Freigewordene Archivdateien/"
+                        ("Freigewordene Archivdateien/", "Released Archive Files/")
                     )
                     for row in assigned_source_rows
                 )
@@ -1028,6 +1031,9 @@ def build_event_sort_plan(
         ).is_file()
         for row in file_rows
     )
+
+    from app.root_operations import attest_legacy_plan_view
+    attest_legacy_plan_view(database_path, workspace_root, target_root, central_stock_root)
 
     legacy_source_root: Path | None = None
     legacy_source_field = ""
@@ -1133,7 +1139,7 @@ def build_event_sort_plan(
         # correct modern location, not at a long-gone import directory.
         if (
             declared_root_kind == "shared_workspace"
-            or relative.as_posix().startswith("Freigewordene Archivdateien/")
+            or relative.as_posix().startswith(("Freigewordene Archivdateien/", "Released Archive Files/"))
         ):
             return central_stock_root, central_candidate, "central_stock"
         if legacy_source_root is not None:

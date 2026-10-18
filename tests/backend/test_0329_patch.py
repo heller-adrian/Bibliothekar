@@ -164,14 +164,13 @@ def test_0329_clean_workspace_has_no_automatic_main_folder(tmp_path: Path, monke
         create_default_main=False,
     )
 
-    assert Path(layout["work_root"]) == workspace / "Arbeitsbereiche"
-    assert (workspace / "Arbeitsbereiche").is_dir()
-    assert (workspace / "SD-Kartensicherungen").is_dir()
-    assert (workspace / "Metadatenkorrektur").is_dir()
-    assert not (workspace / "Arbeitsbereiche" / "main").exists()
+    assert Path(layout["work_root"]) == workspace / "Library Workspaces"
+    assert (workspace / "Library Workspaces").is_dir()
+    assert (workspace / "SD Card Backups").is_dir()
+    assert (workspace / "Metadata Correction").is_dir()
+    assert not (workspace / "Library Workspaces" / "main").exists()
     legacy = workspace / "Arbeitsbereich"
-    assert legacy.is_symlink()
-    assert legacy.resolve() == (workspace / "Arbeitsbereiche").resolve()
+    assert not legacy.exists() and not legacy.is_symlink()
 
 
 def test_0329_main_is_never_created_even_by_legacy_default_or_missing_saved_path(
@@ -191,8 +190,8 @@ def test_0329_main_is_never_created_even_by_legacy_default_or_missing_saved_path
         workspace,
         create_default_main=True,
     )
-    main_path = workspace / "Arbeitsbereiche" / "main"
-    assert Path(layout["work_root"]) == workspace / "Arbeitsbereiche"
+    main_path = workspace / "Library Workspaces" / "main"
+    assert Path(layout["work_root"]) == workspace / "Library Workspaces"
     assert not main_path.exists()
 
     # Auch ein veralteter gespeicherter Main-Pfad wird niemals still neu
@@ -333,6 +332,8 @@ def test_0329_sort_plan_uses_configured_work_root_and_all_19_physical_files(
     work = workspace / "Arbeitsbereiche" / "Arbeitsbereich"
     archive = tmp_path / "archive"
     workspace.mkdir()
+    from tests.backend.legacy_storage_fixture import provision_legacy_storage
+    provision_legacy_storage(workspace)
     work.mkdir(parents=True)
     archive.mkdir()
     ensure_workspace_layout(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 from pathlib import Path
 import hashlib
 
@@ -131,6 +133,7 @@ def test_0311_main_migration_moves_only_free_stock_to_central(tmp_path):
     database = tmp_path / "database" / "kamera.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     layout = ensure_workspace_layout(workspace)
     initialize_database(database)
 
@@ -262,6 +265,7 @@ def test_0311_released_family_refreshes_stale_projection_from_central_stock(tmp_
     other_db = tmp_path / "database" / "business.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     layout = ensure_workspace_layout(workspace)
     initialize_database(main_db)
     initialize_database(other_db)
@@ -322,6 +326,7 @@ def test_0311_claim_reconcile_releases_stale_owned_claim_after_event_delete(tmp_
     workspace = tmp_path / "workspace"
     archive = tmp_path / "archive"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     archive.mkdir()
     layout = ensure_workspace_layout(workspace)
     initialize_database(database)
@@ -399,6 +404,7 @@ def test_0311_central_sync_does_not_overwrite_locally_applied_path(tmp_path):
     other_db = tmp_path / "database" / "business.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     initialize_database(main_db)
     initialize_database(other_db)

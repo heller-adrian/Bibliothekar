@@ -4581,12 +4581,7 @@ BIBLIOTHEKAR_JS = r"""
 
   function bkRenderStorageSettings(data) {
     if (!storageSettings || !data) return;
-    const setValue=(id,value)=>{const node=document.getElementById(id);if(node)node.value=String(value||"");};
     const setText=(id,value)=>{const node=document.getElementById(id);if(node)node.textContent=String(value||"");};
-    setValue("bk-storage-backup-name", data.backup_directory_name);
-    setValue("bk-storage-workspaces-name", data.workspaces_directory_name);
-    setValue("bk-storage-metadata-name", data.metadata_directory_name);
-    setValue("bk-storage-trash-name", data.trash_directory_name);
     setText("bk-storage-workspace-root", data.workspace_root || "/workspace");
     setText("bk-storage-backup-preview", "SD-Kartensicherungen: " + String(data.backup_root || ""));
     setText("bk-storage-workspaces-preview", "Arbeitsbereiche: " + String(data.workspaces_root || ""));
@@ -4605,29 +4600,6 @@ BIBLIOTHEKAR_JS = r"""
       if(status){status.textContent=error.message;status.className="bk-library-status is-error";}
     }
   }
-
-  document.getElementById("bk-storage-save")?.addEventListener("click", async () => {
-    const status=document.getElementById("bk-storage-status");
-    if(status){status.textContent="Pfade werden geprüft und gespeichert …";status.className="bk-library-status";}
-    try {
-      const data=await bkJson("/api/settings/storage-paths", {
-        method:"PUT",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          backup_directory_name:document.getElementById("bk-storage-backup-name")?.value || "",
-          workspaces_directory_name:document.getElementById("bk-storage-workspaces-name")?.value || "",
-          metadata_directory_name:document.getElementById("bk-storage-metadata-name")?.value || "",
-          trash_directory_name:document.getElementById("bk-storage-trash-name")?.value || "",
-        }),
-      });
-      const refreshed=await bkJson("/api/settings/storage-paths");
-      bkRenderStorageSettings(refreshed);
-      if(status){status.textContent="Gespeichert. App-eigene Ordner wurden sicher aktualisiert; externe TrueNAS-Mounts bleiben unverändert.";status.className="bk-library-status is-ok";}
-      await bkRefreshLibraryManagement();
-    } catch(error) {
-      if(status){status.textContent=error.message;status.className="bk-library-status is-error";}
-    }
-  });
 
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadStorageSettings);
 
@@ -5879,20 +5851,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <span>Workspace-Mount: <code id="bk-storage-workspace-root">/workspace</code></span>
           <span>TrueNAS stellt nur diesen RW-Stamm bereit. Bibliothekar verwaltet die folgenden Unterordner.</span>
         </div>
-        <div class="bk-library-form" style="margin-top:12px">
-          <label><span>SD-Kartensicherungen</span><input id="bk-storage-backup-name" value="SD Card Backups"></label>
-          <label><span>Bibliotheks-Arbeitsbereiche</span><input id="bk-storage-workspaces-name" value="Library Workspaces"></label>
-          <label><span>Metadatenkorrektur</span><input id="bk-storage-metadata-name" value="Metadata Correction"></label>
-          <label><span>Papierkorb</span><input id="bk-storage-trash-name" value="Trash"></label>
-        </div>
         <div class="bk-library-meta" style="margin-top:10px">
           <span id="bk-storage-backup-preview"></span>
           <span id="bk-storage-workspaces-preview"></span>
           <span id="bk-storage-metadata-preview"></span>
           <span id="bk-storage-trash-preview"></span>
         </div>
-        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Der Standardunterordner für allgemeine Metadatenkorrektur heißt <code>General</code>. Bereits vorhandene Ordnernamen bleiben unverändert; ein zusätzlicher TrueNAS-Host-Path ist nicht nötig.</p>
-        <div class="bk-library-actions"><button id="bk-storage-save" type="button" class="bk-positive-action">Pfade speichern</button></div>
+        <p>Verwaltungsordnernamen sind fest vorgegeben. Neue Installationen verwenden englische Namen. Bestehende Ordner und gespeicherte Pfade bleiben unverändert.</p>
+        <p><code>SD Card Backups</code> · <code>Library Workspaces</code> · <code>Metadata Correction</code> · <code>Trash</code></p>
         <div id="bk-storage-status" class="bk-library-status"></div>
       </section>
     </div>

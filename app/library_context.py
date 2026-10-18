@@ -17,6 +17,7 @@ class LibraryContext:
     archive_root: Path
     is_main: bool
     settings: dict[str, Any]
+    root_generation: tuple[int, int] | None = None
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -27,6 +28,7 @@ class LibraryContext:
 
 
 def _context_from_row(row: dict[str, Any]) -> LibraryContext:
+    from app.root_operations import generation
     return LibraryContext(
         library_id=str(row["library_id"]),
         display_name=str(row["display_name"]),
@@ -36,6 +38,7 @@ def _context_from_row(row: dict[str, Any]) -> LibraryContext:
         archive_root=Path(str(row["archive_root"])),
         is_main=bool(row["is_main"]),
         settings=dict(row.get("settings") or {}),
+        root_generation=generation(Path(str(row["workspace_root"])),str(row["library_id"])),
     )
 
 

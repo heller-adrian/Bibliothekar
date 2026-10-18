@@ -69,12 +69,13 @@ def test_0502_english_defaults_and_no_unrequested_renames(tmp_path: Path, monkey
                for folder in ("SD-Kartensicherungen", "Arbeitsbereiche", "Metadatenkorrektur", "Papierkorb"))
 
 
-def test_0502_naming_defaults_are_english_and_legacy_opt_in(monkeypatch):
+def test_0502_naming_defaults_are_english_and_saved_names_preserved(monkeypatch):
     monkeypatch.delenv("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE", raising=False)
     assert DEFAULT_NO_EVENT_LABEL == "No Event"
     assert normalize_event_naming({})["no_event_label"] == "No Event"
     monkeypatch.setenv("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE", "de")
-    assert normalize_event_naming({})["no_event_label"] == "Ohne Ereignis"
+    assert normalize_event_naming({})["no_event_label"] == "No Event"
+    assert normalize_event_naming({"no_event_label": "Ohne Ereignis"})["no_event_label"] == "Ohne Ereignis"
     assert normalize_event_naming({"no_event_label": "Eigene Sammlung"})["no_event_label"] == "Eigene Sammlung"
 
 

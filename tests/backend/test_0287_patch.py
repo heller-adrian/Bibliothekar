@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 
 from pathlib import Path
 
@@ -62,6 +63,7 @@ def test_0287_delete_applied_archive_origin_flattens_all_assets_in_archive_relea
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     event_root, _file_id = _seed_applied_workspace(db, workspace)
 
     with database_connection(db) as connection:

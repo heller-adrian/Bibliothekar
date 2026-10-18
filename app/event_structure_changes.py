@@ -1773,7 +1773,7 @@ def _archive_structure_helper_root(
     new = base / "Assign Later"
     if new.is_dir() and not new.is_symlink():
         return new
-    return new if work_root is not None else old
+    return new
 
 
 def cleanup_completed_archived_structure_helpers(

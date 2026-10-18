@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +45,7 @@ def _now() -> str:
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             chunk = handle.read(1024 * 1024)
@@ -55,6 +59,7 @@ def _fsync_directory(path: Path) -> None:
     flags = os.O_RDONLY
     if hasattr(os, "O_DIRECTORY"):
         flags |= os.O_DIRECTORY
+    validate_active_roots()
     descriptor = os.open(path, flags)
     try:
         os.fsync(descriptor)
@@ -78,6 +83,7 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 
 def _safe_relative(value: str) -> Path:
+    validate_active_roots()
     raw = str(value or "").replace("\\", "/").strip()
     relative = Path(raw)
     if (
@@ -105,10 +111,12 @@ def _cleanup_empty_legacy_metadata_tree(metadata_root: Path) -> None:
         reverse=True,
     ):
         try:
+            validate_active_roots()
             path.rmdir()
         except OSError:
             pass
     try:
+        validate_active_roots()
         legacy.rmdir()
     except OSError:
         pass
@@ -128,6 +136,7 @@ def metadata_area_paths(
     paths = storage_paths(workspace_root)
     metadata_root = paths["metadata_root"].resolve(strict=False)
     if create:
+        validate_active_roots()
         metadata_root.mkdir(parents=True, exist_ok=True)
     _cleanup_empty_legacy_metadata_tree(metadata_root)
 
@@ -151,6 +160,7 @@ def metadata_area_paths(
     if not _is_relative_to(target, metadata_root):
         raise MetadataCorrectionError("Metadatenpfad verlässt den konfigurierten Stamm.")
     if create:
+        validate_active_roots()
         target.mkdir(parents=True, exist_ok=True)
     if target.exists() and not target.is_dir():
         raise MetadataCorrectionError("Metadatenpfad ist kein Ordner: " + str(target))
@@ -667,6 +677,7 @@ def _naive_capture_datetime(value: Any) -> datetime:
         raise MetadataCorrectionError(
             "Eine Aufnahmezeit ist ungültig: " + raw
         ) from error
+    validate_active_roots()
     return parsed.replace(tzinfo=None, microsecond=0)
 
 
@@ -810,6 +821,7 @@ def preview_multiple_metadata_correction(
     }
 
 
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def apply_multiple_metadata_correction(
     *,
     workspace_root: Path,
@@ -848,6 +860,7 @@ def apply_multiple_metadata_correction(
     work = (
         metadata_root / ".multiple-work" / ("MULTI_" + uuid.uuid4().hex.upper())
     ).resolve(strict=False)
+    validate_active_roots()
     work.mkdir(parents=True, exist_ok=False)
 
     prepared: list[dict[str, Any]] = []
@@ -877,6 +890,7 @@ def apply_multiple_metadata_correction(
             temp = (work / relative).resolve(strict=False)
             if not _is_relative_to(temp, work):
                 raise MetadataCorrectionError("Unsicherer Mehrfachkorrektur-Arbeitspfad.")
+            validate_active_roots()
             temp.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, temp)
             if _sha256(temp) != str(row["sha256"]):
@@ -933,8 +947,10 @@ def apply_multiple_metadata_correction(
         )
         for item in prepared:
             source = Path(item["source"])
+            validate_active_roots()
             os.replace(source, Path(item["backup"]))
             _fsync_directory(source.parent)
+            validate_active_roots()
             os.replace(Path(item["incoming"]), source)
             _fsync_directory(source.parent)
 
@@ -1000,6 +1016,7 @@ def apply_multiple_metadata_correction(
         else:
             for incoming in incoming_paths:
                 try:
+                    validate_active_roots()
                     incoming.unlink(missing_ok=True)
                 except OSError:
                     pass
@@ -1021,6 +1038,7 @@ def _normalize_manual_datetime(value: Any) -> str:
         ) from error
     if parsed.year < 1905 or parsed.year > 2200:
         raise MetadataCorrectionError("Datum liegt außerhalb des zulässigen Bereichs.")
+    validate_active_roots()
     return parsed.replace(tzinfo=None, microsecond=0).isoformat(timespec="seconds")
 
 
@@ -1364,6 +1382,7 @@ def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
         parsed = parse_exiftool_datetime(raw_text)
         if parsed is None:
             continue
+        validate_active_roots()
         normalized = parsed.replace(tzinfo=None).isoformat(timespec="seconds")
         observed.append({"tag": str(tag), "value": normalized})
         if normalized[:19] == expected_second:
@@ -1533,8 +1552,10 @@ def _apply_general_metadata_correction(
         # Persist a newly created .swap-journals directory before moving originals.
         _fsync_directory(metadata_root)
         _mark_task_writing(database_path, str(task["id"]))
+        validate_active_roots()
         os.replace(source, backup)
         _fsync_directory(source.parent)
+        validate_active_roots()
         os.replace(temp, source)
         _fsync_directory(source.parent)
         if int(source.stat().st_size) != output_size or _sha256(source) != output_sha:
@@ -1610,6 +1631,7 @@ def _apply_library_metadata_correction(
     work = (metadata_root / ".work" / str(task["id"])).resolve(strict=False)
     if work.exists():
         shutil.rmtree(work)
+    validate_active_roots()
     work.mkdir(parents=True, exist_ok=False)
 
     prepared: list[dict[str, Any]] = []
@@ -1652,6 +1674,7 @@ def _apply_library_metadata_correction(
             temp = (work / original_relative).resolve(strict=False)
             if not _is_relative_to(temp, work):
                 raise MetadataCorrectionError("Unsicherer Arbeitskopiepfad.")
+            validate_active_roots()
             temp.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, temp)
             if _sha256(temp) != expected_sha:
@@ -1740,8 +1763,10 @@ def _apply_library_metadata_correction(
         )
         for item in prepared:
             source = Path(item["source"])
+            validate_active_roots()
             os.replace(source, Path(item["backup"]))
             _fsync_directory(source.parent)
+            validate_active_roots()
             os.replace(Path(item["incoming"]), source)
             _fsync_directory(source.parent)
 
@@ -1829,6 +1854,7 @@ def _apply_library_metadata_correction(
         else:
             for incoming in incoming_paths:
                 try:
+                    validate_active_roots()
                     incoming.unlink(missing_ok=True)
                 except OSError:
                     pass
@@ -1839,6 +1865,7 @@ def _apply_library_metadata_correction(
         raise MetadataCorrectionError(str(error)) from error
 
 
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def reintegrate_library_metadata_family(
     database_path: Path,
     *,
@@ -1901,6 +1928,7 @@ def reintegrate_library_metadata_family(
         / ".reintegrate"
         / ("META_SORT_" + uuid.uuid4().hex.upper())
     ).resolve(strict=False)
+    validate_active_roots()
     work.mkdir(parents=True, exist_ok=False)
     incoming_paths: list[Path] = []
     swap_journal: Path | None = None
@@ -1941,6 +1969,7 @@ def reintegrate_library_metadata_family(
             temp = (work / original_relative).resolve(strict=False)
             if not _is_relative_to(temp, work):
                 raise MetadataCorrectionError("Unsicherer Reintegration-Arbeitspfad.")
+            validate_active_roots()
             temp.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, temp)
             if _sha256(temp) != expected_sha:
@@ -2053,6 +2082,7 @@ def reintegrate_library_metadata_family(
         for item in prepared:
             source = Path(item["source"])
             destination = Path(item["destination"])
+            validate_active_roots()
             destination.parent.mkdir(parents=True, exist_ok=True)
             incoming = source.parent / (
                 "." + source.name + ".reintegrate-" + uuid.uuid4().hex
@@ -2087,10 +2117,13 @@ def reintegrate_library_metadata_family(
         for item in prepared:
             source = Path(item["source"])
             destination = Path(item["destination"])
+            validate_active_roots()
             os.replace(source, Path(item["backup"]))
             _fsync_directory(source.parent)
+            validate_active_roots()
             os.replace(Path(item["incoming"]), source)
             _fsync_directory(source.parent)
+            validate_active_roots()
             os.replace(source, destination)
             _fsync_directory(source.parent)
             _fsync_directory(destination.parent)
@@ -2201,6 +2234,7 @@ def reintegrate_library_metadata_family(
         else:
             for incoming in incoming_paths:
                 try:
+                    validate_active_roots()
                     incoming.unlink(missing_ok=True)
                 except OSError:
                     pass
@@ -2210,6 +2244,7 @@ def reintegrate_library_metadata_family(
         raise MetadataCorrectionError(str(error)) from error
 
 
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def apply_metadata_correction(
     database_path: Path,
     correction_id: str,
@@ -2238,6 +2273,7 @@ def apply_metadata_correction(
 
 
 
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def execute_metadata_correction(
     database_path: Path,
     *,

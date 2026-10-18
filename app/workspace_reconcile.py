@@ -7,6 +7,10 @@ physisch verändert; sie werden als manueller Anteil gemeldet.
 """
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from collections import deque
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -412,6 +416,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     }
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=SortApplyError)
 def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_id:str,workspace_path:Path,*,expected_plan_token:str,confirmation_phrase:str)->dict[str,Any]:
     if confirmation_phrase != CONFIRMATION_PHRASE: raise SortApplyError("Die ausdrückliche Bestätigung für den Arbeitsbereich-Abgleich fehlt.")
     plan=build_workspace_reconcile_plan(database_path,job_id,anchor_event_id,workspace_path)
@@ -461,6 +466,7 @@ def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_
     return get_sort_run(database_path,job_id,run_id)
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='sort', error_type=SortApplyError)
 def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path:Path)->None:
     moved=[]; created=[]
     database_finalized = False
@@ -503,6 +509,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         with database_connection(database_path) as c: c.execute("UPDATE sort_runs SET status='moving',phase='Direkter IST→SOLL-Abgleich im SSD-Arbeitsbereich',updated_at=? WHERE id=?",(_now(),run_id))
         for f in plan['files']:
             if f['status']!='move': continue
+            validate_active_roots()
             src=Path(f['source_absolute_path']); dst=Path(f['destination_absolute_path']); dst.parent.mkdir(parents=True,exist_ok=True)
             _move_without_overwrite(src,dst,f); moved.append((src,dst,int(f['file_id']),int(f['expected_size_bytes']),str(f['stored_sha256'])))
             if _sha256_file(dst)!=str(f['stored_sha256']): raise SortApplyError("Zielprüfung fehlgeschlagen: "+str(dst))
@@ -511,6 +518,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 c.execute("UPDATE sort_runs SET moved_file_count=moved_file_count+1,moved_bytes=moved_bytes+?,updated_at=? WHERE id=?",(int(f['expected_size_bytes']),_now(),run_id))
         for a in plan.get('assets') or []:
             if a.get('status')!='move': continue
+            validate_active_roots()
             src=Path(a['source_absolute_path']); dst=Path(a['destination_absolute_path']); dst.parent.mkdir(parents=True,exist_ok=True)
             _move_without_overwrite(src,dst,a); moved.append((src,dst,None,int(a['expected_size_bytes']),str(a.get('stored_sha256') or '')))
             if _sha256_file(dst)!=str(a.get('stored_sha256') or ''): raise SortApplyError("Zielprüfung der Zusatzdatei fehlgeschlagen: "+str(dst))
@@ -692,6 +700,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         # manuell angelegte Ordner sehen.
         for directory in sorted(set(created), key=lambda path: len(path.parts), reverse=True):
             try:
+                validate_active_roots()
                 directory.rmdir()
                 if directory.parent.exists():
                     _fsync_directory(directory.parent)

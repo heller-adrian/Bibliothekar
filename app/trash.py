@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +31,7 @@ def _now() -> str:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             chunk = handle.read(1024 * 1024)
@@ -45,7 +49,7 @@ def trash_root(workspace_root: Path, *, create: bool = True) -> Path:
     context = get_current_library()
     if (
         context is not None
-        and workspace.parent == Path("/tmp/bibliothekar-library-workspaces")
+        and workspace.parent == Path("/tmp/bibliothekar-library-workspaces").resolve(strict=False)
     ):
         workspace = context.workspace_root.expanduser().resolve(strict=False)
     raw = workspace / load_storage_settings()["trash_directory_name"]
@@ -56,6 +60,7 @@ def trash_root(workspace_root: Path, *, create: bool = True) -> Path:
     if raw.exists() and not raw.is_dir():
         raise TrashError("Der konfigurierte Papierkorb ist kein Ordner: " + str(raw))
     if create and not raw.exists():
+        validate_active_roots()
         raw.mkdir(parents=True, exist_ok=True)
     if raw.exists() and not os.access(raw, os.R_OK | os.W_OK | os.X_OK):
         raise TrashError("Der Papierkorb ist nicht vollständig zugreifbar: " + str(raw))
@@ -136,6 +141,7 @@ def _physical_entries(workspace_root: Path) -> tuple[Path, list[dict[str, Any]],
 def _candidate_still_present(workspace_root: Path, row: dict[str, Any]) -> bool:
     if str(row.get("current_root_kind") or "") != "shared_workspace":
         return False
+    validate_active_roots()
     relative = str(row.get("current_relative_path") or "").strip().replace("\\", "/")
     if not relative:
         return False
@@ -166,6 +172,7 @@ def _candidate_still_present(workspace_root: Path, row: dict[str, Any]) -> bool:
     return False
 
 
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=TrashError)
 def reconcile_trash_inventory(
     database_path: Path,
     workspace_root: Path,
@@ -387,13 +394,16 @@ def purge_trash_database(database_path: Path) -> dict[str, int]:
 def _remove_tree_without_following_links(path: Path) -> None:
     info = os.lstat(path)
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        validate_active_roots()
         path.unlink()
         return
     for entry in os.scandir(path):
         _remove_tree_without_following_links(Path(entry.path))
+    validate_active_roots()
     path.rmdir()
 
 
+@protect(workspace_arg='workspace_root', database_arg='None', kind='trash', error_type=TrashError)
 def empty_trash_filesystem(workspace_root: Path) -> dict[str, int]:
     root = trash_root(workspace_root)
     deleted_entries = 0

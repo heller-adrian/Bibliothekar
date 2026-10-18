@@ -108,9 +108,14 @@ def test_0324_cancel_mutation_reconciles_claims_and_central_stock(
         called["sync"] += 1
         return {}
 
+    from tests.backend.legacy_storage_fixture import provision_legacy_storage
+    provision_legacy_storage(tmp_path / "work")
+    (tmp_path / "archive").mkdir()
     context = SimpleNamespace(
         library_id="test-library", database_path=database,
         workspace_root=tmp_path / "work",
+        work_root=tmp_path / "work" / "Arbeitsbereiche",
+        archive_root=tmp_path / "archive",
     )
     monkeypatch.setattr("app.event_mutation.cancel_mutation", fake_cancel)
     monkeypatch.setattr(main, "current_database_file", lambda: database)

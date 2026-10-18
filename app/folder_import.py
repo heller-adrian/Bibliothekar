@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from app.managed_directory_names import directory_path as managed_directory_path
+
+from app.root_operations import protect, validate_active_roots
+
+
+
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -474,6 +480,7 @@ def _remove_empty_directories(root: Path) -> None:
     )
     for directory in directories:
         try:
+            validate_active_roots()
             directory.rmdir()
         except OSError:
             pass
@@ -498,6 +505,7 @@ def remove_excluded_files(
             raise PipelineError(
                 f"SHA-256-Abweichung bei ausgeschlossener Datei: {relative.as_posix()}"
             )
+        validate_active_roots()
         path.unlink()
 
     _remove_empty_directories(temporary_original)
@@ -516,6 +524,7 @@ def move_import_into_workspace(
             f"Temporäre Sicherung fehlt: {temporary_original}"
         )
 
+    validate_active_roots()
     shared_root.mkdir(parents=True, exist_ok=True)
     if int(temporary_original.stat().st_dev) != int(shared_root.stat().st_dev):
         raise PipelineError(
@@ -547,7 +556,9 @@ def move_import_into_workspace(
                 raise PipelineError(f"Quelldatei fehlt: {source}")
             if destination.exists() or destination.is_symlink():
                 raise PipelineError(f"Zieldatei existiert bereits: {destination}")
+            validate_active_roots()
             destination.parent.mkdir(parents=True, exist_ok=True)
+            validate_active_roots()
             os.replace(source, destination)
             from app.trash_selective import _sync_parents
             _sync_parents(destination.parent, shared_root)
@@ -576,6 +587,7 @@ def move_import_into_workspace(
             )
 
         _remove_empty_directories(temporary_original)
+        validate_active_roots()
         temporary_original.rmdir()
 
         # SQLite wird erst nach vollständig geprüfter Dateibewegung
@@ -590,7 +602,9 @@ def move_import_into_workspace(
         for source, destination in reversed(moved):
             try:
                 if destination.exists() and not source.exists():
+                    validate_active_roots()
                     source.parent.mkdir(parents=True, exist_ok=True)
+                    validate_active_roots()
                     os.replace(destination, source)
             except Exception as error:
                 rollback_errors.append(f"{destination} → {source}: {error}")
@@ -641,11 +655,13 @@ def discard_import_moves(central: Path, job_id: str, rows: list, *, verify_callb
         elif not sha or path.stat().st_size != size or sha256_file(path) != sha:
             raise PipelineError("Importdatei wurde verändert; Bereinigung gesperrt: " + str(path))
     for path, size, sha in candidates.values():
+        validate_active_roots()
         path.unlink()
         _sync_dir(path.parent)
     return len(candidates)
 
 
+@protect(workspace_arg='workspace', database_arg='None', kind='import', error_type=PipelineError)
 def run_folder_import_job(
     *,
     source: Path,
@@ -717,7 +733,7 @@ def run_folder_import_job(
     # In 0.31.1 it points at the central stock for real camera imports.
     work_root = destination_root
     temporary_original = temporary_job_root / "Original"
-    temporary_protocol = temporary_job_root / "Protokoll"
+    temporary_protocol = managed_directory_path(temporary_job_root, "import_protocol")
     permanent_protocol = log_dir / "backups" / job_id
     status_path = temporary_protocol / "status.json"
     manifest_path = temporary_protocol / "manifest.json"
@@ -730,6 +746,7 @@ def run_folder_import_job(
     if permanent_protocol.exists():
         raise PipelineError(f"Protokollziel existiert bereits: {permanent_protocol}")
 
+    validate_active_roots()
     temporary_protocol.mkdir(parents=True)
     status: dict[str, Any] = {
         "schema_version": 3,
@@ -1082,7 +1099,9 @@ def run_folder_import_job(
         archive_protocol_directory(temporary_protocol, permanent_protocol)
         if temporary_job_root.exists():
             _remove_empty_directories(temporary_job_root)
+            validate_active_roots()
             (temporary_job_root / "move-journal.json").unlink(missing_ok=True)
+            validate_active_roots()
             temporary_job_root.rmdir()
 
         finished_at = datetime.now(timezone.utc).astimezone().isoformat()
@@ -1144,6 +1163,7 @@ def run_folder_import_job(
                         "Datei hat sich während des Abbruchs verändert: "
                         + str(destination)
                     )
+                validate_active_roots()
                 destination.unlink()
                 _remove_empty_directories(destination.parent)
             except Exception as cleanup_error:
@@ -1187,6 +1207,7 @@ def run_folder_import_job(
             if permanent_protocol.exists()
             else status_path
         )
+        validate_active_roots()
         active_status.parent.mkdir(parents=True, exist_ok=True)
         atomic_json(active_status, status)
         append_log(log_dir, {
@@ -1237,10 +1258,12 @@ def cleanup_completed_folder_import(
         checked.append(path)
 
     for path in checked:
+        validate_active_roots()
         path.unlink()
         parent = path.parent
         while parent != root:
             try:
+                validate_active_roots()
                 parent.rmdir()
             except OSError:
                 break

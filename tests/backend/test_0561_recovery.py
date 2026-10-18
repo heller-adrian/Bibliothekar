@@ -304,7 +304,7 @@ def test_root_rename_rejects_raw_symlink_components(tmp_path, monkeypatch, targe
         link = tmp_path/'parent'; link.symlink_to(tmp_path, target_is_directory=True)
         monkeypatch.setattr(main,'WORKSPACE_PATH',link/'workspace')
     with pytest.raises(HTTPException) as error: main.api_set_storage_paths({'trash_directory_name':'RenamedTrash'})
-    assert error.value.status_code == 422
+    assert error.value.status_code == 410
     assert (outside/'sentinel').read_bytes() == b'synthetic'
     assert load_storage_settings()['trash_directory_name'] == name
 
@@ -313,10 +313,16 @@ def test_root_rename_normal_directory_preserves_bytes(tmp_path, monkeypatch):
     workspace = rename_case(tmp_path, monkeypatch)
     old = workspace/load_storage_settings()['trash_directory_name']; old.mkdir()
     (old/'synthetic.JPG').write_bytes(b'synthetic')
-    main.api_set_storage_paths({'trash_directory_name':'RenamedTrash'})
-    assert not old.exists()
-    assert (workspace/'RenamedTrash'/'synthetic.JPG').read_bytes() == b'synthetic'
-    assert load_storage_settings()['trash_directory_name'] == 'RenamedTrash'
+    # F14 removes this feature. Preserve the source bytes and identity instead.
+    inode = (old/'synthetic.JPG').stat().st_ino
+    before_name = load_storage_settings()['trash_directory_name']
+    with pytest.raises(HTTPException) as error:
+        main.api_set_storage_paths({'trash_directory_name':'RenamedTrash'})
+    assert error.value.status_code == 410
+    assert old.is_dir() and not (workspace/'RenamedTrash').exists()
+    assert (old/'synthetic.JPG').read_bytes() == b'synthetic'
+    assert (old/'synthetic.JPG').stat().st_ino == inode
+    assert load_storage_settings()['trash_directory_name'] == before_name
 
 
 @pytest.mark.parametrize('tamper', ['unregistered_db', 'changed_source', 'changed_backup'])
@@ -395,6 +401,8 @@ def test_trash_stage_and_return_cross_mount_fallback(tmp_path, monkeypatch):
 def test_startup_recovers_general_swap_before_onboarding_worker(tmp_path, monkeypatch):
     from types import SimpleNamespace
     db, workspace, source, original, task = general_case(tmp_path, monkeypatch)
+    for required_root in storage_paths(workspace).values():
+        required_root.mkdir(exist_ok=True)
     with monkeypatch.context() as m:
         m.setattr(mc, '_complete_task', lambda *a, **k: (_ for _ in ()).throw(Interrupted()))
         with pytest.raises(Interrupted): mc.apply_metadata_correction(db, task['id'], workspace_root=workspace, library_id='main')

@@ -5,6 +5,9 @@ wie beim regulären zentralen Kamerabestand.
 """
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
 from datetime import datetime, timezone
 import errno
 import json
@@ -52,6 +55,7 @@ def _ensure_target_parent(root: Path, relative: Path) -> None:
         current = current / part
         if current.is_symlink():
             raise TrashError("Symbolischer Link im Zielpfad: " + str(current))
+        validate_active_roots()
         current.mkdir(exist_ok=True)
         if not current.is_dir():
             raise TrashError("Ziel ist kein Verzeichnis: " + str(current))
@@ -62,6 +66,7 @@ def _move_checked(source: Path, target: Path, sha256: str) -> None:
     created = False
     try:
         try:
+            validate_active_roots()
             os.link(source, target, follow_symlinks=False)
             created = True
         except OSError as error:
@@ -70,25 +75,30 @@ def _move_checked(source: Path, target: Path, sha256: str) -> None:
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
+            validate_active_roots()
             fd = os.open(target, flags, 0o640)
             created = True
+            validate_active_roots()
             with os.fdopen(fd, "wb") as out, source.open("rb") as inp:
                 shutil.copyfileobj(inp, out, length=1024 * 1024)
                 out.flush()
                 os.fsync(out.fileno())
         if _sha256_file(target) != sha256:
             raise TrashError("Prüfsummenfehler: " + source.name)
+        validate_active_roots()
         with target.open("rb") as handle:
             os.fsync(handle.fileno())
         from app.trash_selective import _sync_parents, _sync_dir
         # Sync every new target ancestor before removing the trash entry.
         _sync_parents(target.parent, Path(os.path.commonpath((source, target))))
+        validate_active_roots()
         source.unlink()
         _sync_dir(source.parent)
     except Exception:
         # A directory-fsync error can occur AFTER source.unlink(). Never
         # remove the surviving copy merely because the move raised.
         if created and source.is_file() and not source.is_symlink() and _sha256_file(source) == sha256:
+            validate_active_roots()
             target.unlink(missing_ok=True)
         raise
 
@@ -204,6 +214,7 @@ def _restore_parent(workspace: Path) -> Path:
     parent = storage_paths(workspace)["metadata_root"] / ".trash-restores"
     if parent.is_symlink():
         raise TrashError("Unsicherer Restore-Journalordner.")
+    validate_active_roots()
     parent.mkdir(parents=True, exist_ok=True)
     return parent
 
@@ -270,6 +281,7 @@ def _rollback_restore(plans, root, central):
     for plan in reversed(plans):
         if plan["target"].exists():
             if plan["source"].exists():
+                validate_active_roots()
                 plan["target"].unlink()
                 from app.trash_selective import _sync_dir
                 _sync_dir(plan["target"].parent)
@@ -278,6 +290,7 @@ def _rollback_restore(plans, root, central):
                 _move_checked(plan["target"], plan["source"], plan["sha256"])
 
 
+@protect(workspace_arg='workspace_root', database_arg='None', kind='trash', error_type=TrashError)
 def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
                         relative_paths: list[str] | None = None,
                         operation_id: str | None = None) -> dict[str, Any]:
@@ -301,6 +314,7 @@ def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
         _preflight_restore(plans, root, central)
         if data["state"] == "rolling_back":
             _rollback_restore(plans, root, central)
+            validate_active_roots()
             journal.unlink()
             _sync_dir(journal.parent)
             return restore_trash_files(databases, workspace_root, relative_paths=relative_paths, operation_id=operation_id)
@@ -312,7 +326,9 @@ def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
                 if plan["source"].exists():
                     if plan["target"].exists():
                         # Interrupted link/unlink: both hashes passed preflight.
+                        validate_active_roots()
                         with plan["target"].open("rb") as h: os.fsync(h.fileno())
+                        validate_active_roots()
                         plan["source"].unlink()
                         _sync_dir(plan["source"].parent)
                     else:
@@ -340,10 +356,12 @@ def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
                 data["state"] = "rolling_back"
                 _atomic_json(journal, data)
                 _rollback_restore(plans, root, central)
+                validate_active_roots()
                 journal.unlink()
                 _sync_dir(journal.parent)
             raise TrashError("Wiederherstellung fehlgeschlagen; Journal zur Fortsetzung erhalten: " + str(error)) from error
         if operation_id is None:
+            validate_active_roots()
             journal.unlink()
             _sync_dir(journal.parent)
         return {"restored_file_count": len(plans), "restored_paths": [p["target_relative"] for p in plans]}
@@ -357,6 +375,7 @@ def _catalogue_restored(plan):
     return False
 
 
+@protect(workspace_arg='workspace_root', database_arg='None', kind='recovery', error_type=TrashError)
 def recover_trash_restores(workspace_root: Path, *, allowed_databases: set[Path]) -> int:
     from app.trash_selective import _operation_lock, _sync_dir
     recovered = 0
@@ -369,14 +388,17 @@ def recover_trash_restores(workspace_root: Path, *, allowed_databases: set[Path]
                 if request.is_symlink():
                     raise TrashError("Unsicheres Restore-Auftragsjournal.")
                 if request.is_file() and json.loads(request.read_text()).get("status") == "known_restored":
+                    validate_active_roots()
                     journal.unlink(); _sync_dir(journal.parent)
                     continue
             if data["state"] == "rolling_back":
                 _rollback_restore(plans, root, central)
+                validate_active_roots()
                 journal.unlink(); _sync_dir(journal.parent)
             else:
                 restore_trash_files(allowed_databases, workspace_root, relative_paths=[p["relative"] for p in plans], operation_id=journal.stem)
                 if not data.get("operation_id"):
+                    validate_active_roots()
                     journal.unlink(); _sync_dir(journal.parent)
             recovered += 1
     return recovered

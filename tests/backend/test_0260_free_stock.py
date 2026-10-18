@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 """Physical free-stock boundaries across events, jobs, and years."""
 
 import hashlib
@@ -127,6 +128,7 @@ def _seed_cross_job_shift(tmp_path):
     workspace = tmp_path / "workspace"
     root = workspace / "Arbeitsbereich"
     initialize_database(db)
+    provision_legacy_storage(workspace)
     with database_connection(db) as connection:
         for job_id in ("first", "second"):
             incoming = workspace / "imports" / job_id
@@ -394,7 +396,7 @@ def test_reassignment_year_boundary_creates_separate_no_event_months(tmp_path):
         result = assign_event_reassignments(
             db, "j", "source", [fid], target_mode="new_no_event", segments=[segment],
         )
-        assert result["target"]["folder_name"] == f"{month} - Ohne Ereignis"
+        assert result["target"]["folder_name"] == f"{month} - No Event"
         with database_connection(db) as connection:
             target = connection.execute(
                 "SELECT start_datetime,event_kind FROM events WHERE id=?",
@@ -419,6 +421,7 @@ def test_cross_job_no_event_workspace_target_finishes_applied_reassignment(tmp_p
 
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
+    provision_legacy_storage(workspace)
     setup(db, ["2026-07-23T10:00:00"])
     source = create(db, payload("2026-07-23T00:00", "2026-07-23T23:59"))["parent_event"]
     attach_files(db, workspace, source["id"])

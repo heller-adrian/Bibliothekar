@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,6 +52,7 @@ def _now() -> str:
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
 
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             chunk = handle.read(1024 * 1024)
@@ -61,6 +66,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: Any) -> Path:
+    validate_active_roots()
     raw = str(value or "").strip().replace("\\", "/")
     path = Path(raw)
 
@@ -90,6 +96,7 @@ def _fsync_directory(path: Path) -> None:
     if hasattr(os, "O_DIRECTORY"):
         flags |= os.O_DIRECTORY
 
+    validate_active_roots()
     descriptor = os.open(path, flags)
 
     try:
@@ -278,6 +285,7 @@ def _verify_recovery_copy(path: Path, expected_size: int, expected_sha256: str) 
         raise SortApplyError("SHA-256-Summe weicht bei der Wiederherstellung ab: " + str(path))
 
 
+@protect(workspace_arg='None', database_arg='database_path', kind='recovery', error_type=SortApplyError)
 def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
     """Safely roll interrupted sort/reconcile runs back to their DB IST paths.
 
@@ -443,6 +451,7 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
     return {"recovered": recovered, "blocked": blocked}
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=SortApplyError)
 def prepare_sort_run(
     database_path: Path,
     job_id: str,
@@ -827,6 +836,7 @@ def _create_directories(
 ) -> None:
     for directory in _created_directory_candidates(plan):
         try:
+            validate_active_roots()
             directory.mkdir()
             created.append(directory)
             _fsync_directory(directory.parent)
@@ -917,6 +927,7 @@ def _rollback_one(
         # move. The journaled source is authoritative until SQLite finalization.
         _verify_recovery_copy(source, expected_size, expected_sha256)
         _verify_recovery_copy(destination, expected_size, expected_sha256)
+        validate_active_roots()
         destination.unlink()
         _fsync_directory(destination.parent)
         return
@@ -991,6 +1002,7 @@ def _remove_empty_source_directories(
         reverse=True,
     ):
         try:
+            validate_active_roots()
             directory.rmdir()
             removed.append(directory)
             _fsync_directory(directory.parent)
@@ -1007,6 +1019,7 @@ def _remove_created_empty_directories(created: list[Path]) -> None:
         reverse=True,
     ):
         try:
+            validate_active_roots()
             directory.rmdir()
             _fsync_directory(directory.parent)
         except OSError:
@@ -1379,6 +1392,7 @@ def _finalize_database(
             pass
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='sort', error_type=SortApplyError)
 def execute_sort_run(
     database_path: Path,
     run_id: str,

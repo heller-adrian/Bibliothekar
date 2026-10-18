@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 """Read-only-guided rollback for manual archive changes.
 
 The app never writes to the camera archive.  It preserves only the original
@@ -35,6 +39,7 @@ def _now() -> str:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
@@ -42,6 +47,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: Any) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").replace("\\", "/").strip("/")
     path = PurePosixPath(raw)
     if not path.parts or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
@@ -97,9 +103,11 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    validate_active_roots()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    validate_active_roots()
     os.replace(tmp, path)
 
 
@@ -162,6 +170,7 @@ def _is_advisory_row(row: dict[str, Any]) -> bool:
     )
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveReversalError)
 def prepare_reversal_baseline(
     database_path: Path,
     archive_root: Path,
@@ -207,6 +216,7 @@ def prepare_reversal_baseline(
 
     base = _base(workspace_path, cr_id)
     original_stock = base / "Original"
+    validate_active_roots()
     original_stock.mkdir(parents=True, exist_ok=True)
     event_json_rel = PurePosixPath(original_root, "event.json").as_posix()
     event_json = _safe_archive_path(archive_root, event_json_rel)
@@ -215,6 +225,7 @@ def prepare_reversal_baseline(
         if not event_json.is_file() or event_json.is_symlink():
             raise ArchiveReversalError("Die ursprüngliche event.json ist keine reguläre Datei.")
         backup = original_stock.joinpath(*PurePosixPath(event_json_rel).parts)
+        validate_active_roots()
         backup.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(event_json, backup)
         event_json_meta = {
@@ -239,6 +250,7 @@ def prepare_reversal_baseline(
         if not _matches(source, expected_size, expected_sha):
             continue
         backup = original_stock.joinpath(*_safe_relative(old_rel).parts)
+        validate_active_roots()
         backup.parent.mkdir(parents=True, exist_ok=True)
         if not backup.exists():
             shutil.copyfile(source, backup)
@@ -272,6 +284,7 @@ def reversal_active(workspace_path: Path, cr_id: str) -> bool:
     return _request_path(workspace_path, cr_id).is_file()
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveReversalError)
 def begin_archive_reversal(
     database_path: Path,
     archive_root: Path,
@@ -346,6 +359,7 @@ def _find_archive_location(
     return None
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveReversalError)
 def prepare_archive_reversal(
     database_path: Path,
     archive_root: Path,
@@ -367,6 +381,7 @@ def prepare_archive_reversal(
     central_root = _central_root(workspace_path)
     prepared_targets: list[tuple[Path, int, str]] = []
     for rel in manifest.get("original_directories") or []:
+        validate_active_roots()
         restore_root.joinpath(*_safe_relative(rel).parts).mkdir(parents=True, exist_ok=True)
 
     for asset in manifest.get("original_assets") or []:
@@ -376,9 +391,11 @@ def prepare_archive_reversal(
         target = restore_root.joinpath(
             *_safe_relative(asset["relative_path"]).parts
         )
+        validate_active_roots()
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
             try:
+                validate_active_roots()
                 os.link(source, target, follow_symlinks=False)
             except OSError:
                 shutil.copyfile(source, target)
@@ -392,9 +409,11 @@ def prepare_archive_reversal(
     if event_json:
         source = work_root.joinpath(*_safe_relative(event_json["backup_relative_path"]).parts)
         target = restore_root.joinpath(*_safe_relative(event_json["relative_path"]).parts)
+        validate_active_roots()
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
             try:
+                validate_active_roots()
                 os.link(source, target, follow_symlinks=False)
             except OSError:
                 shutil.copyfile(source, target)
@@ -431,9 +450,11 @@ def prepare_archive_reversal(
             missing_sources.append(old_path)
             continue
         target = restore_root.joinpath(*_safe_relative(old_path).parts).resolve(strict=False)
+        validate_active_roots()
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
             try:
+                validate_active_roots()
                 os.link(source, target, follow_symlinks=False)
             except OSError:
                 shutil.copyfile(source, target)
@@ -732,6 +753,7 @@ def build_archive_reversal_assistant(
     }
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveReversalError)
 def verify_archive_reversal(
     database_path: Path,
     archive_root: Path,
@@ -812,14 +834,17 @@ def cleanup_archive_reversal(workspace_path: Path, cr_id: str) -> None:
         shutil.rmtree(base)
     parent = base.parent
     try:
+        validate_active_roots()
         parent.rmdir()
     except OSError:
         pass
     root = _work_root(workspace_path)
     from app.archive_staging import staging_directory_name
+    validate_active_roots()
     (root / staging_directory_name(root)).mkdir(parents=True, exist_ok=True)
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveReversalError)
 def finish_archive_reversal(
     database_path: Path,
     archive_root: Path,

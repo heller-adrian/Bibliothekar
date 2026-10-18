@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -29,6 +33,7 @@ def _now() -> str:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             chunk = handle.read(1024 * 1024)
@@ -39,6 +44,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: Any) -> Path | None:
+    validate_active_roots()
     raw = str(value or "").replace("\\", "/").strip("/")
     if not raw:
         return None
@@ -52,6 +58,7 @@ def _expected_free_relative(
     connection: Any,
     row: dict[str, Any],
 ) -> str:
+    validate_active_roots()
     current = str(row.get("current_relative_path") or "").replace("\\", "/").strip("/")
     filename = Path(
         current
@@ -65,8 +72,8 @@ def _expected_free_relative(
     # falschen Tagesordner interpretiert; die Metadatenkorrektur übernimmt von
     # dort wieder die kontrollierte Reintegration.
     if (
-        current == "Ohne_Datum"
-        or current.startswith("Ohne_Datum/")
+        current in ("Ohne_Datum", "No Date")
+        or current.startswith(("Ohne_Datum/", "No Date/"))
     ):
         return current
 
@@ -76,14 +83,15 @@ def _expected_free_relative(
     try:
         directory = None
         if (
-            current == "Freigewordene Archivdateien"
-            or current.startswith("Freigewordene Archivdateien/")
+            current in ("Freigewordene Archivdateien", "Released Archive Files")
+            or current.startswith(("Freigewordene Archivdateien/", "Released Archive Files/"))
         ) and family_id is not None:
             directory = released_origin_directory(
                 connection,
                 int(family_id),
                 capture,
                 physical=True,
+                release_name=PurePosixPath(current).parts[0],
             )
         if directory is None:
             directory = canonical_free_directory(
@@ -119,6 +127,8 @@ def _free_rows(
               AND COALESCE(TRIM(f.current_relative_path),'')<>''
               AND f.current_relative_path<>'Später zuordnen'
               AND f.current_relative_path NOT LIKE 'Später zuordnen/%'
+              AND f.current_relative_path<>'Assign Later'
+              AND f.current_relative_path NOT LIKE 'Assign Later/%'
               AND NOT EXISTS (
                   SELECT 1 FROM event_assignments ea
                   JOIN events assigned ON assigned.id=ea.event_id
@@ -212,11 +222,11 @@ def _directory_group(relative_path: str) -> str:
     parts = PurePosixPath(str(relative_path)).parts
     if not parts:
         return ""
-    if parts[0] == "Freigewordene Archivdateien":
+    if parts[0] in ("Freigewordene Archivdateien", "Released Archive Files"):
         take = min(3, max(1, len(parts) - 1))
         return PurePosixPath(*parts[:take]).as_posix()
-    if parts[0] == "Ohne_Datum":
-        return "Ohne_Datum"
+    if parts[0] in ("Ohne_Datum", "No Date"):
+        return parts[0]
     if len(parts) >= 3 and len(parts[0]) == 4 and parts[0].isdigit():
         return PurePosixPath(parts[0], parts[1]).as_posix()
     return (
@@ -322,6 +332,7 @@ def _record_placement_conflict(
         )
 
 
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=RuntimeError)
 def reconcile_central_free_stock(
     database_path: Path,
     workspace_root: Path,
@@ -381,11 +392,13 @@ def reconcile_central_free_stock(
         for row in rows:
             file_id = int(row["file_id"])
             job_id = str(row["job_id"])
+            validate_active_roots()
             expected = str(
                 row.get("expected_relative_path")
                 or row.get("current_relative_path")
                 or ""
             ).replace("\\", "/").strip("/")
+            validate_active_roots()
             current = str(
                 row.get("current_relative_path")
                 or ""
@@ -499,12 +512,12 @@ def reconcile_central_free_stock(
                 )
 
                 observed_is_undated = (
-                    observed == "Ohne_Datum"
-                    or observed.startswith("Ohne_Datum/")
+                    observed in ("Ohne_Datum", "No Date")
+                    or observed.startswith(("Ohne_Datum/", "No Date/"))
                 )
                 current_is_undated = (
-                    current == "Ohne_Datum"
-                    or current.startswith("Ohne_Datum/")
+                    current in ("Ohne_Datum", "No Date")
+                    or current.startswith(("Ohne_Datum/", "No Date/"))
                 )
                 canonical_dated = ""
                 if current_is_undated and str(row.get("selected_capture_time") or ""):

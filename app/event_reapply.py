@@ -36,6 +36,8 @@ from app.sort_plan import build_event_sort_plan
 from app.job_readiness import job_sort_readiness
 
 
+from app.root_operations import protect, validate_active_roots
+
 ACTIVE_RUN_STATUSES = (
     "queued",
     "verifying",
@@ -63,6 +65,7 @@ def active_sort_run_exists(
     return row is not None
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=RuntimeError)
 def prepare_reapply_sort_run(
     database_path: Path,
     job_id: str,

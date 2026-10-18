@@ -76,22 +76,20 @@ def test_0440_default_four_managed_paths_and_rename(tmp_path: Path, monkeypatch)
         "backup_directory_name", "workspaces_directory_name",
         "metadata_directory_name", "trash_directory_name",
     }
-    moved = workspace / "Papierkorb" / "Familie" / "A.JPG"
+    moved = Path(paths["trash_root"]) / "Familie" / "A.JPG"
     moved.parent.mkdir()
     moved.write_bytes(b"manual-finder")
-    new = save_storage_settings({"trash_directory_name": "Aussortiert"})
-    # Same atomic path migration as the settings API, not a second 'Papierkorb'.
-    old_path = workspace / "Papierkorb"
-    new_path = workspace / new["trash_directory_name"]
-    old_path.rename(new_path)
-    assert storage_paths(workspace)["trash_root"] == new_path
-    assert (new_path / "Familie" / "A.JPG").read_bytes() == b"manual-finder"
-    assert not (workspace / "Papierkorb").exists()
+    inode=moved.stat().st_ino
+    with pytest.raises(StorageSettingsError):
+        save_storage_settings({"trash_directory_name": "Aussortiert"})
     ensure_workspace_layout(workspace)
+    assert storage_paths(workspace)["trash_root"] == workspace / "Trash"
+    assert moved.read_bytes() == b"manual-finder" and moved.stat().st_ino == inode
+    assert not (workspace / "Aussortiert").exists()
     assert not (workspace / "Papierkorb").exists()
     assert TRASH_CONFIRMATION == "PAPIERKORB ENDGÜLTIG LEEREN"
     with pytest.raises(StorageSettingsError):
-        normalize_storage_settings({"trash_directory_name": "Arbeitsbereiche"})
+        normalize_storage_settings({"trash_directory_name": "Library Workspaces"})
 
 
 def test_0440_finder_move_is_not_active_stock(tmp_path: Path, monkeypatch):
@@ -175,7 +173,7 @@ def test_0440_menu_and_page_contract():
     from app.trash_ui import TRASH_HTML
 
     assert 'href="/trash"' in _shell_markup("trash", None)
-    assert 'id="bk-storage-trash-name"' in _shell_markup("trash", None)
+    assert 'id="bk-storage-trash-name"' not in _shell_markup("trash", None)
     assert "/api/trash" in TRASH_HTML
     assert "/api/trash/empty" in TRASH_HTML
     assert "Gesamten Papierkorb leeren" in TRASH_HTML

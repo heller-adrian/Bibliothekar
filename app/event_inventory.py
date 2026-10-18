@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -30,6 +34,7 @@ def _now() -> str:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -40,6 +45,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: str) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").strip().replace("\\", "/").strip("/")
     path = PurePosixPath(raw)
     if (
@@ -369,8 +375,10 @@ def _capture_seconds_apart(left: str | None, right: str | None) -> float | None:
         a = datetime.fromisoformat(str(left or ""))
         b = datetime.fromisoformat(str(right or ""))
         if a.tzinfo is not None:
+            validate_active_roots()
             a = a.astimezone(timezone.utc).replace(tzinfo=None)
         if b.tzinfo is not None:
+            validate_active_roots()
             b = b.astimezone(timezone.utc).replace(tzinfo=None)
         return abs((a - b).total_seconds())
     except (TypeError, ValueError):
@@ -435,6 +443,7 @@ def _best_known_match(
     return None
 
 
+@protect(workspace_arg='storage_root', database_arg='database_path', kind='inventory', error_type=EventInventoryError)
 def scan_event_inventory(
     database_path: Path,
     storage_root: Path,

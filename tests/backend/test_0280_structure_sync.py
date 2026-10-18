@@ -1,5 +1,6 @@
 """0.28.0: manual Finder structure synchronization for Applied and Archived events."""
 from __future__ import annotations
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 
 from pathlib import Path
 import json
@@ -149,6 +150,7 @@ def test_0280_archived_manual_rename_requires_staged_event_json_before_commit(tm
     workspace = tmp_path / "workspace"
     archive = tmp_path / "archive"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     archive.mkdir()
     ensure_workspace_layout(workspace)
 
@@ -197,7 +199,7 @@ def test_0280_archived_manual_rename_requires_staged_event_json_before_commit(tm
     prepared_path = Path(prepared["prepared_event_json_path"])
     assert prepared["status"] == "prepared"
     assert prepared_path.is_file()
-    assert "Später zuordnen" in prepared_path.parts
+    assert "Assign Later" in prepared_path.parts
 
     # Bibliothekar itself does not write the archive. Emulate the user's manual
     # replacement, then let Bibliothekar verify the exact prepared document.

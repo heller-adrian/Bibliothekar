@@ -9,10 +9,8 @@ DEFAULT_NO_EVENT_LABEL = "No Event"
 
 
 def _default_no_event_label() -> str:
-    # Preserve the German directory contract in explicitly legacy test/setup
-    # environments. Newly configured installations use the English default.
-    if os.environ.get("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE") == "de":
-        return "Ohne Ereignis"
+    # Physical names for newly planned events do not follow the UI language.
+    # Saved naming snapshots retain their original labels unchanged.
     return DEFAULT_NO_EVENT_LABEL
 
 # 0.43.0 stored one exclusive mode. Keep those values readable so existing

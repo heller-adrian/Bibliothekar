@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 """Physical Applied expansion across occupied and remaining free stock."""
 
 import hashlib
@@ -21,6 +22,7 @@ def test_applied_expansion_moves_new_family_and_renormalizes_remaining_free_stoc
     incoming = workspace / "imports" / "j"
     incoming.mkdir(parents=True)
     initialize_database(db)
+    provision_legacy_storage(workspace)
     families = {}
     files = {}
     with database_connection(db) as connection:

@@ -361,6 +361,10 @@ def _absolute(path: Path, field: str) -> str:
     return str(resolved)
 
 
+from app.root_operations import guard_registry_paths, guard_database_relink
+
+
+@guard_registry_paths
 def register_library(
     registry_path: Path,
     *,
@@ -373,6 +377,7 @@ def register_library(
     is_main: bool = False,
     is_active: bool = True,
     settings: dict[str, Any] | None = None,
+    _expected_roots: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     clean_id = str(library_id or "").strip()
     clean_name = " ".join(str(display_name or "").split()).strip()
@@ -564,6 +569,7 @@ def adopt_main_library(
         is_main=True,
         is_active=True,
         settings=settings,
+        _expected_roots=({key: str(existing[key]) for key in ("workspace_root", "work_root", "archive_root", "database_path", "is_active", "is_registered")} if existing else None),
     )
 
 
@@ -683,9 +689,11 @@ def update_library_settings(
         is_main=bool(existing["is_main"]),
         is_active=bool(existing["is_active"]),
         settings=current,
+        _expected_roots=({key: str(existing[key]) for key in ("workspace_root", "work_root", "archive_root", "database_path", "is_active", "is_registered")} if existing else None),
     )
 
 
+@guard_database_relink
 def update_library_database_path(
     registry_path: Path,
     library_id: str,
@@ -799,6 +807,7 @@ def update_library_paths(
             **dict(existing.get("settings") or {}),
             "paths_updated_at": _now(),
         },
+        _expected_roots=({key: str(existing[key]) for key in ("workspace_root", "work_root", "archive_root", "database_path", "is_active", "is_registered")} if existing else None),
     )
 
 
@@ -824,6 +833,7 @@ def set_library_active(
         is_main=bool(existing["is_main"]),
         is_active=bool(active),
         settings=dict(existing.get("settings") or {}),
+        _expected_roots=({key: str(existing[key]) for key in ("workspace_root", "work_root", "archive_root", "database_path", "is_active", "is_registered")} if existing else None),
     )
 
 
