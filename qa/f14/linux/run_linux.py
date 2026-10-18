@@ -9,7 +9,9 @@ manifest=json.loads((tools.parent/'original-integrity.json').read_text())
 assert all(hashlib.sha256((original/n).read_bytes()).hexdigest()==h for n,h in manifest.items())
 selections=['test_more.py::test_rename_with_live_worker','test_more.py::test_rename_same_web_process','test_remaining.py::test_rename_remaining_workers','test_final_combinations.py::test_rename_after_ssd_unlink']
 label=mode;root=base/label;root.mkdir();scratch=root/'scratch';scratch.mkdir();output=root/'results';output.mkdir()
+temporary=scratch/'tmp';temporary.mkdir(mode=0o700)
 env=dict(os.environ)
+env['TMPDIR']=str(temporary)
 for k in list(env):
  if k.startswith(('KAMERA_','BIBLIOTHEKAR_','PYTEST_','PYTHONPATH')):env.pop(k)
 paths={'KAMERA_CONFIG':'settings.json','KAMERA_WORKSPACE':'workspace','KAMERA_DATABASE_DIR':'database','KAMERA_REGISTRY_DATABASE':'database/registry.sqlite3','KAMERA_LOG_DIR':'logs','KAMERA_POOL_PROBE':'workspace','KAMERA_ARCHIVE_ROOT':'archive','KAMERA_IMPORT_ROOT':'import','KAMERA_REMOVABLE_ROOT':'removable','KAMERA_NAS_SOURCE_ROOT':'nas','KAMERA_REMOVABLE_MOUNT_ROOT':'removable','KAMERA_DEVICE_NODE_ROOT':'devices'}
@@ -19,7 +21,7 @@ env.update(PYTHONDONTWRITEBYTECODE='1',PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHON
 args=[sys.executable,str(tools/'runner.py'),'-q','-p','no:cacheprovider','--import-mode=importlib','-o','addopts=','--basetemp',str(scratch/'pytest'),'--junitxml',str(output/'result.xml'),'-p','finite_execution']
 if mode=='backend':args+=[str(source/'tests/backend')]
 else:args+=['-p','complete_historical_fixture']+[str(original/n) for n in selections]
-(output/'command.json').write_text(json.dumps({'argv':args,'source':str(source),'paths':{k:env[k] for k in paths},'original_sha256':manifest},indent=2))
+(output/'command.json').write_text(json.dumps({'argv':args,'source':str(source),'paths':{k:env[k] for k in paths},'original_sha256':manifest,'TMPDIR':env['TMPDIR'],'AUDIT_SCRATCH':env['AUDIT_SCRATCH']},indent=2))
 with (output/'stdout.log').open('w') as log:
  result=subprocess.run(args,cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=2400)
 print((output/'stdout.log').read_text()[-5000:])
