@@ -34,6 +34,8 @@ def begin(case,boundary,ev,label='worker'):
     control=ev/label;control.mkdir();log=(control/'process.log').open('w')
     source=Path(__file__).resolve().parents[2]
     worker=source/'qa/f14/original/worker_concurrent.py'
+    if boundary in {'import.move1','import.move2'}:
+        worker=Path(__file__).with_name('wave1_concurrent_worker.py')
     process=subprocess.Popen([sys.executable,str(worker),str(case),'operate',boundary,str(control)],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
     deadline=time.monotonic()+20
     while process.poll() is None and time.monotonic()<deadline:

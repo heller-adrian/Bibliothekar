@@ -298,8 +298,25 @@ def instrument(kind):
         import app.pipeline as pl,app.folder_import as fi,app.global_stock as gs
         hook(fi,'copy_and_verify','import.before_copy',when='before');hook(fi,'copy_and_verify','import.copy_verify')
         hook(pl,'sha256_file','import.hash1',predicate=lambda p,*a,**kw:'.incoming' in str(p),nth=1)
-        hook(fi.os,'replace','import.move1',predicate=lambda s,d:'/Original/' in str(s) and '.incoming' not in str(d),nth=1)
-        hook(fi.os,'replace','import.move2',predicate=lambda s,d:'/Original/' in str(s) and '.incoming' not in str(d),nth=2)
+        # Preserve the same post-publication crash boundaries and assertions;
+        # the unsafe os.replace primitive was removed by the F12 patch.
+        import app.import_publication as publication
+        # Stop immediately AFTER the rename, BEFORE directory fsync, exactly
+        # as the former os.replace hooks did. This helper only moves import
+        # media, so journal replacements cannot consume these counters.
+        hook(publication,'_native_rename','import.move1',nth=1)
+        hook(publication,'_native_rename','import.move2',nth=2)
+        hook(publication,'_native_rename','import.publish_before',when='before')
+        hook(publication,'_native_rename','import.publish_after')
+        if boundary=='import.rollback_after':
+            def fail_import_paths(*a,**k):raise RuntimeError('synthetic callback failure before SQLite completion')
+            main.update_import_file_paths=fail_import_paths
+            # The first rollback publishes back into Original. Keep the same
+            # atomic primitive and stop only after the actual reverse rename.
+            real_rollback=fi.rollback_import_file
+            def rollback_and_stop(*a,**k):
+                result=real_rollback(*a,**k);stop('import.rollback_after');return result
+            fi.rollback_import_file=rollback_and_stop
         hook(main,'update_import_file_paths','import.paths')
         hook(Path,'unlink','import.discard1',predicate=lambda p,*a,**k: str(p).startswith(str(WS/'SD-Kartensicherungen')) and '.incoming' not in str(p) and p.suffix=='.JPG')
         hook(main,'complete_job','import.before_complete',when='before');hook(main,'complete_job','import.complete')
