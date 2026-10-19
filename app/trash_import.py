@@ -15,7 +15,7 @@ import uuid
 from app.database import create_job, get_job, database_connection
 from app.source_filter import should_ignore_source_relative
 from app.storage_config import storage_paths
-from app.trash import TrashError, _sha256_file, trash_root
+from app.trash import TrashError, _sha256_file, trash_root, serialized_trash_operation
 from app.trash_restore import _relative, _source
 
 
@@ -34,6 +34,7 @@ def _manifest(parent: Path, job_id: str) -> Path:
     return parent / (job_id + ".json")
 
 
+@serialized_trash_operation("workspace_root")
 def stage_trash_import(
     database_path: Path,
     workspace_root: Path,
@@ -41,7 +42,11 @@ def stage_trash_import(
 ) -> dict:
     if not relative_paths or len(relative_paths) != len(set(relative_paths)):
         raise TrashError("Ungültige Papierkorb-Auswahl.")
+    if set(_relative(v).as_posix() for v in relative_paths).intersection(protected_trash_paths(None, workspace_root)):
+        raise TrashError("Diese Dateien werden bereits wiederhergestellt.")
     root = trash_root(workspace_root)
+    from app.trash_restore import assert_restore_paths_available
+    assert_restore_paths_available(workspace_root,relative_paths)
     parent = stage_parent(workspace_root)
     # Avoid two live imports of the same file if a user clicks twice.
     wanted = set(relative_paths)
@@ -84,19 +89,23 @@ def stage_trash_import(
                 raise TrashError("Datei während der Vorbereitung verändert: " + value)
             copies.append({"relative_path":value,"sha256":digest,"size_bytes":before.st_size})
         record = {"job_id":job_id,"relative_paths":sorted(wanted),"files":copies}
-        _manifest(parent,job_id).write_text(json.dumps(record,ensure_ascii=False),encoding="utf-8")
+        from app.trash_selective import _atomic_json, _sync_dir
+        _atomic_json(_manifest(parent,job_id), record)
+        _sync_dir(parent.parent)
         job = create_job(
             database_path, job_id=job_id, kind="sd_import", trigger_type="manual",
             source_path=str(stage), working_path=str(storage_paths(workspace_root)["backup_root"]),
             operation="trash_import", source_volume_label="Aus Papierkorb",
         )
         return {"job_id":job_id,"queued_file_count":len(copies),"job":job}
-    except Exception:
+    except Exception as error:
+        if _manifest(parent,job_id).exists():
+            raise TrashError("Wiederherstellung unterbrochen; Reservierungsjournal und Originale bleiben zur Klärung erhalten.") from error
         shutil.rmtree(stage, ignore_errors=True)
-        _manifest(parent,job_id).unlink(missing_ok=True)
         raise
 
 
+@serialized_trash_operation("workspace_root")
 def cleanup_successful_trash_import(
     workspace_root: Path,
     job_id: str,
@@ -114,6 +123,8 @@ def cleanup_successful_trash_import(
     data = json.loads(record_path.read_text(encoding="utf-8"))
     if str(data.get("job_id")) != job_id:
         raise TrashError("Papierkorb-Importjournal passt nicht zum Auftrag.")
+    from app.trash_restore import assert_restore_paths_available
+    assert_restore_paths_available(workspace_root,[str(item['relative_path']) for item in data.get('files') or []])
     imported = {
         (str(item.get("relative_path") or ""),str(item.get("sha256") or ""))
         for item in imported_entries
@@ -136,11 +147,13 @@ def cleanup_successful_trash_import(
             removed += 1
         except (OSError,TrashError):
             skipped.append(rel)
-    record_path.write_text(json.dumps({**data,"cleanup_completed":True,"skipped":skipped},ensure_ascii=False),encoding="utf-8")
+    from app.trash_selective import _atomic_json
+    _atomic_json(record_path, {**data,"cleanup_completed":True,"skipped":skipped})
     shutil.rmtree(parent / job_id,ignore_errors=True)
     return {"removed_file_count":removed,"skipped":skipped}
 
 
+@serialized_trash_operation("workspace_root")
 def queue_trash_restore(
     database_path: Path, workspace_root: Path, relative_paths: list[str],
 ) -> dict:
@@ -153,6 +166,8 @@ def queue_trash_restore(
         or any(not isinstance(v,str) for v in relative_paths)
         or len(relative_paths)!=len(set(relative_paths))):
         raise TrashError("Ungültige Papierkorb-Auswahl.")
+    from app.trash_restore import assert_restore_paths_available
+    assert_restore_paths_available(workspace_root,relative_paths)
     parent=stage_parent(workspace_root)
     root=trash_root(workspace_root)
     selected=sorted(relative_paths)
@@ -161,43 +176,35 @@ def queue_trash_restore(
         _source(root,rel)  # validates containment, regular file, no symlinks
         if should_ignore_source_relative(rel):
             raise TrashError("Verwaltungsdatei kann nicht als Aufnahme wiederhergestellt werden: "+value)
-    for manifest in parent.glob("TRASH_IMPORT_*.json"):
-        if manifest.is_symlink():
-            raise TrashError("Unsicheres Papierkorb-Importjournal.")
-        try:
-            data=json.loads(manifest.read_text(encoding="utf-8"))
-            existing=get_job(database_path,str(data.get("job_id") or ""))
-            if existing and existing.get("state") not in {"completed","failed","cancelled","interrupted"}:
-                if set(selected).intersection(data.get("relative_paths") or []):
-                    raise TrashError("Diese Dateien werden bereits wiederhergestellt.")
-        except (OSError,ValueError,KeyError,json.JSONDecodeError) as exc:
-            if isinstance(exc,TrashError):
-                raise
-            raise TrashError("Ein Papierkorb-Importjournal ist nicht lesbar.") from exc
+    selected = sorted(_relative(v).as_posix() for v in selected)
+    if len(selected) != len(set(selected)):
+        raise TrashError("Auswahl enthält denselben Dateipfad mehrfach.")
+    if set(selected).intersection(protected_trash_paths(None, workspace_root)):
+        raise TrashError("Diese Dateien werden bereits wiederhergestellt oder benötigen manuelle Klärung.")
     job_id="TRASH_IMPORT_"+datetime.now().strftime("%Y%m%d_%H%M%S_")+uuid.uuid4().hex[:12].upper()
     record={"job_id":job_id,"relative_paths":selected,"files":[],
             "status":"queued","schema_version":2}
     journal=_manifest(parent,job_id)
-    tmp=journal.with_suffix(".tmp")
+    from app.trash_selective import _atomic_json, _sync_dir
     try:
-        with tmp.open("x",encoding="utf-8") as h:
-            json.dump(record,h,ensure_ascii=False)
-            h.flush()
-            os.fsync(h.fileno())
-        os.replace(tmp,journal)
+        # Durable intent precedes the independent SQLite commit. An orphaned
+        # intent after a crash is protective evidence, never an empty claim.
+        _atomic_json(journal, record)
+        _sync_dir(parent.parent)
         job=create_job(
             database_path,job_id=job_id,kind="sd_import",trigger_type="manual",
             source_path=str(parent/job_id),
             working_path=str(storage_paths(workspace_root)["backup_root"]),
             operation="trash_import",source_volume_label="Aus Papierkorb",
         )
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        journal.unlink(missing_ok=True)
+    except Exception as error:
+        if journal.exists() or journal.is_symlink():
+            raise TrashError("Wiederherstellungsauftrag unterbrochen; Reservierungsjournal und Originale bleiben zur Klärung erhalten.") from error
         raise
     return {"job_id":job_id,"queued_file_count":len(selected),"job":job}
 
 
+@serialized_trash_operation("workspace_root")
 def prepare_queued_trash_restore(
     database_path: Path,
     all_databases: list[Path],
@@ -309,26 +316,56 @@ def _finish_known_restore(workspace_root: Path, job_id: str) -> None:
     from app.trash_selective import _sync_dir
     path = _restore_journal(workspace_root, job_id)
     if path.exists():
+        if path.is_symlink() or json.loads(path.read_text()).get('state') != 'completed':
+            raise TrashError('Unvollständiges Restore-Journal bleibt erhalten.')
         path.unlink()
         _sync_dir(path.parent)
 
 
-def protected_trash_paths(database_path: Path, workspace_root: Path) -> set[str]:
+@serialized_trash_operation("workspace_root")
+def protected_trash_paths(database_path: Path | None, workspace_root: Path, *, ignore_job_id: str | None = None) -> set[str]:
     """Return files reserved by queued/running restores, including staging."""
-    protected=set()
+    from app.trash_restore import restore_reservations
+    protected={path for record in restore_reservations(workspace_root, exclude=ignore_job_id) for path in record['relative_paths']}
     for journal in stage_parent(workspace_root).glob("TRASH_IMPORT_*.json"):
-        if journal.is_symlink():
+        if journal.is_symlink() or not journal.is_file():
             raise TrashError("Unsicheres Papierkorb-Importjournal.")
-        data=json.loads(journal.read_text(encoding="utf-8"))
-        job=get_job(database_path,str(data.get("job_id") or ""))
-        if job and str(job.get("state")) in {
-            "queued","copying","verifying","backup_verified",
-            "analyzing_metadata","organizing","interrupted"
-        }:
-            protected.update(str(p) for p in data.get("relative_paths") or [])
+        try:
+            data=json.loads(journal.read_text(encoding="utf-8"))
+            paths=data["relative_paths"]
+            if data.get("job_id") != journal.stem or not isinstance(paths,list) or not paths:
+                raise ValueError("Ungültiger Reservierungsnachweis")
+            canonical={_relative(p).as_posix() for p in paths}
+            completed = data.get("cleanup_completed") is True
+            known_done = data.get("status") == "known_restored"
+            if completed or (known_done and data.get("files") == []):
+                # Release only a complete partition of the original intent.
+                # Missing cleanup fields are uncertainty, never an empty claim.
+                files = data["files"]
+                known = data.get("known_paths", []) if known_done else []
+                if not isinstance(files, list) or not isinstance(known, list):
+                    raise ValueError("Unvollständiger Abschlussnachweis")
+                staged = {_relative(item["relative_path"]).as_posix() for item in files}
+                restored = {_relative(p).as_posix() for p in known}
+                if staged.intersection(restored) or staged | restored != canonical:
+                    raise ValueError("Abschluss deckt Reservierung nicht vollständig ab")
+                if completed:
+                    skipped = data["skipped"]
+                    if not isinstance(skipped, list):
+                        raise ValueError("Unvollständiger Bereinigungsnachweis")
+                    canonical = {_relative(p).as_posix() for p in skipped}
+                    if not canonical.issubset(staged):
+                        raise ValueError("Unbekannter Bereinigungsrest")
+                else:
+                    canonical = set()
+            if journal.stem != ignore_job_id:
+                protected.update(canonical)
+        except (OSError,ValueError,KeyError,TypeError) as error:
+            raise TrashError("Ein Papierkorb-Reservierungsjournal ist nicht eindeutig lesbar; Löschung gesperrt.") from error
     return protected
 
 
+@serialized_trash_operation("workspace_root")
 def resume_safe_queued_trash_restores(database_path: Path, workspace_root: Path) -> int:
     """Requeue only jobs interrupted before they modified any catalogue rows.
 
@@ -347,6 +384,9 @@ def resume_safe_queued_trash_restores(database_path: Path, workspace_root: Path)
             if not path.is_file() or path.is_symlink():
                 continue
             data=json.loads(path.read_text(encoding="utf-8"))
+            from app.trash_restore import restore_reservations
+            if any(item['operation_id']==jid and item['state']=='conflict' for item in restore_reservations(workspace_root)):
+                continue
             if data.get("status") not in {"queued", "staged", "known_restored"}:
                 continue
             if conn.execute("SELECT 1 FROM files WHERE job_id=? LIMIT 1",(jid,)).fetchone():

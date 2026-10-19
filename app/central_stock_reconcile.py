@@ -359,7 +359,11 @@ def reconcile_central_free_stock(
             "misplaced_file_count": 0,
         }
 
-    actual = _actual_files(central_root)
+    from app.trash_restore import restore_reservations
+    reserved_targets={path for record in restore_reservations(workspace_root) for path in record['target_paths']}
+    if any(str(row['current_relative_path']) in reserved_targets for row in rows):
+        return {'ready':False,'error':'Restore-Konflikt berührt diesen Bestand; Reconciliation gesperrt.','deleted_file_count':0}
+    actual = [item for item in _actual_files(central_root) if item['relative_path'] not in reserved_targets]
     actual_by_relative = {
         str(item["relative_path"]): item
         for item in actual

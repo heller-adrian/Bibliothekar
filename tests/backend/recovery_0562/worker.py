@@ -250,9 +250,14 @@ def configure_fixture(data):
 def instrument(kind):
     from app import trash_selective as ts,metadata_correction as mc,metadata_swap_recovery as ms,sort_apply as sa
     if kind=='trash':
+        if boundary.startswith('f11.reserve'):
+            from app import trash_import as ti
+            hook(ts, '_atomic_json', 'f11.reserve_before', when='before', predicate=lambda p,v: p.name.startswith('TRASH_IMPORT_'))
+            hook(ts, '_atomic_json', 'f11.reserve_after', predicate=lambda p,v: p.name.startswith('TRASH_IMPORT_'))
+            hook(ti, 'create_job', 'f11.reserve_committed')
         hook(ts,'_move_checked','trash.stage1',nth=1);hook(ts,'_purge_selected','trash.db1',nth=1);hook(ts,'_purge_selected','trash.db2',nth=2)
-        hook(ts,'_atomic_json','trash.prepared',predicate=lambda p,v:v['state']=='prepared')
-        hook(ts,'_atomic_json','trash.committed',predicate=lambda p,v:v['state']=='committed')
+        hook(ts,'_atomic_json','trash.prepared',predicate=lambda p,v:v.get('state')=='prepared')
+        hook(ts,'_atomic_json','trash.committed',predicate=lambda p,v:v.get('state')=='committed')
         hook(Path,'unlink','trash.cleanup1',predicate=lambda p,*a,**kw:'.trash-deletions' in str(p) and p.name=='A.JPG')
         hook(ts,'_restore_catalogue','trash.recover_db1',nth=1)
         hook(ts,'_return_checked','trash.recover_file1',nth=1)
@@ -386,6 +391,47 @@ _restore_tree=ast.parse((source/'app/trash_restore.py').read_text())
 _restore_func=next(n for n in _restore_tree.body if isinstance(n,ast.FunctionDef) and n.name=='restore_trash_files')
 RESTORE_COMMIT_NEXT=next(n.lineno for n in ast.walk(_restore_func) if isinstance(n,ast.Expr) and isinstance(n.value,ast.Call) and isinstance(n.value.func,ast.Attribute) and n.value.func.attr=='append' and isinstance(n.value.func.value,ast.Name) and n.value.func.value.id=='committed')
 
+
+
+def r1_instrument():
+    import app.trash_restore as tr
+    import app.trash_selective as ts
+    actual = ts._atomic_json
+    def write(path,value):
+        selected = path.parent.name == '.trash-restores'
+        state = value.get('state')
+        if selected and state=='conflict':stop('r1.before_conflict')
+        actual(path,value)
+        if selected:
+            if state=='prepared':
+                if any(p.get('target_identity') for p in value.get('plans',[])):stop('r1.receipt')
+                else:stop('r1.prepared')
+            if state=='rolling_back':stop('r1.rolling_back')
+            if state=='conflict':stop('r1.after_conflict')
+            if state=='completed':stop('r1.completed')
+    ts._atomic_json=write
+    actual_check=tr._conflict_invariants
+    def validate(*args,**kw):
+        value=actual_check(*args,**kw)
+        if kw.get('existing'):stop('r1.conflict_rechecked')
+        return value
+    tr._conflict_invariants=validate
+    if boundary=='r1.wait_lock':
+        from contextlib import contextmanager
+        actual_lock=ts._operation_lock
+        @contextmanager
+        def waiting(*args,**kwargs):
+            (control/'attempt.json').write_text(json.dumps({'pid':os.getpid(),'before':'workspace flock'}))
+            with actual_lock(*args,**kwargs):yield
+        ts._operation_lock=waiting
+    if action=='r1_conflict':
+        actual_link=tr.os.link
+        def collision(src,dst,*args,**kw):
+            if Path(src)==WS/'Papierkorb/A.JPG' and not Path(dst).exists():Path(dst).write_bytes(b'synthetic-foreign-target')
+            return actual_link(src,dst,*args,**kw)
+        tr.os.link=collision
+
+
 def startup():
     async def lifecycle():
         async with main.app.router.lifespan_context(main.app):
@@ -441,12 +487,18 @@ try:
     if action=='seed':result=seed(boundary)
     else:
         data=json.loads((case/'case.json').read_text());configure_fixture(data);instrument(data['kind'])
+        if boundary.startswith('r1.') or action in {'r1_conflict','r1_owned'}:r1_instrument()
         if boundary in {'import.copy_chunk','import.hash_chunk','import.in_tx','restore.db1'}:sys.settrace(trace_probe)
         if action=='startup':result=startup()
         elif action=='verify_archive':
             from app.archive_transfer import verify_event_archive
             result=verify_event_archive(DB,case/'archive',data['job'],data['event'],workspace_path=WS)
+        elif action=='full_empty':result=main.api_empty_trash({'confirmation':main.TRASH_CONFIRMATION})
+        elif action=='queue_restore':result=main.api_restore_trash({'relative_paths':['A.JPG']})
         elif action=='operate':result=operate(data['kind'])
+        elif action in {'r1_conflict','r1_owned'}:
+            from app.trash_restore import restore_trash_files
+            result=restore_trash_files([Path(p) for p in data['databases']],WS,relative_paths=['A.JPG'],operation_id='R1_SECOND' if boundary=='r1.wait_lock' else None)
         elif action=='control_restore':
             job=claim_next_job(DB,operation='trash_import');assert job
             result=main.process_claimed_job(job,library_context=resolve_library_context(REG,'main'))

@@ -29,10 +29,12 @@ _HELD_LOCKS = threading.local()
 
 
 @contextmanager
-def _operation_lock(workspace: Path):
+def _operation_lock(workspace: Path, *, blocking: bool = True):
     # Inventory recovery must not roll back a live deletion. flock also covers
     # a second web process; the OS releases it when a process dies.
-    with _RECOVERY_LOCK:
+    if not _RECOVERY_LOCK.acquire(blocking=blocking):
+        raise TrashError("Eine Papierkorboperation läuft bereits; bitte erneut versuchen.")
+    try:
         path = _parent(workspace) / ".lock"
         held = getattr(_HELD_LOCKS, "paths", set())
         if path in held:
@@ -41,12 +43,17 @@ def _operation_lock(workspace: Path):
         validate_active_roots()
         fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            except BlockingIOError as error:
+                raise TrashError("Eine Papierkorboperation läuft bereits; bitte erneut versuchen.") from error
             _HELD_LOCKS.paths = held | {path}
             yield
         finally:
             _HELD_LOCKS.paths = held
             os.close(fd)
+    finally:
+        _RECOVERY_LOCK.release()
 
 
 _PURGE_SNAPSHOTS: ContextVar[dict] = ContextVar("trash_purge_snapshots", default={})
@@ -308,6 +315,9 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
             raise TrashError("Löschjournal verweist auf eine nicht registrierte Datenbank.")
         staged = parent / ident
         expected = {str(item["path"]): item for item in data["files"]}
+        from app.trash_import import protected_trash_paths
+        if set(expected).intersection(protected_trash_paths(None, workspace)):
+            raise TrashError("Löschjournal überschneidet sich mit einer Wiederherstellungsreservierung; Bestand bleibt erhalten.")
         for name in expected:
             _relative(name)
         if staged.is_symlink():
@@ -435,7 +445,13 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
         not isinstance(p,str) for p in relative_paths
     ) or len(set(relative_paths))!=len(relative_paths):
         raise TrashError("Ungültige Lösch-Auswahl.")
+    from app.trash_restore import assert_restore_paths_available
+    assert_restore_paths_available(workspace,relative_paths)
     databases = sorted({Path(p).resolve() for p in databases})
+    from app.trash_import import protected_trash_paths
+    selected = {_relative(p).as_posix() for p in relative_paths}
+    if selected.intersection(protected_trash_paths(None, workspace)):
+        raise TrashError("Ausgewählte Dateien gehören zu einer Wiederherstellungsreservierung.")
     _recover_trash_deletions(workspace, allowed_databases=databases)
     root, entries, _ = _physical_entries(workspace)
     physical = {str(e["relative_path"]) for e in entries if e["entry_type"] == "file"}
