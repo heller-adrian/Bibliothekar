@@ -314,6 +314,7 @@ def migrate_main_free_stock_to_central(
     workspace_path: Path,
     *,
     main_work_root: Path | None = None,
+    excluded_family_ids: set[int] | None = None,
 ) -> dict[str, int]:
     """Move legacy free/planned Main files from Arbeitsbereich to central stock.
 
@@ -379,7 +380,12 @@ def migrate_main_free_stock_to_central(
     kept_applied = 0
     kept_staging = 0
 
+    excluded = set(excluded_family_ids or ())
     for row in rows:
+        # Main retains projections of families owned/reserved elsewhere.
+        # Their saved paths are not evidence of local legacy files to migrate.
+        if row["family_id"] is not None and int(row["family_id"]) in excluded:
+            continue
         relative = Path(str(row["current_relative_path"]))
         if relative.is_absolute() or ".." in relative.parts:
             raise GlobalStockError(

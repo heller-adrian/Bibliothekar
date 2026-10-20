@@ -1,0 +1,51 @@
+name: F16 and F20 stock consistency QA
+on:
+  push:
+    branches: [security/f16-f20-stock-consistency]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          python -m pip install -r requirements.txt pytest httpx
+      - name: Record source and environment
+        run: |
+          mkdir -p "$RUNNER_TEMP/f14-qa"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/f14-qa/source.txt"
+          python --version > "$RUNNER_TEMP/f14-qa/environment.txt"
+          uname -a >> "$RUNNER_TEMP/f14-qa/environment.txt"
+          exiftool -ver >> "$RUNNER_TEMP/f14-qa/environment.txt"
+          pip freeze >> "$RUNNER_TEMP/f14-qa/environment.txt"
+      - name: Entire backend suite without fail-fast
+        run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" backend
+      - name: Unchanged originals on previous integration
+        if: always()
+        run: |
+          git fetch --no-tags --depth=1 origin 48197badaf2cd047af3151deee4f422859529e15
+          git worktree add --detach "$RUNNER_TEMP/stock-baseline" 48197badaf2cd047af3151deee4f422859529e15
+          for case in f16 f16_public f20; do
+            python qa/f16_f20/run_original.py "$RUNNER_TEMP/stock-baseline" "$RUNNER_TEMP/f16-f20-evidence/before-$case" "$case" || test "$?" = 1
+            test -f "$RUNNER_TEMP/f16-f20-evidence/before-$case/result.xml"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f16-f20-qa
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/f14-qa/**/*.json
+            ${{ runner.temp }}/f14-qa/**/*.jsonl
+            ${{ runner.temp }}/f14-qa/**/*.xml
+            ${{ runner.temp }}/f14-qa/**/*.log
+            ${{ runner.temp }}/f14-qa/**/*.txt
+            ${{ runner.temp }}/f16-f20-evidence

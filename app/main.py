@@ -2345,6 +2345,11 @@ def startup_database() -> None:
                 DATABASE_FILE,
                 WORKSPACE_PATH,
                 main_work_root=MAIN_LIBRARY_CONTEXT.work_root,
+                excluded_family_ids=blocked_family_ids(
+                    REGISTRY_DATABASE_FILE,
+                    database_path=DATABASE_FILE,
+                    library_id=MAIN_LIBRARY_ID,
+                ),
             )
             main_inventory = backfill_library_inventory(
                 REGISTRY_DATABASE_FILE,

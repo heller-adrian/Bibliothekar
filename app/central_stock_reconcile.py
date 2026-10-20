@@ -332,6 +332,20 @@ def _record_placement_conflict(
         )
 
 
+def _pending_sort_inventory(connection, expected_count):
+    # The durable run exists before any move, including crash recovery. Never
+    # interpret a placement being changed by this application as external loss.
+    runs = [str(row[0]) for row in connection.execute(
+        "SELECT id FROM sort_runs WHERE status IN "
+        "('queued','verifying','moving','finalizing','rolling_back','interrupted')"
+    )]
+    if not runs:
+        return None
+    return {'ready': True, 'postponed': True, 'pending_sort_run_ids': runs,
+            'expected_file_count': expected_count, 'pending_missing_count': 0,
+            'deleted_file_count': 0, 'misplaced_file_count': 0}
+
+
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=RuntimeError)
 def reconcile_central_free_stock(
     database_path: Path,
@@ -347,6 +361,9 @@ def reconcile_central_free_stock(
 
     with database_connection(database_path) as connection:
         rows = _free_rows(connection, excluded)
+        deferred = _pending_sort_inventory(connection, len(rows))
+        if deferred is not None:
+            return deferred
 
     ready, root_error = _ensure_root_identity(central_root, rows)
     if not ready:
@@ -377,6 +394,13 @@ def reconcile_central_free_stock(
     matched_central_paths: set[str] = set()
 
     with database_connection(database_path) as connection:
+        # Recheck after filesystem enumeration. Holding the catalogue writer
+        # lock prevents a new sort intent/status commit from racing this scan.
+        connection.execute('BEGIN IMMEDIATE')
+        deferred = _pending_sort_inventory(connection, len(rows))
+        if deferred is not None:
+            return deferred
+        rows = _free_rows(connection, excluded)
         prior_rows = connection.execute(
             "SELECT file_id,consecutive_misses FROM central_missing_file_observations"
         ).fetchall()
