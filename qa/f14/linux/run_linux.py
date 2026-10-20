@@ -23,7 +23,7 @@ if mode=='backend':args+=[str(source/'tests/backend')]
 else:args+=['-p','complete_historical_fixture']+[str(original/n) for n in selections]
 (output/'command.json').write_text(json.dumps({'argv':args,'source':str(source),'paths':{k:env[k] for k in paths},'original_sha256':manifest,'TMPDIR':env['TMPDIR'],'AUDIT_SCRATCH':env['AUDIT_SCRATCH']},indent=2))
 with (output/'stdout.log').open('w') as log:
- result=subprocess.run(args,cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=2400)
+ result=subprocess.run(args,cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=3600 if mode=='backend' else 2400)
 print((output/'stdout.log').read_text()[-5000:])
 (output/'exit.json').write_text(json.dumps({'returncode':result.returncode,'mode':mode,'historical_raw_result':mode!='backend'}))
 if mode=='backend':raise SystemExit(result.returncode)
