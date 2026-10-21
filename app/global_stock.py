@@ -201,19 +201,7 @@ def project_all_imports(
 
 
 
-def propagate_corrected_family(
-    source_database: Path,
-    database_paths: list[Path],
-    *,
-    job_id: str,
-    family_key: str,
-) -> dict[str, int]:
-    """Mirror a verified metadata correction into every library projection.
-
-    The physical central-stock file exists only once. Library databases keep
-    their own local row IDs, therefore the stable mapping is job_id +
-    family_key + original_relative_path.
-    """
+def _corrected_family_projection(source_database: Path, job_id: str, family_key: str):
     with database_connection(source_database) as source:
         family = source.execute(
             """SELECT selected_capture_time,capture_time_confidence,status
@@ -242,6 +230,24 @@ def propagate_corrected_family(
             ).fetchall()
         ]
 
+    return family, files
+
+
+def propagate_corrected_family(
+    source_database: Path,
+    database_paths: list[Path],
+    *,
+    job_id: str,
+    family_key: str,
+) -> dict[str, int]:
+    """Mirror a verified metadata correction into every library projection.
+
+    The physical central-stock file exists only once. Library databases keep
+    their own local row IDs, therefore the stable mapping is job_id +
+    family_key + original_relative_path.
+    """
+    _corrected_family_projection(source_database, job_id, family_key)
+
     updated_databases = 0
     updated_files = 0
     source_resolved = source_database.resolve(strict=False)
@@ -255,6 +261,11 @@ def propagate_corrected_family(
             raise GlobalStockError("Metadaten-Zieldatenbank fehlt: " + str(target_path))
         seen.add(key)
         with database_connection(target_path) as target:
+            # Acquire the target writer before sampling the authoritative source.
+            # A delayed older propagator can never commit its earlier snapshot
+            # after a newer projection has already committed to this target.
+            target.execute("BEGIN IMMEDIATE")
+            family, files = _corrected_family_projection(source_database, job_id, family_key)
             target_family = target.execute(
                 "SELECT id FROM file_families WHERE job_id=? AND family_key=?",
                 (str(job_id), str(family_key)),

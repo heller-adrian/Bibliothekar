@@ -9133,16 +9133,19 @@ def _sync_completed_library_metadata_correction(
         )
         if str(row.get("database_path") or "").strip()
     ]
-    propagation = propagate_corrected_family(
-        context.database_path,
-        databases,
-        job_id=job_id,
-        family_key=family_key,
-    )
-    from app.metadata_correction import finish_metadata_propagation
-    finish_metadata_propagation(context.database_path, str(task["id"]))
-    synchronize_global_central_stock()
-    task["projection_sync"] = propagation
+    from app.metadata_correction import _metadata_writer, _assert_family_projection_finished
+    with _metadata_writer(context.workspace_root):
+        _assert_family_projection_finished(context.database_path, task, allow_current_task=True)
+        propagation = propagate_corrected_family(
+            context.database_path,
+            databases,
+            job_id=job_id,
+            family_key=family_key,
+        )
+        from app.metadata_correction import finish_metadata_propagation
+        finish_metadata_propagation(context.database_path, str(task["id"]))
+        synchronize_global_central_stock()
+        task["projection_sync"] = propagation
     return task
 
 

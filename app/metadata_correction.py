@@ -3,6 +3,8 @@ from __future__ import annotations
 from app.root_operations import protect, validate_active_roots
 
 
+from contextlib import contextmanager
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import uuid
 
@@ -28,6 +31,74 @@ from app.free_stock_layout import canonical_free_directory
 
 class MetadataCorrectionError(RuntimeError):
     pass
+
+
+@contextmanager
+def _metadata_writer(workspace_root: Path):
+    from app.metadata_swap_recovery import metadata_write_guard, MetadataSwapRecoveryError
+    try:
+        with metadata_write_guard(storage_paths(workspace_root)["metadata_root"]):
+            yield
+    except MetadataSwapRecoveryError as error:
+        raise MetadataCorrectionError(str(error)) from error
+
+
+def _exclusive_metadata_write(function):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        with _metadata_writer(kwargs["workspace_root"]):
+            return function(*args, **kwargs)
+    return guarded
+
+
+def _metadata_projection_databases(database_path: Path) -> list[Path]:
+    """Use the already registered workspace authority, including inactive copies."""
+    from app.root_operations import _registered
+    row = _registered(database_path)
+    if row is None:
+        return [Path(database_path)]
+    candidates = [Path(database_path).parent / 'registry.sqlite3',
+                  Path(database_path).parent / 'bibliothekar-global.sqlite3']
+    if os.environ.get('KAMERA_REGISTRY_DATABASE'):
+        candidates.insert(0, Path(os.environ['KAMERA_REGISTRY_DATABASE']))
+    for registry in dict.fromkeys(candidates):
+        if not registry.is_file():
+            continue
+        try:
+            with database_connection(registry) as connection:
+                copies = [Path(value[0]) for value in connection.execute(
+                    'SELECT database_path FROM libraries WHERE workspace_root=?',
+                    (row['workspace_root'],))]
+        except sqlite3.OperationalError as error:
+            if 'no such table' in str(error):
+                continue
+            raise
+        if any(path.resolve() == Path(database_path).resolve() for path in copies):
+            return list(dict.fromkeys(copies))
+    raise MetadataCorrectionError('Die gemeinsame Metadaten-Registry ist nicht eindeutig verfügbar.')
+
+
+def _assert_family_projection_finished(database_path: Path, task: dict[str, Any], *, allow_current_task: bool = False) -> None:
+    if task.get('area') != 'library':
+        return
+    family = task.get('detected') or {}
+    for database in _metadata_projection_databases(database_path):
+        if not database.is_file():
+            raise MetadataCorrectionError('Eine Metadaten-Projektionsdatenbank fehlt.')
+        with database_connection(database) as connection:
+            rows = connection.execute(
+                "SELECT id,detected_json,verification_json,status FROM metadata_corrections "
+                "WHERE area='library' AND status IN ('writing','completed')").fetchall()
+        for row in rows:
+            if allow_current_task and database.resolve() == Path(database_path).resolve() and row['id'] == task.get('id'):
+                continue
+            detected = json.loads(row['detected_json'] or '{}')
+            if (detected.get('job_id'), detected.get('family_key')) != (family.get('job_id'), family.get('family_key')):
+                continue
+            if row['status'] == 'writing' or json.loads(row['verification_json'] or '{}').get('projection_pending'):
+                raise MetadataCorrectionError(
+                    'Die vorherige Metadatenkorrektur dieser Aufnahme ist noch nicht '
+                    'vollständig in allen Bibliotheken bestätigt. Bitte ihren Abschluss abwarten.')
 
 
 SUPPORTED_MEDIA = {
@@ -822,6 +893,7 @@ def preview_multiple_metadata_correction(
 
 
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
+@_exclusive_metadata_write
 def apply_multiple_metadata_correction(
     *,
     workspace_root: Path,
@@ -1402,10 +1474,13 @@ def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
 
 def _mark_task_writing(database_path: Path, correction_id: str) -> None:
     with database_connection(database_path) as connection:
-        connection.execute(
-            "UPDATE metadata_corrections SET status='writing',updated_at=?,error_message=NULL WHERE id=?",
+        claimed = connection.execute(
+            "UPDATE metadata_corrections SET status='writing',updated_at=?,error_message=NULL "
+            "WHERE id=? AND status IN ('prepared','blocked')",
             (_now(), correction_id),
         )
+        if claimed.rowcount != 1:
+            raise MetadataCorrectionError("Der Metadatenauftrag wurde bereits übernommen.")
 
 
 def _mark_task_blocked(
@@ -1467,6 +1542,10 @@ def finish_metadata_propagation(database_path: Path, task_id: str) -> None:
 
 def replay_pending_metadata_propagations(databases: list[Path]) -> int:
     from app.global_stock import propagate_corrected_family
+    from app.global_stock import GlobalStockError
+    for database in databases:
+        if not Path(database).is_file():
+            raise GlobalStockError("Metadaten-Zieldatenbank fehlt: " + str(database))
     count = 0
     for database in databases:
         for task in list_metadata_corrections(database, include_completed=True):
@@ -1476,8 +1555,14 @@ def replay_pending_metadata_propagations(databases: list[Path]) -> int:
             job_id, family_key = str(detected.get("job_id") or ""), str(detected.get("family_key") or "")
             if not job_id or not family_key:
                 raise MetadataCorrectionError("Ausstehende Metadatenpropagation ohne Familienidentität.")
-            propagate_corrected_family(database, databases, job_id=job_id, family_key=family_key)
-            finish_metadata_propagation(database, str(task["id"]))
+            from app.root_operations import _registered
+            registered = _registered(database)
+            if registered is None:
+                raise MetadataCorrectionError("Ausstehende Metadatenprojektion ohne registrierten Workspace.")
+            with _metadata_writer(Path(registered['workspace_root'])):
+                _assert_family_projection_finished(database, task, allow_current_task=True)
+                propagate_corrected_family(database, databases, job_id=job_id, family_key=family_key)
+                finish_metadata_propagation(database, str(task["id"]))
             count += 1
     return count
 
@@ -1866,6 +1951,7 @@ def _apply_library_metadata_correction(
 
 
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
+@_exclusive_metadata_write
 def reintegrate_library_metadata_family(
     database_path: Path,
     *,
@@ -2253,23 +2339,28 @@ def apply_metadata_correction(
     library_id: str,
 ) -> dict[str, Any]:
     task = get_metadata_correction(database_path, correction_id)
-    if str(task["status"]) not in {"prepared", "blocked"}:
-        raise MetadataCorrectionError(
-            "Der Metadatenauftrag ist nicht zum Schreiben bereit."
-        )
-    if str(task.get("area") or "") == "library":
-        return _apply_library_metadata_correction(
+    with _metadata_writer(workspace_root):
+        # The first read is advisory. Re-read after winning the physical writer
+        # decision: another caller may already have completed this same task.
+        task = get_metadata_correction(database_path, correction_id)
+        if str(task["status"]) not in {"prepared", "blocked"}:
+            raise MetadataCorrectionError(
+                "Der Metadatenauftrag ist nicht zum Schreiben bereit."
+            )
+        if str(task.get("area") or "") == "library":
+            _assert_family_projection_finished(database_path, task)
+            return _apply_library_metadata_correction(
+                database_path,
+                task,
+                workspace_root=workspace_root,
+                library_id=library_id,
+            )
+        return _apply_general_metadata_correction(
             database_path,
             task,
             workspace_root=workspace_root,
             library_id=library_id,
         )
-    return _apply_general_metadata_correction(
-        database_path,
-        task,
-        workspace_root=workspace_root,
-        library_id=library_id,
-    )
 
 
 

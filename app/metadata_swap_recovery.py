@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.root_operations import validate_active_roots
 
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 import hashlib
@@ -23,6 +24,25 @@ from app.database import database_connection
 
 class MetadataSwapRecoveryError(RuntimeError):
     pass
+
+
+@contextmanager
+def metadata_write_guard(metadata_root: Path):
+    """One cooperative writer/recovery per physical metadata area, across processes.
+
+    Reuse F14's protected control directory and nonblocking file lock. SIGKILL
+    releases the kernel lock; the existing durable journals remain authoritative.
+    """
+    from app.root_operations import _control, _lock, RootOperationError
+    try:
+        _, control = _control(Path(metadata_root).resolve(strict=False), allow_missing=True)
+        with _lock(control / 'metadata-write.lock', exclusive=True):
+            yield
+    except RootOperationError as error:
+        raise MetadataSwapRecoveryError(
+            "Eine Metadatenkorrektur oder Wiederherstellung ist bereits aktiv, "
+            "oder ihre Sperre kann nicht sicher nachgewiesen werden."
+        ) from error
 
 
 def _sha(path: Path) -> str:
@@ -432,14 +452,15 @@ def recover_metadata_swaps(
     result: dict[str, Any] = {"completed": 0, "rolled_back": 0, "blocked": 0, "errors": []}
     if not directory.exists():
         return result
-    if directory.is_symlink() or not directory.is_dir():
-        raise MetadataSwapRecoveryError("Metadatenjournal-Stamm ist unsicher.")
-    for journal in sorted(directory.glob("*.json")):
-        try:
-            result[recover_swap_journal(
-                metadata_root, journal, allowed_databases=allowed_databases,
-            )] += 1
-        except Exception as exc:
-            result["blocked"] += 1
-            result["errors"].append(journal.name + ": " + str(exc))
-    return result
+    with metadata_write_guard(metadata_root):
+        if directory.is_symlink() or not directory.is_dir():
+            raise MetadataSwapRecoveryError("Metadatenjournal-Stamm ist unsicher.")
+        for journal in sorted(directory.glob("*.json")):
+            try:
+                result[recover_swap_journal(
+                    metadata_root, journal, allowed_databases=allowed_databases,
+                )] += 1
+            except Exception as exc:
+                result["blocked"] += 1
+                result["errors"].append(journal.name + ": " + str(exc))
+        return result
