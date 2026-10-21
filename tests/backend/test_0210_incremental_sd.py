@@ -158,4 +158,4 @@ def test_source_helper_rejects_stale_mount_for_current_device(monkeypatch):
     assert len(devices) == 1
     assert devices[0]["device_path"] == "/dev/sde1"
     assert devices[0]["mounted"] is False
-    assert any("umount" in call for call in calls)
+    assert not any("umount" in call for call in calls)  # Foreign mounts are preserved.

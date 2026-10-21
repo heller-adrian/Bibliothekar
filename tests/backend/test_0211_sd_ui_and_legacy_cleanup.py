@@ -11,7 +11,7 @@ def test_0211_version_keeps_schema_22():
     assert main.APP_VERSION == PACKAGE_VERSION
 
 
-def test_source_helper_flattens_nested_findmnt_and_cleans_legacy_mount(monkeypatch):
+def test_source_helper_preserves_unowned_nested_legacy_mount(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
     def fake_run(*args: str, check: bool = True):
@@ -35,8 +35,8 @@ def test_source_helper_flattens_nested_findmnt_and_cleans_legacy_mount(monkeypat
     monkeypatch.setattr(source_helper, "run", fake_run)
     source_helper._cleanup_stale_managed_mounts({"/dev/sde1"})
 
-    assert any("umount" in call and str(source_helper.HOST_MOUNT_ROOT / "dev-sdf1") in call for call in calls)
-    assert any("find" in call and "dev-*" in call and "-delete" in call for call in calls)
+    assert not any("umount" in call for call in calls)
+    assert not any("-delete" in call for call in calls)
 
 
 def test_import_page_has_separate_sd_and_generic_source_details():

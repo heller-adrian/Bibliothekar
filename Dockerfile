@@ -45,12 +45,11 @@ RUN mkdir -p \
         /sources/nas \
         /sources/removable \
     && chown -R 568:568 \
-        /opt/kamera \
         /config \
         /database \
         /logs \
         /workspace \
-        /sources
+        /sources/nas
 
 # 0.31.0 startet absichtlich als root: nur der interne Quellen-Helper
 # benoetigt Mount-/Geraeterechte. Der Supervisor startet die eigentliche

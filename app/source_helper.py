@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import json
+import hashlib
 import os
 import re
 import stat
@@ -10,6 +11,7 @@ import subprocess
 
 from fastapi import FastAPI, HTTPException
 from app import __version__
+from app.source_mount_state import Ledger, UnsafeMount, directory_identity, mount_identity, protected_directory
 
 app = FastAPI(title="Kamera-Quellen-Helfer", version=__version__)
 MOUNT_ROOT = Path(
@@ -55,7 +57,7 @@ def flattened(nodes: list[dict[str, Any]], parent: dict[str, Any] | None = None)
 
 
 def safe_id(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-")[:100] or "medium"
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-.")[:100] or "medium"
 
 
 def _kernel_name(node: dict[str, Any]) -> str:
@@ -71,6 +73,8 @@ def _managed_device_node_path(kernel_name: str) -> Path:
 
 
 def _block_device_numbers(kernel_name: str) -> tuple[int, int]:
+    if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*", kernel_name) or kernel_name in {".", ".."}:
+        raise RuntimeError("Invalid kernel device name.")
     sysfs_path = Path("/sys/class/block") / kernel_name / "dev"
     try:
         value = sysfs_path.read_text(encoding="utf-8").strip()
@@ -89,7 +93,7 @@ def _block_device_numbers(kernel_name: str) -> tuple[int, int]:
 
 def _node_matches_device(path: Path, major: int, minor: int) -> bool:
     try:
-        info = path.stat()
+        info = path.lstat()
     except OSError:
         return False
     return bool(
@@ -101,20 +105,25 @@ def _node_matches_device(path: Path, major: int, minor: int) -> bool:
 
 def _ensure_mount_device_node(item: dict[str, Any]) -> tuple[str, bool]:
     original = Path(str(item.get("device_path") or ""))
-    if original.exists():
-        return str(original), False
-
     kernel_name = str(item.get("kernel_name") or "").strip()
     if not kernel_name:
         raise RuntimeError("Kernelname des Blockgeräts fehlt.")
 
     major, minor = _block_device_numbers(kernel_name)
-    DEVICE_NODE_ROOT.mkdir(parents=True, exist_ok=True)
+    if original.exists() or original.is_symlink():
+        protected_directory(original.parent)
+        if not _node_matches_device(original, major, minor):
+            raise RuntimeError("Source is not the selected block device.")
+        return str(original), False
+
+    protected_directory(DEVICE_NODE_ROOT.parent)
+    DEVICE_NODE_ROOT.mkdir(mode=0o700, exist_ok=True)
+    protected_directory(DEVICE_NODE_ROOT)
     managed = _managed_device_node_path(kernel_name)
 
     if managed.exists() or managed.is_symlink():
         if not _node_matches_device(managed, major, minor):
-            managed.unlink(missing_ok=True)
+            raise RuntimeError("Unknown device node already exists; refusing replacement.")
 
     if not managed.exists():
         os.mknod(
@@ -124,27 +133,11 @@ def _ensure_mount_device_node(item: dict[str, Any]) -> tuple[str, bool]:
         )
 
     if not _node_matches_device(managed, major, minor):
-        managed.unlink(missing_ok=True)
         raise RuntimeError(
             "Temporärer Geräte-Node stimmt nicht mit dem erkannten Blockgerät überein."
         )
 
     return str(managed), True
-
-
-def _remove_managed_device_node(kernel_name: str) -> None:
-    if not kernel_name:
-        return
-    path = _managed_device_node_path(kernel_name)
-    try:
-        if path.exists() or path.is_symlink():
-            path.unlink()
-    except OSError:
-        return
-    try:
-        DEVICE_NODE_ROOT.rmdir()
-    except OSError:
-        pass
 
 
 def classify(parent: dict[str, Any], partition: dict[str, Any]) -> str:
@@ -206,54 +199,38 @@ def _flatten_findmnt_rows(rows: list[dict[str, Any]]):
 
 
 def _cleanup_stale_managed_mounts(active_device_paths: set[str]) -> None:
-    result = run(
-        "findmnt",
-        "--json",
-        "--output",
-        "TARGET,SOURCE,FSTYPE,OPTIONS",
-        check=False,
-    )
-    if result.returncode != 0:
-        return
-    try:
-        rows = list(
-            _flatten_findmnt_rows(
-                json.loads(result.stdout).get("filesystems") or []
-            )
-        )
-    except (ValueError, TypeError):
-        return
-
-    for row in rows:
-        target = str(row.get("target") or "")
-        source = str(row.get("source") or "")
-        if target == str(MOUNT_ROOT) or not target.startswith(str(MOUNT_ROOT) + "/"):
-            continue
-        if any(_same_device_source(source, path) for path in active_device_paths):
-            continue
-        run("umount", target, check=False)
-        run("rmdir", target, check=False)
-
-    # Legacy-Versionen verwendeten Mountpunkte wie dev-sde1/dev-sdf1.
-    # Nach erfolgreichem Aushaengen koennen leere Reste gefahrlos entfernt werden.
-    run(
-        "find",
-        str(MOUNT_ROOT),
-        "-mindepth",
-        "1",
-        "-maxdepth",
-        "1",
-        "-type",
-        "d",
-        "-name",
-        "dev-*",
-        "-empty",
-        "-delete",
-        check=False,
-    )
+    # A path prefix or an absent device is not ownership proof. Disconnected
+    # records are intentionally retained for explicit recovery/inspection.
+    return None
 
 
-def devices() -> list[dict[str, Any]]:
+def _device_binding(item: dict[str, Any]) -> dict[str, Any]:
+    kernel = item['kernel_name']
+    major, minor = _block_device_numbers(kernel)
+    sysfs = Path('/sys/class/block') / kernel
+    info = sysfs.stat()
+    return {'major': major, 'minor': minor, 'sysfs': [info.st_dev, info.st_ino],
+            'device_id': item['device_id'], 'filesystem': item['filesystem'],
+            'diskseq': ((sysfs / 'diskseq') if (sysfs / 'diskseq').exists()
+                        else sysfs.resolve().parent / 'diskseq').read_text().strip()}
+
+
+def _readonly(info: dict[str, Any]) -> bool:
+    options = set(str(info.get('options') or '').split(','))
+    return {'ro', 'nosuid', 'nodev', 'noexec'} <= options and 'rw' not in options
+
+
+def _verify_owned(record: dict | None, item: dict, target: Path, info: dict) -> None:
+    if not record or record.get('state') not in {'mounted', 'unmounting'}:
+        raise UnsafeMount('Existing mount has no completed helper ownership proof; it will remain untouched.')
+    if (record.get('device') != _device_binding(item) or record.get('mount') != mount_identity(target)
+            or record.get('source') != info.get('source') or info.get('fstype') != item['filesystem']
+            or not _node_matches_device(Path(str(info.get('source') or '')),
+                                        record['device']['major'], record['device']['minor'])):
+        raise UnsafeMount('Kernel mount or device identity differs from the ownership record; refusing access.')
+
+
+def _scan_devices() -> list[dict[str, Any]]:
     data = lsblk()
     flat = list(flattened(data.get("blockdevices") or []))
     active_device_paths: set[str] = set()
@@ -287,43 +264,18 @@ def devices() -> list[dict[str, Any]]:
             if kernel_name
             else ""
         )
-        parent_serial = str(parent.get("serial") or "").strip()
-        serial_identity = (
-            parent_serial + "-" + str(node.get("size") or "")
-            if parent_serial
-            else ""
-        )
-        stable_identity = (
-            node.get("uuid")
-            or node.get("partuuid")
-            or node.get("label")
-            or serial_identity
-            or path
-        )
-        device_id = safe_id(str(stable_identity))
+        identity = {key: node.get(key) for key in ('uuid', 'partuuid', 'label', 'size')}
+        identity.update(path=path, kernel=kernel_name, serial=parent.get('serial'))
+        device_id = 'media-' + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         mount_path = str(MOUNT_ROOT / device_id)
         info = _mount_info(mount_path)
         is_mounted = bool(info)
         mount_options = str((info or {}).get("options") or "")
         mount_source = str((info or {}).get("source") or "")
 
-        if (
-            is_mounted
-            and not _same_device_source(mount_source, path)
-            and not _same_device_source(mount_source, managed_device_path)
-        ):
-            # Staler Mount: derselbe Mountpunkt gehoert nicht mehr zur aktuell
-            # erkannten Geraeteinstanz. Sicher loesen und als unmounted melden.
-            run("umount", mount_path, check=False)
-            run("rmdir", mount_path, check=False)
-            is_mounted = False
-            mount_options = ""
-            mount_source = ""
-
-        mount_read_only = bool(
-            is_mounted
-            and "ro" in {part.strip() for part in mount_options.split(",")}
-        )
+        # Listing never changes or adopts any mount. Only mount_device can
+        # establish an ownership proof, under the cross-process lock.
+        mount_read_only = bool(is_mounted and _readonly(info or {}))
 
         results.append(
             {
@@ -351,8 +303,36 @@ def devices() -> list[dict[str, Any]]:
     return results
 
 
+def devices() -> list[dict[str, Any]]:
+    found = _scan_devices()
+    # A raw kernel mount must never become an importable source solely because
+    # findmnt reports RO. Listing also verifies ownership after helper restart.
+    try:
+        with Ledger(MOUNT_ROOT).locked() as ledger:
+            for item in found:
+                if not item['mounted']:
+                    continue
+                try:
+                    target = MOUNT_ROOT / item['device_id']
+                    _verify_owned(ledger.read(item['device_id']), item, target,
+                                  _mount_info(str(target)) or {})
+                    if not item['read_only']:
+                        raise UnsafeMount('Mount is not verifiably read-only.')
+                except (OSError, RuntimeError, ValueError, KeyError) as error:
+                    _block_import(item, str(error))
+    except (OSError, RuntimeError, ValueError) as error:
+        for item in found:
+            _block_import(item, str(error))
+    return found
+
+
+def _block_import(item: dict, reason: str):
+    item.update(mounted=False, read_only=False, mount_path=None,
+                host_mount_path=None, ownership_error=reason)
+
+
 def selected_device(path: str) -> dict[str, Any]:
-    for item in devices():
+    for item in _scan_devices():
         if item["device_path"] == path:
             return item
     raise HTTPException(
@@ -372,88 +352,77 @@ def list_devices():
     return {"count": len(found), "devices": found}
 
 
-@app.post("/mount")
-def mount_device(payload: dict[str, Any]):
-    path = str(payload.get("device_path") or "").strip()
-    item = selected_device(path)
-    mount_path = MOUNT_ROOT / item["device_id"]
-
-    run("mkdir", "-p", str(mount_path))
-    if item["mounted"]:
-        return {"mounted": True, "device": item}
-
-    options = "ro,nosuid,nodev,noexec"
-    if item["filesystem"] == "vfat":
-        options += ",utf8=1,uid=568,gid=568,fmask=0133,dmask=0022"
-    elif item["filesystem"] in {"exfat", "ntfs"}:
-        options += ",uid=568,gid=568,umask=0022"
-
+def _operation(payload: dict[str, Any], *, unmount: bool):
     try:
-        mount_source, managed_node = _ensure_mount_device_node(item)
-    except (OSError, RuntimeError) as error:
-        run("rmdir", str(mount_path), check=False)
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Blockgerät ist im Container nicht direkt verfügbar und "
-                "konnte nicht sicher bereitgestellt werden: "
-                + str(error)
-            ),
-        ) from error
+        with Ledger(MOUNT_ROOT).locked() as ledger:
+            item = selected_device(str(payload.get('device_path') or '').strip())
+            target = MOUNT_ROOT / item['device_id']
+            record = ledger.read(item['device_id'])
+            info = _mount_info(str(target))
+            if info:
+                _verify_owned(record, item, target, info)
+                if not unmount:
+                    if not _readonly(info):
+                        raise UnsafeMount('Source is not verifiably read-only; import is blocked.')
+                    return {'mounted': True, 'device': item}
+                record['state'] = 'unmounting'
+                ledger.write(item['device_id'], record)
+                # Identity is checked again immediately before the syscall.
+                _verify_owned(record, item, target, _mount_info(str(target)) or {})
+                result = run("umount", str(target), check=False)
+                if result.returncode or _mount_info(str(target)):
+                    raise UnsafeMount('Unmount failed or mount changed; ownership evidence has been retained.')
+                if directory_identity(target) != record['target']:
+                    raise UnsafeMount('Mountpoint directory changed; refusing cleanup.')
+                target.rmdir()  # only our recorded, empty directory
+                ledger.delete(item['device_id'])
+                return {'mounted': False, 'device': selected_device(item['device_path'])}
+            if record:
+                # A stopped helper never guesses that an existing/new mount is its own.
+                if target.exists():
+                    if directory_identity(target) != record['target']:
+                        raise UnsafeMount('Interrupted mountpoint identity changed; manual inspection required.')
+                    target.rmdir()  # nonempty and foreign content cannot be removed
+                ledger.delete(item['device_id'])
+            if unmount:
+                return {'mounted': False, 'device': item}
+            binding = _device_binding(item)
+            # Qualify kernel identity capability before any mount or journal mutation.
+            mount_identity(MOUNT_ROOT)
+            target.mkdir(mode=0o755)  # EEXIST never means ownership
+            record = {'state': 'prepared', 'device': binding, 'target': directory_identity(target)}
+            ledger.write(item['device_id'], record)
+            source, _managed = _ensure_mount_device_node(item)
+            options = "ro,nosuid,nodev,noexec"
+            if item['filesystem'] == 'vfat':
+                options += ',utf8=1,uid=568,gid=568,fmask=0133,dmask=0022'
+            elif item['filesystem'] in {'exfat', 'ntfs'}:
+                options += ',uid=568,gid=568,umask=0022'
+            if binding != _device_binding(selected_device(item['device_path'])):
+                raise UnsafeMount('Device changed before mount.')
+            result = run("mount", '-t', item['filesystem'], '-o', options, source, str(target), check=False)
+            if result.returncode:
+                raise UnsafeMount('Mount failed; prepared ownership record retained: ' + str(result.stderr or ''))
+            info = _mount_info(str(target)) or {}
+            record.update(state='mounted', mount=mount_identity(target), source=source)
+            if binding != _device_binding(selected_device(item['device_path'])):
+                raise UnsafeMount('Device changed during mount; uncertain mount remains untouched.')
+            if (info.get('source') != source or info.get('fstype') != item['filesystem']
+                    or not _node_matches_device(Path(source), binding['major'], binding['minor'])):
+                raise UnsafeMount('Mounted source cannot be proven; uncertain mount remains untouched.')
+            ledger.write(item['device_id'], record)
+            if not _readonly(info):
+                raise UnsafeMount("Die Quelle konnte nicht nachweislich nur lesend eingebunden werden.")
+            return {'mounted': True, 'device': selected_device(item['device_path'])}
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
-    result = run(
-        "mount",
-        "-t",
-        item["filesystem"],
-        "-o",
-        options,
-        mount_source,
-        str(mount_path),
-        check=False,
-    )
-    if result.returncode != 0:
-        run("rmdir", str(mount_path), check=False)
-        if managed_node:
-            _remove_managed_device_node(str(item.get("kernel_name") or ""))
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                result.stderr
-                or result.stdout
-                or "Einbinden fehlgeschlagen."
-            ).strip(),
-        )
 
-    refreshed = selected_device(path)
-    if not refreshed.get("read_only"):
-        run("umount", str(mount_path), check=False)
-        run("rmdir", str(mount_path), check=False)
-        if managed_node:
-            _remove_managed_device_node(str(item.get("kernel_name") or ""))
-        raise HTTPException(
-            status_code=500,
-            detail="Die Quelle konnte nicht nachweislich nur lesend eingebunden werden.",
-        )
-    return {"mounted": True, "device": refreshed}
+@app.post('/mount')
+def mount_device(payload: dict[str, Any]):
+    return _operation(payload, unmount=False)
 
 
-@app.post("/unmount")
+@app.post('/unmount')
 def unmount_device(payload: dict[str, Any]):
-    path = str(payload.get("device_path") or "").strip()
-    item = selected_device(path)
-    if not item["mounted"]:
-        return {"mounted": False, "device": item}
-
-    mount_path = MOUNT_ROOT / item["device_id"]
-    result = run("umount", str(mount_path), check=False)
-    if result.returncode != 0:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                result.stderr
-                or "Aushaengen fehlgeschlagen; moeglicherweise wird die Quelle noch verwendet."
-            ).strip(),
-        )
-    run("rmdir", str(mount_path), check=False)
-    _remove_managed_device_node(str(item.get("kernel_name") or ""))
-    return {"mounted": False, "device": selected_device(path)}
+    return _operation(payload, unmount=True)
