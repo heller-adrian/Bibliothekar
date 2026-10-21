@@ -181,6 +181,17 @@ TRANSFER_HTML = r'''<!doctype html>
   async function getJson(url){const response=await fetch(url,{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
   async function postJson(url){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
 
+  const releaseConflictMessage='Archivdateien wurden verändert oder ein Sicherheitskonflikt wurde festgestellt. Weitere Löschungen wurden gestoppt. Bereits gelöschte Arbeitskopien sind möglicherweise nicht wiederherstellbar. Prüfen Sie das Archiv und starten Sie die Freigabe ausdrücklich erneut. Noch vorhandene Arbeitsdateien und Archivkopien werden vollständig neu geprüft.';
+  function showReleaseConflict(error){
+    const dialog=document.createElement('dialog');
+    const title=document.createElement('h2');title.textContent='Arbeitsbereich freigeben – unterbrochen';
+    const message=document.createElement('p');message.textContent=releaseConflictMessage;
+    const detail=document.createElement('p');detail.textContent=String(error||'');
+    const close=document.createElement('button');close.textContent='Schließen';close.addEventListener('click',()=>dialog.close());
+    dialog.append(title,message,detail,close);document.body.appendChild(dialog);
+    dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();
+  }
+
   async function followRelease(jobId,eventId,result,verifyButton,releaseButton){
     const url=`/api/jobs/${encodeURIComponent(jobId)}/events/${encodeURIComponent(eventId)}/ssd-release/task`;
     const check=async()=>{
@@ -198,6 +209,8 @@ TRANSFER_HTML = r'''<!doctype html>
           result.className="result danger";
           result.textContent="Freigabe angehalten: "+String(task.error_message||"Unbekannter Fehler")
             +" · Die bisherigen Prüfschritte bleiben gespeichert.";
+          showReleaseConflict(task.error_message);
+          releaseButton.textContent='Freigabe erneut versuchen';
           releaseButton.disabled=false;
           verifyButton.disabled=false;
           return;
@@ -273,7 +286,7 @@ TRANSFER_HTML = r'''<!doctype html>
       releaseButton.addEventListener('click',async(event)=>{
         const button=event.currentTarget;
         try {
-          const question=`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.`;
+          const question=`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.` + '\n\nArchivdateien während der Freigabe nicht extern verändern. Gleichzeitige externe Änderungen können zum Verlust der letzten passenden Kopie führen; die Änderungsüberwachung bietet keine vollständige Erhaltungsgarantie.';
           const confirmation=window.BibliothekarI18n?.confirmAsync
             ? await window.BibliothekarI18n.confirmAsync(question)
             : window.confirm(window.BibliothekarI18n?.t?.(question) || question);
@@ -290,6 +303,9 @@ TRANSFER_HTML = r'''<!doctype html>
           button.disabled=false;verifyButton.disabled=false;
         }
       });
+      // Reloading a page only observes persisted tasks; it never retries a POST.
+      getJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release/task`)
+        .then(task=>{if(['failed','running','queued'].includes(task.status)){result.hidden=false;return followRelease(item.job_id,item.event_id,result,verifyButton,releaseButton);}}).catch(()=>{});
       attachRecoveryAction(card,item);
       archiveList.appendChild(card);
     }
@@ -297,6 +313,9 @@ TRANSFER_HTML = r'''<!doctype html>
     for(const item of history){
       const card=document.createElement('article');card.className='card';
       card.innerHTML=`<div class="item-head"><div><div class="title" data-bk-preserve-language>${escapeHtml(item.name)}</div><div class="path" data-bk-preserve-language>${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">Arbeitsbereich freigegeben</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div>`;
+      // Reloading a page only observes persisted tasks; it never retries a POST.
+      getJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release/task`)
+        .then(task=>{if(['failed','running','queued'].includes(task.status)){result.hidden=false;return followRelease(item.job_id,item.event_id,result,verifyButton,releaseButton);}}).catch(()=>{});
       attachRecoveryAction(card,item);
       historyList.appendChild(card);
     }

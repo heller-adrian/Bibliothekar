@@ -945,6 +945,11 @@ UI_TRANSLATIONS.update({
   "Archivprüfung öffnen": "Open archive verification",
   "Archivprüfung starten": "Start archive verification",
   "Arbeitsbereich freigeben": "Release workspace",
+  "Arbeitsbereich freigeben – unterbrochen": "Release workspace – interrupted",
+  "Freigabe erneut versuchen": "Retry workspace release",
+  "Archivdateien wurden verändert oder ein Sicherheitskonflikt wurde festgestellt. Weitere Löschungen wurden gestoppt. Bereits gelöschte Arbeitskopien sind möglicherweise nicht wiederherstellbar. Prüfen Sie das Archiv und starten Sie die Freigabe ausdrücklich erneut. Noch vorhandene Arbeitsdateien und Archivkopien werden vollständig neu geprüft.": "Archive files changed or a safety conflict was detected. Further deletions have stopped. Work copies already deleted may not be recoverable. Check the archive and explicitly retry the release. Remaining work files and archive copies will be fully checked again.",
+  "Archivdateien während der Freigabe nicht extern verändern. Gleichzeitige externe Änderungen können zum Verlust der letzten passenden Kopie führen; die Änderungsüberwachung bietet keine vollständige Erhaltungsgarantie.": "Do not change archive files externally during release. Concurrent external changes can cause loss of the last matching copy; change monitoring does not provide a complete preservation guarantee.",
+
   "Gesperrt": "Blocked",
   "Offene Prüfungen": "Pending checks",
   "Archivverlauf": "Archive history",

@@ -110,8 +110,23 @@ def test_0476_release_task_survives_interruption(tmp_path: Path, monkeypatch):
     claimed = claim_release(db)
     assert claimed["id"] == task["id"]
     assert recover_releases(db) == 1
+    # A restart lost archive notifications: only an explicit new request may
+    # continue. The original automatic-resume contract is kept in qa/f13/history.
+    assert claim_release(db) is None
+    interrupted = get_release_task(db, "old", "archive")
+    assert interrupted["id"] == task["id"]
+    assert interrupted["status"] == "failed"
+    assert "Keine automatische Fortsetzung" in interrupted["error_message"]
+    for _ in range(3):
+        assert recover_releases(db) == 0
+        assert claim_release(db) is None
+        assert get_release_task(db, "old", "archive")["id"] == task["id"]
+    requested = enqueue_release(db, "old", "archive")
+    assert requested["id"] != task["id"]
+    assert requested["status"] == "queued"
+    assert enqueue_release(db, "old", "archive")["id"] == requested["id"]
     claimed = claim_release(db)
-    assert claimed["id"] == task["id"]
+    assert claimed["id"] == requested["id"]
     assert get_release_task(db, "old", "archive")["status"] == "running"
     monkeypatch.setattr(
         background, "release_event_ssd",

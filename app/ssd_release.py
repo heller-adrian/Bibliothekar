@@ -13,6 +13,7 @@ import os
 import stat
 import uuid
 
+from app.ssd_archive_guard import ArchiveGuard
 from app.archive_transfer import ArchiveVerificationError, verify_event_archive
 from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.database import database_connection
@@ -373,7 +374,13 @@ def _verify_regular_file(
     expected_size: int,
     expected_sha256: str,
     label: str,
+    *,
+    archive_guard: ArchiveGuard | None = None,
+    archive_relative: PurePosixPath | None = None,
 ) -> tuple[os.stat_result, str]:
+    if archive_guard is not None:
+        checked = archive_guard.verify(archive_relative, expected_size, expected_sha256)
+        return checked, expected_sha256
     before = os.lstat(path)
 
     if not stat.S_ISREG(before.st_mode):
@@ -1036,7 +1043,9 @@ def release_event_ssd(
                 "asset_kind": str(stored["asset_kind"]),
             })
 
+    archive_guard = None
     try:
+        archive_guard = ArchiveGuard(archive_root, [row["archive_relative"] for row in prepared + asset_prepared])
         with database_connection(database_path) as connection:
             connection.execute(
                 """
@@ -1062,7 +1071,8 @@ def release_event_ssd(
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
             _archive_stat, archive_hash = _verify_regular_file(
-                archive, expected_size, expected_hash, "Archivdatei"
+                archive, expected_size, expected_hash, "Archivdatei",
+                archive_guard=archive_guard, archive_relative=archive_rel,
             )
 
             source_exists = source.exists() or source.is_symlink()
@@ -1073,6 +1083,7 @@ def release_event_ssd(
                 )
             elif open_release is None:
                 raise SsdReleaseError("SSD-Datei fehlt: " + str(source))
+            row["source_present_for_run"] = source_exists
 
             with database_connection(database_path) as connection:
                 connection.execute(
@@ -1110,7 +1121,8 @@ def release_event_ssd(
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
             _archive_stat, archive_hash = _verify_regular_file(
-                archive, expected_size, expected_hash, "Archivdatei"
+                archive, expected_size, expected_hash, "Archivdatei",
+                archive_guard=archive_guard, archive_relative=archive_rel,
             )
 
             source_exists = source.exists() or source.is_symlink()
@@ -1121,6 +1133,7 @@ def release_event_ssd(
                 )
             elif open_release is None:
                 raise SsdReleaseError("SSD-Datei fehlt: " + str(source))
+            row["source_present_for_run"] = source_exists
 
             with database_connection(database_path) as connection:
                 connection.execute(
@@ -1194,28 +1207,39 @@ def release_event_ssd(
                     expected_hash,
                     "SSD-Datei vor dem Löschen",
                 )
+                archive_guard.verify(row["archive_relative"], expected_size, expected_hash, source_stat)
                 current = os.lstat(source)
                 if (
                     int(current.st_dev),
                     int(current.st_ino),
                     int(current.st_mtime_ns),
                     int(current.st_size),
+                    int(current.st_ctime_ns),
+                    int(current.st_nlink),
+                    int(current.st_mode),
                 ) != (
                     int(source_stat.st_dev),
                     int(source_stat.st_ino),
                     int(source_stat.st_mtime_ns),
                     int(source_stat.st_size),
+                    int(source_stat.st_ctime_ns),
+                    int(source_stat.st_nlink),
+                    int(source_stat.st_mode),
                 ):
                     raise SsdReleaseError(
                         "SSD-Datei änderte sich unmittelbar vor dem Löschen: " + str(source)
                     )
                 validate_active_roots()
+                # Final non-atomic gate: external writers can still race unlink.
+                archive_guard.check()
                 source.unlink()
                 _fsync_directory(source.parent)
                 status_value = "deleted"
                 deleted_count += 1
                 deleted_bytes += expected_size
             else:
+                if row.get("source_present_for_run"):
+                    raise SsdReleaseError("Eine in diesem Lauf geprüfte SSD-Datei ist unerwartet verschwunden; weitere Löschungen gesperrt: " + str(source))
                 status_value = "already_released"
 
             with database_connection(database_path) as connection:
@@ -1245,6 +1269,8 @@ def release_event_ssd(
                     (deleted_count, deleted_bytes, _now(), release_id),
                 )
 
+            archive_guard.check()
+
         for row in prepared:
             delete_source(row, asset=False)
         for row in asset_prepared:
@@ -1256,8 +1282,9 @@ def release_event_ssd(
                 (_now(), release_id),
             )
 
+        archive_guard.check()
         removed = _remove_empty_event_tree(event_root, work_root)
-        return _finalize_release(
+        result = _finalize_release(
             database_path,
             release_id,
             job_id,
@@ -1265,9 +1292,16 @@ def release_event_ssd(
             removed,
         )
 
+        archive_guard.check()
+        return result
+
     except Exception as error:
-        _mark_release_failed(database_path, release_id, str(error))
-        if isinstance(error, SsdReleaseError):
-            raise
-        raise SsdReleaseError(str(error)) from error
+        message = ("SSD-Freigabe gestoppt: " + str(error) +
+                   " Noch vorhandene SSD-Dateien bleiben erhalten. Bereits entfernte Dateien werden nicht wiederhergestellt. "
+                   "Eine erneute Freigabe benötigt einen neuen Auftrag und vollständige Prüfung.")
+        _mark_release_failed(database_path, release_id, message)
+        raise SsdReleaseError(message) from error
+    finally:
+        if archive_guard is not None:
+            archive_guard.close()
 

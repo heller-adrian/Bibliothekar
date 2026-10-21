@@ -185,21 +185,39 @@ def _write(path, value):
 
 
 def _read(path, default=None):
-    try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    # State is atomically published by cooperating writers in the protected
+    # control namespace. An opened previous inode may have been unlinked by
+    # _write; never read it, and only retry a verified, different publication.
+    opened = False
+    for attempt in range(3):
         try:
-            info = os.fstat(descriptor)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o022:
-                raise RootOperationError('Operationsnachweis besitzt keine sichere Eigentumsbindung: '+str(path))
-            with os.fdopen(descriptor) as f:
-                descriptor = None
-                return json.load(f)
-        finally:
-            if descriptor is not None: os.close(descriptor)
-    except FileNotFoundError:
-        return default
-    except (ValueError, OSError) as error:
-        raise RootOperationError('Operationsnachweis ist nicht lesbar: ' + str(path)) from error
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            opened = True
+            try:
+                info = os.fstat(descriptor)
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+                    raise RootOperationError('Operationsnachweis besitzt keine sichere Eigentumsbindung: ' + str(path))
+                if info.st_nlink != 1:
+                    replacement = os.stat(path, follow_symlinks=False)
+                    if (Path(path).name == 'state.json' and info.st_nlink == 0 and attempt < 2
+                            and stat.S_ISREG(replacement.st_mode)
+                            and replacement.st_uid == os.getuid()
+                            and replacement.st_nlink == 1 and not replacement.st_mode & 0o022
+                            and (replacement.st_dev, replacement.st_ino) != (info.st_dev, info.st_ino)):
+                        continue
+                    raise RootOperationError('Operationsnachweis besitzt keine sichere Eigentumsbindung: ' + str(path))
+                with os.fdopen(descriptor) as f:
+                    descriptor = None
+                    return json.load(f)
+            finally:
+                if descriptor is not None:
+                    os.close(descriptor)
+        except FileNotFoundError as error:
+            if not opened:
+                return default
+            raise RootOperationError('Operationsnachweis ist nicht lesbar: ' + str(path)) from error
+        except (ValueError, OSError) as error:
+            raise RootOperationError('Operationsnachweis ist nicht lesbar: ' + str(path)) from error
 
 
 def _control_location(root):
