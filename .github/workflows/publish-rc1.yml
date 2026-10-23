@@ -3,6 +3,7 @@ on:
   push:
     branches: [release/v1.0.0-rc.1]
 permissions:
+  actions: read
   contents: write
   packages: write
 concurrency:
