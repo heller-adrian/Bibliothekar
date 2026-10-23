@@ -13,6 +13,7 @@ from collections import defaultdict
 from datetime import datetime
 import hashlib
 import hmac
+import json
 import os
 from pathlib import Path
 import secrets
@@ -286,7 +287,16 @@ async def protect_request(request: Request, call_next):
                 return _security_headers(JSONResponse(
                     {"detail": "Anmeldeanfrage ist zu groß."}, status_code=413,
                 ))
-            payload = await request.json()
+            # Content-Length can be absent or understated. Bound the actual
+            # stream before buffering/decoding JSON, including chunked bodies.
+            body = bytearray()
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > 16384:
+                    return _security_headers(JSONResponse(
+                        {"detail": "Anmeldeanfrage ist zu groß."}, status_code=413,
+                    ))
+                body.extend(chunk)
+            payload = json.loads(body)
             candidate = str(payload.get("password") or "") if isinstance(payload, dict) else ""
         except (ValueError, TypeError):
             candidate = ""

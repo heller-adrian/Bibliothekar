@@ -149,6 +149,7 @@ TRANSFER_HTML = r'''<!doctype html>
   <script>
 
     async function refreshGlobalTasks() {
+      const taskText=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
       const button=document.getElementById("global-task-fab");
       const badge=document.getElementById("global-task-badge");
       const panel=document.getElementById("global-task-panel");
@@ -161,7 +162,7 @@ TRANSFER_HTML = r'''<!doctype html>
         button.classList.add("visible");
         badge.textContent=String(count);
         badge.classList.toggle("hidden",count===0);
-        panel.innerHTML=count ? `<strong>Offene Aufgaben · ${count}</strong>`+tasks.map(task=>`<a class="global-task-item" href="${String(task.href||'/events').replaceAll('&','&amp;').replaceAll('"','&quot;')}"><strong>${String(task.title||'Aufgabe')}</strong><span>${String(task.detail||'')}</span></a>`).join("") : `<strong>Keine offenen Aufgaben</strong><span class="muted" style="display:block;margin-top:6px">Alles erledigt.</span>`;
+        panel.innerHTML=count ? `<strong>Offene Aufgaben · ${count}</strong>`+tasks.map(task=>`<a class="global-task-item" href="${taskText(task.href||'/events')}"><strong>${taskText(task.title||'Aufgabe')}</strong><span>${taskText(task.detail||'')}</span></a>`).join("") : `<strong>Keine offenen Aufgaben</strong><span class="muted" style="display:block;margin-top:6px">Alles erledigt.</span>`;
       } catch (_) {}
     }
     document.getElementById("global-task-fab")?.addEventListener("click",()=>document.getElementById("global-task-panel")?.classList.toggle("open"));
