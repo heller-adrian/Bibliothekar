@@ -20,11 +20,19 @@ import os
 import sqlite3
 import stat
 import tempfile
+import time
 import uuid
 
 
 class RootOperationError(RuntimeError):
     pass
+
+
+class RootOperationBusy(RootOperationError):
+    """A live kernel lock conflict, distinct from stale journal evidence."""
+    def __init__(self, path):
+        self.lock_path = str(path)
+        super().__init__('Ein anderer Vorgang verwendet diesen Bereich. Bitte kurz warten und erneut versuchen.')
 
 
 _ACTIVE = ContextVar('root_operations', default=())
@@ -267,16 +275,22 @@ def _control(root, *, allow_missing=False):
 
 
 @contextmanager
-def _lock(path, exclusive=False, wait=False):
+def _lock(path, exclusive=False, wait=False, wait_seconds=0):
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         s = os.fstat(fd)
         if not stat.S_ISREG(s.st_mode) or s.st_nlink != 1 or s.st_uid != os.geteuid():
             raise RootOperationError('Ungültige interne Operationssperre.')
-        try:
-            fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | (0 if wait else fcntl.LOCK_NB))
-        except BlockingIOError as error:
-            raise RootOperationError('Stammordnerwechsel wegen eines laufenden Vorgangs nicht möglich. Bitte dessen Abschluss abwarten.') from error
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            try:
+                fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | (0 if wait else fcntl.LOCK_NB))
+                break
+            except BlockingIOError as error:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RootOperationBusy(path) from error
+                time.sleep(min(.02, remaining))
         yield fd
     finally:
         os.close(fd)
@@ -484,7 +498,7 @@ def admission(context, *, allow_missing_legacy=False):
 
 
 @contextmanager
-def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='operation', ids=None, expected_generation=None, shared=None):
+def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='operation', ids=None, expected_generation=None, shared=None, operation_wait=0):
     from app.managed_storage_health import require_pinned_storage
     require_pinned_storage(workspace,initializing=(kind=='startup' and bool((ids or {}).get('initialize_storage'))))
     root, parent = _control(workspace)
@@ -524,7 +538,7 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
     # A global root mutation already owns the complete lock scope. Its child
     # initialization still gets a separate durable operation record; it never
     # overwrites the parent's mutation intent or starts an unreserved worker.
-    with (nullcontext() if owned_mutation else _lock(parent/'workspace.lock')), (nullcontext() if owned_mutation or not shared else _lock(parent/'shared.lock')), (nullcontext() if owned_mutation else _lock(parent/('library-'+hashlib.sha256(library_id.encode()).hexdigest()+'.lock'))), _lock(parent/('operation-'+key+'.lock'), exclusive=True):
+    with (nullcontext() if owned_mutation else _lock(parent/'workspace.lock')), (nullcontext() if owned_mutation or not shared else _lock(parent/'shared.lock')), (nullcontext() if owned_mutation else _lock(parent/('library-'+hashlib.sha256(library_id.encode()).hexdigest()+'.lock'))), _lock(parent/('operation-'+key+'.lock'), exclusive=True, wait_seconds=operation_wait):
         if not owned_mutation:_assert_startable(parent, library_id)
         with _lock(parent/'state.lock', exclusive=True, wait=True):
             state = _state(parent, root)
@@ -592,7 +606,7 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             finally:_ACTIVE.reset(token)
 
 
-def protect(*, workspace_arg=None, database_arg='database_path', kind='operation', error_type=RootOperationError, context_provider=None, db_only_if_no_roots=False):
+def protect(*, workspace_arg=None, database_arg='database_path', kind='operation', error_type=RootOperationError, context_provider=None, db_only_if_no_roots=False, operation_wait=0):
     def decorate(fn):
         signature=inspect.signature(fn)
         @wraps(fn)
@@ -658,7 +672,7 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
             expected=getattr(context,'root_generation',None) if context else None
             if expected is None:expected=generation(workspace,library)
             try:
-                with reserve(workspace,library_id=library,paths=paths,database=database,kind=kind,ids=ids,expected_generation=expected, shared=True if global_import or kind in {'trash','backup','import_cleanup'} or (database_arg == 'None' and kind == 'recovery') else None) as reservation:
+                with reserve(workspace,library_id=library,paths=paths,database=database,kind=kind,ids=ids,expected_generation=expected,operation_wait=operation_wait, shared=True if global_import or kind in {'trash','backup','import_cleanup'} or (database_arg == 'None' and kind == 'recovery') else None) as reservation:
                     if view_context is not None: _check_view(view_context)
                     if context:reservation['_context_work_root']=str(context.work_root)
                     current=_registered(database) if row else None

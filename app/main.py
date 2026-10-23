@@ -476,6 +476,29 @@ def _root_request(fn):
 
 
 
+def _event_inspection_request(fn):
+    """Translate live inventory contention, without hiding safety failures."""
+    from functools import wraps
+    from app.root_operations import RootOperationBusy
+    @wraps(fn)
+    def guarded(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as error:
+            if isinstance(error, TrashError):
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            cause = error
+            while cause is not None:
+                if isinstance(cause, RootOperationBusy):
+                    raise HTTPException(status_code=409, detail=(
+                        "Das Ereignis wird gerade geprüft oder geändert. "
+                        "Bitte kurz warten und erneut öffnen."
+                    )) from error
+                cause = cause.__cause__
+            raise
+    return guarded
+
+
 def _root_thumbnail(fn):
     # Thumbnails only read original media and write disposable cache files.
     # A process death therefore needs no media-operation recovery journal.
@@ -556,7 +579,7 @@ def _ensure_compatibility_link(link: Path, target: Path) -> None:
     link.symlink_to(resolved_target, target_is_directory=True)
 
 
-@protect(kind='compatibility', context_provider=lambda a: a['context'])
+@protect(kind='compatibility', context_provider=lambda a: a['context'], operation_wait=1)
 def compatibility_workspace_root(context: LibraryContext) -> Path:
     # Alle Bibliotheken – auch die primäre – erhalten für Altcode intern eine
     # kleine Kompatibilitätsansicht. Dadurch hängt kein Arbeitsablauf mehr von
@@ -7019,6 +7042,7 @@ def api_create_event(
     }
 
 @app.get("/api/jobs/{job_id}/events/{event_id}/structure")
+@_event_inspection_request
 def api_event_structure(job_id: str, event_id: str):
     """Return the visible target tree plus the persisted event facts.
 
@@ -7180,6 +7204,7 @@ def api_event_structure(job_id: str, event_id: str):
     "/api/jobs/{job_id}/events/{event_id}/edit",
     tags=["Ereignisse"],
 )
+@_event_inspection_request
 def api_event_edit_context(job_id: str, event_id: str) -> dict[str, Any]:
     if get_job(current_database_file(), job_id) is None:
         raise HTTPException(status_code=404, detail="Sicherung wurde nicht gefunden.")

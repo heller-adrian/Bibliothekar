@@ -29,7 +29,7 @@ class TrashError(RuntimeError):
     pass
 
 
-def serialized_trash_operation(workspace_argument: str):
+def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True):
     """All reservation, inventory and worker mutations share the existing lock."""
     def decorate(function):
         parameters = signature(function)
@@ -37,7 +37,7 @@ def serialized_trash_operation(workspace_argument: str):
         def locked(*args, **kwargs):
             workspace = parameters.bind(*args, **kwargs).arguments[workspace_argument]
             from app.trash_selective import _operation_lock
-            with _operation_lock(workspace):
+            with _operation_lock(workspace, blocking=blocking):
                 return function(*args, **kwargs)
         return locked
     return decorate
@@ -203,8 +203,8 @@ def _candidate_still_present(workspace_root: Path, row: dict[str, Any]) -> bool:
     return False
 
 
-@protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=TrashError)
-@serialized_trash_operation("workspace_root")
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=TrashError, operation_wait=1)
+@serialized_trash_operation("workspace_root", blocking=False)
 def reconcile_trash_inventory(
     database_path: Path,
     workspace_root: Path,

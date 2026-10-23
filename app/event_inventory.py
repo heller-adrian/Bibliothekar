@@ -443,7 +443,7 @@ def _best_known_match(
     return None
 
 
-@protect(workspace_arg='storage_root', database_arg='database_path', kind='inventory', error_type=EventInventoryError)
+@protect(workspace_arg='storage_root', database_arg='database_path', kind='inventory', error_type=EventInventoryError, operation_wait=1)
 def scan_event_inventory(
     database_path: Path,
     storage_root: Path,

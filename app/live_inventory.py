@@ -7,6 +7,7 @@ from app.database import database_connection
 from app.event_inventory import EventInventoryError, scan_event_inventory
 from app.sort_plan import _reapply_physical_event_prefix
 from app.workspace_layout import WorkspaceLayoutError, shared_work_root
+from app.root_operations import RootOperationBusy
 from app.trash import reconcile_trash_inventory
 
 
@@ -71,6 +72,8 @@ def refresh_live_event_inventories(
             )
             refreshed[current_event_id] = dict(inventory.get("summary") or {})
         except (EventInventoryError, WorkspaceLayoutError, OSError) as error:
+            if isinstance(error.__cause__, RootOperationBusy):
+                raise error.__cause__ from None
             # Ein angewendetes Ereignis kann vom Benutzer bereits vollständig
             # ins Archiv verschoben worden sein. In diesem Sonderfall wird das
             # Archiv read-only gescannt, damit reconcile_missing_files den
