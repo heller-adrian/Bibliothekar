@@ -258,7 +258,7 @@ def instrument(kind):
         hook(ts,'_move_checked','trash.stage1',nth=1);hook(ts,'_purge_selected','trash.db1',nth=1);hook(ts,'_purge_selected','trash.db2',nth=2)
         hook(ts,'_atomic_json','trash.prepared',predicate=lambda p,v:v.get('state')=='prepared')
         hook(ts,'_atomic_json','trash.committed',predicate=lambda p,v:v.get('state')=='committed')
-        hook(Path,'unlink','trash.cleanup1',predicate=lambda p,*a,**kw:'.trash-deletions' in str(p) and p.name=='A.JPG')
+        hook(ts.trash_fd,'unlink','trash.cleanup1',predicate=lambda p,*a,**kw:'.trash-deletions' in str(p) and p.name=='A.JPG')
         hook(ts,'_restore_catalogue','trash.recover_db1',nth=1)
         hook(ts,'_return_checked','trash.recover_file1',nth=1)
         hook(ts,'_remove_empty_staging','trash.recover_cleanup')

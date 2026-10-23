@@ -424,15 +424,28 @@ def purge_trash_database(database_path: Path) -> dict[str, int]:
 
 
 def _remove_tree_without_following_links(path: Path) -> None:
-    info = os.lstat(path)
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-        validate_active_roots()
-        path.unlink()
-        return
-    for entry in os.scandir(path):
-        _remove_tree_without_following_links(Path(entry.path))
-    validate_active_roots()
-    path.rmdir()
+    from app import trash_fd
+    with trash_fd.parent(path) as (parent_fd, name, check):
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if stat.S_ISLNK(info.st_mode):
+            validate_active_roots(); check()
+            os.unlink(name, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+            return
+        if not stat.S_ISDIR(info.st_mode):
+            validate_active_roots(); check()
+            trash_fd.unlink(path)
+            return
+        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+        try:
+            if trash_fd.identity(os.fstat(fd)) != trash_fd.identity(info):
+                raise TrashError('Papierkorbverzeichnis während der Löschung verändert.')
+            for entry in os.listdir(fd):
+                _remove_tree_without_following_links(path / entry)
+            validate_active_roots(); check()
+            trash_fd.rmdir(path)
+        finally:
+            os.close(fd)
 
 
 @protect(workspace_arg='workspace_root', database_arg='None', kind='trash', error_type=TrashError)
@@ -464,7 +477,8 @@ def empty_trash_filesystem(workspace_root: Path) -> dict[str, int]:
         result = delete_selected_trash_files(databases, workspace_root, paths) if paths else {'deleted_file_count': 0}
         # Only remove empty directories. Never sweep a newly appeared file.
         for e in sorted((e for e in entries if e['entry_type'] == 'directory'), key=lambda e: len(Path(e['relative_path']).parts), reverse=True):
-            try: (root / e['relative_path']).rmdir()
+            from app import trash_fd
+            try: trash_fd.rmdir(root / e['relative_path'])
             except FileNotFoundError: pass
         if any(root.iterdir()):
             raise TrashError("Papierkorb ist nicht vollständig leer; übrige Einträge bleiben erhalten.")

@@ -1,6 +1,7 @@
 """Focused fault injection for the four audited 0.56.2 corrections."""
 from pathlib import Path
 import json
+import os
 import sqlite3
 import threading
 
@@ -169,7 +170,7 @@ def test_journal_replace_failure_retains_previous_durable_record(tmp_path, monke
     path = tmp_path/'journal.json'
     ts._atomic_json(path, {'state':'prepared'})
     with monkeypatch.context() as m:
-        m.setattr(ts.os, 'replace', lambda *_: (_ for _ in ()).throw(OSError('injected replace')))
+        m.setattr(ts.os, 'replace', lambda *_, **__: (_ for _ in ()).throw(OSError('injected replace')))
         with pytest.raises(OSError): ts._atomic_json(path, {'state':'committed'})
     assert json.loads(path.read_text()) == {'state':'prepared'}
     assert list(tmp_path.iterdir()) == [path]
@@ -358,11 +359,15 @@ def test_trash_recovery_handles_dual_copy_stage_boundary(tmp_path, monkeypatch, 
                 raise Interrupted()
             m.setattr(ts.os, 'link', stop)
         else:
-            real = Path.unlink
+            real = ts.os.unlink
+            parent_identity = (source.parent.stat().st_dev, source.parent.stat().st_ino)
             def stop(path, *a, **kw):
+                fd = kw.get('dir_fd')
+                is_source = (fd is not None and Path(path).name == source.name
+                             and (os.fstat(fd).st_dev, os.fstat(fd).st_ino) == parent_identity)
                 real(path, *a, **kw)
-                if path == source: raise Interrupted()
-            m.setattr(Path, 'unlink', stop)
+                if is_source: raise Interrupted()
+            m.setattr(ts.os, 'unlink', stop)
         with pytest.raises(Interrupted): ts.delete_selected_trash_files([db, other], workspace, ['A.JPG'])
     ts.recover_trash_deletions(workspace, allowed_databases={db, other})
     assert source.read_bytes() == payload
