@@ -4096,7 +4096,10 @@ EVENTS_HTML = r"""<!doctype html>
           releaseSortPreparation();
           sortPlanDialog.close();
         }
-        if (preparingArchived) changeRequestDialog.close();
+        if (preparingArchived) {
+          changeRequestSubtitle.textContent = "Der Löschauftrag konnte nicht vorbereitet werden.";
+          changeRequestBody.textContent = error.message;
+        }
         statusElement.classList.remove("bk-loading-status");
         throw error;
       }

@@ -22,6 +22,7 @@ from app.metadata import (
     MetadataError,
     analyze_tree,
     classify_media,
+    LOCAL_TIMEZONE,
     parse_exiftool_datetime,
 )
 from app.storage_config import storage_paths
@@ -1111,7 +1112,7 @@ def _normalize_manual_datetime(value: Any) -> str:
     if parsed.year < 1905 or parsed.year > 2200:
         raise MetadataCorrectionError("Datum liegt außerhalb des zulässigen Bereichs.")
     validate_active_roots()
-    return parsed.replace(tzinfo=None, microsecond=0).isoformat(timespec="seconds")
+    return parsed.replace(microsecond=0).isoformat(timespec="seconds")
 
 
 def _find_scan_record(
@@ -1224,7 +1225,7 @@ def create_metadata_correction(
                 for item in (row.get("metadata_candidates") or [])
                 if str(item.get("tag_name") or "") == verified_source_tag
                 and bool(item.get("usable"))
-                and str(item.get("normalized_datetime") or "")[:19] == proposed
+                and str(item.get("normalized_datetime") or "")[:19] == proposed[:19]
             ),
             None,
         )
@@ -1232,6 +1233,10 @@ def create_metadata_correction(
             raise MetadataCorrectionError(
                 "Der gewählte Metadaten-Quelltyp passt nicht mehr zum aktuellen Dateibestand."
             )
+        # The UI submits the chosen wall clock plus its source tag. Preserve
+        # that candidate's explicit offset, including deliberately selected low
+        # confidence filesystem dates. A freely edited time uses local time.
+        proposed = _normalize_manual_datetime(candidate["normalized_datetime"])
         source_kind = "metadata"
     elif filename_hint and filename_hint.get("datetime") == proposed:
         source_kind = "filename"
@@ -1381,6 +1386,12 @@ def _exiftool_value(value: str) -> str:
 
 def write_metadata_datetime(path: Path, media_type: str, value: str) -> None:
     stamp = _exiftool_value(value)
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=LOCAL_TIMEZONE)
+    offset = parsed.strftime("%z")
+    offset = offset[:3] + ":" + offset[3:]
+    zoned_stamp = stamp + offset
     command = ["exiftool", "-overwrite_original_in_place"]
 
     if media_type == "video":
@@ -1391,21 +1402,24 @@ def write_metadata_datetime(path: Path, media_type: str, value: str) -> None:
         ]
     elif media_type == "xmp":
         command += [
-            f"-XMP-exif:DateTimeOriginal={stamp}",
-            f"-XMP-xmp:CreateDate={stamp}",
-            f"-XMP-xmp:ModifyDate={stamp}",
+            f"-XMP-exif:DateTimeOriginal={zoned_stamp}",
+            f"-XMP-xmp:CreateDate={zoned_stamp}",
+            f"-XMP-xmp:ModifyDate={zoned_stamp}",
         ]
     else:
         command += [
             f"-EXIF:DateTimeOriginal={stamp}",
             f"-EXIF:CreateDate={stamp}",
             f"-EXIF:ModifyDate={stamp}",
+            f"-EXIF:OffsetTimeOriginal={offset}",
+            f"-EXIF:OffsetTimeDigitized={offset}",
+            f"-EXIF:OffsetTime={offset}",
             # Stills can carry a second high-confidence timestamp in XMP.
             # Normalize it together with EXIF so a previously conflicting
             # Prüffall cannot remain conflicting after a manual correction.
-            f"-XMP-exif:DateTimeOriginal={stamp}",
-            f"-XMP-xmp:CreateDate={stamp}",
-            f"-XMP-xmp:ModifyDate={stamp}",
+            f"-XMP-exif:DateTimeOriginal={zoned_stamp}",
+            f"-XMP-xmp:CreateDate={zoned_stamp}",
+            f"-XMP-xmp:ModifyDate={zoned_stamp}",
         ]
 
     command.append(str(path))
@@ -1428,6 +1442,9 @@ def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
         "-CreateDate",
         "-ModifyDate",
         "-CreationDate",
+        "-OffsetTimeOriginal",
+        "-OffsetTimeDigitized",
+        "-OffsetTime",
         str(path),
     ]
     result = subprocess.run(command, check=False, capture_output=True, text=True)
@@ -1445,22 +1462,40 @@ def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
         raise MetadataCorrectionError("Keine Metadaten nach dem Schreiben gefunden.")
 
     expected_second = expected[:19]
+    expected_time = datetime.fromisoformat(expected)
+    if expected_time.tzinfo is None:
+        expected_time = expected_time.replace(tzinfo=LOCAL_TIMEZONE)
+    offsets = {str(key).rsplit(":", 1)[-1]: str(value)
+               for key, value in data[0].items() if str(key).startswith("EXIF:")}
+    timestamp_offsets = {"DateTimeOriginal": "OffsetTimeOriginal",
+                         "CreateDate": "OffsetTimeDigitized", "ModifyDate": "OffsetTime"}
+    mismatches: list[str] = []
     matches: list[dict[str, str]] = []
     observed: list[dict[str, str]] = []
     for tag, raw in data[0].items():
         if tag == "SourceFile" or raw is None:
             continue
+        name = str(tag).rsplit(":", 1)[-1]
+        if name not in {"DateTimeOriginal", "CreateDate", "ModifyDate", "CreationDate"}:
+            continue
         raw_text = str(raw)
+        if str(tag).startswith("EXIF:") and not re.search(r"(?:Z|[+-]\d{2}:\d{2})$", raw_text):
+            raw_text += offsets.get(timestamp_offsets.get(name, ""), "")
         parsed = parse_exiftool_datetime(raw_text)
         if parsed is None:
             continue
         validate_active_roots()
-        normalized = parsed.replace(tzinfo=None).isoformat(timespec="seconds")
+        normalized = parsed.isoformat(timespec="seconds")
         observed.append({"tag": str(tag), "value": normalized})
-        if normalized[:19] == expected_second:
+        # Keep the pre-existing video/container wall-clock contract; this
+        # correction concerns the coupled EXIF/XMP still-image timestamps.
+        if (parsed.replace(tzinfo=None).isoformat(timespec="seconds")[:19] == expected_second
+                if classify_media(path) == "video" else parsed == expected_time):
             matches.append({"tag": str(tag), "value": normalized})
+        else:
+            mismatches.append(str(tag))
 
-    if not matches:
+    if not matches or (mismatches and classify_media(path) != "video"):
         raise MetadataCorrectionError(
             "Die geschriebenen Aufnahmeinformationen konnten nicht bestätigt werden."
         )

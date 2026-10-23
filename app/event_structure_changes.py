@@ -8,16 +8,18 @@ in the archive and the live inventory still matches.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager, ExitStack
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 import hashlib
 import json
 import os
+import stat
 import uuid
 
 from app.database import database_connection
-from app.event_access import event_file_rows
+from app.event_access import event_file_rows, event_source_jobs
 from app.event_leaf_layouts import leaf_descriptors, stored_leaf_layouts, validate_leaf_choices, save_leaf_layouts
 from app.event_inventory import scan_event_inventory, EventInventoryError
 from app.event_layout import get_event_layout, layout_paths, layout_role_paths, update_event_layout
@@ -1952,6 +1954,8 @@ def prepare_archived_structure_change(
     if selected_leaves:
         document["leaf_folder_layouts"] = selected_leaves
     document["structure"] = _tree_text(detected.get("observed_directories") or [])
+    if detected.get("root_rename"):
+        document["event"] = {**document["event"], "folder_name": detected["root_rename"]["new_folder"]}
     if app_version:
         document["source_app_version"] = app_version
         document["generated_at"] = now
@@ -1982,8 +1986,100 @@ def prepare_archived_structure_change(
         "event_id": str(row["event_id"]),
         "prepared_event_json_path": str(prepared),
         "prepared_event_json_sha256": digest,
-        "archive_target_relative_path": f"{year}/{folder}/{EVENT_DOCUMENT_FILENAME}",
+        "archive_target_relative_path": str((detected.get("root_rename") or {}).get("new_path") or f"{year}/{folder}") + "/" + EVENT_DOCUMENT_FILENAME,
     }
+
+
+@contextmanager
+def _bound_archive_document(archive_root: Path, event: Any, detected: dict[str, Any]):
+    """Bind the prepared, unique event document to no-follow directory FDs.
+
+    Identity alone never authorizes adoption: the exact prepared document and
+    the unchanged, hash-verified family inventory are required by the caller.
+    Keep the bindings alive until its SQLite commit, rejecting replacements.
+    """
+    year = str(event["start_datetime"] or "")[:4]
+    expected = _safe_rel((detected.get("root_rename") or {}).get("new_path")
+                         or f"{year}/{event['folder_name']}")
+    if len(PurePosixPath(expected).parts) != 2 or PurePosixPath(expected).parts[0] != year:
+        raise EventStructureChangeError("Der vorbereitete Archivpfad ist ungültig.")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as stack:
+        def opened(name: str, parent: int | None, directory: bool = True) -> int:
+            fd = os.open(name, flags if directory else os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=parent)
+            stack.callback(os.close, fd)
+            return fd
+
+        bindings = []
+        def bound(name: str, parent: int, directory: bool = True) -> int:
+            fd = opened(name, parent, directory)
+            bindings.append((parent, name, fd))
+            return fd
+
+        try:
+            parent = opened("/", None)
+            for part in Path(archive_root).absolute().parts[1:]:
+                parent = bound(part, parent)
+            year_fd = bound(year, parent)
+            matches = []
+            for name in os.listdir(year_fd):
+                info = os.stat(name, dir_fd=year_fd, follow_symlinks=False)
+                if not stat.S_ISDIR(info.st_mode):
+                    continue
+                # Close unrelated candidates immediately: a large archive
+                # must not consume one open FD per event until commit.
+                with ExitStack() as candidate:
+                    candidate_fd = os.open(name, flags, dir_fd=year_fd)
+                    candidate.callback(os.close, candidate_fd)
+                    try:
+                        doc_fd = os.open(EVENT_DOCUMENT_FILENAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                         dir_fd=candidate_fd)
+                    except FileNotFoundError:
+                        continue
+                    candidate.callback(os.close, doc_fd)
+                    info = os.fstat(doc_fd)
+                    if not stat.S_ISREG(info.st_mode):
+                        raise EventStructureChangeError("Die event.json ist keine reguläre Datei.")
+                    with os.fdopen(os.dup(doc_fd), "rb") as stream:
+                        content = stream.read()
+                    try:
+                        payload = json.loads(content)
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                    if not isinstance(payload, dict) or not isinstance(payload.get("event"), dict):
+                        continue
+                    if str(payload["event"].get("id") or "") == str(event["id"]):
+                        matches.append((name, candidate_fd, doc_fd, content, info))
+                        stack.enter_context(candidate.pop_all())
+            if not matches:
+                raise EventStructureChangeError("Die event.json im Archiv entspricht noch nicht der vorbereiteten Datei.")
+            if len(matches) != 1:
+                raise EventStructureChangeError("Der Archiv-Ereignisordner ist nicht eindeutig nachgewiesen.")
+            name, folder_fd, doc_fd, content, document_info = matches[0]
+            prefix = f"{year}/{name}"
+            if prefix != expected:
+                raise EventStructureChangeError("Der Archivpfad hat sich seit der Vorschau verändert.")
+            bindings.extend([(year_fd, name, folder_fd), (folder_fd, EVENT_DOCUMENT_FILENAME, doc_fd)])
+            actual_sha = hashlib.sha256(content).hexdigest()
+            if not detected.get("prepared_event_json_sha256") or actual_sha != detected["prepared_event_json_sha256"]:
+                raise EventStructureChangeError("Die event.json im Archiv entspricht noch nicht der vorbereiteten Datei.")
+
+            def validate_binding():
+                for parent_fd, entry, fd in bindings:
+                    actual = os.stat(entry, dir_fd=parent_fd, follow_symlinks=False)
+                    held = os.fstat(fd)
+                    if (actual.st_dev, actual.st_ino, actual.st_mode) != (held.st_dev, held.st_ino, held.st_mode):
+                        raise EventStructureChangeError("Die Archiv-Pfadbindung wurde verändert.")
+                after = os.fstat(doc_fd)
+                if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (
+                    document_info.st_size, document_info.st_mtime_ns, document_info.st_ctime_ns
+                ):
+                    raise EventStructureChangeError("Die event.json wurde während der Prüfung verändert.")
+            validate_binding()
+            yield prefix, actual_sha, validate_binding, json.loads(content)
+        except OSError as error:
+            raise EventStructureChangeError("Der Archivpfad ist nicht sicher lesbar: " + str(error)) from error
 
 
 def verify_archived_structure_change(
@@ -2010,47 +2106,55 @@ def verify_archived_structure_change(
         ).fetchone()
         if event is None:
             raise EventStructureChangeError("Das archivierte Ereignis fehlt.")
-    year = str(event["start_datetime"] or "")[:4]
-    target = Path(archive_root) / year / str(event["folder_name"]) / EVENT_DOCUMENT_FILENAME
-    if not target.is_file() or target.is_symlink():
-        raise EventStructureChangeError("Die neue event.json wurde im Archiv noch nicht gefunden.")
-    actual_sha = hashlib.sha256(target.read_bytes()).hexdigest()
-    expected_sha = str(detected.get("prepared_event_json_sha256") or "")
-    if not expected_sha or actual_sha != expected_sha:
-        raise EventStructureChangeError("Die event.json im Archiv entspricht noch nicht der vorbereiteten Datei.")
-
-    inventory = scan_event_inventory(
-        database_path,
-        archive_root,
-        str(row["job_id"]),
-        str(row["event_id"]),
-        root_kind="camera_archive",
-        persist=True,
-        update_known_file_locations=False,
-        fast_refresh=False,
-    )
-    with database_connection(database_path) as connection:
-        event_now, layout_now = _event_state(connection, str(row["event_id"]))
-        current = _snapshot_from_inventory(connection, event_now, layout_now, "camera_archive")
-        if str(current.get("signature") or "") != str(detected.get("signature") or ""):
-            raise EventStructureChangeError(
-                "Der Archivbestand hat sich seit der Vorschau erneut verändert. Bitte die Aufgabe neu prüfen."
+    with _bound_archive_document(archive_root, event, detected) as (prefix, actual_sha, validate_binding, document):
+        inventory = scan_event_inventory(
+            database_path,
+            archive_root,
+            str(row["job_id"]),
+            str(row["event_id"]),
+            root_kind="camera_archive",
+            persist=True,
+            update_known_file_locations=False,
+            fast_refresh=False,
+            event_prefix_override=prefix,
+        )
+        with database_connection(database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            event_now, layout_now = _event_state(connection, str(row["event_id"]))
+            current = _snapshot_from_inventory(connection, event_now, layout_now, "camera_archive")
+            if str(current.get("signature") or "") != str(detected.get("signature") or ""):
+                raise EventStructureChangeError(
+                    "Der Archivbestand hat sich seit der Vorschau erneut verändert. Bitte die Aufgabe neu prüfen."
+                )
+            if current.get("blocked") or current.get("root_rename") != detected.get("root_rename"):
+                raise EventStructureChangeError("Die Ereignisidentität oder Dateifamilien sind nicht mehr eindeutig.")
+            owned = {int(item["id"]): (item["family_id"], str(item["sha256_current"] or item["sha256_original"] or ""))
+                     for item in event_file_rows(connection, str(row["event_id"]))}
+            documented = {int(item["known_file_id"]): (item.get("family_id"), str(item.get("sha256") or ""))
+                          for item in document.get("files", []) if item.get("known_file_id") is not None}
+            if not owned or owned != documented or {
+                str(item["job_id"]) for item in event_source_jobs(connection, str(row["event_id"]))
+            } != {str(item["job_id"]) for item in document.get("source_jobs", [])}:
+                raise EventStructureChangeError("Herkunft oder Dateifamilien stimmen nicht mit der vorbereiteten event.json überein.")
+            validate_binding()
+            pending = connection.execute("SELECT status,detected_json FROM event_structure_changes WHERE id=?", (change_id,)).fetchone()
+            if pending is None or pending["status"] != "prepared" or pending["detected_json"] != row["detected_json"]:
+                raise EventStructureChangeError("Die Strukturänderung wurde inzwischen bearbeitet.")
+            layout_state = _apply_confirmed_state(
+                connection,
+                row,
+                input_path=str(row.get("proposed_input_path") or ""),
+                input_paths=detected.get("selected_leaf_input_paths"),
+                now=now,
             )
-        connection.execute("BEGIN IMMEDIATE")
-        layout_state = _apply_confirmed_state(
-            connection,
-            row,
-            input_path=str(row.get("proposed_input_path") or ""),
-            input_paths=detected.get("selected_leaf_input_paths"),
-            now=now,
-        )
-        connection.execute(
-            """UPDATE event_structure_changes
-               SET status='completed',updated_at=?,completed_at=?,error_message=NULL
-               WHERE id=?""",
-            (now, now, change_id),
-        )
-        connection.commit()
+            connection.execute(
+                """UPDATE event_structure_changes
+                   SET status='completed',updated_at=?,completed_at=?,error_message=NULL
+                   WHERE id=?""",
+                (now, now, change_id),
+            )
+            validate_binding()
+            connection.commit()
 
     helper_cleanup = cleanup_completed_archived_structure_helpers(
         database_path,
