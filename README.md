@@ -1,6 +1,7 @@
 # Bibliothekar
 
-> Entwicklungsversion: **0.56.2** (Audit-Branch, noch keine stabile Freigabe). Der stabile Update-Kanal bleibt bis zur erfolgreichen Abnahme unverändert.
+> Release Candidate: **1.0.0-rc.1** – frische Testinstallation, keine stabile Freigabe. [Verbindliche RC-Installationsanleitung](docs/rc1/INSTALL-TRUENAS.md) und [manuelle Abnahme](docs/rc1/MANUAL-ACCEPTANCE.md). Der stabile Update-Kanal bleibt unverändert.
+> Die folgenden älteren Entwicklungsabschnitte sind historisch; für diesen RC gelten die oben verlinkten festen englischen Verwaltungsnamen und Mountregeln.
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 

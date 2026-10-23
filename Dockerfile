@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
 
 ENV \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -28,11 +28,13 @@ LABEL org.opencontainers.image.revision="${SOURCE_REVISION}"
 WORKDIR /opt/kamera
 
 COPY requirements.txt /opt/kamera/requirements.txt
+COPY requirements-rc.constraints.txt /opt/kamera/requirements-rc.constraints.txt
 
 RUN pip install \
         --no-cache-dir \
         --disable-pip-version-check \
-        -r /opt/kamera/requirements.txt
+        -r /opt/kamera/requirements.txt \
+        -c /opt/kamera/requirements-rc.constraints.txt
 
 COPY app /opt/kamera/app
 
