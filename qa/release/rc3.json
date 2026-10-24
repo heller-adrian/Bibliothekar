@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0-rc.3",
+  "accepted_base": "87a6ddb15fb495138e33f98ab9e68f96a883ae63",
+  "accepted_packages": [
+    "40b97622ba8f89af5db771d2694ae9688cb6c448",
+    "1fae16709bf262b82429c3d3d0980f05f2b77ca0",
+    "d02e2a4a88f4100036b5c17a8f03f26811e31c30",
+    "6e22db2162858f5787e4657c3f040f77cc02c447",
+    "fca566ee2c3c4820bab2c29bebe3790627c90416"
+  ],
+  "platform": "linux/amd64",
+  "publication_authorized": false
+}
