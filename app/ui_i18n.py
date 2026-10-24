@@ -1374,6 +1374,10 @@ UI_PATTERNS.extend([
 
 UI_TRANSLATIONS["Erneut prüfen"] = "Check Again"
 
+from app.ui_i18n_rc1 import RC1_TRANSLATIONS, RC1_PATTERNS
+UI_TRANSLATIONS.update(RC1_TRANSLATIONS)
+UI_PATTERNS.extend(RC1_PATTERNS)
+
 I18N_UI_JS = r"""
 (function () {
   "use strict";

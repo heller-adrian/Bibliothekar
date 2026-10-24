@@ -1391,7 +1391,16 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
-  </style>
+  /* RC1: keep matching suggestions compact on phones; details remain available. */
+@media(max-width:820px){
+  .suggestions-panel{padding:12px}
+  .suggestions-panel h2{font-size:1rem;line-height:1.3;margin:0 0 8px}
+  .suggestion-card{padding:10px;gap:8px}
+  .suggestion-head{gap:6px;flex-wrap:wrap}
+  .suggestion-meta{font-size:.8rem;gap:6px}
+  .suggestion-help{font-size:.85rem;margin-bottom:10px}
+}
+</style>
 </head>
 
 <body>
@@ -1451,7 +1460,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     <section id="event-suggestions-panel" class="card suggestions-panel" hidden>
       <h2>Neue Aufnahmen passen zu bestehenden Ereignissen</h2>
-      <p class="muted">Die Aufnahmezeiten passen eindeutig zu bereits vorhandenen Ereignissen. Erst nach deiner Bestätigung werden die neuen Aufnahmen sicher zum passenden Ereignis hinzugefügt.</p>
+      <details class="suggestion-help"><summary>Wie werden passende Ereignisse erkannt?</summary><p class="muted">Die Aufnahmezeiten passen eindeutig zu bereits vorhandenen Ereignissen. Erst nach deiner Bestätigung werden die neuen Aufnahmen sicher zum passenden Ereignis hinzugefügt.</p></details>
       <div id="event-suggestion-list" class="suggestion-list"></div>
       <p id="event-suggestion-status" class="muted" role="status" aria-live="polite"></p>
     </section>
@@ -2094,6 +2103,15 @@ WORKSPACE_HTML = r"""<!doctype html>
     let jobs = [];
     let workspace = null;
     let selectedJobIds = new Set();
+    let allActiveBackups = true;
+    const backupSelectionKey="bk-backup-selection:"+(window.__bkLibraryId||"main");
+    try {
+      const saved=JSON.parse(sessionStorage.getItem(backupSelectionKey)||"null");
+      if(saved && typeof saved.allActive==="boolean" && Array.isArray(saved.ids)){
+        allActiveBackups=saved.allActive;
+        selectedJobIds=new Set(saved.ids.filter(id=>typeof id==="string"));
+      }
+    } catch (_) {}
     let selectedDays = new Set();
     let lastSelectedDayKey = null;
     let selectedPreviewEventId = null;
@@ -2702,6 +2720,17 @@ WORKSPACE_HTML = r"""<!doctype html>
       };
     }
 
+    function refreshBackupSelection(availableJobs) {
+      selectedJobIds = allActiveBackups
+        ? new Set(availableJobs.filter(job=>job.workflow_status!=="archived").map(job=>job.id))
+        : new Set([...selectedJobIds].filter(id=>availableJobs.some(job=>job.id===id)));
+    }
+
+    function saveBackupSelection() {
+      try { sessionStorage.setItem(backupSelectionKey,JSON.stringify({allActive:allActiveBackups,ids:[...selectedJobIds]})); }
+      catch (_) {}
+    }
+
     async function loadJobs({physicalRefresh=false}={}) {
       const cacheKey = "bk-workspace-jobs-0452:" + (window.__bkLibraryId || "main");
       if (!jobs.length) {
@@ -2709,7 +2738,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           const saved = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
           if (Array.isArray(saved?.jobs)) {
             jobs = saved.jobs.filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0));
-            selectedJobIds = new Set(jobs.filter(job => job.workflow_status !== "archived").map(job => job.id));
+            refreshBackupSelection(jobs);
             updateTechnicalAnchor(); renderBackupFilter();
             const ids = [...selectedJobIds];
             const snapshotKey = "bk-workspace-0452:" + (window.__bkLibraryId || "main") + ":" + ids.map(encodeURIComponent).join(",");
@@ -2724,18 +2753,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       if (!workspace?.statistics) setStatus("Arbeitsbestände werden geladen …");
       const data = await getJson("/api/jobs");
       try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch (_) {}
-      const previous = new Set(selectedJobIds);
 
       jobs = (data.jobs || [])
         .filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0))
         .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
 
-      const active=jobs.filter(job=>job.workflow_status!=="archived");
-      if(previous.size){
-        selectedJobIds=new Set([...previous].filter(id=>jobs.some(job=>job.id===id)));
-      }else{
-        selectedJobIds=new Set(active.map(job=>job.id));
-      }
+      refreshBackupSelection(jobs);
+      saveBackupSelection();
 
       const requestedJob=new URLSearchParams(location.search).get("job");
       if(requestedJob && jobs.some(job=>job.id===requestedJob)){
@@ -2754,6 +2778,18 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       await loadWorkspace({physicalRefresh});
     }
+
+    let observedImports=null, refreshingAfterImport=false;
+    window.addEventListener("bk-activity-updated", async event => {
+      const active=new Set((event.detail||[]).filter(item=>["import","trash_restore"].includes(item.kind)&&item.active).map(item=>item.id));
+      const finished=observedImports && [...observedImports].some(id=>!active.has(id));
+      observedImports=active;
+      if(finished && !refreshingAfterImport){
+        refreshingAfterImport=true;
+        try { await loadJobs(); } catch(error) { setStatus(error.message,true); }
+        finally { refreshingAfterImport=false; }
+      }
+    });
 
     async function loadWorkspace({physicalRefresh=false}={}) {
       if (!globalFolderLayout) {
@@ -2838,8 +2874,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         card.innerHTML = `
           <div class="suggestion-head">
             <div>
-              <div class="suggestion-title">${Number(item.family_count || familyIds.length)} neue Familien passen zu ${escapeHtml(item.target_name)}</div>
-              <div class="muted">Diese neuen Aufnahmen liegen vollständig im Zeitraum des bestehenden Ereignisses · Herkunft: ${escapeHtml(item.source_label || "Sicherung")}.</div>
+              <div class="suggestion-title">${Number(item.family_count || familyIds.length)} neue Familien passen zu <span data-bk-preserve-language>${escapeHtml(item.target_name)}</span></div>
             </div>
             <span class="badge ${item.target_status === "archived" ? "warning" : "success"}">${escapeHtml(statusText)}</span>
           </div>
@@ -2849,6 +2884,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           </div>
           <details class="suggestion-files">
             <summary>Vorschau und Wirkung</summary>
+            <p>Diese neuen Aufnahmen liegen vollständig im Zeitraum des bestehenden Ereignisses · Herkunft: <span data-bk-preserve-language>${escapeHtml(item.source_label || "Sicherung")}</span>.</p>
             <p>${escapeHtml(consequence)}</p>
             <ul>${familyRows}</ul>
             <code>${escapeHtml(item.target_folder_name || "")}</code>
@@ -3014,8 +3050,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       const physical=data?.physical_state||{};
       const available=physical.available===true;
-      const actualTree=available
-        ? String(physical.tree_text||bk0511PreviewLabel("(keine Unterordner gefunden)","(no subfolders found)"))
+      const planned = !["applied", "archived"].includes(event.status);
+      const actualTree=planned ? String(data.structure_text || "") : available
+        ? String(physical.event_prefix || event.folder_name || "") + "/\n" + String(physical.tree_text||bk0511PreviewLabel("(keine Unterordner gefunden)","(no subfolders found)"))
         : String(physical.reason||bk0511PreviewLabel("Physischer Bestand nicht prüfbar","Physical inventory unavailable"));
       const observedPaths=new Set(physical.directories||[]);
       const removed=(physical.directory_removed||[]).filter(path=>!observedPaths.has(String(path)));
@@ -3030,7 +3067,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       structurePreview.innerHTML =
         `<div class="preview-root-title" data-bk-preserve-language>${escapeHtml(event.name || "Gespeichertes Ereignis")}</div>`
         + `<div class="stored-preview-meta">${details.join("")}</div>`
-        + `<div class="stored-preview-meta"><strong>${bk0511PreviewLabel("Physischer IST-Bestand","Physical actual inventory")}</strong></div>`
+        + `<div class="stored-preview-meta"><strong>${planned ? bk0511PreviewLabel("Geplante Zielstruktur","Planned target structure") : bk0511PreviewLabel("Physischer IST-Bestand","Physical actual inventory")}</strong></div>`
         + `<pre class="structure-lines">${escapeHtml(actualTree)}</pre>`
         + note;
       previewBody.hidden = false;
@@ -4696,9 +4733,11 @@ WORKSPACE_HTML = r"""<!doctype html>
     function onBackupFilterChange(event){
       const checkbox=event.target.closest("input[data-backup-filter-job]");
       if(!checkbox)return;
+      allActiveBackups=false;
       const id=String(checkbox.dataset.backupFilterJob||"");
       if(checkbox.checked)selectedJobIds.add(id);
       else selectedJobIds.delete(id);
+      saveBackupSelection();
       updateTechnicalAnchor(jobSelect.value);
       renderBackupFilter();
       loadWorkspace().catch(error=>setStatus(error.message,true));
@@ -4706,14 +4745,18 @@ WORKSPACE_HTML = r"""<!doctype html>
     backupFilterActiveList.addEventListener("change",onBackupFilterChange);
     backupFilterArchivedList.addEventListener("change",onBackupFilterChange);
     backupFilterAll.addEventListener("click",()=>{
+      allActiveBackups=true;
       selectedJobIds=new Set(jobs.filter(job=>job.workflow_status!=="archived").map(job=>job.id));
+      saveBackupSelection();
       backupFilterArchived.open=false;
       updateTechnicalAnchor();
       renderBackupFilter();
       loadWorkspace().catch(error=>setStatus(error.message,true));
     });
     backupFilterNone.addEventListener("click",()=>{
+      allActiveBackups=false;
       selectedJobIds.clear();
+      saveBackupSelection();
       updateTechnicalAnchor();
       renderBackupFilter();
       loadWorkspace().catch(error=>setStatus(error.message,true));

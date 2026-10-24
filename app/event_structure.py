@@ -63,19 +63,19 @@ def _clean_name(
             f"{field_name} fehlt."
         )
 
-    forbidden = {
-        "/",
-        "\\",
-        "\0",
-    }
+    # Validate new planning input only. Persisted historical folder names are
+    # never rewritten by this check.
+    forbidden = set('<>:"/\\|?*')
 
-    if any(
-        character in name
-        for character in forbidden
-    ):
+    if (any(character in name for character in forbidden)
+        or any(ord(character) < 32 or ord(character) == 127 for character in name)
+        or name.endswith('.')
+        or name.split('.')[0].upper() in {'CON', 'PRN', 'AUX', 'NUL',
+            *(f'COM{i}' for i in range(1, 10)), *(f'LPT{i}' for i in range(1, 10))}):
         raise EventPreviewError(
             f"{field_name} enthält ein "
-            "unzulässiges Zeichen."
+            'für SMB unzulässiges Zeichen oder einen reservierten Ordnernamen. '
+            'Bitte <>:"/\\|?*, Steuerzeichen und abschließende Punkte vermeiden.'
         )
 
     return name
@@ -686,4 +686,3 @@ def build_event_preview(
         "structure_lines": lines,
         "structure_text": "\n".join(lines),
     }
-

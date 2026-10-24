@@ -43,17 +43,10 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
 .multi-preview{display:grid;gap:8px;margin-top:12px}
 .multi-preview-row{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(130px,.8fr) auto minmax(130px,.8fr);gap:10px;align-items:center;border:1px solid var(--bk-line,#ccd2d8);border-radius:10px;padding:9px 11px}
 .multi-offset{font-variant-numeric:tabular-nums}
-@media(min-width:821px){
-  #meta-detail-card,
-  #multi-detail-card{
-    position:sticky;
-    top:calc(var(--bk-secondary-sticky-bottom,141px) + 12px);
-    max-height:calc(100dvh - var(--bk-secondary-sticky-bottom,141px) - 24px);
-    overflow:auto;
-    overscroll-behavior:contain;
-    scrollbar-gutter:stable;
-  }
-}
+/* Expanded metadata uses the page's scroll chain, without a nested sticky
+   viewport trapping the final fields/buttons. Mobile sheets keep one scroller. */
+#meta-detail-card,#multi-detail-card{position:static;max-height:none;overflow:visible;min-width:0}
+.meta-kv>*{min-width:0;overflow-wrap:anywhere}
 @media(max-width:820px){.multi-preview-row{grid-template-columns:1fr}.multi-preview-row .arrow{display:none}}
 @media(max-width:820px){main{padding:14px 14px 60px}.meta-grid{grid-template-columns:1fr;gap:18px}.meta-kv{grid-template-columns:105px minmax(0,1fr)}.meta-card{padding:14px}.meta-paths{font-size:.78rem}}
 </style>
@@ -279,7 +272,13 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     return String(candidate?.source_type||candidate?.tag_name||"").split(":").pop();
   }
   function candidateLabel(candidate){
-    return String(candidate?.label_de||candidateSourceType(candidate)||"Metadaten");
+    const label=String(candidate?.label_de||candidateSourceType(candidate)||"Metadaten");
+    return window.BibliothekarI18n?.getLocale?.()==="de" ? label : (window.BibliothekarI18n?.t?.(label)||label);
+  }
+  function confidenceLabel(value){
+    const labels={high:"hoch",medium:"mittel",low:"niedrig",missing:"kein belastbares Datum"};
+    const label=labels[String(value)]||String(value||"");
+    return window.BibliothekarI18n?.getLocale?.()==="de" ? label : (window.BibliothekarI18n?.t?.(label)||label);
   }
   function candidateForType(file,type){
     return usableCandidates(file).find(candidate=>candidateSourceType(candidate)===type)||null;
@@ -305,11 +304,12 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   }
   function formatCandidate(candidate){
     if(!candidate)return "";
-    const trust=candidate.trust_label||candidate.confidence||"";
+    const rawTrust=candidate.trust_label||candidate.confidence||"";
+    const trust=window.BibliothekarI18n?.t?.(rawTrust)||rawTrust;
     return '<div class="meta-candidate"><div class="meta-candidate-head"><strong>'+esc(candidateLabel(candidate))+'</strong>'
       +'<button type="button" data-meta-use-candidate="'+esc(candidate.tag_name||"")+'">Übernehmen</button></div>'
       +'<span>'+esc(String(candidate.normalized_datetime||"").slice(0,19))+'</span>'
-      +'<small class="muted">Vertrauen: '+esc(trust)+(candidate.trust_score!==undefined?" · "+esc(candidate.trust_score)+"/100":"")+'</small>'
+      +'<small class="muted"><span>Vertrauen:</span> '+esc(trust)+(candidate.trust_score!==undefined?" · "+esc(candidate.trust_score)+"/100":"")+'</small>'
       +'<small class="muted"><code>'+esc(candidate.technical_tag||candidate.tag_name||"")+'</code></small></div>';
   }
   function configureArea(){
@@ -357,7 +357,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       : "";
     return '<div class="meta-file '+(state.selectionMode?"selectable ":"")+(state.selected===index?"active ":"")+(checked?"selected":"")+'" data-meta-file="'+index+'" data-bk-pwa-select="metadata-file" data-bk-pwa-key="'+esc(fileKey(file))+'" role="button" tabindex="0">'
       +checkbox
-      +'<span><strong>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+memberText+'</small>'
+      +'<span><strong data-bk-preserve-language>'+esc(file.filename)+'</strong><small class="muted"><span data-bk-preserve-language>'+esc(file.relative_path||"")+'</span>'+memberText+'</small>'
       +'<small class="muted">Aktuell: '+esc(file.selected_capture_time||"kein belastbares Datum")+'</small></span>'
       +'<span class="badge '+cls+'">'+esc(badge)+'</span></div>';
   }
@@ -558,7 +558,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       ? '<details><summary>Ursprüngliche Metadaten vor der Korrektur</summary><div class="meta-kv" style="margin-top:9px">'
         +'<span>Aufnahmezeit</span><span>'+esc(original.selected_capture_time||"nicht vorhanden")+'</span>'
         +'<span>Quelle</span><span>'+esc(original.selected_capture_source||"—")+'</span>'
-        +'<span>Vertrauen</span><span>'+esc(original.capture_time_confidence||"—")+'</span></div>'
+        +'<span>Vertrauen</span><span>'+esc(confidenceLabel(original.capture_time_confidence||"—"))+'</span></div>'
         +originalCandidateRows+'</details>'
       : "";
     const candidateBlock='<div><strong>Bevorzugter Metadatenkandidat</strong><div class="meta-candidate-list" style="margin-top:7px">'
@@ -577,8 +577,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       && ["high","medium"].includes(String(file.capture_time_confidence||""))
     ) ? '<button id="meta-general-reintegrate" type="button">In Tagesbestand übernehmen</button>' : "";
     $("meta-details").innerHTML='<div class="meta-form"><div class="meta-kv">'
-      +'<span>Datei</span><strong>'+esc(file.filename)+'</strong>'+familyLine
-      +'<span>Metadaten</span><span>'+esc(file.selected_capture_time||"kein belastbares Datum")+' · '+esc(file.capture_time_confidence||"")+'</span>'
+      +'<span>Datei</span><strong data-bk-preserve-language>'+esc(file.filename)+'</strong>'+familyLine
+      +'<span>Metadaten</span><span>'+esc(file.selected_capture_time||"kein belastbares Datum")+' · '+esc(confidenceLabel(file.capture_time_confidence||""))+'</span>'
       +'<span>Status</span><span>'+(ready?"korrigiert · wartet auf Einsortierung":"Prüfung/Korrektur erforderlich")+'</span>'
       +'<span>Dateiname</span><span>'+(filename?(esc(filename.date)+(filename.time?" "+esc(filename.time):" · Uhrzeit fehlt")):"kein Datum erkannt")+'</span></div>'
       +candidateBlock+originalBlock
@@ -735,7 +735,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     if(!tasks.length){host.innerHTML='<div class="muted">Keine offenen Metadatenaufträge.</div>';return;}
     host.innerHTML='<details><summary><strong>Offene Korrekturen · '+tasks.length+'</strong></summary>'
       +tasks.map(t=>'<div class="meta-task">'
-      +'<div><strong>'+esc(t.source_filename)+'</strong></div>'
+      +'<div><strong data-bk-preserve-language>'+esc(t.source_filename)+'</strong></div>'
       +'<div class="muted">'+esc(t.proposed_datetime||"")+'</div>'
       +(t.error_message?'<div class="danger">'+esc(t.error_message)+'</div>':'')
       +'<div class="meta-actions" style="margin-top:8px"><button class="primary" data-meta-apply="'+esc(t.id)+'">Jetzt ausführen</button>'
@@ -826,7 +826,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
         : '<span style="width:19px;text-align:center">'+(active?"●":"○")+'</span>';
       return '<div class="meta-file '+(state.multipleSelectionMode?"selectable ":"")+(active?"active ":"")+(quickSelected?"selected ":"")+'" data-multi-file="'+index+'" data-bk-pwa-select="metadata-multiple" data-bk-pwa-key="'+esc(file.relative_path||String(index))+'" role="button" tabindex="0">'
         +selector
-        +'<span><strong>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+'</small>'
+        +'<span><strong data-bk-preserve-language>'+esc(file.filename)+'</strong><small class="muted">'+esc(file.relative_path||"")+'</small>'
         +'<small class="muted">Aktuell: '+esc(file.selected_capture_time||"keine Aufnahmezeit")+'</small></span>'
         +'<span class="badge '+cls+'">'+esc(badge)+'</span></div>';
     }).join("")+'</div>';
@@ -916,9 +916,9 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const current=String(file.selected_capture_time||"");
     const date=current.slice(0,10),time=current.slice(11,19);
     $("multi-details").innerHTML='<div class="meta-form"><div class="meta-kv">'
-      +'<span>Datei</span><strong>'+esc(file.filename)+'</strong>'
+      +'<span>Datei</span><strong data-bk-preserve-language>'+esc(file.filename)+'</strong>'
       +'<span>Aktuell</span><span>'+esc(current||"keine Aufnahmezeit")+'</span>'
-      +'<span>Vertrauen</span><span>'+esc(file.capture_time_confidence||"")+'</span></div>'
+      +'<span>Vertrauen</span><span>'+esc(confidenceLabel(file.capture_time_confidence||""))+'</span></div>'
       +'<label><span>Tatsächliches Datum</span><input id="multi-date" type="date" value="'+esc(date)+'"></label>'
       +'<label><span>Tatsächliche Uhrzeit</span><input id="multi-time" type="time" step="1" value="'+esc(time)+'"></label>'
       +'<button id="multi-preview-button" type="button" class="primary">Vorschau berechnen</button></div>';

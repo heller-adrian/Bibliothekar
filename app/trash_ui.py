@@ -96,6 +96,7 @@ TRASH_HTML = r"""<!doctype html>
   const localError=raw=>{
     const value=String(raw||"");
     const prefixes={
+      "Datei keiner Sicherung zuzuordnen; Wiederherstellung nicht möglich:":"File has no backup provenance; restoration is not possible:",
       "Nicht katalogisierte Datei:":"Uncatalogued file:",
       "Größe oder Prüfsumme abweichend:":"Size or checksum mismatch:",
       "Zieldatei existiert bereits:":"Destination already exists:",

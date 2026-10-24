@@ -4319,6 +4319,8 @@ def api_source_folders(root_key: str = "nas", relative_path: str = ".") -> dict[
         current.relative_to(root)
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         raise HTTPException(status_code=404, detail="Ordner wurde nicht gefunden.") from error
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail="Keine Leseberechtigung für diesen NAS-Ordner. Bitte die Freigabe- und Durchquerungsrechte prüfen.") from error
     if not current.is_dir():
         raise HTTPException(status_code=422, detail="Pfad ist kein Ordner.")
     directories = []
@@ -4327,8 +4329,8 @@ def api_source_folders(root_key: str = "nas", relative_path: str = ".") -> dict[
             if child.name.startswith(".") or child.is_symlink() or not child.is_dir():
                 continue
             directories.append({"name": child.name, "relative_path": child.relative_to(root).as_posix()})
-    except PermissionError:
-        pass
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail="Keine Leseberechtigung für diesen NAS-Ordner. Bitte die Freigabe- und Durchquerungsrechte prüfen.") from error
     rel = current.relative_to(root)
     parent = None if not rel.parts else Path(*rel.parts[:-1]).as_posix() or "."
     return {
@@ -4862,7 +4864,7 @@ def api_archive_summary(force_refresh: bool = False) -> dict[str, Any]:
         cached = view_cache.get_snapshot(db_path, "archive", max_age_seconds=20)
         if cached is not None:
             return cached
-    result = list_archive_candidates(db_path, current_archive_root())
+    result = list_archive_candidates(db_path, current_archive_root(), observe_current=True)
     view_cache.put_snapshot(db_path, "archive", result)
     return result
 
@@ -5047,6 +5049,20 @@ def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
                         raise TrashError("Datei nicht im Papierkorb: "+rel)
                 ignored=[rel for rel in selected if should_ignore_source_relative(rel)]
                 requested=[rel for rel in selected if rel not in ignored]
+                # Restore is not an implicit import route for foreign files.
+                # Reject before queue/journal/staging mutations; known files
+                # still go through the existing checksum/provenance worker.
+                for rel in requested:
+                    known = False
+                    for db in databases:
+                        with database_connection(db) as connection:
+                            if connection.execute(
+                                "SELECT 1 FROM files WHERE current_root_kind='trash' AND current_relative_path=? LIMIT 1", (rel,)
+                            ).fetchone():
+                                known = True
+                                break
+                    if not known:
+                        raise TrashError("Datei keiner Sicherung zuzuordnen; Wiederherstellung nicht möglich: " + rel)
                 if not requested:
                     result={"queued_file_count":0,"skipped_paths":ignored,
                             "note":"Keine unterstützten Aufnahmen ausgewählt."}
@@ -7133,6 +7149,7 @@ def api_event_structure(job_id: str, event_id: str):
                         actual_dirs.add("/".join(parts[:depth]))
                 physical_state = {
                     "available": True,
+                    "event_prefix": str((measured.get("root_rename") or {}).get("new_path") or str(event_row["start_datetime"])[:4] + "/" + str(event_row["folder_name"])),
                     "directories": sorted(actual_dirs),
                     "directory_added": measured.get("directory_added") or [],
                     "directory_removed": measured.get("directory_removed") or [],

@@ -118,6 +118,8 @@ def latest_archive_verification(
 def list_archive_candidates(
     database_path: Path,
     archive_root: Path,
+    *,
+    observe_current: bool = False,
 ) -> dict[str, Any]:
     archive_root = archive_root.expanduser().resolve(strict=False)
     available = archive_root.exists() and archive_root.is_dir()
@@ -279,6 +281,29 @@ def list_archive_candidates(
         else:
             item["ssd_release_block_reason"] = None
         item["ssd_release_available"] = True
+        if observe_current and item["released"]:
+            # A live observation is not a new verification and must never
+            # replace the historical proof or update file/catalogue locations.
+            try:
+                inventory = scan_event_inventory(
+                    database_path, archive_root, str(item["job_id"]),
+                    str(item["event_id"]), root_kind="camera_archive",
+                    persist=False, fast_refresh=True,
+                )
+                originals = [row for row in inventory["files"] if row["asset_kind"] == "camera_original"]
+                families = {
+                    ("known", row["family_id"]) if row.get("family_id") is not None
+                    else ("observed", str(PurePosixPath(row["event_relative_path"]).with_suffix("")))
+                    for row in originals
+                }
+                item["current_archive"] = {
+                    "available": True, "scanned_at": inventory["scanned_at"],
+                    "event_prefix": inventory["event_prefix"],
+                    "file_count": len(inventory["files"]), "family_count": len(families),
+                    "uncatalogued_file_count": sum(row.get("known_file_id") is None for row in inventory["files"]),
+                }
+            except (EventInventoryError, OSError) as error:
+                item["current_archive"] = {"available": False, "error": str(error)}
         candidates.append(item)
 
     return {

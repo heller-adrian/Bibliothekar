@@ -259,6 +259,16 @@ TRANSFER_HTML = r'''<!doctype html>
       finally{action.disabled=false;}
     });
   }
+  function archiveHistoryCounts(item){
+    const live=item.current_archive;
+    const observation=live?.available
+      ? `<span>${Number(live.file_count)} Dateien</span><span>${Number(live.family_count)} Familien</span><span>${Number(live.uncatalogued_file_count||0)} nicht katalogisiert</span>`
+      : `<span>${escapeHtml(live?.error||'Aktueller Archivbestand nicht verfügbar.')}</span>`;
+    return `<div class="meta"><strong>Aktueller Archivbestand</strong>${observation}</div>`
+      + `<div class="muted">Verwaltungsdateien wie event.json werden nicht mitgezählt.</div>`
+      + `<div class="muted">Bestand geprüft: <span data-bk-preserve-language>${escapeHtml(live?.scanned_at||'—')}</span></div>`
+      + `<div class="meta"><strong>Historische Archivverifikation</strong><span>${Number(item.verification_file_count||0)} Dateien</span><span data-bk-preserve-language>${escapeHtml(item.verification_completed_at||'—')}</span></div>`;
+  }
   function renderArchive(summary){
     candidateCount.textContent=summary.candidate_count;
     verifiedCount.textContent=summary.verified_count;
@@ -313,10 +323,7 @@ TRANSFER_HTML = r'''<!doctype html>
     if(!history.length) historyList.innerHTML='<div class="empty">Noch keine freigegebenen Ereignisse im Verlauf.</div>';
     for(const item of history){
       const card=document.createElement('article');card.className='card';
-      card.innerHTML=`<div class="item-head"><div><div class="title" data-bk-preserve-language>${escapeHtml(item.name)}</div><div class="path" data-bk-preserve-language>${escapeHtml(item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">Arbeitsbereich freigegeben</span></div><div class="meta"><span>${Number(item.family_count||0)} Familien</span><span>${Number(item.file_count||0)} Dateien</span><span>${formatBytes(item.total_size_bytes)}</span><span>Status: ${escapeHtml(eventStatusLabel(item.status))}</span></div>`;
-      // Reloading a page only observes persisted tasks; it never retries a POST.
-      getJson(`/api/jobs/${encodeURIComponent(item.job_id)}/events/${encodeURIComponent(item.event_id)}/ssd-release/task`)
-        .then(task=>{if(['failed','running','queued'].includes(task.status)){result.hidden=false;return followRelease(item.job_id,item.event_id,result,verifyButton,releaseButton);}}).catch(()=>{});
+      card.innerHTML=`<div class="item-head"><div><div class="title" data-bk-preserve-language>${escapeHtml(item.name)}</div><div class="path" data-bk-preserve-language>${escapeHtml(item.current_archive?.event_prefix || item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">Arbeitsbereich freigegeben</span></div>${archiveHistoryCounts(item)}`;
       attachRecoveryAction(card,item);
       historyList.appendChild(card);
     }

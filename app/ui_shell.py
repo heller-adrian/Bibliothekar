@@ -3773,8 +3773,8 @@ BIBLIOTHEKAR_0424_CSS = r"""
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-    padding: 12px 14px calc(30px + env(safe-area-inset-bottom));
+    overscroll-behavior: auto;
+    padding: 12px 14px calc(96px + env(safe-area-inset-bottom));
   }
 
   html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection .meta-mobile-dialog-body {
@@ -5547,7 +5547,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
             "Quellen einlesen, sicher prüfen und für den Arbeitsbereich vorbereiten.",
         ),
         ("workspace", "captures"): (
-            "Aufnahmen",
+            "Medien",
             "Freie Aufnahmen ordnen und Ereignisse aus dem Arbeitsbestand bilden.",
         ),
         ("workspace", "events"): (
@@ -5606,7 +5606,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         subnav = f"""
 <div class="bk-workspace-subnav" data-bk-workspace-subarea="{escape(subarea or 'root')}" aria-label="Arbeitsbereich">
   <div class="bk-workspace-links">
-    <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Aufnahmen</a>
+    <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Medien</a>
     <a href="/events" class="{'active' if subarea == 'events' else ''}">Ereignisse</a>
   </div>
   {dock_slot}
@@ -5846,7 +5846,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
     <div class="bk-settings-panel" data-bk-settings-panel="paths" hidden>
       <section class="bk-settings-group" id="bk-storage-path-settings">
-        <div><strong>Verwaltete Pfade</strong><div style="color:var(--bk-muted);margin-top:4px">Ordner innerhalb des gemeinsamen Kamera-Arbeitsbereichs</div></div>
+        <div><strong>Verwaltete Pfade · nur zur Information</strong><div style="color:var(--bk-muted);margin-top:4px">Ordner innerhalb des gemeinsamen Kamera-Arbeitsbereichs</div></div>
         <div class="bk-library-meta" style="margin-top:10px">
           <span>Workspace-Mount: <code id="bk-storage-workspace-root">/workspace</code></span>
           <span>TrueNAS stellt nur diesen RW-Stamm bereit. Bibliothekar verwaltet die folgenden Unterordner.</span>
@@ -6233,6 +6233,11 @@ BIBLIOTHEKAR_0444_CSS = r"""
   outline:2px solid var(--bk-blue);
   outline-offset:2px;
 }
+.bk-page-activity{border:1px solid var(--bk-line,#ccd2d8);border-radius:12px;padding:10px;margin-bottom:14px}
+.bk-page-activity[hidden]{display:none}
+.bk-page-activity .bk-activity-item{display:flex;gap:10px;align-items:center;padding:6px 0}
+.bk-page-activity .bk-activity-link{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere;color:inherit;text-decoration:none}
+.bk-page-activity [data-status="failed"]{color:var(--bk-danger,#c33)}
 /* Background operations must remain discoverable on desktop, mobile web and PWA. */
 @media (max-width:900px), (max-height:520px), (hover:none), (pointer:coarse) {
   #bk-background-cancel-notice {
@@ -6265,6 +6270,24 @@ BIBLIOTHEKAR_0444_JS = r"""
   const collapse = card.querySelector(".bk-activity-collapse");
   const clear = card.querySelector(".bk-activity-clear");
   const list = card.querySelector(".bk-activity-list");
+  // Reuse the same persisted activity feed on the operation's page. A queued
+  // entry stays queued; only a terminal server state receives a success icon.
+  const pageActivity = document.createElement("section");
+  pageActivity.className = "bk-page-activity";
+  pageActivity.setAttribute("aria-label", "Auftragsstatus auf dieser Seite");
+  pageActivity.setAttribute("aria-live", "polite");
+  pageActivity.hidden = true;
+  document.querySelector("main")?.prepend(pageActivity);
+
+  function renderPageActivity(operations) {
+    const route = location.pathname;
+    const relevant = operations.filter(item => {
+      const target = destination(item).split("?")[0];
+      return target === route || (route === "/workspace" && target === "/events");
+    });
+    pageActivity.hidden = relevant.length === 0;
+    pageActivity.replaceChildren(...relevant.map(makeItem));
+  }
   box.append(card, mini);
   document.body.appendChild(box);
 
@@ -6343,7 +6366,14 @@ BIBLIOTHEKAR_0444_JS = r"""
     link.href = destination(item);
     link.title = "Zum Vorgang wechseln";
     const name = document.createElement("strong");
-    name.textContent = item.label || "Hintergrundvorgang";
+    const label = String(item.label || "Hintergrundvorgang");
+    const t = value => window.BibliothekarI18n?.t?.(value) || value;
+    name.setAttribute("data-bk-preserve-language", "");
+    if (item.kind === "import") name.textContent = label;
+    else if (item.kind === "apply" && item.job_id && label.endsWith(" anwenden")) {
+      // The event name is user data, even if it equals a dictionary key.
+      name.textContent = t("Anwenden") + ": " + label.slice(0, -9);
+    } else name.textContent = t(label);
     const detail = document.createElement("small");
     detail.textContent = item.detail || "";
     link.append(name, detail);
@@ -6392,6 +6422,8 @@ BIBLIOTHEKAR_0444_JS = r"""
       if (!res.ok) return;
       const data = await res.json();
       const ops = Array.isArray(data.operations) ? data.operations : [];
+      renderPageActivity(ops);
+      window.dispatchEvent(new CustomEvent("bk-activity-updated", {detail: ops}));
       const active = ops.filter(item => item.active);
       const finished = ops.filter(item => !item.active);
       lastSeen = active.concat(finished).slice(0,5);
