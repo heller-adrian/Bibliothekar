@@ -1,4 +1,4 @@
-> Vorbereitungsstand: RC2 ist noch nicht veröffentlicht. Image/Release-Digest werden erst nach gesonderter Freigabe bereitgestellt.
+> Prerelease v1.0.0-rc.2; manuelle Plattformabnahme weiterhin erforderlich.
 
 # v1.0.0-rc.2 – manuelle Abnahme
 

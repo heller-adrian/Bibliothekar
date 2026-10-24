@@ -1,4 +1,4 @@
-> Vorbereitungsstand: RC2 ist noch nicht veröffentlicht. Image/Release-Digest werden erst nach gesonderter Freigabe bereitgestellt.
+> Freigegebener Prerelease v1.0.0-rc.2 zur manuellen TrueNAS-Erprobung; keine stabile 1.0.0-Freigabe.
 
 # Bibliothekar v1.0.0-rc.2 – frische TrueNAS-Testinstallation
 
@@ -14,8 +14,11 @@ Image: `ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.2` (Linux amd64).
 Für die Installation das Release-Asset `compose.truenas.yaml` verwenden: sein
 Imagefeld ist bereits auf den überprüften Digest aus `IMAGE-DIGEST.txt` festgelegt.
 `SHA256SUMS` prüft die heruntergeladenen Assets (`sha256sum -c SHA256SUMS`).
-`source.txt` enthält Releasecommit und Git-Tree. Die geprüfte funktionale Basis ist
-`ac2e7b8df4b8f7bb3a1582b7cb46d250250cd6ed` mit 1674 Linux-PASS.
+`source.txt` enthält Produktcommit `40b97622ba8f89af5db771d2694ae9688cb6c448` und Git-Tree
+`df54a038366684947bd2c9d001d4b17beb253818`. Linux: 1743 PASS, 0 FAIL/ERROR/SKIP.
+Der ursprüngliche Gesamtlauf 40108008839 blieb wegen des alten Smoke-Setups rot;
+Backend und Build bestanden. Das korrigierte Onboarding-Smoke bestand separat in
+40111803032. QA-Commit 49bd136 enthält nur Testinfrastruktur. Details: QA-NACHWEISE.md.
 
 Falls GHCR einen Login verlangt, in TrueNAS passende Registry-Zugangsdaten mit
 Lesezugriff auf dieses Paket hinterlegen. Kein Token in das öffentliche YAML schreiben.
@@ -60,6 +63,22 @@ sein. Darin wird der bestehende private 0700-Eigentumsnachweis angelegt. Nicht d
 gesamte Teststruktur pauschal auf 568 umstellen. Effektive NFSv4-/POSIX-ACLs prüfen;
 ein angezeigtes Modebit allein ist kein vollständiger ACL-Nachweis. Nie bestehende
 NAS-Datasetrechte rekursiv ändern. Das Image ändert keine Host-ACLs automatisch.
+
+### Bekannte manuelle NFSv4-ACL-Voraussetzung des SD-Helpers
+
+Auf TrueNAS ist die effektive ACL maßgeblich: Web-UID/GID 568:568 benötigt am
+Removable-Bereich Lesen und Durchqueren, darf dort aber nicht schreiben – auch
+nicht über Gruppen, Everyone oder vererbte ACEs. Der Helper-Namensraum und seine
+Eltern müssen gegen Schreibzugriff der Web-UID geschützt bleiben; der interne
+private Eigentumsbereich gehört dem Helper. Modebits allein beweisen dies nicht.
+
+Bei einer Sicherheitsablehnung die effektiven NFSv4-ACLs im eigenen Testbereich
+über die TrueNAS-Oberfläche prüfen. Keine pauschale oder rekursive Lockerung, keine
+Übernahme fremder Mounts und keine Umgehung der Helperprüfung. Die bereits manuell
+korrigierte RC1-Konfiguration beim Update unverändert erhalten. Eine spätere
+Kataloginstallation soll diese Konfiguration automatisch korrekt bereitstellen;
+diese Automatisierung ist noch offen. Ohne passende Rechte bleibt die automatische
+SD-Einbindung sicher gesperrt. Nur Testmedien verwenden, keine Formatierung.
 
 Alle Hostpfade müssen vor dem Start vorhanden und tatsächlich eingebunden sein.
 Das YAML verwendet `create_host_path: false`; ein fehlender Mount darf nicht durch
@@ -113,7 +132,8 @@ Ordner manuell wiederherstellen und **Erneut prüfen** wählen. Keine leere Ersa
 Digest ohne Passwörter sichern.
 
 Die vollständige praktische Prüfung steht in `MANUAL-ACCEPTANCE.md`.
-Historische Upgrades sind für diesen RC nicht abgenommen; frische Testinstallation.
+Für deine bestehende RC1-Testinstallation siehe UPDATE-RC1-RC2.md. Eine allgemeine
+Migration beliebiger historischer Entwicklungsbestände wird damit nicht behauptet.
 
 Offizielle Installation via YAML:
 https://apps.truenas.com/managing-apps/installing-custom-apps/
