@@ -573,8 +573,10 @@ def test_0300_source_helper_requires_exact_mount_target(monkeypatch):
 
 
 def test_0300_source_helper_reports_current_deployment_version():
-    assert tuple(map(int, source_helper.app.version.split("."))) >= (0, 30, 0)
-    assert tuple(map(int, source_helper.healthz()["version"].split("."))) >= (0, 30, 0)
+    assert source_helper.app.version == EXPECTED_RELEASE_VERSION
+    assert tuple(map(int, source_helper.app.version.split("-", 1)[0].split("."))) >= (0, 30, 0)
+    assert source_helper.healthz()["version"] == EXPECTED_RELEASE_VERSION
+    assert tuple(map(int, source_helper.healthz()["version"].split("-", 1)[0].split("."))) >= (0, 30, 0)
 
 
 def test_0300_main_adoption_preserves_user_metadata(tmp_path):

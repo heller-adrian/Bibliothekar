@@ -26,7 +26,7 @@ def test_0220_workspace_groups_captures_and_events():
     events = main.events_interface().body.decode("utf-8")
 
     assert 'class="bk-workspace-subnav"' in captures
-    assert '>Aufnahmen</a>' in captures
+    assert '>Medien</a>' in captures
     assert '>Ereignisse</a>' in captures
     assert 'href="/workspace" class="active"' in captures
 

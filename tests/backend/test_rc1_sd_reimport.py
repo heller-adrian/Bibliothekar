@@ -9,6 +9,33 @@ from app.folder_import import quick_source_signature,run_folder_import_job
 from tests.backend.test_f14_root_operations import fixture
 
 
+@pytest.fixture(autouse=True)
+def direct_import_lifecycle(monkeypatch):
+    # These tests invoke the real claimed worker synchronously, without an
+    # application lifespan. Do not inherit a stopped worker's startup state
+    # from previous TestClient lifespans in the complete suite.
+    for name in (
+        'DATABASE_INITIALIZATION', 'WORKSPACE_LAYOUT_INITIALIZATION',
+        'LIBRARY_REGISTRY_INITIALIZATION', 'WORKER_THREAD',
+        'DATABASE_INITIALIZATION_ERROR', 'WORKSPACE_LAYOUT_ERROR',
+        'LIBRARY_REGISTRY_ERROR',
+    ):
+        monkeypatch.setattr(main, name, None)
+
+
+def test_initialized_runtime_without_worker_still_rejects_import(fixture, monkeypatch):
+    from fastapi import HTTPException
+    for name in ('DATABASE_INITIALIZATION', 'WORKSPACE_LAYOUT_INITIALIZATION',
+                 'LIBRARY_REGISTRY_INITIALIZATION'):
+        monkeypatch.setattr(main, name, {'ok': True})
+    with pytest.raises(HTTPException) as error:
+        main.api_run_folder_import({})
+    assert error.value.status_code == 503
+    assert 'Hintergrund-Worker nicht läuft' in error.value.detail
+    with database_connection(fixture[3][0]) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 0
+
+
 def old_job(db,card,device='CARD'):
     create_job(db,job_id='OLD',kind='sd_import',trigger_type='approved_sd',operation='folder_import',source_path=str(card),source_device_id=device,source_signature=quick_source_signature(card))
     with database_connection(db) as c:c.execute("update jobs set state='completed',file_count=108 where id='OLD'")

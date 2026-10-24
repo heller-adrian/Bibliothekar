@@ -22,9 +22,14 @@ def test_0432_workspace_preview_sticks_below_secondary_header_and_scrolls_itself
 def test_0432_metadata_detail_sticks_below_secondary_header():
     assert "#meta-detail-card," in METADATA_CORRECTION_HTML
     assert "#multi-detail-card{" in METADATA_CORRECTION_HTML
-    assert "top:calc(var(--bk-secondary-sticky-bottom,141px) + 12px);" in METADATA_CORRECTION_HTML
-    assert "max-height:calc(100dvh - var(--bk-secondary-sticky-bottom,141px) - 24px);" in METADATA_CORRECTION_HTML
-    assert "overflow:auto;" in METADATA_CORRECTION_HTML
+    # B16: detail cards follow page scrolling so expanded content and final
+    # controls remain reachable instead of creating a nested clipped viewport.
+    assert "#meta-detail-card,#multi-detail-card{position:static;max-height:none;overflow:visible;min-width:0}" in METADATA_CORRECTION_HTML
+    assert "top:calc(var(--bk-secondary-sticky-bottom,141px) + 12px);" not in METADATA_CORRECTION_HTML
+    assert "max-height:calc(100dvh - var(--bk-secondary-sticky-bottom,141px) - 24px);" not in METADATA_CORRECTION_HTML
+    assert 'id="multi-apply"' in METADATA_CORRECTION_HTML
+    assert 'id="multi-apply-import"' in METADATA_CORRECTION_HTML
+    assert 'data-meta-apply=' in METADATA_CORRECTION_HTML
 
 
 def test_0432_import_ui_has_stage_and_overall_progress_plus_eta():

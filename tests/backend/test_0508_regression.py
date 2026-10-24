@@ -57,7 +57,7 @@ def test_0508_external_drive_and_archive_labels():
         "Unterordnerstruktur aktiv": "Subfolder structure enabled",
         "Freigabe abgeschlossen": "Release completed",
         "Der Ordner ist leer.": "The folder is empty.",
-        "Prüfung/Korrektur erforderlich": "Review/correction required",
+        "Prüfung/Korrektur erforderlich": "Verification/correction required",
     }.items():
         assert translate(german) == english
 

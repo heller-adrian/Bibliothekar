@@ -245,7 +245,8 @@ def test_f14_duplicate_real_worker_is_rejected(fixture):
     process,control,log=spawn(case,ws,reg,ev,'reserve-live-main');second=ev/'second-worker';second.mkdir()
     try:
         result=subprocess.run([sys.executable,str(Path(__file__).with_name('f14_root_worker.py')),str(ws),str(second),'reserve-live-main'],capture_output=True,text=True,timeout=10)
-        assert result.returncode!=0 and 'RootOperationError' in result.stderr
+        assert issubclass(ro.RootOperationBusy, ro.RootOperationError)
+        assert result.returncode!=0 and 'app.root_operations.RootOperationBusy:' in result.stderr
         assert not (second/'checkpoint.json').exists()
         (second/'result.json').write_text(json.dumps({'returncode':result.returncode,'stdout':result.stdout,'stderr':result.stderr},indent=2))
         assert (ws/'staged-main.JPG').read_bytes()==b'only-one-transfer'

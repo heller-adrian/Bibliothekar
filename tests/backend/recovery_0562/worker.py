@@ -33,10 +33,10 @@ from app.workspace_layout import ensure_workspace_layout
 DB=case/'kamera.sqlite3';REG=case/'registry.sqlite3';WS=case/'workspace'
 counts={}
 
-def stop(label):
+def stop(label, *, details=None):
     if label!=boundary:return
     marker={'boundary':label,'pid':os.getpid(),'signal':'SIGSTOP then parent SIGKILL',
-            'stack':traceback.format_stack(limit=8)}
+            'stack':traceback.format_stack(limit=8), 'details':details}
     path=control/'checkpoint.json'
     with path.open('w') as f:json.dump(marker,f,indent=2);f.flush();os.fsync(f.fileno())
     os.kill(os.getpid(),signal.SIGSTOP)
@@ -374,9 +374,11 @@ def trace_probe(frame,event,arg):
             stop(boundary)
         if boundary=='import.hash_chunk' and function=='sha256_file' and frame.f_lineno==PIPELINE_HASH_BETWEEN_CHUNKS and '.incoming' in str(loc.get('path','')) and len(loc.get('block',b''))>=1024*1024:
             stop(boundary)
-    if module=='app.database' and function=='complete_job' and boundary=='import.in_tx' and frame.f_lineno==1001:
+    if module=='app.database' and function=='complete_job' and boundary=='import.in_tx' and frame.f_lineno==IMPORT_COMPLETED_IN_TX:
         assert loc['connection'].in_transaction
-        stop(boundary)
+        assert loc['cursor'].rowcount == 1
+        assert loc['connection'].execute('SELECT state FROM jobs WHERE id=?', (loc['job_id'],)).fetchone()[0] == 'completed'
+        stop(boundary, details={'in_transaction': True, 'updated_rows': 1, 'uncommitted_state': 'completed'})
     if module=='app.trash_restore' and function=='restore_trash_files' and boundary=='restore.db1':
         # Line after the first explicit per-database commit; resolved below
         # from the unchanged source and recorded in checkpoint stack.
@@ -387,6 +389,14 @@ def trace_probe(frame,event,arg):
 
 # Discover the statement after connection.commit() in the restore function.
 import ast
+# Stop after UPDATE has executed and before leaving its transaction. Resolve
+# the cursor.rowcount check structurally; numeric lines inside SQL parameters
+# are not stable executable trace boundaries.
+_database_tree=ast.parse((source/'app/database.py').read_text())
+_complete_func=next(n for n in _database_tree.body if isinstance(n,ast.FunctionDef) and n.name=='complete_job')
+_completion_checks=[n for n in ast.walk(_complete_func) if isinstance(n,ast.If) and isinstance(n.test,ast.Compare) and isinstance(n.test.left,ast.Attribute) and isinstance(n.test.left.value,ast.Name) and n.test.left.value.id=='cursor' and n.test.left.attr=='rowcount']
+assert len(_completion_checks)==1
+IMPORT_COMPLETED_IN_TX=_completion_checks[0].lineno
 _restore_tree=ast.parse((source/'app/trash_restore.py').read_text())
 _restore_func=next(n for n in _restore_tree.body if isinstance(n,ast.FunctionDef) and n.name=='restore_trash_files')
 RESTORE_COMMIT_NEXT=next(n.lineno for n in ast.walk(_restore_func) if isinstance(n,ast.Expr) and isinstance(n.value,ast.Call) and isinstance(n.value.func,ast.Attribute) and n.value.func.attr=='append' and isinstance(n.value.func.value,ast.Name) and n.value.func.value.id=='committed')

@@ -34,11 +34,13 @@ def test_0336_still_write_normalizes_exif_and_xmp(monkeypatch, tmp_path: Path):
     )
 
     command = captured[0]
+    for tag in ("OffsetTimeOriginal", "OffsetTimeDigitized", "OffsetTime"):
+        assert f"-EXIF:{tag}=+02:00" in command
     assert "-EXIF:DateTimeOriginal=2026:10:03 21:14:58" in command
     assert "-EXIF:CreateDate=2026:10:03 21:14:58" in command
-    assert "-XMP-exif:DateTimeOriginal=2026:10:03 21:14:58" in command
-    assert "-XMP-xmp:CreateDate=2026:10:03 21:14:58" in command
-    assert "-XMP-xmp:ModifyDate=2026:10:03 21:14:58" in command
+    assert "-XMP-exif:DateTimeOriginal=2026:10:03 21:14:58+02:00" in command
+    assert "-XMP-xmp:CreateDate=2026:10:03 21:14:58+02:00" in command
+    assert "-XMP-xmp:ModifyDate=2026:10:03 21:14:58+02:00" in command
 
 
 def test_0336_reintegration_code_never_accepts_ohne_datum_destination():
