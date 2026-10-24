@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 
 import pytest
@@ -216,4 +218,4 @@ def test_0340_worker_supports_managed_multiple_import():
 
 
 def test_0340_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION

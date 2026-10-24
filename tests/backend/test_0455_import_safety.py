@@ -1,4 +1,6 @@
 """0.47.3: Speicher-Vorprüfung und sicherer, jobspezifischer Importabbruch."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 import hashlib
 import os
 from pathlib import Path
@@ -16,9 +18,9 @@ from app.ui_shell import BIBLIOTHEKAR_0455_CSS, apply_shell
 
 
 def test_0455_version_and_phase_css():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     html = apply_shell("<html><head></head><body></body></html>", active_area="import")
-    assert "Version <span data-bk-version>0.56.2</span>" in html
+    assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in html
     assert f"<style>{BIBLIOTHEKAR_0455_CSS}</style>" in html
     assert "--bk-ink) 2%)" in BIBLIOTHEKAR_0455_CSS
 

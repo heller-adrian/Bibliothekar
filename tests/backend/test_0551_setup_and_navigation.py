@@ -1,4 +1,6 @@
 """0.55.1 first-run language, PWA dock and English clean-install regression."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path, PurePosixPath
 
 from app import __version__
@@ -10,7 +12,7 @@ from app.workspace_layout import ensure_workspace_layout
 
 
 def test_0551_bilingual_first_run():
-    assert __version__ == "0.56.2"
+    assert __version__ == EXPECTED_RELEASE_VERSION
     for html in (_login_html(), _login_html(unavailable=True), _library_onboarding_html()):
         assert 'data-bk-setup-choice="en"' in html
         assert 'data-bk-setup-choice="de"' in html

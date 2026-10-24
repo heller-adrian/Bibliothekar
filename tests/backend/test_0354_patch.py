@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import main
 from app.ui_shell import BIBLIOTHEKAR_0354_CSS, _shell_markup
 from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0354_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0354_capture_summary_stays_below_title_and_above_workspace_content():

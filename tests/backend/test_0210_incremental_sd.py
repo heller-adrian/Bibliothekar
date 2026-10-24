@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 import hashlib
@@ -23,7 +25,7 @@ def _sha(data: bytes) -> str:
 
 def test_0210_version_and_schema(tmp_path: Path):
     assert main.APP_VERSION == PACKAGE_VERSION
-    assert main.RELEASE_VERSION == "0.56.2"
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
     db = tmp_path / "kamera.sqlite3"
     status = initialize_database(db)
     assert 38 in status["applied_versions"]

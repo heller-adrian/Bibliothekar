@@ -1,4 +1,6 @@
 """UI-Abnahme 0.45.3: Importkarten, Theme, mobile Aktionen, Hovers, Suche."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path
 
 from app import __version__, main
@@ -9,9 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0453_release_version():
-    assert __version__ == "0.56.2"
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
-    assert "Version <span data-bk-version>0.56.2</span>" in apply_shell(
+    assert __version__ == EXPECTED_RELEASE_VERSION
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
+    assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in apply_shell(
         "<html><head></head><body></body></html>", active_area="import"
     )
 

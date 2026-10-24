@@ -1,4 +1,6 @@
 """0.47.3: mobile Von–Bis-Darstellung und Release-Vertrag."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path
 
 from app import __version__ as PACKAGE_VERSION
@@ -6,13 +8,13 @@ from app import main, source_helper
 
 
 def test_0402_version_contract():
-    assert PACKAGE_VERSION == "0.56.2"
+    assert PACKAGE_VERSION == EXPECTED_RELEASE_VERSION
     assert main.APP_VERSION == PACKAGE_VERSION
     assert main.DEPLOYMENT_VERSION == PACKAGE_VERSION
     assert source_helper.app.version == PACKAGE_VERSION
     assert source_helper.healthz()["version"] == PACKAGE_VERSION
-    assert "patch-0.56.2" in Path("compose.example.yaml").read_text(encoding="utf-8")
-    assert "Version <span data-bk-version>0.56.2</span>" in Path("app/ui_shell.py").read_text(encoding="utf-8")
+    assert f'{EXPECTED_RELEASE_VERSION}' in Path("compose.example.yaml").read_text(encoding="utf-8")
+    assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in Path("app/ui_shell.py").read_text(encoding="utf-8")
 
 
 def test_0402_mobile_no_event_range_has_one_heading_and_two_full_rows():
@@ -33,6 +35,6 @@ def test_0402_mobile_no_event_range_has_one_heading_and_two_full_rows():
 def test_0402_readme_declares_latest_update_channel():
     source = Path("README.md").read_text(encoding="utf-8")
     assert "Aktuelle stabile Veröffentlichung: **" in source
-    assert "Entwicklungsversion: **0.56.2**" in source
+    assert f'Entwicklungsversion: **{EXPECTED_RELEASE_VERSION}**' in source
     assert "ghcr.io/heller-adrian/bibliothekar:latest" in source
     assert "latest" in source

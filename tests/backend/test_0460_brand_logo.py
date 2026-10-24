@@ -1,4 +1,6 @@
 """0.47.3: Einheitliches SVG-Markenlogo mit dynamischem Bibliotheksnamen."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -26,7 +28,7 @@ def test_0460_svg_is_self_contained_white_and_font_independent():
 
 
 def test_0460_single_svg_in_all_shell_areas_and_dynamic_library():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     for area, subarea in [
         ("import", None), ("workspace", "captures"), ("workspace", "events"),
         ("archive", None), ("metadata", None), ("trash", None)

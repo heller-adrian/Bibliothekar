@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import main
 from app.ui_shell import BIBLIOTHEKAR_0356_CSS
 from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0356_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0356_browser_only_rules_do_not_touch_standalone_webapp():

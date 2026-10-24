@@ -1,3 +1,5 @@
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from tests.backend.default_constant_fixture import shipped_constants
 from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
@@ -12,8 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_0290_runtime_defaults_are_portable(monkeypatch):
     for name,value in shipped_constants(main,["WORKSPACE_PATH","DATABASE_DIRECTORY","LOG_PATH","POOL_PROBE_PATH","ARCHIVE_ROOT","IMPORT_ROOT","NAS_SOURCE_ROOT","REMOVABLE_ROOT"]).items():monkeypatch.setattr(main,name,value)
     assert main.APP_VERSION == PACKAGE_VERSION
-    assert main.RELEASE_VERSION == "0.56.2"
-    assert tuple(map(int, main.DEPLOYMENT_VERSION.split("."))) >= (0, 29, 1)
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
+    assert tuple(map(int, main.DEPLOYMENT_VERSION.split("-", 1)[0].split("."))) >= (0, 29, 1)
     assert str(main.WORKSPACE_PATH) == "/workspace"
     assert str(main.DATABASE_DIRECTORY) == "/database"
     assert str(main.LOG_PATH) == "/logs"

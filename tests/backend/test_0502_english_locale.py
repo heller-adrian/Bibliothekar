@@ -4,6 +4,8 @@ Tests only use disposable synthetic paths. No TrueNAS/production mounts.
 """
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 import shutil
 import subprocess
@@ -94,7 +96,7 @@ def test_0502_login_setup_and_settings_get_localisation():
     assert 'data-bk-language-choice="en"' in html
     assert 'data-bk-language-choice="de"' in html
     assert "MutationObserver" in html
-    assert 'data-bk-version>0.56.2</span>' in html
+    assert f'data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in html
 
 
 def test_0502_english_new_install_inventory_reconcile(tmp_path: Path, monkeypatch):

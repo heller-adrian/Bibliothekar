@@ -1,0 +1,106 @@
+name: RC2 acceptance without publication
+on:
+  push:
+    branches: [release/v1.0.0-rc.2]
+permissions:
+  contents: read
+concurrency:
+  group: rc2-acceptance
+  cancel-in-progress: false
+jobs:
+  backend-and-container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 105
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      RC2_EVIDENCE: ${{ runner.temp }}/rc2-evidence
+      IMAGE: bibliothekar-rc2-qa:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated QA dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          python -m pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - name: Freeze source, package and environment evidence
+        run: |
+          mkdir -p "$RC2_EVIDENCE"
+          git rev-parse HEAD HEAD^{tree} > "$RC2_EVIDENCE/source.txt"
+          python qa/release/verify_rc2_source.py > "$RC2_EVIDENCE/source-contract.json"
+          python --version > "$RC2_EVIDENCE/environment.txt"
+          uname -a >> "$RC2_EVIDENCE/environment.txt"
+          node --version >> "$RC2_EVIDENCE/environment.txt"
+          exiftool -ver >> "$RC2_EVIDENCE/environment.txt"
+          pip freeze >> "$RC2_EVIDENCE/environment.txt"
+          test -d /dev/shm
+          docker compose -f docs/rc2/compose.truenas.yaml config -q
+      - name: One complete isolated Linux backend suite
+        run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" backend
+      - name: Build the tested tree without pushing an image
+        run: |
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --label org.opencontainers.image.version=1.0.0-rc.2 \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --label org.opencontainers.image.source=https://github.com/heller-adrian/Bibliothekar \
+            -t "$IMAGE" . > "$RC2_EVIDENCE/build.log" 2>&1
+          docker image inspect "$IMAGE" > "$RC2_EVIDENCE/image-inspect.json"
+          docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__; assert __version__ == "1.0.0-rc.2"; print(__version__)'
+          docker run --rm --entrypoint python "$IMAGE" -c 'from pathlib import Path; import hashlib,json; r=Path("/opt/kamera"); print(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file() and "__pycache__" not in p.parts}))' > "$RC2_EVIDENCE/image-app-sha256.json"
+          python - <<'PY'
+          import json,hashlib,os
+          from pathlib import Path
+          actual=json.loads((Path(os.environ['RC2_EVIDENCE'])/'image-app-sha256.json').read_text())
+          expected={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('app').rglob('*') if p.is_file() and '__pycache__' not in p.parts}
+          assert actual==expected
+          PY
+          docker run --rm --entrypoint sh "$IMAGE" -c 'python -m pip freeze; dpkg-query -W' > "$RC2_EVIDENCE/image-packages.txt"
+      - name: Fresh isolated container health, authentication, database and UI smoke
+        run: |
+          set -euo pipefail
+          SCRATCH="$RUNNER_TEMP/rc2-smoke"
+          mkdir -p "$SCRATCH"/{config,database,logs,workspace,archive,tmp}
+          sudo chown -R 568:568 "$SCRATCH"
+          docker run -d --name rc2-smoke --read-only --tmpfs /tmp:size=64m,mode=1777 -p 127.0.0.1:18080:8080 \
+            -e KAMERA_SOURCE_HELPER_ENABLED=false -e BIBLIOTHEKAR_ADMIN_PASSWORD=synthetic-rc-build-smoke-password \
+            -e KAMERA_CONFIG=/config/settings.json -e KAMERA_DATABASE_DIR=/database -e KAMERA_REGISTRY_DATABASE=/database/global.sqlite3 \
+            -e KAMERA_LOG_DIR=/logs -e KAMERA_WORKSPACE=/workspace -e KAMERA_POOL_PROBE=/workspace -e KAMERA_ARCHIVE_ROOT=/main-library \
+            -v "$SCRATCH/config:/config" -v "$SCRATCH/database:/database" -v "$SCRATCH/logs:/logs" \
+            -v "$SCRATCH/workspace:/workspace" -v "$SCRATCH/archive:/main-library:ro" "$IMAGE"
+          TMPDIR="$RUNNER_TEMP" python qa/release/smoke_rc2.py
+          docker exec -i rc2-smoke python - <<'PY' > "$RC2_EVIDENCE/web-identity.json"
+          import json
+          from pathlib import Path
+          web=[]
+          for p in Path('/proc').iterdir():
+              if not p.name.isdigit(): continue
+              try:
+                  argv=p.joinpath('cmdline').read_bytes().decode().split(chr(0))
+                  if argv[1:4]==['-m','uvicorn','app.main:app']:
+                      web.append({'argv':argv,'uid':p.stat().st_uid,'gid':p.stat().st_gid})
+              except (FileNotFoundError,ProcessLookupError): pass
+          assert web and all(r['uid']==568 and r['gid']==568 for r in web)
+          print(json.dumps(web))
+          PY
+          docker exec rc2-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC2_EVIDENCE/database-smoke.json"
+      - name: Diagnostics and cleanup of disposable container
+        if: always()
+        run: |
+          mkdir -p "$RC2_EVIDENCE"
+          docker logs rc2-smoke > "$RC2_EVIDENCE/container.log" 2>&1 || true
+          docker rm -f rc2-smoke >/dev/null 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc2-acceptance
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/rc2-evidence/
+            ${{ runner.temp }}/f14-qa/**/results/

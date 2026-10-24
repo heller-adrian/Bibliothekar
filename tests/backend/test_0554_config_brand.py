@@ -1,6 +1,8 @@
 """0.55.4 regression: secure first-install configuration and desktop branding."""
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import json
 import os
 from pathlib import Path
@@ -16,7 +18,7 @@ from app.setup_language import _CSS
 
 
 def test_0554_version():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0554_creates_missing_settings_safely(tmp_path: Path):

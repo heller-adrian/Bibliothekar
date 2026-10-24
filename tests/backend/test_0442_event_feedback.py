@@ -1,13 +1,15 @@
 """0.47.3 UI-Abnahme: sichtbare Vorgänge, keine veralteten Ereigniswarnungen."""
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import main
 from app.events_ui import EVENTS_HTML
 from app.ui_shell import _shell_markup
 
 
 def test_0442_version_and_shared_shell_stay_consistent():
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
-    assert "0.56.2" in _shell_markup("workspace", "events")
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
+    assert EXPECTED_RELEASE_VERSION in _shell_markup("workspace", "events")
     assert 'id="sort-plan-dialog"' in EVENTS_HTML
     assert 'id="change-request-dialog"' in EVENTS_HTML
 

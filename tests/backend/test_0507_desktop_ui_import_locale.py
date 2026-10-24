@@ -1,5 +1,7 @@
 """0.50.7 – desktop navigation, stored paths and import history English copy."""
 from __future__ import annotations
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path
 import json
 
@@ -34,8 +36,8 @@ def test_0507_import_messages_and_schema_are_in_catalog():
     }
     for source, target in messages.items():
         assert UI_TRANSLATIONS[source] == target
-    assert main.RELEASE_VERSION in {"0.50.7", "0.56.2"}
-    assert main.DEPLOYMENT_VERSION in {"0.50.7", "0.56.2"}
+    assert main.RELEASE_VERSION in {EXPECTED_RELEASE_VERSION}
+    assert main.DEPLOYMENT_VERSION in {EXPECTED_RELEASE_VERSION}
     # Database detail and import history are formatted by the app before rendering.
     assert 'Schema version ' in main.index()
     assert 'importUiText(job.progress_message || "Kein Statustext vorhanden.")' in main.index()

@@ -1,4 +1,6 @@
 """0.47.3: reproduzierbare Viewport-/Sticky-Korrektur für die installierte PWA."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from app import __version__, main
 from app.ui_shell import (
     BIBLIOTHEKAR_0473_CSS,
@@ -18,7 +20,7 @@ def _page(area):
 
 
 def test_0473_version_and_logo_v3_unchanged():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     for area in ("import", "workspace", "archive", "metadata", "trash"):
         page = _page(area)
         assert page.count('src="/assets/bibliothekar-logo-v3.svg?v=0.56.2"') == 2

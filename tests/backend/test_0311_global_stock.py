@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from tests.backend.legacy_storage_fixture import provision_legacy_storage
 
 from pathlib import Path
@@ -256,7 +258,7 @@ def test_0311_settings_contract_has_four_tabs_scroll_and_rounding():
     assert "scrollbar-gutter: stable" in css
     assert "#bk-settings-dialog input" in css
     assert "border-radius: 11px" in css
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 

@@ -1,4 +1,6 @@
 """0.47.3: Die neue SVG-Datei ist in Header und Info-Dialog aktiv."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path
 import xml.etree.ElementTree as ET
 

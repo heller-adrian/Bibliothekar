@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -314,8 +316,8 @@ def test_0324_archived_delete_blocks_unresolved_user_file(tmp_path: Path):
 
 
 def test_0324_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
-    assert "Version <span data-bk-version>0.56.2</span>" in ui_shell._shell_markup(
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
+    assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in ui_shell._shell_markup(
         "workspace",
         "events",
     )

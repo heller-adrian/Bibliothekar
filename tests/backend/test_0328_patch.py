@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 import hashlib
 
@@ -135,7 +137,7 @@ def test_0328_settings_surface_exposes_paths_and_editable_library_roots():
     shell = ui_shell._shell_markup("workspace", "events")
     script = ui_shell.BIBLIOTHEKAR_JS
 
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     assert 'data-bk-settings-area="paths"' in shell
     assert 'id="bk-storage-backup-name"' not in shell
     assert 'id="bk-storage-workspaces-name"' not in shell

@@ -1,4 +1,6 @@
 """0.45.3: störungsfreier Wechsel zwischen Hauptbereichen und früher Dark-Mode-Paint."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from app import __version__, main
 from app.ui_shell import (
     BIBLIOTHEKAR_0451_HEAD_JS, BIBLIOTHEKAR_0451_CSS,
@@ -7,8 +9,8 @@ from app.ui_shell import (
 
 
 def test_0451_versions():
-    assert __version__ == "0.56.2"
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == EXPECTED_RELEASE_VERSION
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0451_theme_script_is_in_head_before_all_styles():

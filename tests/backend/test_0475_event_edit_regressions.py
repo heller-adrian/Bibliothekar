@@ -1,4 +1,6 @@
 """0.55.1: regression guards for removed/renamed children and archive cleanup."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from contextlib import contextmanager
 from pathlib import Path
 import json
@@ -86,7 +88,7 @@ def test_0475_archived_empty_child_is_in_manual_removal_plan(monkeypatch, tmp_pa
 def test_0475_release_and_background_dock_contract():
     from app import __version__, main
     from app.ui_shell import BIBLIOTHEKAR_0444_JS, BIBLIOTHEKAR_0450_CSS
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     assert 'bk-activity-progress' in BIBLIOTHEKAR_0444_JS
     assert 'progress_percent' in BIBLIOTHEKAR_0444_JS
     assert "Liberation Mono" in BIBLIOTHEKAR_0450_CSS

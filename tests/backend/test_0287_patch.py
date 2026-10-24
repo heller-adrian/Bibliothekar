@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from tests.backend.legacy_storage_fixture import provision_legacy_storage
 
 from pathlib import Path
@@ -130,7 +132,7 @@ def test_0287_released_archive_groups_merge_same_interval_across_backups(tmp_pat
 
 
 def test_0287_day_controls_lock_month_and_year_and_archive_selection_stays_global():
-    assert main.RELEASE_VERSION == "0.56.2"
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
     assert 'subeventDayControl("data-create-child-start-date"' in WORKSPACE_HTML
     assert "data-create-child-start-month-year" in WORKSPACE_HTML
     assert "data-create-child-end-month-year" in WORKSPACE_HTML

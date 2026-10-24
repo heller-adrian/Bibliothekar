@@ -1,6 +1,8 @@
 """0.55.0 regression: screenshot copy, non-destructive defaults and immediate loading feedback."""
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import json
 from pathlib import Path
 import shutil
@@ -51,7 +53,7 @@ def test_0506_nav_shows_feedback_without_network_gate():
     assert 'window.setTimeout(() => window.location.assign(href), 190)' not in BIBLIOTHEKAR_JS
     assert 'html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before' in rendered
     assert 'html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after' in BIBLIOTHEKAR_0505_LANGUAGE_CSS
-    assert 'data-bk-version>0.56.2</span>' in rendered
+    assert f'data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in rendered
 
 def test_0506_workspace_long_labels_fit_and_preview_dates_wrap():
     assert '.summary > .card > .muted' in WORKSPACE_HTML

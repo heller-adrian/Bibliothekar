@@ -5,6 +5,8 @@ remains untouched, as do desktop create forms and the no-event day_key model.
 """
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import re
 
 from app import __version__, main
@@ -71,4 +73,4 @@ def test_0544_no_event_uses_one_day_and_a_separate_two_time_row():
     assert 'start_time: row.querySelector("[data-segment-start]")?.value' in WORKSPACE_HTML
     assert 'end_time: row.querySelector("[data-segment-end]")?.value' in WORKSPACE_HTML
     assert 'function syncNoEventDateMirror' in WORKSPACE_HTML
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION

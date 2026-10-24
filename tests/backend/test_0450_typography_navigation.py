@@ -1,4 +1,6 @@
 """0.45.0: einheitliche Typografie und ausgeblendete KI-Navigation."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path
 import re
 
@@ -18,9 +20,9 @@ def _render(area, subarea=None):
 
 
 def test_0450_version_and_existing_core_remain_separate():
-    assert __version__ == "0.56.2"
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
-    assert main.RELEASE_VERSION == "0.56.2"
+    assert __version__ == EXPECTED_RELEASE_VERSION
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0450_no_assistant_link_in_desktop_or_mobile_navigation():

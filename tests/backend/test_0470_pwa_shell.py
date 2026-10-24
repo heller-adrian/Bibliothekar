@@ -1,4 +1,6 @@
 """0.47.3: kompakter, seitenfarbiger PWA-Kopf und großer, lesbarer Dock."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path
 
 from app import __version__, main
@@ -8,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_0470_version_and_pwa_css_injected_after_branding():
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     html = apply_shell("<html><head></head><body><main></main></body></html>", active_area="import")
     assert "<style>" + BIBLIOTHEKAR_0470_CSS + "</style>" in html
     assert "BIBLIOTHEKAR_0460_CSS" not in html

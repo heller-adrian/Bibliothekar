@@ -1,6 +1,8 @@
 """0.44.4: Desktop-Statusdock für die drei bestehenden Hintergrundprozesse."""
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import sqlite3
 
 from app import main
@@ -120,4 +122,4 @@ def test_0444_links_to_import_and_events_preserve_library():
     assert 'return "/events?library=" + lib + job;' in BIBLIOTHEKAR_0444_JS
     assert 'new Event("bk-cancellation-queued")' not in BIBLIOTHEKAR_0444_JS
     assert "window.addEventListener(\"bk-cancellation-queued\", refresh)" in BIBLIOTHEKAR_0444_JS
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION

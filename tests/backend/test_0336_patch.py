@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -47,4 +49,4 @@ def test_0336_reintegration_code_never_accepts_ohne_datum_destination():
 
 
 def test_0336_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION

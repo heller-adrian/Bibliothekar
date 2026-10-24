@@ -1,6 +1,8 @@
 """0.45.3: Schnellansicht und Verlauf dürfen fachliche Sicherheit nicht verändern."""
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import __version__, main, view_cache
 from app.database import initialize_database, database_connection
 from app.library_context import LibraryContext
@@ -11,8 +13,8 @@ from app.events_ui import EVENTS_HTML
 
 
 def test_0452_versions_and_reload_controls():
-    assert __version__ == "0.56.2"
-    assert main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == EXPECTED_RELEASE_VERSION
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     assert 'id="day-reload"' in WORKSPACE_HTML
     assert 'id="event-reload"' in EVENTS_HTML
     assert "physicalRefresh:true" in WORKSPACE_HTML

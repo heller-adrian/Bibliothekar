@@ -1,4 +1,6 @@
 """0.55.3 visual polish, truthful health reporting, safe General path fallback."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from pathlib import Path
 from app import __version__
 from app import main
@@ -10,7 +12,7 @@ from app.managed_directory_names import directory_path
 
 
 def test_0553_versions():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0553_setup_brand_is_visible_in_both_languages():

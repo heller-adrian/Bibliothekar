@@ -1,13 +1,13 @@
 # Bibliothekar
 
-> Release Candidate: **1.0.0-rc.1** – frische Testinstallation, keine stabile Freigabe. [Verbindliche RC-Installationsanleitung](docs/rc1/INSTALL-TRUENAS.md) und [manuelle Abnahme](docs/rc1/MANUAL-ACCEPTANCE.md). Der stabile Update-Kanal bleibt unverändert.
+> Release Candidate: **1.0.0-rc.2** – frische Testinstallation, keine stabile Freigabe. [Verbindliche RC-Installationsanleitung](docs/rc2/INSTALL-TRUENAS.md) und [manuelle Abnahme](docs/rc2/MANUAL-ACCEPTANCE.md). Der stabile Update-Kanal bleibt unverändert.
 > Die folgenden älteren Entwicklungsabschnitte sind historisch; für diesen RC gelten die oben verlinkten festen englischen Verwaltungsnamen und Mountregeln.
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
 Aktuelle stabile Veröffentlichung: **0.40.3**
 
-Entwicklungsversion: **0.50.7** – noch nicht als `latest` veröffentlicht.
+Entwicklungsversion: **1.0.0-rc.2** – noch nicht als `latest` veröffentlicht.
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 

@@ -4,6 +4,8 @@ The working 0.54.4 no-event one-day/two-time layout is untouched.
 """
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import re
 
 from app import __version__, main
@@ -49,4 +51,4 @@ def test_0550_no_event_css_and_persistence_remain_identical():
     assert 'day_key: row.querySelector("[data-segment-day]")?.value' in WORKSPACE_HTML
     assert 'start_time: row.querySelector("[data-segment-start]")?.value' in WORKSPACE_HTML
     assert 'end_time: row.querySelector("[data-segment-end]")?.value' in WORKSPACE_HTML
-    assert __version__ == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION

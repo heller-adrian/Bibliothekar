@@ -1,4 +1,6 @@
 """0.55.2 – mobile stage-one navigation without fullscreen loading masks."""
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 from app import __version__
 from app import main
 from app.ui_shell import (
@@ -8,7 +10,7 @@ from app.ui_i18n import I18N_UI_JS
 
 
 def test_0552_version_and_early_shell_before_main():
-    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == "0.56.2"
+    assert __version__ == main.RELEASE_VERSION == main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     for area, subarea, heading in (
         ("import", None, "Import &amp; Prüfung"),
         ("workspace", "captures", "Aufnahmen"),
