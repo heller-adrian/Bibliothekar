@@ -4431,6 +4431,33 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
         include_active=True,
     )
     confirmed = payload.get("confirm_reimport") is True
+    # Ordinary repeat clicks need no empty import job. This fast observation is
+    # explicitly not an integrity check; the confirmed path below remains strict.
+    if (not confirmed and root_key == "removable" and payload.get("source_mode") == "sd_card"
+            and source_device_id and (duplicate is None or duplicate.get("state") == "completed")):
+        summary = import_source_summary(source, root_key, root)
+        count = int(summary["media_file_count"])
+        if (summary["has_import_history"] and count > 0
+                and summary["already_imported_file_count"] == count
+                and not any(summary[key] for key in ("new_file_count", "changed_file_count", "unknown_file_count"))):
+            from app.source_reimport import catalogued_copy_presence
+            from app.source_filter import should_ignore_source_path
+            current = {(item.relative_to(source).as_posix(), item.stat().st_size, item.stat().st_mtime_ns)
+                       for item in source.rglob("*") if item.is_file() and not item.is_symlink()
+                       and item.suffix.lower() in MEDIA_SOURCE_EXTENSIONS and not should_ignore_source_path(source, item)}
+            history = [row for row in list_imported_source_files(DATABASE_FILE, source_device_id)
+                       if (str(row["relative_path"]), int(row["size_bytes"]), int(row.get("modified_at_ns") or 0)) in current]
+            wanted = {str(row["sha256"]) for row in history}
+            origins = [row for row in list_imported_media_origins(DATABASE_FILE) if str(row["sha256"]) in wanted]
+            present = set()
+            try:
+                present = {str(row["sha256"]) for row in catalogued_copy_presence(REGISTRY_DATABASE_FILE, origins)} if origins else set()
+            except (PipelineError, OSError, ValueError):
+                pass  # Uncertainty requires the explicit, fully verified workflow.
+            backed_up = bool(wanted) and wanted <= present and len({str(row["relative_path"]) for row in history}) == count
+            return JSONResponse(content={"accepted": False,
+                "status": "already_backed_up" if backed_up else "verification_required",
+                "media_file_count": count, "integrity_verified": False})
     if duplicate is not None and (duplicate.get("state") != "completed" or not confirmed):
         state_text = "bereits importiert; bitte erneute Prüfung ausdrücklich bestätigen" if duplicate.get("state") == "completed" else "wird bereits importiert"
         raise HTTPException(status_code=409, detail="Diese Quelle ist " + state_text + ". Technische ID: " + str(duplicate.get("id") or "unbekannt"))
@@ -10623,6 +10650,7 @@ def index() -> str:
     .mount-state details { width:100%; margin-top:7px; color:var(--muted); font-size:.82rem; }
     .mount-state code { display:block; max-width:100%; margin-top:6px; white-space:normal; overflow-wrap:anywhere; color:var(--muted); }
     .mount-state.verified { border-color:var(--success); color:var(--success); }
+    #sd-import-button { white-space:nowrap; }
     .sd-actions { grid-template-columns:minmax(220px,1fr) auto auto auto; }
     @media (max-width:900px) { .sd-actions { grid-template-columns:1fr 1fr; } .sd-actions .mount-state { grid-column:1/-1; } }
 
@@ -11038,6 +11066,7 @@ def index() -> str:
       </div>
 
       <div class="source-detail" id="sd-source-detail" data-source-pane="sd"></div>
+      <button id="sd-verify-button" class="secondary" type="button" hidden>Integrität prüfen</button>
 
       <details class="other-source-panel">
         <summary>Andere Quelle verwenden</summary>
@@ -11185,6 +11214,7 @@ def index() -> str:
     const sdCardStatus = document.getElementById("sd-card-status");
     const sdMountButton = document.getElementById("sd-mount-button");
     const sdImportButton = document.getElementById("sd-import-button");
+    const sdVerifyButton = document.getElementById("sd-verify-button");
     const sdUnmountButton = document.getElementById("sd-unmount-button");
     const sdMountState = document.getElementById("sd-mount-state");
     const deviceSelect = document.getElementById("device-select");
@@ -11442,7 +11472,7 @@ def index() -> str:
 
     function estimatedRemainingText(job) {
       if (job.state === "completed") {
-        return "fertig";
+        return bk0511ImportLabel("fertig", "done");
       }
       if (job.state === "interrupted" || job.state === "failed") {
         return "—";
@@ -11553,14 +11583,14 @@ def index() -> str:
       const stagePercent =
         stageProgressPercent(job);
       const stageCode = String(job.stage_progress_stage || job.stage || "starting");
-      const stageLabel = stageLabels[stageCode] || stateLabels[stageCode] || stageCode;
+      const stageLabel = window.BibliothekarI18n?.t?.(stageLabels[stageCode] || stateLabels[stageCode] || stageCode) ?? stageCode;
       const cancelAgeMs = job.cancel_requested_at
         ? Date.now() - backendTimestampMs(job.cancel_requested_at) : 0;
       const mayForceCancel = Boolean(
         job.cancel_requested && !job.cancel_forced && cancelAgeMs >= 15000
       );
       const remaining =
-        estimatedRemainingText(job);
+        window.BibliothekarI18n?.t?.(estimatedRemainingText(job)) ?? estimatedRemainingText(job);
 
       const result =
         job.result || {};
@@ -11611,7 +11641,7 @@ def index() -> str:
                 <li style="margin:6px 0">
                   <code>${escapeHtml(file.relative_path || "")}</code>
                   ${file.existing_source_label || file.existing_job_id
-                    ? `<br><span class="muted">Bereits vorhanden in ${escapeHtml(file.existing_source_label || file.existing_job_id)}${file.existing_relative_path ? " · " + escapeHtml(file.existing_relative_path) : ""}</span>`
+                    ? `<br><span class="muted"><span>${bk0511ImportLabel("Bereits vorhanden in", "Already present in")}</span> <span data-bk-preserve-language>${escapeHtml(file.existing_source_label || file.existing_job_id)}${file.existing_relative_path ? " · " + escapeHtml(file.existing_relative_path) : ""}</span></span>`
                     : ""}
                 </li>`
               ).join("") || `<li class="muted">Detaildaten stehen im technischen Importprotokoll.</li>`}
@@ -11753,7 +11783,7 @@ def index() -> str:
       const expanded = openHistoryIds.has(jobId);
       const progressLabel = isDone
         ? `${bk0511ImportLabel("Abgeschlossen","Completed")} · ${fileCount ?? "–"} ${bk0511ImportLabel("Dateien","files")}`
-        : (isActive ? `${escapeHtml(state)} · ${percent}% · ${escapeHtml(remaining)}` : escapeHtml(state));
+        : (isActive ? `${escapeHtml(window.BibliothekarI18n?.t?.(state) ?? state)} · ${percent}% · ${escapeHtml(remaining)}` : escapeHtml(state));
       const actionMarkup = isHidden
         ? `<button type="button" class="secondary" data-history-unhide="${escapeHtml(jobId)}">Wieder einblenden</button>`
         : (isDone
@@ -11766,7 +11796,9 @@ def index() -> str:
               aria-expanded="${expanded}" aria-label="Details ${escapeHtml(presentation.title)} ${expanded ? "einklappen" : "aufklappen"}">
               ${thumbnail}
               <span class="bk-history-text">
-                <strong>${escapeHtml(presentation.title)}</strong>
+                <strong>${job.operation === "folder_import"
+                  ? `<span>${escapeHtml(bk0511ImportLabel(job.trigger_type === "approved_sd" ? "SD-Kartenimport" : job.trigger_type === "usb_key" ? "Laufwerksimport" : "Ordnerimport", job.trigger_type === "approved_sd" ? "SD Card Import" : job.trigger_type === "usb_key" ? "Drive Import" : "Folder Import"))}</span> · <span data-bk-preserve-language>${escapeHtml(job.source_volume_label === "SD-Karte" && job.state === "completed" && job.result?.organization && !(job.result.organization.devices || []).length ? bk0511ImportLabel("SD-Karte", "SD Card") : (job.source_volume_label || bk0511ImportLabel("Quelle", "Source")))}</span>`
+                  : escapeHtml(presentation.title)}</strong>
                 <small>${isDone ? bk0511ImportLabel("Abgeschlossen","Completed") : progressLabel}${isDone ? " · " + (fileCount ?? "–") + " " + bk0511ImportLabel("Dateien","files") : ""}</small>
               </span>
               ${isActive ? '<span class="bk-history-spinner" aria-hidden="true"></span>' : ""}
@@ -12038,6 +12070,7 @@ def index() -> str:
     async function updateSdSourceDetail() {
       const device = selectedSdDevice;
       sdSourceSummary = null;
+      sdVerifyButton.hidden = true;
       const requestId = ++sdSummaryRequest;
       if (!device?.mounted || !device.read_only || !device.device_id) {
         sdSourceDetail.textContent = "";
@@ -12053,18 +12086,19 @@ def index() -> str:
         sdSourceSummary = source;
         const changed = Number(source.changed_file_count || 0);
         const ignored = Number(source.ignored_file_count || 0);
-        sdSourceDetail.textContent = `${source.file_count} Dateien insgesamt · `
-          + `${source.media_file_count} Medien · `
-          + `${formatBytes(source.total_size_bytes)} · `
-          + `${Number(source.already_imported_file_count || 0)} bereits gesichert · `
-          + `${Number(source.new_file_count || 0)} neu`
-          + (Number(source.unknown_file_count || 0) ? ` · ${source.unknown_file_count} wegen unvollständiger Historie zu prüfen` : "")
-          + (changed ? ` · ${changed} verändert/zu prüfen` : "")
-          + (ignored ? ` · ${ignored} Verwaltungsdateien ignoriert` : "")
-          + (source.import_status === "no_changes" ? " · Keine neuen Dateien" : "");
+        sdSourceDetail.textContent = `${source.file_count} ${bk0511ImportLabel("Dateien insgesamt", "total files")} · `
+          + `${source.media_file_count} ${bk0511ImportLabel("Medien", "media")} · ${formatBytes(source.total_size_bytes)} · `
+          + `${Number(source.already_imported_file_count || 0)} ${bk0511ImportLabel("bereits gesichert", "already backed up")} · `
+          + `${Number(source.new_file_count || 0)} ${bk0511ImportLabel("neu", "new")}`
+          + (Number(source.unknown_file_count || 0) ? ` · ${source.unknown_file_count} ${bk0511ImportLabel("wegen unvollständiger Historie zu prüfen", "to review (incomplete history)")}` : "")
+          + (changed ? ` · ${changed} ${bk0511ImportLabel("verändert/zu prüfen", "changed/to review")}` : "")
+          + (ignored ? ` · ${ignored} ${bk0511ImportLabel("Verwaltungsdateien ignoriert", "administrative files ignored")}` : "")
+          + (source.import_status === "no_changes" ? bk0511ImportLabel(" · Keine neuen Dateien", " · No new files") : "");
         sdImportButton.disabled = source.import_status === "import_running";
-        sdImportButton.textContent = ["no_changes", "already_imported", "history_incomplete"].includes(source.import_status)
-          ? "Erneut prüfen / sichern" : "SD-Karte sichern";
+        sdVerifyButton.hidden = !source.has_import_history;
+        sdVerifyButton.disabled = sdImportButton.disabled;
+        sdImportButton.textContent = source.has_import_history
+          ? bk0511ImportLabel("Erneut sichern", "Back up again") : bk0511ImportLabel("SD-Karte sichern", "Back up SD card");
       } catch (error) {
         if (requestId === sdSummaryRequest)
           sdSourceDetail.textContent = "Karteninformationen nicht verfügbar: " + error.message;
@@ -12520,18 +12554,23 @@ def index() -> str:
       catch (error) { showError(error); }
     });
 
-    sdImportButton.addEventListener("click", async () => {
+    async function confirmSdIntegrity() {
+      return window.BibliothekarI18n.confirmAsync("Diese Quelle wurde bereits verarbeitet. Erneut vollständig prüfen und fehlende Sicherungen bei nachgewiesener Abwesenheit erneut importieren? Vorhandene Originale werden anhand von SHA-256 erkannt und nicht erneut veröffentlicht. Alte Historie und Archivdaten bleiben erhalten.");
+    }
+    async function requestSdBackup(integrity=false) {
       const device = selectedSdDevice;
       if (!device?.mounted || !device.read_only || !device.device_id) {
         showError(new Error("Bitte die SD-Karte zuerst ausschließlich lesend einbinden."));
         return;
       }
       const repeat = Boolean(sdSourceSummary?.has_import_history);
-      if (repeat && !(await window.BibliothekarI18n.confirmAsync("Diese Quelle wurde bereits verarbeitet. Erneut vollständig prüfen und fehlende Sicherungen bei nachgewiesener Abwesenheit erneut importieren? Vorhandene Originale werden anhand von SHA-256 erkannt und nicht erneut veröffentlicht. Alte Historie und Archivdaten bleiben erhalten."))) return;
-      await startFolderImportSelection(
-        "removable", device.device_id, device.label || device.model || "SD-Karte", "sd_card", repeat
-      );
-    });
+      const unchanged = repeat && !["new_file_count", "changed_file_count", "unknown_file_count"].some(key => Number(sdSourceSummary[key] || 0));
+      const verify = integrity || (repeat && !unchanged);
+      if (verify && !(await confirmSdIntegrity())) return;
+      await startFolderImportSelection("removable", device.device_id, device.label || device.model || "SD Card", "sd_card", verify);
+    }
+    sdImportButton.addEventListener("click", () => requestSdBackup());
+    sdVerifyButton.addEventListener("click", () => requestSdBackup(true));
 
     deviceSelect.addEventListener("change", () => {
       driveFolderBrowser.hidden = true;
@@ -12659,6 +12698,16 @@ def index() -> str:
             data.detail || "Ordnerimport konnte nicht gestartet werden."
           );
         }
+        if (!data.accepted && data.status === "already_backed_up") {
+          noticeElement.textContent = bk0511ImportLabel(
+            "Laut Sicherungshistorie ist bereits alles gesichert. Keine neuen Dateien. Für eine vollständige SHA-256-Prüfung bitte „Integrität prüfen“ wählen.",
+            "The backup history shows everything is already backed up. No new files. Choose “Check backup integrity” for a full SHA-256 check.");
+          return;
+        }
+        if (!data.accepted && data.status === "verification_required") {
+          if (await confirmSdIntegrity()) await startFolderImportSelection(rootKey, relativePath, displayName, sourceMode, true);
+          return;
+        }
         noticeElement.textContent = "Ordnerimport wurde angenommen.";
         await loadJobs();
       } catch (error) {
@@ -12677,6 +12726,10 @@ def index() -> str:
       () => refreshAll()
     );
 
+    window.addEventListener("bk-language-changed", () => {
+      loadJobs().catch(showError);
+      updateSdSourceDetail();
+    });
     refreshAll().catch(showError);
 
     // Nur aktive Vorgänge benötigen eine laufende Fortschrittsanzeige.

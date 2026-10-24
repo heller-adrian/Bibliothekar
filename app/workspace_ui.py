@@ -1400,6 +1400,21 @@ WORKSPACE_HTML = r"""<!doctype html>
   .suggestion-meta{font-size:.8rem;gap:6px}
   .suggestion-help{font-size:.85rem;margin-bottom:10px}
 }
+
+    #mobile-preview-button { display:none; }
+    #mobile-preview-dialog { width:min(95vw,700px); max-height:90dvh; padding:12px; overflow:auto; overscroll-behavior:contain; }
+    .mobile-preview-header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .mobile-preview-header h2 { margin:0; }
+    #mobile-preview-dialog .preview { display:block; position:static; margin-top:10px; padding:10px; }
+    #mobile-preview-dialog .preview-body, #mobile-preview-dialog #structure-preview { max-height:none; overflow:visible; }
+    @media(max-width:820px) { #mobile-preview-button:not([hidden]) { display:inline-block; } }
+    @media(max-width:520px) {
+      .day-card { padding:10px; gap:6px 9px; border-radius:11px; }
+      .day-card .day-main { min-width:0; }
+      .day-card > .badge { justify-self:start; font-size:.72rem; padding:3px 7px; }
+      .day-card .day-name { font-size:.92rem; margin-bottom:3px; }
+      .day-card .day-meta { gap:3px 9px; font-size:.8rem; }
+    }
 </style>
 </head>
 
@@ -1557,6 +1572,7 @@ WORKSPACE_HTML = r"""<!doctype html>
               id="day-count-label"
               class="muted day-count-label"
             ></span>
+            <button id="mobile-preview-button" type="button" hidden>Vorschau</button>
             <button id="day-reload" type="button" title="Dateibestand und Zuordnung erneut prüfen">Neuladen</button>
             <button
               id="day-select-all"
@@ -1597,8 +1613,8 @@ WORKSPACE_HTML = r"""<!doctype html>
           <h2>Destination structure preview</h2>
 
           <p class="muted">
-            Die Vorschau zeigt nur die Planung.
-            Es werden noch keine Ordner verändert.
+            Die Vorschau zeigt die geplante Struktur oder den tatsächlichen Bestand.
+            Es werden keine Dateien verändert.
           </p>
 
           <div
@@ -1610,6 +1626,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     </section>
   </main>
 
+  <dialog id="mobile-preview-dialog" aria-labelledby="mobile-preview-title">
+    <div class="mobile-preview-header"><h2 id="mobile-preview-title">Vorschau</h2><button id="mobile-preview-close" type="button">Schließen</button></div>
+    <div id="mobile-preview-content"></div>
+  </dialog>
   <dialog id="event-dialog">
     <form
       id="event-form"
@@ -2880,7 +2900,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           </div>
           <div class="suggestion-meta">
             <span>${Number(item.file_count || 0)} Dateien</span>
-            <span>${escapeHtml(item.target_start_datetime)} bis ${escapeHtml(item.target_end_datetime)}</span>
+            <span>${escapeHtml(item.target_start_datetime)} ${bk0511PreviewLabel("bis", "to")} ${escapeHtml(item.target_end_datetime)}</span>
           </div>
           <details class="suggestion-files">
             <summary>Vorschau und Wirkung</summary>
@@ -2986,8 +3006,51 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    const mobilePreviewButton = document.getElementById("mobile-preview-button");
+    const mobilePreviewDialog = document.getElementById("mobile-preview-dialog");
+    const previewPanel = document.querySelector("aside.preview");
+    const previewHome = document.createComment("structure preview home");
+    previewPanel.before(previewHome);
+    let previewBodyOverflow = "";
+    let previewInDialog = false;
+    function syncMobilePreviewButton() {
+      mobilePreviewButton.hidden = !selectedPreviewEventId && !selectedAllGroups().length;
+    }
+    mobilePreviewButton.addEventListener("click", () => {
+      if (mobilePreviewDialog.open) return;
+      previewInDialog = true;
+      document.getElementById("mobile-preview-content").append(previewPanel);
+      previewBody.hidden = false;
+      previewBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      mobilePreviewDialog.showModal();
+      scheduleTreeFit();
+    });
+    function restoreMobilePreview() {
+      if (!previewInDialog) return;
+      previewHome.after(previewPanel);
+      document.body.style.overflow = previewBodyOverflow;
+      previewInDialog = false;
+    }
+    function closeMobilePreview() {
+      restoreMobilePreview();
+      mobilePreviewDialog.close();
+    }
+    document.getElementById("mobile-preview-close").addEventListener("click", closeMobilePreview);
+    mobilePreviewDialog.addEventListener("cancel", event => {
+      event.preventDefault();
+      closeMobilePreview();
+    });
+    mobilePreviewDialog.addEventListener("close", () => {
+      if (!mobilePreviewDialog.open) restoreMobilePreview();
+    });
+    window.matchMedia("(max-width: 820px)").addEventListener("change", event => {
+      if (!event.matches && mobilePreviewDialog.open) closeMobilePreview();
+    });
+
     function setSelectedPreviewEvent(eventId) {
       selectedPreviewEventId = eventId || null;
+      syncMobilePreviewButton();
       document.querySelectorAll("[data-preview-event-id]").forEach(node => {
         node.classList.toggle(
           "selected-preview",
@@ -3761,6 +3824,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       selectionBar.hidden = false;
 
       const hasSelection = groups.length > 0;
+      syncMobilePreviewButton();
       // 0.16.8: Datum/Uhrzeit sind führend. Eine Tagesauswahl ist nur noch
       // eine bequeme Vorbelegung, aber keine Voraussetzung für neue Ziele.
       newEventButton.disabled = !workspace;

@@ -133,3 +133,27 @@ RC1_PATTERNS = [
     [r"^Wiederherstellung fehlgeschlagen: Datei keiner Sicherung zuzuordnen; Wiederherstellung nicht möglich: (.*)$", "Restoration failed: file has no backup provenance; restoration is not possible: $1"],
     [r"^(Ereignisname|Unterereignisname) enthält ein für SMB unzulässiges Zeichen oder einen reservierten Ordnernamen\.(.*)$", "The event name contains an unsupported SMB character or a reserved folder name. Avoid <>:\"/\\|?*, control characters and trailing dots."],
 ]
+
+
+# RC3: visible UI messages only. Historical JSON and names remain original.
+RC1_TRANSLATIONS.update({
+    "Erneut sichern": "Back up again",
+    "Integrität prüfen": "Check backup integrity",
+    "SD-Karte wurde sicher ausgeworfen.": "SD card safely ejected.",
+    "Zum archivierten Ereignis hinzufügen": "Add to archived event",
+    "Diese Quelle wurde bereits verarbeitet. Erneut vollständig prüfen und fehlende Sicherungen bei nachgewiesener Abwesenheit erneut importieren? Vorhandene Originale werden anhand von SHA-256 erkannt und nicht erneut veröffentlicht. Alte Historie und Archivdaten bleiben erhalten.": "This source was processed before. Check it again and restore backups only if missing copies are confirmed? Existing originals are recognized using SHA-256 and are not published again. Previous history and archive data are preserved.",
+    "Ordnerimport, Metadatenanalyse und Übernahme in den zentralen Tagesbestand sind abgeschlossen.": "Import, metadata analysis and transfer to the central daily inventory are complete.",
+    "Ordnerimport, Metadatenanalyse, Tagesgruppierung und Prüfung sind abgeschlossen.": "Import, metadata analysis, day grouping and verification are complete.",
+    "Ordnerimport erfolgreich abgeschlossen.": "Import completed.",
+    "Historische Details anzeigen": "Show historical details",
+    "Ereignisname im Katalog": "Event name in catalogue",
+    "Aktueller Archivordner": "Current archive folder",
+    "Vorschau": "Preview",
+    "Schließen": "Close",
+})
+RC1_PATTERNS.extend([
+    [r"^Ordnerimport erfolgreich abgeschlossen\. ([0-9]+) Mediendateien wurden verifiziert\.$", "Import completed. $1 media files verified."],
+    [r"^([0-9]+) (Dateien|Mediendateien) wurden verifiziert\.$", "$1 media files verified."],
+])
+
+RC1_TRANSLATIONS["Die Vorschau zeigt die geplante Struktur oder den tatsächlichen Bestand. Es werden keine Dateien verändert."] = "The preview shows the planned structure or actual inventory. No files are changed."

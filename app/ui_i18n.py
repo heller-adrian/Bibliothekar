@@ -1409,6 +1409,9 @@ I18N_UI_JS = r"""
     if (typeof value !== "string" || !value) return value;
     const core = value.trim();
     if (!core) return value;
+    // Standalone dated source labels are stored names, including old generated
+    // labels. Translate the surrounding UI separately, never the saved name.
+    if (!core.includes(" · ") && /^.+ - [0-9]{4}\.[0-9]{2}\.[0-9]{2} - [0-9]{4}\.[0-9]{2}\.[0-9]{2}$/u.test(core)) return value;
     // HTML templates often wrap fixed labels across indented lines.
     // Normalize whitespace *only for exact dictionary lookups*, never for
     // user-supplied paths/filenames or captured dynamic values.

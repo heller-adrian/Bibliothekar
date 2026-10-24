@@ -105,6 +105,17 @@ TRANSFER_HTML = r'''<!doctype html>
     .global-task-item { display:block; padding:10px; margin-top:8px; border-radius:10px; border:1px solid #333a42; background:#20252b; color:inherit; text-decoration:none; }
     .global-task-item strong { display:block; margin-bottom:3px; }
 
+
+    .history-field-label { display:block; font-size:.75rem; font-weight:400; margin-bottom:3px; }
+    @media(min-width:761px) {
+      .archive-history-details > summary { display:none; }
+    }
+    @media(max-width:760px) {
+      #history-list .card { padding:11px; }
+      #history-list .meta { gap:4px 10px; margin-top:7px; font-size:.8rem; }
+      #history-list .path { margin-top:5px; }
+      #history-list .badge { font-size:.74rem; padding:3px 7px; }
+    }
   </style>
 </head>
 <body>
@@ -265,10 +276,16 @@ TRANSFER_HTML = r'''<!doctype html>
       ? `<span>${Number(live.file_count)} Dateien</span><span>${Number(live.family_count)} Familien</span><span>${Number(live.uncatalogued_file_count||0)} nicht katalogisiert</span>`
       : `<span>${escapeHtml(live?.error||'Aktueller Archivbestand nicht verfügbar.')}</span>`;
     return `<div class="meta"><strong>Aktueller Archivbestand</strong>${observation}</div>`
-      + `<div class="muted">Verwaltungsdateien wie event.json werden nicht mitgezählt.</div>`
-      + `<div class="muted">Bestand geprüft: <span data-bk-preserve-language>${escapeHtml(live?.scanned_at||'—')}</span></div>`
-      + `<div class="meta"><strong>Historische Archivverifikation</strong><span>${Number(item.verification_file_count||0)} Dateien</span><span data-bk-preserve-language>${escapeHtml(item.verification_completed_at||'—')}</span></div>`;
+      + `<details class="archive-history-details"><summary>Historische Details anzeigen</summary><div class="muted">Verwaltungsdateien wie event.json werden nicht mitgezählt.</div>`
+      + `<div class="muted">Bestand geprüft: <span data-bk-preserve-language>${escapeHtml(formatDate(live?.scanned_at))}</span></div>`
+      + `<div class="meta"><strong>Historische Archivverifikation</strong><span>${Number(item.verification_file_count||0)} Dateien</span><span data-bk-preserve-language>${escapeHtml(formatDate(item.verification_completed_at))}</span></div></details>`;
   }
+  function syncArchiveHistoryDetails() {
+    historyList.querySelectorAll('.archive-history-details').forEach(node => {
+      node.open = window.matchMedia('(min-width:761px)').matches;
+    });
+  }
+  window.matchMedia('(min-width:761px)').addEventListener('change', syncArchiveHistoryDetails);
   function renderArchive(summary){
     candidateCount.textContent=summary.candidate_count;
     verifiedCount.textContent=summary.verified_count;
@@ -323,10 +340,11 @@ TRANSFER_HTML = r'''<!doctype html>
     if(!history.length) historyList.innerHTML='<div class="empty">Noch keine freigegebenen Ereignisse im Verlauf.</div>';
     for(const item of history){
       const card=document.createElement('article');card.className='card';
-      card.innerHTML=`<div class="item-head"><div><div class="title" data-bk-preserve-language>${escapeHtml(item.name)}</div><div class="path" data-bk-preserve-language>${escapeHtml(item.current_archive?.event_prefix || item.folder_name)}</div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">Arbeitsbereich freigegeben</span></div>${archiveHistoryCounts(item)}`;
+      card.innerHTML=`<div class="item-head"><div><div class="title"><span class="muted history-field-label">Ereignisname im Katalog</span><span data-bk-preserve-language>${escapeHtml(item.name)}</span></div><div class="path"><span class="history-field-label">Aktueller Archivordner</span><span data-bk-preserve-language>${escapeHtml(item.current_archive?.event_prefix || item.folder_name)}</span></div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">Arbeitsbereich freigegeben</span></div>${archiveHistoryCounts(item)}`;
       attachRecoveryAction(card,item);
       historyList.appendChild(card);
     }
+    syncArchiveHistoryDetails();
   }
 
   async function load({forceRefresh=false}={}){
