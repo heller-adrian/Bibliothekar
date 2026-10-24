@@ -1502,8 +1502,10 @@ def process_claimed_job(
                     job_id,
                     source_signature=signature,
                     source_fingerprint=fingerprint,
+                    allow_completed_duplicate=(operation == "folder_import"),
                 )
                 measured_source_signature = signature
+                refresh_import_origins()
 
             def admit_families(
                 analysis: dict[str, Any],
@@ -1525,6 +1527,7 @@ def process_claimed_job(
                     analysis=analysis,
                     checksums=checksums,
                     sizes=sizes,
+                    reimport_of_job_id=job.get("duplicate_of_job_id") if operation == "folder_import" else None,
                 )
                 allowed, blocked = admitted_family_keys(
                     inventory,
@@ -1541,30 +1544,35 @@ def process_claimed_job(
                 if source_device_id
                 else []
             )
-            origin_rows = list_imported_media_origins(
-                database_file,
-                exclude_job_id=job_id,
-            )
-            imported_hashes = {
-                (int(row["size_bytes"]), str(row["sha256"]))
-                for row in origin_rows
-            }
-            imported_sha256 = {
-                str(row["sha256"])
-                for row in origin_rows
-                if str(row.get("sha256") or "")
-            }
+            imported_hashes: set[tuple[int, str]] = set()
+            imported_sha256: set[str] = set()
             duplicate_origins: dict[tuple[int, str], dict[str, Any]] = {}
             duplicate_origins_by_sha: dict[str, dict[str, Any]] = {}
-            for row in origin_rows:
-                duplicate_origins.setdefault(
-                    (int(row["size_bytes"]), str(row["sha256"])),
-                    dict(row),
+
+            def refresh_import_origins() -> None:
+                # Read after the active fingerprint decision, never use a
+                # pre-hash snapshot that predates another completed import.
+                imported_hashes.clear(); imported_sha256.clear()
+                duplicate_origins.clear(); duplicate_origins_by_sha.clear()
+                origin_rows = list_imported_media_origins(
+                    database_file,
+                    exclude_job_id=job_id,
                 )
-                duplicate_origins_by_sha.setdefault(
-                    str(row["sha256"]),
-                    dict(row),
-                )
+                if operation == "folder_import" and job.get("duplicate_of_job_id"):
+                    from app.source_reimport import retained_origins
+                    origin_rows = retained_origins(REGISTRY_DATABASE_FILE, origin_rows)
+                imported_hashes.update((int(row["size_bytes"]), str(row["sha256"])) for row in origin_rows)
+                imported_sha256.update(str(row["sha256"]) for row in origin_rows if row.get("sha256"))
+                for row in origin_rows:
+                    duplicate_origins.setdefault(
+                        (int(row["size_bytes"]), str(row["sha256"])),
+                        dict(row),
+                    )
+                    duplicate_origins_by_sha.setdefault(
+                        str(row["sha256"]),
+                        dict(row),
+                    )
+
 
             def persist_import_history(entries: list[dict[str, Any]]) -> None:
                 if not source_device_id:
@@ -4122,6 +4130,7 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
     media_count = 0
     total_size = 0
     source_device_id = source_device_id_for_path(path, root_key, root)
+    from app.source_filter import should_ignore_source_path
     history_rows = (
         list_imported_source_files(DATABASE_FILE, source_device_id)
         if source_device_id
@@ -4147,7 +4156,7 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
         file_count += 1
         total_size += size
         relative_item = item.relative_to(path).as_posix()
-        if item.suffix.lower() not in MEDIA_SOURCE_EXTENSIONS:
+        if should_ignore_source_path(path, item) or item.suffix.lower() not in MEDIA_SOURCE_EXTENSIONS:
             ignored_fast += 1
             continue
         media_count += 1
@@ -4163,14 +4172,34 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
         source_signature=signature,
         include_active=True,
     )
+    with database_connection(DATABASE_FILE) as connection:
+        previous = [dict(row) for row in connection.execute(
+            "SELECT id,source_device_id,result_json FROM jobs WHERE operation='folder_import' AND state='completed' AND source_device_id=? ORDER BY created_at DESC,id DESC",
+            (source_device_id,),
+        )] if source_device_id else []
+    related = duplicate if duplicate and duplicate.get("state") == "completed" else None
+    if related and not any(row["id"] == related["id"] for row in previous):
+        previous.append(related)
+    # Missing per-file history is unknown, never proof that old photos are new.
+    qualified = False
+    for row in previous[:1]:
+        try:
+            result = row.get("result") or json.loads(row.get("result_json") or "{}")
+        except (ValueError, TypeError):
+            result = {}
+        if row.get("source_device_id") == source_device_id and (result.get("source") or {}).get("file_history_complete"):
+            qualified = True
+    unknown_fast = new_fast if previous and not qualified else 0
+    new_fast -= unknown_fast
     import_status = "available"
-    if duplicate is not None:
-        import_status = "already_imported" if duplicate.get("state") == "completed" else "import_running"
-    elif source_device_id and history_rows and new_fast == 0 and changed_fast == 0:
-        # Reused SD card with no new/changed camera media is a normal idle state,
-        # not an import error. Non-media camera management files do not keep the
-        # source artificially "new".
-        import_status = "no_changes"
+    if duplicate and duplicate.get("state") != "completed":
+        import_status = "import_running"
+    elif unknown_fast:
+        import_status = "history_incomplete"
+    elif new_fast or changed_fast:
+        import_status = "available"
+    elif related or (previous and history_rows):
+        import_status = "already_imported" if related else "no_changes"
     return {
         "root_key": root_key,
         "relative_path": relative,
@@ -4183,9 +4212,12 @@ def import_source_summary(path: Path, root_key: str, root: Path) -> dict[str, An
         "already_imported_file_count": already_imported_fast,
         "new_file_count": new_fast,
         "changed_file_count": changed_fast,
+        "unknown_file_count": unknown_fast,
+        "file_history_complete": not bool(unknown_fast),
+        "has_import_history": bool(previous or history_rows),
         "ignored_file_count": ignored_fast,
         "import_status": import_status,
-        "existing_job_id": duplicate.get("id") if duplicate else None,
+        "existing_job_id": duplicate.get("id") if duplicate else (previous[-1]["id"] if previous else None),
         "existing_job_created_at": duplicate.get("created_at") if duplicate else None,
     }
 
@@ -4396,15 +4428,14 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
         source_signature=source_signature,
         include_active=True,
     )
-    if duplicate is not None:
-        state_text = "bereits importiert" if duplicate.get("state") == "completed" else "wird bereits importiert"
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Diese Quelle ist " + state_text + ". Technische ID: "
-                + str(duplicate.get("id") or "unbekannt")
-            ),
-        )
+    confirmed = payload.get("confirm_reimport") is True
+    if duplicate is not None and (duplicate.get("state") != "completed" or not confirmed):
+        state_text = "bereits importiert; bitte erneute Prüfung ausdrücklich bestätigen" if duplicate.get("state") == "completed" else "wird bereits importiert"
+        raise HTTPException(status_code=409, detail="Diese Quelle ist " + state_text + ". Technische ID: " + str(duplicate.get("id") or "unbekannt"))
+    prior = duplicate if confirmed else None
+    if confirmed and prior is None and source_device_id:
+        with database_connection(DATABASE_FILE) as connection:
+            prior = connection.execute("SELECT id FROM jobs WHERE operation='folder_import' AND state='completed' AND source_device_id=? ORDER BY created_at DESC LIMIT 1", (source_device_id,)).fetchone()
     now = datetime.now().astimezone()
     job_id = now.strftime("FOLDER_IMPORT_%Y%m%d_%H%M%S_%f")
     label = str(payload.get("display_name") or source.name).strip() or source.name
@@ -4426,6 +4457,7 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
             source_volume_label=label,
             source_signature=source_signature,
             source_device_id=source_device_id,
+            reimport_of_job_id=prior["id"] if prior else None,
         )
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
@@ -11985,8 +12017,10 @@ def index() -> str:
     }
 
     let sdSummaryRequest = 0;
+    let sdSourceSummary = null;
     async function updateSdSourceDetail() {
       const device = selectedSdDevice;
+      sdSourceSummary = null;
       const requestId = ++sdSummaryRequest;
       if (!device?.mounted || !device.read_only || !device.device_id) {
         sdSourceDetail.textContent = "";
@@ -11999,6 +12033,7 @@ def index() -> str:
         const source = await response.json();
         if (!response.ok) throw new Error(source.detail || "Karteninhalt konnte nicht geprüft werden.");
         if (requestId !== sdSummaryRequest) return;
+        sdSourceSummary = source;
         const changed = Number(source.changed_file_count || 0);
         const ignored = Number(source.ignored_file_count || 0);
         sdSourceDetail.textContent = `${source.file_count} Dateien insgesamt · `
@@ -12006,12 +12041,13 @@ def index() -> str:
           + `${formatBytes(source.total_size_bytes)} · `
           + `${Number(source.already_imported_file_count || 0)} bereits gesichert · `
           + `${Number(source.new_file_count || 0)} neu`
+          + (Number(source.unknown_file_count || 0) ? ` · ${source.unknown_file_count} wegen unvollständiger Historie zu prüfen` : "")
           + (changed ? ` · ${changed} verändert/zu prüfen` : "")
           + (ignored ? ` · ${ignored} Verwaltungsdateien ignoriert` : "")
           + (source.import_status === "no_changes" ? " · Keine neuen Dateien" : "");
-        if (["no_changes", "already_imported", "import_running"].includes(source.import_status)) {
-          sdImportButton.disabled = true;
-        }
+        sdImportButton.disabled = source.import_status === "import_running";
+        sdImportButton.textContent = ["no_changes", "already_imported", "history_incomplete"].includes(source.import_status)
+          ? "Erneut prüfen / sichern" : "SD-Karte sichern";
       } catch (error) {
         if (requestId === sdSummaryRequest)
           sdSourceDetail.textContent = "Karteninformationen nicht verfügbar: " + error.message;
@@ -12473,8 +12509,10 @@ def index() -> str:
         showError(new Error("Bitte die SD-Karte zuerst ausschließlich lesend einbinden."));
         return;
       }
+      const repeat = Boolean(sdSourceSummary?.has_import_history);
+      if (repeat && !(await window.BibliothekarI18n.confirmAsync("Diese Quelle wurde bereits verarbeitet. Erneut vollständig prüfen und fehlende Sicherungen bei nachgewiesener Abwesenheit erneut importieren? Vorhandene Originale werden anhand von SHA-256 erkannt und nicht erneut veröffentlicht. Alte Historie und Archivdaten bleiben erhalten."))) return;
       await startFolderImportSelection(
-        "removable", device.device_id, device.label || device.model || "SD-Karte", "sd_card"
+        "removable", device.device_id, device.label || device.model || "SD-Karte", "sd_card", repeat
       );
     });
 
@@ -12568,7 +12606,7 @@ def index() -> str:
       await startFolderImportSelection(currentFolderRoot, currentFolderPath, leaf, "folder");
     });
 
-    async function startFolderImportSelection(rootKey, relativePath, displayName="", sourceMode="folder") {
+    async function startFolderImportSelection(rootKey, relativePath, displayName="", sourceMode="folder", confirmReimport=false) {
       if (!rootKey || !relativePath) {
         noticeElement.textContent = "Bitte zuerst eine Importquelle auswählen.";
         noticeElement.classList.add("error-text");
@@ -12593,7 +12631,8 @@ def index() -> str:
               source_root_key: rootKey,
               source_relative_path: relativePath,
               display_name: displayName || undefined,
-              source_mode: sourceMode
+              source_mode: sourceMode,
+              confirm_reimport: confirmReimport
             })
           }
         );

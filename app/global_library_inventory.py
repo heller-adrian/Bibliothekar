@@ -65,15 +65,19 @@ def register_analysis_inventory(
     analysis: dict[str, Any],
     checksums: dict[str, str],
     sizes: dict[str, int],
+    reimport_of_job_id: str | None = None,
 ) -> dict[str, Any]:
     backup_id = backup_key(library_id, job_id)
+    # A confirmed new backup attempt is distinct from the old import, while
+    # canonical family/media identity continues to use the original hashes.
+    attempt_identity = f"reimport:{job_id}:{source_identity}" if reimport_of_job_id else source_identity
     register_source_backup(
         registry_path,
         backup_id=backup_id,
         source_kind="import",
-        source_identity=source_identity or job_id,
+        source_identity=attempt_identity or job_id,
         backup_path=source_path or job_id,
-        metadata={"library_id": library_id, "job_id": job_id},
+        metadata={"library_id": library_id, "job_id": job_id, "physical_source_identity": source_identity, "reimport_of_job_id": reimport_of_job_id},
     )
 
     members_by_family: dict[str, list[dict[str, Any]]] = {}
@@ -165,6 +169,7 @@ def _database_family_rows(
                 ff.job_id,
                 ff.family_key,
                 j.source_signature,
+                j.duplicate_of_job_id,
                 j.source_fingerprint,
                 j.source_device_id,
                 j.source_path,
@@ -222,10 +227,11 @@ def backfill_library_inventory(
             # Quellenidentität.
             is_main_import = library_id == MAIN_LIBRARY_ID
             source_kind = "import" if is_main_import else "existing_library"
+            attempt_identity = f"reimport:{job_id}:{identity}" if first.get("duplicate_of_job_id") else identity
             source_identity = (
-                identity
+                attempt_identity
                 if is_main_import
-                else f"{library_id}:{identity}"
+                else f"{library_id}:{attempt_identity}"
             )
             register_source_backup(
                 registry_path,

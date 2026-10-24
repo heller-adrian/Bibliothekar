@@ -363,6 +363,7 @@ def create_job(
     source_volume_label: str | None = None,
     source_signature: str | None = None,
     source_device_id: str | None = None,
+    reimport_of_job_id: str | None = None,
 ) -> dict[str, Any]:
     now = utc_now_iso()
 
@@ -386,6 +387,7 @@ def create_job(
                 source_volume_label,
                 source_signature,
                 source_device_id,
+                duplicate_of_job_id,
                 created_at,
                 updated_at
             )
@@ -405,6 +407,7 @@ def create_job(
                 ?,
                 ?,
                 ?,
+                ?,
                 ?
             )
             """,
@@ -418,6 +421,7 @@ def create_job(
                 source_volume_label,
                 source_signature,
                 source_device_id,
+                reimport_of_job_id,
                 now,
                 now,
             ),
@@ -444,6 +448,7 @@ def find_folder_import_by_identity(
     source_fingerprint: str | None = None,
     exclude_job_id: str | None = None,
     include_active: bool = True,
+    include_completed: bool = True,
 ) -> dict[str, Any] | None:
     conditions = ["operation = 'folder_import'"]
     values: list[Any] = []
@@ -457,9 +462,11 @@ def find_folder_import_by_identity(
     if not identity_parts:
         return None
     conditions.append("(" + " OR ".join(identity_parts) + ")")
-    states = ["completed"]
+    states = ["completed"] if include_completed else []
     if include_active:
         states += ["queued", "copying", "verifying", "backup_verified", "analyzing_metadata", "organizing"]
+    if not states:
+        return None
     conditions.append("state IN (" + ",".join("?" for _ in states) + ")")
     values.extend(states)
     if exclude_job_id:
@@ -467,7 +474,7 @@ def find_folder_import_by_identity(
         values.append(exclude_job_id)
     with database_connection(database_path) as connection:
         row = connection.execute(
-            "SELECT * FROM jobs WHERE " + " AND ".join(conditions) + " ORDER BY created_at ASC LIMIT 1",
+            "SELECT * FROM jobs WHERE " + " AND ".join(conditions) + " ORDER BY CASE WHEN state='completed' THEN 1 ELSE 0 END, created_at ASC, id LIMIT 1",
             values,
         ).fetchone()
     return row_to_job(row) if row is not None else None
@@ -479,27 +486,27 @@ def set_job_source_identity(
     *,
     source_signature: str,
     source_fingerprint: str,
+    allow_completed_duplicate: bool = False,
 ) -> dict[str, Any]:
-    duplicate = find_folder_import_by_identity(
-        database_path,
-        source_fingerprint=source_fingerprint,
-        exclude_job_id=job_id,
-        include_active=True,
-    )
-    if duplicate is not None:
-        with database_connection(database_path) as connection:
-            connection.execute(
-                "UPDATE jobs SET duplicate_of_job_id = ?, source_signature = ?, source_fingerprint = ?, updated_at = ? WHERE id = ?",
-                (duplicate["id"], source_signature, source_fingerprint, utc_now_iso(), job_id),
-            )
-        raise DatabaseError(
-            "Diese Quelle wurde bereits importiert: " + str(duplicate["id"])
-        )
+    # Serialize identity publication before any filesystem publication. A
+    # second worker cannot pass the same active fingerprint simultaneously.
     with database_connection(database_path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        states = ["queued", "copying", "verifying", "backup_verified", "analyzing_metadata", "organizing"]
+        if not allow_completed_duplicate:
+            states.append("completed")
+        duplicate = connection.execute(
+            "SELECT id FROM jobs WHERE operation='folder_import' AND source_fingerprint=? AND id<>? AND state IN (" + ",".join("?" for _ in states) + ") ORDER BY created_at,id LIMIT 1",
+            (source_fingerprint,job_id,*states),
+        ).fetchone()
         connection.execute(
-            "UPDATE jobs SET source_signature = ?, source_fingerprint = ?, updated_at = ? WHERE id = ?",
-            (source_signature, source_fingerprint, utc_now_iso(), job_id),
+            "UPDATE jobs SET source_signature=?,source_fingerprint=?,updated_at=? WHERE id=?",
+            (source_signature,source_fingerprint,utc_now_iso(),job_id),
         )
+        if duplicate is not None:
+            connection.execute("UPDATE jobs SET duplicate_of_job_id=? WHERE id=?",(duplicate["id"],job_id))
+    if duplicate is not None:
+        raise DatabaseError("Diese Quelle wird bereits verarbeitet: " + str(duplicate["id"]))
     job = get_job(database_path, job_id)
     if job is None:
         raise DatabaseError(f"Auftrag fehlt nach Quellenidentität: {job_id}")
@@ -716,6 +723,7 @@ def list_imported_media_origins(
                 f.job_id,
                 f.original_relative_path,
                 f.current_relative_path,
+                f.current_root_kind, f.sha256_current, f.size_bytes AS current_size_bytes,
                 f.original_filename,
                 COALESCE(f.source_size_bytes, f.size_bytes) AS size_bytes,
                 f.sha256_original AS sha256,

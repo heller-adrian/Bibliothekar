@@ -17,7 +17,7 @@ import hashlib
 import shutil
 import time
 
-from app.metadata import analyze_tree
+from app.metadata import analyze_tree, classify_media
 from app.source_filter import should_ignore_source_path
 from app.import_publication import import_identity, publish_import_file, rollback_import_file
 from app.pipeline import (
@@ -807,6 +807,24 @@ def run_folder_import_job(
             imported_sha256,
             duplicate_origins_by_sha,
         )
+        if already_imported and not any(classify_media(Path(item["relative_path"])) in MEDIA_TYPES for item in entries):
+            # A verified duplicate-only recheck is a successful no-op. Preserve
+            # per-card history even when no bytes need to be published.
+            if import_history_callback is not None:
+                import_history_callback(already_imported)
+            status.update({"state": "success", "stage": "completed", "temporary_backup_removed": True,
+                           "source": {"file_count": 0, "total_source_file_count": len(all_entries),
+                                      "duplicate_file_count": len(already_imported), "already_imported_file_count": len(already_imported),
+                                      "new_file_count": 0, "signature": source_signature, "fingerprint": source_fingerprint,
+                                      "file_history_complete": True},
+                           "organization": {"working_root": str(work_root), "file_count": 0, "verified": True,
+                                            "imported_source_files": [], "destinations": []}})
+            atomic_json(status_path, status)
+            archive_protocol_directory(temporary_protocol, permanent_protocol)
+            _remove_empty_directories(temporary_job_root)
+            validate_active_roots()
+            temporary_job_root.rmdir()
+            return status
         if not entries:
             raise PipelineError(
                 "Auf dieser SD-Karte wurden keine neuen Dateien gefunden. "
@@ -1062,6 +1080,7 @@ def run_folder_import_job(
             "source": {
                 "file_count": len(entries),
                 "total_source_file_count": len(all_entries),
+                "file_history_complete": len(plan) + len(already_imported) == sum(classify_media(Path(e["relative_path"])) in MEDIA_TYPES for e in all_entries),
                 "already_imported_file_count": len(already_imported),
                 "duplicate_file_count": len(already_imported),
                 "duplicate_files": duplicate_details,
