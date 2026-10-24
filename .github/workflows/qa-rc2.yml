@@ -13,7 +13,6 @@ jobs:
     timeout-minutes: 105
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      RC2_EVIDENCE: ${{ runner.temp }}/rc2-evidence
       IMAGE: bibliothekar-rc2-qa:${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +24,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Initialize runner-local evidence path
+        run: printf 'RC2_EVIDENCE=%s/rc2-evidence\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Install isolated QA dependencies
         run: |
           sudo apt-get update -qq
