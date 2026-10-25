@@ -182,3 +182,7 @@ RC1_TRANSLATIONS.update({
  "SD-Sicherungsprüfung unterbrochen; Neustart prüft vollständig neu.": "SD backup check interrupted; restart will verify everything again.",
  "SD-Prüfauftrag konnte nicht gelesen werden.": "The SD check status could not be read.",
 })
+
+RC1_TRANSLATIONS.update({
+    'Eine Wiederherstellung läuft oder ist ungeklärt. Bitte fehlgeschlagene oder unterbrochene Aufträge prüfen; der Papierkorb bleibt gesperrt.': "A restore is active or unresolved. Please review failed or interrupted tasks; trash remains protected.",
+})

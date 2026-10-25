@@ -5219,7 +5219,7 @@ def api_empty_trash(payload: dict[str, Any]) -> dict[str, Any]:
         # same lock and repeats the decision through journal/DB completion.
         with _operation_lock(WORKSPACE_PATH, blocking=False):
             if protected_trash_paths(None, WORKSPACE_PATH):
-                raise TrashError("Wiederherstellung läuft; der Papierkorb kann noch nicht geleert werden.")
+                raise TrashError("Eine Wiederherstellung läuft oder ist ungeklärt. Bitte fehlgeschlagene oder unterbrochene Aufträge prüfen; der Papierkorb bleibt gesperrt.")
             api_trash_inventory()
         with trash_empty_databases(sorted(databases)):
             empty_trash_filesystem(WORKSPACE_PATH)
