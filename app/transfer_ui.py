@@ -107,9 +107,7 @@ TRANSFER_HTML = r'''<!doctype html>
 
 
     .history-field-label { display:block; font-size:.75rem; font-weight:400; margin-bottom:3px; }
-    @media(min-width:761px) {
-      .archive-history-details > summary { display:none; }
-    }
+    .path .history-field-label { display:inline; margin-right:5px; }
     @media(max-width:760px) {
       #history-list .card { padding:11px; }
       #history-list .meta { gap:4px 10px; margin-top:7px; font-size:.8rem; }
@@ -281,11 +279,8 @@ TRANSFER_HTML = r'''<!doctype html>
       + `<div class="meta"><strong>Historische Archivverifikation</strong><span>${Number(item.verification_file_count||0)} Dateien</span><span data-bk-preserve-language>${escapeHtml(formatDate(item.verification_completed_at))}</span></div></details>`;
   }
   function syncArchiveHistoryDetails() {
-    historyList.querySelectorAll('.archive-history-details').forEach(node => {
-      node.open = window.matchMedia('(min-width:761px)').matches;
-    });
+    // Native details start collapsed on every screen; retain user expansion.
   }
-  window.matchMedia('(min-width:761px)').addEventListener('change', syncArchiveHistoryDetails);
   function renderArchive(summary){
     candidateCount.textContent=summary.candidate_count;
     verifiedCount.textContent=summary.verified_count;

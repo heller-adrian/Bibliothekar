@@ -148,9 +148,14 @@ def test_confirmed_reimport_uses_real_worker_and_preserves_source(fixture,monkey
         for db in dbs:
             with database_connection(db) as c:c.execute("update files set current_root_kind='camera_archive' where job_id=?",(first['id'],))
     elif where=='missing':original.unlink()  # synthetic external loss, source preserved
-    second=queue_and_run(dbs[0],context,confirmed=True)
-    assert second['duplicate_of_job_id']==first['id']
-    assert second['result']['organization']['file_count']==(1 if where=='missing' else 0)
+    if where=='missing':
+        second=queue_and_run(dbs[0],context,confirmed=True)
+        assert second['duplicate_of_job_id']==first['id']
+        assert second['result']['organization']['file_count']==1
+    else:
+        response=main.api_run_folder_import({'source_root_key':'removable','source_relative_path':'CARD','source_mode':'sd_card','confirm_reimport':True})
+        assert response.status_code==200 and json.loads(response.body)['integrity_verified'] is True
+        with database_connection(dbs[0]) as c: assert c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==1
     if where=='missing':assert original.read_bytes()==source
     if where=='archive':assert archive.read_bytes()==source and not original.exists()
     assert p.read_bytes()==source

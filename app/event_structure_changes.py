@@ -1494,6 +1494,18 @@ def _validated_structure_input(
     return structure_enabled, clean_input
 
 
+def _renamed_display_name(event: Any, new_folder: str) -> str:
+    name = str(event["name"])
+    old_folder = str(event["folder_name"])
+    if name and old_folder.endswith(name):
+        prefix = old_folder[:-len(name)]
+        if new_folder.startswith(prefix) and new_folder[len(prefix):].strip():
+            return new_folder[len(prefix):].strip()
+    # A non-standard folder name is itself the explicit new title. Never
+    # guess a date prefix from an unrelated arbitrary naming convention.
+    return new_folder
+
+
 def _apply_confirmed_state(
     connection: Any,
     row: dict[str, Any],
@@ -1558,11 +1570,14 @@ def _apply_confirmed_state(
             root_rename.get("new_folder"),
             "Neuer Ereignisordner",
         )
+        previous = connection.execute(
+            "SELECT name,folder_name FROM events WHERE id=?", (row["event_id"],)
+        ).fetchone()
         connection.execute(
             """UPDATE events
-               SET folder_name=?,updated_at=?,edited_at=?
+               SET folder_name=?,name=?,updated_at=?,edited_at=?
                WHERE id=? AND parent_event_id IS NULL""",
-            (new_folder, now, now, row["event_id"]),
+            (new_folder, _renamed_display_name(previous, new_folder), now, now, row["event_id"]),
         )
 
     for child_rename in detected.get("child_renames") or []:
@@ -1955,7 +1970,8 @@ def prepare_archived_structure_change(
         document["leaf_folder_layouts"] = selected_leaves
     document["structure"] = _tree_text(detected.get("observed_directories") or [])
     if detected.get("root_rename"):
-        document["event"] = {**document["event"], "folder_name": detected["root_rename"]["new_folder"]}
+        document["event"] = {**document["event"], "folder_name": detected["root_rename"]["new_folder"],
+                             "name": _renamed_display_name(event, detected["root_rename"]["new_folder"])}
     if app_version:
         document["source_app_version"] = app_version
         document["generated_at"] = now

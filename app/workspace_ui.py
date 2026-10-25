@@ -1401,7 +1401,7 @@ WORKSPACE_HTML = r"""<!doctype html>
   .suggestion-help{font-size:.85rem;margin-bottom:10px}
 }
 
-    #mobile-preview-button { display:none; }
+    #mobile-preview-button { display:none; grid-column:2; justify-self:start; min-height:28px; padding:3px 9px; font-size:.76rem; width:auto; }
     #mobile-preview-dialog { width:min(95vw,700px); max-height:90dvh; padding:12px; overflow:auto; overscroll-behavior:contain; }
     .mobile-preview-header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .mobile-preview-header h2 { margin:0; }
@@ -3014,9 +3014,27 @@ WORKSPACE_HTML = r"""<!doctype html>
     let previewBodyOverflow = "";
     let previewInDialog = false;
     function syncMobilePreviewButton() {
-      mobilePreviewButton.hidden = !selectedPreviewEventId && !selectedAllGroups().length;
+      const selected = selectedPreviewEventId
+        ? [...document.querySelectorAll("[data-preview-event-id]")].find(node => node.dataset.previewEventId === selectedPreviewEventId)
+        : [...document.querySelectorAll(".day-card.selected")].at(-1);
+      mobilePreviewButton.hidden = !selected;
+      if (selected) selected.append(mobilePreviewButton);
     }
-    mobilePreviewButton.addEventListener("click", () => {
+    let lastMobilePreviewTap = {key:"", time:0};
+    function mobilePreviewDoubleTap(card, select) {
+      card.addEventListener("click", event => {
+        if (!window.matchMedia("(max-width:820px)").matches || event.target.closest("button,input,a")) return;
+        const now = performance.now();
+        const key = card.dataset.previewEventId || card.dataset.bkSelectionKey;
+        if (key && lastMobilePreviewTap.key === key && now - lastMobilePreviewTap.time < 350) {
+          event.preventDefault(); event.stopImmediatePropagation();
+          Promise.resolve(select()).then(() => mobilePreviewButton.click()).catch(error => setStatus(error.message,true));
+          lastMobilePreviewTap = {key:"", time:0};
+        } else lastMobilePreviewTap = {key, time:now};
+      }, true);
+    }
+    mobilePreviewButton.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
       if (mobilePreviewDialog.open) return;
       previewInDialog = true;
       document.getElementById("mobile-preview-content").append(previewPanel);
@@ -3050,7 +3068,6 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     function setSelectedPreviewEvent(eventId) {
       selectedPreviewEventId = eventId || null;
-      syncMobilePreviewButton();
       document.querySelectorAll("[data-preview-event-id]").forEach(node => {
         node.classList.toggle(
           "selected-preview",
@@ -3058,6 +3075,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           && node.dataset.previewEventId === selectedPreviewEventId
         );
       });
+      syncMobilePreviewButton();
     }
 
 
@@ -3362,6 +3380,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           card.dataset.previewEventId = group.event_id;
           card.dataset.previewJobId = group.job_id || "";
           card.style.cursor="pointer";
+          mobilePreviewDoubleTap(card, () => openStoredEventPreview(group.event_id, group.job_id || jobSelect.value));
           card.addEventListener("click",()=>{
             openStoredEventPreview(group.event_id, group.job_id || jobSelect.value);
           });
@@ -3577,6 +3596,10 @@ WORKSPACE_HTML = r"""<!doctype html>
         card.dataset.bkPwaSelect = "workspace-capture";
         card.dataset.bkPwaKey = key;
         card.dataset.bkSelectionKey = key;
+        mobilePreviewDoubleTap(card, () => {
+          selectedDays.add(key); lastSelectedDayKey = key;
+          renderDays(); renderSelection();
+        });
         if (group.released_archive) {
           card.classList.add("released-archive-card");
         }
@@ -3790,6 +3813,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         dayList.appendChild(card);
       }
       updateDaySelectAllButton();
+      syncMobilePreviewButton();
     }
 
 

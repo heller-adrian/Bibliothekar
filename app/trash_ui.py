@@ -111,7 +111,12 @@ TRASH_HTML = r"""<!doctype html>
     };
     if(window.BibliothekarI18n?.getLocale?.()==="de")return value;
     for(const [source,target] of Object.entries(prefixes))
-      if(value.startsWith(source))return target+value.slice(source.length);
+      if(value.startsWith(source)){
+        const suffix=value.slice(source.length);
+        if(source!=="Papierkorb konnte nicht sicher geleert werden:")return target+suffix;
+        const cause=window.BibliothekarI18n?.t?.(suffix.trim())||suffix.trim();
+        return target+(cause ? " "+cause : "");
+      }
     return window.BibliothekarI18n?.t?.(value)||value;
   };
   function updateControls(){

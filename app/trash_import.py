@@ -322,6 +322,45 @@ def _finish_known_restore(workspace_root: Path, job_id: str) -> None:
         _sync_dir(path.parent)
 
 
+def _completed_cleanup(database_path: Path | None, workspace_root: Path, job_id: str, skipped: list[str]) -> bool:
+    from contextlib import closing
+    import sqlite3
+    databases = {Path(database_path)} if database_path is not None else set()
+    registry = Path(os.environ.get("KAMERA_REGISTRY_DATABASE",
+        str(Path(os.environ.get("KAMERA_DATABASE_DIR", "/database"))/"bibliothekar-global.sqlite3")))
+    if registry.is_file():
+        try:
+            with closing(sqlite3.connect(registry.absolute().as_uri()+"?mode=ro", uri=True)) as connection:
+                rows = connection.execute("SELECT database_path,workspace_root FROM libraries WHERE COALESCE(is_registered,1)=1").fetchall()
+            databases.update(Path(db) for db, workspace in rows
+                             if Path(workspace).resolve() == workspace_root.resolve())
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            return False
+    found = False
+    for database in databases:
+        # Never create a missing database while deciding whether to release.
+        if not database.is_file():
+            return False
+        try:
+            with closing(sqlite3.connect(database.absolute().as_uri()+"?mode=ro", uri=True)) as connection:
+                connection.row_factory = sqlite3.Row
+                row = connection.execute("SELECT operation,state,source_path,result_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                continue
+            result = json.loads(row["result_json"] or "{}")
+            cleanup = result.get("trash_source_cleanup", {}) if isinstance(result, dict) else {}
+            if not isinstance(cleanup, dict):
+                return False
+            if (row["operation"] != "trash_import" or row["state"] != "completed"
+                    or row["source_path"] != str(stage_parent(workspace_root)/job_id)
+                    or cleanup.get("skipped") != skipped or "warning" in cleanup):
+                return False
+            found = True
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            return False
+    return found
+
+
 @serialized_trash_operation("workspace_root")
 def protected_trash_paths(database_path: Path | None, workspace_root: Path, *, ignore_job_id: str | None = None) -> set[str]:
     """Return files reserved by queued/running restores, including staging."""
@@ -356,6 +395,8 @@ def protected_trash_paths(database_path: Path | None, workspace_root: Path, *, i
                     canonical = {_relative(p).as_posix() for p in skipped}
                     if not canonical.issubset(staged):
                         raise ValueError("Unbekannter Bereinigungsrest")
+                    if _completed_cleanup(database_path, workspace_root, journal.stem, skipped):
+                        canonical = set()
                 else:
                     canonical = set()
             if journal.stem != ignore_job_id:

@@ -2435,13 +2435,13 @@ BIBLIOTHEKAR_0350_CSS = r"""
   }
 
   html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card {
-    grid-template-columns: auto minmax(0, 1fr) auto !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
     gap: 8px !important;
     padding: 10px !important;
   }
 
   html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card > .badge {
-    grid-column: auto !important;
+    grid-column: 2 !important;
     margin: 0 !important;
     font-size: .7rem;
     padding: 4px 7px;

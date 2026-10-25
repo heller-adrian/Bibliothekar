@@ -67,10 +67,10 @@ def test_r01_explicit_integrity_check_still_hashes_and_rejects_corruption(fixtur
     with database_connection(dbs[0]) as c:rel=c.execute('SELECT current_relative_path FROM files WHERE job_id=?',(first['id'],)).fetchone()[0]
     target=storage_paths(ws)['backup_root']/rel
     damaged=bytes([original[0]^1])+original[1:];target.write_bytes(damaged)
-    response=backup_request(True);assert response.status_code==202
-    job=claim_next_job(dbs[0]);assert job
-    main.process_claimed_job(job,library_context=context)
-    assert get_job(dbs[0],job['id'])['state']=='failed'
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as error: backup_request(True)
+    assert error.value.status_code==409
+    assert claim_next_job(dbs[0]) is None
     assert source.read_bytes()==original and target.read_bytes()==damaged
 
 
@@ -91,9 +91,9 @@ const showError=error=>{throw error};
 const startFolderImportSelection=async(...args)=>calls.push(args);
 ''' + html[start:end] + '''
 (async()=>{
-await requestSdBackup();if(confirmed||calls.at(-1)[4]!==false)throw Error('ordinary repeat hashes/queues blindly');
-await requestSdBackup(true);if(confirmed!==1||calls.at(-1)[4]!==true)throw Error('explicit integrity unavailable');
-sdSourceSummary.new_file_count=1;await requestSdBackup();if(confirmed!==2||!calls.at(-1)[4])throw Error('new files not verified');
+await requestSdBackup();if(confirmed!==1||calls.at(-1)[4]!==true)throw Error('repeat did not verify through unified path');
+await requestSdBackup(true);if(confirmed!==2||calls.at(-1)[4]!==true)throw Error('explicit integrity unavailable');
+sdSourceSummary.new_file_count=1;await requestSdBackup();if(confirmed!==3||!calls.at(-1)[4])throw Error('new files not verified');
 selectedSdDevice.read_only=false;let denied=false;try{await requestSdBackup()}catch(e){denied=true};if(!denied||calls.length!==3)throw Error('RO guard');
 })().catch(e=>{console.error(e);process.exitCode=1});
 ''')
@@ -138,7 +138,8 @@ def test_r03_r04_browser_bundle_and_css(tmp_path):
         for css in re.findall(r'<style[^>]*>(.*?)</style>',page,re.S):
             rules=tinycss2.parse_stylesheet(css,skip_comments=True,skip_whitespace=True)
             assert not [r for r in rules if r.type=='error']
-    bundle={'workspace':WORKSPACE_HTML,'archive':TRANSFER_HTML,'import':index(),'i18n':I18N_UI_JS,
+    from app.ui_shell import apply_shell
+    bundle={'shellWorkspace':apply_shell(WORKSPACE_HTML,active_area='workspace',subarea='captures'),'shellArchive':apply_shell(TRANSFER_HTML,active_area='archive'),'workspace':WORKSPACE_HTML,'archive':TRANSFER_HTML,'import':index(),'i18n':I18N_UI_JS,
         'preview':part(WORKSPACE_HTML,'    const mobilePreviewButton =','    function setSelectedPreviewEvent'),
         'stored':part(WORKSPACE_HTML,'    function renderStoredEventPreview(','    async function openStoredEventPreview'),
         'history':part(TRANSFER_HTML,'  function archiveHistoryCounts(','  function syncArchiveHistoryDetails('),

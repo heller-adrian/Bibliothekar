@@ -157,3 +157,15 @@ RC1_PATTERNS.extend([
 ])
 
 RC1_TRANSLATIONS["Die Vorschau zeigt die geplante Struktur oder den tatsächlichen Bestand. Es werden keine Dateien verändert."] = "The preview shows the planned structure or actual inventory. No files are changed."
+
+# RC3 follow-up: presentation only; historical JSON is preserved separately.
+RC1_TRANSLATIONS.update({
+    "Originales Diagnoseprotokoll": "Original diagnostic log",
+    "Der Ordnerimport ist vollständig geprüft. Ein echter ZFS-Snapshot und die Freigabe zum Formatieren werden erst mit der Host-Schnittstelle aktiviert.": "The folder import is fully verified. A real ZFS snapshot and permission to format will only be enabled with the host interface.",
+    "Import läuft im Hintergrund": "Import running in the background",
+    "Wiederherstellung läuft; der Papierkorb kann noch nicht geleert werden.": "A restore is active or unresolved; trash cannot be emptied yet.",
+    "Wiederherstellung reserviert Papierkorbdateien; Leeren gesperrt.": "Trash files are reserved by an active or unresolved restore; emptying is blocked.",
+})
+RC1_PATTERNS.extend([
+    [r"^Papierkorb konnte nicht sicher geleert werden: (.+)$", "Could not empty trash safely: $1"],
+])

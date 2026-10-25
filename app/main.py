@@ -4458,6 +4458,24 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
             return JSONResponse(content={"accepted": False,
                 "status": "already_backed_up" if backed_up else "verification_required",
                 "media_file_count": count, "integrity_verified": False})
+    # A confirmed SD recheck is read-only until a genuinely missing/new media
+    # hash is found. Do not create a regular zero-file import for verification.
+    if (confirmed and root_key == "removable" and payload.get("source_mode") == "sd_card"
+            and source_device_id and (duplicate is None or duplicate.get("state") == "completed")):
+        from app.pipeline import source_manifest
+        from app.source_reimport import retained_origins
+        try:
+            entries = [entry for entry in source_manifest(source)
+                       if Path(entry["relative_path"]).suffix.lower() in MEDIA_SOURCE_EXTENSIONS]
+            origins = list_imported_media_origins(DATABASE_FILE)
+            wanted = {str(entry["sha256"]) for entry in entries}
+            retained = retained_origins(REGISTRY_DATABASE_FILE,
+                [row for row in origins if str(row["sha256"]) in wanted]) if wanted else []
+            if wanted and wanted <= {str(row["sha256"]) for row in retained}:
+                return JSONResponse(content={"accepted": False, "status": "already_backed_up",
+                    "media_file_count": len(entries), "integrity_verified": True})
+        except (PipelineError, OSError, ValueError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
     if duplicate is not None and (duplicate.get("state") != "completed" or not confirmed):
         state_text = "bereits importiert; bitte erneute Prüfung ausdrücklich bestätigen" if duplicate.get("state") == "completed" else "wird bereits importiert"
         raise HTTPException(status_code=409, detail="Diese Quelle ist " + state_text + ". Technische ID: " + str(duplicate.get("id") or "unbekannt"))
@@ -8799,13 +8817,15 @@ def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any
 @_root_request
 def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
     try:
-        return verify_archived_structure_change(
+        result = verify_archived_structure_change(
             current_database_file(),
             current_archive_root(),
             current_workspace_root(),
             change_id,
             work_root=current_library_context().work_root,
         )
+        view_cache.invalidate(current_database_file())
+        return result
     except EventStructureChangeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -11066,7 +11086,6 @@ def index() -> str:
       </div>
 
       <div class="source-detail" id="sd-source-detail" data-source-pane="sd"></div>
-      <button id="sd-verify-button" class="secondary" type="button" hidden>Integrität prüfen</button>
 
       <details class="other-source-panel">
         <summary>Andere Quelle verwenden</summary>
@@ -11214,7 +11233,6 @@ def index() -> str:
     const sdCardStatus = document.getElementById("sd-card-status");
     const sdMountButton = document.getElementById("sd-mount-button");
     const sdImportButton = document.getElementById("sd-import-button");
-    const sdVerifyButton = document.getElementById("sd-verify-button");
     const sdUnmountButton = document.getElementById("sd-unmount-button");
     const sdMountState = document.getElementById("sd-mount-state");
     const deviceSelect = document.getElementById("device-select");
@@ -11557,12 +11575,17 @@ def index() -> str:
         : source;
     }
 
-    // The technical panel is presentation-only. Translate known import-state
-    // Historical technical logs are raw evidence. Keep nested JSON, IDs,
-    // machine codes, user-defined names and filesystem paths byte-for-byte.
-    // Visible summaries are localized independently of this raw panel.
+    // Only app-authored message fields get a translated presentation.
+    // Opaque names/paths/IDs and the separately available original JSON stay intact.
     function localizedTechnicalJob(job) {
-      return job;
+      const fields = new Set(["progress_message", "note", "error_message", "warning"]);
+      function copy(value) {
+        if (Array.isArray(value)) return value.map(copy);
+        if (!value || typeof value !== "object") return value;
+        return Object.fromEntries(Object.entries(value).map(([key,item]) =>
+          [key, fields.has(key) && typeof item === "string" ? importUiText(item) : copy(item)]));
+      }
+      return copy(job);
     }
 
     function renderJob(job, isHidden=false) {
@@ -11775,6 +11798,7 @@ def index() -> str:
                   2
                 )
             )}</pre>
+            <details><summary>Originales Diagnoseprotokoll</summary><pre data-original-job-log>${escapeHtml(JSON.stringify(job,null,2))}</pre></details>
           </details>
         </article>
       `;
@@ -12070,7 +12094,6 @@ def index() -> str:
     async function updateSdSourceDetail() {
       const device = selectedSdDevice;
       sdSourceSummary = null;
-      sdVerifyButton.hidden = true;
       const requestId = ++sdSummaryRequest;
       if (!device?.mounted || !device.read_only || !device.device_id) {
         sdSourceDetail.textContent = "";
@@ -12095,8 +12118,6 @@ def index() -> str:
           + (ignored ? ` · ${ignored} ${bk0511ImportLabel("Verwaltungsdateien ignoriert", "administrative files ignored")}` : "")
           + (source.import_status === "no_changes" ? bk0511ImportLabel(" · Keine neuen Dateien", " · No new files") : "");
         sdImportButton.disabled = source.import_status === "import_running";
-        sdVerifyButton.hidden = !source.has_import_history;
-        sdVerifyButton.disabled = sdImportButton.disabled;
         sdImportButton.textContent = source.has_import_history
           ? bk0511ImportLabel("Erneut sichern", "Back up again") : bk0511ImportLabel("SD-Karte sichern", "Back up SD card");
       } catch (error) {
@@ -12564,13 +12585,11 @@ def index() -> str:
         return;
       }
       const repeat = Boolean(sdSourceSummary?.has_import_history);
-      const unchanged = repeat && !["new_file_count", "changed_file_count", "unknown_file_count"].some(key => Number(sdSourceSummary[key] || 0));
-      const verify = integrity || (repeat && !unchanged);
+      const verify = integrity || repeat;
       if (verify && !(await confirmSdIntegrity())) return;
       await startFolderImportSelection("removable", device.device_id, device.label || device.model || "SD Card", "sd_card", verify);
     }
     sdImportButton.addEventListener("click", () => requestSdBackup());
-    sdVerifyButton.addEventListener("click", () => requestSdBackup(true));
 
     deviceSelect.addEventListener("change", () => {
       driveFolderBrowser.hidden = true;
@@ -12675,7 +12694,7 @@ def index() -> str:
       driveFolderImportButton.disabled = true;
       noticeElement.classList.remove("error-text");
       noticeElement.classList.add("bk-loading-status");
-      noticeElement.textContent = "Ordnerimport wird angelegt …";
+      noticeElement.textContent = confirmReimport ? bk0511ImportLabel("Sicherungen werden geprüft …", "Checking existing backups …") : "Ordnerimport wird angelegt …";
 
       try {
         const response = await fetch(
@@ -12700,8 +12719,8 @@ def index() -> str:
         }
         if (!data.accepted && data.status === "already_backed_up") {
           noticeElement.textContent = bk0511ImportLabel(
-            "Laut Sicherungshistorie ist bereits alles gesichert. Keine neuen Dateien. Für eine vollständige SHA-256-Prüfung bitte „Integrität prüfen“ wählen.",
-            "The backup history shows everything is already backed up. No new files. Choose “Check backup integrity” for a full SHA-256 check.");
+            "Alle Aufnahmen sind bereits gesichert. Kein neuer Importauftrag erforderlich.",
+            "All recordings are already backed up. No new import job is needed.");
           return;
         }
         if (!data.accepted && data.status === "verification_required") {
