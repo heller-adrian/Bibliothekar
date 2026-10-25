@@ -1,0 +1,10 @@
+# Bestehende TrueNAS-RC2-Testinstallation auf RC3 aktualisieren
+
+1. Aufträge regulär beenden, Testkarte sicher auswerfen, App stoppen. App-YAML sichern; config/database als zusammengehörigen Teststand einschließlich vorhandener SQLite-WAL-Dateien sichern. Kein Clean Slate, keine DB-/Journalbereinigung und keine Ordnerumbenennung.
+2. Release-Assets und SHA256SUMS herunterladen und prüfen. Die bestehende TrueNAS-App bearbeiten und **nur das Image** auf den Inhalt von IMAGE-DIGEST.txt ändern. Alternativ den festen Tag ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.3 verwenden. Keine zweite Instanz mit denselben schreibbaren Datasets starten.
+3. Bestehende Datasetpfade, Mounts, Umgebungsvariablen, Ports, Passwortdatei und insbesondere den tatsächlichen Registry-Datenbankpfad unverändert lassen. Nicht das gesamte Beispiel-Compose über die vorhandene Installation kopieren; keine Smoke-Datenbankpfade übernehmen.
+4. Funktionierende NFSv4-ACL des SD-Mountbereichs und geschützte Eltern erhalten: Web-UID/GID 568:568 darf lesen und durchqueren, dort jedoch nicht schreiben; keine pauschale oder rekursive Rechteänderung, keine Umgehung des Helpers. Automatische geschützte Katalogbereitstellung ist weiterhin offen.
+5. App starten, Browser vollständig neu laden, anmelden und Version 1.0.0-rc.3 prüfen. Vorhandene Bibliotheken/Pfade müssen erscheinen. Bei unerwartetem Onboarding, Storagewarnung oder DB-Fehler stoppen und Logs sichern; keine neue leere Bibliothek über vorhandenen Daten anlegen.
+6. Mit synthetischen Medien MANUAL-ACCEPTANCE.md durchführen: identische SD ohne leeren Importauftrag; ausdrückliche Integritätsprüfung und fehlende Kopie; neue JPG/RAW/Video und Duplikate; EN/DE-Meldungen; mobile geplante/angewendete Vorschau, Dialogscroll und Schließen/Orientierung; kompakte Archivhistorie und echte Namen/Pfade. Die noch offene mobile Papierkorbregression gesondert nachholen.
+
+Keine produktiven NAS-Dateien, SD-Formatierung oder TrueNAS-Systempaketänderungen. RC1/RC2/latest bleiben unverändert. Ein bloßer Image-Downgrade ist kein nachgewiesenes Datenbankrollback; dafür den konsistent gesicherten Teststand verwenden.
