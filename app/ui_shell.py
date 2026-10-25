@@ -6347,6 +6347,7 @@ BIBLIOTHEKAR_0444_JS = r"""
   function destination(item) {
     const lib = library();
     if (item.kind === "import") return "/?library=" + lib;
+    if (item.kind === "sd_check") return "/?library=" + lib;
     if (item.kind === "trash_restore") return "/trash?library=" + lib;
     if (item.kind === "release") return "/archive?library=" + lib;
     const job = item.job_id ? "&job=" + encodeURIComponent(item.job_id) : "";
@@ -6369,7 +6370,7 @@ BIBLIOTHEKAR_0444_JS = r"""
     const label = String(item.label || "Hintergrundvorgang");
     const t = value => window.BibliothekarI18n?.t?.(value) || value;
     name.setAttribute("data-bk-preserve-language", "");
-    if (item.kind === "import") name.textContent = label;
+    if (item.kind === "import" || item.kind === "sd_check") name.textContent = label;
     else if (item.kind === "apply" && item.job_id && label.endsWith(" anwenden")) {
       // The event name is user data, even if it equals a dictionary key.
       name.textContent = t("Anwenden") + ": " + label.slice(0, -9);

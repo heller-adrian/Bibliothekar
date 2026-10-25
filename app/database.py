@@ -667,6 +667,7 @@ def list_database_jobs(
             """
             SELECT *
             FROM jobs
+            WHERE operation <> 'sd_recheck'
             ORDER BY created_at DESC, id DESC
             LIMIT ?
             """,

@@ -11,6 +11,12 @@ from tests.backend.test_f14_root_operations import fixture
 
 @pytest.fixture(autouse=True)
 def direct_import_lifecycle(monkeypatch):
+    # Synthetic source trees cannot be kernel-mounted RO on this host. Actual
+    # read-only refusal is tested separately; no production bypass is added.
+    from app import sd_recheck
+    from threading import Event
+    monkeypatch.setattr(sd_recheck,'read_only',lambda path:True)
+    monkeypatch.setattr(main,'WORKER_STOP',Event())
     # These tests invoke the real claimed worker synchronously, without an
     # application lifespan. Do not inherit a stopped worker's startup state
     # from previous TestClient lifespans in the complete suite.
@@ -130,6 +136,10 @@ def queue_and_run(db,context,confirmed=False):
     job=claim_next_job(db);assert job
     main.process_claimed_job(job,library_context=context)
     final=get_job(db,job['id']);assert final['state']=='completed',final
+    if final['operation']=='sd_recheck' and final['result'].get('import_job_id'):
+        job=claim_next_job(db);assert job and job['id']==final['result']['import_job_id']
+        main.process_claimed_job(job,library_context=context)
+        final=get_job(db,job['id']);assert final['state']=='completed',final
     return final
 
 
@@ -153,9 +163,9 @@ def test_confirmed_reimport_uses_real_worker_and_preserves_source(fixture,monkey
         assert second['duplicate_of_job_id']==first['id']
         assert second['result']['organization']['file_count']==1
     else:
-        response=main.api_run_folder_import({'source_root_key':'removable','source_relative_path':'CARD','source_mode':'sd_card','confirm_reimport':True})
-        assert response.status_code==200 and json.loads(response.body)['integrity_verified'] is True
-        with database_connection(dbs[0]) as c: assert c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==1
+        check=queue_and_run(dbs[0],context,confirmed=True)
+        assert check['operation']=='sd_recheck' and check['result']['integrity_verified'] is True
+        with database_connection(dbs[0]) as c: assert c.execute("SELECT COUNT(*) FROM jobs WHERE operation='folder_import'").fetchone()[0]==1
     if where=='missing':assert original.read_bytes()==source
     if where=='archive':assert archive.read_bytes()==source and not original.exists()
     assert p.read_bytes()==source

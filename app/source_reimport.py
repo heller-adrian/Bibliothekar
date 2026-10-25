@@ -24,11 +24,11 @@ def catalogued_copy_presence(registry, origins):
     return _retained_origins(registry, origins, verify_contents=False)
 
 
-def retained_origins(registry, origins):
-    return _retained_origins(registry, origins, verify_contents=True)
+def retained_origins(registry, origins, *, progress_callback=None):
+    return _retained_origins(registry, origins, verify_contents=True, progress_callback=progress_callback)
 
 
-def _retained_origins(registry, origins, *, verify_contents):
+def _retained_origins(registry, origins, *, verify_contents, progress_callback=None):
     libraries = list_libraries(registry, active_only=False)
     if not libraries:
         raise PipelineError('Erneute Sicherung benötigt eine eindeutig registrierte Bibliothek.')
@@ -70,7 +70,9 @@ def _retained_origins(registry, origins, *, verify_contents):
                                     raise PipelineError('Sicherungspfad ist keine reguläre Datei.')
                                 h=hashlib.sha256()
                                 if verify_contents:
-                                    while block:=os.read(handle,1024*1024):h.update(block)
+                                    while block:=os.read(handle,1024*1024):
+                                        h.update(block)
+                                        if progress_callback is not None: progress_callback(len(block))
                                 after=os.fstat(handle);bound=os.stat(name,dir_fd=fd,follow_symlinks=False)
                                 fields=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
                                 if (fields(before)!=fields(after) or fields(after)!=fields(bound)

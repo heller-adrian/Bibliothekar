@@ -67,9 +67,11 @@ def test_r01_explicit_integrity_check_still_hashes_and_rejects_corruption(fixtur
     with database_connection(dbs[0]) as c:rel=c.execute('SELECT current_relative_path FROM files WHERE job_id=?',(first['id'],)).fetchone()[0]
     target=storage_paths(ws)['backup_root']/rel
     damaged=bytes([original[0]^1])+original[1:];target.write_bytes(damaged)
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as error: backup_request(True)
-    assert error.value.status_code==409
+    response=backup_request(True);assert response.status_code==202
+    check=claim_next_job(dbs[0]);assert check['operation']=='sd_recheck'
+    main.process_claimed_job(check,library_context=context)
+    done=get_job(dbs[0],check['id']);assert done['state']=='failed' and done['error_message']
+    assert main.api_import_history()['total']==1
     assert claim_next_job(dbs[0]) is None
     assert source.read_bytes()==original and target.read_bytes()==damaged
 

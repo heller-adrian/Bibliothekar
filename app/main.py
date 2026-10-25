@@ -1227,6 +1227,22 @@ def process_claimed_job(
         settings = load_settings()
         storage = settings.get("storage", {})
 
+        if operation == "sd_recheck":
+            from app import sd_recheck
+            try:
+                preflight_folder_import(Path(job["source_path"]), workspace_path, pool_probe_path,
+                    processing_buffer_percent=int(storage.get("processing_buffer_percent",10)),
+                    safety_reserve_gib=int(storage.get("safety_reserve_gib",20)))
+                sd_recheck.run(database_file, REGISTRY_DATABASE_FILE, job,
+                    source_root=_safe_root("removable"), origins=list_imported_media_origins,
+                    signature=quick_source_signature, stop=WORKER_STOP.is_set)
+            except InterruptedError as error:
+                with database_connection(database_file) as connection:
+                    connection.execute("UPDATE jobs SET state='interrupted',stage='interrupted_after_restart',"
+                        "error_message=?,progress_message=? WHERE id=? AND operation='sd_recheck' AND state IN ('copying','verifying')",
+                        (str(error),str(error),job_id))
+            return
+
         if operation == "metadata_fixture_analysis":
             source_value = job.get("source_path")
 
@@ -1899,7 +1915,7 @@ def process_claimed_job(
     except Exception as error:
         _clear_import_cancel(job_id)
         try:
-            if operation != "metadata_fixture_analysis":
+            if operation not in {"metadata_fixture_analysis", "sd_recheck"}:
                 upsert_backup_lifecycle(
                     database_file,
                     job_id=job_id,
@@ -2124,7 +2140,7 @@ def worker_loop() -> None:
             import_context = _context_from_row(row) if row else build_main_library_context()
             with admission(import_context):
                 global_import = None
-                for operation in ['folder_import','metadata_multiple_import','metadata_general_import','trash_import']:
+                for operation in ['sd_recheck','folder_import','metadata_multiple_import','metadata_general_import','trash_import']:
                     global_import = claim_next_job(DATABASE_FILE,operation=operation)
                     if global_import is not None:break
             if global_import is not None:
@@ -2530,6 +2546,8 @@ def startup_database() -> None:
         interrupted = mark_running_jobs_interrupted(
             DATABASE_FILE
         )
+        from app.sd_recheck import resume as resume_sd_rechecks
+        resume_sd_rechecks(DATABASE_FILE)
         # Only requests that never touched the catalogue may resume automatically.
         from app.trash_import import resume_safe_queued_trash_restores
         restored_queue = resume_safe_queued_trash_restores(DATABASE_FILE, WORKSPACE_PATH)
@@ -4390,6 +4408,21 @@ def _folder_import_runtime_blocker() -> str | None:
     return None
 
 
+def _sd_recheck_response(job):
+    if job.get("operation") != "sd_recheck":
+        return JSONResponse(status_code=202, content={"accepted": True, "status": "import_running", "job": job})
+    return JSONResponse(status_code=202, content={"accepted": True, "status": "sd_check",
+        "task_id": job["id"], "request_id": job["id"].removeprefix("SD_RECHECK_"), "job": job})
+
+
+@app.get("/api/sd-rechecks/{task_id}", tags=["Import"])
+def api_sd_recheck(task_id: str):
+    job = get_job(DATABASE_FILE, task_id)
+    if job is None or job.get("operation") != "sd_recheck":
+        raise HTTPException(status_code=404, detail="SD-Prüfauftrag nicht gefunden.")
+    return job
+
+
 @app.post(
     "/api/jobs/folder-import",
     tags=["Import"],
@@ -4411,6 +4444,15 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
             status_code=422,
             detail="Der gesamte NAS-Quellenbereich kann nicht importiert werden. Bitte einen einzelnen Unterordner wählen.",
         )
+    if root_key == "removable" and payload.get("source_mode") == "sd_card" and payload.get("confirm_reimport") is True:
+        from app.sd_recheck import enqueue
+        try:
+            job = enqueue(DATABASE_FILE, source=source, source_root=root, device=source_device_id,
+                working=workspace_backup_root(WORKSPACE_PATH), label=str(payload.get("display_name") or source.name),
+                request_id=payload.get("request_id"))
+        except (PipelineError, OSError, ValueError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return _sd_recheck_response(job)
     try:
         try:
             storage = load_settings().get("storage", {})
@@ -4458,24 +4500,6 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
             return JSONResponse(content={"accepted": False,
                 "status": "already_backed_up" if backed_up else "verification_required",
                 "media_file_count": count, "integrity_verified": False})
-    # A confirmed SD recheck is read-only until a genuinely missing/new media
-    # hash is found. Do not create a regular zero-file import for verification.
-    if (confirmed and root_key == "removable" and payload.get("source_mode") == "sd_card"
-            and source_device_id and (duplicate is None or duplicate.get("state") == "completed")):
-        from app.pipeline import source_manifest
-        from app.source_reimport import retained_origins
-        try:
-            entries = [entry for entry in source_manifest(source)
-                       if Path(entry["relative_path"]).suffix.lower() in MEDIA_SOURCE_EXTENSIONS]
-            origins = list_imported_media_origins(DATABASE_FILE)
-            wanted = {str(entry["sha256"]) for entry in entries}
-            retained = retained_origins(REGISTRY_DATABASE_FILE,
-                [row for row in origins if str(row["sha256"]) in wanted]) if wanted else []
-            if wanted and wanted <= {str(row["sha256"]) for row in retained}:
-                return JSONResponse(content={"accepted": False, "status": "already_backed_up",
-                    "media_file_count": len(entries), "integrity_verified": True})
-        except (PipelineError, OSError, ValueError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
     if duplicate is not None and (duplicate.get("state") != "completed" or not confirmed):
         state_text = "bereits importiert; bitte erneute Prüfung ausdrücklich bestätigen" if duplicate.get("state") == "completed" else "wird bereits importiert"
         raise HTTPException(status_code=409, detail="Diese Quelle ist " + state_text + ". Technische ID: " + str(duplicate.get("id") or "unbekannt"))
@@ -4493,21 +4517,29 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
         "folder": "manual",
     }.get(source_mode, "manual")
     try:
-        job = create_job(
-            DATABASE_FILE,
-            job_id=job_id,
-            kind="sd_import",
-            trigger_type=trigger_type,
-            source_path=str(source),
-            working_path=str(workspace_backup_root(WORKSPACE_PATH)),
-            operation="folder_import",
-            source_volume_label=label,
-            source_signature=source_signature,
-            source_device_id=source_device_id,
-            reimport_of_job_id=prior["id"] if prior else None,
-        )
+        if source_mode == "sd_card" and root_key == "removable":
+            from app.sd_recheck import initial_import
+            job = initial_import(DATABASE_FILE, ident=job_id, source=source, device=source_device_id,
+                working=workspace_backup_root(WORKSPACE_PATH), label=label,
+                prior=prior["id"] if prior else None, signature=source_signature)
+        else:
+            job = create_job(
+                DATABASE_FILE,
+                job_id=job_id,
+                kind="sd_import",
+                trigger_type=trigger_type,
+                source_path=str(source),
+                working_path=str(workspace_backup_root(WORKSPACE_PATH)),
+                operation="folder_import",
+                source_volume_label=label,
+                source_signature=source_signature,
+                source_device_id=source_device_id,
+                reimport_of_job_id=prior["id"] if prior else None,
+            )
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
+    if job.get("operation") == "sd_recheck":
+        return _sd_recheck_response(job)
     return JSONResponse(
         status_code=202,
         content={
@@ -12117,7 +12149,7 @@ def index() -> str:
           + (changed ? ` · ${changed} ${bk0511ImportLabel("verändert/zu prüfen", "changed/to review")}` : "")
           + (ignored ? ` · ${ignored} ${bk0511ImportLabel("Verwaltungsdateien ignoriert", "administrative files ignored")}` : "")
           + (source.import_status === "no_changes" ? bk0511ImportLabel(" · Keine neuen Dateien", " · No new files") : "");
-        sdImportButton.disabled = source.import_status === "import_running";
+        sdImportButton.disabled = source.import_status === "import_running" || sdRecheckTasks.has(device.device_id);
         sdImportButton.textContent = source.has_import_history
           ? bk0511ImportLabel("Erneut sichern", "Back up again") : bk0511ImportLabel("SD-Karte sichern", "Back up SD card");
       } catch (error) {
@@ -12681,6 +12713,51 @@ def index() -> str:
       await startFolderImportSelection(currentFolderRoot, currentFolderPath, leaf, "folder");
     });
 
+    const sdRecheckTasks = new Map();
+    const sdRecheckKey = device => "bk-sd-recheck:" + device;
+    function sdRecheckRequestId() {
+      // getRandomValues also works on the existing HTTP NAS installation.
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      bytes[6] = (bytes[6] & 15) | 64;
+      bytes[8] = (bytes[8] & 63) | 128;
+      return Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+    }
+    async function followSdRecheck(taskId, device) {
+      if (sdRecheckTasks.get(device) === taskId) return;
+      sdRecheckTasks.set(device, taskId);
+      const poll = async () => {
+        try {
+          const response = await fetch("/api/sd-rechecks/" + encodeURIComponent(taskId));
+          if (response.status === 404) {
+            sdRecheckTasks.delete(device);
+            noticeElement.textContent = importUiText("SD-Prüfauftrag konnte nicht gelesen werden.");
+            return; // Keep the request identity; retry must not invent a new attempt.
+          }
+          if (!response.ok) throw new Error("SD-Prüfauftrag konnte nicht gelesen werden.");
+          const task = await response.json();
+          const active = !["completed","failed","interrupted"].includes(task.state);
+          const percent = task.progress_total ? Math.round(100 * task.progress_current / task.progress_total) : 0;
+          noticeElement.classList.toggle("error-text", task.state === "failed" || task.state === "interrupted");
+          noticeElement.textContent = importUiText(task.error_message || task.progress_message || "SD-Sicherung wird geprüft.")
+            + (active ? " · " + percent + "%" : "");
+          if (active) { setTimeout(poll, 2000); return; }
+          sdRecheckTasks.delete(device);
+          if (localStorage.getItem(sdRecheckKey(device)) === taskId) localStorage.removeItem(sdRecheckKey(device));
+          await loadJobs();
+          await loadSourceDevices();
+        } catch (error) {
+          noticeElement.textContent = bk0511ImportLabel("Prüfstatus vorübergehend nicht erreichbar; Serverauftrag bleibt bestehen.", "Check status temporarily unavailable; the server task is retained.");
+          setTimeout(poll, 4000);
+        }
+      };
+      await poll();
+    }
+    function resumeSdRechecks() {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith("bk-sd-recheck:")) followSdRecheck(localStorage.getItem(key), key.slice("bk-sd-recheck:".length));
+      }
+    }
+
     async function startFolderImportSelection(rootKey, relativePath, displayName="", sourceMode="folder", confirmReimport=false) {
       if (!rootKey || !relativePath) {
         noticeElement.textContent = "Bitte zuerst eine Importquelle auswählen.";
@@ -12697,6 +12774,13 @@ def index() -> str:
       noticeElement.textContent = confirmReimport ? bk0511ImportLabel("Sicherungen werden geprüft …", "Checking existing backups …") : "Ordnerimport wird angelegt …";
 
       try {
+        const key = sdRecheckKey(relativePath);
+        let requestId;
+        if (sourceMode === "sd_card" && confirmReimport) {
+          const previous = localStorage.getItem(key);
+          requestId = previous ? previous.replace("SD_RECHECK_", "") : sdRecheckRequestId();
+          localStorage.setItem(key, "SD_RECHECK_" + requestId.replaceAll("-", ""));
+        }
         const response = await fetch(
           "/api/jobs/folder-import",
           {
@@ -12707,7 +12791,8 @@ def index() -> str:
               source_relative_path: relativePath,
               display_name: displayName || undefined,
               source_mode: sourceMode,
-              confirm_reimport: confirmReimport
+              confirm_reimport: confirmReimport,
+              request_id: requestId
             })
           }
         );
@@ -12717,6 +12802,13 @@ def index() -> str:
             data.detail || "Ordnerimport konnte nicht gestartet werden."
           );
         }
+        if (data.status === "sd_check") {
+          localStorage.setItem(key, data.task_id);
+          window.dispatchEvent(new Event("bk-activity-refresh"));
+          followSdRecheck(data.task_id, relativePath);
+          return;
+        }
+        if (sourceMode === "sd_card" && confirmReimport && data.status === "import_running") localStorage.removeItem(key);
         if (!data.accepted && data.status === "already_backed_up") {
           noticeElement.textContent = bk0511ImportLabel(
             "Alle Aufnahmen sind bereits gesichert. Kein neuer Importauftrag erforderlich.",
@@ -12749,6 +12841,7 @@ def index() -> str:
       loadJobs().catch(showError);
       updateSdSourceDetail();
     });
+    resumeSdRechecks();
     refreshAll().catch(showError);
 
     // Nur aktive Vorgänge benötigen eine laufende Fortschrittsanzeige.

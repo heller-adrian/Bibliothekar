@@ -169,3 +169,16 @@ RC1_TRANSLATIONS.update({
 RC1_PATTERNS.extend([
     [r"^Papierkorb konnte nicht sicher geleert werden: (.+)$", "Could not empty trash safely: $1"],
 ])
+
+RC1_TRANSLATIONS.update({
+ "SD-Sicherungsprüfung wartet auf Verarbeitung.": "SD backup check is queued.",
+ "SD-Quelle wird vollständig geprüft.": "Checking the complete SD source.",
+ "Vorhandene Sicherungskopien werden vollständig geprüft.": "Verifying existing backup copies.",
+ "SD-Sicherungsprüfung wird nach Neustart vollständig wiederholt.": "The SD backup check will restart in full after restart.",
+ "Alle Aufnahmen sind bereits gesichert. Kein neuer Importauftrag erforderlich.": "All recordings are already backed up. No new import job is needed.",
+ "Ergänzungsimport wurde sicher vorgemerkt.": "The supplementary import has been queued safely.",
+ "SD-Karte ist nicht nachweislich ausschließlich lesend eingebunden.": "The SD card is not demonstrably mounted read-only.",
+ "SD-Quelle ist nicht mehr eindeutig und ausschließlich lesend gebunden.": "The SD source identity or read-only mount can no longer be verified.",
+ "SD-Sicherungsprüfung unterbrochen; Neustart prüft vollständig neu.": "SD backup check interrupted; restart will verify everything again.",
+ "SD-Prüfauftrag konnte nicht gelesen werden.": "The SD check status could not be read.",
+})

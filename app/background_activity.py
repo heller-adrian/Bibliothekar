@@ -34,16 +34,16 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
     # while a secondary library is selected in the browser.
     with database_connection(global_import_database) as connection:
         sql = """SELECT id,state,stage,source_volume_label,progress_current,
-                      progress_total,error_message,operation,updated_at
+                      progress_total,error_message,progress_message,operation,updated_at
                FROM jobs
                WHERE operation IN (
                    'folder_import','metadata_multiple_import',
-                   'metadata_general_import','trash_import'
+                   'metadata_general_import','trash_import','sd_recheck'
                )
                  AND (
                    state IN ('queued','copying','verifying','backup_verified',
                              'analyzing_metadata','organizing')
-                   OR (operation='trash_import'
+                   OR (operation IN ('trash_import','sd_recheck')
                        AND (state IN ('failed','interrupted')
                          OR (state='completed' AND updated_at>=?)))
                  )
@@ -69,10 +69,13 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
     for row in rows:
         status=str(row["state"])
         is_trash=str(row["operation"])=="trash_import"
+        is_check=str(row["operation"])=="sd_recheck"
         fields=set(row.keys()) if hasattr(row,"keys") else set(dict(row))
         total=int(row["progress_total"] or 0) if "progress_total" in fields else 0
         current=int(row["progress_current"] or 0) if "progress_current" in fields else 0
-        if is_trash:
+        if is_check:
+            detail=str(row["error_message"] or row["progress_message"] or "SD-Sicherung wird geprüft.")
+        elif is_trash:
             detail=(
                 "Wiederherstellung fehlgeschlagen: "+str(row["error_message"] or "Unbekannter Fehler")
                 if status in {"failed","interrupted"}
@@ -85,7 +88,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         else:
             detail="Import läuft im Hintergrund" if status!="queued" else "Import wartet auf Verarbeitung"
         operations.append({
-            "kind":"trash_restore" if is_trash else "import",
+            "kind":"sd_check" if is_check else "trash_restore" if is_trash else "import",
             "revision":status+":"+str(row["updated_at"] or "") if "updated_at" in fields else status+":",
             "id":str(row["id"]),
             "status":status,
@@ -243,12 +246,12 @@ def clear_finished_activity(library_database: Path, global_import_database: Path
     terminal: set[tuple[str, str, str]] = set()
     with database_connection(global_import_database) as connection:
         for row in connection.execute(
-            """SELECT id,state,updated_at FROM jobs
-               WHERE operation='trash_import'
+            """SELECT id,state,updated_at,operation FROM jobs
+               WHERE operation IN ('trash_import','sd_recheck')
                  AND state IN ('completed','failed','interrupted')"""
         ):
             terminal.add((
-                "trash_restore", str(row["id"]),
+                "sd_check" if row["operation"]=="sd_recheck" else "trash_restore", str(row["id"]),
                 str(row["state"])+":"+str(row["updated_at"] or ""),
             ))
     with database_connection(library_database) as connection:

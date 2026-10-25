@@ -666,7 +666,7 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
             global_import = kind == 'import' and (
                 a.get('central_stock') is True or
                 (isinstance(a.get('job'), dict) and a['job'].get('operation') in {
-                    'folder_import', 'metadata_multiple_import', 'metadata_general_import', 'trash_import'
+                    'folder_import', 'metadata_multiple_import', 'metadata_general_import', 'trash_import', 'sd_recheck'
                 })
             )
             expected=getattr(context,'root_generation',None) if context else None

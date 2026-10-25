@@ -66,6 +66,7 @@ def classify(extension: str) -> str:
 def sha256_file(
     path: Path,
     cancellation_callback: Callable[[], None] | None = None,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> str:
     digest = hashlib.sha256()
     validate_active_roots()
@@ -77,6 +78,7 @@ def sha256_file(
             if not block:
                 break
             digest.update(block)
+            if progress_callback is not None: progress_callback(len(block))
     if cancellation_callback is not None:
         cancellation_callback()
     return digest.hexdigest()
@@ -315,6 +317,7 @@ def source_manifest(
     source: Path,
     progress_callback: Callable[[int, int], None] | None = None,
     cancellation_callback: Callable[[], None] | None = None,
+    bytes_progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[dict[str, Any]]:
     if not source.is_dir():
         raise PipelineError(
@@ -335,6 +338,12 @@ def source_manifest(
         if candidate.is_file() and not candidate.is_symlink()
     )
     processed_files = 0
+    total_bytes = sum(p.stat().st_size for p in paths if p.is_file() and not p.is_symlink()) if bytes_progress_callback else 0
+    hashed_bytes = 0
+    def report_bytes(amount):
+        nonlocal hashed_bytes
+        hashed_bytes += amount
+        bytes_progress_callback(hashed_bytes, total_bytes)
 
     for path in paths:
         if cancellation_callback is not None:
@@ -370,7 +379,7 @@ def source_manifest(
                 tz=timezone.utc,
             ).astimezone().isoformat(),
             "modified_at_ns": int(stat.st_mtime_ns),
-            "sha256": sha256_file(path, cancellation_callback),
+            "sha256": sha256_file(path, cancellation_callback, progress_callback=report_bytes) if bytes_progress_callback else sha256_file(path, cancellation_callback),
         })
 
         processed_files += 1

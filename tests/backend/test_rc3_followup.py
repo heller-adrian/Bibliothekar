@@ -14,13 +14,17 @@ from tests.backend.test_rc1_package_a import archived_change
 def test_repeat_verified_does_not_queue_empty_job(fixture,monkeypatch):
     case,ws,reg,dbs,source,context=setup_live_import(fixture,monkeypatch)
     first=queue_and_run(dbs[0],context);before=source.read_bytes()
-    with database_connection(dbs[0]) as c: count=c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]
+    with database_connection(dbs[0]) as c: count=c.execute("SELECT COUNT(*) FROM jobs WHERE operation='folder_import'").fetchone()[0]
     response=main.api_run_folder_import({'source_root_key':'removable','source_relative_path':'CARD','source_mode':'sd_card','confirm_reimport':True})
-    assert response.status_code==200
-    assert json.loads(response.body)['status']=='already_backed_up'
-    assert json.loads(response.body)['integrity_verified'] is True
+    assert response.status_code==202
+    from app.database import claim_next_job,get_job
+    check=claim_next_job(dbs[0]);assert check['operation']=='sd_recheck'
+    main.process_claimed_job(check,library_context=context)
+    done=get_job(dbs[0],check['id']);assert done['state']=='completed'
+    assert done['result']['status']=='already_backed_up'
+    assert done['result']['integrity_verified'] is True
     with database_connection(dbs[0]) as c:
-        assert c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]==count
+        assert c.execute("SELECT COUNT(*) FROM jobs WHERE operation='folder_import'").fetchone()[0]==count
         assert c.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         assert not c.execute('PRAGMA foreign_key_check').fetchall()
     assert source.read_bytes()==before
