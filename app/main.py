@@ -1174,7 +1174,7 @@ def folder_import_display_label(
     trigger = str(job.get("trigger_type") or "")
     current = str(job.get("source_volume_label") or "").strip()
     if trigger not in {"approved_sd", "usb_key"}:
-        return current or "Sicherungsordner"
+        return current or "Backup folder"
 
     start_date = str(organization.get("capture_start_date") or "")
     end_date = str(organization.get("capture_end_date") or "")
@@ -1184,13 +1184,13 @@ def folder_import_display_label(
     if trigger == "approved_sd":
         devices = list(organization.get("devices") or [])
         if len(devices) == 1:
-            base = str(devices[0].get("name") or "SD-Karte")
+            base = str(devices[0].get("name") or "SD Card")
         elif devices:
-            base = "Mehrere Aufnahmegeräte"
+            base = "Multiple cameras"
         else:
-            base = "SD-Karte"
+            base = "SD Card"
     else:
-        base = current or "Externes Laufwerk"
+        base = current or "External drive"
 
     if start_date and end_date:
         return f"{base} - {display_date(start_date)} - {display_date(end_date)}"
@@ -1665,8 +1665,8 @@ def process_claimed_job(
             if managed_multiple_import or managed_general_import:
                 start_day=str(organization.get("capture_start_date") or "")
                 end_day=str(organization.get("capture_end_date") or "")
-                origin=("Mehrfachkorrektur" if managed_multiple_import
-                        else "Metadatenkorrektur · Allgemein")
+                origin=("Batch Correction" if managed_multiple_import
+                        else "Metadata Correction · General")
                 if start_day:
                     origin += " · " + start_day + (
                         " – " + end_day if end_day and end_day != start_day else ""
@@ -1683,7 +1683,7 @@ def process_claimed_job(
                     result["trash_source_cleanup"] = {"warning":str(cleanup_error)}
                 time_start=str(organization.get("capture_start_date") or "")
                 time_end=str(organization.get("capture_end_date") or "")
-                source_label="Aus Papierkorb"
+                source_label="From Trash"
                 if time_start:
                     source_label += " · " + time_start + (" – " + time_end if time_end and time_end != time_start else "")
                 set_job_source_volume_label(database_file,job_id,source_label)
@@ -1950,6 +1950,9 @@ def process_claimed_job(
                 job_id,
                 error_message=str(error),
             )
+            if operation == "trash_import":
+                from app.trash_failure import recover_failed_restores
+                recover_failed_restores(database_file, workspace_path)
         except Exception as database_error:
             print(
                 "Auftragsfehler konnte nicht in SQLite gespeichert werden:",
@@ -2549,6 +2552,8 @@ def startup_database() -> None:
         from app.sd_recheck import resume as resume_sd_rechecks
         resume_sd_rechecks(DATABASE_FILE)
         # Only requests that never touched the catalogue may resume automatically.
+        from app.trash_failure import recover_failed_restores
+        recover_failed_restores(DATABASE_FILE, WORKSPACE_PATH)
         from app.trash_import import resume_safe_queued_trash_restores
         restored_queue = resume_safe_queued_trash_restores(DATABASE_FILE, WORKSPACE_PATH)
         if restored_queue:
@@ -9533,7 +9538,7 @@ def api_apply_multiple_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                 source_path=str(source),
                 working_path=str(workspace_backup_root(WORKSPACE_PATH)),
                 operation="metadata_multiple_import",
-                source_volume_label="Mehrfachkorrektur",
+                source_volume_label="Batch Correction",
                 source_signature=signature,
                 source_device_id=None,
             )
@@ -9968,7 +9973,7 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                     source_path=str(stage),
                     working_path=str(workspace_backup_root(WORKSPACE_PATH)),
                     operation="metadata_general_import",
-                    source_volume_label="Metadatenkorrektur · Allgemein",
+                    source_volume_label="Metadata Correction · General",
                     source_signature=signature,
                     source_device_id=None,
                 )
@@ -11239,7 +11244,7 @@ def index() -> str:
 
     <section>
       <div class="bk-import-head">
-        <h2>Import- und Prüfverlauf</h2>
+        <h2 class="bk-title-help bk-import-history-title" role="button" tabindex="0" aria-expanded="false" aria-label="Hilfe zum Verlauf" data-bk-title-help data-help="Jeder Eintrag zeigt einen Importvorgang. Fortschritt und Status aktualisieren sich automatisch; technische Details bleiben ausklappbar.">Import- und Prüfverlauf</h2>
         <button class="bk-help" type="button" aria-label="Hilfe zum Verlauf" data-help="Jeder Eintrag zeigt einen Importvorgang. Fortschritt und Status aktualisieren sich automatisch; technische Details bleiben ausklappbar.">?</button>
       </div>
 
@@ -11647,6 +11652,22 @@ def index() -> str:
       return copy(job);
     }
 
+    function importSourceLabel(job) {
+      const raw = job.source_volume_label || bk0511ImportLabel("Quelle", "Source");
+      const org = job.result?.organization;
+      if (document.documentElement.dataset.bkLocale !== "de" || !org) return raw;
+      // Only translate the label the application itself can reconstruct.
+      // Historical references, arbitrary labels and technical JSON stay opaque.
+      if (job.trigger_type === "approved_sd") {
+        const devices = org.devices || [];
+        const base = devices.length > 1 ? "Multiple cameras" : devices.length === 0 ? "SD Card" : null;
+        const suffix = org.capture_start_date && org.capture_end_date
+          ? " - " + org.capture_start_date.replaceAll("-", ".") + " - " + org.capture_end_date.replaceAll("-", ".") : "";
+        if (base && raw === base + suffix) return (base === "Multiple cameras" ? "Mehrere Aufnahmegeräte" : "SD-Karte") + suffix;
+      }
+      return raw;
+    }
+
     function renderJob(job, isHidden=false) {
       const state =
         job.stage === "cancelled"
@@ -11857,7 +11878,6 @@ def index() -> str:
                   2
                 )
             )}</pre>
-            <details><summary>Originales Diagnoseprotokoll</summary><pre data-original-job-log>${escapeHtml(JSON.stringify(job,null,2))}</pre></details>
           </details>
         </article>
       `;
@@ -11880,7 +11900,7 @@ def index() -> str:
               ${thumbnail}
               <span class="bk-history-text">
                 <strong>${job.operation === "folder_import"
-                  ? `<span>${escapeHtml(bk0511ImportLabel(job.trigger_type === "approved_sd" ? "SD-Kartenimport" : job.trigger_type === "usb_key" ? "Laufwerksimport" : "Ordnerimport", job.trigger_type === "approved_sd" ? "SD Card Import" : job.trigger_type === "usb_key" ? "Drive Import" : "Folder Import"))}</span> · <span data-bk-preserve-language>${escapeHtml(job.source_volume_label === "SD-Karte" && job.state === "completed" && job.result?.organization && !(job.result.organization.devices || []).length ? bk0511ImportLabel("SD-Karte", "SD Card") : (job.source_volume_label || bk0511ImportLabel("Quelle", "Source")))}</span>`
+                  ? `<span>${escapeHtml(bk0511ImportLabel(job.trigger_type === "approved_sd" ? "SD-Kartenimport" : job.trigger_type === "usb_key" ? "Laufwerksimport" : "Ordnerimport", job.trigger_type === "approved_sd" ? "SD Card Import" : job.trigger_type === "usb_key" ? "Drive Import" : "Folder Import"))}</span> · <span data-bk-preserve-language>${escapeHtml(job.source_volume_label === "SD-Karte" && job.state === "completed" && job.result?.organization && !(job.result.organization.devices || []).length ? bk0511ImportLabel("SD-Karte", "SD Card") : importSourceLabel(job))}</span>`
                   : escapeHtml(presentation.title)}</strong>
                 <small>${isDone ? bk0511ImportLabel("Abgeschlossen","Completed") : progressLabel}${isDone ? " · " + (fileCount ?? "–") + " " + bk0511ImportLabel("Dateien","files") : ""}</small>
               </span>

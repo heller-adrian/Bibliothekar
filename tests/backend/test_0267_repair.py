@@ -60,7 +60,8 @@ def test_0267_dom_smoke_renders_eight_day_cards_with_real_render_days_code():
             type: "",
             _html: "",
             classList: { add(){}, remove(){}, toggle(){} },
-            appendChild(child) { this.children.push(child); },
+            appendChild(child) { this.children.push(child); child.parentNode=this; },
+            querySelector(selector) { const find=n=>n.children.find(c=>c.className===selector.slice(1)) || n.children.map(find).find(Boolean); return find(this); },
             append(child) { this.children.push(child); child.parentNode=this; },
             events: {},
             addEventListener(type, listener) { (this.events[type] ||= []).push(listener); },
@@ -105,7 +106,7 @@ def test_0267_dom_smoke_renders_eight_day_cards_with_real_render_days_code():
           await Promise.resolve();await Promise.resolve();
           if(!selectedDays.has("2026-07-19")||selectionRenders!==1||previewClicks!==1)
             throw Error("mobile double tap must select and open preview");
-          if(mobilePreviewButton.hidden||mobilePreviewButton.parentNode!==dayList.children[0])
+          if(mobilePreviewButton.hidden||mobilePreviewButton.parentNode?.parentNode!==dayList.children[0] || mobilePreviewButton.parentNode.className!=="day-statuses")
             throw Error("preview button must follow the actual selected card");
           const desktopCount=previewClicks;window.matchMedia=()=>({matches:false});
           card.events.click[0](event);clock+=100;card.events.click[0](event);

@@ -11,8 +11,8 @@ def assert_technical_presentation(html, tmp_path):
     escape=escape[:escape.index('    function formatBytes(')]
     point=html.index('localizedTechnicalJob(job),')
     presentation=html[html.rfind('<pre>',0,point):html.index('</pre>',point)+6]
-    point=html.index('<pre data-original-job-log>')
-    original=html[point:html.index('</pre>',point)+6]
+    assert 'data-original-job-log' not in html
+    original='<pre>${escapeHtml(JSON.stringify(job,null,2))}</pre>'  # raw API evidence, no duplicate UI panel
     sample={'id':'Auftrag-ä<&','name':'Sicherung nicht löschen','path':'/Archiv/Fehler/<img src=x onerror=alert(1)>.JPG',
             'progress_message':'Ordnerimport erfolgreich abgeschlossen. 18 Mediendateien wurden verifiziert.',
             'result':{'note':'Quelle wird vollständig in die temporäre Sicherung kopiert.',

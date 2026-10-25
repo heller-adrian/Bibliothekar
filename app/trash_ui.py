@@ -210,12 +210,17 @@ TRASH_HTML = r"""<!doctype html>
       const box=document.createElement("div"),text=document.createElement("p");
       text.setAttribute("data-bk-preserve-language","");
       const summary=item.status==="finalized"
-        ? bilingual("Fehlgeschlagen – sicher abgeschlossen. Rückfallkopien bleiben erhalten:","Failed – safely finalized. Recovery copies are retained:")
+        ? bilingual("Fehlgeschlagen – sicher abgeschlossen. Rückfallkopien bleiben erhalten.","Failed – safely finalized. Recovery copies are retained.")
         : item.status==="ready"
           ? bilingual("Fehlgeschlagene Wiederherstellung kann nach vollständiger Prüfung sicher beendet werden.","The failed restore can be safely finalized after complete verification.")
-          : bilingual("Wiederherstellung ungeklärt; betroffene Originale und Nachweise wiederherstellen:","Restore unresolved; recover the affected originals and evidence:");
-      text.textContent=summary+" "+item.job_id+(item.recovery_path?" · "+item.recovery_path:"")+(item.message?" · "+localError(item.message):"")+(item.paths?.length?" · "+item.paths.join(", "):"");
+          : bilingual("Wiederherstellung ungeklärt. Betroffene Dateien bleiben geschützt; Details prüfen.","Restore unresolved. Affected files remain protected; review details.");
+      text.textContent=summary;
       box.appendChild(text);
+      const details=document.createElement("details"),heading=document.createElement("summary"),evidence=document.createElement("pre");
+      heading.textContent=bilingual("Details und Wiederherstellung","Details and recovery");
+      evidence.textContent=[item.job_id,item.recovery_path,item.message?localError(item.message):"",...(item.paths||[])].filter(Boolean).join("\n");
+      evidence.style.cssText="white-space:pre-wrap;overflow-wrap:anywhere";
+      details.appendChild(heading);details.appendChild(evidence);box.appendChild(details);
       if(item.job_id && item.status!=="finalized"){
         const button=document.createElement("button");button.type="button";button.className="trash-action";
         button.textContent=bilingual("Fehlgeschlagene Wiederherstellung sicher abbrechen","Safely cancel failed restore");
@@ -229,10 +234,13 @@ TRASH_HTML = r"""<!doctype html>
             const result=await json("/api/trash/restores/"+encodeURIComponent(item.job_id)+"/finalize-failure",{
               method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmation:"SAFE_ABORT_FAILED_RESTORE"})});
             render(result.inventory);
-          }catch(error){status.textContent=localError(error.message);}
+          }catch(error){
+            text.textContent=bilingual("Abschluss weiterhin gesperrt. Die Dateien bleiben geschützt; Details prüfen.","Finalization remains blocked. Files remain protected; review details.");
+            evidence.textContent=item.job_id+"\n"+localError(error.message);
+          }
           finally{busy=false;updateControls();}
         });
-        box.appendChild(button);
+        details.appendChild(button);
       }
       failureNotice.appendChild(box);
     }
@@ -253,7 +261,7 @@ TRASH_HTML = r"""<!doctype html>
         +(Number(data.untracked_file_count||0)?" · "+Number(data.untracked_file_count||0)+" nicht katalogisierte Dateien":"")
       : "Der Papierkorb ist leer.";
     const conflicts=data.restore_conflicts||[];
-    if(conflicts.length)status.textContent+=" · Wiederherstellung blockiert: "+conflicts.map(c=>c.operation_id+" – "+c.message).join("; ");
+    if(conflicts.length)status.textContent+=" · "+bilingual("Ungeklärte Wiederherstellung; Details prüfen.","Unresolved restore; review details.");
     const count=Number(data.file_count||0);
     const folders=Number(data.directory_count||0);
     list.innerHTML=entries.length

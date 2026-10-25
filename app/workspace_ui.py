@@ -1401,13 +1401,21 @@ WORKSPACE_HTML = r"""<!doctype html>
   .suggestion-help{font-size:.85rem;margin-bottom:10px}
 }
 
+    .day-statuses { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
     #mobile-preview-button { display:none; grid-column:2; justify-self:start; min-height:28px; padding:3px 9px; font-size:.76rem; width:auto; }
     #mobile-preview-dialog { width:min(95vw,700px); max-height:90dvh; padding:12px; overflow:auto; overscroll-behavior:contain; }
     .mobile-preview-header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .mobile-preview-header h2 { margin:0; }
     #mobile-preview-dialog .preview { display:block; position:static; margin-top:10px; padding:10px; }
     #mobile-preview-dialog .preview-body, #mobile-preview-dialog #structure-preview { max-height:none; overflow:visible; }
-    @media(max-width:820px) { #mobile-preview-button:not([hidden]) { display:inline-block; } }
+    @media(max-width:820px) {
+      #mobile-preview-button:not([hidden]) { display:inline-block; min-height:32px; }
+      .day-statuses { grid-column:2; flex-wrap:nowrap; min-width:0; }
+      .day-statuses .badge { font-size:clamp(.62rem,2.7vw,.76rem); padding:4px 6px; }
+      .day-statuses #mobile-preview-button { font-size:.72rem; padding:3px 7px; flex-shrink:0; }
+      .timeline-event-statuses #mobile-preview-button { grid-column:1; justify-self:end; }
+      .timeline-event-header > div:first-child { min-width:0; overflow-wrap:anywhere; }
+    }
     @media(max-width:520px) {
       .day-card { padding:10px; gap:6px 9px; border-radius:11px; }
       .day-card .day-main { min-width:0; }
@@ -3018,7 +3026,11 @@ WORKSPACE_HTML = r"""<!doctype html>
         ? [...document.querySelectorAll("[data-preview-event-id]")].find(node => node.dataset.previewEventId === selectedPreviewEventId)
         : [...document.querySelectorAll(".day-card.selected")].at(-1);
       mobilePreviewButton.hidden = !selected;
-      if (selected) selected.append(mobilePreviewButton);
+      if (selected) {
+        const eventStatus = selected.querySelector(".timeline-event-statuses");
+        const dayStatus = selected.querySelector(".day-statuses");
+        (eventStatus || dayStatus || selected).append(mobilePreviewButton);
+      }
     }
     let lastMobilePreviewTap = {key:"", time:0};
     function mobilePreviewDoubleTap(card, select) {
@@ -3809,7 +3821,10 @@ WORKSPACE_HTML = r"""<!doctype html>
               )
             : "Metadaten eindeutig";
 
-        card.appendChild(badge);
+        const statuses=document.createElement("span");
+        statuses.className="day-statuses";
+        statuses.appendChild(badge);
+        card.appendChild(statuses);
         dayList.appendChild(card);
       }
       updateDaySelectAllButton();

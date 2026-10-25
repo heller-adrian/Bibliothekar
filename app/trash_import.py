@@ -95,7 +95,7 @@ def stage_trash_import(
         job = create_job(
             database_path, job_id=job_id, kind="sd_import", trigger_type="manual",
             source_path=str(stage), working_path=str(storage_paths(workspace_root)["backup_root"]),
-            operation="trash_import", source_volume_label="Aus Papierkorb",
+            operation="trash_import", source_volume_label="From Trash",
         )
         return {"job_id":job_id,"queued_file_count":len(copies),"job":job}
     except Exception as error:
@@ -197,7 +197,7 @@ def queue_trash_restore(
             database_path,job_id=job_id,kind="sd_import",trigger_type="manual",
             source_path=str(parent/job_id),
             working_path=str(storage_paths(workspace_root)["backup_root"]),
-            operation="trash_import",source_volume_label="Aus Papierkorb",
+            operation="trash_import",source_volume_label="From Trash",
         )
     except Exception as error:
         if journal.exists() or journal.is_symlink():

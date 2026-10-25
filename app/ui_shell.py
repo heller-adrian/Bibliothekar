@@ -1077,6 +1077,8 @@ body.bibliothekar-redesign .import-panel {
   margin-bottom: 5px;
 }
 .bk-import-head h2 { margin: 0; }
+.bk-import-history-title { cursor:pointer; }
+@media(max-width:700px){.bk-import-history-title + .bk-help{display:none}}
 body[data-bk-area="import"] .import-panel {
   border-left: 4px solid var(--bk-red) !important;
 }
@@ -6282,6 +6284,9 @@ BIBLIOTHEKAR_0444_JS = r"""
   function renderPageActivity(operations) {
     const route = location.pathname;
     const relevant = operations.filter(item => {
+      // SD progress/results already live in the task dock and near the button.
+      if ((route === "/" && item.kind === "sd_check")
+          || (route === "/trash" && item.kind === "trash_restore")) return false;
       const target = destination(item).split("?")[0];
       return target === route || (route === "/workspace" && target === "/events");
     });

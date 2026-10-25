@@ -223,10 +223,10 @@ def test_b18_page_status_and_user_labels(tmp_path):
     make=s[s.index('  function makeItem('):s.index('  async function refresh()',s.index('  function makeItem('))]
     node(tmp_path, '''const window={BibliothekarI18n:{t:v=>({'hoch':'high','Anwenden':'Apply'})[v]||v}};
 const document={createElement:tag=>({tag,dataset:{},children:[],setAttribute(k,v){this[k]=v},append(...xs){this.children.push(...xs)},appendChild(x){this.children.push(x)}})};
-const destination=item=>item.kind==='trash_restore'?'/trash':'/events';
-const location={pathname:'/trash'};const pageActivity={replaceChildren(...xs){this.children=xs}};
+const destination=item=>item.id?'/events':'/other';
+const location={pathname:'/events'};const pageActivity={replaceChildren(...xs){this.children=xs}};
 ''' + make + page + '''
-const queued={kind:'trash_restore',id:'q',label:'From Trash',status:'queued',active:true};
+const queued={kind:'apply',id:'q',label:'From Trash',status:'queued',active:true};
 const done={...queued,id:'d',status:'completed',active:false};
 const failed={...queued,id:'f',status:'failed',active:false};
 renderPageActivity([queued,done,failed,{kind:'apply',status:'applied',active:false}]);

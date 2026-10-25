@@ -240,7 +240,7 @@ def test_failure_ui_disables_deletes_and_uses_only_confirmed_single_job_post(tmp
     script=r'''
 let locale='en',busy=false,lastInventory={deletion_blocked:true,restore_active:true},selectablePaths=['A.JPG'],selected=new Set(),selectMode=false;
 const bilingual=(de,en)=>locale==='de'?de:en,localError=x=>x;
-function element(){return {children:[],textContent:'',setAttribute(){},appendChild(n){this.children.push(n)},replaceChildren(){this.children=[]},addEventListener(k,f){this[k]=f},querySelectorAll(){return this.children.flatMap(c=>c.children||[]).filter(x=>x.type==='button')}}}
+function element(){return {style:{},children:[],textContent:'',setAttribute(){},appendChild(n){this.children.push(n)},replaceChildren(){this.children=[]},addEventListener(k,f){this[k]=f},querySelectorAll(){const all=n=>[n,...(n.children||[]).flatMap(all)];return all(this).filter(x=>x.type==='button')}}}
 const list=element(),failureNotice=element(),restoreButton={},emptyButton={},selectButton={},selectAllButton={};
 const document={createElement:()=>element(),querySelector:()=>({})};let calls=[],confirmed=0;
 const window={BibliothekarI18n:{confirmAsync:async()=>{confirmed++;return true}}};
@@ -261,7 +261,7 @@ const button=failureNotice.querySelectorAll('button')[0];if(button.disabled||but
 await button.click();
 if(confirmed!==1||calls.length!==1||!calls[0].url.endsWith('/TRASH_IMPORT_TEST/finalize-failure'))throw Error('not one confirmed single job');
 if(JSON.parse(calls[0].opts.body).confirmation!=='SAFE_ABORT_FAILED_RESTORE')throw Error('confirmation missing');
-if(emptyButton.disabled||!failureNotice.children[0].children[0].textContent.includes('<raw & path>'))throw Error('completion or text rendering missing');
+if(emptyButton.disabled||!failureNotice.children[0].children[1].children[1].textContent.includes('<raw & path>'))throw Error('completion or text rendering missing');
 locale='de';renderRestoreFailures({restore_failures:[{job_id:'J',status:'blocked',message:'A.JPG'}]});
 if(failureNotice.querySelectorAll('button')[0].textContent!=='Fehlgeschlagene Wiederherstellung sicher abbrechen')throw Error('German action missing');
 })().catch(e=>{console.error(e);process.exitCode=1});

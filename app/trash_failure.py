@@ -74,6 +74,42 @@ def _jobs(connections,job_id,stage):
     return owner,identities
 
 
+def _protocol_only_failure(incoming,stage,job_id):
+    """Retain and bind a failed pre-publication protocol; never clean it up."""
+    if not incoming.exists() and not incoming.is_symlink():return None
+    error='Ungeklärter Import-Zwischenbestand bleibt erhalten: '+str(incoming)
+    with trash_fd.parent(incoming/'probe') as (root,_,check):
+        owner=os.fstat(root)
+        if owner.st_uid!=os.geteuid() or stat.S_IMODE(owner.st_mode)&0o022:raise TrashError(error)
+        names=os.listdir(root)
+        if len(names)!=1 or names[0] not in {'Protocol','Protokoll'}:raise TrashError(error)
+        protocol=incoming/names[0]
+        with trash_fd.parent(protocol/'status.json') as (directory,name,binding):
+            info=os.fstat(directory)
+            if info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)&0o022 or os.listdir(directory)!=['status.json']:raise TrashError(error)
+            with trash_fd.file_at(directory,name) as (fd,before):
+                if before.st_uid!=os.geteuid() or before.st_nlink!=1 or stat.S_IMODE(before.st_mode)&0o022 or before.st_size>1024*1024:raise TrashError(error)
+                raw=os.read(fd,1024*1024+1);data=json.loads(raw)
+                if not isinstance(data,dict) or not isinstance(data.get('lifecycle'),dict):raise TrashError(error)
+                after=os.fstat(fd)
+                fields=lambda st:(st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns,st.st_ctime_ns,st.st_nlink)
+                if fields(before)!=fields(after):raise TrashError(error)
+                if (data.get('job_id')!=job_id or data.get('schema_version')!=3
+                    or data.get('state')!='failed' or data.get('stage')!='failed'
+                    or data.get('simulation') is not False or data.get('import_mode')!='folder'
+                    or data.get('source_path')!=str(stage)
+                    or data.get('lifecycle',{}).get('temporary_backup')!=str(incoming/'Original')
+                    or data.get('lifecycle',{}).get('central_stock')!=str(incoming.parent.parent)
+                    or any(k in data for k in ('organization','source','snapshot','outputs'))):raise TrashError(error)
+                trash_fd.verify_entry(directory,name,before);binding();check()
+                if os.listdir(root)!=names or os.listdir(directory)!=['status.json']:raise TrashError(error)
+                os.fsync(fd);os.fsync(directory);os.fsync(root)
+                return {'root_identity':list(trash_fd.identity(owner)),
+                        'protocol_identity':list(trash_fd.identity(info)),
+                        'status_identity':list(trash_fd.identity(before)),
+                        'status_sha256':hashlib.sha256(raw).hexdigest()}
+
+
 def _inspect(database,workspace,job_id,data,*,closed=False):
     """Read-only proof; caller holds the cross-process trash lock."""
     from app.trash_restore import _relative,restore_reservations
@@ -88,7 +124,7 @@ def _inspect(database,workspace,job_id,data,*,closed=False):
         raise TrashError('Unvollständige Restore-Recovery reserviert diese Dateien: '+job_id)
     stage=stage_parent(workspace)/job_id
     incoming=storage_paths(workspace)['backup_root']/'.incoming'/job_id
-    if incoming.exists() or incoming.is_symlink():raise TrashError('Ungeklärter Import-Zwischenbestand bleibt erhalten: '+str(incoming))
+    incoming_proof=_protocol_only_failure(incoming,stage,job_id)
     with ExitStack() as stack:
         connections=[(p,stack.enter_context(database_connection(p))) for p in scopes(database,workspace)]
         (owner,job),db_ids=_jobs(connections,job_id,stage)
@@ -125,6 +161,7 @@ def _inspect(database,workspace,job_id,data,*,closed=False):
                 raise TrashError('Original/Rückfallkopie prüfen oder aus verifiziertem Backup wiederherstellen: '+str(rel)+' – '+str(error)) from error
         proof={'job_id':job_id,'job_error':job['error_message'],'job_stage':job['stage'],
                'source_path':str(stage),'journal_digest':digest(base),'databases':db_ids,'stage_identity':stage_id,'files':copies}
+        if incoming_proof is not None:proof['retained_incoming_protocol']=incoming_proof
         if closed:
             saved=receipt.get('proof',{})
             if len(saved.get('files',[]))!=len(copies):raise TrashError('Unvollständiger Rückfallkopienbeleg: '+job_id)
@@ -240,3 +277,15 @@ def assert_no_active_restore(workspace,databases=None):
         with database_connection(db) as c:
             row=c.execute("SELECT id FROM jobs WHERE operation='trash_import' AND state IN ('queued','copying','verifying','backup_verified','analyzing_metadata','organizing') LIMIT 1").fetchone()
             if row:raise TrashError('Aktive Wiederherstellung schützt den gesamten Papierkorb: '+str(row['id']))
+
+
+def recover_failed_restores(database,workspace):
+    """Worker/startup only. No state-only release and no media cleanup."""
+    with database_connection(database) as c:
+        ids=[str(r['id']) for r in c.execute("SELECT id FROM jobs WHERE operation='trash_import' AND state='failed' ORDER BY created_at,id")]
+    results=[]
+    for jid in ids:
+        try:results.append(finalize_failure(database,workspace,jid))
+        except (OSError,ValueError,KeyError,TypeError,sqlite3.Error,TrashError) as error:
+            results.append({'job_id':jid,'status':'blocked','message':str(error)})
+    return results

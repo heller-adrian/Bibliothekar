@@ -186,3 +186,10 @@ RC1_TRANSLATIONS.update({
 RC1_TRANSLATIONS.update({
     'Eine Wiederherstellung läuft oder ist ungeklärt. Bitte fehlgeschlagene oder unterbrochene Aufträge prüfen; der Papierkorb bleibt gesperrt.': "A restore is active or unresolved. Please review failed or interrupted tasks; trash remains protected.",
 })
+
+# Presentation only; stored verification evidence remains untouched.
+RC1_PATTERNS.extend([
+    [r"^([0-9]+/[0-9]+) verwaltete Dateien bestätigt\.$", "$1 managed files verified."],
+    [r"^([0-9]+/[0-9]+) verwaltete Dateien bestätigt\. · ([0-9]+) zusätzliche Dateien? nur als Hinweis\.$", "$1 managed files verified. · $2 additional files for information only."],
+    [r"^Ungeklärter Import-Zwischenbestand bleibt erhalten: (.+)$", "Unresolved intermediate import data is retained: $1"],
+])
