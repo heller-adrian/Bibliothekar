@@ -164,10 +164,16 @@ def test_active_or_unresolved_restore_blocks_all_deletes(fixture,state):
     with database_connection(db) as c:c.execute('UPDATE jobs SET state=? WHERE id=?',(state,jid))
     status=main.api_trash_inventory();assert status['deletion_blocked']
     assert status['restore_active'] is (state!='interrupted')
-    with pytest.raises(main.HTTPException):main.api_empty_trash_selection({'relative_paths':['unrelated.JPG']})
-    with pytest.raises(TrashError):delete_selected_trash_files(fixture[3],ws,['unrelated.JPG'])
+    if state == 'interrupted':
+        assert main.api_empty_trash_selection({'relative_paths':['unrelated.JPG']})['deleted_file_count'] == 1
+        assert not other.exists()
+        for item in data['files']:
+            with pytest.raises(TrashError):delete_selected_trash_files(fixture[3],ws,[item['relative_path']])
+    else:
+        with pytest.raises(main.HTTPException):main.api_empty_trash_selection({'relative_paths':['unrelated.JPG']})
+        with pytest.raises(TrashError):delete_selected_trash_files(fixture[3],ws,['unrelated.JPG'])
     with pytest.raises(TrashError):empty_trash_filesystem(ws)
-    assert other.read_bytes()==b'independent'
+    if state != 'interrupted':assert other.read_bytes()==b'independent'
     for r in data['files']:assert hashlib.sha256((storage_paths(ws)['trash_root']/r['relative_path']).read_bytes()).hexdigest()==r['sha256']
 
 
@@ -245,6 +251,12 @@ function render(data){lastInventory=data;renderRestoreFailures({restore_failures
 renderRestoreFailures({restore_failures:[{job_id:'TRASH_IMPORT_TEST',status:'ready'}]});updateControls();
 if(!emptyButton.disabled||!failureNotice.querySelectorAll('button')[0].disabled)throw Error('active deletion/action not disabled');
 lastInventory.restore_active=false;updateControls();
+if(!emptyButton.disabled)throw Error('full empty must remain blocked by reservations');
+selected.add('A.JPG');updateControls();
+if(emptyButton.disabled)throw Error('inactive restore must allow a selected request for server-side validation');
+lastInventory.restore_active=true;updateControls();
+if(!emptyButton.disabled)throw Error('active restore must block even a selected request');
+selected.clear();lastInventory.restore_active=false;updateControls();
 const button=failureNotice.querySelectorAll('button')[0];if(button.disabled||button.textContent!=='Safely cancel failed restore')throw Error('explicit action missing');
 await button.click();
 if(confirmed!==1||calls.length!==1||!calls[0].url.endsWith('/TRASH_IMPORT_TEST/finalize-failure'))throw Error('not one confirmed single job');

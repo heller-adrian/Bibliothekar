@@ -33,6 +33,18 @@ def _fixture(tmp_path: Path, monkeypatch):
     workspace.mkdir()
     initialize_database(db)
     paths = ensure_workspace_layout(workspace)
+    from app.library_registry import initialize_library_registry, register_library, ensure_library_identity
+    registry = tmp_path / "registry.sqlite3"
+    monkeypatch.setenv("KAMERA_REGISTRY_DATABASE", str(registry))
+    initialize_library_registry(registry)
+    ensure_library_identity(db, "main")
+    work = Path(paths["workspaces_root"]) / "main"
+    work.mkdir(exist_ok=True)
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    register_library(registry, library_id="main", display_name="Fixture",
+                     database_path=db, workspace_root=workspace, work_root=work,
+                     archive_root=archive, is_main=True)
     create_job(
         db, job_id="J", kind="sd_import",
         trigger_type="approved_sd", source_path="/source",

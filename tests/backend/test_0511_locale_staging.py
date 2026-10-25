@@ -77,7 +77,7 @@ def test_conflicting_nonempty_legacy_and_english_staging_blocked(tmp_path: Path)
         staging_directory_name(tmp_path)
 
 
-def test_explicit_dynamic_label_contract_and_raw_logs() -> None:
+def test_explicit_dynamic_label_contract_and_raw_logs(tmp_path: Path) -> None:
     repo = Path(__file__).resolve().parents[2]
     main = (repo / "app" / "main.py").read_text()
     events = (repo / "app" / "events_ui.py").read_text()
@@ -91,5 +91,7 @@ def test_explicit_dynamic_label_contract_and_raw_logs() -> None:
     assert 'bk0511OperationTitle(operation)' in events
     assert "bk0511PreviewLabel" in workspace
     assert "bk0511ImportLabel" in main
-    assert "return job;" in main[main.index("function localizedTechnicalJob(job)"):][:100]
+    from tests.backend.rc4_locale_probe import assert_technical_presentation
+    from app import main as application
+    assert_technical_presentation(application.index(), tmp_path)
     assert "JSON.stringify(" in main

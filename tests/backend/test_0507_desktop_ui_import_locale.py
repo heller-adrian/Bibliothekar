@@ -71,11 +71,12 @@ def test_0507_existing_root_names_are_never_silently_renamed(tmp_path: Path, mon
     assert settings["workspaces_directory_name"] == "Library Workspaces"
     assert legacy.is_dir()
 
-def test_0507_technical_detail_retains_raw_evidence():
+def test_0507_technical_detail_retains_raw_evidence(tmp_path):
     html = main.index()
     assert "function localizedTechnicalJob(job)" in html
     assert "function importUiText(value)" in html
-    assert "return job;" in html[html.index("function localizedTechnicalJob(job)"):][:100]
+    from tests.backend.rc4_locale_probe import assert_technical_presentation
+    assert_technical_presentation(html, tmp_path)
     assert "JSON.stringify(\n                  localizedTechnicalJob(job)" in html
     assert "JSON.stringify(" in html
     assert 'const englishExample=document.documentElement.dataset.bkLocale !== "de";' in __import__("app.ui_shell", fromlist=["BIBLIOTHEKAR_JS"]).BIBLIOTHEKAR_JS

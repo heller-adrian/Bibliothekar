@@ -5209,7 +5209,7 @@ def api_empty_trash_selection(payload: dict[str, Any]) -> dict[str, Any]:
                 from app.trash_failure import assert_no_active_restore
                 assert_no_active_restore(WORKSPACE_PATH,databases)
                 reserved=protected_trash_paths(DATABASE_FILE,WORKSPACE_PATH)
-                if reserved:
+                if reserved.intersection(path for path in paths if isinstance(path, str)):
                     raise TrashError("Ausgewählte Dateien gehören zu einer laufenden Wiederherstellung.")
                 result = delete_selected_trash_files(sorted(databases), WORKSPACE_PATH, paths)
             except (OSError, TrashError, ValueError) as error:

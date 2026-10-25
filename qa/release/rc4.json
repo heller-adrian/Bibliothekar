@@ -14,5 +14,11 @@
   ],
   "platform": "linux/amd64",
   "publication_authorized": false,
-  "previous_version": "1.0.0-rc.3"
+  "previous_version": "1.0.0-rc.3",
+  "approved_product_sha256": {
+    "app/main.py": "80c87aff0be957b01decde49dea21a81842a190de3fd877c798637371f0f7258",
+    "app/trash_selective.py": "06029af64b48e03c397a4aba079c923fba0f18f0ea6901f2f428f18f75b52ad0",
+    "app/trash_ui.py": "a87ca5f2c07e65034cc2f12088a972315001dd29ad030504e6ae26bfce92e644"
+  },
+  "approved_product_reason": "User-approved per-path inactive restore reservations; active restores still block every delete; recheck under F11 lock before FD staging; matching HTTP/UI selection admission."
 }

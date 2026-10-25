@@ -434,7 +434,7 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
     selected = {_relative(p).as_posix() for p in relative_paths}
     from app.trash_failure import assert_no_active_restore
     assert_no_active_restore(workspace,databases)
-    if protected_trash_paths(None, workspace):
+    if selected.intersection(protected_trash_paths(None, workspace)):
         raise TrashError("Ausgewählte Dateien gehören zu einer Wiederherstellungsreservierung.")
     _recover_trash_deletions(workspace, allowed_databases=databases)
     root, entries, _ = _physical_entries(workspace)
@@ -472,6 +472,11 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
             source = _source(root,rel)
             if _sha256_file(source) != item["sha256"]:
                 raise TrashError("Datei vor dem Löschen verändert: " + item["path"])
+            # Revalidate under the same F11 lock at the reversible staging boundary.
+            assert_restore_paths_available(workspace, [item['path']])
+            assert_no_active_restore(workspace, databases)
+            if item['path'] in protected_trash_paths(None, workspace):
+                raise TrashError("Ausgewählte Dateien gehören zu einer Wiederherstellungsreservierung.")
             _move_checked(source,target,item["sha256"],durable_root=parent)
         for db in databases:
             _purge_selected(Path(db),[item["path"] for item in candidates])

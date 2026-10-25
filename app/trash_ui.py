@@ -124,7 +124,7 @@ TRASH_HTML = r"""<!doctype html>
   function updateControls(){
     restoreButton.textContent=selected.size?"Auswahl wiederherstellen":"Alle wiederherstellen";
     restoreButton.disabled=busy||!selectablePaths.length;
-    emptyButton.disabled=busy||Boolean(lastInventory?.deletion_blocked)||!document.querySelector(".trash-content");
+    emptyButton.disabled=busy||Boolean(lastInventory?.restore_active)||(!selected.size&&Boolean(lastInventory?.deletion_blocked))||!document.querySelector(".trash-content");
     failureNotice.querySelectorAll("button").forEach(button=>{button.disabled=busy||Boolean(lastInventory?.restore_active);});
     emptyButton.textContent=selected.size?"Auswahl leeren":"Gesamten Papierkorb leeren";
     selectButton.disabled=busy||!selectablePaths.length;
