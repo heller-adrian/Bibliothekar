@@ -432,7 +432,9 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
     databases = sorted({Path(p).resolve() for p in databases})
     from app.trash_import import protected_trash_paths
     selected = {_relative(p).as_posix() for p in relative_paths}
-    if selected.intersection(protected_trash_paths(None, workspace)):
+    from app.trash_failure import assert_no_active_restore
+    assert_no_active_restore(workspace,databases)
+    if protected_trash_paths(None, workspace):
         raise TrashError("Ausgewählte Dateien gehören zu einer Wiederherstellungsreservierung.")
     _recover_trash_deletions(workspace, allowed_databases=databases)
     root, entries, _ = _physical_entries(workspace)

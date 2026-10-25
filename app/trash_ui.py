@@ -75,6 +75,7 @@ TRASH_HTML = r"""<!doctype html>
     </div>
   </div>
   <p id="trash-status" class="trash-status" role="status" aria-live="polite">Papierkorb wird geprüft …</p>
+  <div id="trash-failure-notice" role="status" aria-live="polite"></div>
   <div class="trash-summary" aria-label="Papierkorb-Statistik">
     <div class="trash-stat"><span>Dateien</span><strong id="trash-files">—</strong></div>
     <div class="trash-stat"><span>Ordner</span><strong id="trash-directories">—</strong></div>
@@ -86,6 +87,7 @@ TRASH_HTML = r"""<!doctype html>
 (function(){
   const status=document.getElementById("trash-status");
   const list=document.getElementById("trash-list");
+  const failureNotice=document.getElementById("trash-failure-notice");
   const emptyButton=document.getElementById("trash-empty-button");
   const restoreButton=document.getElementById("trash-restore-button");
   const selectButton=document.getElementById("trash-select-button");
@@ -122,7 +124,8 @@ TRASH_HTML = r"""<!doctype html>
   function updateControls(){
     restoreButton.textContent=selected.size?"Auswahl wiederherstellen":"Alle wiederherstellen";
     restoreButton.disabled=busy||!selectablePaths.length;
-    emptyButton.disabled=busy||!document.querySelector(".trash-content");
+    emptyButton.disabled=busy||Boolean(lastInventory?.deletion_blocked)||!document.querySelector(".trash-content");
+    failureNotice.querySelectorAll("button").forEach(button=>{button.disabled=busy||Boolean(lastInventory?.restore_active);});
     emptyButton.textContent=selected.size?"Auswahl leeren":"Gesamten Papierkorb leeren";
     selectButton.disabled=busy||!selectablePaths.length;
     selectButton.textContent=selectMode?"Auswahl beenden":"Auswählen";
@@ -200,8 +203,43 @@ TRASH_HTML = r"""<!doctype html>
     const items=folder.items.slice().sort((a,b)=>String(a.filename).localeCompare(String(b.filename),"de",{numeric:true,sensitivity:"base"})).map(renderItem);
     return directories.concat(items).join("")||'<div class="trash-empty">Der Ordner ist leer.</div>';
   }
+  function renderRestoreFailures(data){
+    failureNotice.replaceChildren();
+    for(const item of data.restore_failures||[]){
+      if(item.status==="known_restored")continue;
+      const box=document.createElement("div"),text=document.createElement("p");
+      text.setAttribute("data-bk-preserve-language","");
+      const summary=item.status==="finalized"
+        ? bilingual("Fehlgeschlagen – sicher abgeschlossen. Rückfallkopien bleiben erhalten:","Failed – safely finalized. Recovery copies are retained:")
+        : item.status==="ready"
+          ? bilingual("Fehlgeschlagene Wiederherstellung kann nach vollständiger Prüfung sicher beendet werden.","The failed restore can be safely finalized after complete verification.")
+          : bilingual("Wiederherstellung ungeklärt; betroffene Originale und Nachweise wiederherstellen:","Restore unresolved; recover the affected originals and evidence:");
+      text.textContent=summary+" "+item.job_id+(item.recovery_path?" · "+item.recovery_path:"")+(item.message?" · "+localError(item.message):"")+(item.paths?.length?" · "+item.paths.join(", "):"");
+      box.appendChild(text);
+      if(item.job_id && item.status!=="finalized"){
+        const button=document.createElement("button");button.type="button";button.className="trash-action";
+        button.textContent=bilingual("Fehlgeschlagene Wiederherstellung sicher abbrechen","Safely cancel failed restore");
+        button.addEventListener("click",async()=>{
+          if(busy)return;
+          busy=true;updateControls();
+          try{
+            const prompt=bilingual("Fehlgeschlagene Wiederherstellung nach erneuter vollständiger Prüfung abschließen? Originale, geprüfte Rückfallkopien, Journal und Fehlermeldung bleiben erhalten. Unklare Zustände werden nicht freigegeben.","Finalize the failed restore after complete verification again? Originals, verified recovery copies, the journal and the error are retained. Uncertain states remain blocked.");
+            const confirmed=window.BibliothekarI18n?.confirmAsync?await window.BibliothekarI18n.confirmAsync(prompt):window.confirm(prompt);
+            if(!confirmed)return;
+            const result=await json("/api/trash/restores/"+encodeURIComponent(item.job_id)+"/finalize-failure",{
+              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmation:"SAFE_ABORT_FAILED_RESTORE"})});
+            render(result.inventory);
+          }catch(error){status.textContent=localError(error.message);}
+          finally{busy=false;updateControls();}
+        });
+        box.appendChild(button);
+      }
+      failureNotice.appendChild(box);
+    }
+  }
   function render(data){
     lastInventory=data;
+    renderRestoreFailures(data);
     document.getElementById("trash-root").textContent=data.root||"";
     document.getElementById("trash-files").textContent=Number(data.file_count||0);
     document.getElementById("trash-directories").textContent=Number(data.directory_count||0);
@@ -338,6 +376,8 @@ TRASH_HTML = r"""<!doctype html>
     }
   });
   load();
+  window.setInterval(()=>{if(!document.hidden&&!busy&&lastInventory?.restore_active)load();},3000);
+  window.addEventListener("focus",()=>{if(!busy)load();});
 })();
 </script>
 </body>

@@ -5026,6 +5026,16 @@ def api_trash_inventory() -> dict[str, Any]:
 def _trash_inventory_locked() -> dict[str, Any]:
     from app.trash_restore import restore_reservations
     result = _trash_inventory_without_conflicts()
+    from app.trash_failure import describe_failures
+    from app.trash_import import protected_trash_paths
+    result['restore_failures'] = describe_failures(DATABASE_FILE,WORKSPACE_PATH)
+    with database_connection(DATABASE_FILE) as connection:
+        result['restore_active'] = connection.execute("SELECT 1 FROM jobs WHERE operation='trash_import' AND state IN ('queued','copying','verifying','backup_verified','analyzing_metadata','organizing') LIMIT 1").fetchone() is not None
+    try:
+        result['deletion_blocked'] = result['restore_active'] or bool(protected_trash_paths(None,WORKSPACE_PATH))
+    except (TrashError,OSError,ValueError) as error:
+        result['deletion_blocked'] = True
+        result['restore_failures'].append({'job_id':'','status':'blocked','message':str(error)})
     result['restore_conflicts'] = [item for item in restore_reservations(WORKSPACE_PATH) if item['state']=='conflict']
     return result
 
@@ -5162,6 +5172,19 @@ def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.post("/api/trash/restores/{job_id}/finalize-failure", tags=["Papierkorb"])
+@_root_request
+def api_finalize_trash_failure(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("confirmation") != "SAFE_ABORT_FAILED_RESTORE":
+        raise HTTPException(status_code=422,detail="Die ausdrückliche Sicherheitsbestätigung fehlt.")
+    from app.trash_failure import finalize_failure
+    try:
+        item=finalize_failure(DATABASE_FILE,WORKSPACE_PATH,job_id)
+        return {**item,'inventory':api_trash_inventory()}
+    except (OSError,ValueError,KeyError,TypeError,TrashError) as error:
+        raise HTTPException(status_code=409,detail=str(error)) from error
+
+
 @app.post("/api/trash/empty-selection", tags=["Papierkorb"])
 @_root_request
 def api_empty_trash_selection(payload: dict[str, Any]) -> dict[str, Any]:
@@ -5183,8 +5206,10 @@ def api_empty_trash_selection(payload: dict[str, Any]) -> dict[str, Any]:
             databases.add(DATABASE_FILE.resolve(strict=False))
             try:
                 from app.trash_import import protected_trash_paths
+                from app.trash_failure import assert_no_active_restore
+                assert_no_active_restore(WORKSPACE_PATH,databases)
                 reserved=protected_trash_paths(DATABASE_FILE,WORKSPACE_PATH)
-                if reserved.intersection(paths):
+                if reserved:
                     raise TrashError("Ausgewählte Dateien gehören zu einer laufenden Wiederherstellung.")
                 result = delete_selected_trash_files(sorted(databases), WORKSPACE_PATH, paths)
             except (OSError, TrashError, ValueError) as error:
@@ -5218,6 +5243,8 @@ def api_empty_trash(payload: dict[str, Any]) -> dict[str, Any]:
         # Advisory check only; the actual filesystem entry point reclaims the
         # same lock and repeats the decision through journal/DB completion.
         with _operation_lock(WORKSPACE_PATH, blocking=False):
+            from app.trash_failure import assert_no_active_restore
+            assert_no_active_restore(WORKSPACE_PATH,databases)
             if protected_trash_paths(None, WORKSPACE_PATH):
                 raise TrashError("Eine Wiederherstellung läuft oder ist ungeklärt. Bitte fehlgeschlagene oder unterbrochene Aufträge prüfen; der Papierkorb bleibt gesperrt.")
             api_trash_inventory()

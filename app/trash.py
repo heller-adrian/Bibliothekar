@@ -456,6 +456,8 @@ def empty_trash_filesystem(workspace_root: Path) -> dict[str, int]:
     # This check is inside the same process/thread lock as reservation
     # publication, not the advisory HTTP preflight. Keep it through cleanup.
     from app.trash_import import protected_trash_paths
+    from app.trash_failure import assert_no_active_restore
+    assert_no_active_restore(workspace_root,_EMPTY_DATABASES.get())
     if protected_trash_paths(None, workspace_root):
         raise TrashError("Wiederherstellung reserviert Papierkorbdateien; Leeren gesperrt.")
     databases = _EMPTY_DATABASES.get()

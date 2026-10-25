@@ -123,6 +123,8 @@ def cleanup_successful_trash_import(
     data = json.loads(record_path.read_text(encoding="utf-8"))
     if str(data.get("job_id")) != job_id:
         raise TrashError("Papierkorb-Importjournal passt nicht zum Auftrag.")
+    if "failure_finalization" in data:
+        raise TrashError("Verifizierte Rückfallkopien eines fehlgeschlagenen Restores bleiben erhalten.")
     from app.trash_restore import assert_restore_paths_available
     assert_restore_paths_available(workspace_root,[str(item['relative_path']) for item in data.get('files') or []])
     imported = {
@@ -223,6 +225,8 @@ def prepare_queued_trash_restore(
     data=json.loads(journal.read_text(encoding="utf-8"))
     if data.get("job_id")!=job_id or not isinstance(data.get("relative_paths"),list):
         raise TrashError("Ungültiges Papierkorb-Importjournal.")
+    if "failure_finalization" in data:
+        raise TrashError("Abgeschlossener Fehlerauftrag darf seine Rückfallkopien nicht erneut verarbeiten.")
     if data.get("status") == "known_restored":
         _finish_known_restore(workspace_root, job_id)
         return {"unknown_file_count":len(data.get("files") or []), "known_restored_count":int(data.get("known_restored_count") or 0), "known_paths":list(data.get("known_paths") or [])}
@@ -375,6 +379,16 @@ def protected_trash_paths(database_path: Path | None, workspace_root: Path, *, i
             if data.get("job_id") != journal.stem or not isinstance(paths,list) or not paths:
                 raise ValueError("Ungültiger Reservierungsnachweis")
             canonical={_relative(p).as_posix() for p in paths}
+            if "failure_finalization" in data:
+                from app.trash_failure import validate_finalized
+                try:
+                    validate_finalized(database_path,workspace_root,journal.stem,data)
+                except (OSError,ValueError,KeyError,TypeError,TrashError):
+                    pass  # Uncertainty retains the complete original reservation.
+                else:
+                    canonical=set()
+                if journal.stem!=ignore_job_id:protected.update(canonical)
+                continue
             completed = data.get("cleanup_completed") is True
             known_done = data.get("status") == "known_restored"
             if completed or (known_done and data.get("files") == []):
@@ -428,7 +442,7 @@ def resume_safe_queued_trash_restores(database_path: Path, workspace_root: Path)
             from app.trash_restore import restore_reservations
             if any(item['operation_id']==jid and item['state']=='conflict' for item in restore_reservations(workspace_root)):
                 continue
-            if data.get("status") not in {"queued", "staged", "known_restored"}:
+            if "failure_finalization" in data or data.get("status") not in {"queued", "staged", "known_restored"}:
                 continue
             if conn.execute("SELECT 1 FROM files WHERE job_id=? LIMIT 1",(jid,)).fetchone():
                 continue
