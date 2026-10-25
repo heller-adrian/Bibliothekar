@@ -40,7 +40,8 @@ def test_0474_legacy_source_picker_removed_but_import_kept():
     assert "loadSources(" not in code
     assert '"/api/jobs/folder-import"' in code
     assert '"/api/source-folder-summary"' in code
-    assert 'device.device_id, device.label || device.model || "SD-Karte"' in code
+    # RC3 uses an English generated fallback; real source labels remain unchanged.
+    assert 'device.device_id, device.label || device.model || "SD Card"' in code
     assert "/sources/import" not in compose
     assert "/sources/nas:ro" in compose
 
