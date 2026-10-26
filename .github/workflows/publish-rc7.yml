@@ -62,19 +62,11 @@ jobs:
           gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.6 > release-assets/rc6-release-before.json
           gh api repos/$GITHUB_REPOSITORY/git/ref/heads/main > release-assets/main-before.json
           docker compose -f product/docs/rc7/compose.truenas.yaml config -q
-      - name: Targeted Linux regressions only
-        working-directory: product
+      - name: Reuse the successful exact-product Linux and browser evidence
         run: |
-          test -d /dev/shm
-          python qa/f14/linux/run_linux.py "$PWD" targets qa/release/rc7-targets.json
-          cp -r "$RUNNER_TEMP/f14-qa/targets/results" ../release-assets/targeted-linux
-      - name: Offline desktop/mobile DE/EN warning browser
-        working-directory: product
-        run: |
-          npm install --prefix "$RUNNER_TEMP/rc7-browser" playwright@1.58.2
-          "$RUNNER_TEMP/rc7-browser/node_modules/.bin/playwright" install --with-deps chromium
-          PYTHONPATH="$PWD" python qa/rc6-legacy/warning_pages.py "$RUNNER_TEMP/rc7-warning-pages.json"
-          PLAYWRIGHT_MODULE="$RUNNER_TEMP/rc7-browser/node_modules/playwright" node qa/rc6-legacy/setup_browser.cjs "$RUNNER_TEMP/rc7-warning-pages.json" ../release-assets/warning-browser
+          gh run download 40381064662 --repo "$GITHUB_REPOSITORY" --name rc7-publication-evidence --dir "$RUNNER_TEMP/rc7-prior"
+          gh api repos/$GITHUB_REPOSITORY/actions/runs/40381064662 > release-assets/initial-run.json
+          python qa/release/reuse_rc7_evidence.py
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -125,7 +117,7 @@ jobs:
           SCRATCH="$RUNNER_TEMP/rc7-prepublication-datasets"
           mkdir -p "$SCRATCH"/{config,database,logs,workspace,archive}
           sudo chown -R 568:568 "$SCRATCH"
-          docker run -d --name rc6-smoke --read-only --tmpfs /tmp:size=64m,mode=1777 -p 127.0.0.1:18080:8080 \
+          docker run -d --name rc7-smoke --read-only --tmpfs /tmp:size=64m,mode=1777 -p 127.0.0.1:18080:8080 \
             -e KAMERA_SOURCE_HELPER_ENABLED=false -e BIBLIOTHEKAR_ADMIN_PASSWORD=synthetic-rc-build-smoke-password \
             -e KAMERA_CONFIG=/config/settings.json -e KAMERA_DATABASE_DIR=/database -e KAMERA_REGISTRY_DATABASE=/database/global.sqlite3 \
             -e KAMERA_LOG_DIR=/logs -e KAMERA_WORKSPACE=/workspace -e KAMERA_POOL_PROBE=/workspace -e KAMERA_ARCHIVE_ROOT=/main-library \
@@ -133,8 +125,8 @@ jobs:
             -v "$SCRATCH/workspace:/workspace" -v "$SCRATCH/archive:/main-library:ro" "$IMAGE"
           python qa/release/smoke_rc7.py
           python qa/release/container_legacy_rc7.py
-          RC6_EVIDENCE="$RC7_EVIDENCE" IMAGE="$IMAGE" python qa/release/container_recovery_rc6.py
-          docker exec -i rc6-smoke python - <<'PY' > "$RC7_EVIDENCE/web-identity.json"
+          IMAGE="$IMAGE" python qa/release/container_recovery_rc7.py
+          docker exec -i rc7-smoke python - <<'PY' > "$RC7_EVIDENCE/web-identity.json"
           import json
           from pathlib import Path
           web=[]
@@ -148,9 +140,9 @@ jobs:
           assert web and all(r['uid']==568 and r['gid']==568 for r in web)
           print(json.dumps(web))
           PY
-          docker exec rc6-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC7_EVIDENCE/database-smoke.json"
-          docker logs rc6-smoke > "$RC7_EVIDENCE/container.log" 2>&1
-          docker rm -f rc6-smoke
+          docker exec rc7-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC7_EVIDENCE/database-smoke.json"
+          docker logs rc7-smoke > "$RC7_EVIDENCE/container.log" 2>&1
+          docker rm -f rc7-smoke
           (cd "$RC7_EVIDENCE" && zip -qr "$GITHUB_WORKSPACE/release-assets/prepublication-smoke-evidence.zip" .)
       - name: Publish only RC7 and verify the registry manifest
         run: |
@@ -178,15 +170,15 @@ jobs:
           SCRATCH="$RUNNER_TEMP/rc7-published-datasets"
           mkdir -p "$SCRATCH"/{config,database,logs,workspace,archive}
           sudo chown -R 568:568 "$SCRATCH"
-          docker run -d --name rc6-smoke --read-only --tmpfs /tmp:size=64m,mode=1777 -p 127.0.0.1:18080:8080 \
+          docker run -d --name rc7-smoke --read-only --tmpfs /tmp:size=64m,mode=1777 -p 127.0.0.1:18080:8080 \
             -e KAMERA_SOURCE_HELPER_ENABLED=false -e BIBLIOTHEKAR_ADMIN_PASSWORD=synthetic-rc-build-smoke-password \
             -e KAMERA_CONFIG=/config/settings.json -e KAMERA_DATABASE_DIR=/database -e KAMERA_REGISTRY_DATABASE=/database/global.sqlite3 \
             -e KAMERA_LOG_DIR=/logs -e KAMERA_WORKSPACE=/workspace -e KAMERA_POOL_PROBE=/workspace -e KAMERA_ARCHIVE_ROOT=/main-library \
             -v "$SCRATCH/config:/config" -v "$SCRATCH/database:/database" -v "$SCRATCH/logs:/logs" \
             -v "$SCRATCH/workspace:/workspace" -v "$SCRATCH/archive:/main-library:ro" "$(cat release-assets/IMAGE-DIGEST.txt)"
           python qa/release/smoke_rc7.py
-          RC6_EVIDENCE="$RC7_EVIDENCE" IMAGE="$(cat release-assets/IMAGE-DIGEST.txt)" python qa/release/container_recovery_rc6.py
-          docker exec -i rc6-smoke python - <<'PY' > "$RC7_EVIDENCE/web-identity.json"
+          IMAGE="$(cat release-assets/IMAGE-DIGEST.txt)" python qa/release/container_recovery_rc7.py
+          docker exec -i rc7-smoke python - <<'PY' > "$RC7_EVIDENCE/web-identity.json"
           import json
           from pathlib import Path
           web=[]
@@ -200,9 +192,9 @@ jobs:
           assert web and all(r['uid']==568 and r['gid']==568 for r in web)
           print(json.dumps(web))
           PY
-          docker exec rc6-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC7_EVIDENCE/database-smoke.json"
-          docker logs rc6-smoke > "$RC7_EVIDENCE/container.log" 2>&1
-          docker rm -f rc6-smoke
+          docker exec rc7-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC7_EVIDENCE/database-smoke.json"
+          docker logs rc7-smoke > "$RC7_EVIDENCE/container.log" 2>&1
+          docker rm -f rc7-smoke
           (cd "$RC7_EVIDENCE" && zip -qr "$GITHUB_WORKSPACE/release-assets/published-image-smoke-evidence.zip" .)
       - name: Package digest-pinned install artifacts and exact product source
         run: |
@@ -260,8 +252,8 @@ jobs:
         if: always()
         run: |
           mkdir -p release-assets
-          docker logs rc6-smoke > release-assets/container-final.log 2>&1 || true
-          docker rm -f rc6-smoke >/dev/null 2>&1 || true
+          docker logs rc7-smoke > release-assets/container-final.log 2>&1 || true
+          docker rm -f rc7-smoke >/dev/null 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
