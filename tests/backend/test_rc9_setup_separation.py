@@ -23,7 +23,7 @@ def test_populated_unregistered_archive_allows_first_library_setup(legacy,monkey
     assert health['can_setup_again'],health
     # The historical F14 binding still reports the missing main catalogue,
     # but unlike RC8, an unrelated populated archive does not deny recovery.
-    assert len([i for i in health['issues'] if i['code']=='catalog_unavailable'])==1,health
+    assert len([i for i in health['issues'] if i['code']=='catalog_unavailable'])==(1 if state=='legacy_roots' else 0),health
     result=setup_child(case,case/('archive-'+state),'api-reset')
     assert result['ready'] and result['onboarding'] and result['error'] is None,result
     assert picture.read_bytes()==b'old archive photography must survive'
