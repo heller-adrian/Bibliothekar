@@ -918,6 +918,9 @@ def _registered_library_rows() -> list[dict[str, Any]]:
             registered_only=True,
         )
     except Exception:
+        # Never mistake an unreadable existing registry for an empty library.
+        if REGISTRY_DATABASE_FILE.exists() or REGISTRY_DATABASE_FILE.is_symlink():
+            raise
         return []
 
 
@@ -989,7 +992,7 @@ async def library_context_middleware(request: Request, call_next):
         return await call_next(request)
     from app.managed_storage_health import inspect_storage
     storage = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
-    if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize"}:
+    if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize", "/api/settings/storage-replace"}:
         return await call_next(request)
     if not storage['ready']:
         if request.method == "GET" and not request.url.path.startswith("/api/"):
