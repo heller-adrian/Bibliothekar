@@ -39,19 +39,26 @@ if mode=='seed-reset':
     from app.library_registry import initialize_library_registry
     from contextlib import closing
     import sqlite3,shutil
-    initialize_library_registry(reg)
-    with closing(sqlite3.connect(reg)) as c:
-        c.execute("INSERT INTO libraries (library_id,display_name,database_path,workspace_root,work_root,archive_root,settings_json,is_main,is_active,is_registered,created_at,updated_at) VALUES ('main','Nicht eingerichtet',?,?,?,?,?,1,1,0,'synthetic','synthetic')",(str(db),str(ws),str(ws/'.bibliothekar-ohne-bibliothek'),'/main-library',json.dumps({'bootstrap':True,'onboarding_required':True})))
-        c.commit();c.execute('PRAGMA wal_checkpoint(TRUNCATE)')
-    if scenario=='B-missing':
+    if scenario.endswith('header'):
+        from app import main
+        assert main._onboarding_required() and reg.is_file()
+    else:
+        initialize_library_registry(reg)
+        with closing(sqlite3.connect(reg)) as c:
+            c.execute("INSERT INTO libraries (library_id,display_name,database_path,workspace_root,work_root,archive_root,settings_json,is_main,is_active,is_registered,created_at,updated_at) VALUES ('main','Nicht eingerichtet',?,?,?,?,?,1,1,0,'synthetic','synthetic')",(str(db),str(ws),str(ws/'.bibliothekar-ohne-bibliothek'),'/main-library',json.dumps({'bootstrap':True,'onboarding_required':True})))
+            c.commit();c.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    if scenario.startswith('B-'):
         # Only the synthetic control namespace just created by this fixture.
         assert parent.parent==Path('/database/.bibliothekar-root-control')
         shutil.rmtree(parent.parent);record.write_text('{}')
     result={'seed':'empty synthetic old identity state','old_state_sha256':hashlib.sha256(record.read_bytes()).hexdigest()}
 elif mode=='check-reset':
     parent=ro._control_location(ws);state=ro._read(parent/'state.json')
-    assert ro._read(parent/state['setup_reset']['history'])==json.loads(record.read_text())
-    assert len(state['setup_reset']['bootstrap_registry'])==1
+    scenario=os.environ['RC7_RESET_CASE']
+    if scenario=='B-header':assert not state.get('setup_reset')
+    else:
+        assert ro._read(parent/state['setup_reset']['history'])==json.loads(record.read_text())
+        assert len(state['setup_reset']['bootstrap_registry'])==(0 if scenario.endswith('header') else 1)
     assert inspect_storage(ws,database=db)['ready']
     result={'confirmed_reset':'PASS','old_identity_evidence_retained':'PASS'}
 elif mode=='seed-damage':

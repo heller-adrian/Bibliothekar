@@ -10,6 +10,13 @@ from app.storage_config import load_storage_settings,ENGLISH_STORAGE_DEFAULTS,LE
 
 
 
+def _empty_sqlite_header(connection):
+    """A read/open may leave one empty page; custom or retired schemas fail."""
+    return (not connection.execute('SELECT 1 FROM sqlite_master LIMIT 1').fetchone()
+            and all(connection.execute('PRAGMA '+key).fetchone()[0]==value
+                    for key,value in [('page_count',1),('freelist_count',0),('application_id',0),('user_version',0)]))
+
+
 def catalog_has_history(database):
     """Technical schema/default rows alone are not a used media catalogue."""
     if database is None or not Path(database).exists():return False
@@ -18,6 +25,7 @@ def catalog_has_history(database):
     if path.stat().st_size==0:return False
     with closing(sqlite3.connect(path.absolute().as_uri()+'?mode=ro',uri=True)) as c:
         tables=[row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        if not tables and _empty_sqlite_header(c):return False
         if not {'schema_versions','jobs','files'}<=set(tables):raise ValueError('unrecognised catalogue')
         for table in tables:
             quoted='"'+table.replace('"','""')+'"'
@@ -53,6 +61,7 @@ def empty_bootstrap_registry(registry, root, database):
     with closing(sqlite3.connect(registry.absolute().as_uri()+'?mode=ro',uri=True)) as c:
         c.row_factory=sqlite3.Row
         tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not tables and _empty_sqlite_header(c):return []
         if not {'libraries','registry_schema_versions'}<=tables:raise ValueError('unknown_registry_schema')
         for table in tables-{'registry_schema_versions','libraries'}:
             quoted='"'+table.replace('"','""')+'"'

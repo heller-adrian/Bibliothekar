@@ -93,3 +93,28 @@ def test_two_states_sigkill_and_restarts_preserve_receipts(legacy,monkeypatch,mi
     for n in range(3):
         result=setup_child(case,case/f'boot-{n}');assert result['ready'] and result['error'] is None,result
     current=ro._read(parent/'state.json');assert ro._read(parent/current['setup_reset']['history'])==({} if missing else old)
+
+@pytest.mark.parametrize('missing',[False,True])
+def test_real_onboarding_read_does_not_turn_empty_registry_into_a_blocker(legacy,monkeypatch,missing):
+    from app import main
+    case,ws,db,reg,parent,old=legacy;monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(case/'archive'))
+    if missing:shutil.rmtree(parent.parent)
+    assert not reg.exists()
+    assert main._onboarding_required()  # Real _connect creates a SQLite header before SELECT fails.
+    assert reg.exists()
+    with closing(sqlite3.connect(reg.as_uri()+'?mode=ro',uri=True)) as c:
+        assert not c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    health=inspect_storage(ws,database=db)
+    assert health.get('can_setup_again') if not missing else health['can_initialize'],health
+    if not missing:
+        result=setup_child(case,case/'confirmed-header','api-reset');assert result['ready'],result
+    else:
+        result=setup_child(case,case/'fresh-header');assert result['ready'] and result['onboarding'],result
+    result=setup_child(case,case/'header-onboard','onboard');assert result['create_status']==201,result
+
+@pytest.mark.parametrize('marker',['user_version','application_id'])
+def test_empty_looking_custom_registry_header_stays_blocked(legacy,monkeypatch,marker):
+    from app import main
+    case,ws,db,reg,parent,old=legacy;monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(case/'archive'));main._onboarding_required()
+    with closing(sqlite3.connect(reg)) as c:c.execute('PRAGMA '+marker+'=42');c.commit();c.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    health=inspect_storage(ws,database=db);assert not health['can_initialize'] and not health.get('can_setup_again'),health

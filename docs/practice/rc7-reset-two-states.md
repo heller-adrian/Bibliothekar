@@ -41,3 +41,18 @@ einschließlich Bestätigung, tatsächlichem Onboarding, drei Prozessneustarts,
 Containerneustart, SIGKILL und negativen Bestandsfällen. Native TrueNAS-/NFSv4-
 Qualifikation bleibt offen. Kein Eingriff auf dem NAS, kein Release, keine
 Versionsänderung und keine Anweisung zu einem weiteren Clean Slate.
+
+Zusätzlich tatsächlich nachgewiesener Lese-Nebeneffekt: main._onboarding_required()
+ruft list_libraries/_connect auf. PRAGMA journal_mode=WAL erzeugt bei fehlender
+Registry eine SQLite-Headerdatei; SELECT auf die noch nicht vorhandene Tabelle
+schlägt fehl und wird als Onboardingzustand behandelt. Die bisherige Prüfung
+wertete diesen nun vorhandenen Header als unbekanntes Schema und sperrte den
+anschließenden Reset. Eine spätere generische Datenbankabfrage kann denselben
+Headerzustand beim Hauptkatalog hinterlassen.
+
+Behandelt wird ausschließlich die eine leere SQLite-Schemaseite: sqlite_master
+enthält keinerlei Objekte, page_count=1, freelist_count=0, application_id=0 und
+user_version=0. Benutzerdefinierte Kennungen/Schemata und SQLite-Seitenreste werden
+nicht als technische Erstinitialisierung eingestuft. Diese Regeln ersetzen keine
+Medien-/Registry-/Mount-/Retentionprüfung. Zwei originale Header-Gegenproben FAIL,
+nach der eng begrenzten Ergänzung vier Header-/Kennungsgegenproben PASS.

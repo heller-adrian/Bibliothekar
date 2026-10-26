@@ -2,7 +2,7 @@
 import http.cookiejar,json,os,subprocess,time,urllib.request,urllib.error
 from pathlib import Path
 scenario=os.environ['RC7_RESET_CASE']
-assert scenario in {'A-roots','A-technical','B-missing'}
+assert scenario in {'A-roots','A-technical','B-missing','A-header','B-header'}
 out=Path(os.environ['RC7_EVIDENCE'])/scenario;out.mkdir()
 image=os.environ['IMAGE'];fixture=Path('qa/rc7-reset/fixture.py').read_text()
 
@@ -49,13 +49,18 @@ for d,target in [('config','/config'),('database','/database'),('logs','/logs'),
 docker(*args,image)
 try:
     seed(name,'seed-reset');docker('start',name);reset=connect(18081)
-    health=reset('/api/settings/storage-health');assert not health['ready'] and health['can_setup_again'] and not health['can_initialize'],health
-    assert health['setup_evidence']=={'A-roots':'complete_legacy_root_bindings','A-technical':'technical_control_only','B-missing':'empty_without_control_evidence'}[scenario],health
-    assert 'id="storage-initialize"' in reset('/',text=True)
-    assert all(f['status']=='missing' for f in health['folders']),health
-    if scenario=='A-roots':assert len([i for i in health['issues'] if i['code']=='catalog_unavailable'])==1,health
-    reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']},403,csrf=False)
-    assert reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']})['ready']
+    health=reset('/api/settings/storage-health')
+    if scenario=='B-header':
+        assert health['ready'],health
+        assert '/api/libraries/check' in reset('/',text=True)
+    else:
+        assert not health['ready'] and health['can_setup_again'] and not health['can_initialize'],health
+        assert health['setup_evidence']=={'A-roots':'complete_legacy_root_bindings','A-header':'complete_legacy_root_bindings','A-technical':'technical_control_only','B-missing':'empty_without_control_evidence'}[scenario],health
+        assert 'id="storage-initialize"' in reset('/',text=True)
+        assert all(f['status']=='missing' for f in health['folders']),health
+        if scenario in {'A-roots','A-header'}:assert len([i for i in health['issues'] if i['code']=='catalog_unavailable'])==1,health
+        reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']},403,csrf=False)
+        assert reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']})['ready']
     seed(name,'check-reset')
     check=reset('/api/libraries/check',{'display_name':'RC7 Reset','work_root':'','archive_root':'/main-library','default_library_id':'rc7-reset'});assert check['valid'],check
     created=reset('/api/libraries',{'display_name':'RC7 Reset','work_root':'','archive_root':'/main-library'},201)

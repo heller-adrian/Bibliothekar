@@ -107,7 +107,7 @@ jobs:
           docker exec rc7-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC7_EVIDENCE/database-smoke.json"
       - name: Separate persistent containers for both chronological states
         run: |
-          for CASE in A-roots A-technical B-missing; do
+          for CASE in A-roots A-technical B-missing A-header B-header; do
             RC7_RESET_CASE="$CASE" python qa/rc7-reset/container.py
           done
       - name: Diagnostics and cleanup of disposable container
