@@ -79,7 +79,7 @@ try:
     reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']},403,csrf=False)
     assert reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']})['ready']
     seed(name,'check-reset')
-    check=reset('/api/libraries/check',{'display_name':'RC6 Reset','work_root':'','archive_root':'/main-library'});assert check['valid'],check
+    check=reset('/api/libraries/check',{'display_name':'RC6 Reset','work_root':'','archive_root':'/main-library','default_library_id':'rc6-reset'});assert check['valid'],check
     created=reset('/api/libraries',{'display_name':'RC6 Reset','work_root':'','archive_root':'/main-library'},201)
     docker('stop',name);seed(name,'seed-damage');docker('start',name);damaged=connect(18081)
     bad=damaged('/api/settings/storage-health');assert not bad['ready'] and not bad.get('can_setup_again'),bad
