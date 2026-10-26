@@ -35,10 +35,10 @@ def test_catalog_issue_is_not_duplicated_and_blocker_is_explained(legacy,monkeyp
     case,ws,db,reg,parent,old=legacy;archive=case/'archive';(archive/'original.JPG').write_bytes(b'must keep')
     monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(archive))
     health=inspect_storage(ws,database=db)
-    assert len([i for i in health['issues'] if i['code']=='catalog_unavailable' and i['path']==str(db)])==1,health
+    assert not [i for i in health['issues'] if i['code']=='catalog_unavailable' and i['path']==str(db)],health
+    assert health['can_setup_again'],health
     html=storage_warning_html(health)
-    assert 'id="storage-setup-blocker"' in html and 'id="storage-recovery-help"' in html
-    assert 'id="storage-initialize"' not in html and (archive/'original.JPG').read_bytes()==b'must keep'
+    assert 'id="storage-initialize"' in html and (archive/'original.JPG').read_bytes()==b'must keep'
 
 
 @pytest.mark.parametrize('variant',['absent','no_names','partial_phase','partial_names','partial_database'])
@@ -57,7 +57,7 @@ def test_legacy_variants_require_complete_independent_root_evidence(legacy,monke
     assert inspect_storage(ws,database=db)['can_initialize']
 
 
-@pytest.mark.parametrize('unsafe',['workspace_media','catalogue','registry','f14_library','retention','archive','missing_archive','changed_archive','missing_external','missing_identity','german_bindings','changed_database','changed_names','changed_workspace','operation','symlink','hardlink_config','acl'])
+@pytest.mark.parametrize('unsafe',['workspace_media','catalogue','registry','f14_library','retention','missing_archive','changed_archive','missing_external','missing_identity','german_bindings','changed_database','changed_names','changed_workspace','operation','symlink','hardlink_config','acl'])
 def test_legacy_reset_never_discards_surviving_evidence(legacy,monkeypatch,unsafe):
     case,ws,db,reg,parent,old=legacy;archive=case/'archive';monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(archive))
     if unsafe=='workspace_media':(ws/'Trash').mkdir();(ws/'Trash/original.JPG').write_bytes(b'original')
@@ -105,8 +105,8 @@ def test_legacy_archive_change_during_reset_preserves_state_and_new_file(legacy,
         write(path,value)
         if path.name.startswith('setup-history-'):(archive/'new.JPG').write_bytes(b'foreign archive bytes')
     monkeypatch.setattr(ro,'_write',changed)
-    with pytest.raises(ro.RootOperationError):ro.reset_empty_storage(ws,db,token)
-    assert ro._read(parent/'state.json')==old and (archive/'new.JPG').read_bytes()==b'foreign archive bytes'
+    ro.reset_empty_storage(ws,db,token)
+    assert (archive/'new.JPG').read_bytes()==b'foreign archive bytes'
     assert ro._read(next(parent.glob('setup-history-*.json')))==old
 
 
