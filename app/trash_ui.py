@@ -209,7 +209,9 @@ TRASH_HTML = r"""<!doctype html>
       if(item.status==="known_restored")continue;
       const box=document.createElement("div"),text=document.createElement("p");
       text.setAttribute("data-bk-preserve-language","");
-      const summary=item.status==="finalized"
+      const summary=item.status==="finalized" && item.rescued_variants
+        ? bilingual("Erhaltene Varianten gesichert. Historische Originalidentität ist nicht bestätigt.","Preserved variants retained. Historical original identity is not confirmed.")
+        : item.status==="finalized"
         ? bilingual("Fehlgeschlagen – sicher abgeschlossen. Rückfallkopien bleiben erhalten.","Failed – safely finalized. Recovery copies are retained.")
         : item.status==="ready"
           ? bilingual("Fehlgeschlagene Wiederherstellung kann nach vollständiger Prüfung sicher beendet werden.","The failed restore can be safely finalized after complete verification.")
@@ -223,16 +225,20 @@ TRASH_HTML = r"""<!doctype html>
       details.appendChild(heading);details.appendChild(evidence);box.appendChild(details);
       if(item.job_id && item.status!=="finalized"){
         const button=document.createElement("button");button.type="button";button.className="trash-action";
-        button.textContent=bilingual("Fehlgeschlagene Wiederherstellung sicher abbrechen","Safely cancel failed restore");
+        button.textContent=item.rescue_available
+          ? bilingual("Alle erhaltenen Varianten sichern","Retain all preserved variants")
+          : bilingual("Fehlgeschlagene Wiederherstellung sicher abbrechen","Safely cancel failed restore");
         button.addEventListener("click",async()=>{
           if(busy)return;
           busy=true;updateControls();
           try{
-            const prompt=bilingual("Fehlgeschlagene Wiederherstellung nach erneuter vollständiger Prüfung abschließen? Originale, geprüfte Rückfallkopien, Journal und Fehlermeldung bleiben erhalten. Unklare Zustände werden nicht freigegeben.","Finalize the failed restore after complete verification again? Originals, verified recovery copies, the journal and the error are retained. Uncertain states remain blocked.");
+            const prompt=item.rescue_available
+              ? bilingual("Alle noch erhaltenen Datei-Varianten dieses Auftrags nach privater Prüfung sichern und die Reservierung aufheben? Die historische Originalidentität ist nicht nachgewiesen. Abweichende Varianten werden getrennt behalten. Originale und Fehlerbelege bleiben erhalten. Unklare oder fehlende Medien bleiben gesperrt.","Retain all preserved file variants of this job after private verification and release its reservation? Historical original identity is unproven. Different variants are kept separately. Originals and failure evidence remain. Uncertain or missing media stay blocked.")
+              : bilingual("Fehlgeschlagene Wiederherstellung nach erneuter vollständiger Prüfung abschließen? Originale, geprüfte Rückfallkopien, Journal und Fehlermeldung bleiben erhalten. Unklare Zustände werden nicht freigegeben.","Finalize the failed restore after complete verification again? Originals, verified recovery copies, the journal and the error are retained. Uncertain states remain blocked.");
             const confirmed=window.BibliothekarI18n?.confirmAsync?await window.BibliothekarI18n.confirmAsync(prompt):window.confirm(prompt);
             if(!confirmed)return;
             const result=await json("/api/trash/restores/"+encodeURIComponent(item.job_id)+"/finalize-failure",{
-              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmation:"SAFE_ABORT_FAILED_RESTORE"})});
+              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmation:item.rescue_available?"RETAIN_ALL_FAILED_RESTORE_VARIANTS":"SAFE_ABORT_FAILED_RESTORE"})});
             render(result.inventory);
           }catch(error){
             text.textContent=bilingual("Abschluss weiterhin gesperrt. Die Dateien bleiben geschützt; Details prüfen.","Finalization remains blocked. Files remain protected; review details.");

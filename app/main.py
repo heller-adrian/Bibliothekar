@@ -5180,11 +5180,12 @@ def api_restore_trash(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/trash/restores/{job_id}/finalize-failure", tags=["Papierkorb"])
 @_root_request
 def api_finalize_trash_failure(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if payload.get("confirmation") != "SAFE_ABORT_FAILED_RESTORE":
+    if payload.get("confirmation") not in ("SAFE_ABORT_FAILED_RESTORE","RETAIN_ALL_FAILED_RESTORE_VARIANTS"):
         raise HTTPException(status_code=422,detail="Die ausdrückliche Sicherheitsbestätigung fehlt.")
-    from app.trash_failure import finalize_failure
+    from app.trash_failure import finalize_failure,rescue_failure
     try:
-        item=finalize_failure(DATABASE_FILE,WORKSPACE_PATH,job_id)
+        action=rescue_failure if payload["confirmation"]=="RETAIN_ALL_FAILED_RESTORE_VARIANTS" else finalize_failure
+        item=action(DATABASE_FILE,WORKSPACE_PATH,job_id)
         return {**item,'inventory':api_trash_inventory()}
     except (OSError,ValueError,KeyError,TypeError,TrashError) as error:
         raise HTTPException(status_code=409,detail=str(error)) from error

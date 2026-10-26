@@ -124,6 +124,13 @@ def _inspect(database,workspace,job_id,data,*,closed=False):
         raise TrashError('Unvollständige Restore-Recovery reserviert diese Dateien: '+job_id)
     stage=stage_parent(workspace)/job_id
     incoming=storage_paths(workspace)['backup_root']/'.incoming'/job_id
+    from app import trash_retention as retention
+    with trash_fd.parent(stage/'probe') as (directory,_,binding):
+        held=os.fstat(directory)
+        if held.st_uid!=os.geteuid() or stat.S_IMODE(held.st_mode)&0o077:
+            raise TrashError('Rückfall-Staging ist nicht privat für die App-UID: '+str(stage))
+        binding()
+    with retention.qualified(stage,{0,os.geteuid()},directory=True) as (_,binding):binding()
     incoming_proof=_protocol_only_failure(incoming,stage,job_id)
     with ExitStack() as stack:
         connections=[(p,stack.enter_context(database_connection(p))) for p in scopes(database,workspace)]
@@ -137,6 +144,7 @@ def _inspect(database,workspace,job_id,data,*,closed=False):
             rel=_relative(item['relative_path']);sha=str(item['sha256']);size=int(item['size_bytes'])
             if len(sha)!=64 or size<0:raise TrashError('Ungültiger Restore-Dateibeleg: '+str(rel))
             try:
+                with retention.qualified(stage/rel,{0,os.geteuid()}) as (_,binding):binding()
                 with trash_fd.parent(stage/rel) as (directory,name,check):
                     with trash_fd.file_at(directory,name,sha) as (fd,info):
                         if info.st_nlink!=1 or info.st_size!=size:raise TrashError('Stagingkopie ist nicht unabhängig: '+str(rel))
@@ -183,6 +191,10 @@ def checkpoint(boundary):
 @serialized_trash_operation('workspace')
 def validate_finalized(database,workspace,job_id,data=None):
     data=read_journal(workspace,job_id) if data is None else data
+    from app import trash_failure_private as private
+    if private.recorded(database,workspace,job_id):
+        private.validate(database,workspace,job_id,data)
+        return True
     receipt=data.get(KEY,{})
     if not isinstance(receipt,dict) or receipt.get('phase')!='committed':raise TrashError('Fehlerabschluss noch nicht vollständig bestätigt: '+job_id)
     proof,owner,job=_inspect(database,workspace,job_id,data,closed=True)
@@ -197,6 +209,11 @@ def validate_finalized(database,workspace,job_id,data=None):
 def finalize_failure(database,workspace,job_id):
     """Persist verified failure completion; retain all media, error and journal."""
     from app.trash_selective import _atomic_json
+    from app import trash_failure_private as private
+    with database_connection(database) as c:
+        row=c.execute('SELECT source_fingerprint FROM jobs WHERE id=?',(job_id,)).fetchone()
+    if private.recorded(database,workspace,job_id) or (row and row[0]):
+        return private.finalize(database,workspace,job_id)
     data=read_journal(workspace,job_id)
     prior=data.get(KEY)
     if KEY in data and (not isinstance(prior,dict) or prior.get('phase') not in {'prepared','committed'}):
@@ -243,16 +260,32 @@ def finalize_failure(database,workspace,job_id):
 
 
 
+@protect(workspace_arg='workspace',database_arg='database',kind='trash',error_type=TrashError)
+@serialized_trash_operation('workspace')
+def rescue_failure(database,workspace,job_id):
+    """Only the separate explicit API confirmation can call this path."""
+    from app.trash_failure_private import finalize
+    return finalize(database,workspace,job_id,rescue=True)
+
+
 def describe_failures(database,workspace):
     """Report only. Opening the trash never persists a new failure receipt."""
+    from app.trash_failure_private import has_anchor
     with database_connection(database) as c:
-        ids=[str(r['id']) for r in c.execute("SELECT id FROM jobs WHERE operation='trash_import' AND state='failed' ORDER BY created_at,id")]
+        rows=list(c.execute("SELECT id,source_fingerprint FROM jobs WHERE operation='trash_import' AND state='failed' ORDER BY created_at,id"))
+    ids=[str(r['id']) for r in rows];fingerprints={str(r['id']):r['source_fingerprint'] for r in rows}
     result=[]
     for jid in ids:
         data=None
         try:
             data=read_journal(workspace,jid)
-            if KEY in data:
+            from app import trash_failure_private as private
+            retained=private.recorded(database,workspace,jid)
+            if retained:
+                private.validate(database,workspace,jid,data)
+                result.append({'job_id':jid,'status':'finalized','recovery_path':retained['proof']['retention_path'],
+                               'rescued_variants':retained['proof']['mode']=='confirmed-current-variants'})
+            elif KEY in data:
                 validate_finalized(database,workspace,jid,data)
                 result.append({'job_id':jid,'status':'finalized','recovery_path':data[KEY]['proof']['source_path']})
             elif data.get('status')=='known_restored' and data.get('files')==[] and set(data.get('known_paths',[]))==set(data.get('relative_paths',[])):
@@ -262,7 +295,8 @@ def describe_failures(database,workspace):
                 result.append({'job_id':jid,'status':'ready','recovery_path':proof['source_path']})
         except (OSError,ValueError,KeyError,TypeError,sqlite3.Error,TrashError) as error:
             paths=data.get('relative_paths',[]) if isinstance(data,dict) else []
-            result.append({'job_id':jid,'status':'blocked','message':str(error),'paths':paths if isinstance(paths,list) else []})
+            result.append({'job_id':jid,'status':'blocked','message':str(error),'paths':paths if isinstance(paths,list) else [],
+                           'rescue_available':not has_anchor(fingerprints.get(jid))})
     return result
 
 
