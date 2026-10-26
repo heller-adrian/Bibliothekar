@@ -2,7 +2,7 @@
 import http.cookiejar,json,os,subprocess,time,urllib.request,urllib.error
 from pathlib import Path
 scenario=os.environ['RC7_RESET_CASE']
-assert scenario in {'A-roots','A-technical','B-missing','A-header','B-header'}
+assert scenario in {'A-roots','A-technical','B-missing','A-header','B-header','A-archive'}
 out=Path(os.environ['RC7_EVIDENCE'])/scenario;out.mkdir()
 image=os.environ['IMAGE'];fixture=Path('qa/rc7-reset/fixture.py').read_text()
 
@@ -42,6 +42,8 @@ def connect(port):
 
 name='rc7-setup-smoke';scratch=Path(os.environ['RUNNER_TEMP'])/('rc7-reset-'+scenario)
 for path in ['config','database','logs','workspace','archive']:(scratch/path).mkdir(parents=True)
+if scenario=='A-archive':
+    (scratch/'archive'/'original.JPG').write_bytes(b'preexisting independent archive photo')
 subprocess.run(['sudo','chown','-R','568:568',str(scratch)],check=True)
 args=['create','--name',name,'--read-only','--tmpfs','/tmp:size=64m,mode=1777','-p','127.0.0.1:18081:8080']
 for k,v in {'KAMERA_SOURCE_HELPER_ENABLED':'false','BIBLIOTHEKAR_ADMIN_PASSWORD':'synthetic-rc-build-smoke-password','KAMERA_CONFIG':'/config/settings.json','KAMERA_DATABASE_DIR':'/database','KAMERA_REGISTRY_DATABASE':'/database/global.sqlite3','KAMERA_LOG_DIR':'/logs','KAMERA_WORKSPACE':'/workspace','KAMERA_POOL_PROBE':'/workspace','KAMERA_ARCHIVE_ROOT':'/main-library'}.items():args+=['-e',k+'='+v]
@@ -55,12 +57,15 @@ try:
         assert '/api/libraries/check' in reset('/',text=True)
     else:
         assert not health['ready'] and health['can_setup_again'] and not health['can_initialize'],health
-        assert health['setup_evidence']=={'A-roots':'complete_legacy_root_bindings','A-header':'complete_legacy_root_bindings','A-technical':'technical_control_only','B-missing':'empty_without_control_evidence'}[scenario],health
+        assert health['setup_evidence']=={'A-roots':'complete_legacy_root_bindings','A-header':'complete_legacy_root_bindings','A-technical':'technical_control_only','A-archive':'complete_legacy_root_bindings','B-missing':'empty_without_control_evidence'}[scenario],health
         assert 'id="storage-initialize"' in reset('/',text=True)
         assert all(f['status']=='missing' for f in health['folders']),health
         if scenario in {'A-roots','A-header'}:assert len([i for i in health['issues'] if i['code']=='catalog_unavailable'])==1,health
+        if scenario=='A-archive':assert not [i for i in health['issues'] if i['code']=='catalog_unavailable'],health
         reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']},403,csrf=False)
         assert reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']})['ready']
+    if scenario=='A-archive':
+        assert (scratch/'archive'/'original.JPG').read_bytes()==b'preexisting independent archive photo'
     seed(name,'check-reset')
     check=reset('/api/libraries/check',{'display_name':'RC7 Reset','work_root':'','archive_root':'/main-library','default_library_id':'rc7-reset'});assert check['valid'],check
     created=reset('/api/libraries',{'display_name':'RC7 Reset','work_root':'','archive_root':'/main-library'},201)

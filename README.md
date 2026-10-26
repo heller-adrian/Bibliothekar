@@ -1,6 +1,6 @@
 # Bibliothekar
 
-> Release Candidate in Vorbereitung: **1.0.0-rc.8** – noch nicht veröffentlicht, keine stabile Freigabe. [RC8-Prüfstand und Testvorlage](docs/rc8/README.md). Der stabile Update-Kanal bleibt unverändert.
+> Release Candidate in Vorbereitung: **1.0.0-rc.9** – noch nicht veröffentlicht, keine stabile Freigabe. [RC8-Prüfstand und Testvorlage](docs/rc8/README.md). Der stabile Update-Kanal bleibt unverändert.
 > Veröffentlichter Vorgänger RC7: [Installationsanleitung](docs/rc7/INSTALL-TRUENAS.md) und [manuelle Abnahme](docs/rc7/MANUAL-ACCEPTANCE.md).
 > Die folgenden älteren Entwicklungsabschnitte sind historisch; für diesen RC gelten die oben verlinkten festen englischen Verwaltungsnamen und Mountregeln.
 
@@ -8,7 +8,7 @@ Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraau
 
 Aktuelle stabile Veröffentlichung: **0.40.3**
 
-Entwicklungsversion: **1.0.0-rc.8** – noch nicht als `latest` veröffentlicht.
+Entwicklungsversion: **1.0.0-rc.9** – noch nicht als `latest` veröffentlicht.
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
