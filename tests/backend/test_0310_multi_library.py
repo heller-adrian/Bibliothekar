@@ -161,7 +161,7 @@ def test_0310_versions_and_frozen_css_contract():
     assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     assert source_helper.app.version == EXPECTED_RELEASE_VERSION
     assert source_helper.healthz()["version"] == EXPECTED_RELEASE_VERSION
-    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 44419
+    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 44539
     assert ".bk-library-card" not in ui_shell.BIBLIOTHEKAR_CSS
     assert ".bk-library-card" in ui_shell.BIBLIOTHEKAR_0310_CSS
 

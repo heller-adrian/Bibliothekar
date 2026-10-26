@@ -74,7 +74,8 @@ def test_r1_collision_and_three_full_starts(tmp_path,monkeypatch,kind):
     starts(case,ev);preserved(data,ws,target,kind)
     assert tr._identity(source)==ident and tr._identity(target)==before and record.read_bytes()==raw
     conflicts=main.api_trash_inventory()['restore_conflicts'];assert len(conflicts)==1 and conflicts[0]['operation_id']==record.stem
-    assert 'Wiederherstellung blockiert:' in main.TRASH_HTML and 'status.textContent+=' in main.TRASH_HTML
+    assert 'Ungeklärte Wiederherstellung; Details prüfen.' in main.TRASH_HTML
+    assert 'Unresolved restore; review details.' in main.TRASH_HTML and 'status.textContent+=' in main.TRASH_HTML
 
 
 @pytest.mark.parametrize('operation',['restore','queue','selective','full'])

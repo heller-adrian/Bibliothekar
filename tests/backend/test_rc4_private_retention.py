@@ -348,3 +348,17 @@ def test_actual_worker_failure_after_persisted_identity_auto_finalizes(fixture,m
     assert private.recorded(db,ws,jid) and tf.validate_finalized(db,ws,jid)
     assert not ti.protected_trash_paths(db,ws)
     assert all((root/('worker.'+ext)).read_bytes()==('worker original '+ext).encode() for ext in ['JPG','RAF'])
+
+
+def test_posix_default_acl_only_on_existing_ancestor_never_qualifies_creation_parent(tmp_path,monkeypatch):
+    path=tmp_path/'p';path.mkdir(mode=0o700);fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY)
+    try:
+        monkeypatch.setattr(rt,'_attributes',lambda fd:{'system.posix_acl_default':b'existing parent inheritance only'})
+        assert rt.check_acl(fd,{0,os.geteuid()},existing_ancestor=True)
+        with pytest.raises(tf.TrashError):rt.check_acl(fd,{0,os.geteuid()})
+        path.chmod(0o777)
+        with pytest.raises(tf.TrashError):rt.check_acl(fd,{0,os.geteuid()},existing_ancestor=True)
+        path.chmod(0o700)
+        monkeypatch.setattr(rt,'_attributes',lambda fd:{'system.posix_acl_access':b'access must not be ignored'})
+        with pytest.raises(tf.TrashError):rt.check_acl(fd,{0,os.geteuid()},existing_ancestor=True)
+    finally:os.close(fd)

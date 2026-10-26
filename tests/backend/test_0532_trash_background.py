@@ -154,6 +154,7 @@ def test_0532_actual_claimed_worker_finishes_trash_restore(tmp_path,monkeypatch)
     from app.storage_config import storage_paths
 
     database,registry,workspace=_foundation(tmp_path)
+    monkeypatch.setenv("KAMERA_REGISTRY_DATABASE",str(registry))
     contexts=main.list_active_library_contexts(registry)
     assert contexts
     context=next(x for x in contexts if x.library_id=="main")

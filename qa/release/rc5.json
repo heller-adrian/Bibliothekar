@@ -14,5 +14,9 @@
     "app/ui_shell.py"
   ],
   "platform": "linux/amd64",
-  "publication_authorized": false
+  "publication_authorized": false,
+  "approved_correction_sha256": {
+    "app/trash_retention.py": "be61751f4cfdb5a0cba7eaf4f78653872ec01c96ff4671498b577237338437b7"
+  },
+  "approved_correction_reason": "Linux evidence: default-only POSIX ACL on an existing ancestor is not an access grant; final creation parents and all access ACLs stay strict."
 }

@@ -69,13 +69,18 @@ def _attributes(fd):
     finally: lib.acl_free(acl)
 
 
-def check_acl(fd, users, *, sticky=False):
+def check_acl(fd, users, *, sticky=False, existing_ancestor=False):
     info = os.fstat(fd)
     if info.st_uid not in users:
         raise TrashError('Fremder Eigentümer im privaten Verwaltungsbereich.')
     attrs = _attributes(fd)
     native = [(n, v) for n, v in attrs.items() if n in NFS4]
-    if len(native) > 1 or any(n not in NFS4 for n in attrs):
+    # POSIX default ACLs affect newly created children, not access to this
+    # already-existing ancestor. Creation parents are checked as final nodes
+    # by ensure_directory/retain, so their default ACL remains strict.
+    other_acl = {n for n in attrs if n not in NFS4}
+    if existing_ancestor: other_acl.discard('system.posix_acl_default')
+    if len(native) > 1 or other_acl:
         raise TrashError('Nicht qualifizierte ACL im privaten Verwaltungsbereich.')
     if native:
         raw = native[0][1]
@@ -116,20 +121,20 @@ def qualified(path, users, *, directory=False):
     fds = [os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)]
     links = []
     try:
-        check_acl(fds[0], users, sticky=True)
+        check_acl(fds[0], users, sticky=True, existing_ancestor=len(path.parts)>1)
         for i, part in enumerate(path.parts[1:]):
             last = i == len(path.parts)-2
             flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
             if not last or directory: flags |= os.O_DIRECTORY
             fd = os.open(part, flags, dir_fd=fds[-1])
             links.append((fds[-1], part, fd)); fds.append(fd)
-            check_acl(fd, users, sticky=not last)
+            check_acl(fd, users, sticky=not last, existing_ancestor=not last)
         def check():
             for parent, name, fd in links:
                 now = os.stat(name, dir_fd=parent, follow_symlinks=False)
                 if trash_fd.identity(now) != trash_fd.identity(os.fstat(fd)):
                     raise TrashError('Privater Verwaltungsbereich wurde ausgetauscht.')
-                check_acl(fd, users, sticky=fd != fds[-1])
+                check_acl(fd, users, sticky=fd != fds[-1], existing_ancestor=fd != fds[-1])
         check()
         yield fds[-1], check
     finally:

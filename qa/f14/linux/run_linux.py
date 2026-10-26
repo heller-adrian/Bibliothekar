@@ -20,12 +20,15 @@ for k,v in paths.items():
 env.update(PYTHONDONTWRITEBYTECODE='1',PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHONPATH=os.pathsep.join(map(str,[source,tools,original])),AUDIT_SOURCE=str(source),AUDIT_OUTPUT=str(output),AUDIT_SCRATCH=str(scratch),AUDIT_LABEL=label,KAMERA_SOURCE_HELPER_ENABLED='false',KAMERA_SOURCE_HELPER_URL='http://127.0.0.1:1',BIBLIOTHEKAR_ADMIN_PASSWORD='synthetic-f14-ci-password',BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE='de')
 args=[sys.executable,str(tools/'runner.py'),'-q','-p','no:cacheprovider','--import-mode=importlib','-o','addopts=','--basetemp',str(scratch/'pytest'),'--junitxml',str(output/'result.xml'),'-p','finite_execution']
 if mode=='backend':args+=[str(source/'tests/backend')]
+elif mode=='targets':
+ chosen=json.loads(Path(sys.argv[3]).read_text());assert chosen and all(n.startswith('tests/backend/') and '..' not in n.split('::')[0].split('/') for n in chosen)
+ args+=[str(source/n) for n in chosen]
 else:args+=['-p','complete_historical_fixture']+[str(original/n) for n in selections]
 (output/'command.json').write_text(json.dumps({'argv':args,'source':str(source),'paths':{k:env[k] for k in paths},'original_sha256':manifest,'TMPDIR':env['TMPDIR'],'AUDIT_SCRATCH':env['AUDIT_SCRATCH']},indent=2))
 with (output/'stdout.log').open('w') as log:
  result=subprocess.run(args,cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=3600 if mode=='backend' else 2400)
 print((output/'stdout.log').read_text()[-5000:])
-(output/'exit.json').write_text(json.dumps({'returncode':result.returncode,'mode':mode,'historical_raw_result':mode!='backend'}))
-if mode=='backend':raise SystemExit(result.returncode)
+(output/'exit.json').write_text(json.dumps({'returncode':result.returncode,'mode':mode,'historical_raw_result':mode not in {'backend','targets'}}))
+if mode in {'backend','targets'}:raise SystemExit(result.returncode)
 # Preserve red historical contracts. Infrastructure/collection errors still fail QA.
 assert result.returncode in {0,1} and (output/'result.xml').is_file()

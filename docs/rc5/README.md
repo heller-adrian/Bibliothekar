@@ -3,7 +3,8 @@
 Vorbereitet: `1.0.0-rc.5`, noch keine Veröffentlichung.
 Produktbasis `e788208fb479aefb569cd2b46acbc65051de6bfb`, Tree
 `691c335c0dce41d5c1f1fa3085822496d96fed00`. Produktänderungen dieser Vorbereitung
-sind ausschließlich Versionssubstitutionen; Quellvertrag in `qa/release/rc5.json`.
+sind Versionssubstitutionen und die belegte Linux-Korrektur für reine POSIX-
+Default-ACLs auf bereits bestehenden Vorfahren (keine Access-ACL-Freigabe); Quellvertrag in `qa/release/rc5.json`.
 
 ## Vor dem Update: konsistente Rückfallbasis
 
