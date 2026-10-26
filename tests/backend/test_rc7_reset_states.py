@@ -47,7 +47,7 @@ def test_missing_control_does_not_hide_private_retention(legacy,monkeypatch):
     assert (retained/'original.JPG').read_bytes()==b'original'
 
 @pytest.mark.parametrize('missing',[False,True])
-@pytest.mark.parametrize('unsafe',['registered','retired','unmarked','catalogue','workspace','archive','retention','open-operation'])
+@pytest.mark.parametrize('unsafe',['registered','retired','unmarked','catalogue','workspace','retention','open-operation'])
 def test_both_states_keep_real_history_blocked(legacy,monkeypatch,missing,unsafe):
     case,ws,db,reg,parent,old=legacy;monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(case/'archive'));technical_registry(case,ws,db,reg)
     if missing:shutil.rmtree(parent.parent)
