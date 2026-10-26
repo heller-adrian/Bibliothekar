@@ -336,6 +336,9 @@ def test_actual_worker_failure_after_persisted_identity_auto_finalizes(fixture,m
     for ext in ['JPG','RAF']:(root/('worker.'+ext)).write_bytes(('worker original '+ext).encode())
     queued=ti.queue_trash_restore(db,ws,['worker.JPG','worker.RAF']);jid=queued['job_id']
     monkeypatch.setattr(main,'LOG_PATH',case/'logs');monkeypatch.setattr(main,'POOL_PROBE_PATH',ws)
+    monkeypatch.setattr(main,"load_settings",
+                        lambda:{"storage":{"processing_buffer_percent":0,
+                                           "safety_reserve_gib":0}})
     def fail(*args,**kwargs):
         job=get_job(db,jid);assert private.has_anchor(job['source_fingerprint'])
         (ti.stage_parent(ws)/jid).chmod(0o770)
