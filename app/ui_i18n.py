@@ -1378,6 +1378,16 @@ from app.ui_i18n_rc1 import RC1_TRANSLATIONS, RC1_PATTERNS
 UI_TRANSLATIONS.update(RC1_TRANSLATIONS)
 UI_PATTERNS.extend(RC1_PATTERNS)
 
+
+UI_TRANSLATIONS["Neu einrichten"] = "Set up again"
+
+UI_TRANSLATIONS.update({
+    "Quellprüfung wartet auf Verarbeitung.":"Source check is waiting to run.",
+    "Prüfung abbrechen":"Cancel check",
+    "Prüfung abgebrochen. Keine Dateien verändert.":"Check cancelled. No files were changed.",
+    "Quelle wird vollständig geprüft.":"Checking the complete source.",
+})
+
 I18N_UI_JS = r"""
 (function () {
   "use strict";

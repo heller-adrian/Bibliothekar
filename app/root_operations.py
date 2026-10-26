@@ -952,3 +952,31 @@ def guard_registry_paths(fn):
         except RootOperationError as error:
             raise LibraryRegistryError(str(error)) from error
     return call
+
+
+def reset_empty_storage(workspace, database, token):
+    """Explicit empty setup transition; archive old F14 state before commit.
+
+    This never deletes folders, journals, retention, registry or catalogue rows.
+    SIGKILL before the state publication leaves the original state intact; after
+    publication the ordinary empty-initialization startup can safely resume.
+    """
+    from app.managed_storage_health import setup_again_evidence
+    root,parent=_control(workspace)
+    with _lock(parent/'workspace.lock',exclusive=True), _lock(parent/'shared.lock',exclusive=True), _lock(parent/'state.lock',exclusive=True,wait=True):
+        proof=setup_again_evidence(root,database=database)
+        if not proof['allowed'] or proof['token']!=token:
+            raise RootOperationError('Neue Einrichtung ist nicht sicher freigegeben: '+proof.get('reason','Zustand wurde verändert. Bitte erneut prüfen.'))
+        old=_state(parent,root)
+        archive=parent/('setup-history-'+hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()+'.json')
+        if archive.exists():
+            if _read(archive)!=old:raise RootOperationError('Vorhandener Einrichtungsbeleg widerspricht dem Altzustand.')
+        else:_write(archive,old)
+        # Keep the complete old state as immutable history. Advancing generation
+        # invalidates stale request contexts; no old library is rebound.
+        new={'format':1,'workspace':old['workspace'],'generation':old['generation']+1,'libraries':{},'bindings':{str(root):old['workspace']},
+             'setup_reset':{'history':archive.name,'confirmation':'SET UP AGAIN','previous_state_sha256':hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()}}
+        current=setup_again_evidence(root,database=database)
+        if not current['allowed'] or current['token']!=token:raise RootOperationError('Leerheitsnachweis wurde während der Einrichtung verändert.')
+        _check({p:i for p,i in proof['observed'].items() if i is not None})
+        _write(parent/'state.json',new)

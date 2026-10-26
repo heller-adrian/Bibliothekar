@@ -6163,6 +6163,8 @@ BIBLIOTHEKAR_0444_CSS = r"""
   animation:bk-cancel-spin .75s linear infinite;
 }
 #bk-background-cancel-notice .bk-activity-mini {
+  background:var(--bk-surface)!important;
+  background-image:none!important;
   margin-left:auto;
   box-sizing:border-box !important;
   display:flex;
@@ -6392,6 +6394,19 @@ BIBLIOTHEKAR_0444_JS = r"""
       progress.textContent = Math.round(Number(item.progress_percent)) + " %";
       progress.setAttribute("aria-label", "Fortschritt " + progress.textContent);
       row.appendChild(progress);
+    }
+    if (item.kind === "sd_check" && item.active) {
+      const cancel=document.createElement("button");
+      cancel.type="button";cancel.className="bk-activity-retry";cancel.textContent=t("Prüfung abbrechen");
+      cancel.addEventListener("click",async()=>{
+        cancel.disabled=true;
+        try{
+          const response=await fetch("/api/jobs/"+encodeURIComponent(item.id)+"/cancel",{method:"POST"});
+          if(!response.ok){const data=await response.json();throw new Error(data.detail);}
+          await refresh();
+        }catch(error){detail.textContent=String(error.message||error);cancel.disabled=false;}
+      });
+      row.appendChild(cancel);
     }
     if (item.kind === "cancel" && item.can_retry) {
       const retry = document.createElement("button");

@@ -84,6 +84,9 @@ def test_0274_removable_drive_root_and_subfolder_use_same_safe_import_endpoint(
         "storage": {"safety_reserve_gib": 0, "processing_buffer_percent": 10}
     })
 
+    from app import sd_recheck
+    # Synthetic mount model; writable-device refusal has separate counterprobes.
+    monkeypatch.setattr(sd_recheck, "read_only", lambda path: True)
     listing = app_main.api_source_folders("removable", "DRIVE-1")
     assert listing["relative_path"] == "DRIVE-1"
     assert any(item["relative_path"] == "DRIVE-1/Auswahl" for item in listing["directories"])
@@ -98,6 +101,10 @@ def test_0274_removable_drive_root_and_subfolder_use_same_safe_import_endpoint(
     assert whole["job"]["source_path"] == str(drive.resolve())
     assert whole["job"]["source_device_id"] == "DRIVE-1"
 
+    # Finish the first technical check through the real cancellation API before
+    # choosing another folder on the same device. Preserve both path contracts.
+    cancelled = app_main.api_cancel_import(whole["job"]["id"])
+    assert cancelled.status_code == 202 and json.loads(cancelled.body)["cancelled"]
     folder_response = app_main.api_run_folder_import({
         "source_root_key": "removable",
         "source_relative_path": "DRIVE-1/Auswahl",

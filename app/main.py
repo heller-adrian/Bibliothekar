@@ -989,7 +989,7 @@ async def library_context_middleware(request: Request, call_next):
         return await call_next(request)
     from app.managed_storage_health import inspect_storage
     storage = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
-    if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck"}:
+    if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize"}:
         return await call_next(request)
     if not storage['ready']:
         if request.method == "GET" and not request.url.path.startswith("/api/"):
@@ -1234,13 +1234,15 @@ def process_claimed_job(
                     processing_buffer_percent=int(storage.get("processing_buffer_percent",10)),
                     safety_reserve_gib=int(storage.get("safety_reserve_gib",20)))
                 sd_recheck.run(database_file, REGISTRY_DATABASE_FILE, job,
-                    source_root=_safe_root("removable"), origins=list_imported_media_origins,
-                    signature=quick_source_signature, stop=WORKER_STOP.is_set)
+                    source_root=_safe_root((job.get("result") or {}).get("source_root_key", "removable")), origins=list_imported_media_origins,
+                    signature=quick_source_signature, stop=lambda: WORKER_STOP.is_set() or _import_cancel_requested(job_id))
             except InterruptedError as error:
                 with database_connection(database_file) as connection:
                     connection.execute("UPDATE jobs SET state='interrupted',stage='interrupted_after_restart',"
                         "error_message=?,progress_message=? WHERE id=? AND operation='sd_recheck' AND state IN ('copying','verifying')",
                         (str(error),str(error),job_id))
+            finally:
+                _clear_import_cancel(job_id)
             return
 
         if operation == "metadata_fixture_analysis":
@@ -1574,7 +1576,11 @@ def process_claimed_job(
                     database_file,
                     exclude_job_id=job_id,
                 )
-                if operation == "folder_import" and job.get("duplicate_of_job_id"):
+                checked_folder=bool((job.get("result") or {}).get("verified_folder_check"))
+                if checked_folder:
+                    from app.sd_recheck import catalog_origins
+                    origin_rows=catalog_origins(database_file,REGISTRY_DATABASE_FILE,exclude_job_id=job_id)
+                if operation == "folder_import" and (job.get("duplicate_of_job_id") or checked_folder):
                     from app.source_reimport import retained_origins
                     origin_rows = retained_origins(REGISTRY_DATABASE_FILE, origin_rows)
                 imported_hashes.update((int(row["size_bytes"]), str(row["sha256"])) for row in origin_rows)
@@ -3025,6 +3031,23 @@ def api_recheck_storage() -> dict[str, Any]:
         return status
 
 
+@app.post("/api/settings/storage-initialize", tags=["Einstellungen"])
+def api_initialize_storage(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("confirmation") != "SET UP AGAIN":
+        raise HTTPException(status_code=422, detail="Neue Einrichtung muss ausdrücklich bestätigt werden.")
+    with _STORAGE_RECHECK_LOCK:
+        from app.root_operations import reset_empty_storage
+        try:
+            if not api_storage_health()['can_initialize']:
+                reset_empty_storage(WORKSPACE_PATH, DATABASE_FILE, payload.get("token"))
+        except (RootOperationError, OSError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        startup_database()
+        if DATABASE_INITIALIZATION_ERROR:
+            raise HTTPException(status_code=409, detail=DATABASE_INITIALIZATION_ERROR)
+        return api_storage_health()
+
+
 @app.get("/api/settings/storage-paths", tags=["Einstellungen"])
 def api_get_storage_paths() -> dict[str, Any]:
     return _storage_settings_state()
@@ -4441,6 +4464,9 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
 
     relative_value = str(payload.get("source_relative_path") or "").strip()
     root_key = str(payload.get("source_root_key") or "saved").strip()
+    source_mode = str(payload.get("source_mode") or "folder").strip()
+    if source_mode not in {"folder", "drive", "sd_card"} or (source_mode == "sd_card" and root_key != "removable"):
+        raise HTTPException(status_code=422, detail="Ungültige Importquellenart.")
     source = resolve_import_source(relative_value, root_key)
     root = _safe_root(root_key)
     source_device_id = source_device_id_for_path(source, root_key, root)
@@ -4457,6 +4483,15 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
                 request_id=payload.get("request_id"))
         except (PipelineError, OSError, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        return _sd_recheck_response(job)
+    if source_mode in {"folder", "drive"}:
+        from app.sd_recheck import enqueue
+        try:
+            job=enqueue(DATABASE_FILE,source=source,source_root=root,device=source_device_id,
+                working=workspace_backup_root(WORKSPACE_PATH),label=str(payload.get("display_name") or source.name),
+                request_id=payload.get("request_id"),source_root_key=root_key,source_mode=source_mode)
+        except (PipelineError,OSError,ValueError) as error:
+            raise HTTPException(status_code=409,detail=str(error)) from error
         return _sd_recheck_response(job)
     try:
         try:
@@ -4752,6 +4787,15 @@ def api_cancel_import(job_id: str, force: bool = False) -> JSONResponse:
     job = get_job(DATABASE_FILE, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Import wurde nicht gefunden.")
+    if job.get("operation")=="sd_recheck":
+        with database_connection(DATABASE_FILE) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            changed=connection.execute("UPDATE jobs SET state='failed',stage='cancelled',error_message=?,progress_message=? WHERE id=? AND operation='sd_recheck' AND state IN ('queued','copying','verifying')",
+                ("Prüfung abgebrochen. Keine Dateien verändert.","Prüfung abgebrochen. Keine Dateien verändert.",job_id)).rowcount
+        if changed:
+            _request_import_cancel(job_id)
+            return JSONResponse(status_code=202,content={"accepted":True,"cancelled":True})
+        raise HTTPException(status_code=409,detail="Prüfung ist bereits beendet. Einen vorgemerkten Import separat prüfen.")
     if (
         str(job.get("kind") or "") != "sd_import"
         or str(job.get("operation") or "") != "folder_import"
@@ -12822,9 +12866,10 @@ def index() -> str:
       noticeElement.textContent = confirmReimport ? bk0511ImportLabel("Sicherungen werden geprüft …", "Checking existing backups …") : "Ordnerimport wird angelegt …";
 
       try {
-        const key = sdRecheckKey(relativePath);
+        const sourceKey = sourceMode === "sd_card" ? relativePath : rootKey + ":" + relativePath;
+        const key = sdRecheckKey(sourceKey);
         let requestId;
-        if (sourceMode === "sd_card" && confirmReimport) {
+        if ((sourceMode === "sd_card" && confirmReimport) || ["folder", "drive"].includes(sourceMode)) {
           const previous = localStorage.getItem(key);
           requestId = previous ? previous.replace("SD_RECHECK_", "") : sdRecheckRequestId();
           localStorage.setItem(key, "SD_RECHECK_" + requestId.replaceAll("-", ""));
@@ -12853,10 +12898,10 @@ def index() -> str:
         if (data.status === "sd_check") {
           localStorage.setItem(key, data.task_id);
           window.dispatchEvent(new Event("bk-activity-refresh"));
-          followSdRecheck(data.task_id, relativePath);
+          followSdRecheck(data.task_id, sourceKey);
           return;
         }
-        if (sourceMode === "sd_card" && confirmReimport && data.status === "import_running") localStorage.removeItem(key);
+        if (data.status === "import_running") localStorage.removeItem(key);
         if (!data.accepted && data.status === "already_backed_up") {
           noticeElement.textContent = bk0511ImportLabel(
             "Alle Aufnahmen sind bereits gesichert. Kein neuer Importauftrag erforderlich.",
