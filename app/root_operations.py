@@ -967,15 +967,16 @@ def reset_empty_storage(workspace, database, token):
         proof=setup_again_evidence(root,database=database)
         if not proof['allowed'] or proof['token']!=token:
             raise RootOperationError('Neue Einrichtung ist nicht sicher freigegeben: '+proof.get('reason','Zustand wurde verändert. Bitte erneut prüfen.'))
-        old=_state(parent,root)
+        old=_read(parent/'state.json',{})
+        if old:_state(parent,root)
         archive=parent/('setup-history-'+hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()+'.json')
         if archive.exists():
             if _read(archive)!=old:raise RootOperationError('Vorhandener Einrichtungsbeleg widerspricht dem Altzustand.')
         else:_write(archive,old)
         # Keep the complete old state as immutable history. Advancing generation
         # invalidates stale request contexts; no old library is rebound.
-        new={'format':1,'workspace':old['workspace'],'generation':old['generation']+1,'libraries':{},'bindings':{str(root):old['workspace']},
-             'setup_reset':{'history':archive.name,'confirmation':'SET UP AGAIN','qualification':proof.get('basis','initialization_intent'),'database':str(Path(database).absolute()),'previous_state_sha256':hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()}}
+        new={'format':1,'workspace':proof['observed'][str(root)],'generation':old.get('generation',0)+1,'libraries':{},'bindings':{str(root):proof['observed'][str(root)]},
+             'setup_reset':{'history':archive.name,'confirmation':'SET UP AGAIN','bootstrap_registry':proof.get('bootstrap_registry',[]),'qualification':proof.get('basis','initialization_intent'),'database':str(Path(database).absolute()),'previous_state_sha256':hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()}}
         current=setup_again_evidence(root,database=database)
         if not current['allowed'] or current['token']!=token:raise RootOperationError('Leerheitsnachweis wurde während der Einrichtung verändert.')
         _check({p:i for p,i in proof['observed'].items() if i is not None})

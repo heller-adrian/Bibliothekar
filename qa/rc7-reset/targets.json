@@ -1,0 +1,13 @@
+[
+  "tests/backend/test_rc7_reset_states.py",
+  "tests/backend/test_rc6_legacy_setup.py",
+  "tests/backend/test_f14_fixed_storage.py",
+  "tests/backend/test_f14_root_operations.py",
+  "tests/backend/test_f24_fd_paths.py",
+  "tests/backend/test_f11_trash_reservation.py::test_f11_reservation_wins",
+  "tests/backend/test_rc4_private_retention.py::test_reported_status_only_is_finalized_into_private_bytes",
+  "tests/backend/test_rc4_private_retention.py::test_inconsistent_or_attacked_states_do_not_release",
+  "tests/backend/test_rc5_practice_followup.py::test_fresh_real_startup_and_actual_onboarding",
+  "tests/backend/test_rc5_practice_followup.py::test_reset_real_sigkill_and_three_restarts",
+  "tests/backend/test_rc5_practice_followup.py::test_reset_http_requires_auth_confirmation_and_fresh_state"
+]

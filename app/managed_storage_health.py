@@ -39,6 +39,36 @@ def catalog_has_history(database):
     return False
 
 
+def empty_bootstrap_registry(registry, root, database):
+    """Snapshot a strictly unused placeholder; never discard retired libraries.
+
+    Its flags alone prove nothing: all other registry tables must be empty,
+    paths and bootstrap markers must match, and no retirement evidence may exist.
+    The caller also checks catalogue, workspace, archive and private retention.
+    """
+    import json
+    registry=Path(registry)
+    if not registry.exists() or registry.stat().st_size==0:return []
+    if registry.is_symlink() or not registry.is_file():raise ValueError('registry_invalid')
+    with closing(sqlite3.connect(registry.absolute().as_uri()+'?mode=ro',uri=True)) as c:
+        c.row_factory=sqlite3.Row
+        tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {'libraries','registry_schema_versions'}<=tables:raise ValueError('unknown_registry_schema')
+        for table in tables-{'registry_schema_versions','libraries'}:
+            quoted='"'+table.replace('"','""')+'"'
+            if c.execute('SELECT 1 FROM '+quoted+' LIMIT 1').fetchone():raise ValueError('library_or_stock_registry_history')
+        rows=[dict(r) for r in c.execute('SELECT * FROM libraries')]
+    if not rows:return []
+    row=rows[0];archive=os.environ.get('KAMERA_ARCHIVE_ROOT')
+    if (len(rows)!=1 or row['library_id']!='main' or row['is_main']!=1 or row['is_registered']!=0
+            or row.get('deactivated_at') or row.get('unregistered_at')
+            or row['database_path']!=str(Path(database).absolute()) or row['workspace_root']!=str(root)
+            or row['work_root']!=str(root/'.bibliothekar-ohne-bibliothek') or not archive or row['archive_root']!=archive
+            or json.loads(row['settings_json'])!={'bootstrap':True,'onboarding_required':True}):
+        raise ValueError('library_or_stock_registry_history')
+    return rows
+
+
 def _empty_initial_tree(root,names):
     allowed={name for name in names.values()}
     allowed.update(names['metadata_directory_name']+'/'+child for child in ['General','Batch Correction','.trash-deletions','.trash-restores'])
@@ -124,12 +154,14 @@ def inspect_storage(workspace, *, database=None):
             with closing(sqlite3.connect(Path(registry).absolute().as_uri()+'?mode=ro',uri=True)) as c:
                 tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 if 'libraries' in tables:
-                    registered_paths=[r[0] for r in c.execute('SELECT database_path FROM libraries WHERE workspace_root=?',(str(root),))]
+                    registered_paths=[r[0] for r in c.execute('SELECT database_path FROM libraries WHERE workspace_root=? AND COALESCE(is_registered,1)=1',(str(root),))]
                     registered=bool(registered_paths)
                     all_rows=c.execute('SELECT library_id,database_path,workspace_root,is_registered FROM libraries').fetchall()
                     registry_history=bool(all_rows)
                     init_database=(state.get('storage_initialization') or {}).get('database')
-                    registry_technical=bool(all_rows) and all(lid=='main' and not active and ws==str(root) and db==init_database for lid,db,ws,active in all_rows)
+                    bootstrap_database=database or init_database or (state.get('setup_reset') or {}).get('database')
+                    try:registry_technical=bool(empty_bootstrap_registry(registry,root,bootstrap_database)) if bootstrap_database is not None else False
+                    except ValueError:registry_technical=False
                     if database is not None and str(Path(database).absolute()) in registered_paths and not Path(database).is_file():
                         issues.append({'code':'catalog_unavailable','path':str(database)})
         configured=False
@@ -151,7 +183,7 @@ def inspect_storage(workspace, *, database=None):
         structural_empty=occupied and all(f['status']=='available' for f in folders) and _empty_initial_tree(root,names)
         reset=state.get('setup_reset') or {}
         approved_reset=False
-        if reset and not known and not registry_history and not old_database and not custom_configuration:
+        if reset and not known and (not registry_history or registry_technical) and not old_database and not custom_configuration:
             import hashlib,json
             history=reset.get('history','')
             if history.startswith('setup-history-') and Path(history).name==history:
@@ -176,7 +208,12 @@ def inspect_storage(workspace, *, database=None):
         can_initialize=(empty_new or safe_resume) and all(i['code'] in {'missing','initialization_pending'} for i in issues)
         # Several independent missing-catalog checks may report the same path.
         issues=list({(i['code'],i['path']):i for i in issues}.values())
-        reset=setup_again_evidence(root,database=database) if issues and database is not None else {'allowed':False}
+        reset=setup_again_evidence(root,database=database) if database is not None and (issues or empty_new) else {'allowed':False}
+        # No control file is not proof that private data vanished. Apply the
+        # same complete emptiness audit before automatic first initialization.
+        if empty_new and database is not None and not reset['allowed']:
+            can_initialize=False
+            issues.append({'code':'initialization_blocked','path':str(root),'detail':reset.get('reason')})
         return {'can_setup_again':reset['allowed'],'setup_token':reset.get('token'),'setup_blocker':reset.get('reason'),'setup_evidence':reset.get('basis'),'ready':not issues,'can_initialize':can_initialize,'existing_installation':existing and not safe_resume,'workspace':str(root),'folders':folders,'issues':issues,'mount_evidence':'administrator_responsibility','initialization_evidence':'resumable_empty_structure' if safe_resume else 'new_empty_installation' if empty_new else 'existing_or_unclear'}
 
     except Exception as error:
@@ -216,8 +253,10 @@ def setup_again_evidence(workspace, *, database):
         names=load_storage_settings(workspace_root=root)
         from app import trash_retention
         _,users=trash_retention.authority(database,root)
-        with trash_retention.qualified(parent,users,directory=True) as (_,check):check()
-        if not state or state.get('format')!=1 or state.get('workspace')!=_identity(root) or names!=ENGLISH_STORAGE_DEFAULTS:
+        if Path(database).absolute().parent!=parent.parent.parent:raise ValueError('database_binding_changed')
+        boundary=parent if parent.exists() else parent.parent if parent.parent.exists() else Path(database).absolute().parent
+        with trash_retention.qualified(boundary,users,directory=True) as (_,check):check()
+        if (state and (state.get('format')!=1 or state.get('workspace')!=_identity(root))) or names!=ENGLISH_STORAGE_DEFAULTS:
             raise ValueError('workspace_or_legacy_binding')
         if state.get('libraries'):
             raise ValueError('library_or_stock_registry_history')
@@ -232,7 +271,19 @@ def setup_again_evidence(workspace, *, database):
         if init.get('names') not in (None,names) or init.get('phase') not in (None,'initializing','completed'):
             raise ValueError('unknown_initialization')
         basis='initialization_intent'
-        if not init.get('database') or init.get('names')!=names or init.get('phase') not in ('initializing','completed') or state.get('storage_names') is None:
+        receipt=state.get('setup_reset') or {}
+        confirmed=False
+        history=receipt.get('history','')
+        if history and Path(history).name==history and history.startswith('setup-history-'):
+            previous=_read(parent/history,None)
+            confirmed=(previous is not None and receipt.get('confirmation')=='SET UP AGAIN' and hashlib.sha256(json.dumps(previous,sort_keys=True).encode()).hexdigest()==receipt.get('previous_state_sha256'))
+        # A generation-zero workspace-only record may be created before any
+        # roots exist. Partial positive root bindings remain ambiguous/rejected.
+        technical=(set(state)<={'format','workspace','generation','libraries','bindings','storage_names'} and state.get('generation')==0 and not state.get('libraries') and state.get('bindings')=={str(root):_identity(root)} and not receipt and not init)
+        if not state:basis='empty_without_control_evidence'
+        elif confirmed:basis='confirmed_empty_reset'
+        elif technical:basis='technical_control_only'
+        elif not init.get('database') or init.get('names')!=names or init.get('phase') not in ('initializing','completed') or state.get('storage_names') is None:
             def recorded(value):
                 return isinstance(value,list) and len(value)==2 and all(type(v) is int and v>=0 for v in value) and value[1]>0
             if not all(recorded(state.get('bindings',{}).get(str(root/n))) for n in names.values()):
@@ -245,7 +296,7 @@ def setup_again_evidence(workspace, *, database):
         if not _empty_initial_tree(root,names):raise ValueError('workspace_not_empty')
         for pattern in ['operation-*.json','mutation.json','finished-*.json']:
             if list(parent.glob(pattern)):raise ValueError('unresolved_reservation')
-        if any(p.is_symlink() or (p.suffix=='.json' and p.name!='state.json' and not p.name.startswith('setup-history-')) for p in parent.iterdir()):
+        if any(p.is_symlink() or (p.suffix=='.json' and p.name!='state.json' and not p.name.startswith('setup-history-')) for p in (parent.iterdir() if parent.exists() else [])):
             raise ValueError('unknown_control_evidence')
         # Every private media retention and every surviving catalogue is evidence
         # of a used installation, regardless of its current registration flag.
@@ -272,15 +323,8 @@ def setup_again_evidence(workspace, *, database):
             if candidate.absolute()==configured_registry:continue
             if catalog_has_history(candidate):raise ValueError('catalogue_history')
         registry=Path(os.environ.get('KAMERA_REGISTRY_DATABASE',str(database.parent/'bibliothekar-global.sqlite3')))
-        if registry.exists():
-            if registry.is_symlink() or not registry.is_file():raise ValueError('registry_invalid')
-            if registry.stat().st_size:
-                with closing(sqlite3.connect(registry.as_uri()+'?mode=ro',uri=True)) as c:
-                    tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                    if not {'libraries','registry_schema_versions'}<=tables:raise ValueError('unknown_registry_schema')
-                    for table in tables-{'registry_schema_versions'}:
-                        quoted='"'+table.replace('"','""')+'"'
-                        if c.execute('SELECT 1 FROM '+quoted+' LIMIT 1').fetchone():raise ValueError('library_or_stock_registry_history')
+        bootstrap=empty_bootstrap_registry(registry,root,database)
+        if confirmed and receipt.get('bootstrap_registry',[])!=bootstrap:raise ValueError('library_or_stock_registry_history')
         retention=database.parent/'.bibliothekar-restore-retention'
         if retention.is_symlink() or (retention.exists() and any(retention.iterdir())):raise ValueError('retention_survives')
         config={}
@@ -324,8 +368,8 @@ def setup_again_evidence(workspace, *, database):
             except FileNotFoundError:
                 if path==root:raise
                 observed[str(path)]=None
-        if observed[str(root)]!=state['workspace']:raise ValueError('workspace_changed_during_check')
-        material={'state':state,'observed':observed,'database':str(database),'registry':str(registry),'config':config}
-        return {'allowed':True,'basis':basis,'token':hashlib.sha256(json.dumps(material,sort_keys=True).encode()).hexdigest(),'observed':observed}
+        if state and observed[str(root)]!=state['workspace']:raise ValueError('workspace_changed_during_check')
+        material={'state':state,'observed':observed,'database':str(database),'registry':str(registry),'config':config,'bootstrap_registry':bootstrap}
+        return {'allowed':True,'basis':basis,'bootstrap_registry':bootstrap,'token':hashlib.sha256(json.dumps(material,sort_keys=True).encode()).hexdigest(),'observed':observed}
     except Exception as error:
         return {'allowed':False,'reason':str(error)}

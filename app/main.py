@@ -2337,6 +2337,12 @@ def startup_database() -> None:
             active_only=False,
             registered_only=True,
         )
+        if existing_main is not None and not registered_libraries:
+            from app.managed_storage_health import empty_bootstrap_registry
+            try: unused_bootstrap = bool(empty_bootstrap_registry(REGISTRY_DATABASE_FILE, WORKSPACE_PATH, DATABASE_FILE))
+            except ValueError: unused_bootstrap = False
+            if unused_bootstrap:
+                existing_main = None  # A technical placeholder is no configured library.
         workspace_layout = ensure_workspace_layout(
             WORKSPACE_PATH,
             configured_main_work_root=(
