@@ -97,7 +97,8 @@ def _empty_initial_tree(root,names):
                     if (info.st_dev,info.st_ino)!=(os.fstat(child).st_dev,os.fstat(child).st_ino) or not walk(child,rel+'/'):return False
                     if os.stat(name,dir_fd=fd,follow_symlinks=False).st_ino!=info.st_ino:return False
                 finally:os.close(child)
-            elif not (rel==lock and stat.S_ISREG(info.st_mode) and info.st_size==0 and info.st_nlink==1 and info.st_uid==os.geteuid() and not info.st_mode&0o022):return False
+            elif not ((name=='.DS_Store' and stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=1024*1024)
+                      or (rel==lock and stat.S_ISREG(info.st_mode) and info.st_size==0 and info.st_nlink==1 and info.st_uid==os.geteuid() and not info.st_mode&0o022)):return False
         after=os.fstat(fd)
         return (before.st_dev,before.st_ino,before.st_mtime_ns,before.st_ctime_ns)==(after.st_dev,after.st_ino,after.st_mtime_ns,after.st_ctime_ns)
     try:
@@ -190,9 +191,11 @@ def inspect_storage(workspace, *, database=None):
         resuming=(init.get('phase')=='initializing' and init.get('names')==names
                   and (database is None or init.get('database')==str(Path(database).absolute())))
         evidence=bool(state) or any(_control_location(root).glob('*.json'))
-        existing=bool(known or registry_history or old_database or occupied or evidence)
+        existing=bool(known or registry_history or old_database or evidence or (occupied and not _empty_initial_tree(root,names)))
         custom_configuration=configured and names!=ENGLISH_STORAGE_DEFAULTS
-        structural_empty=occupied and all(f['status']=='available' for f in folders) and _empty_initial_tree(root,names)
+        # Finder metadata is not evidence that a library has been used. An
+        # otherwise empty tree remains fresh even when managed roots are absent.
+        structural_empty=_empty_initial_tree(root,names)
         reset=state.get('setup_reset') or {}
         approved_reset=False
         if reset and not known and (not registry_history or registry_technical) and not old_database and not custom_configuration:
@@ -202,7 +205,7 @@ def inspect_storage(workspace, *, database=None):
                 previous=_read(_control_location(root)/history,{})
                 approved_reset=(hashlib.sha256(json.dumps(previous,sort_keys=True).encode()).hexdigest()==reset.get('previous_state_sha256')
                                 and state.get('workspace')==root_id and _empty_initial_tree(root,names))
-        empty_new=(not (known or registry_history or old_database or evidence or custom_configuration) or approved_reset) and (not occupied or structural_empty)
+        empty_new=(not (known or registry_history or old_database or evidence or custom_configuration) or approved_reset) and structural_empty
         # Resuming a bootstrap must never silently rebind a previously pinned F14 inode.
         # A changed root needs the explicit, audited setup-reset transition.
         changed_roots=any(f['expected_identity'] is not None and f['status']!='available' for f in folders)
