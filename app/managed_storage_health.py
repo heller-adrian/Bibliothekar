@@ -171,6 +171,32 @@ def inspect_storage(workspace, *, database=None):
                     registered=bool(registered_paths)
                     all_rows=c.execute('SELECT library_id,database_path,workspace_root,is_registered FROM libraries').fetchall()
                     registry_history=bool(all_rows)
+                    # Registered work roots are protected identities too. A
+                    # missing child with an available Library Workspaces parent
+                    # must reach recovery rather than cause an opaque 500.
+                    workspaces=root/expected['workspaces_directory_name']
+                    workspaces_row=next((f for f in folders if f['key']=='workspaces_directory_name'),None)
+                    if workspaces_row and workspaces_row['status']=='available':
+                        registered_works=c.execute(
+                            'SELECT library_id,work_root FROM libraries WHERE workspace_root=? AND COALESCE(is_registered,1)=1',
+                            (str(root),)).fetchall()
+                        for library_id,work_root in registered_works:
+                            path=Path(work_root)
+                            if path==workspaces or not path.is_relative_to(workspaces):
+                                continue
+                            key='library_work_root:'+str(library_id)
+                            prior=bindings.get(str(path))
+                            try:
+                                actual=identity(path)
+                                code='identity_changed' if prior is not None and actual!=prior else 'available'
+                                if not os.access(path,os.R_OK|os.W_OK|os.X_OK):code='inaccessible'
+                            except FileNotFoundError:actual=None;code='missing'
+                            except PermissionError:actual=None;code='inaccessible'
+                            except (OSError,ValueError):actual=None;code='invalid_directory'
+                            folders.append({'key':key,'name':path.name,'path':str(path),
+                                            'status':code,'identity':actual,'expected_identity':prior,
+                                            'identity_evidence':'previously_observed' if prior else 'no_previous_identity'})
+                            if code!='available':issues.append({'code':code,'path':str(path),'key':key})
                     init_database=(state.get('storage_initialization') or {}).get('database')
                     bootstrap_database=database or init_database or (state.get('setup_reset') or {}).get('database')
                     try:registry_technical=bool(empty_bootstrap_registry(registry,root,bootstrap_database)) if bootstrap_database is not None else False
