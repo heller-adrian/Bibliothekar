@@ -18,18 +18,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install exact application dependencies and pytest
-        run: pip install -r requirements.txt pytest httpx
+      - name: Install pinned RC and QA dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
       - name: Compile and test recovery, bootstrap, F14 and reimport
         run: |
           python -m compileall -q app qa
-          pytest -q -o addopts='' \
-            tests/backend/test_rc10_storage_recovery.py \
-            tests/backend/test_rc9_setup_separation.py \
-            tests/backend/test_rc7_reset_states.py \
-            tests/backend/test_rc6_legacy_setup.py \
-            tests/backend/test_rc1_sd_reimport.py \
-            tests/backend/test_f14_fixed_storage.py
+          python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets qa/rc10/targets.json
       - name: Build isolated RC10 container
         run: docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
       - name: Check container version
