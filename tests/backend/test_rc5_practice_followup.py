@@ -7,7 +7,7 @@ from app.managed_storage_health import inspect_storage
 from app.storage_config import ENGLISH_STORAGE_DEFAULTS
 from app.database import database_connection,claim_next_job,get_job
 from tests.backend.test_f14_root_operations import fixture
-from tests.backend.test_rc1_sd_reimport import setup_live_import,queue_and_run
+from tests.backend.test_rc1_sd_reimport import setup_live_import,queue_and_run,direct_import_lifecycle
 
 @pytest.fixture
 def empty_reset(tmp_path,monkeypatch):
