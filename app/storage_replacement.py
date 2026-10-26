@@ -72,7 +72,10 @@ def replacement_candidates(status):
         row for row in status.get('folders', ())
         if row.get('status') in {'missing','identity_changed'}
         and row.get('expected_identity') is not None
-        and row.get('key') in load_storage_settings(workspace_root=Path(status['workspace']))
+        and (row.get('key') in load_storage_settings(workspace_root=Path(status['workspace']))
+             or (str(row.get('key')).startswith('library_work_root:')
+                 and Path(row['path']).is_relative_to(
+                     Path(status['workspace'])/load_storage_settings(workspace_root=Path(status['workspace']))['workspaces_directory_name'])))
     ]
 
 
@@ -81,9 +84,11 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
         raise RootOperationError('replacement_confirmation_required')
     root, parent=_control(workspace)
     names=load_storage_settings(workspace_root=root)
-    if key not in names:
+    if key not in names and not key.startswith('library_work_root:'):
         raise RootOperationError('replacement_role_unknown')
-    target=root/names[key]
+    # The exact target of a library child root must come from a registered,
+    # previously pinned row; the caller cannot supply an arbitrary path.
+    target=root/names[key] if key in names else None
     with _lock(parent/'workspace.lock',exclusive=True), _lock(parent/'shared.lock',exclusive=True), _lock(parent/'state.lock',exclusive=True,wait=True):
         state=_state(parent,root)
         _assert_startable(parent)
@@ -93,6 +98,8 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
         matching=[r for r in replacement_candidates(status) if r.get('key')==key]
         if len(matching)!=1:
             raise RootOperationError('replacement_not_qualified')
+        if target is None:
+            target=Path(matching[0]['path'])
         if any(row['status']!='available' and row['key']!=key for row in status['folders']):
             raise RootOperationError('replacement_other_roots_unavailable')
         if any(issue['code'] not in {'missing','identity_changed'} or issue['path']!=str(target)
