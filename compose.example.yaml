@@ -1,6 +1,6 @@
 services:
   bibliothekar:
-    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.7}
+    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.8}
     restart: unless-stopped
     user: "0:0"
     privileged: true

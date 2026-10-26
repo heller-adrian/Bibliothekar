@@ -299,8 +299,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "1.0.0-rc.7"
-DEPLOYMENT_VERSION = "1.0.0-rc.7"
+RELEASE_VERSION = "1.0.0-rc.8"
+DEPLOYMENT_VERSION = "1.0.0-rc.8"
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -10503,13 +10503,13 @@ def web_app_manifest(request: Request) -> JSONResponse:
             "background_color": "#15222c",
             "icons": [
                 {
-                    "src": "/assets/bibliothekar-icon-192.png?v=1.0.0-rc.7",
+                    "src": "/assets/bibliothekar-icon-192.png?v=1.0.0-rc.8",
                     "sizes": "192x192",
                     "type": "image/png",
                     "purpose": "any",
                 },
                 {
-                    "src": "/assets/bibliothekar-logo-symbol-background.svg?v=1.0.0-rc.7",
+                    "src": "/assets/bibliothekar-logo-symbol-background.svg?v=1.0.0-rc.8",
                     "sizes": "any",
                     "type": "image/svg+xml",
                     "purpose": "any",
