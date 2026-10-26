@@ -1,0 +1,45 @@
+name: RC5 read-only ACL diagnosis
+on:
+  push:
+    branches: [qa/rc5-acl-diagnosis]
+permissions:
+  contents: read
+jobs:
+  acl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2ade2f018d39f9898812dfb9111592f73d646453
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read actual ACL attributes on runner and synthetic private ancestors
+        run: |
+          python - <<'PY'
+          import os,json,stat
+          from pathlib import Path
+          probe=Path(os.environ['RUNNER_TEMP'])/'rc5-acl-diagnosis'/'private'
+          probe.mkdir(parents=True,mode=0o700)
+          (probe/'synthetic.sqlite3').write_bytes(b'synthetic ACL probe, not a database')
+          paths=set([probe,probe/'synthetic.sqlite3',Path(os.environ['GITHUB_WORKSPACE'])])
+          for path in list(paths):paths.update(path.parents)
+          result=[]
+          for path in sorted(paths):
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  info=os.fstat(fd);attrs={}
+                  for name in sorted(set(os.listxattr(fd))|{'system.nfs4_acl_xdr','security.nfs4acl_xdr','system.posix_acl_access','system.posix_acl_default'}):
+                      try:attrs[name]={'hex':os.getxattr(fd,name).hex()}
+                      except OSError as e:attrs[name]={'errno':e.errno}
+                  result.append({'path':str(path),'uid':info.st_uid,'gid':info.st_gid,'mode':oct(stat.S_IMODE(info.st_mode)),'attributes':attrs})
+              finally:os.close(fd)
+          output={'uid':os.geteuid(),'gid':os.getegid(),'groups':os.getgroups(),'paths':result}
+          Path(os.environ['RUNNER_TEMP']+'/rc5-acl-diagnosis.json').write_text(json.dumps(output,indent=2))
+          print(json.dumps(output,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc5-acl-diagnosis
+          path: ${{ runner.temp }}/rc5-acl-diagnosis.json
