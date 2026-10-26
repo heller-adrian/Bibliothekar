@@ -1,0 +1,50 @@
+name: RC10 isolated safety acceptance
+on:
+  push:
+    branches: [release/v1.0.0-rc.10]
+    paths-ignore: ['.github/workflows/publish-rc10.yml']
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      IMAGE: bibliothekar:rc10-acceptance
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install exact application dependencies and pytest
+        run: pip install -r requirements.txt pytest httpx
+      - name: Compile and test recovery, bootstrap, F14 and reimport
+        run: |
+          python -m compileall -q app qa
+          pytest -q -o addopts='' \
+            tests/backend/test_rc10_storage_recovery.py \
+            tests/backend/test_rc9_setup_separation.py \
+            tests/backend/test_rc7_reset_states.py \
+            tests/backend/test_rc6_legacy_setup.py \
+            tests/backend/test_rc1_sd_reimport.py \
+            tests/backend/test_f14_fixed_storage.py
+      - name: Build isolated RC10 container
+        run: docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+      - name: Check container version
+        run: docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__;assert __version__=="1.0.0-rc.10"'
+      - name: Real container first-use and replacement acceptance
+        run: python qa/rc10/container.py
+      - name: Record acceptance identity
+        if: success()
+        run: |
+          printf 'RC10 QA commit: %s\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain synthetic evidence on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc10-isolated-acceptance
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/bibliothekar-rc10-acceptance/rc10-evidence.json
