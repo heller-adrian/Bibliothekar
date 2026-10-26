@@ -100,10 +100,15 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
             raise RootOperationError('replacement_not_qualified')
         if target is None:
             target=Path(matching[0]['path'])
-        if any(row['status']!='available' and row['key']!=key for row in status['folders']):
-            raise RootOperationError('replacement_other_roots_unavailable')
-        if any(issue['code'] not in {'missing','identity_changed'} or issue['path']!=str(target)
-               for issue in status['issues']):
+        # Multiple lost roots are repaired one by one. Other previously pinned,
+        # missing roots remain blocked until separately restored or confirmed.
+        missing_rows=[row for row in status['folders'] if row['status']!='available']
+        if any(row['status'] not in {'missing','identity_changed'}
+               or row.get('expected_identity') is None for row in missing_rows):
+            raise RootOperationError('replacement_other_evidence_unavailable')
+        allowed_paths={row['path'] for row in missing_rows}
+        if any(issue['code'] not in {'missing','identity_changed'}
+               or issue['path'] not in allowed_paths for issue in status['issues']):
             raise RootOperationError('replacement_other_evidence_unavailable')
         previous=matching[0]['expected_identity']
         if previous != state.get('bindings',{}).get(str(target)):
@@ -122,7 +127,7 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
                 if c.execute('PRAGMA quick_check').fetchone()[0]!='ok':
                     raise RootOperationError('replacement_catalogue_unavailable')
         assert_no_pending(root,[Path(db) for db in databases],
-                          allowed_missing_roots=(str(target),))
+                          allowed_missing_roots=tuple(allowed_paths))
         # No implicit recovery of arbitrary historical child roots.
         children=[]
         if key=='workspaces_directory_name':
