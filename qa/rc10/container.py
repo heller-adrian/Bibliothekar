@@ -137,7 +137,7 @@ try:
         report['registered_library_work_root_replacement']='PASS'
     else:
         raise AssertionError('First library work area escaped the managed workspace')
-    (root/'rc10-evidence.json').write_text(json.dumps(report,indent=2,sort_keys=True))
+    (Path(os.environ['RUNNER_TEMP'])/'rc10-evidence.json').write_text(json.dumps(report,indent=2,sort_keys=True))
     print(json.dumps(report,indent=2,sort_keys=True))
 finally:
     print(docker('logs',container)[-12000:])

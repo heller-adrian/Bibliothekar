@@ -44,4 +44,4 @@ jobs:
           name: rc10-isolated-acceptance
           retention-days: 14
           path: |
-            ${{ runner.temp }}/bibliothekar-rc10-acceptance/rc10-evidence.json
+            ${{ runner.temp }}/rc10-evidence.json
