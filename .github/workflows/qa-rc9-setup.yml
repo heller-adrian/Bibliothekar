@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 65
     env:
       PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: ${{ github.workspace }}
       IMAGE: bibliothekar-rc9-qa:${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
