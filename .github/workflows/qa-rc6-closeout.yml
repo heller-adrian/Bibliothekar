@@ -1,7 +1,7 @@
 name: RC6 targeted fixture closure and container
 on:
   push:
-    branches: [qa/rc6-closeout]
+    branches: [qa/rc6-closeout, qa/rc6-smoke-closeout]
 permissions:
   contents: read
 concurrency:
@@ -44,7 +44,12 @@ jobs:
           test -d /dev/shm
           docker compose -f docs/rc6/compose.truenas.yaml config -q
       - name: Only fixture-affected Linux regressions (no full suite)
+        if: github.ref != 'refs/heads/qa/rc6-smoke-closeout'
         run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets qa/release/rc6-closeout-targets.json
+      - name: Smoke-only retry keeps all tested application and packaging bytes
+        if: github.ref == 'refs/heads/qa/rc6-smoke-closeout'
+        run: |
+          test -z "$(git diff 04ef307bdca0949b1c08a5130fe3e160a003d209 -- app Dockerfile requirements.txt requirements-rc.constraints.txt compose.example.yaml)"
       - name: Build the tested tree without pushing an image
         run: |
           TREE="$(git rev-parse HEAD^{tree})"

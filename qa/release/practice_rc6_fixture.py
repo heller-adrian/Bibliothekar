@@ -19,8 +19,18 @@ if mode=='seed-reset':
     with ro._lock(parent/'state.lock',exclusive=True):
         state=ro._read(parent/'state.json');state['storage_initialization']['phase']='completed';ro._write(parent/'state.json',state)
     record.write_text(json.dumps(state))
-    for name in ENGLISH_STORAGE_DEFAULTS.values():
-        (ws/name).rename(Path('/logs')/('old-empty-'+name));(ws/name).mkdir()
+    # /logs and /workspace are distinct bind mounts. Only these newly created,
+    # verified-empty QA directories are replaced to model historical identities.
+    # Hold their FDs so Linux cannot recycle their inodes for the new roots.
+    held=[]
+    try:
+        for name in ENGLISH_STORAGE_DEFAULTS.values():
+            path=ws/name;fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);held.append(fd)
+            assert not os.listdir(fd)
+            old=os.fstat(fd);path.rmdir();path.mkdir()
+            assert (path.stat().st_dev,path.stat().st_ino)!=(old.st_dev,old.st_ino)
+    finally:
+        for fd in held:os.close(fd)
     result={'seed':'empty synthetic old identity state','old_state_sha256':hashlib.sha256(record.read_bytes()).hexdigest()}
 elif mode=='check-reset':
     parent=ro._control_location(ws);state=ro._read(parent/'state.json')
@@ -30,12 +40,12 @@ elif mode=='check-reset':
 elif mode=='seed-damage':
     rows=list_libraries(reg,active_only=False,registered_only=True);assert len(rows)==1
     original=Path(rows[0]['work_root'])/'preserved.JPG';original.write_bytes(b'RC6 damaged-installation sentinel')
-    (ws/'Trash').rename(Path('/logs/held-Trash'))
+    (ws/'Trash').rename(ws/'qa-held-Trash')
     result={'damage':'synthetic removed root with registered library and original retained'}
 elif mode=='check-damage':
     health=inspect_storage(ws,database=db)
     assert not health['ready'] and not health['can_initialize'] and not health.get('can_setup_again'),health
-    assert not (ws/'Trash').exists() and Path('/logs/held-Trash').is_dir()
+    assert not (ws/'Trash').exists() and (ws/'qa-held-Trash').is_dir()
     rows=list_libraries(reg,active_only=False,registered_only=True)
     assert (Path(rows[0]['work_root'])/'preserved.JPG').read_bytes()==b'RC6 damaged-installation sentinel'
     result={'damaged_used_installation_blocked':'PASS','original_retained':'PASS','storage':health}
