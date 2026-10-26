@@ -114,11 +114,7 @@ try:
     assert len(api('/api/libraries')['libraries'])==1
     assert (root/'archive'/'original.JPG').read_bytes()==original
     report['confirmed_trash_replacement_restart']='PASS'
-    import sqlite3
-    from pathlib import Path
-    registry=root/'database'/'global.sqlite3'
-    with sqlite3.connect(registry) as db:
-        work=Path(db.execute('SELECT work_root FROM libraries WHERE is_registered=1 LIMIT 1').fetchone()[0])
+    work=Path(api('/api/libraries')['libraries'][0]['work_root'])
     # Map container /workspace back into our isolated host scratch directory.
     if work.is_relative_to(Path('/workspace')):
         host_work=root/'workspace'/work.relative_to('/workspace')
