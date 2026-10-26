@@ -106,6 +106,14 @@ def resume(database):
             "WHERE operation='sd_recheck' AND state='interrupted'",(utc_now_iso(),)).rowcount
 
 
+def _import_epoch(connection):
+    # Global folder imports publish catalogue rows before their final state.
+    # Take this fence before verifying copies and compare under handoff's write
+    # transaction; a completed/failed publication invalidates that snapshot.
+    return [tuple(row) for row in connection.execute(
+        "SELECT id,state,updated_at FROM jobs WHERE operation='folder_import' ORDER BY id")]
+
+
 def run(database, registry, job, *, source_root, origins, signature, stop=lambda:False):
     jid=job['id'];source=Path(job['source_path']);bound=job['result'];folder=bool(bound.get('source_root_key'))
     def check():
@@ -134,6 +142,8 @@ def run(database, registry, job, *, source_root, origins, signature, stop=lambda
     entries=[item for item in entries if item['media_type'] in MEDIA_TYPES]
     if not entries: raise PipelineError('SD-Quelle enthält keine unterstützten Mediendateien.')
     wanted={item['sha256'] for item in entries}
+    with database_connection(database) as connection:
+        import_epoch=_import_epoch(connection)
     origin_rows=catalog_origins(database,registry) if folder else origins(database)
     relevant=[row for row in origin_rows if row['sha256'] in wanted]
     progress('verifying_backups',500,'Vorhandene Sicherungskopien werden vollständig geprüft.',True)
@@ -153,6 +163,15 @@ def run(database, registry, job, *, source_root, origins, signature, stop=lambda
         current=connection.execute('SELECT state,operation FROM jobs WHERE id=?',(jid,)).fetchone()
         if not current or current['operation']!=OPERATION or current['state']!='verifying':
             raise PipelineError('SD-Prüfauftrag ist nicht mehr Eigentümer der Übergabe.')
+        publishing=connection.execute("SELECT 1 FROM jobs WHERE operation='folder_import' AND state IN ("
+            +','.join('?' for _ in ACTIVE)+") LIMIT 1",ACTIVE).fetchone()
+        if publishing or _import_epoch(connection)!=import_epoch:
+            # Keep only the technical check, never an empty regular import.
+            # No hash evidence survives this deferral, cancellation or restart.
+            connection.execute("UPDATE jobs SET state='queued',stage='waiting_for_import',"
+                "progress_current=0,progress_total=1000,progress_message=?,updated_at=? WHERE id=?",
+                ('Quellprüfung wartet auf Verarbeitung.',now,jid))
+            return {**bound,'status':'waiting_for_import'}
         if needs_import:
             active=_active(connection,source,job['source_device_id'])
             if active and active['id']!=jid:

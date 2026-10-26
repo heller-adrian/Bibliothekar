@@ -760,6 +760,11 @@ def claim_next_job(
                 SELECT *
                 FROM jobs
                 WHERE state = 'queued'
+                  AND NOT (operation='sd_recheck' AND stage='waiting_for_import'
+                    AND EXISTS (SELECT 1 FROM jobs AS publishing
+                      WHERE publishing.operation='folder_import'
+                        AND publishing.state IN ('queued','copying','verifying','backup_verified',
+                          'analyzing_metadata','organizing','interrupted')))
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
                 """
@@ -770,6 +775,11 @@ def claim_next_job(
                 SELECT *
                 FROM jobs
                 WHERE state = 'queued'
+                  AND NOT (operation='sd_recheck' AND stage='waiting_for_import'
+                    AND EXISTS (SELECT 1 FROM jobs AS publishing
+                      WHERE publishing.operation='folder_import'
+                        AND publishing.state IN ('queued','copying','verifying','backup_verified',
+                          'analyzing_metadata','organizing','interrupted')))
                   AND operation = ?
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
