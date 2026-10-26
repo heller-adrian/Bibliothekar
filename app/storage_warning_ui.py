@@ -49,11 +49,11 @@ def storage_warning_html(status):
                     _phrase('Create replacement folder','Ersatzordner anlegen')+'</button></li>'
                     for row in replacements)
     if buttons:
-        buttons='<h3>'+_phrase('Confirmed loss: create a replacement',
+        buttons=('<h3>'+_phrase('Confirmed loss: create a replacement',
                                'Bestätigter Verlust: Ersatzordner anlegen')+'</h3><p>'+
                 _phrase('Only use this when the original folder and its files cannot be recovered. Existing media records are retained as loss evidence. Missing copies can be imported again.',
                         'Nur verwenden, wenn sich der ursprüngliche Ordner und seine Dateien nicht wiederherstellen lassen. Medienhistorie bleibt als Verlustnachweis erhalten. Fehlende Kopien können erneut importiert werden.')+
-                '</p><ul>'+buttons+'</ul>'
+                '</p><ul>'+buttons+'</ul>')
     token=status.get('setup_token') or ''
     assert not token or (len(token)==64 and all(c in '0123456789abcdef' for c in token))
     return '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
