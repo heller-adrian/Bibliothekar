@@ -26,7 +26,7 @@ def storage_warning_html(status):
     guidance=('''<p id="storage-setup-evidence">Die leere Installation und ihre verbleibenden Bindungen wurden geprüft. Eine neue Einrichtung erfordert Ihre Bestätigung und bewahrt die bisherigen Identitätsbelege.</p>''' if available else
         '<section id="storage-setup-blocker"><h2>Neue Einrichtung derzeit gesperrt</h2><p>'+escape(explanation)+'</p><p>Diagnose: <code>'+escape(reason)+'</code></p></section>'
         '<p id="storage-recovery-help">Stoppen Sie die App und weitere Schreibzugriffe. Sichern Sie alle erhaltenen Datenbanken einschließlich WAL-Dateien, Konfiguration, Journale und Retentionskopien. Stellen Sie die ursprünglichen Dataset-Einbindungen und einen zusammengehörigen Sicherungsstand wieder her. Danach erneut prüfen. Keine Operationsnachweise löschen und keine leeren Ersatzordner über vorhandene Daten legen.</p>')
-    setup=('<button id="storage-initialize">Neu einrichten</button>' if status.get('can_setup_again') or status.get('can_initialize') else '')
+    # The recovery entrance is always reachable; server-side authorization\n    # still decides whether the actual setup transition is safe.\n    setup=('<button id="storage-initialize">Set up again</button>' if available else '')\n    recovery=('<button id="storage-recovery-open" type="button">Setup / recovery options</button>'\n              '<section id="storage-recovery-panel" hidden><h2>Setup and recovery</h2>'\n              '<p>A new installation can use an existing archive; choose an archive when registering your first library. It will not be modified or adopted automatically.</p>'\n              '<p>For an established installation with missing or renamed folders, restore their original paths rather than replacing them with empty folders.</p>'\n              '<p>If setup is blocked, the reason shown above explains which existing data or safety record must be preserved.</p>'\n              '</section>')
     token=str(status.get('setup_token') or '')
     assert not token or (len(token)==64 and all(c in '0123456789abcdef' for c in token))
     return '''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Speicherordner nicht verfügbar</title>
@@ -35,9 +35,10 @@ def storage_warning_html(status):
 <p>Ein benötigter Verwaltungsordner fehlt, wurde verschoben oder ist nicht eindeutig zugänglich.</p>
 <p>Betroffene Vorgänge sind zum Schutz Ihrer Dateien angehalten.</p><ul>'''+rows+'''</ul>
 <p>Bitte stellen Sie den ursprünglichen Ordner gegebenenfalls außerhalb der App im NAS-Dateisystem wieder her. Prüfen Sie die Einbindung und den erwarteten Pfad. Es werden keine Ordner automatisch ersetzt.</p>'''+guidance+'''
-<button id="storage-retry">Erneut prüfen</button>'''+setup+'''<p id="storage-setup-result" role="status"></p></dialog>
+<button id="storage-retry">Erneut prüfen</button>'''+setup+recovery+'''<p id="storage-setup-result" role="status"></p></dialog>
 <script>const d=document.getElementById('storage-protection');if(d.showModal){d.removeAttribute('open');d.showModal();d.addEventListener('cancel',e=>e.preventDefault());}document.getElementById('storage-retry').addEventListener('click',async()=>{const button=document.getElementById('storage-retry');button.disabled=true;try{const token=document.cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('bibliothekar_csrf='));const headers={};if(token)headers['X-Bibliothekar-CSRF']=decodeURIComponent(token.slice(token.indexOf('=')+1));await fetch('/api/settings/storage-recheck',{method:'POST',headers,credentials:'same-origin'});}finally{location.reload();}});</script>
 <script>
+document.getElementById('storage-recovery-open').addEventListener('click',()=>{const panel=document.getElementById('storage-recovery-panel');panel.hidden=!panel.hidden;});
 const setupButton=document.getElementById('storage-initialize');
 if(setupButton)setupButton.addEventListener('click',async()=>{
 const en=document.documentElement.lang==='en';
