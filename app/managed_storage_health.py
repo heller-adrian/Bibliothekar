@@ -174,8 +174,10 @@ def inspect_storage(workspace, *, database=None):
         if database is not None and not Path(database).is_file() and (known or registered) and not safe_resume:
             issues.append({'code':'catalog_unavailable','path':str(database)})
         can_initialize=(empty_new or safe_resume) and all(i['code'] in {'missing','initialization_pending'} for i in issues)
+        # Several independent missing-catalog checks may report the same path.
+        issues=list({(i['code'],i['path']):i for i in issues}.values())
         reset=setup_again_evidence(root,database=database) if issues and database is not None else {'allowed':False}
-        return {'can_setup_again':reset['allowed'],'setup_token':reset.get('token'),'setup_blocker':reset.get('reason'),'ready':not issues,'can_initialize':can_initialize,'existing_installation':existing and not safe_resume,'workspace':str(root),'folders':folders,'issues':issues,'mount_evidence':'administrator_responsibility','initialization_evidence':'resumable_empty_structure' if safe_resume else 'new_empty_installation' if empty_new else 'existing_or_unclear'}
+        return {'can_setup_again':reset['allowed'],'setup_token':reset.get('token'),'setup_blocker':reset.get('reason'),'setup_evidence':reset.get('basis'),'ready':not issues,'can_initialize':can_initialize,'existing_installation':existing and not safe_resume,'workspace':str(root),'folders':folders,'issues':issues,'mount_evidence':'administrator_responsibility','initialization_evidence':'resumable_empty_structure' if safe_resume else 'new_empty_installation' if empty_new else 'existing_or_unclear'}
 
     except Exception as error:
         return {'ready':False,'can_initialize':False,'existing_installation':True,'workspace':str(root),'folders':folders,'issues':[{'code':'evidence_unreadable','path':str(root),'detail':str(error)}]}
@@ -215,10 +217,31 @@ def setup_again_evidence(workspace, *, database):
         from app import trash_retention
         _,users=trash_retention.authority(database,root)
         with trash_retention.qualified(parent,users,directory=True) as (_,check):check()
-        if not state or state.get('workspace')!=_identity(root) or names!=ENGLISH_STORAGE_DEFAULTS:
+        if not state or state.get('format')!=1 or state.get('workspace')!=_identity(root) or names!=ENGLISH_STORAGE_DEFAULTS:
             raise ValueError('workspace_or_legacy_binding')
-        if state.get('storage_names')!=names or not state.get('storage_initialization'):
+        if state.get('libraries'):
+            raise ValueError('library_or_stock_registry_history')
+        # Old F14 reservations could pin every root without an initialization
+        # intent. That absence is neither fresh-install evidence nor permission
+        # to ignore history. Only the explicit reset may use the complete old
+        # root bindings, qualified private namespace and all checks below.
+        init=state.get('storage_initialization',{})
+        if init is None:init={}
+        if not isinstance(init,dict) or state.get('storage_names') not in (None,names):
             raise ValueError('unknown_initialization')
+        if init.get('names') not in (None,names) or init.get('phase') not in (None,'initializing','completed'):
+            raise ValueError('unknown_initialization')
+        basis='initialization_intent'
+        if not init.get('database') or init.get('names')!=names or init.get('phase') not in ('initializing','completed') or state.get('storage_names') is None:
+            def recorded(value):
+                return isinstance(value,list) and len(value)==2 and all(type(v) is int and v>=0 for v in value) and value[1]>0
+            if not all(recorded(state.get('bindings',{}).get(str(root/n))) for n in names.values()):
+                raise ValueError('incomplete_historical_roots')
+            if any(state.get('bindings',{}).get(str(root/n)) is not None for n in LEGACY_STORAGE_DEFAULTS.values()):
+                raise ValueError('ambiguous_historical_roots')
+            if Path(database).absolute().parent!=parent.parent.parent:
+                raise ValueError('database_binding_changed')
+            basis='complete_legacy_root_bindings'
         if not _empty_initial_tree(root,names):raise ValueError('workspace_not_empty')
         for pattern in ['operation-*.json','mutation.json','finished-*.json']:
             if list(parent.glob(pattern)):raise ValueError('unresolved_reservation')
@@ -227,7 +250,7 @@ def setup_again_evidence(workspace, *, database):
         # Every private media retention and every surviving catalogue is evidence
         # of a used installation, regardless of its current registration flag.
         database=Path(database).absolute()
-        if state['storage_initialization'].get('database')!=str(database):raise ValueError('database_binding_changed')
+        if init.get('database') is not None and init['database']!=str(database):raise ValueError('database_binding_changed')
         configured_registry=Path(os.environ.get('KAMERA_REGISTRY_DATABASE',str(database.parent/'bibliothekar-global.sqlite3'))).absolute()
         candidates=set(database.parent.rglob('*.sqlite3'))|{database}
         def unsafe_private_entry(path):
@@ -268,7 +291,17 @@ def setup_again_evidence(workspace, *, database):
                 config=json.loads(raw);check()
         if config.get('libraries') or config.get('library'):raise ValueError('configured_library_survives')
         configured_archive=os.environ.get('KAMERA_ARCHIVE_ROOT')
-        if configured_archive and Path(configured_archive).is_dir() and any(Path(configured_archive).iterdir()):raise ValueError('archive_content_survives')
+        external={}
+        if configured_archive:
+            from app.import_publication import _parent
+            archive=Path(configured_archive)
+            if not archive.is_absolute():raise ValueError('archive_unavailable')
+            try:
+                with _parent(archive/'probe') as (fd,_):
+                    info=os.fstat(fd);external[str(archive)]=[info.st_dev,info.st_ino]
+                    if os.listdir(fd):raise ValueError('archive_content_survives')
+                    if _identity(archive)!=external[str(archive)]:raise ValueError('historical_external_binding')
+            except OSError as error:raise ValueError('archive_unavailable') from error
         if (config.get('metadata_correction') or {}).get('general_root'):raise ValueError('external_metadata_configuration_survives')
         # Old bindings outside the empty managed tree can denote an archive or a
         # different mount. They must remain identical and empty, never guessed.
@@ -282,7 +315,7 @@ def setup_again_evidence(workspace, *, database):
         # Reopen every component without following links, including configured
         # private files' parent namespace; existence/access alone is not proof.
         from app.import_publication import _parent
-        observed={}
+        observed=dict(external)
         for path in [root,*(root/n for n in names.values())]:
             try:
                 with _parent(path/'probe') as (fd,_):
@@ -293,6 +326,6 @@ def setup_again_evidence(workspace, *, database):
                 observed[str(path)]=None
         if observed[str(root)]!=state['workspace']:raise ValueError('workspace_changed_during_check')
         material={'state':state,'observed':observed,'database':str(database),'registry':str(registry),'config':config}
-        return {'allowed':True,'token':hashlib.sha256(json.dumps(material,sort_keys=True).encode()).hexdigest(),'observed':observed}
+        return {'allowed':True,'basis':basis,'token':hashlib.sha256(json.dumps(material,sort_keys=True).encode()).hexdigest(),'observed':observed}
     except Exception as error:
         return {'allowed':False,'reason':str(error)}

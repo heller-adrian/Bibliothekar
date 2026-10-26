@@ -975,7 +975,7 @@ def reset_empty_storage(workspace, database, token):
         # Keep the complete old state as immutable history. Advancing generation
         # invalidates stale request contexts; no old library is rebound.
         new={'format':1,'workspace':old['workspace'],'generation':old['generation']+1,'libraries':{},'bindings':{str(root):old['workspace']},
-             'setup_reset':{'history':archive.name,'confirmation':'SET UP AGAIN','previous_state_sha256':hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()}}
+             'setup_reset':{'history':archive.name,'confirmation':'SET UP AGAIN','qualification':proof.get('basis','initialization_intent'),'database':str(Path(database).absolute()),'previous_state_sha256':hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()}}
         current=setup_again_evidence(root,database=database)
         if not current['allowed'] or current['token']!=token:raise RootOperationError('Leerheitsnachweis wurde während der Einrichtung verändert.')
         _check({p:i for p,i in proof['observed'].items() if i is not None})

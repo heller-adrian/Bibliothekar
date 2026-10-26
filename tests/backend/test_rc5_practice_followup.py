@@ -149,6 +149,7 @@ def setup_child(case,output,mode='startup',paused=False):
 def test_reset_real_sigkill_and_three_restarts(empty_reset,boundary):
     import signal
     case,ws,db,reg,parent,old=empty_reset
+    (case/'archive').mkdir()  # The child configures this actual, accessible archive.
     p,log=setup_child(case,case/'killed',boundary,paused=True)
     try:os.killpg(p.pid,signal.SIGKILL);assert p.wait(timeout=10)==-9
     finally:log.close()
@@ -348,6 +349,7 @@ def test_missing_other_registered_catalog_never_means_no_duplicates(fixture,monk
 
 def test_same_process_warning_to_confirmed_setup_api(empty_reset):
     case,ws,db,reg,parent,old=empty_reset
+    (case/'archive').mkdir()  # Match the configured archive in rc5_setup_worker.
     result=setup_child(case,case/'confirmed-setup','api-reset')
     assert result['error'] is None and result['ready'] and result['onboarding'],result
     assert ro._read(next(parent.glob('setup-history-*.json')))==old
