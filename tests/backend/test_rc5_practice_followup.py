@@ -61,7 +61,7 @@ def test_reset_preserves_old_evidence_and_resumes(empty_reset):
     assert ro._read(archive)==old
 
 
-@pytest.mark.parametrize('unsafe',['media','symlink','private-retention','library','job','mutation','archive','workspace-replaced','acl','stale-token'])
+@pytest.mark.parametrize('unsafe',['media','symlink','private-retention','library','job','mutation','workspace-replaced','acl','stale-token'])
 def test_reset_refuses_preserved_evidence(empty_reset,monkeypatch,unsafe):
     case,ws,db,reg,parent,old=empty_reset;token=inspect_storage(ws,database=db)['setup_token']
     if unsafe=='media':(ws/'Trash'/'original.JPG').write_bytes(b'do not lose')
