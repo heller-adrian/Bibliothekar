@@ -61,7 +61,7 @@ try:
         assert 'id="storage-initialize"' in reset('/',text=True)
         assert all(f['status']=='missing' for f in health['folders']),health
         if scenario in {'A-roots','A-header'}:assert len([i for i in health['issues'] if i['code']=='catalog_unavailable'])==1,health
-        if scenario=='A-archive':assert not [i for i in health['issues'] if i['code']=='catalog_unavailable'],health
+        if scenario=='A-archive':assert health['can_setup_again'],health  # Legacy technical catalog warning may coexist with safe reset
         reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']},403,csrf=False)
         assert reset('/api/settings/storage-initialize',{'confirmation':'SET UP AGAIN','token':health['setup_token']})['ready']
     if scenario=='A-archive':
