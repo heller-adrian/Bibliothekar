@@ -1,0 +1,275 @@
+name: Publish verified v1.0.0-rc.7 prerelease
+on:
+  push:
+    branches: [release/publish-v1.0.0-rc.7]
+permissions:
+  actions: read
+  contents: write
+  packages: write
+concurrency:
+  group: publish-v1.0.0-rc.7
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PRODUCT_COMMIT: 3d4f5bb97b16ad86aec4e072b3671a8828f94a82
+      PRODUCT_TREE: 8a3e37ea7bf9c9f099f43afce0e873a988a454cd
+      IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.7
+      TAG: v1.0.0-rc.7
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          ref: 3d4f5bb97b16ad86aec4e072b3671a8828f94a82
+          path: product
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated targeted QA dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          python -m pip install -r product/requirements.txt -c product/requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - name: Verify exact product, accepted evidence and unused release
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          test "$(git -C product rev-parse HEAD)" = "$PRODUCT_COMMIT"
+          test "$(git -C product rev-parse HEAD^{tree})" = "$PRODUCT_TREE"
+          git -C product rev-parse HEAD HEAD^{tree} > release-assets/source.txt
+          printf '%s\n' "$GITHUB_SHA" > release-assets/publication-commit.txt
+          (cd product && python qa/release/verify_rc7_source.py) > release-assets/source-contract.json
+          for FILE in qa/release/smoke_rc7.py qa/release/container_recovery_rc6.py qa/release/recovery_rc6_fixture.py qa/release/check_web_assets.py; do
+            test "$(git show "$PRODUCT_COMMIT":"$FILE" | sha256sum | cut -d' ' -f1)" = "$(sha256sum "$FILE" | cut -d' ' -f1)"
+          done
+          printf '%s\n' 'RC7 targeted acceptance; RC6 combined evidence: 1993 PASS/17 fixture FAIL, later targeted correction PASS, 2010 distinct PASS. No full RC7 suite.' > release-assets/QA-SCOPE.txt
+          test "$(gh api repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG --jq length)" = 0
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.1 > release-assets/rc1-release-before.json
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.2 > release-assets/rc2-release-before.json
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.3 > release-assets/rc3-release-before.json
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.4 > release-assets/rc4-release-before.json
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.5 > release-assets/rc5-release-before.json
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.6 > release-assets/rc6-release-before.json
+          gh api repos/$GITHUB_REPOSITORY/git/ref/heads/main > release-assets/main-before.json
+          docker compose -f product/docs/rc7/compose.truenas.yaml config -q
+      - name: Targeted Linux regressions only
+        working-directory: product
+        run: |
+          test -d /dev/shm
+          python qa/f14/linux/run_linux.py "$PWD" targets qa/release/rc7-targets.json
+          cp -r "$RUNNER_TEMP/f14-qa/targets/results" ../release-assets/targeted-linux
+      - name: Offline desktop/mobile DE/EN warning browser
+        working-directory: product
+        run: |
+          npm install --prefix "$RUNNER_TEMP/rc7-browser" playwright@1.58.2
+          "$RUNNER_TEMP/rc7-browser/node_modules/.bin/playwright" install --with-deps chromium
+          PYTHONPATH="$PWD" python qa/rc6-legacy/warning_pages.py "$RUNNER_TEMP/rc7-warning-pages.json"
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/rc7-browser/node_modules/playwright" node qa/rc6-legacy/setup_browser.cjs "$RUNNER_TEMP/rc7-warning-pages.json" ../release-assets/warning-browser
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Record existing tag digests and refuse replacement
+        run: python qa/release/registry_rc7.py before
+      - name: Build the immutable accepted product
+        uses: docker/build-push-action@v6
+        with:
+          context: ./product
+          load: true
+          push: false
+          platforms: linux/amd64
+          provenance: false
+          tags: ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.7
+          build-args: |
+            SOURCE_REVISION=3d4f5bb97b16ad86aec4e072b3671a8828f94a82
+          labels: |
+            org.opencontainers.image.version=1.0.0-rc.7
+            org.opencontainers.image.revision=3d4f5bb97b16ad86aec4e072b3671a8828f94a82
+            org.bibliothekar.source.tree=8a3e37ea7bf9c9f099f43afce0e873a988a454cd
+            org.opencontainers.image.source=https://github.com/heller-adrian/Bibliothekar
+      - name: Verify image version and every app byte before publication
+        run: |
+          set -euo pipefail
+          docker image inspect "$IMAGE" > release-assets/image-inspect.json
+          docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__; assert __version__ == "1.0.0-rc.7"; print(__version__)'
+          docker run --rm --entrypoint python "$IMAGE" -c 'from pathlib import Path; import hashlib,json; r=Path("/opt/kamera"); print(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file() and "__pycache__" not in p.parts}))' > release-assets/image-app-sha256.json
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          expected={str(p.relative_to('product')):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('product/app').rglob('*') if p.is_file() and '__pycache__' not in p.parts}
+          assert len(expected)==176 and expected==json.load(open('release-assets/image-app-sha256.json'))
+          image=json.load(open('release-assets/image-inspect.json'))[0]
+          assert image['Architecture']=='amd64' and image['Os']=='linux'
+          assert image['Config']['Labels']['org.opencontainers.image.revision']=='3d4f5bb97b16ad86aec4e072b3671a8828f94a82'
+          assert image['Config']['Labels']['org.bibliothekar.source.tree']=='8a3e37ea7bf9c9f099f43afce0e873a988a454cd'
+          PY
+          docker run --rm --entrypoint sh "$IMAGE" -c 'python -m pip freeze; dpkg-query -W' > release-assets/installed-packages.txt
+      - name: Prepublication container onboarding, legacy reset, restart and retention
+        env:
+          RC7_EVIDENCE: ${{ runner.temp }}/rc7-prepublication-smoke
+        run: |
+          set -euo pipefail
+          mkdir -p "$RC7_EVIDENCE"
+          SCRATCH="$RUNNER_TEMP/rc7-prepublication-datasets"
+          mkdir -p "$SCRATCH"/{config,database,logs,workspace,archive}
+          sudo chown -R 568:568 "$SCRATCH"
+          docker run -d --name rc6-smoke --read-only --tmpfs /tmp:size=64m,mode=1777 -p 127.0.0.1:18080:8080 \
+            -e KAMERA_SOURCE_HELPER_ENABLED=false -e BIBLIOTHEKAR_ADMIN_PASSWORD=synthetic-rc-build-smoke-password \
+            -e KAMERA_CONFIG=/config/settings.json -e KAMERA_DATABASE_DIR=/database -e KAMERA_REGISTRY_DATABASE=/database/global.sqlite3 \
+            -e KAMERA_LOG_DIR=/logs -e KAMERA_WORKSPACE=/workspace -e KAMERA_POOL_PROBE=/workspace -e KAMERA_ARCHIVE_ROOT=/main-library \
+            -v "$SCRATCH/config:/config" -v "$SCRATCH/database:/database" -v "$SCRATCH/logs:/logs" \
+            -v "$SCRATCH/workspace:/workspace" -v "$SCRATCH/archive:/main-library:ro" "$IMAGE"
+          python qa/release/smoke_rc7.py
+          python qa/release/container_legacy_rc7.py
+          RC6_EVIDENCE="$RC7_EVIDENCE" IMAGE="$IMAGE" python qa/release/container_recovery_rc6.py
+          docker exec -i rc6-smoke python - <<'PY' > "$RC7_EVIDENCE/web-identity.json"
+          import json
+          from pathlib import Path
+          web=[]
+          for p in Path('/proc').iterdir():
+              if not p.name.isdigit(): continue
+              try:
+                  argv=p.joinpath('cmdline').read_bytes().decode().split(chr(0))
+                  if argv[1:4]==['-m','uvicorn','app.main:app']:
+                      web.append({'argv':argv,'uid':p.stat().st_uid,'gid':p.stat().st_gid})
+              except (FileNotFoundError,ProcessLookupError): pass
+          assert web and all(r['uid']==568 and r['gid']==568 for r in web)
+          print(json.dumps(web))
+          PY
+          docker exec rc6-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC7_EVIDENCE/database-smoke.json"
+          docker logs rc6-smoke > "$RC7_EVIDENCE/container.log" 2>&1
+          docker rm -f rc6-smoke
+          (cd "$RC7_EVIDENCE" && zip -qr "$GITHUB_WORKSPACE/release-assets/prepublication-smoke-evidence.zip" .)
+      - name: Publish only RC7 and verify the registry manifest
+        run: |
+          set -euo pipefail
+          python qa/release/registry_rc7.py absent
+          docker push "$IMAGE" | tee release-assets/push.log
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' release-assets/push.log | tail -1)"
+          test "${#DIGEST}" = 71
+          REF="ghcr.io/heller-adrian/bibliothekar@$DIGEST"
+          printf '%s\n' "$REF" > release-assets/IMAGE-DIGEST.txt
+          docker pull "$REF"
+          test "$(docker image inspect "$IMAGE" --format '{{.Id}}')" = "$(docker image inspect "$REF" --format '{{.Id}}')"
+          test "$(docker image inspect "$REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$PRODUCT_COMMIT"
+          test "$(docker image inspect "$REF" --format '{{index .Config.Labels "org.bibliothekar.source.tree"}}')" = "$PRODUCT_TREE"
+          python qa/release/registry_rc7.py after
+          docker image inspect "$REF" > release-assets/published-image-inspect.json
+          docker run --rm --entrypoint python "$REF" -c 'from app import __version__; assert __version__ == "1.0.0-rc.7"; from pathlib import Path; import hashlib,json; r=Path("/opt/kamera"); print(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file() and "__pycache__" not in p.parts}))' > release-assets/published-app-sha256.json
+          cmp release-assets/image-app-sha256.json release-assets/published-app-sha256.json
+      - name: Smoke the published image by digest with real onboarding
+        env:
+          RC7_EVIDENCE: ${{ runner.temp }}/rc7-published-smoke
+        run: |
+          set -euo pipefail
+          mkdir -p "$RC7_EVIDENCE"
+          SCRATCH="$RUNNER_TEMP/rc7-published-datasets"
+          mkdir -p "$SCRATCH"/{config,database,logs,workspace,archive}
+          sudo chown -R 568:568 "$SCRATCH"
+          docker run -d --name rc6-smoke --read-only --tmpfs /tmp:size=64m,mode=1777 -p 127.0.0.1:18080:8080 \
+            -e KAMERA_SOURCE_HELPER_ENABLED=false -e BIBLIOTHEKAR_ADMIN_PASSWORD=synthetic-rc-build-smoke-password \
+            -e KAMERA_CONFIG=/config/settings.json -e KAMERA_DATABASE_DIR=/database -e KAMERA_REGISTRY_DATABASE=/database/global.sqlite3 \
+            -e KAMERA_LOG_DIR=/logs -e KAMERA_WORKSPACE=/workspace -e KAMERA_POOL_PROBE=/workspace -e KAMERA_ARCHIVE_ROOT=/main-library \
+            -v "$SCRATCH/config:/config" -v "$SCRATCH/database:/database" -v "$SCRATCH/logs:/logs" \
+            -v "$SCRATCH/workspace:/workspace" -v "$SCRATCH/archive:/main-library:ro" "$(cat release-assets/IMAGE-DIGEST.txt)"
+          python qa/release/smoke_rc7.py
+          RC6_EVIDENCE="$RC7_EVIDENCE" IMAGE="$(cat release-assets/IMAGE-DIGEST.txt)" python qa/release/container_recovery_rc6.py
+          docker exec -i rc6-smoke python - <<'PY' > "$RC7_EVIDENCE/web-identity.json"
+          import json
+          from pathlib import Path
+          web=[]
+          for p in Path('/proc').iterdir():
+              if not p.name.isdigit(): continue
+              try:
+                  argv=p.joinpath('cmdline').read_bytes().decode().split(chr(0))
+                  if argv[1:4]==['-m','uvicorn','app.main:app']:
+                      web.append({'argv':argv,'uid':p.stat().st_uid,'gid':p.stat().st_gid})
+              except (FileNotFoundError,ProcessLookupError): pass
+          assert web and all(r['uid']==568 and r['gid']==568 for r in web)
+          print(json.dumps(web))
+          PY
+          docker exec rc6-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC7_EVIDENCE/database-smoke.json"
+          docker logs rc6-smoke > "$RC7_EVIDENCE/container.log" 2>&1
+          docker rm -f rc6-smoke
+          (cd "$RC7_EVIDENCE" && zip -qr "$GITHUB_WORKSPACE/release-assets/published-image-smoke-evidence.zip" .)
+      - name: Package digest-pinned install artifacts and exact product source
+        run: |
+          set -euo pipefail
+          zip -qr release-assets/targeted-linux-evidence.zip release-assets/targeted-linux
+          zip -qr release-assets/warning-browser-evidence.zip release-assets/warning-browser
+          rm -r release-assets/targeted-linux release-assets/warning-browser
+          cp product/docs/rc7/compose.truenas.yaml release-assets/compose.truenas.yaml
+          sed -i "s|$IMAGE|$(cat release-assets/IMAGE-DIGEST.txt)|" release-assets/compose.truenas.yaml
+          docker compose -f release-assets/compose.truenas.yaml config -q
+          cp docs/rc7/{INSTALL-TRUENAS.md,MANUAL-ACCEPTANCE.md,RELEASE-NOTES.md,UPDATE-RC6-RC7.md} release-assets/
+          cp product/{Dockerfile,requirements.txt,requirements-rc.constraints.txt} release-assets/
+          docker save "$IMAGE" | gzip -n > release-assets/bibliothekar-1.0.0-rc.7-linux-amd64.tar.gz
+          git -C product archive --format=tar --prefix=bibliothekar-1.0.0-rc.7/ "$PRODUCT_COMMIT" | gzip -n > release-assets/bibliothekar-1.0.0-rc.7-source.tar.gz
+          (cd release-assets && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Publish prerelease and verify every uploaded artifact
+        run: |
+          set -euo pipefail
+          cp docs/rc7/RELEASE-NOTES.md "$RUNNER_TEMP/rc7-release-body.md"
+          printf '\nProduct commit: `%s`\nTree: `%s`\n\nImage: `%s`\n\nPublication workflow: https://github.com/%s/actions/runs/%s\n' "$PRODUCT_COMMIT" "$PRODUCT_TREE" "$(cat release-assets/IMAGE-DIGEST.txt)" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> "$RUNNER_TEMP/rc7-release-body.md"
+          # GITHUB_TOKEN creates the tag/release; no recursive tag-push workflows.
+          gh release create "$TAG" --target "$PRODUCT_COMMIT" --title "$TAG" --prerelease --latest=false --notes-file "$RUNNER_TEMP/rc7-release-body.md" release-assets/*
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/$TAG > "$RUNNER_TEMP/release-verification.json"
+          test "$(gh api repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG --jq .object.sha)" = "$PRODUCT_COMMIT"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/rc7-downloaded"
+          (cd "$RUNNER_TEMP/rc7-downloaded" && sha256sum -c SHA256SUMS) > "$RUNNER_TEMP/downloaded-checksums.log"
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.1 > "$RUNNER_TEMP/rc1-release-after.json"
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.2 > "$RUNNER_TEMP/rc2-release-after.json"
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.3 > "$RUNNER_TEMP/rc3-release-after.json"
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.4 > "$RUNNER_TEMP/rc4-release-after.json"
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.5 > "$RUNNER_TEMP/rc5-release-after.json"
+          gh api repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0-rc.6 > "$RUNNER_TEMP/rc6-release-after.json"
+          gh api repos/$GITHUB_REPOSITORY/git/ref/heads/main > "$RUNNER_TEMP/main-after.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          temp=Path(os.environ['RUNNER_TEMP'])
+          release=json.loads((temp/'release-verification.json').read_text())
+          assert release['prerelease'] and not release['draft'] and release['tag_name']=='v1.0.0-rc.7'
+          def stable_release(d):
+              keys=('id','tag_name','target_commitish','name','body','draft','prerelease','created_at','published_at','updated_at')
+              assets=sorted([{k:a.get(k) for k in ('id','name','size','digest','created_at','updated_at')} for a in d['assets']],key=lambda a:a['id'])
+              return {k:d.get(k) for k in keys},assets
+          assert stable_release(json.load(open('release-assets/rc1-release-before.json')))==stable_release(json.loads((temp/'rc1-release-after.json').read_text()))
+          assert stable_release(json.load(open('release-assets/rc2-release-before.json')))==stable_release(json.loads((temp/'rc2-release-after.json').read_text()))
+          assert stable_release(json.load(open('release-assets/rc3-release-before.json')))==stable_release(json.loads((temp/'rc3-release-after.json').read_text()))
+          assert stable_release(json.load(open('release-assets/rc4-release-before.json')))==stable_release(json.loads((temp/'rc4-release-after.json').read_text()))
+          assert stable_release(json.load(open('release-assets/rc5-release-before.json')))==stable_release(json.loads((temp/'rc5-release-after.json').read_text()))
+          assert stable_release(json.load(open('release-assets/rc6-release-before.json')))==stable_release(json.loads((temp/'rc6-release-after.json').read_text()))
+          assert json.load(open('release-assets/main-before.json'))['object']['sha']==json.loads((temp/'main-after.json').read_text())['object']['sha']
+          print(release['html_url'])
+          PY
+          cp "$RUNNER_TEMP/release-verification.json" "$RUNNER_TEMP/downloaded-checksums.log" "$RUNNER_TEMP/rc1-release-after.json" "$RUNNER_TEMP/rc2-release-after.json" "$RUNNER_TEMP/rc3-release-after.json" "$RUNNER_TEMP/rc4-release-after.json" "$RUNNER_TEMP/rc5-release-after.json" "$RUNNER_TEMP/main-after.json" release-assets/
+      - name: Diagnostics and evidence
+        if: always()
+        run: |
+          mkdir -p release-assets
+          docker logs rc6-smoke > release-assets/container-final.log 2>&1 || true
+          docker rm -f rc6-smoke >/dev/null 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc7-publication-evidence
+          retention-days: 30
+          path: |
+            release-assets/
+            !release-assets/*.tar.gz
+            ${{ runner.temp }}/rc7-published-smoke/
+            ${{ runner.temp }}/rc7-prepublication-smoke/
+            ${{ runner.temp }}/f14-qa/**/results/
