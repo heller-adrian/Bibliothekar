@@ -808,7 +808,7 @@ def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, roll
                 _MUTATION.reset(token)
 
 
-def assert_no_pending(workspace, databases, *, library_id=None):
+def assert_no_pending(workspace, databases, *, library_id=None, allowed_missing_roots=()):
     from app.storage_config import load_storage_settings
     names=load_storage_settings(workspace_root=Path(workspace))
     paths={'metadata_root':Path(workspace)/names['metadata_directory_name'],'backup_root':Path(workspace)/names['backup_directory_name']}
@@ -816,7 +816,7 @@ def assert_no_pending(workspace, databases, *, library_id=None):
     for path in paths.values():
         current=_identity(path)
         known=state['bindings'].get(str(path))
-        if known is not None and known!=current:
+        if known is not None and known!=current and str(path) not in allowed_missing_roots:
             raise RootOperationError('Recoverywurzel ist nicht mehr eindeutig gebunden; Nachweise bleiben erhalten: '+str(path))
     for base in [paths['metadata_root']]:
         for name in ['.trash-deletions','.trash-restores','.swap-journals']:
