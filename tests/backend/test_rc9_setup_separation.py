@@ -5,7 +5,7 @@ from app.managed_storage_health import inspect_storage
 from app.storage_warning_ui import storage_warning_html
 from tests.backend.test_rc6_legacy_setup import legacy
 from tests.backend.test_rc7_reset_states import technical_registry
-from tests.backend.test_rc5_practice_followup import setup_child
+from tests.backend.test_rc5_practice_followup import empty_reset, setup_child
 
 @pytest.mark.parametrize('state',['legacy_roots','technical_control'])
 def test_populated_unregistered_archive_allows_first_library_setup(legacy,monkeypatch,state):
@@ -50,3 +50,15 @@ def test_recovery_entry_is_visible_even_if_preserved_media_blocks_reset(legacy,m
     assert 'id="storage-recovery-panel"' in html
     assert 'id="storage-initialize"' not in html
     assert (ws/'real-media.JPG').read_bytes()==b'preserve'
+
+def test_empty_import_scaffolding_not_mistaken_for_media(legacy,monkeypatch):
+    case,ws,db,reg,parent,old=legacy
+    monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(case/'archive'))
+    backup=ws/'SD Card Backups'
+    backup.mkdir()
+    (backup/'.incoming').mkdir()
+    health=inspect_storage(ws,database=db)
+    assert health['can_setup_again'],health
+    (backup/'.incoming'/'unknown.JPG').write_bytes(b'protected unknown import')
+    changed=inspect_storage(ws,database=db)
+    assert not changed['can_setup_again'] and not changed['can_initialize'],changed

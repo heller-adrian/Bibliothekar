@@ -80,6 +80,9 @@ def empty_bootstrap_registry(registry, root, database):
 
 def _empty_initial_tree(root,names):
     allowed={name for name in names.values()}
+    # An empty interrupted import staging *directory* is technical scaffolding.
+    # Any child inside it remains unknown/blocked until independently recovered.
+    allowed.add(names['backup_directory_name']+'/.incoming')
     allowed.update(names['metadata_directory_name']+'/'+child for child in ['General','Batch Correction','.trash-deletions','.trash-restores'])
     lock=names['metadata_directory_name']+'/.trash-deletions/.lock'
     # Traverse only permitted components through held no-follow descriptors.

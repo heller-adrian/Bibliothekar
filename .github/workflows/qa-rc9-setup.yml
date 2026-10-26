@@ -28,7 +28,7 @@ jobs:
       - name: Targeted backend regression and syntax
         run: |
           python -m compileall -q app qa/rc7-reset
-          pytest -q -o addopts='' tests/backend/test_rc9_setup_separation.py tests/backend/test_rc7_reset_states.py tests/backend/test_rc6_legacy_setup.py tests/backend/test_rc5_practice_followup.py
+          python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets qa/rc9/targets.json
       - name: Build amd64 image without publishing
         run: |
           docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .

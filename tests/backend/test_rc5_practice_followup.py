@@ -323,7 +323,8 @@ def test_surviving_private_or_archive_evidence_disallows_reset(empty_reset,monke
     elif kind=='unknown-control':ro._write(parent/'unknown.json',{'preserve':True})
     else:
         settings=case/'settings.json';settings.rename(case/'old-settings.json');settings.symlink_to(case/'old-settings.json')
-    status=inspect_storage(ws,database=db);assert not status.get('can_setup_again'),status
+    status=inspect_storage(ws,database=db)
+    assert status.get('can_setup_again') is (kind=='archive-only'),status
     assert ro._read(parent/'state.json')==old
 
 

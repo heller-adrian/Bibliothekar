@@ -35,7 +35,7 @@ def test_catalog_issue_is_not_duplicated_and_blocker_is_explained(legacy,monkeyp
     case,ws,db,reg,parent,old=legacy;archive=case/'archive';(archive/'original.JPG').write_bytes(b'must keep')
     monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(archive))
     health=inspect_storage(ws,database=db)
-    assert not [i for i in health['issues'] if i['code']=='catalog_unavailable' and i['path']==str(db)],health
+    assert len([i for i in health['issues'] if i['code']=='catalog_unavailable' and i['path']==str(db)])==1,health
     assert health['can_setup_again'],health
     html=storage_warning_html(health)
     assert 'id="storage-initialize"' in html and (archive/'original.JPG').read_bytes()==b'must keep'
@@ -223,6 +223,8 @@ def test_legacy_warning_delivered_scripts_and_css_are_valid(legacy,monkeypatch,t
     case,ws,db,reg,parent,old=legacy;monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(case/'archive'))
     allowed=inspect_storage(ws,database=db);assert allowed['can_setup_again']
     (case/'archive/original.JPG').write_bytes(b'archive must remain')
+    assert inspect_storage(ws,database=db)['can_setup_again']
+    (ws/'unmanaged-original.JPG').write_bytes(b'workspace data must remain')
     blocked=inspect_storage(ws,database=db);assert not blocked['can_setup_again']
     result=check_pages({'setup_allowed':storage_warning_html(allowed),'setup_blocked':storage_warning_html(blocked)},tmp_path/'assets')
     assert result['pages']==2 and result['scripts']==6 and result['styles']==2
