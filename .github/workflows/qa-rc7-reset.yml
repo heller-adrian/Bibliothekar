@@ -4,6 +4,7 @@ on:
     branches: [fix/rc7-reset-two-states]
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: rc7-reset-two-states
   cancel-in-progress: false
@@ -43,7 +44,15 @@ jobs:
           pip freeze >> "$RC7_EVIDENCE/environment.txt"
           test -d /dev/shm
           docker compose -f docs/rc7/compose.truenas.yaml config -q
-      - name: Targeted reset, history, retention and F11/F14/F24 probes
+      - name: Reuse exact-app passing Linux evidence; preserve original failures
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test -z "$(git diff f8ea430eac4778baf872af4925f5e5a7e27f3913 -- app Dockerfile compose.example.yaml)"
+          gh run download 40390517044 --repo "$GITHUB_REPOSITORY" --name rc7-reset-two-states --dir "$RUNNER_TEMP/reset-prior"
+          gh api repos/$GITHUB_REPOSITORY/actions/runs/40390517044 > "$RC7_EVIDENCE/prior-run.json"
+          python qa/rc7-reset/reuse.py
+      - name: Only affected fixtures and current reset regressions
         run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets qa/rc7-reset/targets.json
       - name: Build the tested tree without pushing an image
         run: |

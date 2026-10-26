@@ -2,9 +2,10 @@
 from pathlib import Path
 import json,os,signal,sys
 case=Path(sys.argv[1]);control=Path(sys.argv[2]);boundary=sys.argv[3]
-for key,value in {'KAMERA_WORKSPACE':case/'workspace','KAMERA_CONFIG':case/'settings.json','KAMERA_REGISTRY_DATABASE':case/'registry.sqlite3','KAMERA_DATABASE_DIR':case,'KAMERA_ARCHIVE_ROOT':case/'archive','KAMERA_LOG_DIR':case/'logs'}.items():os.environ[key]=str(value)
+private=case/'database' if (case/'database').is_dir() else case  # Explicit new-install fixture; historical cases retain their paths.
+for key,value in {'KAMERA_WORKSPACE':case/'workspace','KAMERA_CONFIG':case/'settings.json','KAMERA_REGISTRY_DATABASE':private/'registry.sqlite3','KAMERA_DATABASE_DIR':private,'KAMERA_ARCHIVE_ROOT':case/'archive','KAMERA_LOG_DIR':case/'logs'}.items():os.environ[key]=str(value)
 from app import main
-main.WORKSPACE_PATH=case/'workspace';main.DATABASE_FILE=case/'main.sqlite3';main.REGISTRY_DATABASE_FILE=case/'registry.sqlite3';main.CONFIG_PATH=case/'settings.json';main.LOG_PATH=case/'logs'
+main.WORKSPACE_PATH=case/'workspace';main.DATABASE_FILE=private/'main.sqlite3';main.REGISTRY_DATABASE_FILE=private/'registry.sqlite3';main.CONFIG_PATH=case/'settings.json';main.LOG_PATH=case/'logs'
 class NoScheduler:
     def __init__(self,*a,**k):pass
     def start(self):pass

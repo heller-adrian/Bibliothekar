@@ -166,6 +166,7 @@ def child(case,control,boundary='none',paused=False):
 
 def test_f14_real_new_install_startup_and_three_restarts(tmp_path):
     case=tmp_path/'case';case.mkdir();ws=case/'workspace';ws.mkdir();(case/'settings.json').write_text('{}')
+    (case/'database').mkdir();(case/'archive').mkdir()
     for n in range(4):
         result=child(case,tmp_path/f'boot-{n}');assert result['error'] is None,result
         assert all((ws/name).is_dir() for name in ENGLISH_STORAGE_DEFAULTS.values())
@@ -184,10 +185,11 @@ def test_f14_three_actual_startups_do_not_recreate_missing_established_root(home
 @pytest.mark.parametrize('boundary',['SD Card Backups','Trash'])
 def test_f14_sigkill_during_initialization_preserves_pending_evidence(tmp_path,boundary):
     case=tmp_path/'case';case.mkdir();ws=case/'workspace';ws.mkdir();(case/'settings.json').write_text('{}')
+    (case/'database').mkdir();(case/'archive').mkdir()
     p,log=child(case,tmp_path/'kill-point',boundary,paused=True)
     try:os.killpg(p.pid,signal.SIGKILL);assert p.wait(timeout=10)==-9
     finally:log.close()
-    parent=case/'.bibliothekar-root-control';assert list(parent.rglob('operation-*.json'))
+    parent=case/'database/.bibliothekar-root-control';assert list(parent.rglob('operation-*.json'))
     for n in range(3):
         result=child(case,tmp_path/f'restart-{n}');assert result['error'] is None,result
         assert all((ws/name).is_dir() for name in ENGLISH_STORAGE_DEFAULTS.values())
@@ -292,11 +294,13 @@ def test_f14_recheck_never_clears_unrelated_recovery_error(home,monkeypatch):
 
 def test_f14_four_empty_directories_are_not_a_startup_mount_certificate(tmp_path,monkeypatch):
     case=tmp_path/'case';case.mkdir();ws=case/'workspace';ws.mkdir()
+    private=case/'database';private.mkdir();archive=case/'archive';archive.mkdir()
     for name in ENGLISH_STORAGE_DEFAULTS.values():(ws/name).mkdir()
     monkeypatch.setenv('KAMERA_CONFIG',str(case/'settings.json'))
-    monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(case/'registry.sqlite3'))
+    monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(private/'registry.sqlite3'))
+    monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(archive))
     before=stable(case)
-    result=inspect_storage(ws,database=case/'main.sqlite3')
+    result=inspect_storage(ws,database=private/'main.sqlite3')
     assert result['ready'] and result['can_initialize']
     assert result['mount_evidence']=='administrator_responsibility'
     assert stable(case)==before
@@ -304,8 +308,8 @@ def test_f14_four_empty_directories_are_not_a_startup_mount_certificate(tmp_path
 
 @pytest.mark.parametrize('used',[False,True])
 def test_f14_fresh_schema_vs_used_empty_catalogue(tmp_path,monkeypatch,used):
-    case=tmp_path/'case';case.mkdir();ws=case/'workspace';ws.mkdir();db=case/'main.sqlite3'
-    monkeypatch.setenv('KAMERA_CONFIG',str(case/'settings.json'));monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(case/'registry.sqlite3'))
+    case=tmp_path/'case';case.mkdir();ws=case/'workspace';ws.mkdir();private=case/'database';private.mkdir();db=private/'main.sqlite3';archive=case/'archive';archive.mkdir()
+    monkeypatch.setenv('KAMERA_CONFIG',str(case/'settings.json'));monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(private/'registry.sqlite3'));monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(archive))
     initialize_database(db)
     if used:
         from app.database import create_job
@@ -317,10 +321,10 @@ def test_f14_fresh_schema_vs_used_empty_catalogue(tmp_path,monkeypatch,used):
 
 def test_fresh_technical_schema_starts_with_english_event_defaults(tmp_path):
     case=tmp_path/'case';case.mkdir();(case/'workspace').mkdir();(case/'settings.json').write_text('{}')
-    initialize_database(case/'main.sqlite3')
+    (case/'database').mkdir();(case/'archive').mkdir();initialize_database(case/'database/main.sqlite3')
     result=child(case,tmp_path/'startup')
     assert result['error'] is None,result
-    with sqlite3.connect(case/'main.sqlite3') as c:
+    with sqlite3.connect(case/'database/main.sqlite3') as c:
         setting=json.loads(c.execute("SELECT value_json FROM app_settings WHERE setting_key='event_folder_layout_default'").fetchone()[0])
     (case/'fresh-schema-default.json').write_text(json.dumps(setting,indent=2))
     assert setting['input_path']=='All','Fresh technical schema retained German event defaults'
