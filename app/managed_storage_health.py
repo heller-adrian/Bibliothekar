@@ -212,7 +212,9 @@ def inspect_storage(workspace, *, database=None):
             issues.append({'code':'reset_requires_empty','path':str(root)})
         missing_catalog=database is not None and (not Path(database).is_file() or Path(database).stat().st_size==0)
         if missing_catalog and not safe_resume:
-            # A configured archive is an unselected source mount, not a library\n            # registration. Its bytes must not obstruct first-library setup.\n            if registered or (occupied and not _empty_initial_tree(root,names)):
+            # A configured archive is an unselected source mount, not a library
+            # registration. Its bytes must not obstruct first-library setup.
+            if registered or (occupied and not _empty_initial_tree(root,names)):
                 issues.append({'code':'catalog_unavailable','path':str(database)})
         if database is not None and not Path(database).is_file() and (known or registered) and not safe_resume:
             issues.append({'code':'catalog_unavailable','path':str(database)})
@@ -354,7 +356,8 @@ def setup_again_evidence(workspace, *, database):
             try:
                 with _parent(archive/'probe') as (fd,_):
                     info=os.fstat(fd);external[str(archive)]=[info.st_dev,info.st_ino]
-                    # Observe its inode without reading or adopting any photos.\n                    if _identity(archive)!=external[str(archive)]:raise ValueError('historical_external_binding')
+                    # Observe its inode without reading or adopting any photos.
+                    if _identity(archive)!=external[str(archive)]:raise ValueError('historical_external_binding')
             except OSError as error:raise ValueError('archive_unavailable') from error
         if (config.get('metadata_correction') or {}).get('general_root'):raise ValueError('external_metadata_configuration_survives')
         # Old bindings outside the empty managed tree can denote an archive or a
@@ -365,7 +368,10 @@ def setup_again_evidence(workspace, *, database):
             if value in allowed:continue
             if path.is_relative_to(root):
                 if path.exists() or path.is_symlink():raise ValueError('historical_workspace_content')
-            elif _identity(path)!=identity:raise ValueError('historical_external_binding')\n            # Preserved, correctly pinned external roots may already hold files.\n            # Catalogues, registry history, and private media retention are\n            # checked independently and still block an unsafe reset.
+            elif _identity(path)!=identity:raise ValueError('historical_external_binding')
+            # Preserved, correctly pinned external roots may already hold files.
+            # Catalogues, registry history, and private media retention are
+            # checked independently and still block an unsafe reset.
         # Reopen every component without following links, including configured
         # private files' parent namespace; existence/access alone is not proof.
         from app.import_publication import _parent

@@ -26,7 +26,15 @@ def storage_warning_html(status):
     guidance=('''<p id="storage-setup-evidence">Die leere Installation und ihre verbleibenden Bindungen wurden geprüft. Eine neue Einrichtung erfordert Ihre Bestätigung und bewahrt die bisherigen Identitätsbelege.</p>''' if available else
         '<section id="storage-setup-blocker"><h2>Neue Einrichtung derzeit gesperrt</h2><p>'+escape(explanation)+'</p><p>Diagnose: <code>'+escape(reason)+'</code></p></section>'
         '<p id="storage-recovery-help">Stoppen Sie die App und weitere Schreibzugriffe. Sichern Sie alle erhaltenen Datenbanken einschließlich WAL-Dateien, Konfiguration, Journale und Retentionskopien. Stellen Sie die ursprünglichen Dataset-Einbindungen und einen zusammengehörigen Sicherungsstand wieder her. Danach erneut prüfen. Keine Operationsnachweise löschen und keine leeren Ersatzordner über vorhandene Daten legen.</p>')
-    # The recovery entrance is always reachable; server-side authorization\n    # still decides whether the actual setup transition is safe.\n    setup=('<button id="storage-initialize">Set up again</button>' if available else '')\n    recovery=('<button id="storage-recovery-open" type="button">Setup / recovery options</button>'\n              '<section id="storage-recovery-panel" hidden><h2>Setup and recovery</h2>'\n              '<p>A new installation can use an existing archive; choose an archive when registering your first library. It will not be modified or adopted automatically.</p>'\n              '<p>For an established installation with missing or renamed folders, restore their original paths rather than replacing them with empty folders.</p>'\n              '<p>If setup is blocked, the reason shown above explains which existing data or safety record must be preserved.</p>'\n              '</section>')
+    # The recovery entrance is always reachable; server-side authorization
+    # still decides whether the actual setup transition is safe.
+    setup=('<button id="storage-initialize">Set up again</button>' if available else '')
+    recovery=('<button id="storage-recovery-open" type="button">Setup / recovery options</button>'
+              '<section id="storage-recovery-panel" hidden><h2>Setup and recovery</h2>'
+              '<p>A new installation can use an existing archive; choose an archive when registering your first library. It will not be modified or adopted automatically.</p>'
+              '<p>For an established installation with missing or renamed folders, restore their original paths rather than replacing them with empty folders.</p>'
+              '<p>If setup is blocked, the reason shown above explains which existing data or safety record must be preserved.</p>'
+              '</section>')
     token=str(status.get('setup_token') or '')
     assert not token or (len(token)==64 and all(c in '0123456789abcdef' for c in token))
     return '''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Speicherordner nicht verfügbar</title>
