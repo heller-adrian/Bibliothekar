@@ -81,6 +81,7 @@ li{margin:12px 0}code{font-size:.88em}.languages{display:flex;justify-content:fl
 <p>'''+_phrase('The independent external archive is never automatically adopted or modified.',
              'Das unabhängige externe Archiv wird niemals automatisch übernommen oder verändert.')+'''</p></section>
 <p id="storage-setup-result" role="status" aria-live="polite"></p></dialog>
+<script>try{document.documentElement.lang=localStorage.getItem('bibliothekar-language')==='de'?'de':'en'}catch(_){document.documentElement.lang='en'}</script>
 <script>
 (function(){
  const key='bibliothekar-language',root=document.documentElement,result=document.getElementById('storage-setup-result');
