@@ -918,9 +918,20 @@ def _registered_library_rows() -> list[dict[str, Any]]:
             registered_only=True,
         )
     except Exception:
-        # Never mistake an unreadable existing registry for an empty library.
+        # A brand-new SQLite header is a technical placeholder, not a lost
+        # library. An unrecognised, corrupt or previously used registry is not.
         if REGISTRY_DATABASE_FILE.exists() or REGISTRY_DATABASE_FILE.is_symlink():
-            raise
+            from app.managed_storage_health import _empty_sqlite_header
+            import sqlite3
+            from contextlib import closing
+            try:
+                if REGISTRY_DATABASE_FILE.is_symlink():
+                    raise ValueError('untrusted_registry')
+                with closing(sqlite3.connect(REGISTRY_DATABASE_FILE.absolute().as_uri()+'?mode=ro',uri=True)) as conn:
+                    if not _empty_sqlite_header(conn):
+                        raise ValueError('unreadable_existing_registry')
+            except Exception:
+                raise
         return []
 
 
@@ -1583,7 +1594,17 @@ def process_claimed_job(
                 if checked_folder:
                     from app.sd_recheck import catalog_origins
                     origin_rows=catalog_origins(database_file,REGISTRY_DATABASE_FILE,exclude_job_id=job_id)
-                if operation == "folder_import" and (job.get("duplicate_of_job_id") or checked_folder):
+                # After an explicitly confirmed storage loss, historical SHA
+                # is no longer evidence of a retained copy. Inspect every
+                # registered catalogue and verify real retained bytes before
+                # building the normal duplicate set (also for SD imports).
+                from app.root_operations import _control_location, _read
+                replacement_state = _read(_control_location(WORKSPACE_PATH)/'state.json',{})
+                loss_confirmed = bool(replacement_state.get('storage_replacements'))
+                if loss_confirmed:
+                    from app.sd_recheck import catalog_origins
+                    origin_rows = catalog_origins(database_file, REGISTRY_DATABASE_FILE, exclude_job_id=job_id)
+                if loss_confirmed or (operation == "folder_import" and (job.get("duplicate_of_job_id") or checked_folder)):
                     from app.source_reimport import retained_origins
                     origin_rows = retained_origins(REGISTRY_DATABASE_FILE, origin_rows)
                 imported_hashes.update((int(row["size_bytes"]), str(row["sha256"])) for row in origin_rows)
@@ -3063,6 +3084,26 @@ def api_initialize_storage(payload: dict[str, Any]) -> dict[str, Any]:
         if DATABASE_INITIALIZATION_ERROR:
             raise HTTPException(status_code=409, detail=DATABASE_INITIALIZATION_ERROR)
         return api_storage_health()
+
+
+@app.post("/api/settings/storage-replace", tags=["Einstellungen"])
+def api_replace_storage(payload: dict[str, Any]) -> dict[str, Any]:
+    """Explicit replacement of one previously pinned, lost managed root."""
+    from app.storage_replacement import replace_managed_directory
+    with _STORAGE_RECHECK_LOCK:
+        try:
+            result=replace_managed_directory(
+                WORKSPACE_PATH, DATABASE_FILE, REGISTRY_DATABASE_FILE,
+                str(payload.get('key') or ''), str(payload.get('confirmation') or ''),
+            )
+        except (RootOperationError, OSError, ValueError) as error:
+            raise HTTPException(status_code=409, detail='storage_replacement_blocked: '+str(error)) from error
+        startup_database()
+        if DATABASE_INITIALIZATION_ERROR:
+            return {**result, 'restart_required':True,
+                    'storage_health':api_storage_health()}
+        return {**result, 'restart_required':False,
+                'storage_health':api_storage_health()}
 
 
 @app.get("/api/settings/storage-paths", tags=["Einstellungen"])
