@@ -8,7 +8,7 @@ permissions:
   actions: read
 concurrency:
   group: publish-bibliothekar-rc9
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   publish:
     if: github.repository == 'heller-adrian/Bibliothekar'
@@ -93,7 +93,7 @@ jobs:
           docker push "$IMAGE" | tee release-assets/push.log
           DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' release-assets/push.log | tail -1)"
           test "${#DIGEST}" -eq 71
-          REF="ghcr.io/heller-adrian/bibliothekar${DIGEST}"
+          REF="ghcr.io/heller-adrian/bibliothekar@${DIGEST}"
           docker pull "$REF"
           test "$(docker image inspect "$IMAGE" --format '{{.Id}}')" = "$(docker image inspect "$REF" --format '{{.Id}}')"
           test "$(docker image inspect "$REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
