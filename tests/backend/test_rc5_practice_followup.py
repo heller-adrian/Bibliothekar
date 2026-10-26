@@ -47,8 +47,12 @@ def test_folder_duplicate_admission_is_background_not_regular_import(fixture,mon
     assert claim_next_job(dbs[0]) is None and main.api_import_history()['total']==before
 
 
-def test_reset_preserves_old_evidence_and_resumes(empty_reset):
+def test_reset_preserves_old_evidence_and_resumes(empty_reset,monkeypatch):
     case,ws,db,reg,parent,old=empty_reset
+    # The canonical Linux harness supplies an independent bootstrap archive.
+    # Both parent and subprocess must attest the identical synthetic mount.
+    (case/'archive').mkdir()
+    monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(case/'archive'))
     proof=inspect_storage(ws,database=db)
     ro.reset_empty_storage(ws,db,proof['setup_token'])
     new=ro._read(parent/'state.json');archive=parent/new['setup_reset']['history']
