@@ -3050,7 +3050,10 @@ def api_initialize_storage(payload: dict[str, Any]) -> dict[str, Any]:
             # after rechecking all independent evidence under exclusive locks.
             stale=any(row.get('expected_identity') is not None and row.get('status')!='available'
                       for row in status.get('folders',()))
-            if status.get('can_setup_again') and (stale or not status.get('can_initialize')):\n                reset_empty_storage(WORKSPACE_PATH, DATABASE_FILE, payload.get('token'))\n            elif not status.get('can_initialize'):\n                raise RootOperationError('Setup requires verified empty storage or restoration of the previous installation.')
+            if status.get('can_setup_again') and (stale or not status.get('can_initialize')):
+                reset_empty_storage(WORKSPACE_PATH, DATABASE_FILE, payload.get('token'))
+            elif not status.get('can_initialize'):
+                raise RootOperationError('Setup requires verified empty storage or restoration of the previous installation.')
         except (RootOperationError, OSError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         startup_database()
