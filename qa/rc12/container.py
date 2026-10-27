@@ -103,7 +103,7 @@ def case(label,boundary='',foreign_owner=False,denied=False,helper=False,technic
         statecode="import json,hashlib;from pathlib import Path;p=Path('/appdata/database/.bibliothekar-root-control')/hashlib.sha256(b'/workspace').hexdigest();print(json.dumps({'state':json.loads((p/'state.json').read_text()),'operations':[x.name for x in p.glob('operation-*.json')]}))"
         snapshot=json.loads(docker('exec','--user','568:568',name,'python','-c',statecode));nonce=snapshot['state']['storage_initialization']['reservation_id']
         assert snapshot['state']['format']==3 and not snapshot['operations']
-        assert not (base/'workspace/Metadata Correction/.trash-deletions/.lock').exists()
+        docker('exec','--user','568:568',name,'python','-c',"from pathlib import Path;assert not Path('/workspace/Metadata Correction/.trash-deletions/.lock').exists()")
         first=api('/api/libraries',{'display_name':'RC12 First','work_root':'','archive_root':'/main-library'},expect=201)
         assert first['library']['is_registered']
         docker('restart',name);api=client(18318)

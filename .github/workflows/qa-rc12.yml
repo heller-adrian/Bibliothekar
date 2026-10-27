@@ -2,7 +2,7 @@ name: RC12 isolated architecture acceptance
 on:
   push:
     branches: [release/v1.0.0-rc.12]
-    paths-ignore: ["docs/**", "README.md", "CHANGELOG.md", ".github/workflows/publish-rc12.yml"]
+    paths-ignore: ["docs/**", "README.md", "CHANGELOG.md", ".github/workflows/publish-rc12.yml", "qa/rc12/container.py", "qa/rc11/sitecustomize.py", ".github/workflows/qa-rc12-container.yml", ".github/workflows/qa-rc12.yml"]
 permissions:
   contents: read
 concurrency:
