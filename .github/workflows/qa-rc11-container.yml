@@ -1,0 +1,90 @@
+name: RC11 verified regression reuse and container acceptance
+on:
+  push:
+    branches: [release/v1.0.0-rc.11]
+    paths: [qa/rc11/container.py, .github/workflows/qa-rc11-container.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: rc11-container-recheck
+  cancel-in-progress: true
+jobs:
+  regression_evidence:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REGRESSION_SHA: 1e084e5b7185cddd02bb0fb2e033b4a9127f7afe
+      REGRESSION_RUN: '40496761565'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prove regression source unchanged and all four prior jobs successful
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REGRESSION_RUN" > "$RUNNER_TEMP/prior-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REGRESSION_RUN/jobs?per_page=100" > "$RUNNER_TEMP/prior-jobs.json"
+          python - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+          r=json.loads((Path(os.environ['RUNNER_TEMP'])/'prior-run.json').read_text())
+          assert r['head_sha']==os.environ['REGRESSION_SHA'] and r['path']=='.github/workflows/qa-rc11.yml'
+          jobs=json.loads((Path(os.environ['RUNNER_TEMP'])/'prior-jobs.json').read_text())['jobs']
+          names={'Regression ('+g+')' for g in ['baseline','bootstrap','retention','history']}
+          selected=[j for j in jobs if j['name'] in names]
+          assert {j['name'] for j in selected}==names and all(j['conclusion']=='success' for j in selected)
+          changed=subprocess.check_output(['git','diff','--name-only',os.environ['REGRESSION_SHA'],'HEAD'],text=True).splitlines()
+          allowed={'qa/rc11/container.py','.github/workflows/qa-rc11.yml','.github/workflows/qa-rc11-container.yml'}
+          assert all(p in allowed or p.startswith('docs/') for p in changed),changed
+          proof={'source_sha':os.environ['GITHUB_SHA'],'regression_sha':os.environ['REGRESSION_SHA'],'regression_run':os.environ['REGRESSION_RUN'],'changed_files':changed,'unchanged':'app, tests, Dockerfile, requirements and regression harness; only container observer/workflow/docs changed'}
+          root=Path(os.environ['RUNNER_TEMP'])/'reused';root.mkdir()
+          (root/'reuse-proof.json').write_text(json.dumps(proof,indent=2)+'\n')
+          PY
+          gh run download "$REGRESSION_RUN" --pattern 'rc11-regression-*' --dir "$RUNNER_TEMP/reused"
+          python - <<'PY'
+          import json,os,xml.etree.ElementTree as ET
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'reused';counts={}
+          for group in ['baseline','bootstrap','retention','history']:
+              d=root/('rc11-regression-'+group)
+              assert json.loads((d/'exit.json').read_text())['returncode']==0
+              cases=ET.parse(d/'result.xml').findall('.//testcase')
+              assert cases and all(c.find('failure') is None and c.find('error') is None and c.find('skipped') is None for c in cases)
+              counts[group]=len(cases)
+          assert counts['baseline']==151 and sum(counts.values())==328,counts
+          print('Verified unchanged regression payload:',counts)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rc11-reused-regressions
+          path: ${{ runner.temp }}/reused/
+          retention-days: 14
+  acceptance:
+    name: Container acceptance
+    needs: regression_evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      IMAGE: bibliothekar:rc11-acceptance
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build local acceptance image without publishing
+        run: docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+      - name: Verify candidate identity
+        run: docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__;assert __version__=="1.0.0-rc.11"'
+      - name: Original supervisor, UID568, real HTTP and all crash cases
+        run: python qa/rc11/container.py
+      - name: Retain container evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc11-isolated-acceptance
+          path: |
+            ${{ runner.temp }}/rc11-evidence.json
+            ${{ runner.temp }}/rc11-container-logs
+          retention-days: 14

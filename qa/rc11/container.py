@@ -28,6 +28,23 @@ def docker(*args,check=True):
 
 def hashes(path):return {str(p.relative_to(path)):hashlib.sha256(p.read_bytes()).hexdigest() for p in path.rglob('*') if p.is_file()}
 
+def private_snapshot(container):
+    # The host runner deliberately has no access to UID568's private authority.
+    # Observe it read-only as the actual app UID, without changing any ACL/mode.
+    program='''import os,json,hashlib
+from pathlib import Path
+own=Path('/database/.bibliothekar-root-control')/hashlib.sha256(b'/workspace').hexdigest()
+state=json.loads((own/'state.json').read_text());nonce=state['storage_initialization']['reservation_id']
+lock=Path('/workspace/Metadata Correction/.trash-deletions/.lock')
+legacy=None
+if lock.exists():
+ info=lock.stat();legacy={'gid':info.st_gid,'uid':info.st_uid,'mode':info.st_mode & 0o777,'empty':lock.read_bytes()==b''}
+print(json.dumps({'uid':os.getuid(),'gid':os.getgid(),'state':state,
+ 'private_lock':(own/'trash-recovery.lock').is_file(),'active_operations':[p.name for p in own.glob('operation-*.json')],
+ 'completion_receipt':(own/('bootstrap-completed-'+nonce+'.json')).is_file(),
+ 'adoptions':[json.loads(p.read_text()) for p in own.glob('rc11-adoption-*.json')],'legacy':legacy}))'''
+    return json.loads(docker('exec','--user','568:568',container,'python','-c',program))
+
 def api_client():
     host='http://127.0.0.1:18317';jar=http.cookiejar.CookieJar();browser=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
     for attempt in range(90):
@@ -114,20 +131,20 @@ def case(label,boundary='',legacy=False,legacy_completed=False,unsafe_private=Fa
         assert health['ready'] and not health['issues'],health
         assert api('/api/libraries')['libraries']==[]
         page=api('/',raw=True);assert 'id="create"' in page and 'id="name"' in page
-        own=base/'database/.bibliothekar-root-control'/hashlib.sha256(b'/workspace').hexdigest()
-        state=json.loads((own/'state.json').read_text());nonce=state['storage_initialization']['reservation_id']
+        observed=private_snapshot(container)
+        assert observed['uid']==568 and observed['gid']==568,observed
+        state=observed['state'];nonce=state['storage_initialization']['reservation_id']
         assert state['format']==2 and state['storage_initialization']['phase']=='completed'
-        assert (own/'trash-recovery.lock').is_file()
-        assert not list(own.glob('operation-*.json'))
-        assert (own/('bootstrap-completed-'+nonce+'.json')).exists()
+        assert observed['private_lock']
+        assert not observed['active_operations']
+        assert observed['completion_receipt']
         if legacy:
             original=json.loads((base/'evidence/rc10-original.json').read_text())
             assert state['bindings']==original['bindings'] and nonce==original['reservation_id']
-            adopted=[json.loads(p.read_text()) for p in own.glob('rc11-adoption-*.json')]
+            adopted=observed['adoptions']
             assert any(base64.b64decode(r['material']['state']).decode()==original['state'] for r in adopted)
-            lock=base/'workspace/Metadata Correction/.trash-deletions/.lock'
-            assert lock.stat().st_gid==0 and lock.stat().st_mode & 0o777==0o770 and lock.read_bytes()==b''
-        else:assert not (base/'workspace/Metadata Correction/.trash-deletions/.lock').exists()
+            assert observed['legacy']=={'gid':0,'uid':568,'mode':0o770,'empty':True}
+        else:assert observed['legacy'] is None
         created=api('/api/libraries',{'display_name':'RC11 Camera','work_root':'','archive_root':'/main-library'},expect=201)
         assert created['library']['is_registered']
         # Second actual library creation proves a following F14 root mutation.
