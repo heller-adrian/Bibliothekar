@@ -1,7 +1,7 @@
 """Private failed-restore retention; no workspace metadata is a trust anchor.
 
-Trust: the app UID, root, the configured database-directory owner and the
-system administrator groups 0/544. Other apps sharing those credentials are
+Trust: the app UID, root and the system administrator groups 0/544.
+Other apps sharing those credentials are
 inside this trust boundary. Native NFS4 ACLs are read, never changed.
 """
 from contextlib import contextmanager
@@ -70,10 +70,9 @@ def authority(database, workspace):
     ws = Path(workspace).absolute()
     if root == ws or ws in root.parents or root in ws.parents:
         raise TrashError('Private Retention und gemeinsamer Workspace müssen getrennt sein.')
-    # Ownership of the explicitly configured private app mount is an admin role,
-    # not proof that its UID is isolated from other host processes.
+    # Mount ownership alone never promotes an unrelated NAS user to admin.
     with trash_fd.parent(root/'.binding') as (fd, _, binding):
-        users = {0, os.geteuid(), os.fstat(fd).st_uid}
+        users = {0, os.geteuid()}
         binding()
     with qualified(root, users, directory=True) as (_, check): check()
     return root, users

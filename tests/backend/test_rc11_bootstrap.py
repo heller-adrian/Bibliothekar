@@ -252,6 +252,7 @@ def test_completion_requires_actual_schemas_and_version_identity(case):
     assert main.APP_VERSION==main.RELEASE_VERSION==main.DEPLOYMENT_VERSION==__version__=='1.0.0-rc.11'
     root=case/'workspace';db=case/'database/kamera.sqlite3'
     for n in NAMES.values():(root/n).mkdir()
+    (case/'config/settings.json').write_text('{}')
     with pytest.raises(ro.RootOperationError,match='bootstrap_database_not_prepared'):
         with ro.reserve(root,library_id='main',paths=[root,*(root/n for n in NAMES.values())],database=db,kind='startup',ids={'initialize_storage':True}) as record:
             bootstrap.complete(root,record)
@@ -288,3 +289,33 @@ def test_missing_control_state_never_switches_legacy_lock_authority(case):
         with _operation_lock(root):pass
     assert not (parent/'state.json').exists() and not (parent/'trash-recovery.lock').exists()
     assert lock.read_bytes()==b'' and lock.stat().st_mode & 0o777==0o770
+
+
+def test_missing_configuration_cannot_complete_bootstrap(case):
+    root=case/'workspace';db=case/'database/kamera.sqlite3'
+    initialize_database(db);initialize_library_registry(case/'database/bibliothekar-global.sqlite3')
+    state={'storage_initialization':{'registry':str(case/'database/bibliothekar-global.sqlite3'),'names':dict(NAMES)},'bindings':{}}
+    with pytest.raises(ro.RootOperationError,match='bootstrap_configuration_not_prepared'):
+        bootstrap.technical_postconditions(root,db,state)
+
+
+def test_workspace_scan_error_reports_actual_subdirectory(case,monkeypatch):
+    target=case/'workspace/Metadata Correction';target.mkdir()
+    real_listdir=os.listdir
+    def failed(fd):
+        if isinstance(fd,int) and os.fstat(fd).st_ino==target.stat().st_ino:
+            raise PermissionError(errno.EACCES,'synthetic scan refusal')
+        return real_listdir(fd)
+    monkeypatch.setattr(os,'listdir',failed)
+    result=bootstrap.tree(case/'workspace',NAMES)
+    assert result['issues']==[{'code':'workspace_scan_error','path':str(target),'detail':'[Errno 13] synthetic scan refusal'}]
+
+
+def test_malformed_configuration_reports_actual_path(case):
+    root,db,parent,state,_,_=legacy(case)
+    (case/'config/settings.json').write_text('{broken')
+    with pytest.raises(ro.RootOperationError,match='configuration_invalid: '+str(case/'config/settings.json')):
+        bootstrap.evidence(root,db,state,require_adoption=False)
+    health=inspect_storage(root,database=db)
+    assert health['issues'][0]['code']=='configuration_invalid'
+    assert health['issues'][0]['path']==str(case/'config/settings.json')

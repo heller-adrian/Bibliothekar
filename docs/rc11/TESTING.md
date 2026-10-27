@@ -27,3 +27,14 @@ Die NFSv4-XDR-Unittests prüfen bekannte und unbekannte ACL-Dokumente, Vererbung
 - Gemeinsame Workspace-ACL unverändert; kein neues aktives Workspace-Lock.
 - Isolierte Migration einer konsistenten Sicherung des blockierten RC10-Standes und vollständiger Webablauf.
 - Erst anschließend gesondert freigegebener produktiver Wiederaufnahmeversuch; kein Clean Slate.
+
+## Lokale Ergebnisse vom 27. Oktober 2026
+
+- Unveränderter RC10-Ausgangsstand: **151 bestanden**, 6 Warnungen, 138,40 s.
+- Erweiterte lokale Matrix `combined-2`: **325 bestanden**, 6 Warnungen, 874,77 s, macOS/Python 3.12.13. Während dieses Entwicklungsdurchlaufs wurden abschließende Absicherungen ergänzt; er ist deshalb kein Beleg für den endgültigen Commit als Ganzes.
+- Danach gezielt: vier Tests zu Versions-/Schemaidentität, fehlender Konfiguration, verlorenem Kontrollstate bei altem Lock und expliziter Bestandsübernahme bestanden.
+- Ein direkt gestarteter Entwicklungs-Testaufruf ohne PYTHONPATH scheiterte beim Import der Kindprozesse (`ModuleNotFoundError: app`). Dies war ein Aufruffehler; der dokumentierte Harness setzt den Modulpfad. Dieser Lauf wird nicht als Abnahme gewertet.
+
+Der Linuxlauf ist auf den exakten Commit festgelegt und wird nach Abschluss hier mit Ergebnis und Grenzen ergänzt.
+
+Für native Migrationstests einen **eigenen RC10-Teststart auf isolierten TrueNAS-Datasets** erzeugen und dessen tatsächliche Bindings erhalten. Eine Dateikopie oder ein Datasetklon einer produktiven Sicherung kann Geräte-/Inodeidentitäten ändern; eine solche Kopie ist nicht ohne Weiteres eine wiederaufnehmbare Installation. Die Tests dürfen ihre synthetische Fixture auf lokale Testidentitäten umsetzen. Dieses Vorgehen ist keine Erlaubnis, produktive Bindings manuell umzuschreiben.

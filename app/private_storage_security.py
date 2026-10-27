@@ -1,6 +1,6 @@
 """Private control authority. Never repair ACLs or synthesize a native ACL.
 
-Trust: root, app UID and the configured private mount owner; admin groups 0/544.
+Trust: root and app UID; admin groups 0/544.
 An apps group is not the app UID. Allow entries granting mutation to anybody
 else are conservatively rejected (even behind a deny), including inheritance.
 TrueNAS native XDR definitions: truenas/nfs4xdr-acl-tools/include/nfs4.h.

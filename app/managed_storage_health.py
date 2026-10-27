@@ -292,6 +292,9 @@ def inspect_storage(workspace, *, database=None):
 
     except Exception as error:
         from app.private_storage_security import PrivateStorageError
+        from app.storage_config import StorageSettingsError, _config_path
+        if isinstance(error, StorageSettingsError):
+            return {'ready':False,'can_initialize':False,'can_setup_again':False,'existing_installation':True,'workspace':str(root),'folders':folders,'issues':[{'code':'configuration_invalid','path':str(_config_path()),'detail':str(error)}],'setup_blocker':'configuration_invalid'}
         if isinstance(error, PrivateStorageError):
             return {'ready':False,'can_initialize':False,'can_setup_again':False,'existing_installation':True,'workspace':str(root),'folders':folders,'issues':[error.issue()],'setup_blocker':error.code}
         return {'ready':False,'can_initialize':False,'existing_installation':True,'workspace':str(root),'folders':folders,'issues':[{'code':'evidence_unreadable','path':str(root),'detail':str(error)}]}

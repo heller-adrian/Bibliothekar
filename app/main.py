@@ -2279,9 +2279,7 @@ def startup_database() -> None:
     try:
         ensure_settings_file(CONFIG_PATH)
     except OSError as error:
-        # Keep startup diagnostics available (health reports unreadable config)
-        # without causing a second, unrelated database initialization error.
-        print("Unable to create initial application settings:", error, flush=True)
+        raise RootOperationError('bootstrap_configuration_not_prepared: '+str(CONFIG_PATH)+': '+str(error)) from error
 
     try:
         from app.managed_storage_health import catalog_has_history

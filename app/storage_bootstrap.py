@@ -67,6 +67,12 @@ def tree(root, names, *, legacy=None, allow_legacy=False):
     issues = []; observed_lock = None
     def issue(code, rel, detail): issues.append({'code': code, 'path': str(root/rel), 'detail': detail})
     def walk(fd, prefix=''):
+        try:
+            scan_directory(fd, prefix)
+        except OSError as error:
+            rel = prefix + str(error.filename) if error.filename and not Path(error.filename).is_absolute() else prefix
+            issue('workspace_scan_error', rel, str(error))
+    def scan_directory(fd, prefix):
         nonlocal observed_lock
         before = os.fstat(fd)
         for name in sorted(os.listdir(fd)):
@@ -174,7 +180,12 @@ def _history(root, database, registry, state):
     from app.storage_config import _config_path
     if _config_path().exists():
         with qualified(_config_path()) as (fd, check):
-            config = json.loads(os.read(fd, 1024*1024+1)); check()
+            try:
+                config = json.loads(os.read(fd, 1024*1024+1))
+                if not isinstance(config, dict): raise ValueError('JSON object required')
+            except (ValueError, UnicodeDecodeError) as error:
+                raise RootOperationError('configuration_invalid: '+str(_config_path())+': '+str(error)) from error
+            check()
         if config.get('libraries') or config.get('library') or (config.get('metadata_correction') or {}).get('general_root'):
             raise RootOperationError('configured_library_survives: '+str(_config_path()))
 
@@ -182,10 +193,13 @@ def _history(root, database, registry, state):
 def evidence(root, database, state, *, require_adoption=True):
     """Strict pending-bootstrap qualification; callers hold locks before writes."""
     from app.root_operations import _control_location, _read, _identity
-    from app.storage_config import load_storage_settings
+    from app.storage_config import load_storage_settings, StorageSettingsError, _config_path
     root, database = Path(root).absolute(), Path(database).absolute()
     registry = Path(os.environ.get('KAMERA_REGISTRY_DATABASE', str(database.parent/'bibliothekar-global.sqlite3'))).absolute()
-    parent = _control_location(root); names = load_storage_settings(workspace_root=root)
+    parent = _control_location(root)
+    try: names = load_storage_settings(workspace_root=root)
+    except StorageSettingsError as error:
+        raise RootOperationError('configuration_invalid: '+str(_config_path())+': '+str(error)) from error
     init = state.get('storage_initialization') or {}
     if state.get('workspace') != _identity(root): raise RootOperationError('workspace_identity_changed: '+str(root))
     if state.get('storage_names') != names or init.get('names') != names or init.get('database') != str(database):
@@ -209,6 +223,9 @@ def evidence(root, database, state, *, require_adoption=True):
     if operation is None:
         if state.get('format') != 2 or init.get('operation_key') != operation_key or not init.get('reservation_id'):
             raise RootOperationError('bootstrap_reservation_missing: '+str(operation_path))
+        nonce = init['reservation_id']
+        if not isinstance(nonce, str) or len(nonce) != 32 or any(c not in '0123456789abcdef' for c in nonce) or init.get('bootstrap_id') != nonce:
+            raise RootOperationError('bootstrap_reservation_mismatch: '+str(operation_path))
     else:
         if any(operation.get(k) != v for k, v in template.items()) or operation.get('format') != 1 or operation.get('workspace') != str(root) or operation.get('generation') != [state['generation'], 0]:
             raise RootOperationError('bootstrap_reservation_mismatch: '+str(operation_path))
@@ -370,6 +387,15 @@ def technical_postconditions(root, database, state):
     from app.database import available_migrations
     from app.library_registry import REGISTRY_SCHEMA_VERSION
     from app.root_operations import _identity
+    from app.storage_config import _config_path
+    config = _config_path()
+    if not config.is_file():
+        raise RootOperationError('bootstrap_configuration_not_prepared: '+str(config))
+    with qualified(config) as (fd, check):
+        data = os.read(fd, 1024*1024+1)
+        if len(data) > 1024*1024 or not isinstance(json.loads(data), dict):
+            raise RootOperationError('bootstrap_configuration_not_prepared: '+str(config))
+        check()
     init = state['storage_initialization']
     registry = Path(init['registry'])
     expected_catalogue = {version for version, _ in available_migrations()}
