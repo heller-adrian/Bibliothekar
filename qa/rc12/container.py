@@ -146,6 +146,6 @@ try:
     case('technical-dirs',technical=True)
     case('access-denied',denied=True)
     case('removable-runtime',foreign_owner=True,helper=True)
-    for boundary in ['reservation','folders','config','database','registry','recovery','private-lock','prepared','completion-receipt','completed','operation-archive','finished-receipt','operation-unlink','uncommitted-state']:
+    for boundary in ['instance-intent','claim-linked','claim-unlinked','instance-ready','reservation','folders','config','database','registry','recovery','private-lock','prepared','completion-receipt','completed','operation-archive','finished-receipt','operation-unlink','uncommitted-state']:
         case('crash-'+boundary,boundary=boundary)
 finally:save()

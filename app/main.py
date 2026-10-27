@@ -3130,6 +3130,11 @@ def api_replace_storage(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/settings/storage-paths", tags=["Einstellungen"])
 def api_get_storage_paths() -> dict[str, Any]:
+    status = api_storage_health()
+    if not status['ready']:
+        # Registry helpers open SQLite RW. Diagnostics must never recreate a
+        # missing registry before the historical installation is recovered.
+        raise HTTPException(status_code=409, detail={'code':'storage_not_ready','storage_health':status})
     return _storage_settings_state()
 
 

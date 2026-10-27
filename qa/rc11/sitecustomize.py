@@ -30,9 +30,16 @@ if boundary and is_web and not marker.exists():
             if value.get('storage_initialization',{}).get('phase')=='prepared':stop()
         return original_replace(src,dst,*a,**kw)
     if boundary=='uncommitted-state':os.replace=replace
+    original_link=os.link
+    def link(src,dst,*a,**kw):
+        result=original_link(src,dst,*a,**kw)
+        if boundary=='claim-linked' and str(dst)=='.bibliothekar-instance.json':stop()
+        return result
+    if boundary=='claim-linked':os.link=link
     original_unlink=os.unlink
     def unlink(path,*a,**kw):
         result=original_unlink(path,*a,**kw)
+        if boundary=='claim-unlinked' and str(path).split('/')[-1].startswith('.bibliothekar-claim-'):stop()
         if boundary=='operation-unlink' and str(path).split('/')[-1].startswith('operation-') and str(path).endswith('.json'):stop()
         return result
     if boundary=='operation-unlink':os.unlink=unlink
@@ -46,7 +53,9 @@ if boundary and is_web and not marker.exists():
         if filename=='root_operations.py' and name=='_lock' and boundary=='private-lock' and Path(frame.f_locals['path']).name=='trash-recovery.lock':stop()
         if filename=='root_operations.py' and name=='_write':
             path=Path(frame.f_locals['path']);value=frame.f_locals['value'];phase=value.get('storage_initialization',{}).get('phase')
-            if (boundary=='reservation' and path.name.startswith('operation-') and value.get('kind')=='startup'
+            if (boundary=='instance-intent' and path.name=='instance.json' and value.get('phase')=='initializing'
+                or boundary=='instance-ready' and path.name=='instance.json' and value.get('phase')=='ready'
+                or boundary=='reservation' and path.name.startswith('operation-') and value.get('kind')=='startup'
                 or boundary=='prepared' and path.name=='state.json' and phase=='prepared'
                 or boundary=='completed' and path.name=='state.json' and phase=='completed'
                 or boundary=='completion-receipt' and path.name.startswith('bootstrap-completed-')

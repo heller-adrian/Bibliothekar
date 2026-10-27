@@ -73,13 +73,14 @@ else:
         if case!='pending':
             assert m.api_storage_health()['ready'],m.api_storage_health()
             post('/api/libraries',{'display_name':'After recovery','work_root':'','archive_root':str(second)},201)
-    if case in ('missing-db','missing-state'):
-        path=m.DATABASE_FILE if case=='missing-db' else own/'state.json'
+    if case in ('missing-db','missing-state','missing-registry'):
+        path=m.REGISTRY_DATABASE_FILE if case=='missing-registry' else m.DATABASE_FILE if case=='missing-db' else own/'state.json'
         path.rename(path.with_name(path.name+'.saved'))
         health=m.api_storage_health();assert not health['ready'] and not health['can_initialize'],health
         assert health['issues'][0]['code']=='installation_history_missing',health
         assert client.get('/').status_code==200
         post('/api/settings/storage-recheck',{},409)
+        assert client.get('/api/settings/storage-paths').status_code==409
         assert not path.exists()
     if case=='second-instance':
         other=base/'second-appdata';other.mkdir()
