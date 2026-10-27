@@ -1,0 +1,179 @@
+name: Publish Bibliothekar RC12 prerelease
+on:
+  push:
+    branches: [release/v1.0.0-rc.12]
+    paths: [.github/workflows/publish-rc12.yml]
+permissions:
+  contents: write
+  packages: write
+  actions: read
+concurrency:
+  group: publish-bibliothekar-rc12
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'heller-adrian/Bibliothekar'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.12
+      TAG: v1.0.0-rc.12
+      ACCEPTED_SHA: 671d7e7eb96ff493ae51720bb2769eccd8f9048f
+      ACCEPTED_QA: '40552807697'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require successful exact-source QA and private repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          gh api "repos/$GITHUB_REPOSITORY" --jq '{full_name,private}' > release-assets/repository-privacy.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA" > release-assets/accepted-QA.json
+          python - <<'PYGATE'
+          import json,os,urllib.request,urllib.error
+          p=json.load(open('release-assets/repository-privacy.json'));assert p['private'] is True
+          q=json.load(open('release-assets/accepted-QA.json'))
+          assert q['conclusion']=='success' and q['status']=='completed' and q['head_sha']==os.environ['ACCEPTED_SHA']
+          assert q['path']=='.github/workflows/qa-rc12.yml'
+          for resource in ['git/ref/tags/','releases/tags/']:
+              url='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'+resource+os.environ['TAG']
+              req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              try:
+                  with urllib.request.urlopen(req): pass
+              except urllib.error.HTTPError as error:
+                  if error.code==404:continue
+                  raise
+              raise RuntimeError('Existing release/tag: refusing overwrite')
+          PYGATE
+          git diff --quiet "$ACCEPTED_SHA" "$GITHUB_SHA" -- app tests qa Dockerfile compose.example.yaml compose.removable.yaml compose.nas-source.yaml requirements.txt requirements-rc.constraints.txt
+          gh run download "$ACCEPTED_QA" --dir "$RUNNER_TEMP/rc12-accepted-evidence"
+          python - <<'PYQA'
+          import json,os,xml.etree.ElementTree as ET
+          from pathlib import Path
+          base=Path(os.environ['RUNNER_TEMP'])/'rc12-accepted-evidence';counts={}
+          for group in ['baseline','bootstrap','retention','history','rc12']:
+              root=base/('rc12-regression-'+group)
+              assert json.loads((root/'exit.json').read_text())['returncode']==0
+              cases=ET.parse(root/'result.xml').findall('.//testcase')
+              assert cases and all(c.find('failure') is None and c.find('error') is None and c.find('skipped') is None for c in cases)
+              counts[group]=len(cases)
+          assert counts=={'baseline':151,'bootstrap':57,'retention':52,'history':71,'rc12':71},counts
+          for prefix,expected in [('rc12',25),('rc11',19)]:
+              report=json.loads((base/'rc12-container-acceptance'/(prefix+'-evidence.json')).read_text())
+              assert report['source']==os.environ['ACCEPTED_SHA'] and len(report['cases'])==expected
+              assert all(c['status']=='PASS' and all(c[k] for k in ['first_library_created','following_mutation','restarted','archives_unchanged']) for c in report['cases'])
+              if prefix=='rc12':assert all(c['repair_restored'] and c['repair_replaced'] for c in report['cases'])
+              assert report['native_truenas_acl']['status']=='NOT_RUN'
+              Path('release-assets/'+prefix+'-container-QA.json').write_text(json.dumps(report,indent=2)+'\n')
+          Path('release-assets/regression-summary.json').write_text(json.dumps(counts,indent=2)+'\n')
+          print('Accepted regressions:',sum(counts.values()),counts,'container cases:',25+19)
+          PYQA
+          git checkout --detach "$ACCEPTED_SHA"
+          git rev-parse HEAD HEAD^{tree} > release-assets/source-identity.txt
+          tar -czf release-assets/accepted-QA-evidence.tar.gz -C "$RUNNER_TEMP/rc12-accepted-evidence" .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse an existing image tag or an unknown registry error
+        shell: bash
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "$IMAGE" > "$RUNNER_TEMP/existing-rc12.out" 2> "$RUNNER_TEMP/existing-rc12.err"; then
+            echo 'Existing GHCR RC12 image; refusing overwrite.' >&2
+            exit 1
+          fi
+          if ! grep -Eiq 'not found|manifest unknown' "$RUNNER_TEMP/existing-rc12.err"; then
+            cat "$RUNNER_TEMP/existing-rc12.err" >&2
+            exit 1
+          fi
+      - name: Build accepted source and verify complete application payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$ACCEPTED_SHA" -t "$IMAGE" .
+          docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__;assert __version__=="1.0.0-rc.12"'
+          python - <<'PY'
+          import os,json,hashlib,subprocess
+          from pathlib import Path
+          source={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('app').rglob('*') if p.is_file()}
+          program='from pathlib import Path;import hashlib,json;r=Path("/opt/kamera");print(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file()}))'
+          image=json.loads(subprocess.check_output(['docker','run','--rm','--entrypoint','python',os.environ['IMAGE'],'-c',program],text=True))
+          assert source==image
+          Path('release-assets/app-sha256.json').write_text(json.dumps(source,sort_keys=True,indent=2)+'\n')
+          PY
+          docker image inspect "$IMAGE" --format '{{.Id}}' > "$RUNNER_TEMP/rc12-local-image-id"
+      - name: Push and retrieve immutable image from registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE" | tee release-assets/push.log
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' release-assets/push.log | tail -1)"
+          test "${#DIGEST}" -eq 71
+          REF="ghcr.io/heller-adrian/bibliothekar@$DIGEST"
+          docker image rm "$IMAGE"
+          docker pull "$REF" | tee release-assets/registry-pull.log
+          test "$(cat "$RUNNER_TEMP/rc12-local-image-id")" = "$(docker image inspect "$REF" --format '{{.Id}}')"
+          test "$(docker image inspect "$REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ACCEPTED_SHA"
+          docker run --rm --entrypoint python "$REF" -c 'from app import __version__;assert __version__=="1.0.0-rc.12"'
+          printf '%s\n' "$REF" > release-assets/IMAGE-DIGEST.txt
+          docker buildx imagetools inspect "$REF" --raw > release-assets/registry-manifest.json
+          test "$(sha256sum release-assets/registry-manifest.json | cut -d' ' -f1)" = "${DIGEST#sha256:}"
+          docker image inspect "$REF" --format '{{json .RepoDigests}}' > release-assets/registry-repodigests.json
+      - name: Package source, practical manuals, digest-pinned Compose and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="$(cat release-assets/IMAGE-DIGEST.txt)"
+          cp compose.example.yaml release-assets/compose.rc12.yaml
+          cp compose.removable.yaml compose.nas-source.yaml release-assets/
+          cp docs/rc12/compose.legacy.yaml release-assets/compose.legacy.yaml
+          sed -i "s|ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.12|$REF|" release-assets/compose.rc12.yaml release-assets/compose.legacy.yaml
+          cp docs/rc12/TRUENAS-TEST.md docs/rc12/ARCHITECTURE.md docs/rc12/RELEASE-NOTES.md release-assets/
+          cp Dockerfile requirements.txt requirements-rc.constraints.txt release-assets/
+          git diff --name-only v1.0.0-rc.11 "$ACCEPTED_SHA" > release-assets/CHANGED-FILES.txt
+          git archive --format=tar --prefix=bibliothekar-1.0.0-rc.12/ "$ACCEPTED_SHA" | gzip -n > release-assets/bibliothekar-1.0.0-rc.12-source.tar.gz
+          printf '\nAccepted source: %s\nImage: %s\nQA: https://github.com/%s/actions/runs/%s\n\nTrueNAS guide: https://github.com/%s/blob/%s/docs/rc12/TRUENAS-TEST.md\n' "$ACCEPTED_SHA" "$REF" "$GITHUB_REPOSITORY" "$ACCEPTED_QA" "$GITHUB_REPOSITORY" "$TAG" >> release-assets/RELEASE-NOTES.md
+          python - <<'PYREPORT'
+          import os,json
+          from pathlib import Path
+          counts=json.loads(Path('release-assets/regression-summary.json').read_text())
+          text='# RC12 Testbericht\n\n'+str(sum(counts.values()))+' Linux-Regressionstests bestanden: '+json.dumps(counts)+'. Alle Regressionen wurden am veröffentlichten App-/Teststand vollständig neu ausgeführt.\n\n44 Containerfälle bestanden: 25 neues RC12-Profil, 19 Legacy-/RC10-Migrationsfälle. Original-Supervisor, Web-UID/GID568, echte RW-/RO-Bind-Mounts, reale Linux-POSIX-ACL-Vererbung mit Eigentümer3000 und benanntem Benutzer568, tatsächliche Zugriffsverweigerung und administrative Freigabe, Login/CSRF, erste Bibliothek, Neustart, ursprüngliche Ordnerwiederherstellung, bestätigter Ersatz, Folgeoperation, 20 RC12-SIGKILL-Grenzen und 14 Legacy-Bootstrapgrenzen plus Migrationscrashes. RO-Archive unverändert. Privater optionaler Wechselmedien-Runtime-Mount auf echtem Linux-Kernel geprüft; physische SD-/USB-Geräte nicht geprüft.\n\nNative TrueNAS/OpenZFS/NFSv4: NICHT AUSGEFÜHRT. POSIX-ACLs und synthetische ACL-Bytes sind kein nativer TrueNAS-Nachweis. Hostverwaltetes Profil vertraut berechtigten NAS-Writern und behauptet keine Manipulationssicherheit gegen sie. Produktives NAS unverändert.\n\nQuellstand: '+os.environ['ACCEPTED_SHA']+'\nQA: https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['ACCEPTED_QA']+'\n'
+          Path('release-assets/TEST-REPORT.md').write_text(text)
+          PYREPORT
+          (cd release-assets && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Create prerelease and verify tag, assets and unchanged privacy
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --target "$ACCEPTED_SHA" --title "$TAG" --prerelease --latest=false --notes-file release-assets/RELEASE-NOTES.md release-assets/*
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/rc12-release-verified.json"
+          python - <<'PY'
+          import json
+          r=json.load(open(__import__('os').environ['RUNNER_TEMP']+'/rc12-release-verified.json'))
+          assert r['prerelease'] and not r['draft'] and r['tag_name']=='v1.0.0-rc.12'
+          assert {'SHA256SUMS','IMAGE-DIGEST.txt','compose.rc12.yaml','TRUENAS-TEST.md','bibliothekar-1.0.0-rc.12-source.tar.gz'}<={a['name'] for a in r['assets']}
+          print(r['html_url'])
+          PY
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)" = "$ACCEPTED_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
+          mkdir "$RUNNER_TEMP/rc12-release-downloaded"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/rc12-release-downloaded"
+          (cd "$RUNNER_TEMP/rc12-release-downloaded" && sha256sum --check SHA256SUMS)
+          cat release-assets/IMAGE-DIGEST.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain publication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc12-publication-evidence
+          retention-days: 30
+          path: release-assets/
