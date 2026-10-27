@@ -52,7 +52,7 @@ def client(port):
 
 def case(label,boundary='',foreign_owner=False,denied=False,helper=False,technical=False):
     base=root/label;base.mkdir()
-    for name in ('appdata','workspace','archive','archive-second','evidence'):(base/name).mkdir()
+    for name in ('appdata','workspace','archive','archive-second','evidence','other-appdata'):(base/name).mkdir()
     (base/'archive/original.JPG').write_bytes(b'RC12 read-only photo')
     before=hashlib.sha256((base/'archive/original.JPG').read_bytes()).hexdigest()
     (base/'workspace/.DS_Store').write_bytes(b'Finder metadata')
@@ -88,7 +88,7 @@ def case(label,boundary='',foreign_owner=False,denied=False,helper=False,technic
         api=client(18318)
         if denied:
             h=api('/api/settings/storage-health');assert not h['ready'] and not h['can_initialize'],h
-            assert not (base/'appdata/database/kamera.sqlite3').exists()
+            command('sudo','test','!','-e',str(base/'appdata/database/kamera.sqlite3'))
             assert not (base/'workspace/Trash').exists()
             assert 'Storage recovery' in api('/',raw=True)
             # Explicit test administrator restores actual access, never application chmod/chown.
@@ -109,12 +109,12 @@ def case(label,boundary='',foreign_owner=False,denied=False,helper=False,technic
         docker('restart',name);api=client(18318)
         assert api('/api/settings/storage-health')['ready'] and len(api('/api/libraries')['libraries'])==1
         # Actual storage fault -> authenticated repair UI -> both recovery paths.
-        trash=base/'workspace/Trash';trash.rename(base/'workspace/trash-original')
+        docker('exec','--user','568:568',name,'mv','/workspace/Trash','/workspace/trash-original')
         h=api('/api/settings/storage-health');assert h['state']=='DEGRADED' and not h['ready'],h
         page=api('/',raw=True);assert 'storage-replace' in page and 'Expected folder identity' in page
-        (base/'workspace/trash-original').rename(trash);api('/api/settings/storage-recheck',{})
+        docker('exec','--user','568:568',name,'mv','/workspace/trash-original','/workspace/Trash');api('/api/settings/storage-recheck',{})
         assert api('/api/settings/storage-health')['ready']
-        trash.rename(base/'workspace/trash-lost')
+        docker('exec','--user','568:568',name,'mv','/workspace/Trash','/workspace/trash-lost')
         api('/api/settings/storage-replace',{'key':'trash_directory_name','confirmation':'WRONG'},expect=409)
         replaced=api('/api/settings/storage-replace',{'key':'trash_directory_name','confirmation':'I ACCEPT MISSING FILES'})
         assert replaced['loss_recorded'] and not replaced['restart_required'],replaced
@@ -127,7 +127,7 @@ def case(label,boundary='',foreign_owner=False,denied=False,helper=False,technic
             assert write.returncode!=0,write
             result['kernel_removable_mount']=actual.strip()
         # Another appdata instance with same workspace must refuse ownership.
-        other=base/'other-appdata';other.mkdir();command('sudo','chown','568:568',str(other))
+        other=base/'other-appdata'
         conflict=docker('run','--rm','--user','568:568','-e','KAMERA_APPDATA=/appdata','-e','KAMERA_WORKSPACE=/workspace',
                         '-v',str(other)+':/appdata','-v',str(base/'workspace')+':/workspace','--entrypoint','python',image,
                         '-c',"from app.appdata import prepare;prepare();from app.managed_storage_health import inspect_storage;r=inspect_storage('/workspace',database='/appdata/database/kamera.sqlite3');assert not r['ready'] and any(i['code']=='workspace_claim_conflict' for i in r['issues']),r")

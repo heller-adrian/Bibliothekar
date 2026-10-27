@@ -73,6 +73,11 @@ else:
         if case!='pending':
             assert m.api_storage_health()['ready'],m.api_storage_health()
             post('/api/libraries',{'display_name':'After recovery','work_root':'','archive_root':str(second)},201)
+    if case=='pending-ready':
+        ro._write(own/'operation-unrecognized.json',{'preserve':'unresolved'})
+        health=m.api_storage_health();assert not health['ready'] and not health['can_initialize'],health
+        post('/api/settings/storage-recheck',{},409)
+        assert (own/'operation-unrecognized.json').exists()
     if case in ('missing-db','missing-state','missing-registry'):
         path=m.REGISTRY_DATABASE_FILE if case=='missing-registry' else m.DATABASE_FILE if case=='missing-db' else own/'state.json'
         path.rename(path.with_name(path.name+'.saved'))

@@ -186,3 +186,33 @@ def finish(workspace):
     manifest = verify(workspace)
     if manifest:
         manifest['phase'] = 'ready'; _write(base/'instance.json',manifest)
+
+
+def pending_operations(workspace, *, all_records=False):
+    """Malformed evidence always blocks; startup also fences unrecovered intents.
+
+    A valid *live* reservation may coexist with ordinary requests. Before worker
+    release, no other process is allowed to leave an unresolved durable intent.
+    """
+    if root() is None: return []
+    from app.root_operations import _read,_control_location
+    from app.storage_bootstrap import key_for
+    parent = _control_location(workspace); state = _read(parent/'state.json',{})
+    issues = []
+    for path in parent.glob('operation-*.json'):
+        record = _read(path,{})
+        try:
+            valid = (record.get('format') == 1 and record.get('workspace') == str(workspace)
+                     and isinstance(record['ids'],dict) and isinstance(record['kind'],str)
+                     and isinstance(record['library'],str)
+                     and path.name == 'operation-'+key_for(record)+'.json'
+                     and record['generation'] == [state['generation'],state.get('libraries',{}).get(record['library'],0)]
+                     and isinstance(record['bindings'],dict)
+                     and len(record['reservation_id']) == 32
+                     and all(c in '0123456789abcdef' for c in record['reservation_id'])
+                     and all(identity is None or state.get('bindings',{}).get(p)==identity for p,identity in record['bindings'].items()))
+        except (KeyError,TypeError,ValueError): valid = False
+        if not valid or all_records:
+            issues.append({'code':'unresolved_reservation','path':str(path),
+                           'detail':'Unrecognized or unrecovered operation; preserve evidence and restore its original roots before retrying.'})
+    return issues

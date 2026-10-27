@@ -2258,6 +2258,10 @@ def _coordinate_startup(fn):
                     complete(WORKSPACE_PATH, startup_reservation)
             from app.appdata import finish as finish_appdata
             finish_appdata(WORKSPACE_PATH)
+            from app.appdata import pending_operations
+            remaining = pending_operations(WORKSPACE_PATH,all_records=True)
+            if remaining:
+                raise RootOperationError('unresolved_reservation: '+remaining[0]['path']+': '+remaining[0]['detail'])
             DATABASE_INITIALIZATION_ERROR = None
             _start_runtime_workers()
             return result

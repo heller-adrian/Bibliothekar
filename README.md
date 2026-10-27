@@ -1,6 +1,6 @@
 # Bibliothekar
 
-> Release Candidate in Vorbereitung: **1.0.0-rc.12** – Ein-Mount-Appdaten und überarbeitete Speicherzustände. [RC12-Installation und Abnahme](docs/rc12/TRUENAS-TEST.md). Der stabile Update-Kanal bleibt unverändert.
+> Release Candidate **1.0.0-rc.12** – Ein-Mount-Appdaten und überarbeitete Speicherzustände. [RC12-Installation und Abnahme](docs/rc12/TRUENAS-TEST.md). Der stabile Update-Kanal bleibt unverändert.
 > Der veröffentlichte Ausgangspunkt dieser Entwicklung ist RC10 (`c8e078ee`). Historische RC7-Unterlagen: [Installationsanleitung](docs/rc7/INSTALL-TRUENAS.md) und [manuelle Abnahme](docs/rc7/MANUAL-ACCEPTANCE.md).
 > Die folgenden älteren Entwicklungsabschnitte sind historisch; für diesen RC gelten die oben verlinkten festen englischen Verwaltungsnamen und Mountregeln.
 

@@ -319,6 +319,11 @@ def inspect_storage(workspace, *, database=None):
                 for operation in _control_location(workspace).glob('operation-*.json'):
                     result['issues'].append({'code':'unresolved_reservation','path':str(operation),
                         'detail':'Restore original roots and reconcile this operation before accepting a replacement.'})
+            from app.appdata import pending_operations
+            invalid_operations = pending_operations(Path(workspace).absolute())
+            if invalid_operations:
+                result['issues'].extend(invalid_operations)
+                result.update(ready=False,can_initialize=False)
             result['can_setup_again'] = False
             result['security_model'] = 'host_managed'
             result['warnings'] = [{'code':'host_acl_is_administrative_trust','path':str(appdata_root()),
