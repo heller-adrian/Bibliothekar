@@ -763,7 +763,7 @@ def _require_coordinated_topology(root, databases):
 
 
 @contextmanager
-def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, rollback_check=None, expected_generation=None, precondition=None, details=None):
+def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, rollback_check=None, expected_generation=None, precondition=None, details=None, wait_seconds=0):
     from app.managed_storage_health import require_pinned_storage
     require_pinned_storage(workspace)
     root,parent=_control(workspace)
@@ -778,7 +778,7 @@ def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, roll
         return
     databases = tuple(databases)
     _require_coordinated_topology(root,databases)
-    with _lock(parent/'workspace.lock',exclusive=library is None), _lock(parent/'shared.lock',exclusive=True):
+    with _lock(parent/'workspace.lock',exclusive=library is None,wait_seconds=wait_seconds), _lock(parent/'shared.lock',exclusive=True,wait_seconds=wait_seconds):
         @contextmanager
         def library_lock():
             if library is None:

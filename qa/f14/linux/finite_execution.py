@@ -13,10 +13,14 @@ def pytest_sessionstart(session):
 @pytest.hookimpl(hookwrapper=True,tryfirst=True)
 def pytest_runtest_protocol(item,nextitem):
     start=len(children)
+    # This integration case runs three separate real app lifecycles. Each
+    # lifecycle already has a 45-second subprocess deadline, plus three
+    # 15-second probes. The old 90-second aggregate bound was contradictory.
+    deadline = 240 if item.nodeid.endswith('test_f14_true_sigkill_preserves_reservation_and_blocks_changes[reserve]') else 90
     def alarm(*args):
         timeouts.append(item.nodeid)
-        raise AuditTestTimeout('Isolated test exceeded 90 seconds: '+item.nodeid)
-    previous=signal.signal(signal.SIGALRM,alarm);signal.alarm(90)
+        raise AuditTestTimeout(f'Isolated test exceeded {deadline} seconds: '+item.nodeid)
+    previous=signal.signal(signal.SIGALRM,alarm);signal.alarm(deadline)
     try:yield
     finally:
         signal.alarm(0);signal.signal(signal.SIGALRM,previous)
@@ -27,4 +31,4 @@ def pytest_runtest_protocol(item,nextitem):
                     else:p.kill()
                     p.wait(timeout=5)
             except (ProcessLookupError,AttributeError):pass
-        (Path(os.environ['AUDIT_OUTPUT'])/'execution-deadlines.json').write_text(json.dumps({'per_test_seconds':90,'timeouts':timeouts,'cleanup':'Tracked child processes remaining at test end are stopped; sessions killed as groups'},indent=2))
+        (Path(os.environ['AUDIT_OUTPUT'])/'execution-deadlines.json').write_text(json.dumps({'per_test_seconds':90,'three_lifecycle_reserve_seconds':240,'timeouts':timeouts,'cleanup':'Tracked child processes remaining at test end are stopped; sessions killed as groups'},indent=2))

@@ -319,3 +319,25 @@ def test_malformed_configuration_reports_actual_path(case):
     health=inspect_storage(root,database=db)
     assert health['issues'][0]['code']=='configuration_invalid'
     assert health['issues'][0]['path']==str(case/'config/settings.json')
+
+
+def test_mutation_waits_for_idle_admission_and_rechecks_generation(case):
+    import threading
+    root=case/'workspace';held=threading.Event();release=threading.Event();finished=threading.Event();errors=[]
+    _,parent=ro._control(root)
+    def reader():
+        try:
+            with ro._lock(parent/'workspace.lock'):
+                held.set();assert release.wait(5)
+        except BaseException as error:errors.append(error)
+    reader_thread=threading.Thread(target=reader);reader_thread.start();assert held.wait(3)
+    def writer():
+        try:
+            with ro.mutate(root,wait_seconds=2):finished.set()
+        except BaseException as error:errors.append(error)
+    writer_thread=threading.Thread(target=writer);writer_thread.start()
+    time.sleep(.1);assert not finished.is_set()
+    release.set();reader_thread.join(5);writer_thread.join(5)
+    assert finished.is_set() and not errors
+    with pytest.raises(ro.RootOperationError,match='generation|generation|Generation'):
+        with ro.mutate(root,expected_generation=(0,0),wait_seconds=1):pass

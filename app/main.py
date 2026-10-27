@@ -3838,7 +3838,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     known = list_libraries(REGISTRY_DATABASE_FILE,active_only=False,registered_only=False)
     databases = list(dict.fromkeys([Path(row['database_path']) for row in known]+([DATABASE_FILE] if DATABASE_FILE.is_file() else [])))
     try:
-        with mutate(WORKSPACE_PATH,databases=databases,expected_generation=expected_generation,
+        with mutate(WORKSPACE_PATH,databases=databases,expected_generation=expected_generation,wait_seconds=5,
                     details={'operation':'create_library','library_id':library_id,'registry_before':known,
                              'requested_work':checked['work_root'],'requested_archive':checked['archive_root']}):
             try:

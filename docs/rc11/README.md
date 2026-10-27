@@ -4,6 +4,8 @@ RC11 behebt den bestätigten RC10-Erststartfehler: Das technische Trash-Lock wir
 
 Dokumente:
 
+- [Praktische TrueNAS-Testanleitung: Neuinstallation und blockierter RC10-Erststart](TRUENAS-TEST.md)
+
 - [Neue TrueNAS-Installation](INSTALL-TRUENAS.md)
 - [RC10 sicher übernehmen](UPGRADE-RC10.md)
 - [Sicherheitsmodell und ACL-Voraussetzungen](SECURITY.md)
