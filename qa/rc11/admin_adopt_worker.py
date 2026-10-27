@@ -6,6 +6,7 @@ import signal
 import sys
 
 assert os.environ.get('RC11_QA_SYNTHETIC')=='true'
+assert os.getpid()!=1,'Run the QA CLI as a child of the original tini entrypoint, not namespace PID1'
 from app import root_operations as ro
 from app import storage_admin
 original_write=ro._write
