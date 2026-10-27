@@ -65,7 +65,8 @@ def replacement_candidates(status):
         return []
     severe={'workspace_unavailable','workspace_identity_changed','configuration_changed',
             'registry_unavailable','catalog_unavailable','evidence_unreadable',
-            'initialization_pending','unresolved_reservation'}
+            'initialization_pending','unresolved_reservation','mount_identity_changed',
+            'installation_history_missing','appdata_identity_changed','workspace_claim_conflict'}
     if any(issue['code'] in severe for issue in status.get('issues', ())):
         return []
     return [
@@ -110,6 +111,11 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
         if any(issue['code'] not in {'missing','identity_changed'}
                or issue['path'] not in allowed_paths for issue in status['issues']):
             raise RootOperationError('replacement_other_evidence_unavailable')
+        # A mount disappearance must never turn into mkdir on its parent FS.
+        from app.appdata import mount
+        for path, expected_mount in state.get('mounts',{}).items():
+            if mount(path) != expected_mount:
+                raise RootOperationError('replacement_mount_unavailable: '+path)
         previous=matching[0]['expected_identity']
         if previous != state.get('bindings',{}).get(str(target)):
             raise RootOperationError('replacement_binding_changed')

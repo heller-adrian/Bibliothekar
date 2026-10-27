@@ -1,0 +1,9 @@
+# Optional physical USB/SD access, same container mount namespace as web.
+# Base installation requires no privileged helper or removable host mount.
+services:
+  bibliothekar:
+    privileged: true
+    environment:
+      KAMERA_SOURCE_HELPER_ENABLED: "true"
+    volumes:
+      - /run/udev:/run/udev:ro

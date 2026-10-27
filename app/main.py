@@ -2215,6 +2215,8 @@ def _coordinate_startup(fn):
     def coordinated():
         global DATABASE_INITIALIZATION_ERROR, _STORAGE_STARTUP_PAUSED
         try:
+            from app.appdata import prepare as prepare_appdata
+            prepare_appdata()
             from app.managed_storage_health import require_storage
             try:
                 preflight=require_storage(WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
@@ -2224,6 +2226,8 @@ def _coordinate_startup(fn):
                 _STORAGE_STARTUP_PAUSED = True
                 raise
             _STORAGE_STARTUP_PAUSED = False
+            from app.appdata import claim
+            claim(WORKSPACE_PATH)
             from app.storage_bootstrap import prepare_control
             prepare_control(WORKSPACE_PATH, DATABASE_FILE)
             # Migration/version fence may have published an audited transition.
@@ -2252,9 +2256,13 @@ def _coordinate_startup(fn):
                 if preflight['can_initialize']:
                     from app.storage_bootstrap import complete
                     complete(WORKSPACE_PATH, startup_reservation)
+            from app.appdata import finish as finish_appdata
+            finish_appdata(WORKSPACE_PATH)
+            DATABASE_INITIALIZATION_ERROR = None
             _start_runtime_workers()
             return result
-        except RootOperationError as error:
+        except (RootOperationError, OSError, ValueError) as error:
+            _STORAGE_STARTUP_PAUSED = True
             DATABASE_INITIALIZATION_ERROR = "Startup: " + str(error)
             print(DATABASE_INITIALIZATION_ERROR, flush=True)
     return coordinated
@@ -3057,6 +3065,10 @@ def api_storage_health() -> dict[str, Any]:
 def api_recheck_storage() -> dict[str, Any]:
     """Explicitly retry startup only when storage preflight stopped it entirely."""
     with _STORAGE_RECHECK_LOCK:
+        from app.appdata import prepare as prepare_appdata
+        try: prepare_appdata()
+        except (OSError,RootOperationError) as error:
+            raise HTTPException(status_code=409,detail=str(error)) from error
         from app.managed_storage_health import inspect_storage
         # A previous startup error remains diagnostic, but cannot conceal that
         # the administrator has now restored the original storage bindings.

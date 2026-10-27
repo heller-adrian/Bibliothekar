@@ -99,6 +99,16 @@ def attributes(fd):
 
 def check_acl(fd, users, *, path='<descriptor>', sticky=False, existing_ancestor=False, reader=None):
     info = os.fstat(fd)
+    from app.appdata import managed, root as appdata_root
+    if managed(path):
+        # Explicit RC12 host-managed contract. Kernel access, descriptor binding,
+        # file type and link count remain enforced; ACL exclusivity is NOT
+        # claimed. Additional host principals are trusted dataset operators.
+        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)) or (stat.S_ISREG(info.st_mode) and info.st_nlink != 1):
+            raise PrivateStorageError('control_file_invalid', path, 'directory or singly linked regular file required')
+        if Path(os.path.abspath(path)).is_relative_to(appdata_root()) and os.fstatvfs(fd).f_flag & os.ST_RDONLY:
+            raise PrivateStorageError('storage_read_only', path, 'mount is read-only')
+        return {'identity':[info.st_dev,info.st_ino], 'acl_sha256':None, 'security_model':'host_managed'}
     if info.st_uid not in users:
         raise PrivateStorageError('private_owner_untrusted', path, f'uid={info.st_uid}; expected one of {sorted(users)}')
     try:

@@ -50,7 +50,7 @@ def _operation_lock(workspace: Path, *, blocking: bool = True):
                     assert_no_orphan_legacy_lock(workspace)
                     state = {'format':2,'workspace':_identity(workspace),'generation':0,'libraries':{},'bindings':{str(Path(workspace).absolute()):_identity(workspace)}}
                     _write(control/'state.json',state)
-        if state.get('format') != 2:
+        if state.get('format') not in (2, 3):
             raise TrashError('control_migration_required: '+str(control)+': offline RC11 migration required before private trash lock')
         path = control / 'trash-recovery.lock'
         held = getattr(_HELD_LOCKS, "paths", set())

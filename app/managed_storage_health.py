@@ -24,8 +24,6 @@ def catalog_has_history(database):
     if path.is_symlink() or not path.is_file():raise ValueError('invalid catalogue')
     from app.private_storage_security import qualify_existing
     qualify_existing(path)
-    from app.private_storage_security import qualify_existing
-    qualify_existing(path)
     if path.stat().st_size==0:return False
     with closing(sqlite3.connect(path.absolute().as_uri()+'?mode=ro',uri=True)) as c:
         tables=[row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")]
@@ -103,7 +101,7 @@ def _empty_initial_tree(root, names):
     return _initial_tree(root, names)['empty']
 
 
-def inspect_storage(workspace, *, database=None):
+def _inspect_storage(workspace, *, database=None):
     from app.root_operations import _control_location,_read
     root=Path(os.path.abspath(workspace));issues=[];folders=[]
     try:
@@ -259,7 +257,7 @@ def inspect_storage(workspace, *, database=None):
                 code = pieces[0] if pieces[0].replace('_','').isalnum() else 'bootstrap_evidence_unreadable'
                 path = pieces[1] if len(pieces)>1 and pieces[1].startswith('/') else str(root)
                 issues.append({'code':code,'path':path,'detail':pieces[2] if len(pieces)>2 else detail})
-        if state.get('format') == 2 and init.get('bootstrap_id') and init.get('phase') == 'completed':
+        if state.get('format') in (2, 3) and init.get('bootstrap_id') and init.get('phase') == 'completed':
             from app.storage_bootstrap import completed
             if not completed(root, state):
                 issues.append({'code':'bootstrap_completion_receipt_missing','path':str(_control_location(root))})
@@ -300,6 +298,38 @@ def inspect_storage(workspace, *, database=None):
         return {'ready':False,'can_initialize':False,'existing_installation':True,'workspace':str(root),'folders':folders,'issues':[{'code':'evidence_unreadable','path':str(root),'detail':str(error)}]}
 
 
+def inspect_storage(workspace, *, database=None):
+    from app.appdata import root as appdata_root, verify, mount
+    from app.storage_status import describe
+    from app.root_operations import _read, _control_location
+    try:
+        if appdata_root(): verify(workspace)
+        result = _inspect_storage(workspace,database=database)
+        if appdata_root():
+            state = _read(_control_location(workspace)/'state.json',{})
+            if state and state.get('format') != 3:
+                raise ValueError('legacy_layout_requires_explicit_migration: '+str(_control_location(workspace)))
+            for path, expected in state.get('mounts',{}).items():
+                actual = mount(path)
+                if actual != expected:
+                    result['issues'].append({'code':'mount_identity_changed','path':path,
+                                             'detail':f'expected={expected}; actual={actual}'})
+                    result.update(ready=False,can_initialize=False)
+            result['can_setup_again'] = False
+            result['security_model'] = 'host_managed'
+            result['warnings'] = [{'code':'host_acl_is_administrative_trust','path':str(appdata_root()),
+                'detail':'Dataset owners and ACL writers are trusted host operators; F14 is continuity evidence, not tamper-proof authentication.'}]
+        else: result['security_model'] = 'rc11_private_authority'
+        return describe(result)
+    except Exception as error:
+        text=str(error); pieces=text.split(': ',2)
+        code=pieces[0] if pieces[0].replace('_','').isalnum() else 'evidence_unreadable'
+        path=pieces[1] if len(pieces)>1 and pieces[1].startswith('/') else str(workspace)
+        return describe({'ready':False,'can_initialize':False,'can_setup_again':False,
+            'existing_installation':True,'workspace':str(workspace),'folders':[],
+            'issues':[{'code':code,'path':path,'detail':text}]})
+
+
 def require_storage(workspace, *, database=None, allow_new=False):
     from app.root_operations import RootOperationError
     result=inspect_storage(workspace,database=database)
@@ -336,7 +366,7 @@ def setup_again_evidence(workspace, *, database):
         if Path(database).absolute().parent!=parent.parent.parent:raise ValueError('database_binding_changed')
         boundary=parent if parent.exists() else parent.parent if parent.parent.exists() else Path(database).absolute().parent
         with trash_retention.qualified(boundary,users,directory=True) as (_,check):check()
-        if (state and (state.get('format') not in (1,2) or state.get('workspace')!=_identity(root))) or names!=ENGLISH_STORAGE_DEFAULTS:
+        if (state and (state.get('format') not in (1,2,3) or state.get('workspace')!=_identity(root))) or names!=ENGLISH_STORAGE_DEFAULTS:
             raise ValueError('workspace_or_legacy_binding')
         if state.get('libraries'):
             raise ValueError('library_or_stock_registry_history')

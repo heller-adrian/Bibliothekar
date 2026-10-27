@@ -42,6 +42,11 @@ def check_acl(fd, users, *, sticky=False, existing_ancestor=False):
 def qualified(path, users, *, directory=False):
     """Hold and qualify every ancestor, including the mount-visible namespace."""
     path = Path(os.path.abspath(path))
+    from app.appdata import managed
+    if managed(path):
+        from app.private_storage_security import qualified as common
+        with common(path,users,directory=directory) as value: yield value
+        return
     fds = [os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)]
     links = []
     try:
@@ -135,7 +140,8 @@ def retain(source, target, item, users, checkpoint):
                     out = None
                 if out is not None:
                     try:
-                        check_acl(out, users)
+                        from app.private_storage_security import check_acl as control_check_acl
+                        control_check_acl(out, users, path=target)
                         while block := os.read(src, 1024*1024):
                             view = memoryview(block)
                             while view:

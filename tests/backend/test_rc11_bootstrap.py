@@ -249,7 +249,7 @@ def test_synthetic_security_namespace_is_not_kernel_authority(case,monkeypatch):
 
 def test_completion_requires_actual_schemas_and_version_identity(case):
     from app import main, __version__
-    assert main.APP_VERSION==main.RELEASE_VERSION==main.DEPLOYMENT_VERSION==__version__=='1.0.0-rc.11'
+    assert main.APP_VERSION==main.RELEASE_VERSION==main.DEPLOYMENT_VERSION==__version__=='1.0.0-rc.12'
     root=case/'workspace';db=case/'database/kamera.sqlite3'
     for n in NAMES.values():(root/n).mkdir()
     (case/'config/settings.json').write_text('{}')

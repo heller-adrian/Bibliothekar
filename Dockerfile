@@ -5,7 +5,6 @@ ENV \
     PYTHONUNBUFFERED=1 \
     TZ=Europe/Berlin \
     KAMERA_SOURCE_HELPER_ENABLED=true \
-    KAMERA_REMOVABLE_MOUNT_ROOT=/sources/removable \
     KAMERA_DEVICE_NODE_ROOT=/dev/bibliothekar \
     KAMERA_WEB_UID=568 \
     KAMERA_WEB_GID=568
@@ -39,6 +38,7 @@ RUN pip install \
 COPY app /opt/kamera/app
 
 RUN mkdir -p \
+        /appdata \
         /config \
         /database \
         /logs \

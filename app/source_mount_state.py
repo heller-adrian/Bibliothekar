@@ -29,7 +29,21 @@ def protected_directory(path: Path) -> None:
         raise UnsafeMount('Helper directory must be an absolute, bounded path.')
     if os.geteuid() == int(os.environ.get('KAMERA_WEB_UID', '568')):
         raise UnsafeMount('Helper and web application must use different UIDs.')
-    parts = list(reversed((path, *path.parents)))
+    from app.appdata import root as appdata_root, mount
+    base = appdata_root()
+    runtime = base/'removable-sources' if base else None
+    if runtime and (path == runtime or path == runtime/'.bibliothekar-helper'):
+        info = runtime.lstat(); current = mount(runtime)
+        if current['target'] != str(runtime) or current['filesystem'] != 'tmpfs' or info.st_uid != 0 or info.st_mode & 0o022:
+            raise UnsafeMount('RC12 removable helper needs its root-owned private tmpfs mount')
+        from app.import_publication import _parent
+        with _parent(path/'.probe'):
+            pass  # no symlink in any component
+        # A mounted child cannot be unlinked/replaced by the web UID. This
+        # runtime filesystem has no inherited host NFSv4 ACLs.
+        parts = [runtime] if path == runtime else [runtime,path]
+    else:
+        parts = list(reversed((path, *path.parents)))
     for part in parts:
         info = part.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, os.geteuid()):

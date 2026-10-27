@@ -27,6 +27,14 @@ def storage_warning_html(status):
         'retention_survives': ('Retained recovery media must be preserved.', 'Aufbewahrte Wiederherstellungsmedien müssen erhalten bleiben.'),
         'startup_failed': ('Technical startup failed; the original cause follows.', 'Der technische Start ist fehlgeschlagen; die ursprüngliche Ursache folgt.'),
     }
+    explanations.update({
+        'workspace_claim_conflict':('This workspace belongs to another instance or its appdata was lost. Restore the matching appdata backup or select a separate empty workspace.','Dieser Workspace gehört zu einer anderen Instanz oder seine Appdaten gingen verloren. Stelle die zugehörige Appdatensicherung wieder her oder wähle einen getrennten leeren Workspace.'),
+        'installation_history_missing':('Database or control history is missing. Restore a consistent appdata backup; folder replacement cannot reconstruct a catalogue.','Datenbank oder Steuerhistorie fehlt. Stelle eine konsistente Appdatensicherung wieder her; ein Ersatzordner kann keinen Katalog rekonstruieren.'),
+        'mount_identity_changed':('The dataset mount changed or disappeared. Restore the expected mount; no replacement is created on the underlying filesystem.','Die Dataset-Einbindung fehlt oder hat sich geändert. Stelle die erwartete Einbindung wieder her; auf dem darunterliegenden Dateisystem wird kein Ersatz angelegt.'),
+        'workspace_identity_changed':('The workspace identity changed. Restore the original dataset; copying individual files into a new folder does not restore its identity.','Die Workspace-Identität hat sich geändert. Stelle das ursprüngliche Dataset wieder bereit; einzelne Dateien in einem neuen Ordner stellen dessen Identität nicht wieder her.'),
+        'legacy_layout_requires_explicit_migration':('Keep the existing RC10/RC11 mount layout and its review procedure. A new appdata profile does not automatically adopt old control data.','Behalte das bestehende RC10-/RC11-Mountlayout und dessen Übernahmeverfahren bei. Das neue Appdatenprofil übernimmt alte Steuerdaten nicht automatisch.'),
+        'private_path_unavailable':('The application cannot open this path with its actual credentials. Check the mount and effective access permissions.','Die Anwendung kann diesen Pfad mit ihren tatsächlichen Benutzerrechten nicht öffnen. Prüfe Einbindung und effektive Zugriffsrechte.'),
+    })
     rows = ''
     for item in status['issues']:
         code = str(item['code'])
@@ -34,6 +42,8 @@ def storage_warning_html(status):
         rows += '<li><code>'+escape(str(item['path']))+'</code> · <code>'+escape(code)+'</code>'
         if message: rows += '<p>'+_phrase(*message)+'</p>'
         if item.get('detail'): rows += '<p><code>'+escape(str(item['detail']))+'</code></p>'
+        expected = next((r.get('expected_identity') for r in status.get('folders',[]) if r['path']==item['path']),None)
+        if expected is not None: rows += '<p>'+_phrase('Expected folder identity: ','Erwartete Ordneridentität: ')+'<code>'+escape(str(expected))+'</code></p>'
         rows += '</li>'
     reasons={
         'workspace_not_empty':('Existing or unknown files must be preserved.',
@@ -77,6 +87,8 @@ def storage_warning_html(status):
                 _phrase('Only use this when the original folder and its files cannot be recovered. Existing media records are retained as loss evidence. Missing copies can be imported again.',
                         'Nur verwenden, wenn sich der ursprüngliche Ordner und seine Dateien nicht wiederherstellen lassen. Medienhistorie bleibt als Verlustnachweis erhalten. Fehlende Kopien können erneut importiert werden.')+
                 '</p><ul>'+buttons+'</ul>')
+    state = status.get('state','AMBIGUOUS')
+    state_text = _phrase('Storage state: ','Speicherzustand: ')+'<code>'+escape(state)+'</code>'
     token=status.get('setup_token') or ''
     assert not token or (len(token)==64 and all(c in '0123456789abcdef' for c in token))
     return '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -91,13 +103,13 @@ li{margin:12px 0}code{font-size:.88em}.languages{display:flex;justify-content:fl
 <h1 id="storage-title">'''+_phrase('Storage unavailable','Speicherordner nicht verfügbar')+'''</h1>
 <p>'''+_phrase('Storage or technical startup requires verification. File operations are paused to protect existing data.',
              'Speicher oder technischer Start benötigen eine Prüfung. Dateioperationen sind zum Schutz vorhandener Daten angehalten.')+'''</p>
-<ul>'''+rows+'''</ul>
+<p>'''+state_text+'''</p><ul>'''+rows+'''</ul>
 <p>'''+_phrase('Follow the cause shown above, then select Check again.',
              'Beachte die oben genannte Ursache und wähle anschließend Erneut prüfen.')+'''</p>
 '''+guidance+'''
 <button type="button" id="storage-retry">'''+_phrase('Check again','Erneut prüfen')+'''</button>'''+setup+'''
 <button type="button" id="storage-recovery-open">'''+_phrase('Repair options','Reparaturmöglichkeiten')+'''</button>
-<section id="storage-recovery-panel" hidden><h2>'''+_phrase('Repair existing storage','Vorhandenen Speicher reparieren')+'''</h2>
+<section id="storage-recovery-panel"><h2>'''+_phrase('Repair existing storage','Vorhandenen Speicher reparieren')+'''</h2>
 <p>'''+_phrase('Option 1: restore or rename the original folder and check again. No files or records are changed.',
              'Option 1: den ursprünglichen Ordner wiederherstellen oder umbenennen und erneut prüfen. Dateien und Nachweise bleiben unverändert.')+'''</p>
 '''+buttons+'''
@@ -121,9 +133,9 @@ li{margin:12px 0}code{font-size:.88em}.languages{display:flex;justify-content:fl
  function csrf(){const entry=document.cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('bibliothekar_csrf='));return entry?decodeURIComponent(entry.slice(entry.indexOf('=')+1)):''}
  async function post(path,payload){const headers={'Content-Type':'application/json'},token=csrf();if(token)headers['X-Bibliothekar-CSRF']=token;
    const response=await fetch(path,{method:'POST',headers,credentials:'same-origin',body:JSON.stringify(payload)});
-   let data={};try{data=await response.json()}catch(_){}if(!response.ok)throw new Error(String(data.detail||response.status));return data;
+   let data={};try{data=await response.json()}catch(_){}if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail||data));return data;
  }
- document.getElementById('storage-retry').addEventListener('click',async e=>{e.currentTarget.disabled=true;try{await post('/api/settings/storage-recheck',{});}catch(error){result.textContent=error.message}finally{location.reload()}});
+ document.getElementById('storage-retry').addEventListener('click',async e=>{e.currentTarget.disabled=true;try{await post('/api/settings/storage-recheck',{});location.reload()}catch(error){result.textContent=error.message;e.currentTarget.disabled=false}});
  const setup=document.getElementById('storage-initialize');
  if(setup)setup.addEventListener('click',async()=>{if(!confirm(lang()==='de'?'Geprüfte leere Installation neu einrichten?':'Initialize verified unused storage?'))return;
   setup.disabled=true;try{await post('/api/settings/storage-initialize',{confirmation:'SET UP AGAIN',token:'''+json.dumps(token)+'''});location.reload()}
@@ -139,7 +151,7 @@ li{margin:12px 0}code{font-size:.88em}.languages{display:flex;justify-content:fl
    try{const data=await post('/api/settings/storage-replace',{key:button.dataset.key,confirmation:'I ACCEPT MISSING FILES'});
       if(data.restart_required){result.textContent=lang()==='de'?'Ersatz angelegt und dokumentiert. Containerneustart erforderlich.':'Replacement recorded. Restart the container.'}
       else location.reload();
-   }catch(_){result.textContent=lang()==='de'?'Ersatz verweigert. Prüfe die weiteren Ordner und Vorgänge.':'Replacement refused. Check other folders and pending operations.';button.disabled=false}
+   }catch(error){result.textContent=error.message;button.disabled=false}
  });
 })();
 </script><script>'''+I18N_UI_JS+'''</script></body></html>'''

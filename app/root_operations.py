@@ -23,6 +23,7 @@ import tempfile
 import time
 import uuid
 
+from app.appdata import managed as host_managed, root as appdata_root
 from app.private_storage_security import RootOperationError, PrivateStorageError, qualified as private_qualified, check_acl as private_check_acl
 
 
@@ -220,7 +221,7 @@ def _read(path, default=None):
                     current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
                     if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino): continue
                 private_check_acl(fd, {0, os.geteuid()}, path=path)
-                if info.st_uid != os.geteuid():
+                if info.st_uid != os.geteuid() and not host_managed(path):
                     raise RootOperationError('Operationsnachweis besitzt keine sichere Eigentumsbindung: ' + str(path))
                 with os.fdopen(fd) as stream:
                     fd = None
@@ -281,7 +282,7 @@ def _control(root, *, allow_missing=False):
             check()
         with private_qualified(directory, directory=True) as (_, check): check()
         s = directory.stat(follow_symlinks=False)
-        if not stat.S_ISDIR(s.st_mode) or s.st_uid != os.geteuid() or s.st_mode & 0o077:
+        if not stat.S_ISDIR(s.st_mode) or (not host_managed(directory) and (s.st_uid != os.geteuid() or s.st_mode & 0o077)):
             raise RootOperationError('Interne Operationsnachweise sind nicht zugriffsgeschützt.')
     return root, parent
 
@@ -296,7 +297,7 @@ def _lock(path, exclusive=False, wait=False, wait_seconds=0):
                 check()
                 value = private_check_acl(fd, {0, os.geteuid()}, path=path)
                 current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
-                if value['identity'] != [current.st_dev, current.st_ino] or os.fstat(fd).st_uid != os.geteuid():
+                if value['identity'] != [current.st_dev, current.st_ino] or (os.fstat(fd).st_uid != os.geteuid() and not host_managed(path)):
                     raise RootOperationError('Ungültige interne Operationssperre: '+str(path))
             validate()
             deadline = time.monotonic() + wait_seconds
@@ -319,8 +320,10 @@ def _state(parent, root):
     if value is None:
         from app.storage_bootstrap import assert_no_orphan_legacy_lock
         assert_no_orphan_legacy_lock(root)
-        value = {'format': 2, 'workspace': _identity(root), 'generation': 0, 'libraries': {}, 'bindings': {}}
-    if value.get('format') not in (1, 2) or value.get('workspace') != _identity(root):
+        value = {'format': 3 if appdata_root() else 2, 'workspace': _identity(root), 'generation': 0, 'libraries': {}, 'bindings': {}}
+    if appdata_root() and value.get('format') != 3:
+        raise RootOperationError('legacy_layout_requires_explicit_migration: '+str(parent))
+    if value.get('format') not in (1, 2, 3) or value.get('workspace') != _identity(root):
         raise RootOperationError('Workspace-Identität hat sich außerhalb von Bibliothekar geändert.')
     return value
 
@@ -607,6 +610,14 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                 if (ids or {}).get('initialize_storage'):
                     from app.storage_bootstrap import begin
                     begin(state, record, key, names)
+            if state.get('format') == 3:
+                from app.appdata import mount
+                pinned = state.setdefault('mounts',{})
+                for path in bindings:
+                    current_mount = mount(path)
+                    if path in pinned and pinned[path] != current_mount:
+                        raise RootOperationError('mount_identity_changed: '+path)
+                    pinned[path] = current_mount
             _write(parent/'state.json',state)
             _write(parent/('operation-'+key+'.json'),record)
         record['_parent']=parent;record['_path']=parent/('operation-'+key+'.json')

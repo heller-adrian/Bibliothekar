@@ -13,6 +13,7 @@ import sqlite3
 import stat
 import uuid
 
+from app.appdata import root as appdata_root
 from app.private_storage_security import RootOperationError, qualified
 
 CONFIRMATION = 'ADOPT RC10 BOOTSTRAP'
@@ -78,6 +79,18 @@ def tree(root, names, *, legacy=None, allow_legacy=False):
         for name in sorted(os.listdir(fd)):
             rel = prefix+name
             info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            from app.appdata import root as appdata_root
+            claim_names = {'.bibliothekar-instance.json'}
+            if appdata_root():
+                instance_path = appdata_root()/'instance.json'
+                if instance_path.is_file():
+                    from app.root_operations import _read
+                    manifest = _read(instance_path,{})
+                    claim_names.add('.bibliothekar-claim-'+str(manifest.get('instance_id')))
+            if not prefix and name in claim_names and appdata_root():
+                from app.appdata import verify
+                verify(root)
+                continue
             if stat.S_ISDIR(info.st_mode) and rel in allowed:
                 child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
                 try:
@@ -221,7 +234,7 @@ def evidence(root, database, state, *, require_adoption=True):
     operation_path = parent/('operation-'+operation_key+'.json')
     operation = _read(operation_path, None)
     if operation is None:
-        if state.get('format') != 2 or init.get('operation_key') != operation_key or not init.get('reservation_id'):
+        if state.get('format') not in (2, 3) or init.get('operation_key') != operation_key or not init.get('reservation_id'):
             raise RootOperationError('bootstrap_reservation_missing: '+str(operation_path))
         nonce = init['reservation_id']
         if not isinstance(nonce, str) or len(nonce) != 32 or any(c not in '0123456789abcdef' for c in nonce) or init.get('bootstrap_id') != nonce:
@@ -340,7 +353,7 @@ def prepare_control(root, database):
         if not state:
             assert_no_orphan_legacy_lock(root)
             return
-        if state.get('format') == 2: return
+        if state.get('format') in (2, 3): return
         if state.get('format') != 1: raise RootOperationError('control_format_unsupported: '+str(parent))
         init = state.get('storage_initialization') or {}
         own = None; scan = None
@@ -376,7 +389,7 @@ def begin(state, record, operation_key, names):
     nonce = record['reservation_id']
     if previous.get('reservation_id') not in (None, nonce) or previous.get('bootstrap_id') not in (None, nonce):
         raise RootOperationError('bootstrap_reservation_mismatch: '+record['workspace'])
-    state['format'] = 2
+    state['format'] = 3 if appdata_root() else 2
     state['storage_initialization'] = {**previous, 'phase': previous.get('phase', 'initializing'),
         'names': names, 'database': record['database'], 'registry':os.environ.get('KAMERA_REGISTRY_DATABASE', str(Path(record['database']).parent/'bibliothekar-global.sqlite3')), 'reservation_id': nonce,
         'operation_key': operation_key, 'bootstrap_id': previous.get('bootstrap_id', nonce),
