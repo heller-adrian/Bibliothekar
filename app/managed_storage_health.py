@@ -315,6 +315,10 @@ def inspect_storage(workspace, *, database=None):
                     result['issues'].append({'code':'mount_identity_changed','path':path,
                                              'detail':f'expected={expected}; actual={actual}'})
                     result.update(ready=False,can_initialize=False)
+            if not result.get('can_initialize') and any(r.get('expected_identity') is not None and r['status'] != 'available' for r in result.get('folders',[])):
+                for operation in _control_location(workspace).glob('operation-*.json'):
+                    result['issues'].append({'code':'unresolved_reservation','path':str(operation),
+                        'detail':'Restore original roots and reconcile this operation before accepting a replacement.'})
             result['can_setup_again'] = False
             result['security_model'] = 'host_managed'
             result['warnings'] = [{'code':'host_acl_is_administrative_trust','path':str(appdata_root()),

@@ -117,6 +117,12 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
             if mount(path) != expected_mount:
                 raise RootOperationError('replacement_mount_unavailable: '+path)
         previous=matching[0]['expected_identity']
+        # Legacy states lack explicit mount provenance. A recorded device
+        # boundary must still not collapse into the parent filesystem.
+        actual_target = _identity(target)
+        parent_identity = _identity(target.parent)
+        if previous and parent_identity and previous[0] != parent_identity[0] and (actual_target is None or actual_target[0] != previous[0]):
+            raise RootOperationError('replacement_dataset_mount_unproven: '+str(target))
         if previous != state.get('bindings',{}).get(str(target)):
             raise RootOperationError('replacement_binding_changed')
         if not _unoccupied(target):

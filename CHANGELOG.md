@@ -1,3 +1,12 @@
+## 1.0.0-rc.12 – Ein-Mount-Installation und nachvollziehbare Reparatur (27.10.2026)
+
+- Neues explizites hostverwaltetes Appdatenprofil unter /appdata: reale Zugriffsrechte statt globaler UID-/ACL-Exklusivitätsblockade.
+- FRESH, INITIALIZING, READY, DEGRADED, AMBIGUOUS mit getrenntem Onboarding und authentifizierter Reparatur.
+- F14-Format3, persistente Instanzbindung, Workspace-Claim, Mount-Provenienz und Schutz vor verlorener Steuerhistorie.
+- Originalordner wiedererkennen oder bestätigten leeren Rollen-Ersatz dokumentieren; keine Katalog-/Journal-Löschung.
+- Basisprofil ohne privilegierten Helper; optionaler rootkontrollierter Wechselmedien-Runtime-Mount ohne Hostpropagation.
+- Legacy-Layout und explizite RC10/RC11-Übernahme bleiben getrennt. Native TrueNAS-Abnahme steht aus.
+
 ## 1.0.0-rc.11 – Kandidat zur Prüfung (27.10.2026)
 
 - Privates, nativ ACL-geprüftes Trash-/Recovery-Lock; gemeinsamer Workspace bleibt von privater Kontrollautorität getrennt.

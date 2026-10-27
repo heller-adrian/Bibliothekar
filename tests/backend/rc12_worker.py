@@ -56,7 +56,8 @@ else:
         if case=='inode':target.mkdir()
         if case=='pending':ro._write(own/'operation-unknown.json',{'preserve':'unresolved'})
         health=m.api_storage_health();assert health['state']=='DEGRADED' and not health['ready'],health
-        assert 'storage-replace' in client.get('/').text
+        page=client.get('/').text
+        assert ('class="storage-replace"' in page) == (case!='pending'),page
         assert client.post('/api/settings/storage-replace',json={'key':'trash_directory_name','confirmation':'I ACCEPT MISSING FILES'}).status_code==403
         if case=='restore':
             old.rename(target);post('/api/settings/storage-recheck',{})

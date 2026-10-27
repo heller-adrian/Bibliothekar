@@ -1,0 +1,10 @@
+# Optional read-only NAS import source; does not add a writable appdata mount.
+services:
+  bibliothekar:
+    volumes:
+      - type: bind
+        source: ${BIBLIOTHEKAR_NAS_SOURCE_DIR}
+        target: /sources/nas
+        read_only: true
+        bind:
+          create_host_path: false

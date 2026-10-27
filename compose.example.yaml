@@ -29,9 +29,17 @@ services:
         bind:
           propagation: rprivate
           create_host_path: false
-      - ${BIBLIOTHEKAR_WORKSPACE_DIR}:/workspace
-      - ${BIBLIOTHEKAR_MAIN_LIBRARY_DIR}:/main-library:ro
-      - ${BIBLIOTHEKAR_NAS_SOURCE_DIR}:/sources/nas:ro
+      - type: bind
+        source: ${BIBLIOTHEKAR_WORKSPACE_DIR}
+        target: /workspace
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BIBLIOTHEKAR_MAIN_LIBRARY_DIR}
+        target: /main-library
+        read_only: true
+        bind:
+          create_host_path: false
 
     read_only: true
 

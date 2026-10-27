@@ -1006,7 +1006,7 @@ async def library_context_middleware(request: Request, call_next):
     if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize", "/api/settings/storage-replace"}:
         return await call_next(request)
     if DATABASE_INITIALIZATION_ERROR and storage['ready']:
-        storage = {**storage, 'ready':False, 'issues':[{'code':'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
+        storage = {**storage, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'issues':[{'code':'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
     if not storage['ready']:
         if request.method == "GET" and not request.url.path.startswith("/api/"):
             from app.storage_warning_ui import storage_warning_html
@@ -3056,7 +3056,7 @@ def api_storage_health() -> dict[str, Any]:
     from app.managed_storage_health import inspect_storage
     status = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
     if DATABASE_INITIALIZATION_ERROR and status['ready']:
-        status = {**status, 'ready':False, 'startup_error':DATABASE_INITIALIZATION_ERROR,
+        status = {**status, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'startup_error':DATABASE_INITIALIZATION_ERROR,
                   'issues':[{'code':'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
     return status
 
