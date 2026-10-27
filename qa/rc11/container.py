@@ -97,6 +97,7 @@ def case(label,boundary='',legacy=False,legacy_completed=False,unsafe_private=Fa
             # A read-only inspection followed by an explicit, exact evidence decision.
             inspected=json.loads(docker('run','--rm','--user','568:568',*opts,'--entrypoint','python',image,'-m','app.storage_admin','inspect'))
             assert inspected['operation']['reservation_id']=='9c2ab846562a4fb6aee39e2d08edeee6'
+            assert inspected['adoption'] is None,'Unexpected pre-existing adoption in fresh RC10 fixture'
             adopted=docker('run','--rm','--user','568:568',*opts,'--entrypoint','python',image,'/qa-code/admin_adopt_worker.py','adopt','--token',inspected['token'],'--confirmation','ADOPT RC10 BOOTSTRAP','--backup-reference','isolated synthetic fixture backup',check=boundary!='adoption-receipt')
             if boundary=='adoption-receipt':
                 assert adopted.returncode!=0 and (base/'evidence/checkpoint.json').exists(),adopted.stdout+adopted.stderr
