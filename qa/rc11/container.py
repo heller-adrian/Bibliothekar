@@ -97,7 +97,7 @@ def case(label,boundary='',legacy=False,legacy_completed=False,unsafe_private=Fa
             # A read-only inspection followed by an explicit, exact evidence decision.
             inspected=json.loads(docker('run','--rm','--user','568:568',*opts,'--entrypoint','python',image,'-m','app.storage_admin','inspect'))
             assert inspected['operation']['reservation_id']=='9c2ab846562a4fb6aee39e2d08edeee6'
-            adopted=docker('run','--rm','--user','568:568',*opts,'-e','RC11_QA_ADMIN_ADOPT=true','--entrypoint','python',image,'-m','app.storage_admin','adopt','--token',inspected['token'],'--confirmation','ADOPT RC10 BOOTSTRAP','--backup-reference','isolated synthetic fixture backup',check=boundary!='adoption-receipt')
+            adopted=docker('run','--rm','--user','568:568',*opts,'--entrypoint','python',image,'/qa-code/admin_adopt_worker.py','adopt','--token',inspected['token'],'--confirmation','ADOPT RC10 BOOTSTRAP','--backup-reference','isolated synthetic fixture backup',check=boundary!='adoption-receipt')
             if boundary=='adoption-receipt':
                 assert adopted.returncode!=0 and (base/'evidence/checkpoint.json').exists(),adopted.stdout+adopted.stderr
                 result['crash']=json.loads((base/'evidence/checkpoint.json').read_text())
@@ -165,12 +165,12 @@ def case(label,boundary='',legacy=False,legacy_completed=False,unsafe_private=Fa
         docker('rm','-f',container,check=False)
 
 try:
+    case('rc10-adoption-crash',legacy=True,boundary='adoption-receipt')
+    case('rc10-completed-gap',legacy=True,legacy_completed=True,boundary='control-format')
     case('new')
     case('unsafe-private',unsafe_private=True)
     for boundary in ['reservation','folders','config','database','registry','recovery','private-lock','prepared','completion-receipt','completed','operation-archive','finished-receipt','operation-unlink','uncommitted-state']:
         case('crash-'+boundary,boundary=boundary)
     case('rc10-migration',legacy=True)
-    case('rc10-adoption-crash',legacy=True,boundary='adoption-receipt')
-    case('rc10-completed-gap',legacy=True,legacy_completed=True,boundary='control-format')
 finally:
     (Path(os.environ['RUNNER_TEMP'])/'rc11-evidence.json').write_text(json.dumps(report,indent=2))

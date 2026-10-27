@@ -10,8 +10,7 @@ import sys
 boundary=os.environ.get('RC11_QA_BOUNDARY','')
 marker=Path('/qa-evidence/checkpoint.json')
 is_web = 'app.main:app' in sys.argv
-is_admin = os.environ.get('RC11_QA_ADMIN_ADOPT') == 'true'
-if boundary and (is_web or is_admin) and not marker.exists():
+if boundary and is_web and not marker.exists():
     def stop(publication=None):
         with marker.open('w') as stream:
             json.dump({'boundary':boundary,'pid':os.getpid(),'uid':os.getuid(),'gid':os.getgid(),'publication':str(publication) if publication else None},stream)
