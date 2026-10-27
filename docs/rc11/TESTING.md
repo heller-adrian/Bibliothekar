@@ -38,3 +38,9 @@ Die NFSv4-XDR-Unittests prüfen bekannte und unbekannte ACL-Dokumente, Vererbung
 Der Linuxlauf ist auf den exakten Commit festgelegt und wird nach Abschluss hier mit Ergebnis und Grenzen ergänzt.
 
 Für native Migrationstests einen **eigenen RC10-Teststart auf isolierten TrueNAS-Datasets** erzeugen und dessen tatsächliche Bindings erhalten. Eine Dateikopie oder ein Datasetklon einer produktiven Sicherung kann Geräte-/Inodeidentitäten ändern; eine solche Kopie ist nicht ohne Weiteres eine wiederaufnehmbare Installation. Die Tests dürfen ihre synthetische Fixture auf lokale Testidentitäten umsetzen. Dieses Vorgehen ist keine Erlaubnis, produktive Bindings manuell umzuschreiben.
+
+Abschlusskorrekturen lokal: 54 RC11-Tests bestanden (159,04 s); anschließend zwei gezielte Pfadmeldungsprüfungen bestanden. Die abschließende gemeinsame Matrix mit Bootstrap, Migration, ACL-Grenzen und privater Retention bestand im isolierenden Harness mit **108 Tests**, 5 Warnungen, **370,87 s**. Quellcode enthält dabei die einheitliche Vertrauensgrenze ohne implizite Aufnahme eines fremden Mountbesitzers.
+
+Aktueller Implementierungscommit: `0eb040ddd2cebe44ec6449be5b29431e23498ca6`. Abschließende Linux-Abnahme: https://github.com/heller-adrian/Bibliothekar/actions/runs/40491103384 (Ergebnis noch offen). Vorheriger Entwicklungslauf: https://github.com/heller-adrian/Bibliothekar/actions/runs/40488694204.
+
+Der Containerlauf prüft die tatsächlich ausgelieferte Onboarding-HTML-Seite und führt die Bibliotheksregistrierungen mit authentifizierten HTTP-/CSRF-Anfragen aus. Eine grafische Browserautomatisierung oder native TrueNAS-Prüfung wird dadurch nicht behauptet.
