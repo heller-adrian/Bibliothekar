@@ -7,7 +7,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: rc11-container-recheck
+  group: rc11-acceptance
   cancel-in-progress: true
 jobs:
   regression_evidence:
@@ -52,7 +52,7 @@ jobs:
               cases=ET.parse(d/'result.xml').findall('.//testcase')
               assert cases and all(c.find('failure') is None and c.find('error') is None and c.find('skipped') is None for c in cases)
               counts[group]=len(cases)
-          assert counts['baseline']==151 and sum(counts.values())==328,counts
+          assert counts=={'baseline':151,'bootstrap':57,'retention':52,'history':71},counts
           print('Verified unchanged regression payload:',counts)
           PY
       - uses: actions/upload-artifact@v4
