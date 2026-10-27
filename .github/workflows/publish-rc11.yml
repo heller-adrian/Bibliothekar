@@ -1,0 +1,220 @@
+name: Publish Bibliothekar RC11 prerelease
+on:
+  push:
+    branches: [release/v1.0.0-rc.11]
+    paths: [.github/workflows/publish-rc11.yml]
+permissions:
+  contents: write
+  packages: write
+  actions: read
+concurrency:
+  group: publish-bibliothekar-rc11
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'heller-adrian/Bibliothekar'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.11
+      TAG: v1.0.0-rc.11
+      ACCEPTED_SHA: d275b4a98735ce87aab57820c61c4b0cf355596e
+      ACCEPTED_QA: '40513323411'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require successful exact-source QA and private repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          gh api "repos/$GITHUB_REPOSITORY" --jq '{full_name,private}' > release-assets/repository-privacy.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA" > release-assets/accepted-QA.json
+          python - <<'PY'
+          import json,os
+          p=json.load(open('release-assets/repository-privacy.json'));assert p['private'] is True
+          q=json.load(open('release-assets/accepted-QA.json'))
+          assert q['conclusion']=='success' and q['status']=='completed' and q['head_sha']==os.environ['ACCEPTED_SHA']
+          assert q['path']=='.github/workflows/qa-rc11-container.yml'
+          PY
+          git diff --quiet "$ACCEPTED_SHA" "$GITHUB_SHA" -- app tests qa Dockerfile compose.example.yaml requirements.txt requirements-rc.constraints.txt
+          python - <<'PYCODE'
+          import os,urllib.request,urllib.error
+          for resource in ['git/ref/tags/','releases/tags/']:
+              url='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'+resource+os.environ['TAG']
+              req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              try:
+                  with urllib.request.urlopen(req): pass
+              except urllib.error.HTTPError as error:
+                  if error.code==404: continue
+                  raise
+              raise RuntimeError('Existing release/tag: refusing overwrite')
+          PYCODE
+          gh run download "$ACCEPTED_QA" --dir "$RUNNER_TEMP/rc11-accepted-evidence"
+          python - <<'PY'
+          import json,os,xml.etree.ElementTree as ET
+          from pathlib import Path
+          base=Path(os.environ['RUNNER_TEMP'])/'rc11-accepted-evidence'
+          proof=json.loads((base/'rc11-reused-regressions/reuse-proof.json').read_text())
+          assert proof['source_sha']==os.environ['ACCEPTED_SHA'] and proof['regression_sha']=='1e084e5b7185cddd02bb0fb2e033b4a9127f7afe' and proof['regression_run']=='40496761565'
+          counts={}
+          for group in ['baseline','bootstrap','retention','history']:
+              root=base/'rc11-reused-regressions'/('rc11-regression-'+group)
+              result=json.loads((root/'exit.json').read_text());assert result['returncode']==0
+              cases=ET.parse(root/'result.xml').findall('.//testcase')
+              assert cases and all(c.find('failure') is None and c.find('error') is None and c.find('skipped') is None for c in cases)
+              counts[group]=len(cases)
+          assert counts=={'baseline':151,'bootstrap':57,'retention':52,'history':71},counts
+          report=json.loads((base/'rc11-isolated-acceptance/rc11-evidence.json').read_text())
+          assert report['source']==os.environ['ACCEPTED_SHA'] and len(report['cases'])==19
+          assert all(c['status']=='PASS' and all(c[k] for k in ['first_library_created','following_mutation','restarted','archives_unchanged']) for c in report['cases'])
+          assert report['native_truenas_acl']['status']=='NOT_RUN'
+          Path('release-assets/regression-summary.json').write_text(json.dumps(counts,indent=2)+'\n')
+          Path('release-assets/container-QA.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('Accepted regressions:',sum(counts.values()),counts,'container cases:',len(report['cases']))
+          PY
+          git checkout --detach "$ACCEPTED_SHA"
+          git rev-parse HEAD HEAD^{tree} > release-assets/source-identity.txt
+          tar -czf release-assets/accepted-QA-evidence.tar.gz -C "$RUNNER_TEMP/rc11-accepted-evidence" .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse an existing image tag or an unknown registry error
+        shell: bash
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "$IMAGE" > "$RUNNER_TEMP/existing-rc11.out" 2> "$RUNNER_TEMP/existing-rc11.err"; then
+            echo 'Existing GHCR RC11 image; refusing overwrite.' >&2
+            exit 1
+          fi
+          if ! grep -Eiq 'not found|manifest unknown' "$RUNNER_TEMP/existing-rc11.err"; then
+            cat "$RUNNER_TEMP/existing-rc11.err" >&2
+            exit 1
+          fi
+      - name: Build accepted source and verify complete application payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$ACCEPTED_SHA" -t "$IMAGE" .
+          docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__;assert __version__=="1.0.0-rc.11"'
+          python - <<'PY'
+          import os,json,hashlib,subprocess
+          from pathlib import Path
+          source={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('app').rglob('*') if p.is_file()}
+          program='from pathlib import Path;import hashlib,json;r=Path("/opt/kamera");print(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file()}))'
+          image=json.loads(subprocess.check_output(['docker','run','--rm','--entrypoint','python',os.environ['IMAGE'],'-c',program],text=True))
+          assert source==image
+          Path('release-assets/app-sha256.json').write_text(json.dumps(source,sort_keys=True,indent=2)+'\n')
+          PY
+          docker image inspect "$IMAGE" --format '{{.Id}}' > "$RUNNER_TEMP/rc11-local-image-id"
+      - name: Push and retrieve immutable image from registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE" | tee release-assets/push.log
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' release-assets/push.log | tail -1)"
+          test "${#DIGEST}" -eq 71
+          REF="ghcr.io/heller-adrian/bibliothekar@$DIGEST"
+          docker image rm "$IMAGE"
+          docker pull "$REF" | tee release-assets/registry-pull.log
+          test "$(cat "$RUNNER_TEMP/rc11-local-image-id")" = "$(docker image inspect "$REF" --format '{{.Id}}')"
+          test "$(docker image inspect "$REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ACCEPTED_SHA"
+          docker run --rm --entrypoint python "$REF" -c 'from app import __version__;assert __version__=="1.0.0-rc.11"'
+          printf '%s\n' "$REF" > release-assets/IMAGE-DIGEST.txt
+          docker buildx imagetools inspect "$REF" --raw > release-assets/registry-manifest.json
+          test "$(sha256sum release-assets/registry-manifest.json | cut -d' ' -f1)" = "${DIGEST#sha256:}"
+          docker image inspect "$REF" --format '{{json .RepoDigests}}' > release-assets/registry-repodigests.json
+      - name: Package source, practical manuals, digest-pinned Compose and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="$(cat release-assets/IMAGE-DIGEST.txt)"
+          cp compose.example.yaml release-assets/compose.rc11.yaml
+          sed -i "s|ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.11|$REF|" release-assets/compose.rc11.yaml
+          cp docs/rc11/TRUENAS-TEST.md release-assets/TRUENAS-TEST.md
+          cp docs/rc11/UPGRADE-RC10.md release-assets/UPGRADE-RC10.md
+          cp docs/rc11/INSTALL-TRUENAS.md release-assets/INSTALL-TRUENAS.md
+          cp docs/rc11/SECURITY.md release-assets/SECURITY.md
+          cp docs/rc11/MIGRATION.md release-assets/MIGRATION-AND-ROLLBACK.md
+          cp Dockerfile requirements.txt requirements-rc.constraints.txt release-assets/
+          git archive --format=tar --prefix=bibliothekar-1.0.0-rc.11/ "$ACCEPTED_SHA" | gzip -n > release-assets/bibliothekar-1.0.0-rc.11-source.tar.gz
+          cat > release-assets/RELEASE-NOTES.md <<'EOF'
+          # Bibliothekar v1.0.0-rc.11 — TrueNAS test prerelease
+
+          RC11 separates the shared photo workspace from private Trash/F14 lock
+          authority, validates native private ACLs and mount-visible parents,
+          and explicitly blocks unsafe or unreadable ACL semantics. It preserves
+          old RC10 lock artifacts and supports reviewed offline inspect/adopt
+          migration of an interrupted first startup without Clean Slate.
+
+          Bootstrap prepared/completed receipts keep the original reservation
+          across crashes. Historical media, jobs, retention, generations and
+          conflicting operations remain blockers. Library creation now waits
+          briefly for idle F14 admission without skipping generation checks.
+
+          Automated Linux regressions and 19 full supervisor/uid568/HTTP/container
+          cases passed, including first and second library creation, restarts,
+          RO archive preservation, legacy migration and SIGKILL recovery.
+          The 331 regressions were executed at 1e084e5b; the final source has
+          identical application/tests/dependencies and a corrected UID568-only
+          container observer. Exact reuse proof and receipts are attached.
+
+          Native TrueNAS/OpenZFS/NFSv4 acceptance is intentionally still pending.
+          This prerelease is published for that testing, not as stable 1.0.0.
+          Existing unsafe private ACLs require administrative qualification and
+          an explicit provenance decision. See TRUENAS-TEST.md before upgrading.
+          No production NAS has been modified by this publication.
+
+          F14 format 2 prevents an uncontrolled image-only downgrade to RC10.
+          Preserve a consistent complete backup; do not edit bindings or delete
+          SQLite/WAL/SHM, operation receipts or retention as an upgrade step.
+          Terminal-free ordinary TrueNAS installation remains the 1.0.0 package
+          goal; RC11 historical migration still has an explicit shell step.
+          The GitHub repository remains private. Private GHCR pulls need their
+          own authorized read-only registry credentials on TrueNAS.
+          EOF
+          printf '\nAccepted source: %s\nImage: %s\nQA: https://github.com/%s/actions/runs/%s\n\nGerman TrueNAS guide: https://github.com/%s/blob/%s/docs/rc11/TRUENAS-TEST.md\n' "$ACCEPTED_SHA" "$REF" "$GITHUB_REPOSITORY" "$ACCEPTED_QA" "$GITHUB_REPOSITORY" "$TAG" >> release-assets/RELEASE-NOTES.md
+          python - <<'PYREPORT'
+          import os,json
+          from pathlib import Path
+          counts=json.loads(Path('release-assets/regression-summary.json').read_text())
+          report='# RC11 Testbericht\n\nAutomatisiert abgenommen: **331 Linux-Regressionstests** und **19 Containerfälle**.\n\nRegressionen: 151 RC10-Basis, 57 RC11-Bootstrap, 52 Retention, 71 History. Ausgeführt am unveränderten App-/Teststand 1e084e5b; Wiederverwendung durch exakten Git-Diff und erfolgreiche Originaljobs nachgewiesen. Der endgültige Stand enthält ausschließlich korrigierte Container-Beobachtung und Fehlerauslösung sowie Workflow-/Dokumentationsänderungen.\n\nContainer: Original-Supervisor, echte UID/GID 568:568, HTTP-Anmeldung/CSRF, erste und zweite Bibliothek, Neustarts, RO-Archive bytegleich, sichere private Sperre, RC10-Originalreservation und alle 14 neuen SIGKILL-Grenzen plus Migrationscrashes.\n\nNatives TrueNAS/OpenZFS/NFSv4: **NICHT AUSGEFÜHRT**. Die Veröffentlichung ist ein Prerelease für diese Abnahme, keine stabile 1.0.0-Freigabe. Produktives NAS unverändert.\n\n'
+          report+='Veröffentlichter Quellstand: '+os.environ['ACCEPTED_SHA']+'\n\nAbnahme: https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['ACCEPTED_QA']+'\n'
+          Path('release-assets/TEST-REPORT.md').write_text(report)
+          PYREPORT
+          (cd release-assets && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Create prerelease and verify tag, assets and unchanged privacy
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --target "$ACCEPTED_SHA" --title "$TAG" --prerelease --latest=false --notes-file release-assets/RELEASE-NOTES.md release-assets/*
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/rc11-release-verified.json"
+          python - <<'PY'
+          import json
+          r=json.load(open(__import__('os').environ['RUNNER_TEMP']+'/rc11-release-verified.json'))
+          assert r['prerelease'] and not r['draft'] and r['tag_name']=='v1.0.0-rc.11'
+          assert {'SHA256SUMS','IMAGE-DIGEST.txt','compose.rc11.yaml','TRUENAS-TEST.md','bibliothekar-1.0.0-rc.11-source.tar.gz'}<={a['name'] for a in r['assets']}
+          print(r['html_url'])
+          PY
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)" = "$ACCEPTED_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
+          mkdir "$RUNNER_TEMP/rc11-release-downloaded"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/rc11-release-downloaded"
+          (cd "$RUNNER_TEMP/rc11-release-downloaded" && sha256sum --check SHA256SUMS)
+          cat release-assets/IMAGE-DIGEST.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain publication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc11-publication-evidence
+          retention-days: 30
+          path: release-assets/

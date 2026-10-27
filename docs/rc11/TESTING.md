@@ -44,3 +44,15 @@ Abschlusskorrekturen lokal: 54 RC11-Tests bestanden (159,04 s); anschließend zw
 Aktueller Implementierungscommit: `0eb040ddd2cebe44ec6449be5b29431e23498ca6`. Abschließende Linux-Abnahme: https://github.com/heller-adrian/Bibliothekar/actions/runs/40491103384 (Ergebnis noch offen). Vorheriger Entwicklungslauf: https://github.com/heller-adrian/Bibliothekar/actions/runs/40488694204.
 
 Der Containerlauf prüft die tatsächlich ausgelieferte Onboarding-HTML-Seite und führt die Bibliotheksregistrierungen mit authentifizierten HTTP-/CSRF-Anfragen aus. Eine grafische Browserautomatisierung oder native TrueNAS-Prüfung wird dadurch nicht behauptet.
+
+## Fortsetzung für den RC11-Prerelease
+
+Die Linux-Matrix am Appstand `1e084e5b7185cddd02bb0fb2e033b4a9127f7afe` bestand vollständig: **151 Basis + 57 Bootstrap + 52 Retention + 71 History = 331 Tests**. Belege: https://github.com/heller-adrian/Bibliothekar/actions/runs/40496761565. Der damalige Containerteil scheiterte an einem QA-Beobachter, der als fremde Host-UID private 0700-Dateien lesen wollte. Die Korrektur liest unter der tatsächlichen App-UID im Container; keine private ACL wurde für Tests gelockert.
+
+Weitere Container-Diagnose: Ein durch `--entrypoint python` zum Namespace-PID1 gemachter administrativer Prozess konnte den vorgesehenen selbst gesendeten SIGKILL nicht als normalen Prozessabsturz modellieren. Der QA-CLI läuft nun als Kind des originalen `tini` und verlangt ausdrücklich PID ungleich 1. Die normale Web-Abnahme verwendet weiterhin den originalen Supervisor. Referenzen: [Linux PID namespaces](https://www.man7.org/linux/man-pages/man7/pid_namespaces.7.html), [tini](https://github.com/krallin/tini).
+
+Die Regressionen werden nur bei nachgewiesen unverändertem App-/Test-/Abhängigkeits-/Regressionsstand wiederverwendet. Der gezielte Containerworkflow prüft die tatsächlichen erfolgreichen Originaljobs, sämtliche JUnit-Fälle ohne Fehler/Skip und eine strenge Git-Diff-Allowlist für ausschließlich Container-QA/Workflow/Dokumentation. Er archiviert diese Zuordnung als `reuse-proof.json`. Das ist kein erneut ausgeführter Regressionslauf am späteren QA-Commit.
+
+**Abschließendes Ergebnis:** https://github.com/heller-adrian/Bibliothekar/actions/runs/40513323411 — erfolgreich. Abgenommener Quellstand `d275b4a98735ce87aab57820c61c4b0cf355596e`. Alle **19 realen Linux-Containerfälle bestanden**, einschließlich administrative Receipt-SIGKILL als PID7/UID568/GID568, RC10-completed-Lücke, 14 Bootstrap-Persistenzgrenzen, erste/zweite Bibliothek, Neustarts und unveränderte RO-Archive. Die reale RC10-Reservationsvorlage wurde in allen Migrationsfällen mit erhaltener ID und unveränderten Rollenbindungen abgeschlossen. Die 331 unveränderten Regressionen sind über den beschriebenen Wiederverwendungsnachweis gebunden.
+
+Native TrueNAS-/ZFS-/NFSv4-Abnahme bleibt **NOT_RUN** und folgt ausdrücklich nach Veröffentlichung des Test-Prerelease. Kein vollständiger neuer Backend-Gesamtlauf und kein physischer SD-Karten-/NAS-Test werden behauptet. Der Release enthält einen separaten abschließenden TEST-REPORT.md und die unveränderten Originalbelege mit Prüfsummen.
