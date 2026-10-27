@@ -1,3 +1,11 @@
+## 1.0.0-rc.11 – Kandidat zur Prüfung (27.10.2026)
+
+- Privates, nativ ACL-geprüftes Trash-/Recovery-Lock; gemeinsamer Workspace bleibt von privater Kontrollautorität getrennt.
+- Explizite Offlineübernahme von RC10-Erststarts mit Originalnachweisen, stabiler Reservation, F14-Format 2 und dauerhaftem Abschlussreceipt.
+- Crashfenster zwischen completed und Reservationsfreigabe geschlossen; Worker erst nach Abschluss freigegeben.
+- Historische F14-/Katalog-/Registry-/Retention-Gegenbeweise und konkrete deutsch/englische Speicherdiagnosen ergänzt.
+- Keine Veröffentlichung oder produktive Migration. Voraussetzungen, Upgrade-/Rollbackgrenzen und tatsächliche QA siehe [RC11](docs/rc11/README.md).
+
 ## 0.56.2
 
 - F5–F10 aus Audit Phase 3: frühe Sortier-/Reconcile-Recovery, dauerhafte Papierkorb-Restores und Import-Move-Nachweise, fortsetzbare SSD-Teilfreigabe mit vollständiger Archivprüfung sowie wiederholbare Metadatenpropagation und Arbeitskopienbereinigung.

@@ -11,8 +11,30 @@ def _phrase(en, de):
 
 def storage_warning_html(status):
     from app.storage_replacement import replacement_candidates
-    rows=''.join('<li><code>'+escape(str(i['path']))+'</code> · <code>'+
-                 escape(str(i['code']))+'</code></li>' for i in status['issues'])
+    explanations = {
+        'bootstrap_incomplete': ('Technical setup is incomplete. Check again to resume the verified startup.', 'Die technische Einrichtung ist unvollständig. Erneut prüfen setzt den verifizierten Start fort.'),
+        'bootstrap_administrative_review_required': ('RC10 evidence needs offline administrative review and an explicit adoption receipt.', 'RC10-Nachweise benötigen eine administrative Offlineprüfung und einen ausdrücklichen Übernahmebeleg.'),
+        'legacy_lock_not_migrated': ('The old shared RC10 lock is preserved and must be migrated to private coordination.', 'Das alte gemeinsame RC10-Lock bleibt erhalten und muss auf private Koordination migriert werden.'),
+        'private_acl_untrusted_write': ('Another principal can change private control data. Secure this private dataset and its parents; the shared workspace ACL can remain.', 'Andere Berechtigte können private Steuerdaten verändern. Sichere dieses private Dataset und seine Eltern; die gemeinsame Workspace-ACL kann bestehen bleiben.'),
+        'acl_backend_unavailable': ('Native ACL safety could not be verified. Grant the app readable native ACLs on an owner/admin-only private dataset.', 'Die native ACL-Sicherheit konnte nicht geprüft werden. Die App benötigt lesbare native ACLs auf einem privaten Dataset für Eigentümer und Administratoren.'),
+        'bootstrap_reservation_mismatch': ('The saved startup reservation contradicts current evidence. Preserve all records for recovery.', 'Die gespeicherte Startupreservation widerspricht den aktuellen Nachweisen. Bewahre alle Nachweise zur Wiederherstellung auf.'),
+        'bootstrap_additional_operation': ('An additional operation prevents first-install resume.', 'Eine zusätzliche Operation verhindert die Fortsetzung der Erstinstallation.'),
+        'workspace_unknown_entry': ('Unknown content is preserved; it is not automatic first-install data.', 'Unbekannter Inhalt bleibt erhalten; er ist kein automatisch übernehmbarer Erstinstallationsbestand.'),
+        'workspace_scan_error': ('The workspace could not be inspected reliably.', 'Der Workspace konnte nicht zuverlässig geprüft werden.'),
+        'workspace_scan_changed': ('The workspace changed during inspection. Stop concurrent editors and retry.', 'Der Workspace wurde während der Prüfung verändert. Beende parallele Zugriffe und prüfe erneut.'),
+        'bootstrap_completion_receipt_missing': ('The startup completion proof is missing or inconsistent.', 'Der Abschlussnachweis des Starts fehlt oder ist widersprüchlich.'),
+        'historical_library_generation': ('Historical library generations prevent automatic first-install resume.', 'Historische Bibliotheksgenerationen verhindern eine automatische Erstinstallationsfortsetzung.'),
+        'retention_survives': ('Retained recovery media must be preserved.', 'Aufbewahrte Wiederherstellungsmedien müssen erhalten bleiben.'),
+        'startup_failed': ('Technical startup failed; the original cause follows.', 'Der technische Start ist fehlgeschlagen; die ursprüngliche Ursache folgt.'),
+    }
+    rows = ''
+    for item in status['issues']:
+        code = str(item['code'])
+        message = explanations.get(code)
+        rows += '<li><code>'+escape(str(item['path']))+'</code> · <code>'+escape(code)+'</code>'
+        if message: rows += '<p>'+_phrase(*message)+'</p>'
+        if item.get('detail'): rows += '<p><code>'+escape(str(item['detail']))+'</code></p>'
+        rows += '</li>'
     reasons={
         'workspace_not_empty':('Existing or unknown files must be preserved.',
                                'Vorhandene oder unbekannte Dateien müssen erhalten bleiben.'),
@@ -29,8 +51,9 @@ def storage_warning_html(status):
     en,de=reasons.get(reason,('Existing state cannot be safely treated as a new installation.',
                               'Der vorhandene Zustand kann nicht sicher als Neuinstallation gelten.'))
     available=bool(status.get('can_setup_again') or status.get('can_initialize'))
+    resume_only=any(i['code']=='bootstrap_incomplete' for i in status['issues'])
     setup=('<button type="button" id="storage-initialize">'+
-           _phrase('Set up again','Neu einrichten')+'</button>') if available else ''
+           _phrase('Set up again','Neu einrichten')+'</button>') if available and not resume_only else ''
     guidance=('<p id="storage-setup-evidence">'+
              _phrase('Verified unused storage can be initialized without deleting previous identity records.',
                      'Geprüfter unbenutzter Speicher kann eingerichtet werden, ohne Identitätsbelege zu löschen.')+
@@ -66,11 +89,11 @@ li{margin:12px 0}code{font-size:.88em}.languages{display:flex;justify-content:fl
 <dialog id="storage-protection" open aria-labelledby="storage-title">
 <div class="languages"><button type="button" class="bk-lang" data-lang="en">EN</button><button type="button" class="bk-lang" data-lang="de">DE</button></div>
 <h1 id="storage-title">'''+_phrase('Storage unavailable','Speicherordner nicht verfügbar')+'''</h1>
-<p>'''+_phrase('A previously managed folder is missing, moved or inaccessible. File operations are paused to protect existing data.',
-             'Ein bisher verwalteter Ordner fehlt, wurde verschoben oder ist nicht erreichbar. Dateioperationen sind zum Schutz vorhandener Daten angehalten.')+'''</p>
+<p>'''+_phrase('Storage or technical startup requires verification. File operations are paused to protect existing data.',
+             'Speicher oder technischer Start benötigen eine Prüfung. Dateioperationen sind zum Schutz vorhandener Daten angehalten.')+'''</p>
 <ul>'''+rows+'''</ul>
-<p>'''+_phrase('First restore the original folder or mount, then select Check again.',
-             'Stelle zuerst den ursprünglichen Ordner oder Mount wieder her und wähle Erneut prüfen.')+'''</p>
+<p>'''+_phrase('Follow the cause shown above, then select Check again.',
+             'Beachte die oben genannte Ursache und wähle anschließend Erneut prüfen.')+'''</p>
 '''+guidance+'''
 <button type="button" id="storage-retry">'''+_phrase('Check again','Erneut prüfen')+'''</button>'''+setup+'''
 <button type="button" id="storage-recovery-open">'''+_phrase('Repair options','Reparaturmöglichkeiten')+'''</button>
@@ -100,7 +123,7 @@ li{margin:12px 0}code{font-size:.88em}.languages{display:flex;justify-content:fl
    const response=await fetch(path,{method:'POST',headers,credentials:'same-origin',body:JSON.stringify(payload)});
    let data={};try{data=await response.json()}catch(_){}if(!response.ok)throw new Error(String(data.detail||response.status));return data;
  }
- document.getElementById('storage-retry').addEventListener('click',async e=>{e.currentTarget.disabled=true;try{await post('/api/settings/storage-recheck',{});}catch(_){result.textContent=lang()==='de'?'Ordner weiterhin nicht verfügbar.':'Storage is still unavailable.'}finally{location.reload()}});
+ document.getElementById('storage-retry').addEventListener('click',async e=>{e.currentTarget.disabled=true;try{await post('/api/settings/storage-recheck',{});}catch(error){result.textContent=error.message}finally{location.reload()}});
  const setup=document.getElementById('storage-initialize');
  if(setup)setup.addEventListener('click',async()=>{if(!confirm(lang()==='de'?'Geprüfte leere Installation neu einrichten?':'Initialize verified unused storage?'))return;
   setup.disabled=true;try{await post('/api/settings/storage-initialize',{confirmation:'SET UP AGAIN',token:'''+json.dumps(token)+'''});location.reload()}

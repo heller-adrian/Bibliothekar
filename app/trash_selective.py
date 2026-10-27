@@ -36,23 +36,37 @@ def _operation_lock(workspace: Path, *, blocking: bool = True):
     if not _RECOVERY_LOCK.acquire(blocking=blocking):
         raise TrashError("Eine Papierkorboperation läuft bereits; bitte erneut versuchen.")
     try:
-        path = _parent(workspace) / ".lock"
+        from app.root_operations import _control, _read, _write, _lock, _identity
+        _, control = _control(workspace)
+        state = _read(control/'state.json', {})
+        if not state:
+            # Direct registered-domain entry points can be the first F14 user.
+            # Publish the version fence under complete exclusion before using
+            # a different domain lock; never upgrade an existing format-1 state.
+            with _lock(control/'workspace.lock', exclusive=True), _lock(control/'shared.lock', exclusive=True), _lock(control/'state.lock', exclusive=True, wait=True):
+                state = _read(control/'state.json', {})
+                if not state:
+                    from app.storage_bootstrap import assert_no_orphan_legacy_lock
+                    assert_no_orphan_legacy_lock(workspace)
+                    state = {'format':2,'workspace':_identity(workspace),'generation':0,'libraries':{},'bindings':{str(Path(workspace).absolute()):_identity(workspace)}}
+                    _write(control/'state.json',state)
+        if state.get('format') != 2:
+            raise TrashError('control_migration_required: '+str(control)+': offline RC11 migration required before private trash lock')
+        path = control / 'trash-recovery.lock'
         held = getattr(_HELD_LOCKS, "paths", set())
         if path in held:
             yield
             return
         validate_active_roots()
-        fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        from app.root_operations import _lock
+        guard = _lock(path, exclusive=True, wait=blocking)
+        fd = guard.__enter__()
         try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-            except BlockingIOError as error:
-                raise TrashError("Eine Papierkorboperation läuft bereits; bitte erneut versuchen.") from error
             _HELD_LOCKS.paths = held | {path}
             yield
         finally:
             _HELD_LOCKS.paths = held
-            os.close(fd)
+            guard.__exit__(None, None, None)
     finally:
         _RECOVERY_LOCK.release()
 

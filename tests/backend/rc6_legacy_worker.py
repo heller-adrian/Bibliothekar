@@ -20,6 +20,12 @@ if mode=='live':
         connection.close()
         return original(database,*a,**kw)
     main.claim_next_job=at_claim
+if mode=='live':
+    # This fixture represents an old format-1 installation. RC11 deliberately
+    # requires an explicit administrative provenance decision before upgrade.
+    from app import storage_admin
+    proof=storage_admin.inspect(main.WORKSPACE_PATH,main.DATABASE_FILE,scope='control')
+    storage_admin.adopt(main.WORKSPACE_PATH,main.DATABASE_FILE,proof['token'],'ADOPT RC10 BOOTSTRAP','synthetic consistent legacy backup',scope='control')
 main.startup_database()
 if mode=='live':
     assert main.DATABASE_INITIALIZATION_ERROR is None,main.DATABASE_INITIALIZATION_ERROR

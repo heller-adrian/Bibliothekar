@@ -1,0 +1,50 @@
+name: RC11 isolated safety acceptance
+on:
+  push:
+    branches: [release/v1.0.0-rc.11]
+    paths-ignore: ["docs/**", "README.md", "CHANGELOG.md"]
+permissions:
+  contents: read
+concurrency:
+  group: rc11-acceptance
+  cancel-in-progress: false
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      IMAGE: bibliothekar:rc11-acceptance
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned application and QA dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - name: Regression, ACL evidence, migration and SIGKILL tests
+        run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets qa/rc11/targets.json
+      - name: Build local acceptance image without publishing
+        run: docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+      - name: Verify candidate identity
+        run: docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__; assert __version__=="1.0.0-rc.11"'
+      - name: Real supervisor, uid568, HTTP, RO mounts and crash recovery
+        run: python qa/rc11/container.py
+      - name: Retain acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc11-isolated-acceptance
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/rc11-evidence.json
+            ${{ runner.temp }}/f14-qa/targets/results
+            ${{ runner.temp }}/rc11-container-logs
+      - name: Record source and scope
+        if: success()
+        run: |
+          printf 'Accepted source: %s\nLinux container QA; native TrueNAS ACL acceptance remains a separate gate.\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

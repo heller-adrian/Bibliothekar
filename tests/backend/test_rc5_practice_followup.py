@@ -14,10 +14,14 @@ def empty_reset(tmp_path,monkeypatch):
     case=tmp_path/'case';case.mkdir();ws=case/'workspace';ws.mkdir();private=case/'database';private.mkdir();db=private/'main.sqlite3';reg=private/'registry.sqlite3';config=case/'settings.json';config.write_text('{}')
     for k,v in {'KAMERA_WORKSPACE':ws,'KAMERA_CONFIG':config,'KAMERA_REGISTRY_DATABASE':reg,'KAMERA_DATABASE_DIR':private}.items():monkeypatch.setenv(k,str(v))
     for name in ENGLISH_STORAGE_DEFAULTS.values():(ws/name).mkdir()
-    with ro.reserve(ws,library_id='main',paths=[ws,*(ws/n for n in ENGLISH_STORAGE_DEFAULTS.values())],database=db,kind='startup',ids={'initialize_storage':True}):pass
-    parent=ro._control_location(ws)
-    with ro._lock(parent/'state.lock',exclusive=True):
-        state=ro._read(parent/'state.json');state['storage_initialization']['phase']='completed';ro._write(parent/'state.json',state)
+    # Historical RC5/RC10 fixture, not an incomplete RC11 bootstrap. Preserve
+    # the original format-1 state explicitly: RC11 requires a real receipt.
+    _,parent=ro._control(ws)
+    state={'format':1,'workspace':ro._identity(ws),'generation':0,'libraries':{},
+           'bindings':{str(p):ro._identity(p) for p in [ws,*(ws/n for n in ENGLISH_STORAGE_DEFAULTS.values())]},
+           'storage_names':dict(ENGLISH_STORAGE_DEFAULTS),
+           'storage_initialization':{'phase':'completed','names':dict(ENGLISH_STORAGE_DEFAULTS),'database':str(db)}}
+    ro._write(parent/'state.json',state)
     old=ro._read(parent/'state.json')
     for n in ENGLISH_STORAGE_DEFAULTS.values():
         (ws/n).rename(case/('old-'+n));(ws/n).mkdir()

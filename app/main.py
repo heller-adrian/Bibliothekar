@@ -299,8 +299,8 @@ from app.archive_reassignment import (
 
 
 APP_VERSION = __version__
-RELEASE_VERSION = "1.0.0-rc.9"
-DEPLOYMENT_VERSION = "1.0.0-rc.9"
+RELEASE_VERSION = __version__
+DEPLOYMENT_VERSION = __version__
 
 CONFIG_PATH = Path(
     os.environ.get(
@@ -1005,6 +1005,8 @@ async def library_context_middleware(request: Request, call_next):
     storage = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
     if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize", "/api/settings/storage-replace"}:
         return await call_next(request)
+    if DATABASE_INITIALIZATION_ERROR and storage['ready']:
+        storage = {**storage, 'ready':False, 'issues':[{'code':'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
     if not storage['ready']:
         if request.method == "GET" and not request.url.path.startswith("/api/"):
             from app.storage_warning_ui import storage_warning_html
@@ -2222,6 +2224,10 @@ def _coordinate_startup(fn):
                 _STORAGE_STARTUP_PAUSED = True
                 raise
             _STORAGE_STARTUP_PAUSED = False
+            from app.storage_bootstrap import prepare_control
+            prepare_control(WORKSPACE_PATH, DATABASE_FILE)
+            # Migration/version fence may have published an audited transition.
+            preflight=require_storage(WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
             assert_workspace_startable(WORKSPACE_PATH)
             from app.root_operations import _registered
             from app.storage_config import load_storage_settings
@@ -2229,22 +2235,25 @@ def _coordinate_startup(fn):
                 paths = [WORKSPACE_PATH, *(WORKSPACE_PATH / name for name in load_storage_settings(workspace_root=WORKSPACE_PATH).values())]
                 row = _registered(DATABASE_FILE)
                 if row:
-                    paths.append(Path(row['work_root']))
+                    from app.managed_storage_health import empty_bootstrap_registry
+                    technical = False
+                    if not row.get('is_registered', True):
+                        try: technical = bool(empty_bootstrap_registry(REGISTRY_DATABASE_FILE, WORKSPACE_PATH, DATABASE_FILE))
+                        except ValueError: pass
+                    if not technical: paths.append(Path(row['work_root']))
                 return paths
-            with reserve(WORKSPACE_PATH, library_id=MAIN_LIBRARY_ID, paths=bindings, database=DATABASE_FILE, kind='startup', ids={'initialize_storage':True} if preflight['can_initialize'] else None):
+            with reserve(WORKSPACE_PATH, library_id=MAIN_LIBRARY_ID, paths=bindings, database=DATABASE_FILE, kind='startup', ids={'initialize_storage':True} if preflight['can_initialize'] else None) as startup_reservation:
                 # Initialize only a preflight-proven empty installation, before
                 # domain recovery or DB initialization can recreate missing roots.
                 ensure_workspace_layout(WORKSPACE_PATH)
                 result=fn()
+                if DATABASE_INITIALIZATION_ERROR:
+                    raise RootOperationError(DATABASE_INITIALIZATION_ERROR)
                 if preflight['can_initialize']:
-                    if DATABASE_INITIALIZATION_ERROR:raise RootOperationError(DATABASE_INITIALIZATION_ERROR)
-                    from app.root_operations import _control_location,_read,_write,_lock
-                    parent=_control_location(WORKSPACE_PATH)
-                    with _lock(parent/'state.lock',exclusive=True,wait=True):
-                        state=_read(parent/'state.json')
-                        state['storage_initialization']['phase']='completed'
-                        _write(parent/'state.json',state)
-                return result
+                    from app.storage_bootstrap import complete
+                    complete(WORKSPACE_PATH, startup_reservation)
+            _start_runtime_workers()
+            return result
         except RootOperationError as error:
             DATABASE_INITIALIZATION_ERROR = "Startup: " + str(error)
             print(DATABASE_INITIALIZATION_ERROR, flush=True)
@@ -2394,16 +2403,6 @@ def startup_database() -> None:
             LIBRARY_REGISTRY_ERROR = None
             DATABASE_INITIALIZATION_ERROR = None
 
-            WORKER_STOP.clear()
-            if WORKER_THREAD is None or not WORKER_THREAD.is_alive():
-                WORKER_THREAD = Thread(
-                    target=worker_loop,
-                    name="kamera-job-worker",
-                    daemon=True,
-                )
-                WORKER_THREAD.start()
-            start_cancel_worker()
-            start_release_worker()
             return
 
         if existing_main is not None:
@@ -2661,57 +2660,6 @@ def startup_database() -> None:
                     flush=True,
                 )
 
-        WORKER_STOP.clear()
-
-        if (
-            WORKER_THREAD is None
-            or not WORKER_THREAD.is_alive()
-        ):
-            WORKER_THREAD = Thread(
-                target=worker_loop,
-                name="kamera-job-worker",
-                daemon=True,
-            )
-            WORKER_THREAD.start()
-
-        start_cancel_worker()
-        start_release_worker()
-
-        # 0.41.3: Persistente Mehrfach-Anwendungen und Sortierjournale
-        # werden nach einem Neustart auch in sekundären Bibliotheken
-        # wiederentdeckt.
-        try:
-            for context in list_active_library_contexts(
-                REGISTRY_DATABASE_FILE
-            ):
-                ensure_library_database_schema(
-                    context
-                )
-                if (
-                    context.database_path.resolve(strict=False)
-                    != DATABASE_FILE.resolve(strict=False)
-                ):
-                    mark_incomplete_sort_runs_interrupted(
-                        context.database_path
-                    )
-                    recover_interrupted_sort_runs(
-                        context.database_path
-                    )
-                for batch_id in recover_operation_batches(
-                    context.database_path
-                ):
-                    Thread(
-                        target=_apply_batch_thread_target,
-                        args=(batch_id, context),
-                        name=f"kamera-batch-recovery-{batch_id}",
-                        daemon=True,
-                    ).start()
-        except Exception as batch_error:
-            print(
-                "Persistente Server-Batches konnten nicht vollständig "
-                f"wiederaufgenommen werden: {batch_error}",
-                flush=True,
-            )
 
     except Exception as error:
         DATABASE_INITIALIZATION = None
@@ -2720,6 +2668,62 @@ def startup_database() -> None:
         WORKSPACE_LAYOUT_ERROR = str(error)
         LIBRARY_REGISTRY_INITIALIZATION = None
         LIBRARY_REGISTRY_ERROR = str(error)
+
+
+def _start_runtime_workers():
+    """No background writer is released before technical/F14 commit."""
+    global WORKER_THREAD
+    WORKER_STOP.clear()
+
+    if (
+        WORKER_THREAD is None
+        or not WORKER_THREAD.is_alive()
+    ):
+        WORKER_THREAD = Thread(
+            target=worker_loop,
+            name="kamera-job-worker",
+            daemon=True,
+        )
+        WORKER_THREAD.start()
+
+    start_cancel_worker()
+    start_release_worker()
+
+    # 0.41.3: Persistente Mehrfach-Anwendungen und Sortierjournale
+    # werden nach einem Neustart auch in sekundären Bibliotheken
+    # wiederentdeckt.
+    try:
+        for context in list_active_library_contexts(
+            REGISTRY_DATABASE_FILE
+        ):
+            ensure_library_database_schema(
+                context
+            )
+            if (
+                context.database_path.resolve(strict=False)
+                != DATABASE_FILE.resolve(strict=False)
+            ):
+                mark_incomplete_sort_runs_interrupted(
+                    context.database_path
+                )
+                recover_interrupted_sort_runs(
+                    context.database_path
+                )
+            for batch_id in recover_operation_batches(
+                context.database_path
+            ):
+                Thread(
+                    target=_apply_batch_thread_target,
+                    args=(batch_id, context),
+                    name=f"kamera-batch-recovery-{batch_id}",
+                    daemon=True,
+                ).start()
+    except Exception as batch_error:
+        print(
+            "Persistente Server-Batches konnten nicht vollständig "
+            f"wiederaufgenommen werden: {batch_error}",
+            flush=True,
+        )
 
 
 @app.on_event("shutdown")
@@ -3044,18 +3048,26 @@ def _storage_settings_state() -> dict[str, Any]:
 @app.get("/api/settings/storage-health", tags=["Einstellungen"])
 def api_storage_health() -> dict[str, Any]:
     from app.managed_storage_health import inspect_storage
-    return inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
+    status = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
+    if DATABASE_INITIALIZATION_ERROR and status['ready']:
+        status = {**status, 'ready':False, 'startup_error':DATABASE_INITIALIZATION_ERROR,
+                  'issues':[{'code':'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
+    return status
 
 
 @app.post("/api/settings/storage-recheck", tags=["Einstellungen"])
 def api_recheck_storage() -> dict[str, Any]:
     """Explicitly retry startup only when storage preflight stopped it entirely."""
     with _STORAGE_RECHECK_LOCK:
-        status = api_storage_health()
-        if not status['ready']:
-            raise HTTPException(status_code=409, detail='Verwaltungsordner sind weiterhin nicht eindeutig verfügbar.')
-        if _STORAGE_STARTUP_PAUSED:
+        from app.managed_storage_health import inspect_storage
+        # A previous startup error remains diagnostic, but cannot conceal that
+        # the administrator has now restored the original storage bindings.
+        status = inspect_storage(WORKSPACE_PATH, database=DATABASE_FILE)
+        if not status['ready'] and not status.get('can_initialize'):
+            raise HTTPException(status_code=409, detail={'code':'storage_recheck_blocked','issues':status['issues']})
+        if _STORAGE_STARTUP_PAUSED or status.get('can_initialize'):
             startup_database()
+            status = api_storage_health()
         if DATABASE_INITIALIZATION_ERROR:
             raise HTTPException(status_code=409, detail='Die Wiederanlaufprüfung ist noch gesperrt: ' + DATABASE_INITIALIZATION_ERROR)
         return status
@@ -10555,13 +10567,13 @@ def web_app_manifest(request: Request) -> JSONResponse:
             "background_color": "#15222c",
             "icons": [
                 {
-                    "src": "/assets/bibliothekar-icon-192.png?v=1.0.0-rc.8",
+                    "src": f"/assets/bibliothekar-icon-192.png?v={APP_VERSION}",
                     "sizes": "192x192",
                     "type": "image/png",
                     "purpose": "any",
                 },
                 {
-                    "src": "/assets/bibliothekar-logo-symbol-background.svg?v=1.0.0-rc.8",
+                    "src": f"/assets/bibliothekar-logo-symbol-background.svg?v={APP_VERSION}",
                     "sizes": "any",
                     "type": "image/svg+xml",
                     "purpose": "any",

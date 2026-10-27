@@ -23,9 +23,7 @@ import tempfile
 import time
 import uuid
 
-
-class RootOperationError(RuntimeError):
-    pass
+from app.private_storage_security import RootOperationError, PrivateStorageError, qualified as private_qualified, check_acl as private_check_acl
 
 
 class RootOperationBusy(RootOperationError):
@@ -179,53 +177,62 @@ def _sync(path):
 
 
 def _write(path, value):
-    fd, tmp = tempfile.mkstemp(prefix='.pending-', dir=path.parent)
-    try:
-        with os.fdopen(fd, 'w') as f:
-            json.dump(value, f, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-        _sync(path.parent)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+    path = Path(path)
+    with private_qualified(path.parent, directory=True) as (parent_fd, check):
+        name = '.pending-' + hashlib.sha256(path.name.encode()).hexdigest()[:16] + '-' + uuid.uuid4().hex
+        fd = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)
+        try:
+            private_check_acl(fd, {0, os.geteuid()}, path=path.parent/name)
+            with os.fdopen(fd, 'w') as stream:
+                fd = None
+                json.dump(value, stream, sort_keys=True)
+                stream.flush(); os.fsync(stream.fileno())
+                private_check_acl(stream.fileno(), {0, os.geteuid()}, path=path.parent/name)
+                expected = os.fstat(stream.fileno())
+                current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if (expected.st_dev, expected.st_ino) != (current.st_dev, current.st_ino):
+                    raise RootOperationError('Private publication replaced: ' + str(path))
+                check()
+                os.replace(name, path.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                os.fsync(parent_fd)
+        finally:
+            if fd is not None: os.close(fd)
+            try: os.unlink(name, dir_fd=parent_fd)
+            except FileNotFoundError: pass
 
 
 def _read(path, default=None):
-    # State is atomically published by cooperating writers in the protected
-    # control namespace. An opened previous inode may have been unlinked by
-    # _write; never read it, and only retry a verified, different publication.
-    opened = False
-    for attempt in range(3):
-        try:
-            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-            opened = True
+    path = Path(path)
+    if not path.parent.exists():
+        # Qualify the nearest existing private ancestor before accepting absence.
+        from app.private_storage_security import qualify_existing
+        qualify_existing(path.parent)
+        return default
+    with private_qualified(path.parent, directory=True) as (parent_fd, check):
+        for attempt in range(3):
             try:
-                info = os.fstat(descriptor)
-                if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+                fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+            except FileNotFoundError:
+                check(); return default
+            try:
+                info = os.fstat(fd)
+                if info.st_nlink == 0 and path.name == 'state.json' and attempt < 2:
+                    current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                    if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino): continue
+                private_check_acl(fd, {0, os.geteuid()}, path=path)
+                if info.st_uid != os.geteuid():
                     raise RootOperationError('Operationsnachweis besitzt keine sichere Eigentumsbindung: ' + str(path))
-                if info.st_nlink != 1:
-                    replacement = os.stat(path, follow_symlinks=False)
-                    if (Path(path).name == 'state.json' and info.st_nlink == 0 and attempt < 2
-                            and stat.S_ISREG(replacement.st_mode)
-                            and replacement.st_uid == os.getuid()
-                            and replacement.st_nlink == 1 and not replacement.st_mode & 0o022
-                            and (replacement.st_dev, replacement.st_ino) != (info.st_dev, info.st_ino)):
-                        continue
-                    raise RootOperationError('Operationsnachweis besitzt keine sichere Eigentumsbindung: ' + str(path))
-                with os.fdopen(descriptor) as f:
-                    descriptor = None
-                    return json.load(f)
+                with os.fdopen(fd) as stream:
+                    fd = None
+                    value = json.load(stream)
+                    private_check_acl(stream.fileno(), {0, os.geteuid()}, path=path)
+                check()
+                return value
+            except (OSError, ValueError) as error:
+                raise RootOperationError('Operationsnachweis ist nicht lesbar: ' + str(path)) from error
             finally:
-                if descriptor is not None:
-                    os.close(descriptor)
-        except FileNotFoundError as error:
-            if not opened:
-                return default
-            raise RootOperationError('Operationsnachweis ist nicht lesbar: ' + str(path)) from error
-        except (ValueError, OSError) as error:
-            raise RootOperationError('Operationsnachweis ist nicht lesbar: ' + str(path)) from error
+                if fd is not None: os.close(fd)
+        raise RootOperationError('Operationsnachweis wurde wiederholt ausgetauscht: '+str(path))
 
 
 def _control_location(root):
@@ -236,6 +243,8 @@ def _control_location(root):
     matches = {}
     for candidate in dict.fromkeys(candidates):
         if not candidate.is_file(): continue
+        from app.private_storage_security import qualify_existing
+        qualify_existing(candidate)
         try:
             with closing(sqlite3.connect(candidate.absolute().as_uri()+'?mode=ro', uri=True)) as c:
                 if c.execute('SELECT 1 FROM libraries WHERE workspace_root=? LIMIT 1', (str(root),)).fetchone():
@@ -263,11 +272,14 @@ def _control(root, *, allow_missing=False):
         raise RootOperationError('Workspace ist nicht verfügbar: ' + str(root))
     parent = _control_location(root)
     for directory in [parent.parent,parent]:
-        try:
-            directory.mkdir(mode=0o700)
-            _sync(directory.parent)
-        except FileExistsError:
-            pass
+        with private_qualified(directory.parent, directory=True) as (fd, check):
+            try:
+                os.mkdir(directory.name, mode=0o700, dir_fd=fd)
+                os.fsync(fd)
+            except FileExistsError:
+                pass
+            check()
+        with private_qualified(directory, directory=True) as (_, check): check()
         s = directory.stat(follow_symlinks=False)
         if not stat.S_ISDIR(s.st_mode) or s.st_uid != os.geteuid() or s.st_mode & 0o077:
             raise RootOperationError('Interne Operationsnachweise sind nicht zugriffsgeschützt.')
@@ -276,29 +288,39 @@ def _control(root, *, allow_missing=False):
 
 @contextmanager
 def _lock(path, exclusive=False, wait=False, wait_seconds=0):
-    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    try:
-        s = os.fstat(fd)
-        if not stat.S_ISREG(s.st_mode) or s.st_nlink != 1 or s.st_uid != os.geteuid():
-            raise RootOperationError('Ungültige interne Operationssperre.')
-        deadline = time.monotonic() + wait_seconds
-        while True:
-            try:
-                fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | (0 if wait else fcntl.LOCK_NB))
-                break
-            except BlockingIOError as error:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise RootOperationBusy(path) from error
-                time.sleep(min(.02, remaining))
-        yield fd
-    finally:
-        os.close(fd)
+    path = Path(path)
+    with private_qualified(path.parent, directory=True) as (parent_fd, check):
+        fd = os.open(path.name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=parent_fd)
+        try:
+            def validate():
+                check()
+                value = private_check_acl(fd, {0, os.geteuid()}, path=path)
+                current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                if value['identity'] != [current.st_dev, current.st_ino] or os.fstat(fd).st_uid != os.geteuid():
+                    raise RootOperationError('Ungültige interne Operationssperre: '+str(path))
+            validate()
+            deadline = time.monotonic() + wait_seconds
+            while True:
+                try:
+                    fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | (0 if wait else fcntl.LOCK_NB))
+                    break
+                except BlockingIOError as error:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0: raise RootOperationBusy(path) from error
+                    time.sleep(min(.02, remaining))
+            validate()
+            yield fd
+            validate()
+        finally: os.close(fd)
 
 
 def _state(parent, root):
-    value = _read(parent / 'state.json', {'format': 1, 'workspace': _identity(root), 'generation': 0, 'libraries': {}, 'bindings': {}})
-    if value.get('format') != 1 or value.get('workspace') != _identity(root):
+    value = _read(parent / 'state.json', None)
+    if value is None:
+        from app.storage_bootstrap import assert_no_orphan_legacy_lock
+        assert_no_orphan_legacy_lock(root)
+        value = {'format': 2, 'workspace': _identity(root), 'generation': 0, 'libraries': {}, 'bindings': {}}
+    if value.get('format') not in (1, 2) or value.get('workspace') != _identity(root):
         raise RootOperationError('Workspace-Identität hat sich außerhalb von Bibliothekar geändert.')
     return value
 
@@ -570,7 +592,10 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                 changed=changed or any(identity is None and bindings[path] is not None and known_before.get(path)!=bindings[path] and not (kind=='startup' and (ids or {}).get('initialize_storage') and path in {str(root/n) for n in state.get('storage_names',{}).values()}) for path,identity in previous.items())
                 if changed:raise RootOperationError('Unterbrochener Auftrag besitzt eine andere Stammordnerbindung. Nachweise bleiben erhalten.')
             nonce = old.get('reservation_id') if old else None
-            if nonce and (parent/('finished-'+nonce+'.json')).exists() and _completed(old):
+            init = state.get('storage_initialization') or {}
+            if not nonce and kind == 'startup' and (ids or {}).get('initialize_storage') and init.get('operation_key') == key:
+                nonce = init.get('reservation_id')
+            if nonce and (parent/('finished-'+nonce+'.json')).exists() and _completed(old) and not (kind == 'startup' and (ids or {}).get('initialize_storage')):
                 nonce = None  # a repeated successful operation is a new execution
             record = {'format':1,'reservation_id':nonce or uuid.uuid4().hex,'shared':shared,'workspace':str(root),'library':library_id,'generation':list(current),'bindings':bindings,'database':str(Path(database).absolute()) if database else None,'kind':kind,'ids':ids or {}}
             if kind == 'startup':
@@ -580,7 +605,8 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     raise RootOperationError('Verwaltungsordnernamen widersprechen den gespeicherten Bindungen.')
                 state['storage_names']=names
                 if (ids or {}).get('initialize_storage'):
-                    state['storage_initialization']={'phase':'initializing','names':names,'database':str(database)}
+                    from app.storage_bootstrap import begin
+                    begin(state, record, key, names)
             _write(parent/'state.json',state)
             _write(parent/('operation-'+key+'.json'),record)
         record['_parent']=parent;record['_path']=parent/('operation-'+key+'.json')
@@ -595,6 +621,9 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             try:
                 validate_active_roots()
                 if completed or _receipt_completed({k:v for k,v in record.items() if not k.startswith('_')}):
+                    if kind == 'startup' and (ids or {}).get('initialize_storage'):
+                        from app.storage_bootstrap import finish
+                        finish(root, parent, {k:v for k,v in record.items() if not k.startswith('_')})
                     proof = parent / ('finished-'+record['reservation_id']+'.json')
                     _write(proof, {'receipt': 'operation_returned_and_roots_verified',
                                    'reservation': {k:v for k,v in record.items() if not k.startswith('_')}})
@@ -617,6 +646,12 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
             if context is not None:
                 database=context.database_path
             row=_registered(database,library_id=a.get('library_id'),workspace=a.get(workspace_arg))
+            if row and not row.get('is_registered', True) and any(r.get('kind') == 'startup' and r.get('ids', {}).get('initialize_storage') for r in _ACTIVE.get()):
+                from app.managed_storage_health import empty_bootstrap_registry, catalog_has_history
+                try:
+                    if not catalog_has_history(database) and empty_bootstrap_registry(os.environ['KAMERA_REGISTRY_DATABASE'], Path(row['workspace_root']), database):
+                        row = None  # Exact unused technical placeholder, not a domain context.
+                except (ValueError, KeyError): pass
             if row and database is None:database=Path(row['database_path'])
             view_context = _view_context(a.get(workspace_arg), database) if row is None and context is None else None
             if view_context is not None: context = view_context
@@ -975,8 +1010,10 @@ def reset_empty_storage(workspace, database, token):
         else:_write(archive,old)
         # Keep the complete old state as immutable history. Advancing generation
         # invalidates stale request contexts; no old library is rebound.
-        new={'format':1,'workspace':proof['observed'][str(root)],'generation':old.get('generation',0)+1,'libraries':{},'bindings':{str(root):proof['observed'][str(root)]},
+        new={'format':2,'workspace':proof['observed'][str(root)],'generation':old.get('generation',0)+1,'libraries':{},'bindings':{str(root):proof['observed'][str(root)]},
              'setup_reset':{'history':archive.name,'confirmation':'SET UP AGAIN','bootstrap_registry':proof.get('bootstrap_registry',[]),'qualification':proof.get('basis','initialization_intent'),'database':str(Path(database).absolute()),'previous_state_sha256':hashlib.sha256(json.dumps(old,sort_keys=True).encode()).hexdigest()}}
+        if old.get('control_migration'):
+            new['control_migration']=old['control_migration']
         current=setup_again_evidence(root,database=database)
         if not current['allowed'] or current['token']!=token:raise RootOperationError('Leerheitsnachweis wurde während der Einrichtung verändert.')
         _check({p:i for p,i in proof['observed'].items() if i is not None})

@@ -23,95 +23,19 @@ ADMIN_GROUPS = {0, 544}
 
 
 def _attributes(fd):
-    if hasattr(os, 'listxattr'):
-        # Probe native names explicitly: not every driver lists system attrs.
-        names = {n for n in os.listxattr(fd) if 'acl' in n.lower()} | set(NFS4) | {'system.posix_acl_access', 'system.posix_acl_default'}
-        attrs = {}
-        for name in sorted(names):
-            try: attrs[name] = os.getxattr(fd, name)
-            except OSError as error:
-                if error.errno not in {errno.ENODATA, errno.ENOTSUP, errno.EOPNOTSUPP}: raise
-        return attrs
-    if sys.platform != 'darwin':
-        raise TrashError('ACL-Prüfung der privaten Retention ist nicht verfügbar.')
-    # Query presence explicitly using fstatx/filesec (Darwin SDK sys/fcntl.h),
-    # never interpret an acl_get_fd_np failure as a permission proof.
-    lib = ctypes.CDLL(None, use_errno=True)
-    lib.filesec_init.restype = ctypes.c_void_p
-    lib.filesec_free.argtypes = [ctypes.c_void_p]
-    lib.fstatx_np.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
-    lib.filesec_query_property.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
-    fsec = lib.filesec_init()
-    if not fsec: raise TrashError('Native Verwaltungs-ACL nicht lesbar.')
-    try:
-        buffer = ctypes.create_string_buffer(2048); present = ctypes.c_int(-1)
-        if lib.fstatx_np(fd, buffer, fsec) != 0 or lib.filesec_query_property(fsec, 5, ctypes.byref(present)) != 0:
-            raise TrashError('Native Verwaltungs-ACL nicht lesbar.')
-        if present.value == 0: return {}
-    finally: lib.filesec_free(fsec)
-    lib.acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
-    lib.acl_get_fd_np.restype = ctypes.c_void_p
-    lib.acl_get_entry.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
-    lib.acl_get_tag_type.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
-    lib.acl_free.argtypes = [ctypes.c_void_p]
-    acl = lib.acl_get_fd_np(fd, 0x100)
-    if not acl: raise TrashError('Native Verwaltungs-ACL nicht lesbar.')
-    try:
-        entry = ctypes.c_void_p(); first = True
-        while True:
-            ctypes.set_errno(0)
-            result = lib.acl_get_entry(acl, 0 if first else -1, ctypes.byref(entry)); first = False
-            if result == -1 and ctypes.get_errno() == errno.EINVAL: break
-            tag = ctypes.c_int()
-            if result != 0 or lib.acl_get_tag_type(entry, ctypes.byref(tag)) != 0 or tag.value != 2:
-                raise TrashError('Nicht qualifizierte native ACL im privaten Verwaltungsbereich.')
-        return {}  # Every entry was ACL_EXTENDED_DENY; none grants access.
-    finally: lib.acl_free(acl)
+    from app.private_storage_security import attributes
+    return attributes(fd)
 
 
 def check_acl(fd, users, *, sticky=False, existing_ancestor=False):
-    info = os.fstat(fd)
-    if info.st_uid not in users:
-        raise TrashError('Fremder Eigentümer im privaten Verwaltungsbereich.')
-    attrs = _attributes(fd)
-    native = [(n, v) for n, v in attrs.items() if n in NFS4]
-    # POSIX default ACLs affect newly created children, not access to this
-    # already-existing ancestor. Creation parents are checked as final nodes
-    # by ensure_directory/retain, so their default ACL remains strict.
-    other_acl = {n for n in attrs if n not in NFS4}
-    if existing_ancestor: other_acl.discard('system.posix_acl_default')
-    if len(native) > 1 or other_acl:
-        raise TrashError('Nicht qualifizierte ACL im privaten Verwaltungsbereich.')
-    if native:
-        raw = native[0][1]
-        if len(raw) < 28 or len(raw) > 20488 or (len(raw)-8) % 20:
-            raise TrashError('Ungültiges NFS4-ACL-Dokument.')
-        flags, count = struct.unpack_from('!II', raw)
-        if count != (len(raw)-8)//20 or flags & ~0x30007:
-            raise TrashError('Unbekannte NFS4-ACL-Struktur.')
-        for kind, flags, special, mask, who in struct.iter_unpack('!IIIII', raw[8:]):
-            if kind not in (0, 1, 2, 3) or special not in (0, 1) or flags & ~0xff or mask & ~0x1f01ff:
-                raise TrashError('Unbekannter NFS4-ACL-Eintrag.')
-            if kind != 0 or not mask & WRITE:
-                continue
-            # Include inherit-only grants: they may affect newly created copies.
-            group = bool(flags & 0x40)
-            if special:
-                if who == 1: trusted = info.st_uid in users
-                elif who == 2: trusted = info.st_gid in ADMIN_GROUPS
-                elif who == 3: trusted = False
-                else: raise TrashError('Unbekannter NFS4-ACL-Prinzipal.')
-            else:
-                trusted = who in (ADMIN_GROUPS if group else users)
-            if not trusted:
-                raise TrashError('Fremde Schreib-/Löschrechte in privater NFS4-ACL.')
-    elif info.st_mode & 0o022:
-        if not (sticky and stat.S_ISDIR(info.st_mode) and info.st_mode & stat.S_ISVTX):
-            raise TrashError('Fremde POSIX-Schreibrechte im privaten Verwaltungsbereich.')
-    if not stat.S_ISDIR(info.st_mode) and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
-        raise TrashError('Private Datei ist nicht eindeutig oder hat Hardlinks.')
-    return {'identity': list(trash_fd.identity(info)), 'acl_sha256':
-            hashlib.sha256(b''.join(n.encode()+v for n, v in sorted(attrs.items()))).hexdigest()}
+    from app.private_storage_security import check_acl as qualify_acl, PrivateStorageError
+    try:
+        return qualify_acl(fd, users, sticky=sticky, existing_ancestor=existing_ancestor, reader=_attributes)
+    except PrivateStorageError as error:
+        # Keep the retention API's established domain error contract.
+        if isinstance(error.__cause__, PermissionError): raise error.__cause__
+        prefix = 'Fremde Schreib-/Löschrechte im privaten Verwaltungsbereich. ' if error.code in ('private_acl_untrusted_write','private_owner_untrusted') else 'Nicht qualifizierte private ACL. '
+        raise TrashError(prefix + str(error)) from error
 
 
 @contextmanager

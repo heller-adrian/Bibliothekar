@@ -1,0 +1,3 @@
+# RC11 Arbeitsstand
+
+2026-10-27: Ausgangspunkt c8e078ee, Zweig release/v1.0.0-rc.11. Die unveränderten 151 RC10-Basistests bestanden. Implementiert: native private ACL-/Elternprüfung, FD-gebundene F14-Zugriffe, privates Trash-Lock, explizite Offlineübernahme von RC10-Nachweisen, Format-2-Sperre gegen RC10, persistente Bootstrap-ID und Abschlussreceipt, zusätzliche Historienprüfungen und genaue UI-Ursachen. Reale RC10-Fixture und SIGKILL-Tests ergänzt; Regressionen werden noch korrigiert und abschließend erneut ausgeführt. Linux-Container-QA vorbereitet, noch nicht ausgeführt. Native TrueNAS-Abnahme und produktive Migration offen. Keine Veröffentlichung oder NAS-Eingriffe. Nächster Schritt: Testmatrix abschließen, gezielte Linux-CI und Testbericht.
