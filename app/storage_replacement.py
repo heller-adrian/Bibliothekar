@@ -66,7 +66,7 @@ def replacement_candidates(status):
     severe={'workspace_unavailable','workspace_identity_changed','configuration_changed',
             'registry_unavailable','catalog_unavailable','evidence_unreadable',
             'initialization_pending','unresolved_reservation','mount_identity_changed',
-            'installation_history_missing','appdata_identity_changed','workspace_claim_conflict'}
+            'installation_history_missing','catalog_identity_mismatch','registry_history_mismatch','appdata_identity_changed','workspace_claim_conflict'}
     if any(issue['code'] in severe for issue in status.get('issues', ())):
         return []
     return [

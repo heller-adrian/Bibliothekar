@@ -17,6 +17,25 @@ def _empty_sqlite_header(connection):
                     for key,value in [('page_count',1),('freelist_count',0),('application_id',0),('user_version',0)]))
 
 
+def _empty_schema_marker(connection, table):
+    """RC12 may resume a committed, still empty migration metadata table.
+
+    No arbitrary partial schema is blessed: exactly one known table, its exact
+    columns, no applied version, no other object and default SQLite markers.
+    Independent F14, registry and workspace history checks still apply.
+    """
+    from app.appdata import root as appdata_root
+    if appdata_root() is None: return False
+    objects=connection.execute("SELECT type,name FROM sqlite_master").fetchall()
+    if [tuple(row) for row in objects] != [('table',table)]: return False
+    columns=connection.execute('PRAGMA table_info('+table+')').fetchall()
+    signature=[(r[1],r[2],r[3],r[4],r[5]) for r in columns]
+    return (signature==[('version','INTEGER',0,None,1),('applied_at','TEXT',1,None,0)]
+            and not connection.execute('SELECT 1 FROM '+table+' LIMIT 1').fetchone()
+            and connection.execute('PRAGMA application_id').fetchone()[0]==0
+            and connection.execute('PRAGMA user_version').fetchone()[0]==0)
+
+
 def catalog_has_history(database):
     """Technical schema/default rows alone are not a used media catalogue."""
     if database is None or not Path(database).exists():return False
@@ -28,6 +47,7 @@ def catalog_has_history(database):
     with closing(sqlite3.connect(path.absolute().as_uri()+'?mode=ro',uri=True)) as c:
         tables=[row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")]
         if not tables and _empty_sqlite_header(c):return False
+        if _empty_schema_marker(c,'schema_versions'):return False
         if not {'schema_versions','jobs','files'}<=set(tables):raise ValueError('unrecognised catalogue')
         for table in tables:
             quoted='"'+table.replace('"','""')+'"'
@@ -67,6 +87,7 @@ def empty_bootstrap_registry(registry, root, database):
         c.row_factory=sqlite3.Row
         tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not tables and _empty_sqlite_header(c):return []
+        if _empty_schema_marker(c,'registry_schema_versions'):return []
         if not {'libraries','registry_schema_versions'}<=tables:raise ValueError('unknown_registry_schema')
         for table in tables-{'registry_schema_versions','libraries'}:
             quoted='"'+table.replace('"','""')+'"'
@@ -319,8 +340,8 @@ def inspect_storage(workspace, *, database=None):
                 for operation in _control_location(workspace).glob('operation-*.json'):
                     result['issues'].append({'code':'unresolved_reservation','path':str(operation),
                         'detail':'Restore original roots and reconcile this operation before accepting a replacement.'})
-            from app.appdata import pending_operations
-            invalid_operations = pending_operations(Path(workspace).absolute())
+            from app.appdata import pending_operations, catalogue_issues
+            invalid_operations = pending_operations(Path(workspace).absolute()) + catalogue_issues(Path(workspace).absolute())
             if invalid_operations:
                 result['issues'].extend(invalid_operations)
                 result.update(ready=False,can_initialize=False)

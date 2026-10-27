@@ -7,7 +7,7 @@ import sys
 import pytest
 
 
-@pytest.mark.parametrize('case',['fresh','broad','technical','restore','replace','inode','pending','pending-ready',
+@pytest.mark.parametrize('case',['fresh','db-header','registry-header','broad','technical','restore','replace','inode','pending','pending-ready','replaced-db','emptied-registry','registration-flag',
  'missing-db','missing-state','missing-registry','second-instance','missing-mount','legacy-lock','foreign','symlink'])
 def test_rc12_lifecycle(tmp_path,case):
     env={k:v for k,v in os.environ.items() if not k.startswith(('KAMERA_','BIBLIOTHEKAR_'))}

@@ -26,6 +26,12 @@ if case=='foreign':(w/'unknown.JPG').write_bytes(b'preserve')
 if case=='symlink':(w/'Trash').symlink_to(archive,target_is_directory=True)
 if case=='broad':a.chmod(0o777)
 appdata.prepare()
+if case in ('db-header','registry-header'):
+    import sqlite3
+    target=m.DATABASE_FILE if case=='db-header' else m.REGISTRY_DATABASE_FILE
+    table='schema_versions' if case=='db-header' else 'registry_schema_versions'
+    with sqlite3.connect(target) as connection:
+        connection.execute('CREATE TABLE '+table+' (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)')
 initial=inspect_storage(w,database=m.DATABASE_FILE)
 if case in ('legacy-lock','foreign','symlink'):
     assert not initial['can_initialize'],initial
@@ -73,6 +79,26 @@ else:
         if case!='pending':
             assert m.api_storage_health()['ready'],m.api_storage_health()
             post('/api/libraries',{'display_name':'After recovery','work_root':'','archive_root':str(second)},201)
+    if case in ('emptied-registry','registration-flag'):
+        import sqlite3
+        if case=='emptied-registry':
+            from app.library_registry import initialize_library_registry
+            m.REGISTRY_DATABASE_FILE.rename(m.REGISTRY_DATABASE_FILE.with_name('registry-preserved.saved'))
+            initialize_library_registry(m.REGISTRY_DATABASE_FILE)
+        else:
+            with sqlite3.connect(m.REGISTRY_DATABASE_FILE) as connection: connection.execute('UPDATE libraries SET is_registered=0')
+        health=m.api_storage_health();assert not health['ready'] and not health['can_initialize'],health
+        assert any(i['code']=='registry_history_mismatch' for i in health['issues']),health
+        post('/api/settings/storage-recheck',{},409)
+    if case=='replaced-db':
+        from app.database import initialize_database
+        saved=m.DATABASE_FILE.with_name('catalogue-preserved.saved')
+        m.DATABASE_FILE.rename(saved)
+        initialize_database(m.DATABASE_FILE)
+        health=m.api_storage_health();assert not health['ready'] and not health['can_initialize'],health
+        assert any(i['code']=='catalog_identity_mismatch' for i in health['issues']),health
+        post('/api/settings/storage-recheck',{},409)
+        assert saved.exists()
     if case=='pending-ready':
         ro._write(own/'operation-unrecognized.json',{'preserve':'unresolved'})
         health=m.api_storage_health();assert not health['ready'] and not health['can_initialize'],health

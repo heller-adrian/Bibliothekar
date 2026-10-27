@@ -216,3 +216,51 @@ def pending_operations(workspace, *, all_records=False):
             issues.append({'code':'unresolved_reservation','path':str(path),
                            'detail':'Unrecognized or unrecovered operation; preserve evidence and restore its original roots before retrying.'})
     return issues
+
+
+def catalogue_issues(workspace):
+    """A registered catalogue cannot become a new empty DB on schema startup."""
+    if root() is None: return []
+    from contextlib import closing
+    import sqlite3
+    from app.private_storage_security import qualified
+    registry = Path(os.environ['KAMERA_REGISTRY_DATABASE'])
+    if not registry.is_file(): return []  # Fresh bootstrap or independently diagnosed history loss.
+    from app.root_operations import _read,_control_location
+    state = _read(_control_location(workspace)/'state.json',{})
+    issues = []
+    with qualified(registry), closing(sqlite3.connect(registry.absolute().as_uri()+'?mode=ro',uri=True)) as connection:
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'libraries' not in tables:
+            if (state.get('storage_initialization') or {}).get('phase') == 'completed':
+                return [{'code':'registry_history_mismatch','path':str(registry),'detail':'Previously prepared registry schema is missing; restore the consistent history.'}]
+            return []
+        all_rows = connection.execute('SELECT library_id,is_registered,unregistered_at FROM libraries WHERE workspace_root=?',(str(workspace),)).fetchall()
+        rows = connection.execute('SELECT library_id,database_path FROM libraries WHERE workspace_root=? AND COALESCE(is_registered,1)=1',(str(workspace),)).fetchall()
+    from app.root_operations import _read,_control_location
+    from app.managed_storage_health import catalog_has_history,empty_bootstrap_registry
+    state = _read(_control_location(workspace)/'state.json',{})
+    expected = set(state.get('libraries',{})) - {'shared'}
+    recorded = {row[0] for row in all_rows}
+    main = Path(os.environ['KAMERA_DATABASE_DIR'])/'kamera.sqlite3'
+    ambiguous_flags = any(not flag and not retired for _,flag,retired in all_rows)
+    technical = False
+    if ambiguous_flags:
+        try: technical = bool(empty_bootstrap_registry(registry,Path(workspace),main)) and not expected and not catalog_has_history(main)
+        except (ValueError,sqlite3.Error): pass
+    core = {str(workspace),*(str(Path(workspace)/name) for name in state.get('storage_names',{}).values())}
+    additional_bindings = set(state.get('bindings',{}))-core
+    if expected-recorded or (not all_rows and (catalog_has_history(main) or additional_bindings)) or (ambiguous_flags and not technical):
+        issues.append({'code':'registry_history_mismatch','path':str(registry),
+            'detail':'Library generations, catalogue history or registration flags contradict the registry. Restore the consistent history; onboarding cannot replace it.'})
+    for library_id,path in rows:
+        target = Path(path)
+        try:
+            with qualified(target), closing(sqlite3.connect(target.absolute().as_uri()+'?mode=ro',uri=True)) as connection:
+                identity = connection.execute('SELECT library_id FROM library_identity WHERE singleton=1').fetchone()
+                if identity is None or identity[0] != library_id:
+                    issues.append({'code':'catalog_identity_mismatch','path':str(target),
+                        'detail':'Registered catalogue identity missing/different; restore its consistent backup, never initialize it as a new library.'})
+        except (OSError,sqlite3.Error) as error:
+            issues.append({'code':'catalog_unavailable','path':str(target),'detail':str(error)})
+    return issues

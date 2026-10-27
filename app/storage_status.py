@@ -29,7 +29,7 @@ def describe(observation):
         state = State.AMBIGUOUS
     elif any(i['code'] in {'missing','identity_changed','workspace_identity_changed',
                           'workspace_unavailable','mount_identity_changed',
-                          'installation_history_missing','registry_unavailable','catalog_unavailable',
+                          'installation_history_missing','registry_unavailable','catalog_unavailable','catalog_identity_mismatch','registry_history_mismatch',
                           'storage_read_only','private_path_unavailable','appdata_identity_changed'} for i in issues):
         state = State.DEGRADED
     else:
@@ -41,6 +41,6 @@ def describe(observation):
         'recheck':True,
         'expected_folders':[{'path':r['path'],'identity':r.get('expected_identity'),'status':r['status']}
                             for r in result.get('folders',[]) if r['status'] != 'available'],
-        'history_restore_required':any(i['code'] in {'installation_history_missing','registry_unavailable','catalog_unavailable','workspace_claim_conflict'} for i in issues),
+        'history_restore_required':any(i['code'] in {'installation_history_missing','registry_unavailable','catalog_unavailable','catalog_identity_mismatch','registry_history_mismatch','workspace_claim_conflict'} for i in issues),
     }
     return result

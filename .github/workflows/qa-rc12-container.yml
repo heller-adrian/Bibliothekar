@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   regression_evidence:
+    if: ${{ !contains(github.event.head_commit.message, '[full-rc12]') }}
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

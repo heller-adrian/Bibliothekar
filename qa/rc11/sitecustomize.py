@@ -42,13 +42,13 @@ if boundary and is_web and not marker.exists():
         if boundary=='claim-unlinked' and str(path).split('/')[-1].startswith('.bibliothekar-claim-'):stop()
         if boundary=='operation-unlink' and str(path).split('/')[-1].startswith('operation-') and str(path).endswith('.json'):stop()
         return result
-    if boundary=='operation-unlink':os.unlink=unlink
+    if boundary in {'operation-unlink','claim-unlinked'}:os.unlink=unlink
     def trace(frame,event,arg):
         if event=='call':
-            return trace if frame.f_code.co_name in {'ensure_settings_file','initialize_database','initialize_library_registry','recover_trash_restores','_lock','_write'} else None
+            return trace if frame.f_code.co_name in {'ensure_schema_version_table','_ensure_registry_schema_table','ensure_settings_file','initialize_database','initialize_library_registry','recover_trash_restores','_lock','_write'} else None
         if event!='return':return trace
         name=frame.f_code.co_name;filename=Path(frame.f_code.co_filename).name
-        targets={'ensure_settings_file':'config','initialize_database':'database','initialize_library_registry':'registry','recover_trash_restores':'recovery'}
+        targets={'ensure_schema_version_table':'database-header','_ensure_registry_schema_table':'registry-header','ensure_settings_file':'config','initialize_database':'database','initialize_library_registry':'registry','recover_trash_restores':'recovery'}
         if targets.get(name)==boundary:stop()
         if filename=='root_operations.py' and name=='_lock' and boundary=='private-lock' and Path(frame.f_locals['path']).name=='trash-recovery.lock':stop()
         if filename=='root_operations.py' and name=='_write':
