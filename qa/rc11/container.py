@@ -97,10 +97,11 @@ def case(label,boundary='',legacy=False,legacy_completed=False,unsafe_private=Fa
             # A read-only inspection followed by an explicit, exact evidence decision.
             inspected=json.loads(docker('run','--rm','--user','568:568',*opts,'--entrypoint','python',image,'-m','app.storage_admin','inspect'))
             assert inspected['operation']['reservation_id']=='9c2ab846562a4fb6aee39e2d08edeee6'
-            adopted=docker('run','--rm','--user','568:568',*opts,'--entrypoint','python',image,'-m','app.storage_admin','adopt','--token',inspected['token'],'--confirmation','ADOPT RC10 BOOTSTRAP','--backup-reference','isolated synthetic fixture backup',check=boundary!='adoption-receipt')
+            adopted=docker('run','--rm','--user','568:568',*opts,'-e','RC11_QA_ADMIN_ADOPT=true','--entrypoint','python',image,'-m','app.storage_admin','adopt','--token',inspected['token'],'--confirmation','ADOPT RC10 BOOTSTRAP','--backup-reference','isolated synthetic fixture backup',check=boundary!='adoption-receipt')
             if boundary=='adoption-receipt':
                 assert adopted.returncode!=0 and (base/'evidence/checkpoint.json').exists(),adopted.stdout+adopted.stderr
                 result['crash']=json.loads((base/'evidence/checkpoint.json').read_text())
+                assert result['crash']['publication'].split('/')[-1].startswith('rc11-adoption-')
         if unsafe_private:subprocess.run(['sudo','chmod','0777',str(base/'database')],check=True)
         docker('create','--name',container,*opts,'-p','127.0.0.1:18317:8080',image)
         docker('start',container)

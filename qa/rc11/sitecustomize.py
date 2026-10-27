@@ -10,11 +10,11 @@ import sys
 boundary=os.environ.get('RC11_QA_BOUNDARY','')
 marker=Path('/qa-evidence/checkpoint.json')
 is_web = 'app.main:app' in sys.argv
-is_admin = 'app.storage_admin' in getattr(sys, 'orig_argv', []) and 'adopt' in sys.argv
+is_admin = os.environ.get('RC11_QA_ADMIN_ADOPT') == 'true'
 if boundary and (is_web or is_admin) and not marker.exists():
-    def stop():
+    def stop(publication=None):
         with marker.open('w') as stream:
-            json.dump({'boundary':boundary,'pid':os.getpid(),'uid':os.getuid(),'gid':os.getgid()},stream)
+            json.dump({'boundary':boundary,'pid':os.getpid(),'uid':os.getuid(),'gid':os.getgid(),'publication':str(publication) if publication else None},stream)
             stream.flush();os.fsync(stream.fileno())
         os.kill(os.getpid(),signal.SIGKILL)
     original_mkdir=Path.mkdir
@@ -54,6 +54,6 @@ if boundary and (is_web or is_admin) and not marker.exists():
                 or boundary=='operation-archive' and path.name.startswith('bootstrap-operation-')
                 or boundary=='finished-receipt' and path.name.startswith('finished-')
                 or boundary=='control-format' and path.name=='state.json' and value.get('control_migration')
-                or boundary=='adoption-receipt' and path.name.startswith('rc11-adoption-')):stop()
+                or boundary=='adoption-receipt' and path.name.startswith('rc11-adoption-')):stop(path)
         return trace
     sys.settrace(trace)

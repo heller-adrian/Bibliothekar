@@ -2,7 +2,7 @@ name: RC11 isolated safety acceptance
 on:
   push:
     branches: [release/v1.0.0-rc.11]
-    paths-ignore: ["docs/**", "README.md", "CHANGELOG.md", ".github/workflows/publish-rc11.yml", "qa/rc11/container.py", ".github/workflows/qa-rc11-container.yml", ".github/workflows/qa-rc11.yml"]
+    paths-ignore: ["docs/**", "README.md", "CHANGELOG.md", ".github/workflows/publish-rc11.yml", "qa/rc11/container.py", "qa/rc11/sitecustomize.py", ".github/workflows/qa-rc11-container.yml", ".github/workflows/qa-rc11.yml"]
 permissions:
   contents: read
 concurrency:

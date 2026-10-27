@@ -2,7 +2,7 @@ name: RC11 verified regression reuse and container acceptance
 on:
   push:
     branches: [release/v1.0.0-rc.11]
-    paths: [qa/rc11/container.py, .github/workflows/qa-rc11-container.yml]
+    paths: [qa/rc11/container.py, qa/rc11/sitecustomize.py, .github/workflows/qa-rc11-container.yml]
 permissions:
   contents: read
   actions: read
@@ -35,7 +35,7 @@ jobs:
           selected=[j for j in jobs if j['name'] in names]
           assert {j['name'] for j in selected}==names and all(j['conclusion']=='success' for j in selected)
           changed=subprocess.check_output(['git','diff','--name-only',os.environ['REGRESSION_SHA'],'HEAD'],text=True).splitlines()
-          allowed={'qa/rc11/container.py','.github/workflows/qa-rc11.yml','.github/workflows/qa-rc11-container.yml'}
+          allowed={'qa/rc11/container.py','qa/rc11/sitecustomize.py','.github/workflows/qa-rc11.yml','.github/workflows/qa-rc11-container.yml'}
           assert all(p in allowed or p.startswith('docs/') for p in changed),changed
           proof={'source_sha':os.environ['GITHUB_SHA'],'regression_sha':os.environ['REGRESSION_SHA'],'regression_run':os.environ['REGRESSION_RUN'],'changed_files':changed,'unchanged':'app, tests, Dockerfile, requirements and regression harness; only container observer/workflow/docs changed'}
           root=Path(os.environ['RUNNER_TEMP'])/'reused';root.mkdir()
