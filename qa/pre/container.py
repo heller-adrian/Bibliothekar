@@ -14,8 +14,9 @@ from pathlib import Path
 import subprocess
 p=Path('/fixture/nas/CARD');p.mkdir()
 for i in range(14):Image.new('RGB',(8,8),(i*17,i*13,i*7)).save(p/f'PHOTO{i:03}.JPG')
-# A usable secondary source with medium confidence keeps the files in Undated.
-subprocess.run(['exiftool','-overwrite_original','-XMP:CreateDate=2025:12:07 15:04:37+13:00',str(p)],check=True,capture_output=True)
+# Conflicting high-confidence tags put the original files in Undated.
+# The batch correction must then make all tags consistently +13:00.
+subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2025:12:07 15:04:37','-EXIF:OffsetTimeOriginal=+13:00','-XMP-exif:DateTimeOriginal=2024:12:07 15:04:37+01:00',str(p)],check=True,capture_output=True)
 Path('/fixture/archive/untouched.txt').write_bytes(b'independent archive')
 Path('/fixture/business/untouched.txt').write_bytes(b'second independent archive')
 Path('/fixture/workspace/.DS_Store').write_bytes(b'Finder')
