@@ -36,6 +36,7 @@ def storage_warning_html(status):
         'mount_identity_changed':('The dataset mount changed or disappeared. Restore the expected mount; no replacement is created on the underlying filesystem.','Die Dataset-Einbindung fehlt oder hat sich geändert. Stelle die erwartete Einbindung wieder her; auf dem darunterliegenden Dateisystem wird kein Ersatz angelegt.'),
         'workspace_identity_changed':('The workspace identity changed. Restore the original dataset; copying individual files into a new folder does not restore its identity.','Die Workspace-Identität hat sich geändert. Stelle das ursprüngliche Dataset wieder bereit; einzelne Dateien in einem neuen Ordner stellen dessen Identität nicht wieder her.'),
         'legacy_layout_requires_explicit_migration':('Keep the existing RC10/RC11 mount layout and its review procedure. A new appdata profile does not automatically adopt old control data.','Behalte das bestehende RC10-/RC11-Mountlayout und dessen Übernahmeverfahren bei. Das neue Appdatenprofil übernimmt alte Steuerdaten nicht automatisch.'),
+        'control_file_invalid':('A technical control file has an invalid type or link count. Operations remain paused until the original evidence is verified.','Eine technische Steuerdatei besitzt einen ungültigen Typ oder Linkstatus. Vorgänge bleiben bis zur Prüfung der ursprünglichen Nachweise angehalten.'),
         'private_path_unavailable':('The application cannot open this path with its actual credentials. Check the mount and effective access permissions.','Die Anwendung kann diesen Pfad mit ihren tatsächlichen Benutzerrechten nicht öffnen. Prüfe Einbindung und effektive Zugriffsrechte.'),
     })
     rows = ''
@@ -44,9 +45,18 @@ def storage_warning_html(status):
         message = explanations.get(code)
         rows += '<li><code>'+escape(str(item['path']))+'</code> · <code>'+escape(code)+'</code>'
         if message: rows += '<p>'+_phrase(*message)+'</p>'
-        if item.get('detail'): rows += '<p><code>'+escape(str(item['detail']))+'</code></p>'
+        if item.get('detail'):
+            detail=str(item['detail'])
+            if 'Quellfamilien-ID' in detail or 'source_inventory_conflict:' in detail:
+                rows += '<p>'+_phrase('Source history and current inventory disagree. Original source identity is preserved. This is a provenance conflict; check the matching loss records.', 'Quellhistorie und aktueller Bestand widersprechen sich. Die ursprüngliche Quellenidentität bleibt erhalten. Prüfe die zugehörigen Verlustnachweise.')+'</p>'
+                rows += '<details><summary>'+_phrase('Technical details','Technische Details')+'</summary><code>'+escape(detail)+'</code></details>'
+            else: rows += '<p><code>'+escape(detail)+'</code></p>'
         expected = next((r.get('expected_identity') for r in status.get('folders',[]) if r['path']==item['path']),None)
-        if expected is not None: rows += '<p>'+_phrase('Expected folder identity: ','Erwartete Ordneridentität: ')+'<code>'+escape(str(expected))+'</code></p>'
+        if expected is not None:
+            from pathlib import Path
+            name=Path(item['path']).name
+            rows += '<p>'+_phrase('Expected folder: ','Erwarteter Ordner: ')+'<code>'+escape(name)+'</code> <button type="button" class="storage-copy" data-copy="'+escape(name,quote=True)+'">'+_phrase('Copy name','Namen kopieren')+'</button></p>'
+            rows += '<details><summary>'+_phrase('Technical identity','Technische Identität')+'</summary><code>'+escape(str(expected))+'</code></details>'
         rows += '</li>'
     reasons={
         'workspace_not_empty':('Existing or unknown files must be preserved.',
@@ -78,6 +88,8 @@ def storage_warning_html(status):
              _phrase('Restore original mounts and folders, preserving databases, journals and retained media. Recheck afterwards. Never delete evidence to make setup pass.',
                      'Stelle ursprüngliche Einbindungen und Ordner wieder her und bewahre Datenbanken, Journale und Rückfallkopien. Prüfe danach erneut. Lösche keine Nachweise, um die Einrichtung zu erzwingen.')+
              '</p>')
+    if status.get('existing_installation') and not available:
+        guidance=''
     replacements=replacement_candidates(status)
     buttons=''.join('<li><code>'+escape(str(row['path']))+'</code> '
                     '<button type="button" class="storage-replace" data-key="'+
@@ -99,11 +111,10 @@ def storage_warning_html(status):
 <style>body{font:16px system-ui;background:#141922;color:#edf0f5;margin:0}
 dialog{color:inherit;background:#202938;border:2px solid #ffbd57;border-radius:12px;width:min(710px,calc(100% - 36px));max-height:90dvh;overflow:auto;box-sizing:border-box;overflow-wrap:anywhere;padding:24px}
 dialog::backdrop{background:#000b}button{padding:11px;margin:6px;min-height:44px;border-radius:7px;cursor:pointer}
-li{margin:12px 0}code{font-size:.88em}.languages{display:flex;justify-content:flex-end;gap:8px}.languages button{min-height:34px}
+li{margin:12px 0}code{font-size:.88em}.storage-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.storage-heading h1{margin:0}.languages{display:flex;gap:8px}.languages button{min-height:34px}
 #storage-recovery-panel[hidden]{display:none}section{margin:14px 0}</style></head><body>
 <dialog id="storage-protection" open aria-labelledby="storage-title">
-<div class="languages"><button type="button" class="bk-lang" data-lang="en">EN</button><button type="button" class="bk-lang" data-lang="de">DE</button></div>
-<h1 id="storage-title">'''+_phrase('Storage unavailable','Speicherordner nicht verfügbar')+'''</h1>
+<div class="storage-heading"><h1 id="storage-title">'''+_phrase('Storage unavailable','Speicherordner nicht verfügbar')+'''</h1><div class="languages"><button type="button" class="bk-lang" data-lang="en">EN</button><button type="button" class="bk-lang" data-lang="de">DE</button></div></div>
 <p>'''+_phrase('Storage or technical startup requires verification. File operations are paused to protect existing data.',
              'Speicher oder technischer Start benötigen eine Prüfung. Dateioperationen sind zum Schutz vorhandener Daten angehalten.')+'''</p>
 <p>'''+state_text+'''</p><ul>'''+rows+'''</ul>
@@ -130,6 +141,7 @@ li{margin:12px 0}code{font-size:.88em}.languages{display:flex;justify-content:fl
  }
  for(const b of document.querySelectorAll('.bk-lang'))b.addEventListener('click',()=>{try{localStorage.setItem(key,b.dataset.lang)}catch(_){}sync()});
  sync();
+ document.querySelectorAll('.storage-copy').forEach(b=>b.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(b.dataset.copy)}catch(_){result.textContent=b.dataset.copy}}));
  const dialog=document.getElementById('storage-protection');
  if(dialog.showModal){dialog.removeAttribute('open');dialog.showModal();dialog.addEventListener('cancel',e=>e.preventDefault())}
  document.getElementById('storage-recovery-open').addEventListener('click',()=>{const panel=document.getElementById('storage-recovery-panel');panel.hidden=!panel.hidden});

@@ -389,3 +389,6 @@ TRANSFER_HTML = r'''<!doctype html>
 </script>
 </body>
 </html>'''
+
+from app.ui_rc13 import workspace_words as _workspace_words
+TRANSFER_HTML = _workspace_words(TRANSFER_HTML)

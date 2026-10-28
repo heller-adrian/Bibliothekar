@@ -1526,6 +1526,13 @@ UI_TRANSLATIONS.update({'Die historischen Einrichtungsbelege sind unvollständig
                                                                                                                                                                                                                                                                                                                                                                                                       'existing '
                                                                                                                                                                                                                                                                                                                                                                                                       'data.'})
 
+from app.ui_rc13 import workspace_words, TRANSLATIONS as RC13_TRANSLATIONS, PATTERNS as RC13_PATTERNS
+UI_TRANSLATIONS.update(RC13_TRANSLATIONS)
+UI_TRANSLATIONS.update({workspace_words(k):workspace_words(v) for k,v in list(UI_TRANSLATIONS.items())})
+UI_TRANSLATIONS.update({k:workspace_words(v) for k,v in list(UI_TRANSLATIONS.items())})
+UI_PATTERNS[:0] = RC13_PATTERNS
+UI_PATTERNS = [[workspace_words(k),workspace_words(v)] for k,v in UI_PATTERNS]
+
 I18N_UI_JS = r"""
 (function () {
   "use strict";

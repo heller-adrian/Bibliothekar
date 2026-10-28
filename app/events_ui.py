@@ -2766,7 +2766,7 @@ EVENTS_HTML = r"""<!doctype html>
             <div>Dateien verändert: nein</div>
             <div>Ordner verändert: nein</div>
             <div>Datenbank verändert: nein</div>
-            <div>Gleiches Dateisystem: ${summary.same_filesystem ? "ja" : "nein"}</div>
+            <div>${bk0511EventLabel("Gleiches Dateisystem:","Same file system:")} ${summary.same_filesystem ? bk0511EventLabel("ja","Yes") : bk0511EventLabel("nein","No")}</div>
             <div>Familien auf mehrere Ziele verteilt: ${Number(summary.family_split_count || 0)}</div>
           </div>
         </details>
@@ -4522,7 +4522,7 @@ EVENTS_HTML = r"""<!doctype html>
       changeRequestClose.disabled = true;
 
       const reversalPathLabels=assistant.path_labels||{};
-      const reversalArchiveRoot=String(reversalPathLabels.archive_root||"Kamerabibliothek");
+      const reversalArchiveRoot=String(reversalPathLabels.archive_root||"");
       const reversalWorkRoot=String(reversalPathLabels.work_root||"Arbeitsbereich");
       const phase = String(assistant.phase || "prepare");
       const logicalOrder = ["prepare","finder","verify"];
@@ -4749,9 +4749,9 @@ EVENTS_HTML = r"""<!doctype html>
         const reviewRows = filesRes.ok ? await filesRes.json() : [];
         const releaseStock = assistant.release_stock || {};
         const pathLabels = assistant.path_labels || {};
-        const archiveRootLabel = String(pathLabels.archive_root || "Kamerabibliothek");
-        const workRootLabel = String(pathLabels.work_root || "Arbeitsbereich");
-        const backupRootLabel = String(pathLabels.backup_root || "SD-Kartensicherungen");
+        const archiveRootLabel = String(pathLabels.archive_root || "");
+        const workRootLabel = String(pathLabels.work_root || "");
+        const backupRootLabel = String(pathLabels.backup_root || "");
         const finderNeeded =
           (assistant.operations || []).length > 0
           || Boolean(releaseStock.required);
@@ -4851,7 +4851,7 @@ EVENTS_HTML = r"""<!doctype html>
 
           if (releaseRequired && (releaseStage === "copy_to_ssd" || releaseStage === "verify_copy")) {
             const copiesReady = releaseStage === "verify_copy";
-            html += `<div class="card"><strong>1. Freigewordene Archivdateien auf SSD sichern</strong><p class="muted" style="margin-top:5px">${copiesReady ? "Bibliothekar hat die geplanten Archivdateien auf die SSD kopiert. Prüfe jetzt die Kopien nochmals gegen Größe und SHA-256, bevor du im Archiv etwas entfernst." : "Bibliothekar kann die unten exakt aufgeführten Archivdateien nach deiner Freigabe read-only lesen, auf die SSD kopieren und die Kopien sofort nach Größe und SHA-256 bestätigen. Ziel ist <em>${escapeHtml(backupRootLabel)}/Freigewordene Archivdateien</em>. Noch nichts im Archiv löschen."}</p>`;
+            html += `<div class="card"><strong>${bk0511EventLabel("1. Freigewordene Archivdateien im Arbeitsbereich sichern","1. Back up released archive files in the workspace")}</strong><p class="muted" style="margin-top:5px">${copiesReady ? bk0511EventLabel("Bibliothekar hat die geplanten Archivdateien in den Arbeitsbereich kopiert. Prüfe die Kopien gegen Größe und SHA-256, bevor du im Archiv etwas entfernst.","Bibliothekar copied the planned archive files into the workspace. Verify the copies by size and SHA-256 before removing anything from the archive.") : bk0511EventLabel("Nach deiner Freigabe liest Bibliothekar die unten exakt aufgeführten Archivdateien read-only, kopiert sie in den Arbeitsbereich und prüft Größe und SHA-256. Ziel:","After confirmation, Bibliothekar reads the exact archive files below, copies them to the workspace and verifies size and SHA-256. Destination:")} <code>${escapeHtml(backupRootLabel)}/${escapeHtml(releaseStock.release_directory_name || "Released Archive Files")}</code> ${bk0511EventLabel("Noch nichts im Archiv löschen.","Do not delete anything from the archive yet.")}</p>`;
             if (releaseSegments.length) {
               html += `<div style="display:grid;gap:8px;margin-top:10px">`;
               for (const segment of releaseSegments) {
@@ -4886,7 +4886,12 @@ EVENTS_HTML = r"""<!doctype html>
               : `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-copy-create>SSD-Kopien anlegen</button></div></section>`;
           } else if (releaseRequired && releaseStage === "remove_archive") {
             html += `<div class="card"><strong>✓ SSD-Kopien vollständig geprüft</strong><p class="success-text" style="margin-top:5px">Alle freigewordenen Dateien stimmen nach Größe und SHA-256 mit dem geplanten Bestand überein.</p></div>`;
+            if(releaseStock.folder_removal?.qualified) {
+              html += `<div class="card"><strong>${bk0511EventLabel("2. Gesamten Ereignisordner entfernen","2. Remove entire event folder")}</strong><p>${bk0511EventLabel("Nach vollständiger Prüfung kannst du diesen gesamten Ereignisordner einschließlich event.json manuell entfernen:","After complete verification, you may manually remove this entire event folder including event.json:")}</p><code style="display:block;overflow-wrap:anywhere">${escapeHtml(releaseStock.folder_removal.path)}</code><p class="muted">${bk0511EventLabel("Die App selbst löscht nichts im schreibgeschützten Archiv. Archivinhalt vor dem Entfernen nicht verändern.","The app does not delete anything from the read-only archive. Do not change the archive contents before removal.")}</p></div>`;
+            } else {
             html += `<div class="card"><strong>2. Bestätigte Archivoriginale entfernen</strong><p class="muted" style="margin-top:5px">Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.</p><details style="margin-top:10px"><summary>${releaseRows.length} Archivpfade anzeigen</summary><div style="margin-top:8px">${releaseRows.map(row => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(archiveRootLabel)}/${escapeHtml(row.old_path || "")}</code>`).join("")}</div></details></div>`;
+              html += `<p>${bk0511EventLabel("Nur die angezeigten Dateien entfernen. Unbekannte Inhalte im Ereignisordner bleiben geschützt.","Remove only the listed files. Unknown contents of the event folder remain protected.")}</p>`;
+            }
             html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div><div id="change-release-errors" class="danger-text" style="display:none"></div></div>`;
             html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-removal-verify>Entfernung aus dem Archiv prüfen</button></div></section>`;
           } else {
@@ -4900,7 +4905,7 @@ EVENTS_HTML = r"""<!doctype html>
               const targetHint = targetStructureDeleted
                 ? "Bei diesem Löschauftrag wird keine neue Archivstruktur aufgebaut."
                 : "So soll das bearbeitete Ereignis nach den folgenden Finder-Schritten im Archiv aussehen.";
-              html += `<details class="card change-disclosure"><summary><strong>${targetTitle}</strong></summary><p class="muted" style="margin-top:8px">${targetHint}</p><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></details>`;
+              html += `<details class="card change-disclosure"><summary><strong>${targetTitle}</strong></summary><p class="muted" style="margin-top:8px">${targetHint}</p><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></details>`;
             }
 
             for (const operation of assistant.operations || []) {
@@ -4942,7 +4947,7 @@ EVENTS_HTML = r"""<!doctype html>
             && reviewRows.length > 0
             && managedReviewRows.every(row => String(row.verification_status || "") === "verified");
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Abschließen</h3><p class="muted">So soll die Kamerabibliothek jetzt aussehen. Die Prüfung selbst bleibt vollständig read-only.</p></div></div>`;
-          if (targetTree) html += `<div class="card"><strong>SOLL-Struktur</strong><pre class="change-target-tree" style="margin-top:9px">${escapeHtml(targetTree)}</pre></div>`;
+          if (targetTree) html += `<div class="card"><strong>SOLL-Struktur</strong><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></div>`;
           html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? "✓ Prüfung erfolgreich" : "Prüfen"}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} Dateien bestätigt.` : "Noch nicht geprüft."}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
           html += renderTechnicalDetails();
           html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>Änderung abschließen & SSD freigeben</button></div></section>`;
@@ -6001,3 +6006,6 @@ EVENTS_HTML = r"""<!doctype html>
 </body>
 </html>
 """
+
+from app.ui_rc13 import workspace_words as _workspace_words
+EVENTS_HTML = _workspace_words(EVENTS_HTML)

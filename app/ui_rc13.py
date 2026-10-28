@@ -1,0 +1,82 @@
+"""Presentation terminology; no persisted codes, paths or storage decisions."""
+def workspace_words(text):
+    for old,new in (
+        ('SSD-Arbeitsbereich','Arbeitsbereich'),('SSD-Arbeitsbestand','Arbeitsbestand'),
+        ('SSD-Bestände','Arbeitsbereich-Bestände'),('SSD-Freigabe','Arbeitsbereich-Freigabe'),
+        ('ZIELORDNER AUF DER SSD','ZIELORDNER IM ARBEITSBEREICH'),
+        ('SSD freigeben','Arbeitsbereich freigeben'),('SSD freigegeben','Arbeitsbereich freigegeben'),
+        ('SSD-Originale','Arbeitsbereich-Originale'),('SSD workspace','workspace'),
+        ('SSD-Hilfsstrukturen','temporäre Arbeitsbereichsstrukturen'),
+        ('SSD-Ordner','Arbeitsbereichsordner'),('SSD-Bestand','Arbeitsbereich-Bestand'),
+        ('SSD-Ereignisbestand','Arbeitsbereich-Ereignisbestand'),('SSD-Rückbestand','Arbeitsbereich-Rückbestand'),
+        ('SSD-Kopien','Arbeitsbereich-Kopien'),('SSD-Kopie','Arbeitsbereich-Kopie'),
+        ('SSD-Ziel','Arbeitsbereich-Ziel'),('SSD-Strukturen','Arbeitsbereichsstrukturen'),
+        ('auf die SSD','in den Arbeitsbereich'),('auf der SSD','im Arbeitsbereich'),
+        ('auf SSD','im Arbeitsbereich'),('aus der SSD','aus dem Arbeitsbereich'),
+        ('von der SSD','aus dem Arbeitsbereich'),('SSD copies','workspace copies'),
+        ('SSD copy','workspace copy'),('SSD inventory','workspace inventory'),
+        ('SSD restoration inventory','Workspace restoration inventory'),
+        ('SSD originals','workspace originals'),('SSD structures','workspace structures'),
+        ('SSD folders','workspace folders'),('SSD files','workspace files'),
+        ('to the SSD','to the workspace'),('on the SSD','in the workspace'),
+        ('from SSD','from workspace'),('from the SSD','from the workspace'),
+        ('Finder-Rückarbeit','Manuelle Wiederherstellung'),('Manual Finder restoration','Manual restoration'),
+        ('Finder-Arbeit','Manuelle Arbeit'),('Finder work','Manual work'),('Finder-Schritten','manuellen Schritten'),
+    ):text=text.replace(old,new)
+    return text
+
+TRANSLATIONS={
+ '1. Freigewordene Archivdateien im Arbeitsbereich sichern':'1. Back up released archive files in the workspace',
+ '2. Gesamten Ereignisordner entfernen':'2. Remove entire event folder',
+ 'Die App selbst löscht nichts im schreibgeschützten Archiv. Archivinhalt vor dem Entfernen nicht verändern.':'The app does not delete anything from the read-only archive. Do not change the archive contents before removal.',
+
+ 'Metadatenkorrektur':'Metadata Correction',
+ 'Statusanzeige ausblenden':'Dismiss status display',
+ 'Ereignisse anwenden':'Apply events',
+ 'auf SSD benötigt werden':'needed in the workspace',
+ 'ja':'Yes','nein':'No','Fortschritt':'Progress','Verschoben':'Moved','Familie:':'Family:',
+ 'Einzeldateien anzeigen':'Show individual files','Familien':'Families','Dateien':'Files',
+ 'Gemeinsamer Arbeitsbereich-Abgleich abgeschlossen':'Shared workspace reconciliation completed',
+ 'Gemeinsamer Arbeitsbereich-Abgleich bereit.':'Shared workspace reconciliation ready.',
+ 'Ein Seitenwechsel oder Browser-Neustart unterbricht den Serverauftrag nicht.':'Switching pages or restarting the browser does not interrupt the server job.',
+ 'Alle benötigten Kameraoriginale liegen bereits im aktuellen verifizierten SSD-Bestand. Der ursprüngliche Sicherungsauftrag bleibt nur Herkunft und ist keine physische Sortierquelle mehr.':'All required camera originals are already in the verified workspace inventory. The original backup job records their origin and is no longer a physical sorting source.',
+ 'Die App erzeugt ausschließlich benötigte SSD-Ordner und versucht für eingehende freie Dateien zuerst Hardlinks unter „Später zuordnen“. Sind Hardlinks zwischen den Speicherorten nicht möglich, wird angehalten und du wählst ausdrücklich Kopieren oder Verschieben. Freigewordene Archivdateien aus dem Archiv werden hier noch nicht kopiert; das geschieht erst nach einem eigenen Klick. Die Kamerabibliothek bleibt unverändert.':'The app creates the required workspace folders and first tries hard links for incoming free files under Assign Later. If hard links between these locations are unavailable, it pauses for your explicit choice of Copy or Move. Released archive files are copied only after a separate confirmation. The archive remains unchanged.',
+ 'Vor diesem Schritt muss der angezeigte Ordner noch nicht existieren. Beim Vorbereiten prüft die App den tatsächlichen Archivzustand sowie Größe und SHA-256. Nur Originale, die für den Rückweg wirklich auf SSD benötigt werden, werden dort sicher materialisiert.':'The displayed folder does not need to exist yet. Preparation checks the actual archive inventory, sizes and SHA-256. Only originals needed for restoration in the workspace are materialized there.',
+ 'Die App bereitet nur SSD-Hilfsstrukturen vor. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.':'The app prepares temporary workspace structures. The archive and valid database state remain unchanged.',
+ 'Kopieren':'Copy','Verschieben':'Move','oder':'or',
+ 'werden ergänzt. Hardlinks werden bevorzugt; falls Quelle und Ziel auf unterschiedlichen Dateisystemen liegen, fragt Bibliothekar ausdrücklich nach':'will be added. Hard links are preferred; when source and destination use different filesystems, Bibliothekar asks you to choose',
+ 'Ereignis wird vollständig aus der Kamerabibliothek entfernt.':'The entire event will be removed from the archive.',
+ 'Bibliothekar kann die unten exakt aufgeführten Archivdateien nach deiner Freigabe read-only lesen, auf die SSD kopieren und die Kopien sofort nach Größe und SHA-256 bestätigen. Ziel ist':'After confirmation, Bibliothekar can read the exact archive files below, copy them to the workspace and verify their size and SHA-256. Destination:',
+ 'Noch nichts im Archiv löschen.':'Do not delete anything from the archive yet.',
+ 'Nur die angezeigten Dateien entfernen. Unbekannte Inhalte im Ereignisordner bleiben geschützt.':'Remove only the listed files. Unknown contents of the event folder remain protected.',
+ 'Nach vollständiger Prüfung kannst du diesen gesamten Ereignisordner einschließlich event.json manuell entfernen:':'After complete verification, you may manually remove this entire event folder including event.json:',
+ 'Arbeitsbereich dient der laufenden Bearbeitung und Ereignissortierung.':'Workspace holds ongoing work and event sorting.',
+ 'Zentraler Aufnahmebestand und geprüfte Rückkehrkopien aus dem Archiv.':'Central photo inventory and verified copies returned from the archive.',
+ 'Unabhängige Arbeitsordner der registrierten Bibliotheken.':'Independent work folders of registered libraries.',
+ 'Temporäre, geprüfte Metadatenkorrekturen; Allgemein und Stapelkorrektur.':'Temporary verified metadata corrections; General and Batch Correction.',
+ 'Zurückgehaltene Dateien bis zur ausdrücklich bestätigten endgültigen Löschung.':'Files retained until explicitly confirmed permanent deletion.',
+ 'Allgemein':'General','Stapelkorrektur':'Batch Correction',
+}
+PATTERNS=[
+ [r'^Verwaltungsordner fehlen oder sind nicht eindeutig verfügbar\. Betroffene Vorgänge bleiben zum Schutz der Dateien gesperrt: ([\s\S]+)$','Managed storage or control evidence is unavailable. Affected operations remain paused to protect files: $1'],
+
+ [r'^([0-9]+)\s+Familie\s*·\s*([0-9]+)\s+Dateien([\s\S]*)$','$1 family · $2 files$3'],
+ [r'^([0-9]+)\s+Datei(\s*·[\s\S]*)?$','$1 file$2'],
+
+ [r'^Arbeitsbereich wird im Hintergrund freigegeben · (.+) · Ein Seitenwechsel oder Browser-Neustart unterbricht den Serverauftrag nicht\.$','Workspace release running in background · $1 · Switching pages or restarting the browser does not interrupt the server job.'],
+ [r'^Arbeitsbereich-Freigabe abgeschlossen · (.+)$','Workspace release completed · $1'],
+
+ [r'^Familie:\s*([\s\S]+)$','Family: $1'],
+ [r'^([0-9]+)\s+Familien\s*$','$1 families'],
+ [r'^Unterereignis „(.+)“ enthält an (.+) keine Dateifamilien; für diese Tage werden keine Tagesordner angelegt\.$','Subevent “$1” has no file families on $2; day folders will not be created for those days.'],
+
+ [r'^([0-9]+)\s+Familien\s*·\s*([0-9]+)\s+Dateien([\s\S]*)$','$1 families · $2 files$3'],
+ [r'^([0-9]+)\s+Dateien(\s*·[\s\S]*)?$','$1 files$2'],
+ [r'^([0-9]+) Familien$','$1 families'],
+ [r'^([0-9]+)/([0-9]+) Dateien bestätigt\.$','$1/$2 files confirmed.'],
+ [r'^Unterereignis „(.+)“ enthält aktuell keine Dateifamilien; die leere Ordnerstruktur wird trotzdem angelegt\.$','Subevent “$1” currently has no file families; its empty folder structure will still be created.'],
+ [r'^([0-9]+) fehlende Ordner$','$1 missing folders'],
+ [r'^([0-9]+) Familien bleiben nach Abschluss als freier Bestand unter$','$1 families remain as free inventory after completion under'],
+ [r'^([0-9]+) von ([0-9]+) Ereignissen verarbeitet$','$1 of $2 events processed'],
+ [r'^Servervorgang · ([0-9]+) von ([0-9]+) Ereignissen · (.+)$','Server job · $1 of $2 events · $3'],
+]

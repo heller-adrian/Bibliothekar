@@ -233,6 +233,9 @@ def build_archive_change_assistant(
         database_path, archive_root, cr_id
     )
     release_stock = describe_archive_release_stock(database_path, cr_id)
+    from app.managed_directory_names import directory_name
+    from app.workspace_layout import backup_root
+    release_stock['release_directory_name']=directory_name(backup_root(workspace_path),"released_archive")
 
     status = str(cr.get("status") or "")
     delete_event = bool(cr.get("delete_event") or 0)
@@ -298,8 +301,12 @@ def build_archive_change_assistant(
         )
 
     operations: list[dict[str, Any]] = []
+    folder_removal = {"qualified":False}
+    if delete_event and release_stock.get("copy_verified"):
+        from app.archive_delete_guidance import qualify_event_folder
+        folder_removal=qualify_event_folder(database_path,archive_root,workspace_path,cr_id,release_stock)
 
-    if delete_event and (
+    if delete_event and folder_removal.get("qualified") and (
         not bool(release_stock.get("required"))
         or bool(release_stock.get("archive_removed"))
     ):
@@ -627,7 +634,7 @@ def build_archive_change_assistant(
                 f"{int(release_stock.get('file_count') or 0)} freigewordene Archivdateien"
             ),
         },
-        "release_stock": release_stock,
+        "release_stock": {**release_stock,"folder_removal":folder_removal},
         "path_labels": {
             "archive_root": archive_display_root,
             "work_root": work_display_root,

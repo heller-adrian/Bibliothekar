@@ -1006,7 +1006,7 @@ async def library_context_middleware(request: Request, call_next):
     if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize", "/api/settings/storage-replace"}:
         return await call_next(request)
     if DATABASE_INITIALIZATION_ERROR and storage['ready']:
-        storage = {**storage, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'issues':[{'code':'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
+        storage = {**storage, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'issues':[{'code':'source_inventory_conflict' if database_initialization_error_code(DATABASE_INITIALIZATION_ERROR)=='source_inventory_conflict' else 'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
     if not storage['ready']:
         if request.method == "GET" and not request.url.path.startswith("/api/"):
             from app.storage_warning_ui import storage_warning_html
@@ -3061,7 +3061,7 @@ def api_storage_health() -> dict[str, Any]:
     status = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
     if DATABASE_INITIALIZATION_ERROR and status['ready']:
         status = {**status, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'startup_error':DATABASE_INITIALIZATION_ERROR,
-                  'issues':[{'code':'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
+                  'issues':[{'code':'source_inventory_conflict' if database_initialization_error_code(DATABASE_INITIALIZATION_ERROR)=='source_inventory_conflict' else 'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
     return status
 
 
@@ -3333,6 +3333,8 @@ def database_initialization_error_code(error: str | None) -> str | None:
     """Expose stable codes to the UI, never infer success from an error string."""
     if not error:
         return None
+    if "source_inventory_conflict:" in error or "Eine bestehende Quellfamilien-ID" in error:
+        return "source_inventory_conflict"
     if "Eine bestehende Backup-ID darf nicht auf eine andere Quelle umgebunden werden." in error:
         return "backup_source_conflict"
     if "Eine bestehende Backup-ID darf nicht auf einen anderen Quellentyp umgebunden werden." in error:
@@ -13141,12 +13143,8 @@ def api_get_change_request_assistant(
     """Kompakter Archivassistent; refresh scannt den realen Bestand read-only."""
     try:
         context = current_library_context()
-        archive_label = (
-            "Kamerabibliothek"
-            if context.is_main
-            else (context.archive_root.name or "Kamerabibliothek")
-        )
-        work_label = context.work_root.name or "Arbeitsbereich"
+        archive_label = str(context.archive_root)
+        work_label = str(context.work_root)
         return JSONResponse(content=build_archive_change_assistant(
             current_database_file(),
             current_archive_root(),
@@ -13155,7 +13153,7 @@ def api_get_change_request_assistant(
             scan_live=bool(refresh),
             archive_display_root=archive_label,
             work_display_root=work_label,
-            backup_display_root=BACKUP_DIRECTORY_NAME,
+            backup_display_root=str(workspace_backup_root(context.workspace_root)),
         ))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -13425,12 +13423,8 @@ def api_get_change_reversal(cr_id: str, refresh: bool = False) -> JSONResponse:
     try:
         from app.archive_reversal import build_archive_reversal_assistant
         context = current_library_context()
-        archive_label = (
-            "Kamerabibliothek"
-            if context.is_main
-            else (context.archive_root.name or "Kamerabibliothek")
-        )
-        work_label = context.work_root.name or "Arbeitsbereich"
+        archive_label = str(context.archive_root)
+        work_label = str(context.work_root)
         return JSONResponse(content=build_archive_reversal_assistant(
             current_database_file(),
             current_archive_root(),
@@ -13450,12 +13444,8 @@ def api_prepare_change_reversal(cr_id: str) -> JSONResponse:
     try:
         from app.archive_reversal import prepare_archive_reversal
         context = current_library_context()
-        archive_label = (
-            "Kamerabibliothek"
-            if context.is_main
-            else (context.archive_root.name or "Kamerabibliothek")
-        )
-        work_label = context.work_root.name or "Arbeitsbereich"
+        archive_label = str(context.archive_root)
+        work_label = str(context.work_root)
         return JSONResponse(content=prepare_archive_reversal(
             current_database_file(),
             current_archive_root(),

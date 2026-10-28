@@ -4585,10 +4585,20 @@ BIBLIOTHEKAR_JS = r"""
     if (!storageSettings || !data) return;
     const setText=(id,value)=>{const node=document.getElementById(id);if(node)node.textContent=String(value||"");};
     setText("bk-storage-workspace-root", data.workspace_root || "/workspace");
-    setText("bk-storage-backup-preview", "SD-Kartensicherungen: " + String(data.backup_root || ""));
-    setText("bk-storage-workspaces-preview", "Arbeitsbereiche: " + String(data.workspaces_root || ""));
-    setText("bk-storage-metadata-preview", "Metadatenkorrektur: " + String(data.metadata_root || ""));
-    setText("bk-storage-trash-preview", "Papierkorb: " + String(data.trash_root || ""));
+    const t=value=>window.BibliothekarI18n?.t?.(value)||value;
+    const descriptions = [
+      ["backup", "SD-Kartensicherungen", data.backup_root, "Zentraler Aufnahmebestand und geprüfte Rückkehrkopien aus dem Archiv."],
+      ["workspaces", "Bibliotheks-Arbeitsbereiche", data.workspaces_root, "Unabhängige Arbeitsordner der registrierten Bibliotheken."],
+      ["metadata", "Metadatenkorrektur", data.metadata_root, "Temporäre, geprüfte Metadatenkorrekturen; Allgemein und Stapelkorrektur."],
+      ["trash", "Papierkorb", data.trash_root, "Zurückgehaltene Dateien bis zur ausdrücklich bestätigten endgültigen Löschung."]
+    ];
+    for (const [id,label,path,purpose] of descriptions) {
+      const node=document.getElementById("bk-storage-"+id+"-preview");
+      if(!node)continue;
+      const title=document.createElement("strong"),code=document.createElement("code"),help=document.createElement("small");
+      title.textContent=t(label);code.textContent=String(path||"");help.textContent=t(purpose);
+      node.replaceChildren(title,document.createElement("br"),code,document.createElement("br"),help);
+    }
   }
 
   async function bkLoadStorageSettings() {
@@ -5859,7 +5869,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <span id="bk-storage-metadata-preview"></span>
           <span id="bk-storage-trash-preview"></span>
         </div>
-        <p>Verwaltungsordnernamen sind fest vorgegeben. Neue Installationen verwenden englische Namen. Bestehende Ordner und gespeicherte Pfade bleiben unverändert.</p>
+        <p style="margin-top:24px">Verwaltungsordnernamen sind fest vorgegeben. Neue Installationen verwenden englische Namen. Bestehende Ordner und gespeicherte Pfade bleiben unverändert.</p>
         <p><code>SD Card Backups</code> · <code>Library Workspaces</code> · <code>Metadata Correction</code> · <code>Trash</code></p>
         <div id="bk-storage-status" class="bk-library-status"></div>
       </section>
@@ -5910,7 +5920,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0-rc.12</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0-rc.13</span></p>
   </div>
 </dialog>
 
@@ -6239,6 +6249,8 @@ BIBLIOTHEKAR_0444_CSS = r"""
 }
 .bk-page-activity{border:1px solid var(--bk-line,#ccd2d8);border-radius:12px;padding:10px;margin-bottom:14px}
 .bk-page-activity[hidden]{display:none}
+@media(min-width:901px){.bk-page-activity{display:none}}
+.bk-page-activity-dismiss{float:right;min-width:36px;min-height:36px;border:0;background:transparent;color:inherit;font-size:1.3rem;cursor:pointer}
 .bk-page-activity .bk-activity-item{display:flex;gap:10px;align-items:center;padding:6px 0}
 .bk-page-activity .bk-activity-link{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere;color:inherit;text-decoration:none}
 .bk-page-activity [data-status="failed"]{color:var(--bk-danger,#c33)}
@@ -6283,17 +6295,27 @@ BIBLIOTHEKAR_0444_JS = r"""
   pageActivity.hidden = true;
   document.querySelector("main")?.prepend(pageActivity);
 
+  const dismissedPageActivities=new Set();
+  try {for(const id of JSON.parse(sessionStorage.getItem("bk-dismissed-page-activities")||"[]"))dismissedPageActivities.add(id)}catch(_){}
   function renderPageActivity(operations) {
     const route = location.pathname;
     const relevant = operations.filter(item => {
       // SD progress/results already live in the task dock and near the button.
       if ((route === "/" && item.kind === "sd_check")
           || (route === "/trash" && item.kind === "trash_restore")) return false;
+      if(dismissedPageActivities.has(String(item.id)))return false;
       const target = destination(item).split("?")[0];
       return target === route || (route === "/workspace" && target === "/events");
     });
     pageActivity.hidden = relevant.length === 0;
-    pageActivity.replaceChildren(...relevant.map(makeItem));
+    const dismiss=document.createElement("button");dismiss.type="button";dismiss.className="bk-page-activity-dismiss";
+    dismiss.textContent="×";dismiss.setAttribute("aria-label",window.BibliothekarI18n?.t?.("Statusanzeige ausblenden")||"Statusanzeige ausblenden");
+    dismiss.addEventListener("click",()=>{
+      for(const item of relevant)dismissedPageActivities.add(String(item.id));
+      try{sessionStorage.setItem("bk-dismissed-page-activities",JSON.stringify([...dismissedPageActivities]))}catch(_){}
+      pageActivity.hidden=true;
+    });
+    pageActivity.replaceChildren(dismiss,...relevant.map(makeItem));
   }
   box.append(card, mini);
   document.body.appendChild(box);
