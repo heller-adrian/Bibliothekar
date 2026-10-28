@@ -201,9 +201,16 @@ def test_0329_main_is_never_created_even_by_legacy_default_or_missing_saved_path
     assert not main_path.exists()
 
 
+@pytest.mark.parametrize(
+    "legacy_layout,explicit_work",
+    [(False, False), (True, False), (True, True)],
+    ids=["fresh-english", "existing-german-default", "existing-german-explicit"],
+)
 def test_0329_first_library_is_user_named_primary_without_main_work_folder(
     tmp_path: Path,
     monkeypatch,
+    legacy_layout: bool,
+    explicit_work: bool,
 ):
     monkeypatch.setenv(
         "KAMERA_CONFIG",
@@ -213,40 +220,38 @@ def test_0329_first_library_is_user_named_primary_without_main_work_folder(
     database = database_dir / "kamera.sqlite3"
     registry = database_dir / "bibliothekar-global.sqlite3"
     workspace = tmp_path / "workspace"
-    work = workspace / "Arbeitsbereiche" / "Kamerabibliothek"
+    workspaces_name = "Arbeitsbereiche" if legacy_layout else "Library Workspaces"
+    work = workspace / workspaces_name / ("Kamerabibliothek" if explicit_work else "kamerabibliothek")
     archive = tmp_path / "archive"
 
     database_dir.mkdir()
     workspace.mkdir()
     archive.mkdir()
+    if legacy_layout:
+        from tests.backend.legacy_storage_fixture import provision_legacy_storage
+        provision_legacy_storage(workspace)
     initialize_database(database)
     initialize_library_registry(registry)
-    ensure_workspace_layout(workspace, create_default_main=False)
+    layout = ensure_workspace_layout(workspace, create_default_main=False)
+    assert Path(layout["workspaces_root"]) == workspace / workspaces_name
+    if explicit_work:
+        work.mkdir()
+    else:
+        assert not work.exists()
 
     monkeypatch.setattr(main, "DATABASE_DIRECTORY", database_dir)
     monkeypatch.setattr(main, "DATABASE_FILE", database)
     monkeypatch.setattr(main, "REGISTRY_DATABASE_FILE", registry)
     monkeypatch.setattr(main, "WORKSPACE_PATH", workspace)
     monkeypatch.setattr(main, "MAIN_LIBRARY_CONTEXT", main.build_main_library_context())
-    monkeypatch.setattr(
-        main,
-        "inspect_library_paths",
-        lambda *args, **kwargs: {
-            "valid": True,
-            "work_root": str(work),
-            "archive_root": str(archive),
-            "managed_default_work_root": True,
-            "archive_read_only": True,
-            "hardlink_to_central_stock": True,
-            "errors": [],
-            "warnings": [],
-        },
-    )
+    # Simulate only the archive mount property, not the path inspection.
+    # The real validation and descriptor-based creation must be exercised.
+    monkeypatch.setattr(main, "_mount_read_only", lambda path: True)
 
     result = main.api_create_library(
         {
             "display_name": "Kamerabibliothek",
-            "work_root": "",
+            "work_root": str(work) if explicit_work else "",
             "archive_root": str(archive),
         }
     )
@@ -259,7 +264,60 @@ def test_0329_first_library_is_user_named_primary_without_main_work_folder(
     assert Path(str(stored["database_path"])) == database.resolve()
     assert Path(str(stored["work_root"])) == work.resolve()
     assert work.is_dir()
-    assert not (workspace / "Arbeitsbereiche" / "main").exists()
+    assert not (workspace / workspaces_name / "main").exists()
+    if not legacy_layout:
+        assert not (workspace / "Arbeitsbereiche").exists()
+
+
+def test_0329_inspection_never_creates_missing_explicit_workspace(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setenv("KAMERA_CONFIG", str(tmp_path / "config" / "settings.json"))
+    database_dir = tmp_path / "database"
+    database = database_dir / "kamera.sqlite3"
+    registry = database_dir / "bibliothekar-global.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    database_dir.mkdir()
+    workspace.mkdir()
+    archive.mkdir()
+    initialize_database(database)
+    initialize_library_registry(registry)
+    ensure_workspace_layout(workspace, create_default_main=False)
+    missing = workspace / "Library Workspaces" / "unexpected"
+
+    monkeypatch.setattr(main, "DATABASE_DIRECTORY", database_dir)
+    monkeypatch.setattr(main, "DATABASE_FILE", database)
+    monkeypatch.setattr(main, "REGISTRY_DATABASE_FILE", registry)
+    monkeypatch.setattr(main, "WORKSPACE_PATH", workspace)
+    monkeypatch.setattr(main, "MAIN_LIBRARY_CONTEXT", main.build_main_library_context())
+    monkeypatch.setattr(main, "_mount_read_only", lambda path: True)
+
+    checked = main.inspect_library_paths(str(missing), str(archive))
+    assert checked["valid"] is False
+    assert not missing.exists()
+    with pytest.raises(main.HTTPException) as rejected:
+        main.api_create_library({
+            "display_name": "Should not appear",
+            "work_root": str(missing),
+            "archive_root": str(archive),
+        })
+    assert rejected.value.status_code == 422
+    assert not missing.exists()
+    assert get_library(registry, MAIN_LIBRARY_ID, active_only=False) is None
+
+
+def test_0329_exclusive_parent_refuses_symlink(tmp_path: Path):
+    from app.import_publication import _parent
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = tmp_path / "symlink-parent"
+    link.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(OSError):
+        with _parent(link / "unauthorized") as (fd, name):
+            raise AssertionError("Symlinked parent was opened")
+    assert not (outside / "unauthorized").exists()
 
 
 def test_0329_physical_xmp_exports_are_visible_in_day_plan_and_event(

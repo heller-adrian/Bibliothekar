@@ -3708,6 +3708,13 @@ def inspect_library_paths(
                     )
                 elif _new_workspace_collision(work_root):
                     errors.append('library_workspace_name_collision: '+str(work_root))
+            elif not resolved_work.exists():
+                # Validation must never create an explicitly requested path.
+                # Only a managed default is created after all checks, inside F14.
+                errors.append(
+                    "Der Bibliotheks-Arbeitsbereich ist nicht verfügbar: "
+                    + str(resolved_work)
+                )
             else:
                 resolve_library_work_root(WORKSPACE_PATH, resolved_work)
         except (WorkspaceLayoutError, StorageSettingsError) as error:
