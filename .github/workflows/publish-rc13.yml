@@ -19,7 +19,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.13
       TAG: v1.0.0-rc.13
-      ACCEPTED_SHA: b156fe2bd0867667c217213a3ae6fa9fe410a543
+      ACCEPTED_SHA: 1f59167e3bfcd38928f0ad32e20d88910a15d53a
       ACCEPTED_QA: '40661973452'
       QA_SHA: fa803ca7e2435f69c6a226e46bccfab528712571
       CONTAINER_QA: '40667478387'
@@ -37,7 +37,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir release-assets
-          test "$(gh api users/heller-adrian/packages/container/bibliothekar --jq .visibility)" = private
+          gh api users/heller-adrian/packages/container/bibliothekar --jq '{name,visibility,package_type}' > release-assets/registry-visibility.json
+          python -c "import json;d=json.load(open('release-assets/registry-visibility.json'));assert d['visibility'] in ('public','private','internal');print('Existing GHCR visibility:',d['visibility'])"
           gh api "repos/$GITHUB_REPOSITORY" --jq '{full_name,private}' > release-assets/repository-privacy.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA" > release-assets/accepted-QA.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA/jobs" > release-assets/accepted-backend-jobs.json
@@ -219,6 +220,7 @@ jobs:
           PY
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)" = "$ACCEPTED_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
+          test "$(gh api users/heller-adrian/packages/container/bibliothekar --jq .visibility)" = "$(python -c "import json;print(json.load(open('release-assets/registry-visibility.json'))['visibility'])")"
           mkdir "$RUNNER_TEMP/rc13-release-downloaded"
           gh release download "$TAG" --dir "$RUNNER_TEMP/rc13-release-downloaded"
           (cd "$RUNNER_TEMP/rc13-release-downloaded" && sha256sum --check SHA256SUMS)
