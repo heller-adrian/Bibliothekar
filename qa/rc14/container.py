@@ -15,6 +15,7 @@ from pathlib import Path
 from PIL import Image
 import subprocess
 root=Path('/fixture/nas/CARD');root.mkdir()
+Path('/fixture/nas/BusinessArchive').mkdir()
 for i in range(16):Image.new('RGB',(8,8),(i,30,20)).save(root/f'PHOTO{i:03}.JPG')
 subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10:27 12:00:00',str(root)],check=True,capture_output=True)
 Path('/fixture/workspace/.DS_Store').write_bytes(b'Finder')
