@@ -46,7 +46,7 @@ def test_0336_still_write_normalizes_exif_and_xmp(monkeypatch, tmp_path: Path):
 def test_0336_reintegration_code_never_accepts_ohne_datum_destination():
     source = Path("app/metadata_correction.py").read_text(encoding="utf-8")
     assert "Korrigierte Metadaten würden erneut in Ohne_Datum einsortiert." in source
-    assert 'record["selected_capture_time"] = proposed[:19]' in source
+    assert 'record["selected_capture_time"] = proposed' in source
     assert 'record["capture_time_confidence"] = "high"' in source
 
 

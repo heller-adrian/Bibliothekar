@@ -302,7 +302,7 @@ def _database_state(data: dict[str, Any]) -> str:
                     results.append("ambiguous")
             else:
                 if (str(row["sha256_current"]) == item["after_sha"]
-                    and str(row["selected_capture_time"] or "")[:19] == str(data["proposed"])[:19]):
+                    and str(row["selected_capture_time"] or "") == str(data["proposed"])):
                     results.append("committed")
                 elif str(row["sha256_current"]) == item["before_sha"]:
                     results.append("prepared")

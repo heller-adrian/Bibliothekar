@@ -1384,11 +1384,24 @@ def _exiftool_value(value: str) -> str:
     return parsed.strftime("%Y:%m:%d %H:%M:%S")
 
 
+def _capture_with_zone(parsed: datetime) -> datetime:
+    if parsed.tzinfo is not None:
+        return parsed
+    # A naive local timestamp must have exactly one valid UTC interpretation.
+    choices = {}
+    for fold in (0, 1):
+        aware = parsed.replace(tzinfo=LOCAL_TIMEZONE, fold=fold)
+        if aware.astimezone(timezone.utc).astimezone(LOCAL_TIMEZONE).replace(tzinfo=None) == parsed:
+            choices[aware.utcoffset()] = aware
+    if len(choices) != 1:
+        raise MetadataCorrectionError("Diese lokale Uhrzeit ist wegen der Zeitumstellung ungültig oder mehrdeutig. Bitte einen expliziten UTC-Offset angeben.")
+    return next(iter(choices.values()))
+
+
 def write_metadata_datetime(path: Path, media_type: str, value: str) -> None:
     stamp = _exiftool_value(value)
     parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=LOCAL_TIMEZONE)
+    parsed = _capture_with_zone(parsed)
     offset = parsed.strftime("%z")
     offset = offset[:3] + ":" + offset[3:]
     zoned_stamp = stamp + offset
@@ -1463,8 +1476,7 @@ def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
 
     expected_second = expected[:19]
     expected_time = datetime.fromisoformat(expected)
-    if expected_time.tzinfo is None:
-        expected_time = expected_time.replace(tzinfo=LOCAL_TIMEZONE)
+    expected_time = _capture_with_zone(expected_time)
     offsets = {str(key).rsplit(":", 1)[-1]: str(value)
                for key, value in data[0].items() if str(key).startswith("EXIF:")}
     timestamp_offsets = {"DateTimeOriginal": "OffsetTimeOriginal",
@@ -1483,6 +1495,7 @@ def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
             raw_text += offsets.get(timestamp_offsets.get(name, ""), "")
         parsed = parse_exiftool_datetime(raw_text)
         if parsed is None:
+            mismatches.append(str(tag) + ' (invalid timestamp)')
             continue
         validate_active_roots()
         normalized = parsed.isoformat(timespec="seconds")
@@ -1490,18 +1503,22 @@ def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
         # Keep the pre-existing video/container wall-clock contract; this
         # correction concerns the coupled EXIF/XMP still-image timestamps.
         if (parsed.replace(tzinfo=None).isoformat(timespec="seconds")[:19] == expected_second
-                if classify_media(path) == "video" else parsed == expected_time):
+                if classify_media(path) == "video" else parsed == expected_time and parsed.replace(tzinfo=None) == expected_time.replace(tzinfo=None)):
             matches.append({"tag": str(tag), "value": normalized})
         else:
             mismatches.append(str(tag))
 
     if not matches or (mismatches and classify_media(path) != "video"):
         raise MetadataCorrectionError(
-            "Die geschriebenen Aufnahmeinformationen konnten nicht bestätigt werden."
+            "Die geschriebenen Aufnahmeinformationen konnten nicht bestätigt werden. "
+            + 'Expected: '+expected_time.isoformat(timespec='seconds')+'; '
+            + 'Observed: '+json.dumps(observed,ensure_ascii=False)+'; '
+            + 'Conflicting tags: '+', '.join(mismatches)
         )
 
     return {
         "expected_datetime": expected_second,
+        "expected_with_offset": expected_time.isoformat(timespec='seconds'),
         "matching_tags": matches,
         "observed_tags": observed,
     }
@@ -1849,7 +1866,7 @@ def _apply_library_metadata_correction(
                 "after_sha": str(item["output_sha"]), "file_id": int(item["file_id"]),
             })
 
-        proposed = str(task["proposed_datetime"])[:19]
+        proposed = str(task["proposed_datetime"])
         first = prepared[0]
         verification = {
             "family_id": family_id,
@@ -1985,6 +2002,39 @@ def _apply_library_metadata_correction(
         raise MetadataCorrectionError(str(error)) from error
 
 
+def _reintegration_capture(database_path, family_id, rows, stored, *, job_id, family_key):
+    """Qualify RC14's truncated offset from its exact completed swap receipt.
+
+    Never infer a correction from current EXIF alone or alter a source origin.
+    Fresh verification against this value still precedes every physical move.
+    """
+    if datetime.fromisoformat(stored).tzinfo is not None:return stored
+    matches=set()
+    with database_connection(database_path) as connection:
+        tasks=connection.execute("SELECT proposed_datetime,detected_json,verification_json FROM metadata_corrections WHERE area='library' AND status='completed'").fetchall()
+    by_id={int(r['file_id']):r for r in rows}
+    for task in tasks:
+        detected=json.loads(task['detected_json'] or '{}')
+        if int(detected.get('family_id') or 0)!=int(family_id):continue
+        if detected.get('job_id')!=job_id or detected.get('family_key')!=family_key:continue
+        proposal=str(task['proposed_datetime'] or '')
+        stamp=datetime.fromisoformat(proposal)
+        if stamp.tzinfo is None or proposal[:19]!=stored[:19]:continue
+        verification=json.loads(task['verification_json'] or '{}')
+        if (int(verification.get('family_id') or 0)!=int(family_id)
+            or any(str(verification.get(key) or '')!=str(detected.get(key) or '') for key in ('job_id','family_key'))
+            or verification.get('proposed_datetime')!=proposal):continue
+        members=verification.get('members',[])
+        if (not verification.get('reintegration_pending') or len(members)!=len(rows)
+            or {int(m.get('file_id') or 0) for m in members}!=set(by_id)):continue
+        if any(m.get('output_sha256')!=by_id[int(m['file_id'])]['sha256_current']
+               or int(m.get('output_size_bytes') or -1)!=int(by_id[int(m['file_id'])]['size_bytes'])
+               or m.get('output_relative_path')!=by_id[int(m['file_id'])]['current_relative_path'] for m in members):continue
+        matches.add(proposal)
+    if len(matches)>1:raise MetadataCorrectionError('Widersprüchliche Zeitzonen-Nachweise der abgeschlossenen Korrektur.')
+    return next(iter(matches),stored)
+
+
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 @_exclusive_metadata_write
 def reintegrate_library_metadata_family(
@@ -2041,6 +2091,9 @@ def reintegrate_library_metadata_family(
             ).fetchall()
         ]
 
+    original_proposed = proposed
+    proposed = _reintegration_capture(database_path, family_id, rows, proposed, job_id=str(family["job_id"]), family_key=str(family["family_key"]))
+
     if not rows:
         raise MetadataCorrectionError("Die Dateifamilie enthält keine Dateien.")
 
@@ -2080,7 +2133,7 @@ def reintegrate_library_metadata_family(
                     + current_relative.as_posix()
                 )
             stored_capture = str(row.get("selected_capture_time") or "").strip()
-            if not stored_capture or stored_capture[:19] != proposed[:19]:
+            if not stored_capture or stored_capture != original_proposed:
                 raise MetadataCorrectionError(
                     "Die korrigierten Familienmitglieder besitzen keinen einheitlichen Zeitstempel."
                 )
@@ -2125,12 +2178,12 @@ def reintegrate_library_metadata_family(
         # filenames, but stale secondary timestamps must never route a corrected
         # family back into Ohne_Datum.
         for record in analysis.get("files") or []:
-            record["selected_capture_time"] = proposed[:19]
+            record["selected_capture_time"] = proposed
             record["selected_capture_source"] = "metadata_correction"
             record["capture_time_confidence"] = "high"
             record["review_required"] = False
         for family_record in analysis.get("families") or []:
-            family_record["selected_capture_time"] = proposed[:19]
+            family_record["selected_capture_time"] = proposed
             family_record["capture_time_confidence"] = "high"
 
         entries = [
@@ -2233,7 +2286,7 @@ def reintegrate_library_metadata_family(
         swap_journal = create_swap_journal(
             metadata_root, kind="reintegrate", file_entries=swap_files,
             data_root=central_root, database_path=database_path,
-            family_id=int(family_id), proposed=proposed[:19],
+            family_id=int(family_id), proposed=proposed,
         )
         for item in prepared:
             source = Path(item["source"])
@@ -2260,11 +2313,12 @@ def reintegrate_library_metadata_family(
                 live_family is None
                 or str(live_family["job_id"]) != str(family["job_id"])
                 or str(live_family["family_key"]) != str(family["family_key"])
-                or str(live_family["selected_capture_time"] or "")[:19] != proposed[:19]
+                or str(live_family["selected_capture_time"] or "") != original_proposed
             ):
                 raise MetadataCorrectionError(
                     "Dateifamilie wurde während der Einsortierung verändert."
                 )
+            connection.execute("UPDATE file_families SET selected_capture_time=? WHERE id=?",(proposed,int(family_id)))
             for item in prepared:
                 cursor = connection.execute(
                     """UPDATE files
@@ -2283,7 +2337,7 @@ def reintegrate_library_metadata_family(
                         str(item["destination_relative"]),
                         int(item["normalized_size"]),
                         str(item["normalized_sha"]),
-                        proposed[:19],
+                        proposed,
                         now,
                         int(item["file_id"]),
                         int(family_id),
@@ -2310,7 +2364,7 @@ def reintegrate_library_metadata_family(
                 "family_id": int(family_id),
                 "job_id": str(family["job_id"]),
                 "family_key": str(family["family_key"]),
-                "selected_capture_time": proposed[:19],
+                "selected_capture_time": proposed,
                 "file_count": len(prepared),
                 "files": [
                     {
@@ -2335,7 +2389,7 @@ def reintegrate_library_metadata_family(
                         "family_id": int(family_id),
                         "job_id": str(family["job_id"]),
                         "family_key": str(family["family_key"]),
-                        "selected_capture_time": proposed[:19],
+                        "selected_capture_time": proposed,
                         "file_count": len(prepared),
                         "files": [
                             {
