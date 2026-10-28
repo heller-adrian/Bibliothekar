@@ -269,7 +269,7 @@ def test_0329_first_library_is_user_named_primary_without_main_work_folder(
         assert not (workspace / "Arbeitsbereiche").exists()
 
 
-def test_0329_inspection_never_creates_missing_explicit_workspace(
+def test_0329_explicit_new_workspace_is_checked_without_creation(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -294,18 +294,36 @@ def test_0329_inspection_never_creates_missing_explicit_workspace(
     monkeypatch.setattr(main, "MAIN_LIBRARY_CONTEXT", main.build_main_library_context())
     monkeypatch.setattr(main, "_mount_read_only", lambda path: True)
 
+    # The check must not materialize an otherwise admissible first library.
     checked = main.inspect_library_paths(str(missing), str(archive))
-    assert checked["valid"] is False
-    assert not missing.exists()
-    with pytest.raises(main.HTTPException) as rejected:
-        main.api_create_library({
-            "display_name": "Should not appear",
-            "work_root": str(missing),
-            "archive_root": str(archive),
-        })
-    assert rejected.value.status_code == 422
+    assert checked["valid"] is True, checked["errors"]
     assert not missing.exists()
     assert get_library(registry, MAIN_LIBRARY_ID, active_only=False) is None
+
+    # The archive RO proof still fails closed without any new workspace.
+    monkeypatch.setattr(main, "_mount_read_only", lambda path: False)
+    blocked = main.inspect_library_paths(str(missing), str(archive))
+    assert blocked["valid"] is False
+    assert not missing.exists()
+    monkeypatch.setattr(main, "_mount_read_only", lambda path: True)
+
+    # Missing external and legacy 'main' paths are not silently provisioned.
+    invalid = (tmp_path / "elsewhere" / "unexpected", workspace / "Library Workspaces" / "main")
+    for candidate in invalid:
+        denied = main.inspect_library_paths(str(candidate), str(archive))
+        assert denied["valid"] is False, denied
+        assert not candidate.exists()
+
+    # The existing F14 mutation creates the approved path, not the preflight.
+    result = main.api_create_library({
+        "display_name": "New Camera Library",
+        "work_root": str(missing),
+        "archive_root": str(archive),
+    })
+    assert result["library"]["is_main"] is True
+    assert Path(result["library"]["work_root"]) == missing.resolve()
+    assert missing.is_dir()
+    assert get_library(registry, MAIN_LIBRARY_ID, active_only=False) is not None
 
 
 def test_0329_exclusive_parent_refuses_symlink(tmp_path: Path):

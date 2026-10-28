@@ -285,6 +285,8 @@ def shared_work_root(workspace_path: Path) -> Path:
 def resolve_library_work_root(
     workspace_path: Path,
     requested_work_root: Path | None = None,
+    *,
+    create_missing: bool = True,
 ) -> Path:
     # Ein explizit gespeicherter Bibliothekspfad darf niemals davon abhängen,
     # ob der historische/default Main-Pfad noch existiert.
@@ -312,6 +314,19 @@ def resolve_library_work_root(
             and target.name.casefold() != "main"
         ):
             validate_active_roots()
+            if not create_missing:
+                # An absent explicit child is a valid first-library choice,
+                # but path inspection must not write outside F14's mutation.
+                if not configured_workspaces.is_dir():
+                    raise WorkspaceLayoutError(
+                        "Der konfigurierte Arbeitsbereiche-Stamm ist nicht verfügbar: "
+                        + str(configured_workspaces)
+                    )
+                if not os.access(configured_workspaces, os.R_OK | os.W_OK | os.X_OK):
+                    raise WorkspaceLayoutError(
+                        "Der konfigurierte Arbeitsbereiche-Stamm ist nicht vollständig zugreifbar."
+                    )
+                return target
             target.mkdir(parents=True, exist_ok=True)
         else:
             raise WorkspaceLayoutError(
