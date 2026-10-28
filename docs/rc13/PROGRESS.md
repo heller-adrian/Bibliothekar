@@ -96,3 +96,11 @@ Erwartungen. Drei Package-C-Gegenproben und beide F15-Phasen bestehen lokal;
 Linux-inotify bleibt zwingend für SSD. Zusätzlich prüft die echte RC13-Docker-QA
 nach jedem registrierten Neustart ausdrücklich geschützte Papierkorboperationen,
 statt allein Storage-ready als Nachweis zu verwenden. Kein Produktguard geändert.
+
+Abnahme fa803ca7: vollständiges Backend 2.189 PASS in acht Gruppen, gezieltes
+Gate 101 PASS, Chromium 44 PASS. Alle heruntergeladenen JUnit-/inkrementellen
+Ergebnisse und Node-Manifeste unabhängig geprüft: exakt vollständige disjunkte
+Abdeckung, keine Fehler oder SKIPs. Containerjob wurde zunächst vor Runnerstart
+von GitHub wegen Actions-Kontingent gesperrt. Nach Erneuerung durch den Benutzer
+nur den Containerjob erneut gestartet; vorhandene erfolgreichen Belege erhalten.
+Aktuell echter Imagebau und Supervisorabnahme, Veröffentlichung weiterhin offen.

@@ -81,9 +81,10 @@ from pathlib import Path
 from PIL import Image
 import subprocess
 p=Path('/fixture/nas/CARD');p.mkdir()
-for name,color in [('A.JPG','red'),('A.RAF','blue')]:
+for name,color in [('A.JPG','red'),('raw-seed.JPG','blue')]:
  Image.new('RGB',(8,8),color).save(p/name,format='JPEG')
 subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10:27 12:00:00','-EXIF:Make=FUJIFILM','-EXIF:Model=X-E5',*map(str,p.iterdir())],check=True,capture_output=True)
+(p/'raw-seed.JPG').rename(p/'A.RAF')
 Path('/fixture/archive/original.JPG').write_bytes(b'Independent existing archive')
 Path('/fixture/business/original.JPG').write_bytes(b'Independent business archive')
 Path('/fixture/workspace/.DS_Store').write_bytes(b'Finder')

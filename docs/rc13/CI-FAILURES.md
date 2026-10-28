@@ -69,3 +69,19 @@ Lokale Gegenprüfungen: beide getrennten F15-Phasen bestanden; der SSD-Fall
 benötigt natives Linux-inotify und wird ausschließlich im Linuxgate bewertet.
 Die drei korrigierten RC1-Package-C-Fälle bestanden einzeln. Alle genannten
 Fehlerfälle wurden zusätzlich ins vorgeschaltete Linuxgate aufgenommen.
+
+## Containerfixture nach erfolgreichem Backend
+
+Auf `fa803ca7` bestanden alle 2.189 Backendfälle sowie 101 Gate- und 44
+Chromiumfälle, unabhängig anhand aller Artefakte nachgeprüft. Der Containerjob
+wurde zuerst vor Runnerstart durch das aufgebrauchte GitHub-Actions-Kontingent
+gesperrt. Nach Erneuerung durch den Benutzer scheiterte er beim Erzeugen der
+synthetischen Bilder: ExifTool verweigert JPEG-Inhalte mit `.RAF`-Endung beim
+Schreiben. Die Gegenprobe reproduziert genau diesen Fehler. Die Fixture schreibt
+EXIF nun vor der abschließenden Umbenennung; Auslesen der EXIF-Daten besteht.
+Der eigentliche Anwendungsprozess war an dieser Fehlerstelle noch nicht gestartet.
+
+Die Containerabnahme läuft deshalb separat mit unverändertem App-/Backendstand.
+Ein Git-Diff-Gate erlaubt gegenüber dem vollständig bestandenen Backend nur die
+RC13-Containerfixture als QA-Abweichung. Alle 46 Containerfälle bleiben zwingend;
+die fehlgeschlagene ursprüngliche Containerprüfung wird nicht als PASS ausgegeben.
