@@ -1,42 +1,16 @@
-# RC13 → RC14: vorbereitete Upgradeanleitung
+# TrueNAS SCALE: Bibliothekar von RC13 auf v1.0.0-rc.14 aktualisieren
 
-Entwurf, noch keine Installationsfreigabe: GitHub-Prerelease und verifizierter
-Image-Digest werden erst nach vollständiger automatisierter Abnahme eingetragen.
-Keinen ungetesteten Branchcontainer auf TrueNAS installieren.
+**Gültigkeit:** Ein vorsichtiger Upgrade-Leitfaden, keine Aufforderung zur automatischen Änderung des NAS. Die Veröffentlichung ist ein Prerelease; Linux-Docker-Abnahmen ersetzen keine native TrueNAS-/NFSv4-ACL-Prüfung.
 
-1. In TrueNAS die bisherige Custom-App stoppen. Beide Instanzen dürfen nicht
-   gleichzeitig denselben beschreibbaren Workspace oder dieselben Appdaten nutzen.
-2. Bei gestoppter App zusammengehörige Snapshots/Sicherungen von Appdaten und
-   Workspace erstellen. SQLite, WAL/SHM, F14, Logs und .incoming vollständig
-   erhalten; das externe Fotoarchiv bleibt unverändert RO. Nichts bereinigen.
-3. Image auf den später veröffentlichten RC14-Digest umstellen. Alle bisherigen
-   Mounts und Umgebungsvariablen beibehalten, insbesondere /appdata, /workspace,
-   /main-library, optionale NAS-Quelle RO und zusätzliche Archivmounts RO.
-4. App starten, anmelden, Version und Speicherstatus prüfen. Eine reguläre
-   Speicherabweichung weiter über den bewährten Reparaturdialog behandeln.
-5. Unter Import & Prüfung den fehlgeschlagenen Großimport öffnen. „Import prüfen
-   und fortsetzen“ zeigt die serverseitig geprüften Staging-/Zielzahlen. Für den
-   belegten NAS-Zustand werden 3892 staged / 0 veröffentlicht erwartet. Bei anderen
-   Zahlen zuerst die konkrete Erklärung prüfen. Keine SQL-Dateien editieren.
-6. Bestätigung setzt denselben Job fort; Originalfamilien werden nicht neu
-   registriert. Alternativ „Staging behalten und Auftrag schließen“: Dateien und
-   Nachweise bleiben erhalten und zählen nicht als frei verwendbarer Bestand.
-7. Nach Abschluss Bestand, Open Tasks und Protokoll prüfen, zweimal neu starten
-   und eine geschützte normale Aktion ausführen. Das Archiv muss bytegleich bleiben.
+1. **Ist-Zustand dokumentieren:** Aktuelles Image samt Tag/Digest, Mounts, UID/GID-Einstellungen, Archiv-Read-only-Bindings, Bibliotheksliste und ausstehende Jobs notieren. Bestehende Sperren, unbekannte Journalzustände oder fehlende Speicheridentitäten nicht übergehen.
+2. **App anhalten:** Bibliothekar in TrueNAS Apps stoppen. Keine zweite Instanz parallel mit denselben beschreibbaren Appdata- und Workspace-Datasets starten.
+3. **Konsistente Snapshots:** Während die App vollständig gestoppt ist, zusammengehörige Snapshots von **allen** beschreibbaren Appdata- und Workspace-Datasets erstellen. Der Appdata-Bestand umfasst SQLite, WAL/SHM, globale Registry, Konfiguration, F14-Nachweise, Journale und eventuelle unvollständige Importe; diese Bestandteile niemals einzeln austauschen oder löschen.
+4. **Image exakt wählen:** Die im Release enthaltene `IMAGE-DIGEST.txt` lesen. Nach Möglichkeit die Referenz `ghcr.io/heller-adrian/bibliothekar@sha256:…` einsetzen. Bei reinen Tag-Feldern `1.0.0-rc.14` verwenden; **niemals** `latest`. Falls Authentifizierung erforderlich ist, berechtigten GHCR-Zugang konfigurieren, keine Tokens in Logs kopieren.
+5. **Konfiguration beibehalten:** Dieselben Hostpfade an `/appdata` (RW) und `/workspace` (RW) binden. Vorhandene Archive `/main-library` und `/Businessarchiv` sowie freigegebene NAS-Importquellen `/sources/nas` weiterhin explizit **Read Only** einbinden. Keine pauschale Rechteänderung und keine Änderung der bestehenden Helper-/UID-568-Supervisorkonfiguration vornehmen.
+6. **Einmalig starten und prüfen:** Version `1.0.0-rc.14`, Anmeldung, Speicherstatus, registrierte Bibliotheken, F14-Identitäten und ursprüngliche Bestandszahlen prüfen. Bei einem unterbrochenen RC13-Import zuerst die vorgesehene **Import-Recovery-Inspektion** öffnen und nur bei plausiblen nachgewiesenen Originalen die explizite Fortsetzung auswählen; **keinen** parallelen neuen Import starten.
+7. **Funktional prüfen:** Mit entbehrlichen Testdaten einen gewöhnlichen Folder Import, die schreibgeschützten Archivquellen, vorhandene Ereignisse, Änderungsaufträge und die DE/EN-Oberfläche kontrollieren. Anschließend zweimal kontrolliert neu starten und Speicherstatus, Bibliotheksidentitäten und Originalprüfsummen vergleichen.
+8. **Bei Abweichung stoppen:** Technische Fehlermeldung, Job-ID, Uhrzeit, Image-Digest und vollständige Containerlogs sichern. **Kein Clean Slate, kein manuelles SQLite-/WAL-Editieren, kein Löschen von Journal- oder F14-Dateien und keine rekursive ACL-Reparatur** als Schnelllösung. Rückkehr auf einen Snapshot nur als vollständige, konsistente Rückkehr aller zusammengehörigen Datasets planen.
 
-Fehlen Journal, ursprüngliche Herkunft oder Identitätsnachweise, wird keine
-Fortsetzung erfunden. Die UI nennt Job/Pfad und technischen Grund. Protokolle
-sichern und den Befund melden; kein Clean Slate und kein manuelles Entfernen von
-Staging-/Operationsdateien.
+Eine zusätzliche Bibliothek darf erst entfernt werden, wenn ihr Workspace leer und ihr Bestand nachweislich archiviert ist; Dateien, SQLite und Archive werden dabei nicht automatisch gelöscht. Eine spätere Wiederaufnahme des Archivbestands erfolgt ausschließlich über den normalen, ausdrücklich freigegebenen Read-only-Quellmount.
 
-Zusatzbibliothek entfernen: zuerst alle Jobs und Ereignisänderungen abschließen,
-Dateien regulär archivieren und den Arbeitsordner vollständig leeren. Unter
-Einstellungen → Bibliotheken ausdrücklich „Bibliothek entfernen“ bestätigen.
-Archiv, Datenbank, Herkunft und Hülle bleiben erhalten. Für spätere Wiederaufnahme
-Archiv zusätzlich als ausdrücklich erlaubte RO-Importquelle bereitstellen und
-Folder Import verwenden. Keine Ereignisse werden aus event.json rekonstruiert.
-
-Rollback: App stoppen und zusammengehörige Vor-Upgrade-Snapshots von Appdaten
-und Workspace wiederherstellen, bevor RC13 wieder gestartet wird. Ein bloßer
-Imagewechsel nach einer RC14-Deregistrierung oder Recoveryentscheidung ist kein
-geprüfter Rollback. Archiv und Quellen werden nicht zurückgeschrieben.
+**Abdeckungsgrenze:** Die 48 erfolgreichen CI-Containerfälle laufen auf Linux mit synthetischen Testdaten. Die konkrete TrueNAS-Installation, NFSv4-ACLs und produktive Originale sind damit noch nicht vor Ort verifiziert.

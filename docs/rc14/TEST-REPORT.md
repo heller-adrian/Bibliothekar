@@ -1,63 +1,26 @@
-# RC14 Testbericht – laufende Abnahme
+# RC14 – abschließender automatisierter Abnahmebericht (28.10.2026)
 
-Status: keine Veröffentlichung freigegeben. Native TrueNAS/NFSv4: NOT_RUN.
+## Exakt geprüfter Quellstand
 
-## Tatsächlich vorhandene Nachweise
+Anwendungscode: `b43d9fb9d957cb817f74e6fee303b6413d91cd38`
 
-- Unveränderter RC13: konkurrierender WAL-Writer während des Zentralbestands-
-  Hashes scheitert reproduzierbar. Nach Verlagerung der Hasharbeit besteht die
-  Gegenprobe. Das beweist die Codeanfälligkeit, keinen historischen NAS-Stacktrace.
-- Lokaler fokussierter Lauf nach Zähler-/Recoverykorrekturen: 53 PASS,
-  30,69 s, Python 3.13 / macOS, synthetische Daten. Zusätzlich eine HTTP-
-  Bibliothekslisten-Gegenprobe PASS. Überlappende Läufe werden nicht addiert.
-- Aktueller lokaler Lebenszykluslauf mit Claimfreigabe/Retirementreceipt:
-  23 PASS, 8,15 s. Nachfolgende Identitätsrevalidierung wird noch geprüft.
-- Chromium: 44 bestehende RC13-Fälle und 147 RC14-Fälle (EN/DE/EN,
-  320/390/1280 px) lokal bestanden. Tatsächlicher Tagesrenderer, tatsächlicher
-  I18n-Katalog; keine externe NAS-Verbindung.
-- Linuxlauf 40718962941: Browser PASS; gezieltes Gate 82 PASS / 1 TIMEOUT.
-  Der neue 3892-Dateien-Test überschritt die pauschalen 90 Sekunden unter
-  vollständigem Dateizugriffsaudit. Nur dieser neue Größenfall erhält 300 s.
-- Linuxlauf 40720091267 auf 65c56bf985af775516e83c1f698c178911db8c1d:
-  gezieltes Gate und Chromium PASS. Acht vollständige Backendgruppen laufen.
+Workflow: [RC14 complete isolated acceptance, Lauf 40751837451](https://github.com/heller-adrian/Bibliothekar/actions/runs/40751837451), Status **SUCCESS**, erster Versuch.
 
-## Verpflichtende noch offene Belege
+Alle 11 GitHub-Actions-Artefakte wurden vollständig heruntergeladen und ihre Originalinhalte überprüft. Dies ist die finale Evidenz für diese Freigabe, nicht der veraltete Zwischenstand aus früheren Testberichten.
 
-Vollständige disjunkte Backendabnahme, originale Supervisor-Container unter UID
-568 mit RW-/RO-Binds, echte HTTP-Anmeldung, RC12-Herkunftsfehlerupgrade,
-RC13-Journal-/Teilpublikations-SIGKILL und derselbe Import nach RC14-Upgrade,
-Retirementabsturz, normaler Folder Import aus erhaltenem RO-Archiv, zwei Neustarts
-und alle bisherigen RC11-/RC12-Speicherreparaturfälle.
+| Gate | Ergebnis |
+| --- | --- |
+| Gezieltes Sicherheits- und Onboarding-Gate | 110 PASS |
+| Acht Backendpartitionen (279 je Partition) | 2.232 PASS, alle Testknoten genau einmal |
+| Chromium RC14 | 147 PASS |
+| Chromium RC13-Regressionen | 44 PASS |
+| RC14 echte Containerfälle | 2 PASS: Journal, teilweise Veröffentlichung und Bibliotheksrückzug |
+| RC13 echte Container-/RC12-Upgradetests | 2 PASS |
+| RC12 Container-/Reparaturfälle | 25 PASS |
+| RC11/RC10 Migrations- und Crashfälle | 19 PASS |
 
-Die Größenfixture enthält tatsächlich 3892 Dateien in 3889 Familien; sie ist kein
-66,5-GiB-Durchsatzbenchmark. Jeder originale Inode, jede SHA-256 und alle vier
-unveränderlichen Ursprungstabellen werden verglichen. Linux-POSIX-ACL-Tests
-ersetzen keine native NFSv4-/OpenZFS-Abnahme.
+Sämtliche Containerberichte weisen die Quellcode-Revision aus. Der Journal- und der Teilveröffentlichungs-SIGKILL wurden am tatsächlichen Rückkehrereignis im `kamera-job-worker` mit UID 568 ausgelöst. Der Bibliotheksrückzug wurde nach dem Registry-Commit im AnyIO-Thread unterbrochen. Vorhandene Archiv- und Importdateien blieben ihren geprüften SHA-256-/Identitätsnachweisen zufolge erhalten; die reguläre Wiederaufnahme wurde abgeschlossen.
 
-## Bekannte Grenzen
+**Nicht geprüft:** Native TrueNAS SCALE-/OpenZFS-/NFSv4-ACL-Funktionalität an produktiver Hardware (NOT_RUN). Die RC14-Freigabe ist ein Prerelease, kein Stable-Release.
 
-Ohne ein vollständiges Eigentumsjournal bzw. verifizierbare ursprüngliche
-Herkunft wird ein früher unterbrochener Import erhalten und verständlich gesperrt;
-es gibt keine erfundene Veröffentlichung oder automatische Datenbereinigung.
-Bestätigte Quellenverluste behalten ihre ursprünglichen Familien. Neue Claims
-und Archiv-Wiedereinzug werden nur über die normalen Zulassungsregeln geprüft.
-
-Quelle, Image-Digest, exakte Abschlusszählungen und erfolgreiche Run-Links werden
-erst nach tatsächlich bestandener Gesamtabnahme eingetragen. Ein grüner Browser-
-oder Storage-Health-Check ist keine Containerfreigabe.
-
-## Nachfolgende gezielte Korrekturen
-
-Lokaler aktueller Gate-Lauf: **63 PASS, 28,66 s**, Python 3.13/macOS,
-`test_rc14_import`, `test_rc14_lifecycle`, `test_rc14_ui`, Konsistenzsemantik,
-Archivprojektion sowie sämtliche ungültigen relativen Publikationspfade.
-Linuxspezifischer Cross-Filesystem-Test wurde separat auf macOS erwartungsgemäß
-mit „BLOCKED: actual Linux second filesystem required“ abgewiesen; kein PASS
-behauptet. Er gehört zur vollständigen Linuxabnahme.
-
-Bereits gelesene rote Linuxgruppen aus Lauf 40720091267: veralteter deutscher
-Pfadfehlertext, README-Version, synthetisch als queued angelegte fertige Bestände,
-Archivprojektion und zwei bisher destruktive Discard-Verträge. Die Textkompatibilität
-ist wiederhergestellt; Fixtures kennzeichnen abgeschlossene Veröffentlichungen.
-Die Discardtests prüfen nun Verweigerung sowie erhaltene Dateien/Jobs/Journale.
-Das bisherige Rot bleibt im Lauf sichtbar und gilt nicht rückwirkend als PASS.
+Der eigenständige Publisher prüft alle Jobs, exakt alle Artefakte, die disjunkte Testabdeckung, Commit- und Paketidentität und das erfolgreiche Docker-Pull-Ergebnis nochmals. Bei Fehlern erfolgt keine Fortsetzung.

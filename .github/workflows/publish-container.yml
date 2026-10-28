@@ -6,8 +6,10 @@ on:
       - main
       - patch/0.50.8
       - patch/0.53.2
+    # Keep all stable tags; RC prerelease tags never trigger this publisher.
     tags:
       - 'v*'
+      - '!v*-rc.*'
   workflow_dispatch:
   workflow_call:
 
