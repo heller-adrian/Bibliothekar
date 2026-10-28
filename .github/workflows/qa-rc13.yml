@@ -2,7 +2,7 @@ name: RC13 complete isolated acceptance
 on:
   push:
     branches: [release/v1.0.0-rc.13]
-    paths-ignore: ['docs/**', 'README.md', 'CHANGELOG.md', '.github/workflows/publish-rc13.yml']
+    paths-ignore: ['docs/**', 'README.md', 'CHANGELOG.md', '.github/workflows/publish-rc13.yml', '.github/workflows/qa-rc13-container.yml', 'qa/rc13/container.py']
 permissions:
   contents: read
 concurrency:
