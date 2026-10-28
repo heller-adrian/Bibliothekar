@@ -290,7 +290,7 @@ def test_0325_ui_and_version_contract():
         "workspace",
         "events",
     )
-    assert "SSD-Kopien anlegen" in EVENTS_HTML
+    assert "Arbeitsbereich-Kopien anlegen" in EVENTS_HTML
     assert "/release-copy/create" in EVENTS_HTML
     assert "Schritt 1 von 2" in EVENTS_HTML
     assert "Schritt 2 von 2" in EVENTS_HTML

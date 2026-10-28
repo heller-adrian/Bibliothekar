@@ -55,13 +55,18 @@ TRANSLATIONS={
  'Unabhängige Arbeitsordner der registrierten Bibliotheken.':'Independent work folders of registered libraries.',
  'Temporäre, geprüfte Metadatenkorrekturen; Allgemein und Stapelkorrektur.':'Temporary verified metadata corrections; General and Batch Correction.',
  'Zurückgehaltene Dateien bis zur ausdrücklich bestätigten endgültigen Löschung.':'Files retained until explicitly confirmed permanent deletion.',
+ 'Kein eindeutiger Zielordner vorhanden.':'No unique destination folder available.',
  'Allgemein':'General','Stapelkorrektur':'Batch Correction',
 }
 PATTERNS=[
+ [r'^([0-9]+)\s+Familie\s*·\s*([0-9]+)\s+Dateien\s*·\s*([0-9.,]+ (?:B|KiB|MiB|GiB|TiB))$','$1 family · $2 files · $3'],
+ [r'^([0-9]+)\s+Familien\s*·\s*([0-9]+)\s+Dateien\s*·\s*([0-9.,]+ (?:B|KiB|MiB|GiB|TiB))$','$1 families · $2 files · $3'],
+ [r'^([0-9]+)\s+Dateien\s*·\s*([A-Z0-9, /+()-]+)\s*·\s*([0-9.,]+ (?:B|KiB|MiB|GiB|TiB))$','$1 files · $2 · $3'],
+
  [r'^Verwaltungsordner fehlen oder sind nicht eindeutig verfügbar\. Betroffene Vorgänge bleiben zum Schutz der Dateien gesperrt: ([\s\S]+)$','Managed storage or control evidence is unavailable. Affected operations remain paused to protect files: $1'],
 
- [r'^([0-9]+)\s+Familie\s*·\s*([0-9]+)\s+Dateien([\s\S]*)$','$1 family · $2 files$3'],
- [r'^([0-9]+)\s+Datei(\s*·[\s\S]*)?$','$1 file$2'],
+ [r'^([0-9]+)\s+Familie\s*·\s*([0-9]+)\s+Dateien$','$1 family · $2 files'],
+ [r'^([0-9]+)\s+Datei$','$1 file'],
 
  [r'^Arbeitsbereich wird im Hintergrund freigegeben · (.+) · Ein Seitenwechsel oder Browser-Neustart unterbricht den Serverauftrag nicht\.$','Workspace release running in background · $1 · Switching pages or restarting the browser does not interrupt the server job.'],
  [r'^Arbeitsbereich-Freigabe abgeschlossen · (.+)$','Workspace release completed · $1'],
@@ -70,8 +75,8 @@ PATTERNS=[
  [r'^([0-9]+)\s+Familien\s*$','$1 families'],
  [r'^Unterereignis „(.+)“ enthält an (.+) keine Dateifamilien; für diese Tage werden keine Tagesordner angelegt\.$','Subevent “$1” has no file families on $2; day folders will not be created for those days.'],
 
- [r'^([0-9]+)\s+Familien\s*·\s*([0-9]+)\s+Dateien([\s\S]*)$','$1 families · $2 files$3'],
- [r'^([0-9]+)\s+Dateien(\s*·[\s\S]*)?$','$1 files$2'],
+ [r'^([0-9]+)\s+Familien\s*·\s*([0-9]+)\s+Dateien$','$1 families · $2 files'],
+ [r'^([0-9]+)\s+Dateien\s*$','$1 files'],
  [r'^([0-9]+) Familien$','$1 families'],
  [r'^([0-9]+)/([0-9]+) Dateien bestätigt\.$','$1/$2 files confirmed.'],
  [r'^Unterereignis „(.+)“ enthält aktuell keine Dateifamilien; die leere Ordnerstruktur wird trotzdem angelegt\.$','Subevent “$1” currently has no file families; its empty folder structure will still be created.'],

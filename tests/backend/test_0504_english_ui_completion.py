@@ -71,9 +71,12 @@ def test_0504_all_screenshot_literals_and_dynamic_patterns():
     assert UI_TRANSLATIONS["Löschbare Planungen"] == "Deletable plans"
     # Later screenshot fixes may need higher-priority patterns, while 0.50.4
     # patterns must remain intact and in their original relative order.
-    offset = len(UI_0507_PATTERNS)
-    assert UI_PATTERNS[:offset] == UI_0507_PATTERNS
-    assert UI_PATTERNS[offset:offset + len(UI_0504_PATTERNS)] == UI_0504_PATTERNS
+    from app.ui_rc13 import PATTERNS, workspace_words
+    offset = len(PATTERNS)
+    normalized = lambda rows: [[workspace_words(k), workspace_words(v)] for k,v in rows]
+    assert UI_PATTERNS[offset:offset+len(UI_0507_PATTERNS)] == normalized(UI_0507_PATTERNS)
+    offset += len(UI_0507_PATTERNS)
+    assert UI_PATTERNS[offset:offset + len(UI_0504_PATTERNS)] == normalized(UI_0504_PATTERNS)
     assert 'class="event-name" data-bk-preserve-language' in EVENTS_HTML
     assert 'class="event-folder" data-bk-preserve-language' in EVENTS_HTML
 

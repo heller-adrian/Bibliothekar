@@ -20,7 +20,7 @@ def tr(value: str) -> str:
 def test_0509_exact_labels_and_backend_operations():
     examples={
       "Vorbereiten":"Prepare",
-      "Finder-Arbeit":"Finder work",
+      "Finder-Arbeit":"Manual work",
       "Aktualisieren":"Refresh",
       "Ursprünglichen Bestand aus Später zuordnen zurückkopieren":"Copy original inventory back from Assign Later",
       "Archivdateien an ihren ursprünglichen Ort zurückverschieben":"Move archive files back to their original locations",

@@ -168,5 +168,5 @@ def test_02610_ui_contracts_from_manual_deep_test():
     assert 'document.body.appendChild(menu);' in BIBLIOTHEKAR_JS
     assert 'id="change-request-inline-error"' in EVENTS_HTML
     assert "Zielstruktur-Vorschau" in EVENTS_HTML
-    assert "Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt." in EVENTS_HTML
+    assert "Freigewordene Archivdateien werden zuerst sicher in den Arbeitsbereich zurückgeholt." in EVENTS_HTML
     assert "Freigewordene Archivaufnahmen" in WORKSPACE_HTML

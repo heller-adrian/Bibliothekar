@@ -12,7 +12,7 @@ def replace_on_open(monkeypatch, path, action, *, repeat=False):
     seen = []
     def interleave(name, flags, *args, **kwargs):
         fd = real_open(name, flags, *args, **kwargs)
-        if Path(name) == path and (repeat or not seen):
+        if ((Path(name) == path or (Path(name).name == path.name and kwargs.get('dir_fd') is not None)) and not flags & os.O_CREAT and (repeat or not seen)):
             old = os.fstat(fd)
             action()
             after = os.fstat(fd)
@@ -56,14 +56,14 @@ def test_unsafe_replacement_is_rejected(tmp_path, monkeypatch, kind):
             ro._write(path, {'generation': 1})
             if kind == 'writable': path.chmod(0o666)
     if kind == 'foreign':
-        real_stat = os.stat
-        def fake_stat(name, *args, **kwargs):
-            info = real_stat(name, *args, **kwargs)
-            if Path(name) == path and kwargs.get('follow_symlinks') is False:
-                return SimpleNamespace(st_mode=info.st_mode, st_uid=os.getuid()+1,
-                                       st_nlink=info.st_nlink, st_dev=info.st_dev, st_ino=info.st_ino)
+        real_fstat = os.fstat
+        def fake_fstat(fd):
+            info = real_fstat(fd)
+            if path.exists() and info.st_ino == path.lstat().st_ino:
+                values = list(info); values[4] = os.getuid()+1
+                return os.stat_result(values)
             return info
-        monkeypatch.setattr(ro.os, 'stat', fake_stat)
+        monkeypatch.setattr(ro.os, 'fstat', fake_fstat)
     replace_on_open(monkeypatch, path, replace)
     with pytest.raises(ro.RootOperationError): ro._read(path)
     assert foreign.read_bytes() == original

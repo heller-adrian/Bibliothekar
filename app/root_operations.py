@@ -213,8 +213,13 @@ def _read(path, default=None):
         for attempt in range(3):
             try:
                 fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
-            except FileNotFoundError:
-                check(); return default
+            except FileNotFoundError as error:
+                check()
+                if attempt:
+                    raise RootOperationError('Operationsnachweis nach Austausch verschwunden: ' + str(path)) from error
+                return default
+            except OSError as error:
+                raise RootOperationError('Operationsnachweis ist nicht lesbar: ' + str(path)) from error
             try:
                 info = os.fstat(fd)
                 if info.st_nlink == 0 and path.name == 'state.json' and attempt < 2:

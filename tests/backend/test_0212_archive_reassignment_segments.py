@@ -155,8 +155,8 @@ def test_archive_ui_returns_released_segments_to_ssd_before_finder_work():
     assert "data-archive-reassign-segment" not in EVENTS_HTML
     assert "data-archive-reassign-target" not in EVENTS_HTML
     assert "Ausgewählte Segmente zuordnen" not in EVENTS_HTML
-    assert "Freigewordene Archivdateien auf SSD sichern" in EVENTS_HTML
-    assert "SSD-Kopien prüfen" in EVENTS_HTML
+    assert "Freigewordene Archivdateien im Arbeitsbereich sichern" in EVENTS_HTML
+    assert "Arbeitsbereich-Kopien prüfen" in EVENTS_HTML
     assert "Bestätigte Archivoriginale entfernen" in EVENTS_HTML
     assert "Entfernung aus dem Archiv prüfen" in EVENTS_HTML
     assert "/release-copy/verify" in EVENTS_HTML

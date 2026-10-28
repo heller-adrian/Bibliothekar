@@ -37,3 +37,17 @@ Ein solcher Import bleibt ungeklärt; der RC12-Appdaten-Operationsaudit wird nic
 umgangen. Folgeprüfung: 23 PASS (Herkunft, fünf Projektions- und fünf
 Metadaten-SIGKILL-Fälle), zusätzlich 14 PASS für Herkunft und Anzeige-Gate.
 Die übrigen Linuxpartitionen laufen noch; noch keine Container-/Releasefreigabe.
+
+Fortsetzung 28.10.: Alle acht fehlgeschlagenen Gruppen aus 40607188501 sowie
+Artefakte ausgewertet. Alte UI-/Versionsverträge aktualisiert; zu breite
+Zählerübersetzung auf konkrete vollständige Texte begrenzt. Deskriptor-relative
+Race-Fixtures korrigiert und fehlgeschlagene/symlinkartige Kontrollöffnungen
+präzise abgefangen. Linux-Dateisystemtyp wird auf jedem gehaltenen FD mit
+fstatfs bestimmt; kein Cache und unveränderte ACL-/Identitätsprüfungen.
+Gezielt lokal: UI 16 PASS; Herkunft/F14/Bootstrap 95 PASS, ein ausschließlich
+Linux-spezifischer ABI-Test auf macOS SKIP; fünf zuvor langsame Lifecycle-/Trash-/
+Sortier-Recoveryfälle 5 PASS ohne bedingten Recovery-Skip. Chromium-Matrix erneut
+44 PASS. Neuer Linuxlauf führt zuerst ein gezieltes Fehler-/Sicherheitsgate aus,
+dann alle acht vollständigen Backendpartitionen und die echte Containerabnahme.
+Keine Veröffentlichung erfolgt. Nächster Schritt: Linuxgate, vollständige
+Abnahme und Fehlerkorrekturen anhand der tatsächlichen Containerbelege.

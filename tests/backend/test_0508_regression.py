@@ -64,8 +64,8 @@ def test_0508_external_drive_and_archive_labels():
 
 def test_0508_dynamic_counts_and_preview():
     examples = {
-        "32\n                Dateien": "32 Files",
-        "16\n                Familien": "16 Families",
+        "32\n                Dateien": "32 files",
+        "16\n                Familien": "16 families",
         "Unterereignisse: 1": "Subevents: 1",
         "Zeitsegmente: 3": "Time segments: 3",
         "angewendet · Ereignis": "applied · Event",

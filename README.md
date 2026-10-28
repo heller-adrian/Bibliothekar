@@ -1,6 +1,6 @@
 # Bibliothekar
 
-> Release Candidate **1.0.0-rc.12** – Ein-Mount-Appdaten und überarbeitete Speicherzustände. [RC12-Installation und Abnahme](docs/rc12/TRUENAS-TEST.md). Der stabile Update-Kanal bleibt unverändert.
+> Release Candidate **1.0.0-rc.13** – unveränderliche Quellenhistorie und korrigierte Bedienoberfläche. [RC13-Upgrade und Abnahme](docs/rc13/UPGRADE-RC12.md). Der stabile Update-Kanal bleibt unverändert.
 > Der veröffentlichte Ausgangspunkt dieser Entwicklung ist RC10 (`c8e078ee`). Historische RC7-Unterlagen: [Installationsanleitung](docs/rc7/INSTALL-TRUENAS.md) und [manuelle Abnahme](docs/rc7/MANUAL-ACCEPTANCE.md).
 > Die folgenden älteren Entwicklungsabschnitte sind historisch; für diesen RC gelten die oben verlinkten festen englischen Verwaltungsnamen und Mountregeln.
 
@@ -8,7 +8,7 @@ Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraau
 
 Aktuelle stabile Veröffentlichung: **0.40.3**
 
-Entwicklungsversion: **1.0.0-rc.12** – noch nicht als `latest` veröffentlicht.
+Entwicklungsversion: **1.0.0-rc.13** – noch nicht als `latest` veröffentlicht.
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 

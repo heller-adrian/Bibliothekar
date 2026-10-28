@@ -21,6 +21,13 @@ WRITE = 0x2 | 0x4 | 0x10 | 0x40 | 0x100 | 0x10000 | 0x40000 | 0x80000
 ADMIN_GROUPS = {0, 544}
 LOCAL_FILESYSTEMS = {'ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'tmpfs', 'overlay', 'aufs', 'ramfs'}
 
+# Linux statfs.f_type is the first native long on both supported container ABIs.
+# Query the held descriptor on every call; never cache path/mount/ACL decisions.
+_FS_MAGIC = {0xEF53: 'ext4', 0x58465342: 'xfs', 0x9123683E: 'btrfs',
+             0x01021994: 'tmpfs', 0x794C7630: 'overlay', 0x61756673: 'aufs',
+             0x858458F6: 'ramfs', 0x2FC12FC1: 'zfs'}
+_LIBC = ctypes.CDLL(None, use_errno=True) if sys.platform == 'linux' else None
+
 
 class RootOperationError(RuntimeError):
     pass
@@ -41,6 +48,13 @@ def filesystem(fd):
         return 'darwin'
     if sys.platform != 'linux':
         raise OSError('unsupported private ACL platform')
+    buffer = ctypes.create_string_buffer(512)
+    if _LIBC.fstatfs(fd, ctypes.byref(buffer)) != 0:
+        raise OSError(ctypes.get_errno(), 'descriptor filesystem query failed')
+    magic = ctypes.c_long.from_buffer(buffer).value & 0xFFFFFFFF
+    if magic in _FS_MAGIC:
+        return _FS_MAGIC[magic]
+    # Unknown filesystems retain the conservative native backend lookup.
     info = Path(f'/proc/self/fdinfo/{fd}').read_text()
     mount_id = next(line.split(':', 1)[1].strip() for line in info.splitlines() if line.startswith('mnt_id:'))
     for line in Path('/proc/self/mountinfo').read_text().splitlines():
