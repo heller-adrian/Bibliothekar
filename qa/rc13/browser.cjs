@@ -61,6 +61,10 @@ for(const choice of [locale==='en'?'de':'en',locale]){
  assert.equal(await page.evaluate(()=>window.BibliothekarI18n.getLocale()),choice);
 }
 assert.equal(await page.locator('#storage-setup-blocker').count(),0);assert.equal(await page.locator('.storage-copy').getAttribute('data-copy'),'Trash');
+await page.evaluate(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});document.execCommand=kind=>{window.rc13Copied={kind,value:document.activeElement.value};return true}});
+await page.locator('.storage-copy').click();
+assert.deepEqual(await page.evaluate(()=>window.rc13Copied),{kind:'copy',value:'Trash'});
+assert.equal(await page.locator('textarea').count(),0);
 await page.screenshot({path:path.join(out,`${locale}-${width}-storage.png`)});results.push({locale,width,stage:'storage',status:'PASS'});
 await page.goto('http://rc13.invalid/events');await page.evaluate(()=>document.documentElement.dataset.bkTheme='light');await page.addScriptTag({content:bundle.i18n});await page.evaluate(l=>window.BibliothekarI18n.setLocale(l),locale);
 await page.evaluate(()=>{window.mutations=0;window.fetch=async(_,options={})=>{if(options.method==='POST')window.mutations++;return {ok:true,json:async()=>({operations:[{kind:'apply',id:'batch-rc13',status:'applied',active:false,label:'Ereignisse anwenden',detail:'1 von 1 Ereignissen verarbeitet',href:'/events',progress_percent:100}]})}}});

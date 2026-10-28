@@ -75,3 +75,8 @@ Lange Crashdateien werden jetzt nach gesammelten Test-IDs statt ganzen Dateien
 verteilt; Manifestprüfung muss über alle acht Gruppen genau jeden Test einmal
 nachweisen. Frühere Gruppenergebnisse werden nicht als abschließende Abnahme
 dieses neuen Stands ausgegeben.
+
+Kopierknopf zusätzlich für normale NAS-HTTP-Ursprünge abgesichert: falls die
+Clipboard API fehlt oder verweigert wird, selektierter temporärer Textbereich
+im Dialog als Fallback; keine Reparaturaktion. Browser prüft den Fallback mit
+ersetzter Zwischenablageschnittstelle ohne Zugriff auf die Systemzwischenablage.

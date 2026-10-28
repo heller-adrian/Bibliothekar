@@ -142,7 +142,17 @@ li{margin:12px 0}code{font-size:.88em}.storage-heading{display:flex;align-items:
  }
  for(const b of document.querySelectorAll('.bk-lang'))b.addEventListener('click',()=>{try{localStorage.setItem(key,b.dataset.lang)}catch(_){}sync()});
  sync();
- document.querySelectorAll('.storage-copy').forEach(b=>b.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(b.dataset.copy)}catch(_){result.textContent=b.dataset.copy}}));
+ document.querySelectorAll('.storage-copy').forEach(b=>b.addEventListener('click',async()=>{
+  const value=b.dataset.copy;
+  try{await navigator.clipboard.writeText(value);return}catch(_){}
+  // NAS HTTP origins do not expose Clipboard API. Keep a user-gesture fallback.
+  const field=document.createElement('textarea'),focused=document.activeElement;
+  field.value=value;field.readOnly=true;field.style.cssText='position:fixed;opacity:0;pointer-events:none';
+  dialog.appendChild(field);
+  try{field.select();field.setSelectionRange(0,value.length);if(!document.execCommand('copy'))result.textContent=value}
+  catch(_){result.textContent=value}
+  finally{field.remove();focused?.focus({preventScroll:true})}
+ }));
  const dialog=document.getElementById('storage-protection');
  if(dialog.showModal){dialog.removeAttribute('open');dialog.showModal();dialog.addEventListener('cancel',e=>e.preventDefault())}
  document.getElementById('storage-recovery-open').addEventListener('click',()=>{const panel=document.getElementById('storage-recovery-panel');panel.hidden=!panel.hidden});
