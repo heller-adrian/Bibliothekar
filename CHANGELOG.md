@@ -1,3 +1,21 @@
+## 1.0.0-rc.13 – Quellenhistorie und korrigierte Bedienoberfläche (28.10.2026)
+
+- Bestätigte Einzeldateiverluste ändern die ursprüngliche Quellfamilie nicht.
+  Betroffene RC12-Installationen setzen anhand ihrer erhaltenen Nachweise fort.
+- Zweite Bibliotheken referenzieren die ursprüngliche kanonische Herkunft;
+  widersprüchliche oder unbelegte Fehlbestände werden weiterhin gesperrt.
+- Atomarer F14-State-Austausch wird eng begrenzt und vollständig erneut geprüft;
+  Symlinks, Hardlinks und ungültige Kontrollnachweise bleiben Sperrgründe.
+- Tatsächliche Bibliothekspfade, vollständige DE/EN-Dialoge, verständliche
+  manuelle Archiv-/Rückänderung und mobile Statusanzeige korrigiert.
+- Speicherreparatur erhält ausschließlich Darstellungskorrekturen; ihre
+  Bedingungen und Verlustbestätigungen bleiben erhalten.
+- Vollständiger automatisierter Abnahmenachweis und praktische TrueNAS-Schritte:
+  [RC13-Unterlagen](docs/rc13/TEST-REPORT.md),
+  [Upgrade](docs/rc13/UPGRADE-RC12.md),
+  [TrueNAS-Test](docs/rc13/TRUENAS-TEST.md).
+  Native TrueNAS-/ACL-Abnahme erfolgt separat; RC13 bleibt ein Prerelease.
+
 ## 1.0.0-rc.12 – Ein-Mount-Installation und nachvollziehbare Reparatur (27.10.2026)
 
 - Neues explizites hostverwaltetes Appdatenprofil unter /appdata: reale Zugriffsrechte statt globaler UID-/ACL-Exklusivitätsblockade.

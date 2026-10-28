@@ -1,6 +1,8 @@
-# Bibliothekar 1.0.0-rc.13 — Kandidat
+# Bibliothekar 1.0.0-rc.13 — Prerelease
 
-Status: Implementierung und automatisierte Abnahme laufen. Noch kein Release.
+Automatisierte Linux-Abnahme bestanden: 2.189 Backendtests, 101 gezielte
+Gate-Tests, 44 Chromiumfälle und 46 reale Supervisor-/Containerfälle.
+Keine native TrueNAS-/ACL-Abnahme und keine stabile 1.0.0-Freigabe.
 
 - Ursprüngliche Quellfamilie bleibt nach bestätigter Einzeldateilöschung erhalten.
   Eine betroffene RC12-Installation kann anhand vorhandener Belege automatisch
@@ -17,5 +19,6 @@ Status: Implementierung und automatisierte Abnahme laufen. Noch kein Release.
 [Ursachenanalyse](ANALYSE.md) · [Alle 20 Screenshots](SCREENSHOTS.md) ·
 [Upgrade](UPGRADE-RC12.md) · [Praktische TrueNAS-Abnahme](TRUENAS-TEST.md)
 
-Linux-/Containerergebnisse und unveränderlicher Image-Digest werden erst nach
-abgeschlossener Abnahme ergänzt. Keine native TrueNAS-/ACL-Freigabe.
+[Testbericht](TEST-REPORT.md) enthält Quellstände und Abdeckungsgrenzen.
+Das Release ergänzt den unveränderlichen Image-Digest, tatsächlichen Pullbeleg,
+digestgebundene Compose-Datei, vollständige QA-Belege und SHA256SUMS.

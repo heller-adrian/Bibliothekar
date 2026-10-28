@@ -1,8 +1,8 @@
 # Sichere Aktualisierung der gesperrten RC12-Installation
 
 Diese Anleitung gilt für dieselbe bestehende RC12-Instanz und dieselben Mounts.
-Die Veröffentlichung und der geprüfte Image-Digest werden erst nach erfolgreicher
-Linux-Abnahme in den Releaseunterlagen angegeben. Native Abnahme folgt separat.
+Die Linux-/Containerabnahme ist bestanden. Das Release enthält den geprüften
+Image-Digest und Pullbeleg; native Abnahme folgt separat.
 
 1. Bibliothekar in TrueNAS **stoppen**. Keine zweite Instanz mit denselben
    beschreibbaren Appdaten oder demselben Workspace starten.

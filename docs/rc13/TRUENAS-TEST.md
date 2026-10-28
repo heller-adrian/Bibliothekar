@@ -59,7 +59,12 @@ erwarteter kopierbarer Ordnername und beide bisherigen Reparaturwege erscheinen.
 Zuerst denselben ursprünglichen Ordner zurückbenennen und erneut prüfen.
 Anschließend mit einem erneuten simulierten Verlust den ausdrücklich bestätigten
 leeren Ersatz prüfen. Ein neu angelegter Ordner mit hineinkopierten Dateien ist
-keine Wiederherstellung der ursprünglichen Ordneridentität. Datenbank-,
+keine Wiederherstellung der ursprünglichen Ordneridentität. Falls die Oberfläche
+nach dem festgeschriebenen Ersatz ausdrücklich einen Containerneustart verlangt,
+in TrueNAS **Apps → Bibliothekar → Restart** ausführen und danach erneut anmelden.
+Die Verlustbestätigung nicht wiederholen; der Ersatz und sein Nachweis sind
+bereits gespeichert. Bleibt die Sperre bestehen, Diagnose und Logs sichern.
+Datenbank-,
 Workspace-Mount- oder ungeklärte Journalverluste sind keine beliebig ersetzbaren
 leeren Trash-Ordner.
 

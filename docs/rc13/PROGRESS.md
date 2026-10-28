@@ -104,3 +104,11 @@ Abdeckung, keine Fehler oder SKIPs. Containerjob wurde zunächst vor Runnerstart
 von GitHub wegen Actions-Kontingent gesperrt. Nach Erneuerung durch den Benutzer
 nur den Containerjob erneut gestartet; vorhandene erfolgreichen Belege erhalten.
 Aktuell echter Imagebau und Supervisorabnahme, Veröffentlichung weiterhin offen.
+
+Abschlussabnahme bestanden: Backend 2.189 PASS, Gate 101 PASS, Chromium 44 PASS
+auf fa803ca7; realer Supervisor 46/46 PASS auf 1ceac829 (Lauf 40667478387).
+App-/Backendcode beider Stände ist identisch; Unterschiede nur dokumentierte
+Containerfixtures/CI. Heruntergeladene Gesamtbelege mit dem echten Releasegate
+unabhängig erfolgreich geprüft. Native TrueNAS-Abnahme ausdrücklich ausstehend.
+Nächster Schritt: Abschlussdokumentation committen, Publisher an diese exakten
+Nachweise binden, Prerelease/Image veröffentlichen und Registry-Pull verifizieren.
