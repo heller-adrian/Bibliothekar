@@ -7,7 +7,7 @@ from app.metadata_correction import _mark_task_writing,MetadataCorrectionError
 from app.database import database_connection
 from tests.backend.test_0562_process_recovery import isolated_process_environment
 
-@pytest.mark.parametrize('case',['f15_current','f17_current','f18_false','f18_true'])
+@pytest.mark.parametrize('case',['f15_active','f15_pending','f17_current','f18_false','f18_true'])
 def test_metadata_safety_contract(tmp_path,case):
     source=Path(__file__).resolve().parents[2];out=tmp_path/case
     result=subprocess.run([sys.executable,str(source/'qa/metadata_consistency/run_original.py'),str(source),str(out),case],timeout=80)

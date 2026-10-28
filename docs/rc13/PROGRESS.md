@@ -80,3 +80,19 @@ Kopierknopf zusätzlich für normale NAS-HTTP-Ursprünge abgesichert: falls die
 Clipboard API fehlt oder verweigert wird, selektierter temporärer Textbereich
 im Dialog als Fallback; keine Reparaturaktion. Browser prüft den Fallback mit
 ersetzter Zwischenablageschnittstelle ohne Zugriff auf die Systemzwischenablage.
+
+Finaler automatisierter Lauf: 40658249648 auf 3657f5dc.
+Gezieltes Linuxgate: 67 PASS, keine SKIPs; Chromium: 44 PASS.
+Vollständige Sammlung lokal geprüft: 2.188 Test-IDs in 253 Backenddateien.
+Alle acht Nodepartitionen laufen; Containerabnahme und Veröffentlichung stehen
+noch aus. Keine produktiven Systeme angesprochen. Nach bestandenem Gesamtlauf
+nur Abschlussdokumentation ergänzen, identischen App-/Teststand nachweisen,
+Prerelease/Image veröffentlichen und tatsächlichen Pull prüfen.
+
+Folgelauf 40658249648 vollständig ausgewertet: sieben Fehler in fünf Gruppen,
+Details in CI-FAILURES.md. Korrigiert wurden Laufzeitisolation der Testfixtures,
+SSD-Gegenprobe mit eigenem Crashzustand, getrennte F15-Phasen und alte DOM-/Text-
+Erwartungen. Drei Package-C-Gegenproben und beide F15-Phasen bestehen lokal;
+Linux-inotify bleibt zwingend für SSD. Zusätzlich prüft die echte RC13-Docker-QA
+nach jedem registrierten Neustart ausdrücklich geschützte Papierkorboperationen,
+statt allein Storage-ready als Nachweis zu verwenden. Kein Produktguard geändert.

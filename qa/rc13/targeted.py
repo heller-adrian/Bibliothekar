@@ -22,6 +22,11 @@ tests = [
     'test_0562_process_recovery.py::test_sort_recovery_sigkill',
     'test_f16_f20_stock_consistency.py::test_unchanged_original[f20]',
     'test_rc4_practice.py::test_sd_activity_only_in_dock_and_local_notice',
+    'test_0562_recovery_guards.py::test_startup_recovers_registered_databases_only',
+    'test_rc1_b01.py', 'test_rc1_package_c.py',
+    'test_0562_process_recovery.py::test_ssd_repeat_retry_counterprobe',
+    'test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_active]',
+    'test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_pending]',
 ]
 selection = Path(os.environ['RUNNER_TEMP'])/'rc13-targeted.json'
 selection.write_text(json.dumps(['tests/backend/'+name for name in tests]))

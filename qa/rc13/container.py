@@ -152,6 +152,12 @@ Path('/fixture/workspace/.DS_Store').write_bytes(b'Finder')
         for _ in range(2):
             docker('restart',name);api=client();assert api('/api/settings/storage-health')['ready']
             assert len(api('/api/libraries')['libraries'])==2
+            # A health response alone cannot prove reservations were released.
+            # Exercise guarded HTTP mutations after each registered restart.
+            docker('exec','--user','568:568',name,'python','-c',"from pathlib import Path;Path('/workspace/Trash/unknown.JPG').write_bytes(b'Unknown restart original')")
+            prior=read();api('/api/trash/restore',{'relative_paths':['unknown.JPG']},expect=409)
+            assert read()['counts']==prior['counts']
+            api('/api/trash/empty',{'confirmation':'PAPIERKORB ENDGÜLTIG LEEREN'})
         final=read();assert final['readonly']==before['readonly'] and final['raw']==before['raw']
         # Each projection retains the same canonical family, including the lost JPG.
         origins=final['origin']['source_families'];assert len(origins)==2

@@ -155,6 +155,11 @@ def test_b13_foreign_trash_is_rejected_before_queue(fixture):
     root=storage_paths(ws)['trash_root']; root.mkdir(exist_ok=True)
     photo=root/'unknown.JPG'; photo.write_bytes(b'foreign original')
     identity=(photo.stat().st_dev,photo.stat().st_ino); digest=hashlib.sha256(photo.read_bytes()).hexdigest()
+    # This HTTP fixture bypasses startup. Publish the same private lock fence
+    # before entering request admission, as a completed bootstrap would do.
+    from app.trash_selective import _operation_lock
+    with _operation_lock(ws):
+        pass
     client=TestClient(main.app,raise_server_exceptions=False)
     try:
         response=client.post('/api/trash/restore',json={'relative_paths':['unknown.JPG']})
@@ -194,7 +199,8 @@ def test_c_javascript_syntax_and_rendered_pages(tmp_path):
 def test_b14_locale_examples_and_protected_data(tmp_path):
     from app.ui_i18n import I18N_UI_JS
     from app.ui_i18n_rc1 import RC1_TRANSLATIONS
-    cases={**RC1_TRANSLATIONS, '16 freie Familien':'16 available families',
+    from app.ui_rc13 import workspace_words
+    cases={**{key:workspace_words(value) for key,value in RC1_TRANSLATIONS.items()}, '16 freie Familien':'16 available families',
            'ca. 15 Sek.':'approx. 15 sec.', 'ca. 2 Std. 4 Min.':'approx. 2 hr. 4 min.',
            'In Tagesbestand einsortieren (2)':'Add to daily inventory (2)',
            'Datei keiner Sicherung zuzuordnen; Wiederherstellung nicht möglich: Grüße.JPG':
@@ -222,7 +228,8 @@ def test_b18_page_status_and_user_labels(tmp_path):
     page=page[:page.index('\n  }')+4]
     make=s[s.index('  function makeItem('):s.index('  async function refresh()',s.index('  function makeItem('))]
     node(tmp_path, '''const window={BibliothekarI18n:{t:v=>({'hoch':'high','Anwenden':'Apply'})[v]||v}};
-const document={createElement:tag=>({tag,dataset:{},children:[],setAttribute(k,v){this[k]=v},append(...xs){this.children.push(...xs)},appendChild(x){this.children.push(x)}})};
+const dismissedPageActivities=new Set();
+const document={createElement:tag=>({tag,dataset:{},children:[],addEventListener(){},setAttribute(k,v){this[k]=v},append(...xs){this.children.push(...xs)},appendChild(x){this.children.push(x)}})};
 const destination=item=>item.id?'/events':'/other';
 const location={pathname:'/events'};const pageActivity={replaceChildren(...xs){this.children=xs}};
 ''' + make + page + '''
@@ -230,8 +237,8 @@ const queued={kind:'apply',id:'q',label:'From Trash',status:'queued',active:true
 const done={...queued,id:'d',status:'completed',active:false};
 const failed={...queued,id:'f',status:'failed',active:false};
 renderPageActivity([queued,done,failed,{kind:'apply',status:'applied',active:false}]);
-if(pageActivity.hidden||pageActivity.children.length!==3)throw Error('wrong page status');
-const icons=pageActivity.children.map(row=>row.children[0].textContent);
+if(pageActivity.hidden||pageActivity.children.length!==4)throw Error('wrong page status');
+const icons=pageActivity.children.slice(1).map(row=>row.children[0].textContent);
 if(icons.join(',')!==',✓,!')throw Error('queued treated as completed');
 const user=makeItem({kind:'import',label:'hoch',status:'completed',active:false});
 if(user.children[1].children[0].textContent!=='hoch')throw Error('user label translated');

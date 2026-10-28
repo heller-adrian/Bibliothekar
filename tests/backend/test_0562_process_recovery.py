@@ -456,16 +456,12 @@ def test_known_restore_without_crash_control(tmp_path):
 
 
 def test_ssd_repeat_retry_counterprobe(tmp_path):
-    # Continue the already killed case instead of repeating its SIGKILL.
-    previous=OUT/os.environ['AUDIT_LABEL']/'ssd-ssd_unlink1'
-    if not (previous/'seed/execution.json').exists():previous=OUT/'area-calibration/ssd-ssd_unlink1'
-    execution=json.loads((previous/'seed/execution.json').read_text())
-    case=Path(execution['command'][2]);assert case.is_relative_to(Path(os.environ['AUDIT_SCRATCH']))
-    evidence=OUT/os.environ['AUDIT_LABEL']/'ssd-repeat-retry';evidence.mkdir(parents=True)
-    assert json.loads((previous/'kill/execution.json').read_text())['returncode']==-9
-    data=json.loads((case/'case.json').read_text())
-    original=snapshot(case,evidence/'before-extra-retries.json')
-    for n in (2,3,4):
+    # Own the original SIGKILL fixture; no dependency on another test's files.
+    evidence,case,data=new_case(tmp_path,'ssd','ssd-repeat-retry')
+    invoke(case,'operate','ssd.unlink1',evidence/'kill',kill=True)
+    checks_sql(snapshot(case,evidence/'after-kill.json'))
+    # Complete once, then repeat three more real startup/retry sequences.
+    for n in (1,2,3,4):
         invoke(case,'startup','none',evidence/f'restart{n}')
         invoke(case,'retry','none',evidence/f'retry{n}')
         state=snapshot(case,evidence/f'after-retry{n}.json');checks_sql(state)
