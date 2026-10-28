@@ -3,5 +3,5 @@ import json
 from pathlib import Path
 
 EXPECTED_RELEASE_VERSION = json.loads(
-    (Path(__file__).resolve().parents[2] / 'qa/release/rc14.json').read_text()
+    (Path(__file__).resolve().parents[2] / 'qa/release/pre.json').read_text()
 )['version']

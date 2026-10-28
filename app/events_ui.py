@@ -4371,6 +4371,13 @@ EVENTS_HTML = r"""<!doctype html>
 
 
 
+    eventList.addEventListener('dblclick',event=>{
+      if(event.target.closest('button,a,input,select,textarea,summary'))return;
+      const card=event.target.closest('.event-card');
+      const view=card?.querySelector('[data-view-event]');
+      if(view&&!view.disabled)openEventViewer(view.dataset.viewEvent,view.dataset.jobId).catch(error=>setStatus(error.message,true));
+    });
+
     async function loadChangeRequests() {
       try {
         // job_id ist optional; der Default-Status ist leer, die Liste
@@ -4460,6 +4467,7 @@ EVENTS_HTML = r"""<!doctype html>
         remove_deleted_event_root:"Remove the old event folder entirely",
         copy_helper_folders:"Copy the prepared structure into the archive",
         copy_files:"Copy new files into the existing archive folder",
+        rename_archive_folder:"Rename verified folder",
         replace_event_document:"Copy updated event.json into archive",
         move_archive_files:"Move files within the camera library",
         remove_directories:"Remove obsolete folders",
@@ -4524,7 +4532,7 @@ EVENTS_HTML = r"""<!doctype html>
       const reversalPathLabels=assistant.path_labels||{};
       const reversalArchiveRoot=String(reversalPathLabels.archive_root||"");
       const reversalWorkRoot=String(reversalPathLabels.work_root||"Arbeitsbereich");
-      const phase = String(assistant.phase || "prepare");
+      const phase = options.phase || String(assistant.phase || "prepare");
       const logicalOrder = ["prepare","finder","verify"];
       const currentLogical = logicalOrder.indexOf(phase);
       const visualSteps = [
@@ -4569,11 +4577,12 @@ EVENTS_HTML = r"""<!doctype html>
       } else {
         html += '<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Verwerfen</h3><p class="muted">Der ursprüngliche Archivzustand wird vollständig read-only nach Ordnern, Pfaden, Größen und SHA-256 geprüft.</p></div></div>';
         html += '<div id="reversal-verify-panel" class="card"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" class="plan-button" data-reversal-verify>Rückänderung prüfen</button><span class="muted" data-reversal-summary>Noch nicht geprüft.</span></div><div data-reversal-errors style="display:none;margin-top:10px"></div></div>';
-        html += '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finish disabled>Ursprungszustand bestätigen & Änderung verwerfen</button></div></section>';
+        html += '<div class="change-footer"><button type="button" class="plan-button" data-reversal-back>Zur manuellen Wiederherstellung zurück</button><button type="button" class="plan-button bk-positive-action" data-reversal-finish disabled>Ursprungszustand bestätigen & Änderung verwerfen</button></div></section>';
       }
 
       html += '<div class="card" style="margin-top:10px;border-color:var(--bk-danger,#c75050)"><details><summary><strong>Notausstieg bei unmöglicher Rückänderung</strong></summary><p class="muted" style="margin-top:8px">Nur verwenden, wenn die Wiederherstellung unmöglich ist. Der Auftrag wird beendet, aber das Ereignis bleibt gesperrt, bis der Originalbestand gesondert geprüft wurde. Es werden keine Archivdateien verändert oder als geprüft markiert.</p><button type="button" class="plan-button danger-button" data-reversal-force>Abbrechen erzwingen · manuelle Klärung</button></details></div>';
       changeRequestBody.innerHTML = html;
+      changeRequestBody.querySelector("[data-reversal-back]")?.addEventListener('click',()=>showArchiveReversalDetail(crId,{phase:'finder',refreshLive:true}).catch(error=>showReversalError(error.message)));
       changeRequestBody.querySelector("[data-reversal-force]")?.addEventListener("click", async event => {
         if (!(await window.BibliothekarI18n.confirmAsync("NOTFALLABBRUCH: Der ursprüngliche Archivbestand ist danach NICHT als wiederhergestellt bestätigt. Das Ereignis bleibt bis zur erneuten Prüfung gesperrt. Fortfahren?"))) return;
         const confirmation = await window.BibliothekarI18n.promptAsync("Gib zur Bestätigung exakt NOTFALLABBRUCH ein:");
@@ -4939,6 +4948,7 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         if (phase === "verify") {
+          html += '<button type="button" class="plan-button" data-cr-back>Zur manuellen Arbeit zurück</button>';
           const managedReviewRows = Array.isArray(reviewRows)
             ? reviewRows.filter(row => !Boolean(row.advisory))
             : [];
@@ -5199,6 +5209,7 @@ EVENTS_HTML = r"""<!doctype html>
           }
         });
 
+        changeRequestBody.querySelector('[data-cr-back]')?.addEventListener('click',()=>showChangeRequestDetail(crId,{phase:'finder',refreshLive:true}));
         const verifyBtn = changeRequestBody.querySelector("[data-cr-verify]");
         const archiveBtn = changeRequestBody.querySelector("[data-cr-archive]");
         if (verifyBtn) verifyBtn.addEventListener("click", async () => {
@@ -5979,6 +5990,11 @@ EVENTS_HTML = r"""<!doctype html>
             }
           );
         }
+      }
+      const requestedEvent=params.get("event");
+      if (!task && requestedEvent && jobId) {
+        await openEventViewer(requestedEvent,jobId);
+        return;
       }
       if (!task) {
         const pendingArchive = await findOpenArchiveChangeRequest();

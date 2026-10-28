@@ -2759,18 +2759,24 @@ WORKSPACE_HTML = r"""<!doctype html>
       catch (_) {}
     }
 
+    /* PRE_WORKSPACE_CACHE */
+    let workspaceLoadSerial=0, jobsLoadSerial=0;
+
     async function loadJobs({physicalRefresh=false}={}) {
-      const cacheKey = "bk-workspace-jobs-0452:" + (window.__bkLibraryId || "main");
+      const request=++jobsLoadSerial;
+      const cacheKey = "bk-workspace-jobs-pre:" + (window.__bkLibraryId || "main");
       if (!jobs.length) {
         try {
-          const saved = JSON.parse(sessionStorage.getItem(cacheKey) || "null");
+          const saved = await readWorkspaceSnapshot(cacheKey);
+          if(request!==jobsLoadSerial)return;
           if (Array.isArray(saved?.jobs)) {
             jobs = saved.jobs.filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0));
             refreshBackupSelection(jobs);
             updateTechnicalAnchor(); renderBackupFilter();
             const ids = [...selectedJobIds];
-            const snapshotKey = "bk-workspace-0452:" + (window.__bkLibraryId || "main") + ":" + ids.map(encodeURIComponent).join(",");
-            const snap = JSON.parse(sessionStorage.getItem(snapshotKey) || "null");
+            const snapshotKey = "bk-workspace-pre:" + (window.__bkLibraryId || "main") + ":" + ids.map(encodeURIComponent).join(",");
+            const snap = await readWorkspaceSnapshot(snapshotKey);
+            if(request!==jobsLoadSerial)return;
             if (snap?.statistics && snap?.planning_overview) {
               workspace = snap; eventSuggestions = snap.event_suggestions || [];
               renderSummary(); renderEventSuggestions(); renderDays(); renderPlannedActions(); renderSelection();
@@ -2780,7 +2786,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       if (!workspace?.statistics) setStatus("Arbeitsbestände werden geladen …");
       const data = await getJson("/api/jobs");
-      try { sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch (_) {}
+      if(request!==jobsLoadSerial)return;
+      await writeWorkspaceSnapshot(cacheKey,data,()=>request===jobsLoadSerial);
+      if(request!==jobsLoadSerial)return;
 
       jobs = (data.jobs || [])
         .filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0))
@@ -2820,6 +2828,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     });
 
     async function loadWorkspace({physicalRefresh=false}={}) {
+      const request=++workspaceLoadSerial;
       if (!globalFolderLayout) {
         try { globalFolderLayout = await getJson("/api/settings/event-folder-layout"); }
         catch (_) { globalFolderLayout = {structure_enabled:true,input_path:"Alle",layout:{version:1,nodes:[]}}; }
@@ -2839,12 +2848,12 @@ WORKSPACE_HTML = r"""<!doctype html>
         return;
       }
 
-      const query=ids.map(encodeURIComponent).join(",");
-      const snapshotKey = "bk-workspace-0452:" + (window.__bkLibraryId || "main") + ":" + query;
+      const query=ids.sort().map(encodeURIComponent).join(",");
+      const snapshotKey = "bk-workspace-pre:" + (window.__bkLibraryId || "main") + ":" + query;
       if (!physicalRefresh) {
         try {
-          const saved = JSON.parse(sessionStorage.getItem(snapshotKey) || "null");
-          if (saved && saved.statistics && saved.planning_overview) {
+          const saved = await readWorkspaceSnapshot(snapshotKey);
+          if (request===workspaceLoadSerial && saved && saved.statistics && saved.planning_overview) {
             workspace = saved;
             eventSuggestions = saved.event_suggestions || [];
             renderSummary(); renderEventSuggestions(); renderDays();
@@ -2855,17 +2864,18 @@ WORKSPACE_HTML = r"""<!doctype html>
       if (!workspace?.statistics || physicalRefresh) setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
       statusElement.classList.add("bk-loading-status");
       try {
-        workspace=await getJson(
+        const fresh=await getJson(
           `/api/workspace/summary?jobs=${query}&physical_refresh=${physicalRefresh ? "true" : "false"}`
         );
+        if(request!==workspaceLoadSerial)return;
+        workspace=fresh;
       } finally {
-        statusElement.classList.remove("bk-loading-status");
+        if(request===workspaceLoadSerial)statusElement.classList.remove("bk-loading-status");
       }
+      if(request!==workspaceLoadSerial)return;
       eventSuggestions=workspace.event_suggestions || [];
-      try {
-        const packed = JSON.stringify(workspace);
-        if (packed.length < 1800000) sessionStorage.setItem(snapshotKey, packed);
-      } catch (_) {}
+      await writeWorkspaceSnapshot(snapshotKey,workspace,()=>request===workspaceLoadSerial);
+      if(request!==workspaceLoadSerial)return;
 
       updateTechnicalAnchor(jobSelect.value);
       renderSummary();
@@ -3396,6 +3406,10 @@ WORKSPACE_HTML = r"""<!doctype html>
           card.addEventListener("click",()=>{
             openStoredEventPreview(group.event_id, group.job_id || jobSelect.value);
           });
+          card.addEventListener("dblclick",event=>{
+            event.preventDefault();
+            location.href='/events?job='+encodeURIComponent(group.job_id||jobSelect.value)+'&event='+encodeURIComponent(group.event_id);
+          });
 
           const range =
             formatTimelineDateRange(
@@ -3513,15 +3527,16 @@ WORKSPACE_HTML = r"""<!doctype html>
 
           const name = document.createElement("span");
           name.className = "day-name";
-          name.textContent = "Prüffälle · Ohne Datum";
+          const reviewCount=Number(group.review_required_count||0);
+          const total=Number(group.file_count||0);
+          const readyCount=Number(group.ready_to_sort_file_count||0);
+          name.textContent=reviewCount?'Prüffälle · Ohne Datum':'Bereit zum Einsortieren · Ohne Datum';
 
           const metadata = document.createElement("span");
           metadata.className = "day-meta";
-          metadata.innerHTML = `
-            <span>${Number(group.file_count || 0)} Dateien</span>
-            <span>${Number(group.family_count || 0)} Familien</span>
-            <span>${formatBytes(Number(group.total_size_bytes || 0))}</span>
-          `;
+          metadata.textContent=(reviewCount?reviewCount+' Prüffälle':'')
+            +(reviewCount&&readyCount?' · ':'')
+            +(readyCount?readyCount+' bereit zum Einsortieren':'');
 
           const hint = document.createElement("span");
           hint.className = "review-card-hint";
@@ -3532,13 +3547,9 @@ WORKSPACE_HTML = r"""<!doctype html>
           main.appendChild(metadata);
           main.appendChild(hint);
 
-          const reviewCount = Number(group.review_required_count || 0);
           const badge = document.createElement("span");
-          badge.className = "badge warning";
-          badge.textContent =
-            reviewCount === 1
-              ? "1 Prüffall"
-              : `${reviewCount} Prüffälle`;
+          badge.className = "badge "+(reviewCount?'warning':'success');
+          badge.textContent = formatBytes(Number(group.total_size_bytes||0));
 
           const showReviewPreview = () => {
             selectedDays.clear();
@@ -3547,7 +3558,7 @@ WORKSPACE_HTML = r"""<!doctype html>
             renderDays();
             renderSelection();
 
-            selectionLabel.textContent = "Prüffälle";
+            selectionLabel.textContent = reviewCount?"Prüffälle":"Bereit zum Einsortieren";
             newEventButton.disabled = true;
             noEventButton.disabled = true;
             existingNoEventButton.disabled = true;
@@ -3557,8 +3568,7 @@ WORKSPACE_HTML = r"""<!doctype html>
               <div class="metadata-review-preview">
                 <div class="preview-root-title">Prüffälle · Ohne Datum</div>
                 <div class="preview-selection-note">
-                  Diese Dateien besitzen noch kein belastbares Aufnahmedatum
-                  und können deshalb keinem Ereignis zugeordnet werden.
+                  ${reviewCount?'Diese Dateien benötigen eine Metadatenprüfung.':'Die Metadaten sind bestätigt. Die Dateien müssen noch in den Tagesbestand einsortiert werden.'}
                 </div>
                 <div class="preview-selection-note">
                   <strong>${Number(group.file_count || 0)} Dateien ·
@@ -5265,3 +5275,6 @@ WORKSPACE_HTML = r"""<!doctype html>
 
 from app.ui_rc13 import workspace_words as _workspace_words
 WORKSPACE_HTML = _workspace_words(WORKSPACE_HTML)
+
+from app.ui_workspace_cache import WORKSPACE_CACHE_JS
+WORKSPACE_HTML = WORKSPACE_HTML.replace("/* PRE_WORKSPACE_CACHE */",WORKSPACE_CACHE_JS)

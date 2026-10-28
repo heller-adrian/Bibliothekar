@@ -21,9 +21,9 @@ def database_stamp(path: Path) -> tuple[Any, ...]:
     for name in (str(path), str(path) + "-wal"):
         try:
             st = Path(name).stat()
-            values.extend((st.st_mtime_ns, st.st_size))
+            values.extend((st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size))
         except OSError:
-            values.extend((None, None))
+            values.extend((None, None, None, None))
     return tuple(values)
 
 
@@ -42,13 +42,18 @@ def get_snapshot(path: Path, group: str, *args: Any, max_age_seconds: int | None
         return deepcopy(value)
 
 
-def put_snapshot(path: Path, group: str, value: Any, *args: Any) -> None:
+def put_snapshot(path: Path, group: str, value: Any, *args: Any, observed_stamp=None) -> bool:
     key = (str(path.resolve(strict=False)), group, *args)
     with _LOCK:
-        _ITEMS[key] = (database_stamp(path), time.monotonic(), deepcopy(value))
+        stamp=database_stamp(path)
+        if observed_stamp is not None and observed_stamp!=stamp:
+            _ITEMS.pop(key,None)
+            return False
+        _ITEMS[key] = (stamp, time.monotonic(), deepcopy(value))
         _ITEMS.move_to_end(key)
         while len(_ITEMS) > _MAX_ITEMS:
             _ITEMS.popitem(last=False)
+        return True
 
 
 def needs_first_physical_check(path: Path) -> bool:

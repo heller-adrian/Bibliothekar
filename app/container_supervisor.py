@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 WEB_UID = int(os.environ.get("KAMERA_WEB_UID", "568"))
 WEB_GID = int(os.environ.get("KAMERA_WEB_GID", "568"))
-HELPER_ENABLED = os.environ.get("KAMERA_SOURCE_HELPER_ENABLED", "true").strip().lower() in {
+HELPER_ENABLED = os.environ.get("KAMERA_SOURCE_HELPER_ENABLED", "false").strip().lower() in {
     "1",
     "true",
     "yes",

@@ -598,6 +598,24 @@ def build_archive_change_assistant(
                     "state": "pending" if scan_live else None,
                 })
 
+    # Presentation only: keep the existing physical completion verification.
+    if status != "aenderbar_vorschlagen" and not release_stock.get("required") and event_document:
+        from app.archive_reversal import _manifest_path, _read_json
+        from app.archive_rename_guidance import qualify_rename
+        try:
+            baseline = _read_json(_manifest_path(workspace_path, cr_id))
+            compact = qualify_rename(
+                archive_root, rows, current_document=baseline.get("event_json"),
+                replacement=work_root / staging_name / str(event_document["target_relative_path"]),
+                replacement_meta=event_document, document_target=event_document["target_relative_path"],
+                archive_label=archive_display_root, work_root=work_root, work_label=work_display_root,
+                known_directories=baseline.get("original_directories") or [],
+            )
+            if compact:
+                operations = compact
+        except (OSError, ValueError, KeyError, RuntimeError):
+            pass  # Missing/ambiguous evidence retains the detailed instructions.
+
     if status == "aenderbar_vorschlagen" and preparation_required:
         phase = "prepare"
     elif (

@@ -679,6 +679,23 @@ def _reversal_state(
             "state": "pending",
         })
 
+    if event_json and operations:
+        from app.archive_change_document import projected_archive_event_document_spec
+        from app.archive_rename_guidance import qualify_rename
+        spec = projected_archive_event_document_spec(database_path, cr_id)
+        if spec:
+            reversed_rows = [dict(row, old_path=row.get("new_path"), new_path=row.get("old_path")) for row in rows]
+            compact = qualify_rename(
+                archive_root, reversed_rows,
+                current_document=dict(spec, relative_path=spec["target_relative_path"]),
+                replacement=work_root / str(event_json["backup_relative_path"]),
+                replacement_meta=event_json, document_target=event_json["relative_path"],
+                archive_label=archive_display_root, work_root=work_root, work_label=work_display_root,
+                known_directories=[str(value).replace(str(manifest["original_root"]),str(manifest["target_root"]),1) for value in manifest.get("original_directories") or []],
+            )
+            if compact:
+                operations = compact
+
     restore_event_root = restore_root.joinpath(
         *_safe_relative(str(manifest["original_root"])).parts
     )

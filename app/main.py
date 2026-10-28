@@ -376,7 +376,7 @@ NAS_SOURCE_ROOT = Path(
 
 SOURCE_HELPER_URL = os.environ.get(
     "KAMERA_SOURCE_HELPER_URL",
-    "http://source-helper:8090",
+    "http://127.0.0.1:8090",
 ).rstrip("/")
 
 
@@ -9335,12 +9335,13 @@ def api_global_workspace_summary(
         view_cache.mark_physical_checked(db_path)
         view_cache.invalidate(db_path)
 
-    cache_key = tuple(sorted(selected))
+    cache_key = (tuple(sorted(selected)),view_cache.database_stamp(REGISTRY_DATABASE_FILE))
     if not must_check:
         cached = view_cache.get_snapshot(db_path, "workspace", cache_key)
         if cached is not None:
             return cached
 
+    snapshot_stamp=view_cache.database_stamp(db_path)
     excluded_by_job = {
         job_id: blocked_family_ids(
             REGISTRY_DATABASE_FILE,
@@ -9372,7 +9373,7 @@ def api_global_workspace_summary(
                 "source_label": label,
             })
     payload["event_suggestions"] = suggestions
-    view_cache.put_snapshot(db_path, "workspace", payload, cache_key)
+    view_cache.put_snapshot(db_path, "workspace", payload, cache_key,observed_stamp=snapshot_stamp)
     return payload
 
 @app.get(
@@ -9934,7 +9935,7 @@ def api_correct_metadata_batch(payload: dict[str, Any]) -> dict[str, Any]:
                 area=area,
                 relative_path=str(row.get("relative_path") or ""),
                 family_id=item["family_id"],
-                proposed_datetime=str(candidate["normalized_datetime"])[:19],
+                proposed_datetime=str(candidate["normalized_datetime"]),
                 workspace_root=context.workspace_root,
                 library_id=context.library_id,
                 library_name=context.display_name,
@@ -10162,11 +10163,19 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
         metadata_root = storage_paths(context.workspace_root)["metadata_root"].resolve(strict=False)
         stage_parent = (metadata_root / ".general-import").resolve(strict=False)
-        job_id = datetime.now().astimezone().strftime("GENERAL_IMPORT_%Y%m%d_%H%M%S_%f")
+        # Same immutable selection yields one durable queue identity. The
+        # existing F14 operation lock serializes admission before any copy.
+        admission=[(relative,int(source.stat().st_size),sha256_file(source)) for relative,source,_row in selected]
+        job_id = "GENERAL_IMPORT_" + hashlib.sha256(json.dumps([context.library_id,sorted(admission)],ensure_ascii=False).encode()).hexdigest()[:32]
         stage = (stage_parent / job_id).resolve(strict=False)
         with reserve(context.workspace_root,library_id=context.library_id,database=DATABASE_FILE,
                      kind='import',ids={'job_id':job_id,'function':'app.main.api_reintegrate_general_metadata','source_stage':str(stage)},
                      paths=[context.workspace_root,metadata_root,stage_parent,workspace_backup_root(WORKSPACE_PATH)],shared=True):
+            prior=get_job(DATABASE_FILE,job_id)
+            if prior:
+                if prior['state'] in {'failed','interrupted'}:
+                    raise MetadataCorrectionError('Eine unterbrochene Allgemein-Übernahme muss zuerst geprüft werden: '+job_id)
+                return {'queued':True,'job':prior,'file_count':len(selected),'reused':True}
             stage_parent.mkdir(parents=True, exist_ok=True)
             stage.mkdir(parents=True, exist_ok=False)
             try:

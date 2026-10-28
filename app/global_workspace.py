@@ -235,6 +235,7 @@ def _merge_available(items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, 
         current["file_count"] = int(current.get("file_count") or 0) + int(group.get("file_count") or 0)
         current["family_count"] = int(current.get("family_count") or 0) + int(group.get("family_count") or 0)
         current["total_size_bytes"] = int(current.get("total_size_bytes") or 0) + int(group.get("total_size_bytes") or 0)
+        current["ready_to_sort_file_count"] = int(current.get("ready_to_sort_file_count") or 0) + int(group.get("ready_to_sort_file_count") or 0)
         current["review_required_count"] = int(current.get("review_required_count") or 0) + int(group.get("review_required_count") or 0)
         current["family_ids"] = sorted(set([*(current.get("family_ids") or []), *(group.get("family_ids") or [])]))
         current["families"].extend({**family, "job_id": job_id} for family in (group.get("families") or []))
@@ -302,6 +303,16 @@ def build_global_workspace_summary(
         selected,
         workspace_path=workspace_path,
     )
+    # Display count from committed correction state, never total minus review.
+    with database_connection(database_path) as connection:
+        ready = {int(row[0]): int(row[1]) for row in connection.execute(
+            "SELECT family_id,COUNT(*) FROM files WHERE review_status='corrected' "
+            "AND metadata_write_status='written' AND selected_capture_time IS NOT NULL "
+            "GROUP BY family_id"
+        )}
+    for _job, group in available_items:
+        group["ready_to_sort_file_count"] = (0 if group.get("has_date") else
+            sum(ready.get(int(fid),0) for fid in group.get("family_ids") or []))
     available = _merge_available(available_items)
     timeline = sorted(
         [*event_groups, *available],

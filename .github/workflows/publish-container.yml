@@ -9,7 +9,7 @@ on:
     # Keep all stable tags; RC prerelease tags never trigger this publisher.
     tags:
       - 'v*'
-      - '!v*-rc.*'
+      - '!v*-*'
   workflow_dispatch:
   workflow_call:
 

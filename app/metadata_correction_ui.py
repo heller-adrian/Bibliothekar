@@ -134,6 +134,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   const state={
     area:["library","general","multiple"].includes(requested)?requested:"library",
     scan:null,selected:null,selectedSet:new Set(),lastSelected:null,selectionMode:false,tasks:[],areas:null,
+    generalJob:null,generalSubmitting:false,generalPolling:false,
     multipleReference:null,multiplePreview:null,multipleSelectedSet:new Set(),multipleSelectionMode:false
   };
   const $=id=>document.getElementById(id);
@@ -416,9 +417,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     const fileCount=Number(state.scan?.summary?.file_count ?? files.length);
     const familyCount=Number(state.scan?.summary?.family_count ?? files.length);
     const chosen=state.selectedSet.size?(" · "+state.selectedSet.size+" ausgewählt"):"";
-    $("meta-summary").textContent=state.area==="library"
-      ? familyCount+" Familien · "+fileCount+" Dateien"+chosen
-      : files.length+" Datei"+(files.length===1?"":"en")+chosen;
+    $("meta-summary").textContent=fileCount+" Datei"+(fileCount===1?"":"en")+chosen;
     if(!files.length){
       $("meta-files").innerHTML='<div class="muted">'+(state.area==="library"?"Keine Ohne-Datum-Familien vorhanden.":"Der Ordner ist leer.")+'</div>';
       updateSelectionControls();return;
@@ -529,6 +528,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     $("meta-bulk-apply")?.addEventListener("click",()=>correctSelectedBySource(files));
     $("meta-reintegrate")?.addEventListener("click",reintegrateSelected);
     $("meta-general-reintegrate")?.addEventListener("click",()=>reintegrateGeneralSelected(files));
+    syncGeneralBusy();
   }
   function renderDetails(){
     const chosen=selectedFiles();
@@ -602,6 +602,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     $("meta-prepare").addEventListener("click",()=>correctSelected(file));
     $("meta-reintegrate")?.addEventListener("click",reintegrateSelected);
     $("meta-general-reintegrate")?.addEventListener("click",()=>reintegrateGeneralSelected([file]));
+    syncGeneralBusy();
   }
   function selectionKeys(){
     const files=state.scan?.files||[];
@@ -640,7 +641,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       setStatus(error.message,true);
     }finally{
       const current=$("meta-prepare");
-      if(current)current.disabled=false;
+      if(current){current.disabled=false;current.classList.remove("bk-busy");current.removeAttribute("aria-busy");}
     }
   }
   async function correctSelectedBySource(files){
@@ -680,29 +681,63 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     if(invalid.length){
       setStatus("Vor der Übernahme müssen alle ausgewählten Dateien eine belastbare Aufnahmezeit besitzen.",true);return;
     }
+    if(state.generalSubmitting||state.generalJob)return;
+    state.generalSubmitting=true;
     const button=$("meta-general-reintegrate");
-    if(button){button.disabled=true;button.classList.add("bk-busy");}
+    if(button){button.disabled=true;button.classList.add("bk-busy");button.setAttribute("aria-busy","true");}
     setStatus(selected.length===1?"Übernahme in den Tagesbestand wird vorbereitet …":selected.length+" Dateien werden für den Tagesbestand vorbereitet …");
     try{
       const data=await json("/api/metadata-correction/general/reintegrate",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({items:selected.map(file=>({relative_path:file.relative_path}))})
       });
+      state.generalJob=data.job.id;
       closeMobileDetail();
       setStatus((data.file_count||selected.length)+" Datei"+((data.file_count||selected.length)===1?"":"en")+" zur verifizierten Übernahme in den Tagesbestand vorgemerkt.");
+      pollGeneralJob();
     }catch(error){
       setStatus(error.message,true);
     }finally{
-      const current=$("meta-general-reintegrate");
-      if(current){current.disabled=false;current.classList.remove("bk-busy");}
+      state.generalSubmitting=false;
+      syncGeneralBusy();
     }
+  }
+
+  function syncGeneralBusy(){
+    const button=$("meta-general-reintegrate"),busy=Boolean(state.generalSubmitting||state.generalJob);
+    if(button){button.disabled=busy;button.classList.toggle("bk-busy",busy);button.setAttribute("aria-busy",String(busy));}
+    $("meta-status").classList.toggle("bk-loading-status",busy);
+  }
+  async function pollGeneralJob(){
+    if(state.generalPolling||!state.generalJob)return;
+    state.generalPolling=true;syncGeneralBusy();
+    try{
+      const job=await json('/api/jobs/'+encodeURIComponent(state.generalJob));
+      if(['completed','failed','interrupted'].includes(job.state)){
+        state.generalJob=null;
+        await scan(false,true);await loadTasks(true);
+        setStatus(job.state==='completed'?'Übernahme in den Tagesbestand abgeschlossen.':(job.error_message||'Übernahme wurde unterbrochen.'),job.state!=='completed');
+      }else setStatus(job.progress_message||'Übernahme in den Tagesbestand läuft …');
+    }catch(error){setStatus(error.message,true);}
+    finally{
+      state.generalPolling=false;syncGeneralBusy();
+      if(state.generalJob)setTimeout(pollGeneralJob,1500);
+    }
+  }
+  async function restoreGeneralJob(){
+    if(state.area!=='general')return;
+    try{
+      const data=await json('/api/jobs');
+      const job=(data.jobs||[]).find(j=>j.operation==='metadata_general_import'&&!['completed','failed','interrupted'].includes(j.state));
+      if(job){state.generalJob=job.id;pollGeneralJob();}
+    }catch(error){setStatus(error.message,true);}
   }
 
   async function reintegrateSelected(){
     const files=selectedReadyFiles();
     if(!files.length){setStatus("Bitte zuerst alle ausgewählten Einträge korrigieren.",true);return;}
     const button=$("meta-reintegrate");
-    if(button)button.disabled=true;
+    if(button){button.disabled=true;button.classList.add("bk-busy");button.setAttribute("aria-busy","true");}
     setStatus(files.length===1?"Korrigierte Familie wird einsortiert …":files.length+" korrigierte Familien werden einsortiert …");
     try{
       await json("/api/metadata-correction/reintegrate",{
@@ -719,7 +754,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       await loadTasks(true);
     }finally{
       const current=$("meta-reintegrate");
-      if(current)current.disabled=false;
+      if(current){current.disabled=false;current.classList.remove("bk-busy");current.removeAttribute("aria-busy");}
     }
   }
   async function loadTasks(quiet=false){
@@ -1108,7 +1143,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
     loadAreas(),
     loadTasks()
   ]).finally(()=>{
-    scan(true,false);
+    scan(true,false).then(()=>{syncGeneralBusy();restoreGeneralJob();});
   });
 })();
 </script>
