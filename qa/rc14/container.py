@@ -41,6 +41,19 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
    if job['state'] in ('completed','failed','interrupted'):return job
    time.sleep(.2)
   raise AssertionError(job)
+ def unregister_when_idle(api,lid):
+  path='/api/libraries/'+lid+'/unregister'
+  for attempt in range(80):
+   try:return api(path,{'confirmation':'REMOVE LIBRARY'})
+   except AssertionError as error:
+    details=error.args[0] if error.args else None
+    if not (isinstance(details,tuple) and len(details)==3
+            and details[0]==path and details[1]==409
+            and 'Ein anderer Vorgang verwendet diesen Bereich.' in details[2]):
+     raise
+    if attempt==79:
+     raise AssertionError('F14 lock remained busy after bounded retries: '+str(details)) from error
+    time.sleep(.2)
  try:
   create(os.environ['RC13_IMAGE'],True);api=old.client()
   api('/api/libraries',{'display_name':'Main Library','work_root':'','archive_root':'/main-library'},expect=201)
@@ -49,8 +62,22 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
   for _ in range(600):
    if (root/'evidence/rc14-checkpoint.json').exists() and old.docker('inspect','-f','{{.State.Running}}',name).strip()=='false':break
    time.sleep(.2)
-  assert (root/'evidence/rc14-checkpoint.json').exists()
-  (root/'evidence/rc14-checkpoint.json').rename(root/'evidence/rc13-import-checkpoint.json')
+  if not (root/'evidence/rc14-checkpoint.json').exists():
+   diagnostic={'boundary':boundary,'phase':'initial-import','task_id':task,
+               'container':old.docker('inspect','-f','{{json .State}}',name,check=False).stdout.strip()}
+   for key,path in [('recheck','/api/sd-rechecks/'+task),('history','/api/import-history')]:
+    try:diagnostic[key]=api(path)
+    except Exception as error:diagnostic[key+'_error']=str(error)
+   live=old.docker('logs',name,check=False)
+   diagnostic['logs_tail']=(live.stdout+live.stderr)[-6000:]
+   raise AssertionError('RC14 checkpoint missing: '+json.dumps(diagnostic,default=str,ensure_ascii=False))
+  checkpoint=json.loads((root/'evidence/rc14-checkpoint.json').read_text())
+  assert checkpoint['boundary']==boundary and checkpoint['uid']==568 and checkpoint['event']=='return',checkpoint
+  assert checkpoint['function']==('_atomic_json' if boundary=='journal' else 'publish_import_file'),checkpoint
+  assert checkpoint['thread']=='kamera-job-worker',checkpoint
+  assert old.docker('inspect','-f','{{.State.ExitCode}}',name).strip()!='0',checkpoint
+  # The runner cannot rename UID568-owned evidence in this host fixture.
+  old.command('sudo','mv',str(root/'evidence/rc14-checkpoint.json'),str(root/'evidence/rc13-import-checkpoint.json'))
   old.docker('rm',name);create(os.environ['IMAGE']);api=old.client()
   history=api('/api/import-history')['jobs'];job=next(j for j in history if j['operation']=='folder_import')
   assert job['state'] in ('failed','interrupted'),job
@@ -66,15 +93,25 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
   assert second['work_root']=='/workspace/Library Workspaces/business',second
   lid=second['library_id']
   if boundary=='journal':
-   try:api('/api/libraries/'+lid+'/unregister',{'confirmation':'REMOVE LIBRARY'})
+   try:unregister_when_idle(api,lid)
    except OSError:pass
    for _ in range(200):
     if (root/'evidence/rc14-checkpoint.json').exists() and old.docker('inspect','-f','{{.State.Running}}',name).strip()=='false':break
     time.sleep(.2)
-   assert json.loads((root/'evidence/rc14-checkpoint.json').read_text())['boundary']=='retirement-registry-committed'
+   if not (root/'evidence/rc14-checkpoint.json').exists():
+    live=old.docker('logs',name,check=False)
+    diagnostic={'boundary':boundary,'phase':'retirement','library_id':lid,
+                'container':old.docker('inspect','-f','{{json .State}}',name,check=False).stdout.strip(),
+                'logs_tail':(live.stdout+live.stderr)[-6000:]}
+    try:diagnostic['libraries']=api('/api/libraries')
+    except Exception as error:diagnostic['api_error']=str(error)
+    raise AssertionError('RC14 retirement checkpoint missing: '+json.dumps(diagnostic,default=str,ensure_ascii=False))
+   retirement_checkpoint=json.loads((root/'evidence/rc14-checkpoint.json').read_text())
+   assert retirement_checkpoint['boundary']=='retirement-registry-committed' and retirement_checkpoint['event']=='c_return' and retirement_checkpoint['function']=='remove.commit',retirement_checkpoint
+   assert retirement_checkpoint['uid']==568 and old.docker('inspect','-f','{{.State.ExitCode}}',name).strip()!='0',retirement_checkpoint
    old.docker('start',name);api=old.client();assert api('/api/settings/storage-health')['ready']
    assert not any(r['library_id']==lid for r in api('/api/libraries')['libraries'])
-  else:api('/api/libraries/'+lid+'/unregister',{'confirmation':'REMOVE LIBRARY'})
+  else:unregister_when_idle(api,lid)
   assert (root/'workspace/Library Workspaces/business').is_dir()
   # The only re-entry route is the normal Folder Import API via explicit RO source.
   admitted=api('/api/jobs/folder-import',{'source_root_key':'nas','source_relative_path':'BusinessArchive','source_mode':'folder'},expect=202)
@@ -87,7 +124,7 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
   for _ in range(2):
    old.docker('restart',name);api=old.client();assert api('/api/settings/storage-health')['ready']
   assert snapshot()['readonly']==before['readonly']
-  report['cases'].append({'boundary':boundary,'status':'PASS','uid':568,'real_rc13_upgrade':True,'original_job_resumed':jid,'normal_archive_reimport':True,'two_restarts':True,'readonly_bytes_unchanged':True})
+  report['cases'].append({'boundary':boundary,'status':'PASS','uid':568,'real_rc13_upgrade':True,'original_job_resumed':jid,'normal_archive_reimport':True,'two_restarts':True,'readonly_bytes_unchanged':True,'import_crash':checkpoint,'retirement_crash':retirement_checkpoint if boundary=='journal' else None})
  finally:
   result=old.docker('logs',name,check=False);(logs/(boundary+'.log')).write_text(result.stdout+result.stderr)
   old.docker('rm','-f',name,check=False)
