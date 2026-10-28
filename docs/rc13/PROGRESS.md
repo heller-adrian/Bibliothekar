@@ -24,3 +24,16 @@ enthält erwartete Linux-inotify-Grenzen und alte Fixture-/Compose-Verträge;
 angepasste Verträge werden erneut geprüft. Vollständige Linux-Abnahme mit acht
 lückenlosen Dateipartitionen und echtem RC12→RC13-Containerupgrade vorbereitet.
 Noch kein Tag, kein Release, kein Image veröffentlicht.
+
+Linux-Lauf 40607188501 auf b14729c5: Chromium 44 PASS. Erste fertige
+Backendpartition: 270 PASS, ein veralteter DOM-Stub für die neue Schließen-Schaltfläche
+fehlgeschlagen. Stub ergänzt, keine Sicherheitsbedingung geändert.
+Weitere lokale Befunde: tatsächlicher SIGKILL unmittelbar nach erster
+Quellfamilienregistrierung lässt noch keine lokalen Files/Member zurück. Dieser
+unvollständige Nachweis wird jetzt ausschließlich bei exakt passender offener
+Importreservation und Job-/Quell-/Generations-/Bindingprüfung erhalten. Es wird
+keine Mitgliedschaft vervollständigt und keine Operation abgeschlossen.
+Ein solcher Import bleibt ungeklärt; der RC12-Appdaten-Operationsaudit wird nicht
+umgangen. Folgeprüfung: 23 PASS (Herkunft, fünf Projektions- und fünf
+Metadaten-SIGKILL-Fälle), zusätzlich 14 PASS für Herkunft und Anzeige-Gate.
+Die übrigen Linuxpartitionen laufen noch; noch keine Container-/Releasefreigabe.

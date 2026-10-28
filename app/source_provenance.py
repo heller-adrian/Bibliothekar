@@ -48,6 +48,7 @@ def qualify_origins(registry_path, database_path, library_id, grouped, fingerpri
         source=origin['source_family_key']
         try: meta=json.loads(origin['metadata_json'])
         except (ValueError,TypeError):_conflict(source,'invalid origin metadata')
+        if not isinstance(meta,dict):_conflict(source,'invalid origin metadata')
         job=str(meta.get('job_id') or '')
         family=str(origin['family_key'])
         if (meta.get('library_id')!=library_id or not job
@@ -73,6 +74,10 @@ def qualify_origins(registry_path, database_path, library_id, grouped, fingerpri
         # authorize completion of that registration, never a shortened inventory.
         if not members:
             if live and fingerprint(live)==origin['content_fingerprint']:continue
+            if not live and _unfinished_import(registry_path,database_path,library_id,job,job_row):
+                # Retain the exact incomplete origin. No membership/claim is
+                # completed here; the original import reservation stays open.
+                continue
             _conflict(source,'origin members missing')
         if fingerprint(members)!=origin['content_fingerprint']:
             _conflict(source,'canonical fingerprint disagrees with origin members')
@@ -118,6 +123,7 @@ def qualify_origins(registry_path, database_path, library_id, grouped, fingerpri
             if str(entry['job_id'] or '')!=job:continue
             try:data=json.loads(entry['details_json'])
             except (ValueError,TypeError):continue
+            if not isinstance(data,dict):continue
             if data.get('library_id',library_id)!=library_id:continue
             if any(str(row.get('file_id'))==str(entry['entity_id']) for row in live):continue
             if live and data.get('family_id') is not None and any(
@@ -171,3 +177,38 @@ def projection_origin(registry_path, database_path, library_id, job, family, cur
         _conflict(f'{library_id}:{job}:{family}','new projection differs from authoritative main inventory')
     present={r['original_relative_path'] for r in current}
     return {**origin,'projected_missing_members':[m['media_id'] for m in origin['members'] if m['relative_path'] not in present]}
+
+
+def _unfinished_import(registry_path,database_path,library_id,job,job_row):
+    """Recognize, without authorizing or completing, an interrupted publication."""
+    if library_id!='main' or job_row.get('state') not in {
+        'queued','copying','verifying','backup_verified','analyzing_metadata','organizing','interrupted'}:
+        return False
+    from app.library_registry import get_library
+    from app.root_operations import _control_location,_read,_identity
+    from app.storage_bootstrap import key_for
+    library=get_library(registry_path,library_id,active_only=False)
+    if library is None:return False
+    workspace=Path(library['workspace_root'])
+    parent=_control_location(workspace)
+    state=_read(parent/'state.json',{})
+    if state.get('format') not in (1,2,3) or state.get('workspace')!=_identity(workspace):return False
+    with database_connection(database_path) as c:
+        if c.execute('SELECT 1 FROM files WHERE job_id=? LIMIT 1',(job,)).fetchone():return False
+    for path in parent.glob('operation-*.json'):
+        record=_read(path,{})
+        if record.get('kind')!='import' or record.get('ids')!={'function':'app.main.process_claimed_job','job_id':job}:continue
+        nonce=record.get('reservation_id','')
+        if (record.get('format')!=1 or record.get('library')!=library_id
+            or record.get('workspace')!=str(workspace) or record.get('database')!=str(Path(database_path).absolute())
+            or record.get('generation')!=[state.get('generation'),state.get('libraries',{}).get(library_id,0)]
+            or len(nonce)!=32 or any(ch not in '0123456789abcdef' for ch in nonce)
+            or path.name!='operation-'+key_for(record)+'.json'):
+            return False
+        if (parent/('finished-'+nonce+'.json')).exists():return False
+        bindings=record.get('bindings',{})
+        if bindings.get(str(workspace))!=_identity(workspace):return False
+        if any(identity is not None and (state.get('bindings',{}).get(p)!=identity or _identity(p)!=identity)
+               for p,identity in bindings.items()):return False
+        return True
+    return False

@@ -164,7 +164,8 @@ def test_sd_activity_only_in_dock_and_local_notice(tmp_path):
     start=code.index('  function renderPageActivity(');end=code.index('  box.append',start)
     node(tmp_path,"""const location={pathname:'/'};
 const pageActivity={hidden:false,replaceChildren(...xs){this.children=xs}},destination=v=>v.kind==='trash_restore'?'/trash':'/';
-const makeItem=v=>v;
+const makeItem=v=>v,dismissedPageActivities=new Set(),window={};
+const document={createElement(){return {setAttribute(){},addEventListener(){}}}};
 """+code[start:end]+"""
 const records=[{id:'old',kind:'sd_check',status:'completed'},{id:'new',kind:'sd_check',status:'queued'}];
 const raw=JSON.stringify(records);renderPageActivity(records);
@@ -172,7 +173,7 @@ if(!pageActivity.hidden||pageActivity.children.length||raw!==JSON.stringify(reco
 location.pathname='/trash';renderPageActivity([{id:'t',kind:'trash_restore'}]);
 if(!pageActivity.hidden||pageActivity.children.length)throw Error('duplicate trash banner');
 location.pathname='/';renderPageActivity([{id:'i',kind:'import'}]);
-if(pageActivity.hidden||pageActivity.children.length!==1)throw Error('unrelated task visibility changed');
+if(pageActivity.hidden||pageActivity.children.filter(v=>v.id==='i').length!==1||pageActivity.children[0].className!=='bk-page-activity-dismiss')throw Error('unrelated task visibility changed');
 """)
 
 

@@ -264,8 +264,8 @@ def instrument(kind):
         hook(ts,'_remove_empty_staging','trash.recover_cleanup')
     elif kind in {'metadata','library_metadata','multiple_metadata','reintegrate','metadata_projection'}:
         source=Path(data['source'])
-        hook(mc.os,'replace','meta.backup',predicate=lambda s,d:Path(s)==source)
-        hook(mc.os,'replace','meta.swap',predicate=lambda s,d:Path(d)==source)
+        hook(mc.os,'replace','meta.backup',predicate=lambda s,d,**kw:Path(s)==source)
+        hook(mc.os,'replace','meta.swap',predicate=lambda s,d,**kw:Path(d)==source)
         hook(ms,'create_swap_journal','meta.before_journal',when='before')
         hook(ms,'create_swap_journal','meta.journal')
         hook(mc,'_complete_task','meta.db')

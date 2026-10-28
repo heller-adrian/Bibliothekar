@@ -72,3 +72,15 @@ Die Reparaturentscheidungen in `storage_replacement.py` und
 Darstellungskorrekturen. RC12- und Legacy-Containerabnahme werden erneut ausgeführt.
 Native TrueNAS-Erstinstallation und ACL-Abnahme sind nicht Teil dieses Auftrags.
 Ein fehlender oder widersprüchlicher Audit wird nicht als Freigabe interpretiert.
+
+## Unterbrochene Herkunftspublikation
+
+Der vollständige Crashlauf ergänzt einen tatsächlich erreichten Fall: SIGKILL
+nach `register_source_family`, bevor lokale Dateien oder Registry-Member
+veröffentlicht sind. Hier darf die leere Memberliste weder als fertig behandelt
+noch gelöscht werden. Nur ein noch nicht abgeschlossener passender Importjob,
+seine exakte F14-Importreservation (`app.main.process_claimed_job`, Job-ID),
+Reservationsschlüssel/-ID, Datenbankpfad, Generation, Workspace und sämtliche
+Bindings qualifizieren diesen erhaltenen Zwischenstand. Es werden dadurch keine
+Member ergänzt, kein Abschlussbeleg geschrieben und keine ungeklärte Operation
+freigegeben. Der bestehende Appdaten-Startaudit offener Operationen bleibt aktiv.

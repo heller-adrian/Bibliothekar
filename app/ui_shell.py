@@ -6308,6 +6308,7 @@ BIBLIOTHEKAR_0444_JS = r"""
       return target === route || (route === "/workspace" && target === "/events");
     });
     pageActivity.hidden = relevant.length === 0;
+    if(!relevant.length){pageActivity.replaceChildren();return;}
     const dismiss=document.createElement("button");dismiss.type="button";dismiss.className="bk-page-activity-dismiss";
     dismiss.textContent="×";dismiss.setAttribute("aria-label",window.BibliothekarI18n?.t?.("Statusanzeige ausblenden")||"Statusanzeige ausblenden");
     dismiss.addEventListener("click",()=>{
