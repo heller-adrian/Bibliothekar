@@ -1,0 +1,43 @@
+name: RC14 isolated crash hook probe
+on:
+  push:
+    branches: [qa/rc14-crash-hook-probe]
+permissions:
+  contents: read
+jobs:
+  journal-and-partial:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      IMAGE: bibliothekar:rc14-crash-probe
+      RC13_IMAGE: bibliothekar:rc13-original
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check observer and syntax
+        run: |
+          python -m py_compile qa/rc14/sitecustomize.py qa/rc14/container.py
+          python - <<'PY'
+          from pathlib import Path
+          site=Path('qa/rc14/sitecustomize.py').read_text()
+          assert 'threading.setprofile_all_threads(observe)' in site
+          assert "count==3" in site and "name=='_atomic_json'" in site
+          PY
+      - name: Build exact RC13 starting image and RC14 candidate (isolated)
+        run: |
+          mkdir "$RUNNER_TEMP/rc13-original"
+          git archive 1f59167e3bfcd38928f0ad32e20d88910a15d53a | tar -x -C "$RUNNER_TEMP/rc13-original"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION=1f59167e3bfcd38928f0ad32e20d88910a15d53a -t "$RC13_IMAGE" "$RUNNER_TEMP/rc13-original"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+      - name: Real journal, partial-publication and retirement SIGKILL proof
+        run: python qa/rc14/container.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc14-crash-probe-evidence
+          path: |
+            ${{ runner.temp }}/rc14-evidence.json
+            ${{ runner.temp }}/rc14-container-logs
+            ${{ runner.temp }}/rc14-container

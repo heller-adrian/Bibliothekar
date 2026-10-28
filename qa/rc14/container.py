@@ -49,7 +49,20 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
   for _ in range(600):
    if (root/'evidence/rc14-checkpoint.json').exists() and old.docker('inspect','-f','{{.State.Running}}',name).strip()=='false':break
    time.sleep(.2)
-  assert (root/'evidence/rc14-checkpoint.json').exists()
+  if not (root/'evidence/rc14-checkpoint.json').exists():
+   diagnostic={'boundary':boundary,'phase':'initial-import','task_id':task,
+               'container':old.docker('inspect','-f','{{json .State}}',name,check=False).stdout.strip()}
+   for key,path in [('recheck','/api/sd-rechecks/'+task),('history','/api/import-history')]:
+    try:diagnostic[key]=api(path)
+    except Exception as error:diagnostic[key+'_error']=str(error)
+   live=old.docker('logs',name,check=False)
+   diagnostic['logs_tail']=(live.stdout+live.stderr)[-6000:]
+   raise AssertionError('RC14 checkpoint missing: '+json.dumps(diagnostic,default=str,ensure_ascii=False))
+  checkpoint=json.loads((root/'evidence/rc14-checkpoint.json').read_text())
+  assert checkpoint['boundary']==boundary and checkpoint['uid']==568 and checkpoint['event']=='return',checkpoint
+  assert checkpoint['function']==('_atomic_json' if boundary=='journal' else 'publish_import_file'),checkpoint
+  assert checkpoint['thread']=='kamera-job-worker',checkpoint
+  assert old.docker('inspect','-f','{{.State.ExitCode}}',name).strip()!='0',checkpoint
   (root/'evidence/rc14-checkpoint.json').rename(root/'evidence/rc13-import-checkpoint.json')
   old.docker('rm',name);create(os.environ['IMAGE']);api=old.client()
   history=api('/api/import-history')['jobs'];job=next(j for j in history if j['operation']=='folder_import')
@@ -71,7 +84,9 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
    for _ in range(200):
     if (root/'evidence/rc14-checkpoint.json').exists() and old.docker('inspect','-f','{{.State.Running}}',name).strip()=='false':break
     time.sleep(.2)
-   assert json.loads((root/'evidence/rc14-checkpoint.json').read_text())['boundary']=='retirement-registry-committed'
+   retirement_checkpoint=json.loads((root/'evidence/rc14-checkpoint.json').read_text())
+   assert retirement_checkpoint['boundary']=='retirement-registry-committed' and retirement_checkpoint['event']=='c_return' and retirement_checkpoint['function']=='remove.commit',retirement_checkpoint
+   assert retirement_checkpoint['uid']==568 and old.docker('inspect','-f','{{.State.ExitCode}}',name).strip()!='0',retirement_checkpoint
    old.docker('start',name);api=old.client();assert api('/api/settings/storage-health')['ready']
    assert not any(r['library_id']==lid for r in api('/api/libraries')['libraries'])
   else:api('/api/libraries/'+lid+'/unregister',{'confirmation':'REMOVE LIBRARY'})
@@ -87,7 +102,7 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
   for _ in range(2):
    old.docker('restart',name);api=old.client();assert api('/api/settings/storage-health')['ready']
   assert snapshot()['readonly']==before['readonly']
-  report['cases'].append({'boundary':boundary,'status':'PASS','uid':568,'real_rc13_upgrade':True,'original_job_resumed':jid,'normal_archive_reimport':True,'two_restarts':True,'readonly_bytes_unchanged':True})
+  report['cases'].append({'boundary':boundary,'status':'PASS','uid':568,'real_rc13_upgrade':True,'original_job_resumed':jid,'normal_archive_reimport':True,'two_restarts':True,'readonly_bytes_unchanged':True,'import_crash':checkpoint,'retirement_crash':retirement_checkpoint if boundary=='journal' else None})
  finally:
   result=old.docker('logs',name,check=False);(logs/(boundary+'.log')).write_text(result.stdout+result.stderr)
   old.docker('rm','-f',name,check=False)
