@@ -2023,7 +2023,9 @@ def _reintegration_capture(database_path, family_id, rows, stored, *, job_id, fa
         verification=json.loads(task['verification_json'] or '{}')
         if (int(verification.get('family_id') or 0)!=int(family_id)
             or any(str(verification.get(key) or '')!=str(detected.get(key) or '') for key in ('job_id','family_key'))
-            or verification.get('proposed_datetime')!=proposal):continue
+            # RC14 truncated this receipt too; only its exact catalogue value
+            # is a permitted legacy representation of the full task proposal.
+            or verification.get('proposed_datetime') not in {proposal,stored}):continue
         members=verification.get('members',[])
         if (not verification.get('reintegration_pending') or len(members)!=len(rows)
             or {int(m.get('file_id') or 0) for m in members}!=set(by_id)):continue

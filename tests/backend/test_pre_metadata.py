@@ -50,6 +50,9 @@ def test_rc14_truncated_catalogue_requires_exact_completed_receipt(tmp_path,proo
     with database_connection(db) as c:
         c.execute('UPDATE file_families SET selected_capture_time=?',(stamp[:19],))
         c.execute('UPDATE files SET selected_capture_time=?',(stamp[:19],))
+        receipt=json.loads(c.execute('SELECT verification_json FROM metadata_corrections').fetchone()[0])
+        receipt['proposed_datetime']=stamp[:19]
+        c.execute('UPDATE metadata_corrections SET verification_json=?',(json.dumps(receipt),))
         if proof=='missing':c.execute("UPDATE metadata_corrections SET status='blocked'")
         if proof in ('wrong_hash','wrong_job'):
             row=c.execute('SELECT verification_json FROM metadata_corrections').fetchone()
@@ -89,7 +92,8 @@ def test_ambiguous_or_nonexistent_local_time_needs_explicit_offset(tmp_path,stam
     assert p.read_bytes()==before
 
 
-def test_general_admission_reuses_durable_job_for_same_bytes(tmp_path,monkeypatch):
+@pytest.mark.parametrize('race',[False,True])
+def test_general_admission_reuses_durable_job_for_same_bytes(tmp_path,monkeypatch,race):
     from types import SimpleNamespace
     from app import main
     db,ws,source,family,task=real_family(tmp_path,'2025-12-07T15:04:37+13:00')
@@ -103,6 +107,19 @@ def test_general_admission_reuses_durable_job_for_same_bytes(tmp_path,monkeypatc
     monkeypatch.setattr(main,'scan_metadata_area',lambda **kwargs:{'files':[row]})
     # Unit admission body; the production wrapper and real HTTP remain in CI.
     endpoint=main.api_reintegrate_general_metadata.__wrapped__
+    if race:
+        from fastapi import HTTPException
+        original_copy=main.shutil.copyfile
+        def changed_source(source,target):
+            Path(source).write_bytes(b'changed after admission')
+            return original_copy(source,target)
+        monkeypatch.setattr(main.shutil,'copyfile',changed_source)
+        with pytest.raises(HTTPException) as error:
+            endpoint({'items':[{'relative_path':'new.JPG'}]})
+        assert error.value.status_code==409
+        with database_connection(db) as c:
+            assert c.execute("SELECT COUNT(*) FROM jobs WHERE operation='metadata_general_import'").fetchone()[0]==0
+        return
     first=endpoint({'items':[{'relative_path':'new.JPG'}]})
     second=endpoint({'items':[{'relative_path':'new.JPG'}]})
     assert second['reused'] and first['job']['id']==second['job']['id']

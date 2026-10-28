@@ -10168,6 +10168,7 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         admission=[(relative,int(source.stat().st_size),sha256_file(source)) for relative,source,_row in selected]
         job_id = "GENERAL_IMPORT_" + hashlib.sha256(json.dumps([context.library_id,sorted(admission)],ensure_ascii=False).encode()).hexdigest()[:32]
         stage = (stage_parent / job_id).resolve(strict=False)
+        admitted = {relative:(size,sha) for relative,size,sha in admission}
         with reserve(context.workspace_root,library_id=context.library_id,database=DATABASE_FILE,
                      kind='import',ids={'job_id':job_id,'function':'app.main.api_reintegrate_general_metadata','source_stage':str(stage)},
                      paths=[context.workspace_root,metadata_root,stage_parent,workspace_backup_root(WORKSPACE_PATH)],shared=True):
@@ -10187,8 +10188,11 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(source, target)
                     if (
-                        int(target.stat().st_size) != int(source.stat().st_size)
-                        or sha256_file(target) != sha256_file(source)
+                        int(target.stat().st_size) != admitted[relative][0]
+                        or int(source.stat().st_size) != admitted[relative][0]
+                        or source.is_symlink()
+                        or sha256_file(target) != admitted[relative][1]
+                        or sha256_file(source) != admitted[relative][1]
                     ):
                         raise MetadataCorrectionError(
                             "Staging-Kopie konnte nicht verifiziert werden: " + relative
