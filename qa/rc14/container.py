@@ -28,6 +28,7 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
   args=['--read-only','--tmpfs','/tmp:size=64m,mode=1777','-p','127.0.0.1:18319:8080']
   env={'KAMERA_APPDATA':'/appdata','KAMERA_WORKSPACE':'/workspace','KAMERA_ARCHIVE_ROOT':'/main-library','KAMERA_POOL_PROBE':'/workspace','KAMERA_NAS_SOURCE_ROOT':'/sources/nas','KAMERA_SOURCE_HELPER_ENABLED':'false','KAMERA_WEB_UID':'568','KAMERA_WEB_GID':'568','BIBLIOTHEKAR_ADMIN_PASSWORD':'isolated-rc13-upgrade-password'}
   if observe:env.update(PYTHONPATH='/qa-code:/opt/kamera',RC14_BOUNDARY=boundary)
+  elif boundary=='journal':env.update(PYTHONPATH='/qa-code:/opt/kamera',RC14_BOUNDARY='retirement')
   for k,v in env.items():args+=['-e',k+'='+v]
   for src,dst in [('appdata','/appdata'),('workspace','/workspace'),('archive','/main-library:ro'),('business','/Businessarchiv:ro'),('nas','/sources/nas:ro'),('evidence','/qa-evidence')]:args+=['-v',str(root/src)+':'+dst]
   args+=['-v',str(root/'business')+':/sources/nas/BusinessArchive:ro','-v',str(old.source/'qa/rc14')+':/qa-code:ro']
@@ -48,6 +49,7 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
    if (root/'evidence/rc14-checkpoint.json').exists() and old.docker('inspect','-f','{{.State.Running}}',name).strip()=='false':break
    time.sleep(.2)
   assert (root/'evidence/rc14-checkpoint.json').exists()
+  (root/'evidence/rc14-checkpoint.json').rename(root/'evidence/rc13-import-checkpoint.json')
   old.docker('rm',name);create(os.environ['IMAGE']);api=old.client()
   history=api('/api/import-history')['jobs'];job=next(j for j in history if j['operation']=='folder_import')
   assert job['state'] in ('failed','interrupted'),job
@@ -62,7 +64,16 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
   second=api('/api/libraries',{'display_name':'Business','work_root':'','archive_root':'/Businessarchiv'},expect=201)['library']
   assert second['work_root']=='/workspace/Library Workspaces/business',second
   lid=second['library_id']
-  api('/api/libraries/'+lid+'/unregister',{'confirmation':'REMOVE LIBRARY'})
+  if boundary=='journal':
+   try:api('/api/libraries/'+lid+'/unregister',{'confirmation':'REMOVE LIBRARY'})
+   except OSError:pass
+   for _ in range(200):
+    if (root/'evidence/rc14-checkpoint.json').exists() and old.docker('inspect','-f','{{.State.Running}}',name).strip()=='false':break
+    time.sleep(.2)
+   assert json.loads((root/'evidence/rc14-checkpoint.json').read_text())['boundary']=='retirement-registry-committed'
+   old.docker('start',name);api=old.client();assert api('/api/settings/storage-health')['ready']
+   assert not any(r['library_id']==lid for r in api('/api/libraries')['libraries'])
+  else:api('/api/libraries/'+lid+'/unregister',{'confirmation':'REMOVE LIBRARY'})
   assert (root/'workspace/Library Workspaces/business').is_dir()
   # The only re-entry route is the normal Folder Import API via explicit RO source.
   admitted=api('/api/jobs/folder-import',{'source_root_key':'nas','source_relative_path':'BusinessArchive','source_mode':'folder'},expect=202)

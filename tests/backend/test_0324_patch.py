@@ -163,6 +163,8 @@ def test_0324_released_archive_assets_and_marker_project_between_libraries(
         capture_time="2026-07-22T21:30:00",
         data=camera_data,
     )
+    with database_connection(main_db) as connection:
+        connection.execute("UPDATE jobs SET state='completed' WHERE id='REL'")
     project_import_job(main_db, other_db, "REL")
 
     central_camera_rel = (

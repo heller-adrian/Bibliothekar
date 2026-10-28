@@ -124,6 +124,12 @@ def test_owned_claim_retires_only_with_archive_and_immutable_receipt(fixture,mon
         path=archive/item['destination_relative_path'];path.parent.mkdir(parents=True,exist_ok=True)
         path.write_bytes((central/item['destination_relative_path']).read_bytes())
     with database_connection(fixture[3][1]) as c:c.execute("UPDATE files SET current_root_kind='camera_archive'")
+    from app.global_library_inventory import backfill_library_inventory
+    backfill_library_inventory(reg,database_path=fixture[3][1],library_id='second',claim_all_owned=False)
+    # Other global free projections belong to main, not this library. Their
+    # presence must not block retirement of the independently archived claim.
+    with database_connection(fixture[3][1]) as c:
+        c.execute("UPDATE files SET current_root_kind='shared_workspace' WHERE original_relative_path='D0001.JPG'")
     claim_source_family(reg,source_family_key='main:'+job+':F0',library_id='second',event_id='ARCHIVED',claim_state='owned')
     # There is a fully qualified retained staging envelope until finalization.
     from app.import_recovery import retain_completed_evidence
@@ -159,3 +165,26 @@ def test_library_listing_survives_storage_fault_without_enabling_mutation(fixtur
     response=client.post('/api/libraries/second/unregister',json={'confirmation':'REMOVE LIBRARY'})
     assert response.status_code==409
     assert get_library(reg,'second',active_only=False)['is_registered']
+
+
+def test_dead_import_keeps_exact_reservation_until_explicit_retention(fixture):
+    from app import root_operations as ro
+    from app.import_recovery import pending_reservations,retain,retained_staging_is_qualified
+    db,reg,ws,central,stage,logs,job,plan=staged_case(fixture)
+    from app.storage_config import load_storage_settings
+    from app.library_registry import get_library
+    owner=get_library(reg,'main',active_only=False)
+    paths=[ws,*[ws/n for n in load_storage_settings(workspace_root=ws).values()],Path(owner['work_root']),Path(owner['archive_root'])]
+    with pytest.raises(SystemExit):
+        with ro.reserve(ws,library_id='main',database=db,paths=paths,kind='import',
+                        ids={'function':'app.main.process_claimed_job','job_id':job},shared=True) as record:
+            original={k:v for k,v in record.items() if not k.startswith('_')}
+            raise SystemExit('isolated dead worker')
+    parent=ro._control_location(ws)
+    assert len(pending_reservations(db,reg,ws,logs))==1
+    assert list(parent.glob('operation-*.json'))
+    retain(db,reg,ws,logs,job)
+    assert not list(parent.glob('operation-*.json'))
+    receipt=ro._read(parent/('import-retained-'+original['reservation_id']+'.json'))
+    assert receipt['reservation']==original
+    assert receipt['staged']==6 and retained_staging_is_qualified(db,reg,ws,logs)

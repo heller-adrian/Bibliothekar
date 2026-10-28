@@ -59,6 +59,8 @@ def _seed_free_file(
     data: bytes,
 ) -> tuple[int, int, str]:
     _ensure_job(db)
+    with database_connection(db) as connection:
+        connection.execute("UPDATE jobs SET state='completed' WHERE id='J'")
     relative = f"{day[:4]}/{day}/{filename}"
     digest = _sha(data)
     with database_connection(db) as connection:

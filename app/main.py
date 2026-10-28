@@ -2266,12 +2266,15 @@ def _coordinate_startup(fn):
             finish_appdata(WORKSPACE_PATH)
             from app.appdata import pending_operations
             remaining = pending_operations(WORKSPACE_PATH,all_records=True)
+            from app.import_recovery import pending_reservations
+            recoverable=pending_reservations(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH) if remaining else set()
+            remaining=[r for r in remaining if r['path'] not in recoverable]
             if remaining:
                 raise RootOperationError('unresolved_reservation: '+remaining[0]['path']+': '+remaining[0]['detail'])
             DATABASE_INITIALIZATION_ERROR = None
             _start_runtime_workers()
             return result
-        except (RootOperationError, OSError, ValueError) as error:
+        except (RootOperationError, PipelineError, OSError, ValueError) as error:
             _STORAGE_STARTUP_PAUSED = True
             DATABASE_INITIALIZATION_ERROR = "Startup: " + str(error)
             print(DATABASE_INITIALIZATION_ERROR, flush=True)
@@ -4833,11 +4836,8 @@ def api_import_recovery(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                     (json.dumps(result),'Verified original import queued for continuation.',job_id))
         elif action=='retain':
             if payload.get('confirmation')!='KEEP STAGED BACKUP':raise ValueError('import_recovery_confirmation_required')
-            with database_connection(DATABASE_FILE) as c:
-                c.execute('BEGIN IMMEDIATE')
-                result=json.loads(proof['job']['result_json'] or '{}');result['import_recovery']='retained'
-                changed=c.execute("UPDATE jobs SET state='failed',stage='staging_retained',result_json=? WHERE id=? AND state IN ('failed','interrupted')",(json.dumps(result),job_id)).rowcount
-                if changed!=1:raise ValueError('import_recovery_job_changed')
+            from app.import_recovery import retain
+            retain(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH,job_id)
         elif action!='inspect':raise ValueError('import_recovery_action_invalid')
         return {'job_id':job_id,'qualified':True,'staged_file_count':proof['staged_file_count'],
                 'published_file_count':proof['published_file_count'],'queued':action=='resume'}

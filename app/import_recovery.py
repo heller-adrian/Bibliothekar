@@ -37,7 +37,7 @@ def read_record(path):
 def relative(value):
     raw=str(value)
     if not raw or '\0' in raw or '\\' in raw or Path(raw).is_absolute() or any(p in ('','.','..') for p in raw.split('/')):
-        raise PipelineError('import_recovery_unsafe_path: '+raw)
+        raise PipelineError('Unsicherer relativer Importpfad: '+raw+' [import_recovery_unsafe_path]')
     return raw
 
 
@@ -100,6 +100,16 @@ def qualify(database, registry, workspace, logs, job_id):
         for p in original.rglob('*'):
             if p.is_symlink() or (p.is_file() and p.relative_to(original).as_posix() not in by_source):
                 raise PipelineError('import_recovery_unknown_file: '+str(p))
+    from app.managed_directory_names import NAME_PAIRS
+    if stage.exists():
+        allowed={'Original','move-journal.json',*NAME_PAIRS['import_protocol']}
+        for child in stage.iterdir():
+            if child.name not in allowed or child.is_symlink():
+                raise PipelineError('import_recovery_unknown_envelope: '+str(child))
+        for name in NAME_PAIRS['import_protocol']:
+            protocol=stage/name
+            if protocol.exists() and (not protocol.is_dir() or any(p.is_symlink() or not p.is_file() or p.name not in {'status.json','manifest.json','snapshot.json'} for p in protocol.iterdir())):
+                raise PipelineError('import_recovery_unknown_protocol: '+str(protocol))
     return {'job_id':job_id,'job':dict(job),'plan':plan,'journal':str(journal),
             'staged_file_count':staged,'published_file_count':published,
             'central':str(central),'stage':str(stage),'qualified':True}
@@ -185,3 +195,76 @@ def finish_published_envelopes(database, registry, workspace, logs):
     for child in incoming.iterdir():
         if child.name in completed and (child/'move-journal.json').is_file():
             retain_completed_evidence(database,registry,workspace,logs,child.name)
+
+
+def pending_reservations(database, registry, workspace, logs):
+    """Recognize only our exact dead worker; leave its reservation untouched.
+
+    This authorizes access to the recovery UI, never a root change or a new
+    import. Unknown operations remain startup blockers.
+    """
+    from app.root_operations import _control_location,_read,_write,_check,_lock,_sync,generation
+    from app.storage_bootstrap import key_for
+    parent=_control_location(workspace);accepted=set()
+    state=_read(parent/'state.json',{})
+    for path in parent.glob('operation-*.json'):
+        record=_read(path,{})
+        ids=record.get('ids',{})
+        if (record.get('kind')!='import' or record.get('library')!='main'
+            or record.get('database')!=str(Path(database).absolute())
+            or record.get('workspace')!=str(Path(workspace).absolute())
+            or set(ids)!={'function','job_id'} or ids['function']!='app.main.process_claimed_job'):
+            continue
+        with _lock(path.with_suffix('.lock'),exclusive=True):
+            if _read(path,{})!=record or path.name!='operation-'+key_for(record)+'.json':
+                raise PipelineError('import_recovery_reservation_changed: '+str(path))
+            if record.get('generation')!=list(generation(workspace,'main')):
+                raise PipelineError('import_recovery_generation_changed: '+str(path))
+            bindings=record.get('bindings',{})
+            from app.library_registry import get_library
+            from app.storage_config import load_storage_settings
+            owner=get_library(registry,'main',active_only=False)
+            if owner is None:raise PipelineError('import_recovery_database_identity: '+str(database))
+            required={str(Path(workspace).absolute()),owner['work_root'],owner['archive_root'],
+                      *(str(Path(workspace)/n) for n in load_storage_settings(workspace_root=Path(workspace)).values())}
+            nonce=str(record.get('reservation_id') or '')
+            if (record.get('format')!=1 or record.get('shared') is not True or len(nonce)!=32
+                or any(c not in '0123456789abcdef' for c in nonce) or not required<=set(bindings)):
+                raise PipelineError('import_recovery_reservation_incomplete: '+str(path))
+            if not bindings or any(i is None or state.get('bindings',{}).get(p)!=i for p,i in bindings.items()):
+                raise PipelineError('import_recovery_bindings_changed: '+str(path))
+            _check(bindings)
+            proof=qualify(database,registry,workspace,logs,ids['job_id'])
+            if proof['job']['state']=='completed' and proof['staged_file_count']==0:
+                _write(parent/('import-completed-'+nonce+'.json'),
+                       {'reservation':record,'journal':proof['journal'],'verified_published':proof['published_file_count'],'disposition':'completed'})
+                path.unlink();_sync(parent)
+                accepted.add(str(path));continue
+            if proof['job']['state'] not in {'failed','interrupted'}:
+                raise PipelineError('import_recovery_worker_not_terminal: '+str(path))
+            accepted.add(str(path))
+    return accepted
+
+
+def retain(database, registry, workspace, logs, job_id):
+    """Close execution by explicit decision, preserving its complete receipt."""
+    from app.root_operations import reserve,_control_location,_write,generation
+    from app.library_registry import get_library
+    # Bind only actual registered roots and roles, never guessed children.
+    from app.storage_config import load_storage_settings
+    owner=get_library(registry,'main',active_only=False)
+    if owner is None:raise PipelineError('import_recovery_database_identity: '+str(database))
+    paths=[Path(workspace),*[Path(workspace)/n for n in load_storage_settings(workspace_root=Path(workspace)).values()],Path(owner['work_root']),Path(owner['archive_root'])]
+    with reserve(workspace,library_id='main',database=database,paths=paths,kind='import',
+                 ids={'function':'app.main.process_claimed_job','job_id':job_id},
+                 expected_generation=generation(workspace,'main'),shared=True) as reservation:
+        proof=qualify(database,registry,workspace,logs,job_id)
+        with database_connection(Path(database)) as c:
+            c.execute('BEGIN IMMEDIATE')
+            row=c.execute("SELECT result_json FROM jobs WHERE id=? AND state IN ('failed','interrupted')",(job_id,)).fetchone()
+            if row is None:raise PipelineError('import_recovery_job_changed: '+job_id)
+            result=json.loads(row[0] or '{}');result['import_recovery']='retained'
+            c.execute("UPDATE jobs SET state='failed',stage='staging_retained',result_json=? WHERE id=?",(json.dumps(result),job_id))
+        _write(_control_location(workspace)/('import-retained-'+reservation['reservation_id']+'.json'),
+               {'disposition':'staged_copies_retained_not_published','reservation':{k:v for k,v in reservation.items() if not k.startswith('_')},
+                'job_id':job_id,'journal':proof['journal'],'staged':proof['staged_file_count'],'published':proof['published_file_count']})

@@ -34,10 +34,14 @@ def remove(registry, library_id, confirmation):
                          'registry_before':{k:row[k] for k in ('work_root','archive_root','database_path','settings','is_registered')}}):
         # Legacy fixtures/layouts can have a validated in-memory generation
         # before the first durable state file. Persist it BEFORE registry commit.
-        from app.root_operations import _control_location,_state,_write,_lock
+        from app.root_operations import _control_location,_state,_write,_lock,_check
         control=_control_location(workspace)
         with _lock(control/'state.lock',exclusive=True,wait=True):
             if not (control/'state.json').exists():_write(control/'state.json',_state(control,workspace))
+            state=_state(control,workspace)
+            bindings={str(p):_identity(p) for p in (workspace,work,archive)}
+            if any(value is None for value in bindings.values()):raise LibraryRegistryError('library_remove_retained_roots_changed')
+            _check({p:i for p,i in state['bindings'].items() if p in bindings})
         # No recursive deletion, even for an empty managed shell. Existing
         # names/bindings remain reserved; a new library chooses a distinct name.
         with _parent(work/'probe'):
@@ -56,6 +60,21 @@ def remove(registry, library_id, confirmation):
             path=archive/relative(f['current_relative_path'])
             with _parent(path) as (fd,name):
                 _verified(fd,name,{'size_bytes':f['size_bytes'],'sha256':f['sha256_current'] or f['sha256_original']})
+        from app.global_library_inventory import _database_family_rows,family_content_fingerprint
+        from app.source_provenance import qualify_origins,registry_origins
+        groups={}
+        for f in _database_family_rows(db):
+            groups.setdefault((str(f['job_id']),str(f['family_key'])),[]).append(f)
+        qualified=qualify_origins(Path(registry),db,library_id,groups,family_content_fingerprint)
+        origins=registry_origins(Path(registry).absolute(),library_id)
+        archived=set()
+        roots_by_id={int(f['id']):f['current_root_kind'] for f in files}
+        for origin in origins:
+            metadata=json.loads(origin['metadata_json'] or '{}')
+            key=(str(metadata.get('job_id') or ''),str(origin['family_key']))
+            members=groups.get(key,[])
+            if key in qualified and members and all(roots_by_id.get(int(f['file_id']))=='camera_archive' for f in members):
+                archived.add(origin['canonical_family_id'])
         connection=_connect(Path(registry))
         try:
             connection.execute('BEGIN IMMEDIATE')
@@ -66,13 +85,14 @@ def remove(registry, library_id, confirmation):
             if any(c['claim_state']=='reserved' for c in claims):raise LibraryRegistryError('library_remove_reserved_claims')
             # A live ownership claim may retire only when its catalogue
             # holdings have all been verified in the retained RO archive.
-            if claims and any(f['current_root_kind']!='camera_archive' for f in files):
+            if any(c['canonical_family_id'] not in archived for c in claims):
                 raise LibraryRegistryError('library_remove_unsecured_claims')
             if any(work.iterdir()):raise LibraryRegistryError('library_remove_workspace_not_empty: '+str(work))
+            _check(bindings)
             settings=json.loads(current['settings_json'] or '{}')
             settings['retirement_receipt']={'format':1,'id':nonce,'library_id':library_id,
                 'at':datetime.now(timezone.utc).isoformat(),'claims':claims,
-                'work_identity':_identity(work),'archive_identity':_identity(archive),
+                'work_identity':bindings[str(work)],'archive_identity':bindings[str(archive)],
                 'database':str(db),'workspace_retained':str(work),'archive_retained':str(archive)}
             # Snapshot every historical live claim in the SAME transaction.
             # Original source/canonical/member/media rows never change.

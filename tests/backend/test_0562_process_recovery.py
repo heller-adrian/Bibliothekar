@@ -416,17 +416,19 @@ def test_recovery_keeps_foreign_bytes_after_sigkill(tmp_path,kind,boundary):
         assert list(case.rglob('DELETE_*.json')) if kind=='trash' else list(case.rglob('.swap-journals/*.json'))
 
 
-def test_import_discard_after_sigkill_does_not_orphan_moved_file(tmp_path):
+def test_import_discard_after_sigkill_preserves_moved_file_and_history(tmp_path):
     evidence,case,data,before,crashed,restarts=run_case(tmp_path,'import','import.move1')
     for record,state in restarts:assert record['returncode']==0,record
+    staged=snapshot(case,evidence/'before-refusal.json')
+    copies={str(p):hash_file(p) for p in (case/'workspace'/'SD-Kartensicherungen').rglob('*.JPG')}
     discarded=invoke(case,'discard','none',evidence/'discard')
-    assert discarded['returncode']==0,discarded
+    assert discarded['returncode']!=0,discarded
     final=snapshot(case,evidence/'after-discard.json')
-    assert not any(r['id']=='J' for r in db_rows(final,'jobs'))
-    assert db_rows(final,'files')==[]
+    assert db_rows(final,'jobs')==db_rows(staged,'jobs')
+    assert db_rows(final,'files')==db_rows(staged,'files')
+    assert copies=={str(p):hash_file(p) for p in (case/'workspace'/'SD-Kartensicherungen').rglob('*.JPG')}
+    assert list(case.rglob('move-journal.json'))
     for name,digest in data['expected'].items():assert hash_file(case/'card'/name)==digest
-    leftovers=[p for p in (case/'workspace'/'SD-Kartensicherungen').rglob('*.JPG')]
-    assert not leftovers,{'orphaned_verified_import_files_after_discard':[str(p) for p in leftovers]}
 
 
 @pytest.mark.parametrize('kind',['library_metadata','multiple_metadata','reintegrate'])
@@ -542,17 +544,19 @@ def test_0562_restore_preserves_ambiguous_evidence(tmp_path,tamper):
         checks_sql(snapshot(case,evidence/f'after-restart{n}.json'))
 
 
-def test_0562_import_discard_recovery_two_sigkills(tmp_path):
-    evidence,case,data=new_case(tmp_path,'import','discard-progressive-recovery')
+def test_0562_import_discard_preserves_crashed_import_for_verified_recovery(tmp_path):
+    evidence,case,data=new_case(tmp_path,'import','discard-preserves-recovery')
     invoke(case,'operate','import.move2',evidence/'kill',kill=True)
-    three_restarts(case,evidence)
+    before=three_restarts(case,evidence)
+    copies={str(p):hash_file(p) for p in (case/'workspace/SD-Kartensicherungen').rglob('*.JPG')}
     for n in (1,2):
-        invoke(case,'discard','import.discard1',evidence/f'discard-kill{n}',kill=True)
-        checks_sql(snapshot(case,evidence/f'after-discard-kill{n}.json'))
-    assert invoke(case,'discard','none',evidence/'discard-final')['returncode']==0
-    state=snapshot(case,evidence/'after-discard-final.json');checks_sql(state)
-    assert not db_rows(state,'files') and not db_rows(state,'jobs')
-    assert not list((case/'workspace/SD-Kartensicherungen').rglob('*.JPG'))
+        result=invoke(case,'discard','none',evidence/f'discard-refused{n}')
+        assert result['returncode']!=0
+        after=snapshot(case,evidence/f'after-refusal{n}.json');checks_sql(after)
+        assert db_rows(after,'files')==db_rows(before,'files')
+        assert db_rows(after,'jobs')==db_rows(before,'jobs')
+        assert copies=={str(p):hash_file(p) for p in (case/'workspace/SD-Kartensicherungen').rglob('*.JPG')}
+    assert list(case.rglob('move-journal.json'))
     for name,digest in data['expected'].items():assert hash_file(case/'card'/name)==digest
 
 

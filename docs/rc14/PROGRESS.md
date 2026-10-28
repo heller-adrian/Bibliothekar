@@ -29,3 +29,23 @@ Chromium und Original-Supervisor-Container einschließlich echtem RC13-SIGKILL
 nach Journal / nach drei Renames, HTTP-Fortsetzung, Entfernung und Folder Import.
 Keine Freigabe bisher. Native TrueNAS-Prüfung weiterhin NOT_RUN. Nutzer hat
 Budgetobergrenze ausdrücklich auf 29 % Wochenverbrauch erweitert.
+
+Weiterer Review: echte SIGKILL-Importreservationen müssen für den authentifizierten
+Recoveryzugang erhalten bleiben. Dafür exakt qualifizierte Reservationen erkannt
+(alle Rollen, Generation, Schlüssel, Nonce, Herkunft, Journal, keine lebende
+Operationssperre). Aufbewahren verwendet dieselbe Reservation und archiviert sie
+vollständig als import-retained-Receipt. Bereits vollständig publizierte,
+completed Jobs bekommen vor Freigabe ein erhaltenes Abschlussreceipt. Unbekannte
+Operationen bleiben gesperrt. Claimprüfung auf die tatsächlich eigenen Familien
+begrenzt; unabhängiger Zentralbestand wird nicht als eigener ungesicherter
+Workspace gewertet. Originale Herkunftszeilen bleiben unverändert.
+
+Aktuelles lokales Gate: 63 PASS in 28,66 s, einschließlich vollständiger
+Reservationsgleichheit, unbekannter Umschlag-/Protokolldateien und aller
+relativen Pfadgegenproben. Linuxlauf 40720091267 meldet in bisher abgeschlossenen
+Gruppen rote alte Text-/Versions-/Fixtureerwartungen und zwei erwartete Abbrüche
+der nun gesperrten destruktiven Discardfunktion. Entsprechende Tests wurden auf
+erhaltene Dateien, Jobs und Journale umgestellt; keine Sicherheitsbedingung
+entfernt. Zwei Gruppen waren bei diesem Eintrag noch aktiv. Nächster konkreter
+Schritt: vollständige Abnahme des nachfolgenden Commits, dann Container;
+bei roten Fällen keine Veröffentlichung. Budgetfreigabe maximal bis 29 %.

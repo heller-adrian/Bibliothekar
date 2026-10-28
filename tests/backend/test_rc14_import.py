@@ -79,7 +79,7 @@ def test_rc13_staged_zero_published_resume_preserves_origin(fixture,count):
         assert before=={t:c.execute('SELECT * FROM '+t+' ORDER BY 1,2').fetchall() for t in before}
 
 
-@pytest.mark.parametrize('damage',['changed_bytes','foreign_target','symlink','unknown_file','missing_origin'])
+@pytest.mark.parametrize('damage',['changed_bytes','foreign_target','symlink','unknown_file','unknown_envelope','unknown_protocol','missing_origin'])
 def test_recovery_ambiguity_keeps_all_evidence(fixture,damage):
     from app.import_recovery import qualify
     db,reg,ws,central,stage,logs,job,plan=staged_case(fixture)
@@ -89,6 +89,8 @@ def test_recovery_ambiguity_keeps_all_evidence(fixture,damage):
         p=central/plan[0]['destination_relative_path'];p.parent.mkdir(parents=True);p.write_bytes(b'foreign')
     elif damage=='symlink':first.unlink();first.symlink_to('/etc/passwd')
     elif damage=='unknown_file':(stage/'Original/foreign.JPG').write_bytes(b'foreign')
+    elif damage=='unknown_envelope':(stage/'foreign.txt').write_bytes(b'foreign')
+    elif damage=='unknown_protocol':(stage/'Protocol/foreign.txt').write_bytes(b'foreign')
     else:
         with sqlite3.connect(reg) as c:c.execute('DELETE FROM source_family_members')
     before=(stage/'move-journal.json').read_bytes()
