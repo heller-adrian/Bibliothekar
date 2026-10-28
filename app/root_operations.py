@@ -223,12 +223,23 @@ def _read(path, default=None):
                 private_check_acl(fd, {0, os.geteuid()}, path=path)
                 if info.st_uid != os.geteuid() and not host_managed(path):
                     raise RootOperationError('Operationsnachweis besitzt keine sichere Eigentumsbindung: ' + str(path))
-                with os.fdopen(fd) as stream:
-                    fd = None
+                with os.fdopen(os.dup(fd)) as stream:
                     value = json.load(stream)
-                    private_check_acl(stream.fileno(), {0, os.geteuid()}, path=path)
+                    private_check_acl(fd, {0, os.geteuid()}, path=path)
                 check()
                 return value
+            except PrivateStorageError as error:
+                # A concurrent atomic state publication unlinks the old inode.
+                # Retry only that exact, observed exchange; all checks run again
+                # on a freshly opened descriptor. Other files/errors stay fatal.
+                held = fd
+                if path.name == 'state.json' and attempt < 2 and error.code in {'control_file_invalid','private_file_invalid'}:
+                    old = os.fstat(held)
+                    current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                    if old.st_nlink == 0 and (old.st_dev,old.st_ino) != (current.st_dev,current.st_ino):
+                        check()
+                        continue
+                raise
             except (OSError, ValueError) as error:
                 raise RootOperationError('Operationsnachweis ist nicht lesbar: ' + str(path)) from error
             finally:

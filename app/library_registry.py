@@ -1464,13 +1464,22 @@ def register_source_media(
             raise LibraryRegistryError("Quelldatei verweist auf unbekannte Sicherung.")
 
         existing = connection.execute(
-            "SELECT media_id, sha256, created_at FROM source_media WHERE backup_id=? AND relative_path=?",
+            "SELECT media_id, sha256, size_bytes, media_type, created_at FROM source_media WHERE backup_id=? AND relative_path=?",
             (clean_backup, clean_relative),
         ).fetchone()
-        if existing is not None and str(existing["sha256"]).lower() != clean_sha:
+        if existing is not None and (
+            str(existing["sha256"]).lower() != clean_sha
+            or int(existing["size_bytes"]) != max(0,int(size_bytes or 0))
+            or str(existing["media_type"] or "") != str(media_type or "").strip()
+        ):
             raise LibraryRegistryError(
                 "Eine bekannte Quelldatei darf nicht still durch anderen Inhalt ersetzt werden."
             )
+
+        if existing is not None:
+            row=connection.execute("SELECT * FROM source_media WHERE media_id=?",(existing["media_id"],)).fetchone()
+            connection.commit()
+            return dict(row)
 
         connection.execute(
             """
@@ -1531,10 +1540,14 @@ def register_source_family_members(
         if family is None:
             raise LibraryRegistryError("Quellfamilie wurde nicht gefunden.")
 
-        connection.execute(
-            "DELETE FROM source_family_members WHERE source_family_key=?",
-            (clean_family,),
-        )
+        existing = [str(row[0]) for row in connection.execute(
+            "SELECT media_id FROM source_family_members WHERE source_family_key=? ORDER BY member_order,media_id",
+            (clean_family,))]
+        if existing:
+            if set(existing) != set(unique_media):
+                raise LibraryRegistryError("source_inventory_conflict: original source family members are immutable: " + clean_family)
+            connection.commit()
+            return len(existing)
         now = _now()
         for order, media_id in enumerate(unique_media):
             media = connection.execute(

@@ -377,7 +377,8 @@ def purge_trash_database(database_path: Path) -> dict[str, int]:
         rows = [
             dict(row)
             for row in connection.execute(
-                """SELECT id,job_id,family_id,current_relative_path,
+                """SELECT id,job_id,family_id,current_relative_path,original_relative_path,sha256_original,source_size_bytes,size_bytes,
+                          (SELECT family_key FROM file_families WHERE id=files.family_id) AS family_key,
                           COALESCE(sha256_current,sha256_original,'') AS sha256
                    FROM files
                    WHERE current_root_kind='trash'
@@ -397,6 +398,10 @@ def purge_trash_database(database_path: Path) -> dict[str, int]:
                     str(row["id"]),
                     json.dumps(
                         {
+                            "family_key": str(row.get("family_key") or ""),
+                            "original_relative_path": str(row["original_relative_path"]),
+                            "sha256_original": str(row["sha256_original"] or ""),
+                            "source_size_bytes": int(row["source_size_bytes"] if row["source_size_bytes"] is not None else row["size_bytes"]),
                             "trash_relative_path": str(row.get("current_relative_path") or ""),
                             "sha256": str(row.get("sha256") or ""),
                         },

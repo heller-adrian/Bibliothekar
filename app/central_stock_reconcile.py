@@ -118,7 +118,8 @@ def _free_rows(
     rows = connection.execute(
         f"""SELECT f.id AS file_id,f.job_id,f.family_id,
                    f.current_relative_path,f.original_relative_path,
-                   f.original_filename,f.size_bytes,
+                   f.original_filename,f.size_bytes,f.sha256_original,
+                   COALESCE(f.source_size_bytes,f.size_bytes) AS source_size_bytes,
                    COALESCE(f.sha256_current,f.sha256_original,'') AS sha256,
                    ff.family_key,ff.selected_capture_time
             FROM files f
@@ -689,7 +690,8 @@ def reconcile_central_free_stock(
             known = connection.execute(
                 """SELECT f.id AS file_id,f.job_id,f.family_id,
                           f.current_relative_path,f.current_root_kind,
-                          f.original_filename,f.size_bytes,
+                          f.original_filename,f.size_bytes,f.sha256_original,
+                   COALESCE(f.source_size_bytes,f.size_bytes) AS source_size_bytes,
                           COALESCE(f.sha256_current,f.sha256_original,'') AS sha256
                    FROM files f
                    WHERE f.size_bytes=?
@@ -836,6 +838,9 @@ def reconcile_central_free_stock(
                             "library_id": library_id,
                             "family_id": family_id,
                             "family_key": str(row.get("family_key") or ""),
+                            "original_relative_path": str(row.get("original_relative_path") or ""),
+                            "sha256_original": str(row.get("sha256_original") or ""),
+                            "source_size_bytes": int(row["source_size_bytes"]),
                             "last_relative_path": relative,
                             "sha256": str(row.get("sha256") or ""),
                             "confirmed_after_scans": int(

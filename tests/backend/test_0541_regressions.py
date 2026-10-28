@@ -48,6 +48,12 @@ def test_0541_recovers_only_stale_job_snapshot_source_identity(tmp_path, monkeyp
     source_path = "/workspace/.trash-import/TRASH_IMPORT_1"
     signature = _backfill_fixture(monkeypatch, source_path)
     registry = _registry(tmp_path, source_path, source_path)
+    from app.database import initialize_database, create_job
+    initialize_database(tmp_path / "unused.sqlite3")
+    create_job(tmp_path / "unused.sqlite3",job_id="TRASH_IMPORT_1",kind="sd_import",trigger_type="manual",source_path=source_path,working_path="/workspace")
+    from app.database import database_connection
+    with database_connection(tmp_path / "unused.sqlite3") as c:
+        c.execute("UPDATE jobs SET source_signature=? WHERE id='TRASH_IMPORT_1'",(signature,))
     backfill_library_inventory(
         registry, database_path=tmp_path / "unused.sqlite3",
         library_id=MAIN_LIBRARY_ID, claim_all_owned=False,

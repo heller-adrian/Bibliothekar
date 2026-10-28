@@ -396,7 +396,8 @@ def _purge_selected(db: Path, paths: list[str]) -> None:
             raise TrashError("Katalog wurde seit der Löschvorbereitung verändert.")
         for path in paths:
             rows = [dict(row) for row in connection.execute(
-                """SELECT id,job_id,family_id,
+                """SELECT id,job_id,family_id,original_relative_path,sha256_original,source_size_bytes,size_bytes,
+                          (SELECT family_key FROM file_families WHERE id=files.family_id) AS family_key,
                           COALESCE(sha256_current,sha256_original,'') AS sha256
                    FROM files WHERE current_root_kind='trash' AND current_relative_path=?""",
                 (path,)
@@ -406,7 +407,10 @@ def _purge_selected(db: Path, paths: list[str]) -> None:
                     """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
                        VALUES (?,'trash_file_permanently_deleted','file',?,?,?)""",
                     (row["job_id"],str(row["id"]),
-                     json.dumps({"trash_relative_path":path,"sha256":row["sha256"]},
+                     json.dumps({"trash_relative_path":path,"sha256":row["sha256"],
+                      "family_key":row["family_key"],"original_relative_path":row["original_relative_path"],
+                      "sha256_original":row["sha256_original"],
+                      "source_size_bytes":row["source_size_bytes"] if row["source_size_bytes"] is not None else row["size_bytes"]},
                                 ensure_ascii=False),now)
                 )
                 connection.execute(

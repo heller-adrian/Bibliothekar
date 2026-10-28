@@ -181,7 +181,6 @@ def _database_family_rows(
             FROM file_families ff
             JOIN jobs j ON j.id = ff.job_id
             JOIN files f ON f.family_id = ff.id
-            WHERE COALESCE(TRIM(f.sha256_original), '') <> ''
             ORDER BY ff.job_id, ff.id, f.id
             """
         ).fetchall()
@@ -198,10 +197,17 @@ def backfill_library_inventory(
     rows = _database_family_rows(database_path)
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
+        if not str(row.get("sha256_original") or "").strip():
+            raise LibraryRegistryError("source_inventory_conflict: missing original checksum")
         grouped.setdefault(
             (str(row["job_id"]), str(row["family_key"])),
             [],
         ).append(row)
+
+    # Current ownership is mutable; original source membership is not.
+    from app.source_provenance import qualify_origins
+    original = qualify_origins(registry_path, database_path, library_id, grouped,
+                               family_content_fingerprint)
 
     backup_registered: set[str] = set()
     family_count = 0
@@ -209,6 +215,15 @@ def backfill_library_inventory(
     claim_count = 0
 
     for (job_id, family_key), members in grouped.items():
+        if (job_id, family_key) in original:
+            family_count += 1
+            media_count += len(members)
+            if claim_all_owned:
+                claim_source_family(registry_path,
+                    source_family_key=occurrence_key(library_id,job_id,family_key),
+                    library_id=library_id,event_id=None,claim_state="owned")
+                claim_count += 1
+            continue
         first = members[0]
         backup_id = backup_key(library_id, job_id)
         if backup_id not in backup_registered:
@@ -263,13 +278,20 @@ def backfill_library_inventory(
             for row in members
         ]
         source_key = occurrence_key(library_id, job_id, family_key)
+        from app.source_provenance import projection_origin
+        projection=projection_origin(registry_path,database_path,library_id,job_id,family_key,members)
+        origin_metadata={"library_id":library_id,"job_id":job_id}
+        if projection is not None:
+            normalized_members=projection['members']
+            origin_metadata.update(projection_origin=projection['source_family_key'],
+                projected_missing_members=projection['projected_missing_members'])
         family = register_source_family(
             registry_path,
             source_family_key=source_key,
             backup_id=backup_id,
             family_key=family_key,
             content_fingerprint=family_content_fingerprint(normalized_members),
-            metadata={"library_id": library_id, "job_id": job_id},
+            metadata=origin_metadata,
         )
         media_ids: list[str] = []
         for member in normalized_members:
