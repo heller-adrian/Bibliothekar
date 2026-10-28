@@ -117,7 +117,20 @@ def case(label,boundary='',foreign_owner=False,denied=False,helper=False,technic
         docker('exec','--user','568:568',name,'mv','/workspace/Trash','/workspace/trash-lost')
         api('/api/settings/storage-replace',{'key':'trash_directory_name','confirmation':'WRONG'},expect=409)
         replaced=api('/api/settings/storage-replace',{'key':'trash_directory_name','confirmation':'I ACCEPT MISSING FILES'})
-        assert replaced['loss_recorded'] and not replaced['restart_required'],replaced
+        assert replaced['loss_recorded'],replaced
+        if replaced['restart_required']:
+            # The existing API/UI explicitly support restart after a committed
+            # replacement when a live worker prevents the immediate startup.
+            # Never accept a different recovery error, reset or new identity.
+            h=replaced['storage_health']
+            assert h.get('startup_error')=='Startup: Ein anderer Vorgang verwendet diesen Bereich. Bitte kurz warten und erneut versuchen.',replaced
+            assert all(f['status']=='available' and f['identity']==f['expected_identity'] for f in h['folders']),h
+            expected={f['key']:f['identity'] for f in h['folders']}
+            docker('restart',name);api=client(18318)
+            resumed=api('/api/settings/storage-health')
+            assert resumed['ready'] and resumed['state']=='READY',resumed
+            assert {f['key']:f['identity'] for f in resumed['folders']}==expected,resumed
+            result['repair_restart_required']=True
         api('/api/libraries',{'display_name':'After repair','work_root':'','archive_root':'/archive-second'},expect=201)
         if helper:
             assert docker('exec',name,'python','-c',"import urllib.request,json;r=json.load(urllib.request.urlopen('http://127.0.0.1:8090/healthz'));assert r['mount_root']=='/appdata/removable-sources'").strip()==''

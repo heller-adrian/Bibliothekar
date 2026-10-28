@@ -5,6 +5,7 @@ name: RC13 isolated container acceptance
     - release/v1.0.0-rc.13
     paths:
     - qa/rc13/container.py
+    - qa/rc12/container.py
     - .github/workflows/qa-rc13-container.yml
 permissions:
   contents: read
@@ -30,7 +31,7 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
-        git diff --quiet fa803ca7e2435f69c6a226e46bccfab528712571 "$GITHUB_SHA" -- app tests qa Dockerfile compose.example.yaml compose.removable.yaml compose.nas-source.yaml requirements.txt requirements-rc.constraints.txt ':(exclude)qa/rc13/container.py'
+        git diff --quiet fa803ca7e2435f69c6a226e46bccfab528712571 "$GITHUB_SHA" -- app tests qa Dockerfile compose.example.yaml compose.removable.yaml compose.nas-source.yaml requirements.txt requirements-rc.constraints.txt ':(exclude)qa/rc13/container.py' ':(exclude)qa/rc12/container.py'
         gh api repos/heller-adrian/Bibliothekar/actions/runs/40661973452 > "$RUNNER_TEMP/backend-run.json"
         gh api repos/heller-adrian/Bibliothekar/actions/runs/40661973452/jobs > "$RUNNER_TEMP/backend-jobs.json"
         python - <<'PYGATE'

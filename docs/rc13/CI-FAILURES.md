@@ -85,3 +85,14 @@ Die Containerabnahme läuft deshalb separat mit unverändertem App-/Backendstand
 Ein Git-Diff-Gate erlaubt gegenüber dem vollständig bestandenen Backend nur die
 RC13-Containerfixture als QA-Abweichung. Alle 46 Containerfälle bleiben zwingend;
 die fehlgeschlagene ursprüngliche Containerprüfung wird nicht als PASS ausgegeben.
+
+Der erste separate Containerlauf bestand beide neuen RC13-Fälle und acht
+RC12-Fälle. Beim nächsten bestätigten Trash-Ersatz war der Verlust bereits
+festgeschrieben und alle Ordneridentitäten korrekt; der unmittelbare Startup
+traf eine laufende F14-Sperre. Die unveränderte API lieferte ausdrücklich
+`restart_required=true`, die bestehende UI verlangt dafür einen Neustart.
+Die alte Containererwartung verlangte fälschlich immer `false`.
+Die QA akzeptiert jetzt ausschließlich diesen konkreten Busy-Grund, prüft alle
+Identitäten vor und nach einem echten Containerneustart und verlangt danach
+READY sowie die weiterhin folgenden geschützten Mutationen. Andere Startupfehler
+bleiben Testfehler. Keine Reparaturfunktion und keine F14-Sperre geändert.
