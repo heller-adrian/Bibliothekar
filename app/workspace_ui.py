@@ -2833,6 +2833,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         try { globalFolderLayout = await getJson("/api/settings/event-folder-layout"); }
         catch (_) { globalFolderLayout = {structure_enabled:true,input_path:"Alle",layout:{version:1,nodes:[]}}; }
       }
+      if(request!==workspaceLoadSerial)return;
       const ids=[...selectedJobIds].filter(id=>jobs.some(job=>job.id===id));
       selectedDays.clear();
 
@@ -3530,7 +3531,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           const reviewCount=Number(group.review_required_count||0);
           const total=Number(group.file_count||0);
           const readyCount=Number(group.ready_to_sort_file_count||0);
-          name.textContent=reviewCount?'Prüffälle · Ohne Datum':'Bereit zum Einsortieren · Ohne Datum';
+          name.textContent=reviewCount?'Prüffälle · Ohne Datum':readyCount?'Bereit zum Einsortieren · Ohne Datum':'Ohne Datum';
 
           const metadata = document.createElement("span");
           metadata.className = "day-meta";

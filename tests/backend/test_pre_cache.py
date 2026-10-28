@@ -48,3 +48,23 @@ def test_cache_rejects_result_computed_before_database_change(tmp_path):
     accepted=view_cache.put_snapshot(db,'workspace',{'count':88},observed_stamp=stamp)
     assert accepted is False
     assert view_cache.get_snapshot(db,'workspace') is None
+
+
+def test_out_of_order_workspace_responses_cannot_restore_old_count(tmp_path):
+    source=WORKSPACE_HTML
+    a=source.index('    async function loadWorkspace(');b=source.index('    function renderEventSuggestions()',a)
+    from app.ui_workspace_cache import WORKSPACE_CACHE_JS
+    program='''const assert=require('node:assert/strict');const window={__bkLibraryId:'main'};
+const sessionStorage={getItem:()=>null,removeItem(){},setItem(){}};
+let workspace=null,eventSuggestions=[],globalFolderLayout={},workspaceLoadSerial=0;
+const jobs=[{id:'J'}],selectedJobIds=new Set(['J']),selectedDays=new Set(),jobSelect={value:'J'},statusElement={classList:{add(){},remove(){}}};
+const renderSummary=()=>{},renderEventSuggestions=()=>{},renderDays=()=>{},renderPlannedActions=()=>{},renderSelection=()=>{},updateTechnicalAnchor=()=>{},setStatus=()=>{};
+let pending=[];const getJson=()=>new Promise(resolve=>pending.push(resolve));
+'''+WORKSPACE_CACHE_JS+'\n'+source[a:b]+'''
+(async()=>{const old=loadWorkspace();await new Promise(r=>setImmediate(r));const latest=loadWorkspace();await new Promise(r=>setImmediate(r));
+pending[1]({statistics:{file_count:3980},planning_overview:{}});await latest;
+pending[0]({statistics:{file_count:88},planning_overview:{}});await old;
+assert.equal(workspace.statistics.file_count,3980);})().catch(e=>{console.error(e);process.exitCode=1});'''
+    p=tmp_path/'race.cjs';p.write_text(program)
+    r=subprocess.run([shutil.which('node'),str(p)],capture_output=True,text=True,timeout=10)
+    assert r.returncode==0,r.stderr

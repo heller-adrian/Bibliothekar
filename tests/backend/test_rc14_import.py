@@ -53,7 +53,7 @@ def staged_case(fixture, count=6):
     return db,reg,ws,central,stage,logs,job,plan
 
 
-@pytest.mark.parametrize('count',[6,3892])
+@pytest.mark.parametrize('count',[6,100,3892])
 def test_rc13_staged_zero_published_resume_preserves_origin(fixture,count):
     from app.import_recovery import qualify,resume,retain_completed_evidence
     from app.database import update_import_file_paths,database_connection

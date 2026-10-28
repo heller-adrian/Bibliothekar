@@ -1,6 +1,6 @@
 """Read-only optional guidance. It never replaces archive completion checks."""
 from pathlib import Path,PurePosixPath
-import os,stat
+import os,stat,hashlib
 from app.import_publication import _parent,_verified
 
 
@@ -31,7 +31,21 @@ def qualify_rename(archive,rows,*,current_document,replacement,replacement_meta,
         def verify(path,meta):
             with _parent(path) as (fd,name):_verified(fd,name,{'size_bytes':int(meta['size_bytes']),'sha256':str(meta['sha256'])})
         replacement=Path(replacement)
-        verify(replacement,replacement_meta)
+        # Reversal deliberately hardlinks its private Original and Restoration
+        # copies. This read-only proof allows those links; import publication's
+        # exclusive single-link ownership rule is unchanged.
+        with _parent(replacement) as (parent_fd,name):
+            fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK,dir_fd=parent_fd)
+            try:
+                before=os.fstat(fd)
+                if not stat.S_ISREG(before.st_mode) or before.st_size!=int(replacement_meta['size_bytes']):return None
+                digest=hashlib.sha256()
+                while block:=os.read(fd,1024*1024):digest.update(block)
+                after=os.fstat(fd)
+                fields=lambda info:(info.st_dev,info.st_ino,info.st_mode,info.st_nlink,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+                if digest.hexdigest()!=replacement_meta['sha256'] or fields(before)!=fields(after):return None
+            finally:
+                os.close(fd)
         old_doc=archive/str(_relative(current_document['relative_path']))
         verify(old_doc,current_document)
         expected=set()
@@ -49,8 +63,11 @@ def qualify_rename(archive,rows,*,current_document,replacement,replacement_meta,
         for value in known_directories:
             rel=_relative(value)
             if rel.is_relative_to(old) and rel!=old:allowed_dirs.add(str(rel.relative_to(old)))
+        identity_before=source.stat(follow_symlinks=False)
         actual=set()
-        for parent,dirs,names in os.walk(source,followlinks=False):
+        def failed(error):
+            raise error
+        for parent,dirs,names in os.walk(source,followlinks=False,onerror=failed):
             for name in dirs+names:
                 path=Path(parent)/name;info=path.lstat()
                 if stat.S_ISDIR(info.st_mode) and str(path.relative_to(source)) not in allowed_dirs:return None
@@ -58,6 +75,7 @@ def qualify_rename(archive,rows,*,current_document,replacement,replacement_meta,
             actual.update(str((Path(parent)/name).relative_to(source)) for name in names)
         if actual!=expected:return None
         identity=source.stat(follow_symlinks=False)
+        if (identity.st_dev,identity.st_ino)!=(identity_before.st_dev,identity_before.st_ino) or target.exists() or target.is_symlink():return None
         return [
           {'kind':'rename_archive_folder','title':'Geprüften Ordner umbenennen','source':archive_label+'/'+str(old),'target':archive_label+'/'+str(new),'items':[old.name],
            'detail':'Ordner umbenennen, danach die geprüfte event.json ersetzen. Keine weiteren Archivdateien verändern.','state':'pending','identity':[identity.st_dev,identity.st_ino]},

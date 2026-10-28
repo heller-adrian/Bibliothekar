@@ -87,3 +87,25 @@ def test_ambiguous_or_nonexistent_local_time_needs_explicit_offset(tmp_path,stam
     with pytest.raises(mc.MetadataCorrectionError,match='UTC-Offset'):
         mc.write_metadata_datetime(p,'jpeg',stamp)
     assert p.read_bytes()==before
+
+
+def test_general_admission_reuses_durable_job_for_same_bytes(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from app import main
+    db,ws,source,family,task=real_family(tmp_path,'2025-12-07T15:04:37+13:00')
+    context=SimpleNamespace(database_path=db,workspace_root=ws,library_id='main',display_name='Test')
+    monkeypatch.setattr(main,'current_library_context',lambda:context)
+    monkeypatch.setattr(main,'DATABASE_FILE',db)
+    monkeypatch.setattr(main,'WORKSPACE_PATH',ws)
+    paths=mc.metadata_area_paths(area='general',workspace_root=ws,library_id='main',create=True)
+    p=paths['root']/'new.JPG';p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'unique-unregistered-test-bytes')
+    row={'relative_path':'new.JPG','selected_capture_time':'2025-12-07T15:04:37+13:00','capture_time_confidence':'high'}
+    monkeypatch.setattr(main,'scan_metadata_area',lambda **kwargs:{'files':[row]})
+    # Unit admission body; the production wrapper and real HTTP remain in CI.
+    endpoint=main.api_reintegrate_general_metadata.__wrapped__
+    first=endpoint({'items':[{'relative_path':'new.JPG'}]})
+    second=endpoint({'items':[{'relative_path':'new.JPG'}]})
+    assert second['reused'] and first['job']['id']==second['job']['id']
+    with database_connection(db) as c:
+        assert c.execute("SELECT COUNT(*) FROM jobs WHERE operation='metadata_general_import'").fetchone()[0]==1
+    assert p.read_bytes()==b'unique-unregistered-test-bytes'
