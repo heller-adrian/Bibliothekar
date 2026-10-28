@@ -29,7 +29,7 @@ def test_0291_supervisor_separates_root_helper_from_web_uid(monkeypatch):
     for name,value in shipped_constants(container_supervisor,["WEB_UID","WEB_GID","HELPER_ENABLED"]).items():monkeypatch.setattr(container_supervisor,name,value)
     assert container_supervisor.WEB_UID == 568
     assert container_supervisor.WEB_GID == 568
-    assert container_supervisor.HELPER_ENABLED is True
+    assert container_supervisor.HELPER_ENABLED is False  # optional privileged helper requires opt-in
     assert container_supervisor.web_command()[-3:] == [
         "0.0.0.0",
         "--port",

@@ -9,7 +9,7 @@ def test_0422_metadata_areas_scan_automatically_on_page_open():
     assert 'Promise.all([' in html
     assert 'loadAreas(),' in html
     assert 'loadTasks()' in html
-    assert 'scan(true,false);' in html
+    assert 'scan(true,false).then(()=>{syncGeneralBusy();restoreGeneralJob();});' in html
     assert 'if(state.area==="multiple")return scanMultiple(announce);' in html
 
 

@@ -40,6 +40,7 @@ def wait_import(api,task):
 report={'commit':os.environ['GITHUB_SHA'],'native_truenas':'NOT_RUN'}
 try:
  create(os.environ['RC14_IMAGE']);api=old.client()
+ report['rc14_exiftool']=old.docker('exec',name,'exiftool','-ver').strip()
  api('/api/libraries',{'display_name':'Main Library','work_root':'','archive_root':'/main-library'},expect=201)
  old.docker('exec','--user','568:568',name,'python','-c',"import json;from pathlib import Path;p=Path('/appdata/config/settings.json');v=json.loads(p.read_text());v.setdefault('storage',{}).update(safety_reserve_gib=0,processing_buffer_percent=0);p.write_text(json.dumps(v))")
  task=api('/api/jobs/folder-import',{'source_root_key':'nas','source_relative_path':'CARD','source_mode':'folder'},expect=202)
@@ -54,6 +55,7 @@ try:
  before=snapshot();assert all(r['selected_capture_time']=='2025-12-07T15:04:37' for r in before['files'])
  old.docker('stop',name);old.docker('rm',name)
  create(os.environ['IMAGE']);api=old.client();assert api('/api/settings/storage-health')['ready']
+ report['candidate_exiftool']=old.docker('exec',name,'exiftool','-ver').strip()
  response=api('/api/metadata-correction/reintegrate',{'items':items});report['reintegrate']=response
  after=snapshot();assert after['origin']==before['origin'] and after['readonly']==before['readonly']
  assert all(r['selected_capture_time']=='2025-12-07T15:04:37+13:00' for r in after['files'])

@@ -73,7 +73,7 @@ def test_0421_internal_metadata_transfers_are_hidden_from_import_history(tmp_pat
 def test_0421_without_date_is_review_card_not_event_selection():
     html = WORKSPACE_HTML
 
-    assert 'name.textContent = "Prüffälle · Ohne Datum"' in html
+    assert "name.textContent=reviewCount?'Prüffälle · Ohne Datum':readyCount?'Bereit zum Einsortieren · Ohne Datum':'Ohne Datum'" in html
     assert 'card.className = "day-card without-date review-card"' in html
     assert '.filter(group => group.has_date)' in html
     assert 'new Set(selectableDayKeys())' in html

@@ -37,3 +37,27 @@ EN/DE-/Mobile-/General-Reload-Fälle lokal bestanden. Rename-Negativfälle und
 bestehende Archive-/Reversaltests: 23 PASS. Vollständiges read-only CI-Gate
 vorbereitet, noch nicht abgeschlossen. Nächster Schritt: gezieltes Gate bereinigen,
 CI auf dem Prüfcommit ausführen, alle Artefakte prüfen. Keine Veröffentlichung.
+
+## Budget-/Übergabestand
+
+Wochenanzeige 39 % (Start29 %): genehmigungsfreie Auftragsgrenze erreicht;
+Erweiterung bis42 % angefragt. Bis Antwort keine weitere Entwicklung/CI starten.
+Remote-Prüfstand4ae0e231, Lauf40786897485: Browser195PASS,
+Targeted148PASS. Backend3 und4 jeweils283PASS;5 und7 jeweils281PASS,
+je ein README-Versionsfehler, lokal behoben (2PASS). Restpartitionen laufen.
+Lokaler zusätzlicher Commit1c0b3033: tatsächliche RC14-Belegtrunkierung
+berücksichtigt (Metadatengruppe13PASS), General-Admission gegen Quellwechsel
+gepinnt (2PASS). Noch nicht gepusht. README-Version, QA-ExifTool-Versionsnachweis
+und aktualisierter Prüfbericht liegen zusätzlich uncommitted vor.
+Nächster Schritt nach Budgetfreigabe: übrige Backendfehler bündeln; lokale
+Nachträge committen/pushen; vollständiges Gate auf endgültigem Commit,
+reale RC14→pre-Containerreproduktion und bestehende RC10–RC14-QA prüfen;
+alle Artefakte/Partitionen/SKIPs nachweisen und Abschlussbericht fertigstellen.
+Keine Veröffentlichung/Tags/GHCR-Push, keine NAS-Änderung.
+
+Budgeterweiterung bis42 % ausdrücklich vom Benutzer genehmigt. Vorlauf40786897485
+vollständig ausgewertet:2256PASS/5FAIL, keine SKIPs. Fehler: README-Version2,
+alte Quellen-Erwartungen für Helper-Opt-in, Undated-Status und Autoscan3.
+Erwartungen passend zur beauftragten Funktion aktualisiert; Schutzassertions
+bleiben erhalten. Reale RC14-Beleg-/Admission-Korrektur in1c0b3033 gesichert.
+Gebündelter Nachlauf folgt auf dem abschließenden Prüfstand.

@@ -1,14 +1,15 @@
 # Bibliothekar
 
-> Release Candidate **1.0.0-rc.14** in Entwicklung – geprüfte Importfortsetzung und erhaltener Bibliotheksbestand. [RC14-Upgrade und Abnahme](docs/rc14/UPGRADE-RC13.md). Der stabile Update-Kanal bleibt unverändert.
-> Der veröffentlichte Ausgangspunkt dieser Entwicklung ist RC10 (`c8e078ee`). Historische RC7-Unterlagen: [Installationsanleitung](docs/rc7/INSTALL-TRUENAS.md) und [manuelle Abnahme](docs/rc7/MANUAL-ACCEPTANCE.md).
-> Die folgenden älteren Entwicklungsabschnitte sind historisch; für diesen RC gelten die oben verlinkten festen englischen Verwaltungsnamen und Mountregeln.
+> Entwicklungskandidat **1.0.0-pre**, ausgehend vom veröffentlichten RC14.
+> Noch nicht veröffentlicht. [Prüfbericht](docs/pre/TEST-REPORT.md),
+> [RC14-Upgrade](docs/pre/UPGRADE-RC14.md), [TrueNAS-Abnahme](docs/pre/TRUENAS-TEST.md).
+> Native TrueNAS-/Hardwareabnahme steht aus; Freigabe erfolgt separat.
 
 Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
 
 Aktuelle stabile Veröffentlichung: **0.40.3**
 
-Entwicklungsversion: **1.0.0-rc.14** – noch nicht als `latest` veröffentlicht.
+Entwicklungsversion: **1.0.0-pre** – noch nicht als `latest` veröffentlicht.
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
