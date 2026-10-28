@@ -138,6 +138,7 @@ li{margin:12px 0}code{font-size:.88em}.storage-heading{display:flex;align-items:
  function sync(){const value=lang();root.lang=value;root.dataset.bkLocale=value;
   document.querySelectorAll('.bk-translate').forEach(el=>{el.textContent=el.dataset[value]||''});
   document.querySelectorAll('.bk-lang').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.lang===value)));
+  window.BibliothekarI18n?.setLocale(value);
  }
  for(const b of document.querySelectorAll('.bk-lang'))b.addEventListener('click',()=>{try{localStorage.setItem(key,b.dataset.lang)}catch(_){}sync()});
  sync();

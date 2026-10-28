@@ -53,7 +53,13 @@ await page.locator('.plan-target-group').evaluate(n=>n.open=true);await page.loc
 const sort=await page.locator('#sort-plan-body').innerText();
 if(locale==='en')assert(!/Familien|Dateien|Familie:|Einzeldateien|Dateisystem: ja|Unterereignis/.test(sort),sort);
 await page.screenshot({path:path.join(out,`${locale}-${width}-nested-sort.png`)});results.push({locale,width,stage:'nested-sort',status:'PASS'});
-await page.setContent(strip(bundle.warning));await page.addScriptTag({content:bundle.i18n});await page.evaluate(l=>window.BibliothekarI18n.setLocale(l),locale);
+await page.setContent(bundle.warning);
+for(const choice of [locale==='en'?'de':'en',locale]){
+ await page.locator('.bk-lang[data-lang="'+choice+'"]').click();await page.waitForTimeout(60);
+ assert.equal(await page.locator('#storage-title').innerText(),choice==='en'?'Storage unavailable':'Speicherordner nicht verfügbar');
+ assert.equal(await page.locator('.storage-copy').innerText(),choice==='en'?'Copy name':'Namen kopieren');
+ assert.equal(await page.evaluate(()=>window.BibliothekarI18n.getLocale()),choice);
+}
 assert.equal(await page.locator('#storage-setup-blocker').count(),0);assert.equal(await page.locator('.storage-copy').getAttribute('data-copy'),'Trash');
 await page.screenshot({path:path.join(out,`${locale}-${width}-storage.png`)});results.push({locale,width,stage:'storage',status:'PASS'});
 await page.goto('http://rc13.invalid/events');await page.evaluate(()=>document.documentElement.dataset.bkTheme='light');await page.addScriptTag({content:bundle.i18n});await page.evaluate(l=>window.BibliothekarI18n.setLocale(l),locale);

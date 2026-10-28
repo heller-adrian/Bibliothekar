@@ -51,3 +51,27 @@ Sortier-Recoveryfälle 5 PASS ohne bedingten Recovery-Skip. Chromium-Matrix erne
 dann alle acht vollständigen Backendpartitionen und die echte Containerabnahme.
 Keine Veröffentlichung erfolgt. Nächster Schritt: Linuxgate, vollständige
 Abnahme und Fehlerkorrekturen anhand der tatsächlichen Containerbelege.
+
+Linuxlauf 40654740807 auf ad73cf38: gezieltes Fehler-/Sicherheitsgate
+64 PASS ohne SKIP (einschließlich echter Linux-fstatfs-ABI, alter Timeouts,
+F14-Abschlussbelegen und Sortier-Recovery); Chromium 44 PASS. Die acht vollständigen
+Backendgruppen laufen. Veröffentlichung weiterhin gesperrt bis zum vollständigen
+Backend- und Containerergebnis. Praktische Anleitung in TRUENAS-TEST.md ergänzt.
+
+Abschließender UI-Abgleich: verbliebene englische SSD-Formulierungen einschließlich
+Backend-Freigabehinweis auf Arbeitsbereich/Workspace korrigiert; 21 gezielte
+UI-/Lokalisierungstests PASS. Die bisherige Browserfixture entfernte auf der
+Reparaturseite auch deren eigenen Sprachcode. Jetzt läuft das tatsächliche
+Seitenskript mit echten EN-/DE-Schaltflächen. Dabei Sprachzustand der lokalen
+Recovery-Texte mit der allgemeinen I18n-Engine synchronisiert; ausschließlich
+Darstellung, unveränderte Reparaturrequests/-bestätigungen. Chromium erneut
+44 PASS einschließlich beider realer Sprachwechsel und erwarteter Ordnernamen.
+
+Letztes lokales UI-/QA-Gate: 23 PASS; Chromium 44 PASS mit Prüfung jedes
+Sprachwechsels. Gegenprobe ohne Sprachzustands-Synchronisation reproduziert
+falsch englischen Text nach DE-Wechsel. Keine Änderung an Reparaturautorisation.
+Die vollständige Linuxabnahme wird für diesen letzten UI-Stand erneut gestartet.
+Lange Crashdateien werden jetzt nach gesammelten Test-IDs statt ganzen Dateien
+verteilt; Manifestprüfung muss über alle acht Gruppen genau jeden Test einmal
+nachweisen. Frühere Gruppenergebnisse werden nicht als abschließende Abnahme
+dieses neuen Stands ausgegeben.

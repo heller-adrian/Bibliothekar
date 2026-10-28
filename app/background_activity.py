@@ -203,7 +203,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             "label": "Arbeitsbereich freigeben",
             "detail": (
                 "Freigabe wartet auf Verarbeitung" if status == "queued"
-                else "Freigabe läuft; Archiv und SSD werden geprüft"
+                else "Freigabe läuft; Archiv und Arbeitsbereich werden geprüft"
                 if status == "running"
                 else "Freigabe abgeschlossen" if status == "completed"
                 else "Freigabe angehalten: " + str(task.get("error_message") or "Unbekannter Fehler")

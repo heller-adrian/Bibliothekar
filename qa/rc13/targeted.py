@@ -8,7 +8,7 @@ import sys
 source = Path(__file__).resolve().parents[2]
 tests = [
     'test_root_atomic_publication.py', 'test_descriptor_filesystem.py',
-    'test_rc13_provenance.py', 'test_rc13_ui.py',
+    'test_rc13_provenance.py', 'test_rc13_ui.py', 'test_rc13_partition.py',
     'test_0504_english_ui_completion.py', 'test_0508_regression.py',
     'test_0509_english_workflows.py',
     'test_f14_o2_policy.py::test_f14_o2_sigkill_and_three_real_lifecycle_starts_preserve_state',

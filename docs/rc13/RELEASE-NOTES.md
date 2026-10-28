@@ -15,7 +15,7 @@ Status: Implementierung und automatisierte Abnahme laufen. Noch kein Release.
   verifizierten Rückkehrkopien; unbekannte Inhalte bleiben geschützt.
 
 [Ursachenanalyse](ANALYSE.md) · [Alle 20 Screenshots](SCREENSHOTS.md) ·
-[Upgrade und praktische Abnahme](UPGRADE-RC12.md)
+[Upgrade](UPGRADE-RC12.md) · [Praktische TrueNAS-Abnahme](TRUENAS-TEST.md)
 
 Linux-/Containerergebnisse und unveränderlicher Image-Digest werden erst nach
 abgeschlossener Abnahme ergänzt. Keine native TrueNAS-/ACL-Freigabe.

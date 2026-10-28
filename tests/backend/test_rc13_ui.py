@@ -47,3 +47,10 @@ def test_whole_event_advice_requires_complete_verified_inventory(tmp_path,monkey
     result=qualify_event_folder(tmp_path/'db',archive,ws,'CR',stock)
     assert result['qualified'] is (change is None),result
     assert {str(p):p.read_bytes() for p in archive.rglob('*') if p.is_file()}==before
+
+
+def test_all_workspace_translations_use_workspace_terminology():
+    from app.ui_i18n import UI_TRANSLATIONS, UI_PATTERNS
+    assert not [(key,value) for key,value in UI_TRANSLATIONS.items() if 'SSD' in value]
+    assert not [(key,value) for key,value in UI_PATTERNS if 'SSD' in value]
+    assert UI_TRANSLATIONS['Freigabe läuft; Archiv und Arbeitsbereich werden geprüft']=='Release running; checking archive and workspace'

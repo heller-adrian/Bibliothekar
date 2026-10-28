@@ -19,6 +19,11 @@ def workspace_words(text):
         ('SSD originals','workspace originals'),('SSD structures','workspace structures'),
         ('SSD folders','workspace folders'),('SSD files','workspace files'),
         ('to the SSD','to the workspace'),('on the SSD','in the workspace'),
+        ('SSD release','Workspace release'),('SSD released','workspace released'),
+        ('ON SSD','IN THE WORKSPACE'),('on SSD','in the workspace'),
+        ('SSD event files','workspace event files'),('SSD recovery inventory','workspace recovery inventory'),
+        ('to SSD','to the workspace'),('archive and SSD','archive and workspace'),
+        ('Release SSD','Release workspace'),
         ('from SSD','from workspace'),('from the SSD','from the workspace'),
         ('Finder-Rückarbeit','Manuelle Wiederherstellung'),('Manual Finder restoration','Manual restoration'),
         ('Finder-Arbeit','Manuelle Arbeit'),('Finder work','Manual work'),('Finder-Schritten','manuellen Schritten'),
@@ -56,6 +61,7 @@ TRANSLATIONS={
  'Temporäre, geprüfte Metadatenkorrekturen; Allgemein und Stapelkorrektur.':'Temporary verified metadata corrections; General and Batch Correction.',
  'Zurückgehaltene Dateien bis zur ausdrücklich bestätigten endgültigen Löschung.':'Files retained until explicitly confirmed permanent deletion.',
  'Kein eindeutiger Zielordner vorhanden.':'No unique destination folder available.',
+ 'Freigabe läuft; Archiv und Arbeitsbereich werden geprüft':'Release running; checking archive and workspace',
  'Allgemein':'General','Stapelkorrektur':'Batch Correction',
 }
 PATTERNS=[
