@@ -63,7 +63,8 @@ subprocess.run(['exiftool','-overwrite_original','-EXIF:DateTimeOriginal=2026:10
   assert checkpoint['function']==('_atomic_json' if boundary=='journal' else 'publish_import_file'),checkpoint
   assert checkpoint['thread']=='kamera-job-worker',checkpoint
   assert old.docker('inspect','-f','{{.State.ExitCode}}',name).strip()!='0',checkpoint
-  (root/'evidence/rc14-checkpoint.json').rename(root/'evidence/rc13-import-checkpoint.json')
+  # The runner cannot rename UID568-owned evidence in this host fixture.
+  old.command('sudo','mv',str(root/'evidence/rc14-checkpoint.json'),str(root/'evidence/rc13-import-checkpoint.json'))
   old.docker('rm',name);create(os.environ['IMAGE']);api=old.client()
   history=api('/api/import-history')['jobs'];job=next(j for j in history if j['operation']=='folder_import')
   assert job['state'] in ('failed','interrupted'),job

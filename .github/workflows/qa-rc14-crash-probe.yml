@@ -40,4 +40,3 @@ jobs:
           path: |
             ${{ runner.temp }}/rc14-evidence.json
             ${{ runner.temp }}/rc14-container-logs
-            ${{ runner.temp }}/rc14-container
