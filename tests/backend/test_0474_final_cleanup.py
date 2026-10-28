@@ -43,7 +43,9 @@ def test_0474_legacy_source_picker_removed_but_import_kept():
     # RC3 uses an English generated fallback; real source labels remain unchanged.
     assert 'device.device_id, device.label || device.model || "SD Card"' in code
     assert "/sources/import" not in compose
-    assert "/sources/nas:ro" in compose
+    import yaml
+    nas=yaml.safe_load((Path(__file__).resolve().parents[2]/"compose.nas-source.yaml").read_text())["services"]["bibliothekar"]["volumes"][0]
+    assert nas["target"]=="/sources/nas" and nas["read_only"] is True
 
 
 def test_0474_statistics_follow_selected_nas_folder(tmp_path, monkeypatch):

@@ -104,8 +104,8 @@ m.write_metadata_datetime = lambda path,media_type,value: Path(path).write_bytes
 m.verify_metadata_datetime = lambda path,expected: {"expected_datetime":expected,"matching_tags":[{"tag":"test","value":expected}],"observed_tags":[]}
 if sys.argv[3] in {"after_backup","after_first_replacement","after_second_backup"}:
     original=m.os.replace
-    def abrupt(src,dst):
-        result=original(src,dst)
+    def abrupt(src,dst,**kwargs):
+        result=original(src,dst,**kwargs)
         mode=sys.argv[3]
         if mode=="after_backup" and ".metadata-before-" in str(dst):
             os._exit(42)
@@ -220,8 +220,8 @@ preview=m.preview_multiple_metadata_correction(
 )
 if sys.argv[3] in {"after_backup","after_first_replacement","after_second_backup"}:
     original=m.os.replace
-    def abrupt(src,dst):
-        result=original(src,dst)
+    def abrupt(src,dst,**kwargs):
+        result=original(src,dst,**kwargs)
         mode=sys.argv[3]
         if mode=="after_backup" and ".multiple-before-" in str(dst):
             os._exit(42)
@@ -301,8 +301,8 @@ m.build_folder_import_plan=lambda entries,analysis,root,**kw: ([
 ],[],{})
 if sys.argv[3] in {"after_backup","after_incoming","after_destination"}:
     old=m.os.replace
-    def terminate(src,dst):
-        result=old(src,dst)
+    def terminate(src,dst,**kwargs):
+        result=old(src,dst,**kwargs)
         mode=sys.argv[3]
         if mode=="after_backup" and ".reintegrate-before-" in str(dst):
             os._exit(42)

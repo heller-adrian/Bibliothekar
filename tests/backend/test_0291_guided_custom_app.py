@@ -59,10 +59,15 @@ def test_0291_compose_is_one_service_and_guided_custom_app_compatible():
     assert "pid: host" not in compose
     assert "network_mode:" not in compose
     assert 'user: "0:0"' in compose
-    assert "privileged: true" in compose
-    assert "KAMERA_SOURCE_HELPER_ENABLED: \"true\"" in compose
-    assert "${BIBLIOTHEKAR_REMOVABLE_DIR}:/sources/removable\n" in compose
-    assert "${BIBLIOTHEKAR_REMOVABLE_DIR}:/sources/removable:ro" not in compose
+    import yaml
+    base=yaml.safe_load(compose)['services']['bibliothekar']
+    removable=yaml.safe_load((REPO_ROOT/'compose.removable.yaml').read_text())['services']['bibliothekar']
+    assert not base.get('privileged',False)
+    assert base['environment']['KAMERA_SOURCE_HELPER_ENABLED']=='false'
+    assert removable['privileged'] is True
+    assert removable['environment']['KAMERA_SOURCE_HELPER_ENABLED']=='true'
+    assert '/run/udev:/run/udev:ro' in removable['volumes']
+    assert all(row['target']!='/sources/removable' for row in base['volumes'])
 
 
 def test_0291_removable_media_are_still_forced_read_only():

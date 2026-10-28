@@ -350,7 +350,9 @@ def test_0300_worker_and_ui_are_library_foundation_aware():
     ui_source = (repo_root / "app" / "ui_shell.py").read_text()
     compose = (repo_root / "compose.example.yaml").read_text()
 
-    assert f'DEPLOYMENT_VERSION = "{EXPECTED_RELEASE_VERSION}"' in main_source
+    from app import main
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
+    assert "DEPLOYMENT_VERSION = __version__" in main_source
     assert "list_active_library_contexts(" in main_source
     assert "context.database_path" in main_source
     assert "library_context=context" in main_source
@@ -358,7 +360,9 @@ def test_0300_worker_and_ui_are_library_foundation_aware():
     assert "deployment_version" in ui_source
     assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in ui_source
     assert f'ghcr.io/heller-adrian/bibliothekar:{EXPECTED_RELEASE_VERSION}' in compose
-    assert "KAMERA_REGISTRY_DATABASE: /database/bibliothekar-global.sqlite3" in compose
+    assert "KAMERA_APPDATA: /appdata" in compose
+    from app import appdata
+    assert "bibliothekar-global.sqlite3" in Path(appdata.__file__).read_text()
 
 
 def test_0300_registry_file_cannot_be_used_as_library_database(tmp_path):

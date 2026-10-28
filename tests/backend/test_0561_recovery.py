@@ -223,8 +223,8 @@ def test_general_metadata_restart_boundaries(tmp_path, monkeypatch, boundary):
     with monkeypatch.context() as m:
         if boundary in ('backup', 'swap'):
             real = mc.os.replace
-            def stop(src, dst):
-                real(src, dst)
+            def stop(src, dst, **kwargs):
+                real(src, dst, **kwargs)
                 if (boundary == 'backup' and Path(src) == source) or (boundary == 'swap' and Path(dst) == source):
                     raise Interrupted()
             m.setattr(mc.os, 'replace', stop)

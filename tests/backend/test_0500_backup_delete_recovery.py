@@ -121,11 +121,11 @@ def test_0500_interrupted_rollback_keeps_journal_and_bytes(tmp_path, monkeypatch
     db, registry, root, original, _ = _seed(tmp_path)
     original_replace = module.os.replace
 
-    def inject(source, destination):
+    def inject(source, destination, **kwargs):
         # Permit the first stage move but refuse the restore.
         if str(source).find(".deleting/") >= 0:
             raise PermissionError("synthetic restore refused")
-        return original_replace(source, destination)
+        return original_replace(source, destination, **kwargs)
 
     def stop_before_main(*args):
         raise RuntimeError("synthetic SQLite failure")

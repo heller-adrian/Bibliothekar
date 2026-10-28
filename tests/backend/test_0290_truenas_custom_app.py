@@ -44,9 +44,16 @@ def test_0290_compose_uses_custom_app_mount_contract():
     assert "KAMERA_ARCHIVE_ROOT: /main-library" in compose
     assert "KAMERA_IMPORT_ROOT: /sources/import" not in compose
     assert "KAMERA_NAS_SOURCE_ROOT: /sources/nas" in compose
-    assert "KAMERA_REMOVABLE_ROOT: /sources/removable" in compose
-    assert "${BIBLIOTHEKAR_MAIN_LIBRARY_DIR}:/main-library:ro" in compose
-    assert "${BIBLIOTHEKAR_WORKSPACE_DIR}:/workspace" in compose
+    import yaml
+    volumes=yaml.safe_load(compose)['services']['bibliothekar']['volumes']
+    by_target={row['target']:row for row in volumes}
+    assert by_target['/appdata']['source']=='${BIBLIOTHEKAR_APPDATA_DIR}'
+    assert by_target['/main-library']['read_only'] is True
+    assert by_target['/workspace']['source']=='${BIBLIOTHEKAR_WORKSPACE_DIR}'
+    assert all(row['bind']['create_host_path'] is False for row in volumes)
+    from app.appdata import configure
+    from app import appdata
+    assert '"removable-sources"' in Path(appdata.__file__).read_text() or "'removable-sources'" in Path(appdata.__file__).read_text()
 
 
 def test_0290_workspace_owns_sd_backup_structure():

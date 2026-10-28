@@ -111,7 +111,7 @@ def case(label,boundary='',foreign_owner=False,denied=False,helper=False,technic
         # Actual storage fault -> authenticated repair UI -> both recovery paths.
         docker('exec','--user','568:568',name,'mv','/workspace/Trash','/workspace/trash-original')
         h=api('/api/settings/storage-health');assert h['state']=='DEGRADED' and not h['ready'],h
-        page=api('/',raw=True);assert 'storage-replace' in page and 'Expected folder identity' in page
+        page=api('/',raw=True);assert 'storage-replace' in page and 'Expected folder:' in page
         docker('exec','--user','568:568',name,'mv','/workspace/trash-original','/workspace/Trash');api('/api/settings/storage-recheck',{})
         assert api('/api/settings/storage-health')['ready']
         docker('exec','--user','568:568',name,'mv','/workspace/Trash','/workspace/trash-lost')

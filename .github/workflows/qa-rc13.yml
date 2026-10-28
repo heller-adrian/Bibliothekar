@@ -1,0 +1,113 @@
+name: RC13 complete isolated acceptance
+on:
+  push:
+    branches: [release/v1.0.0-rc.13]
+    paths-ignore: ['docs/**', 'README.md', 'CHANGELOG.md', '.github/workflows/publish-rc13.yml']
+permissions:
+  contents: read
+concurrency:
+  group: rc13-acceptance
+  cancel-in-progress: true
+jobs:
+  backend:
+    name: Complete backend (${{ matrix.partition }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl acl
+          pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - run: python qa/rc13/regression.py '${{ matrix.partition }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc13-backend-${{ matrix.partition }}
+          path: |
+            ${{ runner.temp }}/f14-qa/targets/results
+            ${{ runner.temp }}/rc13-partition.json
+  browser:
+    name: Chromium German English mobile desktop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          pip install -r requirements.txt -c requirements-rc.constraints.txt
+          npm install --prefix "$RUNNER_TEMP/rc13-browser-tools" playwright@1.62.1
+          "$RUNNER_TEMP/rc13-browser-tools/node_modules/.bin/playwright" install --with-deps chromium
+      - run: |
+          python qa/rc13/export_ui.py "$RUNNER_TEMP/rc13-ui-bundle.json"
+          NODE_PATH="$RUNNER_TEMP/rc13-browser-tools/node_modules" node qa/rc13/browser.cjs "$RUNNER_TEMP/rc13-ui-bundle.json" "$RUNNER_TEMP/rc13-browser"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc13-browser
+          path: ${{ runner.temp }}/rc13-browser
+  acceptance:
+    name: Real supervisor RC12 upgrade and crash acceptance
+    needs: [backend, browser]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      IMAGE: bibliothekar:rc13-acceptance
+      RC12_IMAGE: bibliothekar:rc12-original
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y acl
+      - name: Compose contract
+        env:
+          BIBLIOTHEKAR_APPDATA_DIR: /tmp/rc13/appdata
+          BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/rc13/workspace
+          BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/rc13/archive
+          BIBLIOTHEKAR_NAS_SOURCE_DIR: /tmp/rc13/source
+          BIBLIOTHEKAR_ADMIN_PASSWORD: isolated-rc13-compose-password
+        run: docker compose -f compose.example.yaml -f compose.removable.yaml -f compose.nas-source.yaml config -q
+      - name: Build exact candidate and original released RC12
+        run: |
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+          mkdir "$RUNNER_TEMP/rc12-source"
+          git archive 671d7e7eb96ff493ae51720bb2769eccd8f9048f | tar -x -C "$RUNNER_TEMP/rc12-source"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION=671d7e7eb96ff493ae51720bb2769eccd8f9048f -t "$RC12_IMAGE" "$RUNNER_TEMP/rc12-source"
+      - name: Real RC12 deletion and blocked restart to RC13, UID568, HTTP, second library, SIGKILL
+        run: python qa/rc13/container.py
+      - name: Preserve all RC12 storage repair and bootstrap acceptance
+        run: python qa/rc12/container.py
+      - name: Preserve RC10 RC11 migration and crash acceptance
+        run: python qa/rc11/container.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc13-container
+          path: |
+            ${{ runner.temp }}/rc13-evidence.json
+            ${{ runner.temp }}/rc13-container-logs
+            ${{ runner.temp }}/rc12-evidence.json
+            ${{ runner.temp }}/rc12-container-logs
+            ${{ runner.temp }}/rc11-evidence.json
+            ${{ runner.temp }}/rc11-container-logs
