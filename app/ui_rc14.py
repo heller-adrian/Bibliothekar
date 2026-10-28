@@ -67,6 +67,7 @@ PATTERNS=[
  [r'^Importprüfung: ([0-9]+) Dateien im Staging, ([0-9]+) Dateien veröffentlicht\.$','Import verification: $1 staged files, $2 published files.'],
 ]
 for message in ERRORS.values():
-    import re
     if message in TRANSLATIONS:
-        PATTERNS.insert(0,[r'^'+re.escape(message)+r': (.+)$',TRANSLATIONS[message]+': $1'])
+        # JavaScript Unicode regexes reject Python's escaped spaces/hyphens.
+        escaped=''.join('\\'+c if c in r'.^$*+?{}[]\|()' else c for c in message)
+        PATTERNS.insert(0,[r'^'+escaped+r': (.+)$',TRANSLATIONS[message]+': $1'])
