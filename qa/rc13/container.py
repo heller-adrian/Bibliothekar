@@ -14,8 +14,8 @@ import urllib.error
 import urllib.request
 
 source=Path(__file__).resolve().parents[2]
-base=Path(os.environ['RUNNER_TEMP'])/'rc13-container';base.mkdir()
-logs=Path(os.environ['RUNNER_TEMP'])/'rc13-container-logs';logs.mkdir()
+base=Path(os.environ['RUNNER_TEMP'])/'rc13-container';base.mkdir(exist_ok=True)
+logs=Path(os.environ['RUNNER_TEMP'])/'rc13-container-logs';logs.mkdir(exist_ok=True)
 report={'source':os.environ['GITHUB_SHA'],'native_truenas':'NOT_RUN','cases':[]}
 
 def command(*args,check=True):
@@ -169,5 +169,6 @@ Path('/fixture/workspace/.DS_Store').write_bytes(b'Finder')
         capture('final');docker('rm','-f',name,check=False)
         (Path(os.environ['RUNNER_TEMP'])/'rc13-evidence.json').write_text(json.dumps(report,indent=2))
 
-run_case('rc12-upgrade')
-run_case('rc12-upgrade-sigkill',crash=True)
+if __name__=='__main__':
+    run_case('rc12-upgrade')
+    run_case('rc12-upgrade-sigkill',crash=True)

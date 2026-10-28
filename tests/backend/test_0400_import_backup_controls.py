@@ -146,7 +146,7 @@ def test_0400_import_ui_explains_copy_and_exposes_controls():
     assert "/api/backups/" in source
 
 
-def test_0400_folder_import_can_be_cancelled_without_incoming_residue(tmp_path: Path):
+def test_0400_folder_import_cancel_retains_protocol_and_source(tmp_path: Path):
     source = tmp_path / "source"
     workspace = tmp_path / "workspace"
     logs = tmp_path / "logs"
@@ -168,7 +168,8 @@ def test_0400_folder_import_can_be_cancelled_without_incoming_residue(tmp_path: 
             cancellation_callback=lambda: True,
         )
 
-    assert not (backup_root(workspace) / ".incoming" / "CANCEL_0400").exists()
+    assert (source/"IMG_0001.JPG").read_bytes()==b"camera"
+    assert (backup_root(workspace)/".incoming"/"CANCEL_0400").exists()
 
 
 def test_0400_completed_unused_backup_can_be_deleted(tmp_path: Path):

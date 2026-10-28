@@ -394,6 +394,27 @@ def reconcile_central_free_stock(
     modified = 0
     matched_central_paths: set[str] = set()
 
+    # Hashing is unbounded filesystem work. Never hold the SQLite writer while
+    # doing it: even one slow NAS hash otherwise starves import progress/path
+    # publication beyond busy_timeout. Revalidate both snapshots before commit.
+    snapshot_rows = rows
+    expected = {str(r['expected_relative_path']): r for r in rows}
+    search_sizes = {int(r['size_bytes']) for r in rows
+                    if str(r['expected_relative_path']) not in actual_by_relative}
+    signatures = {}
+    for item in actual:
+        path = Path(item['path'])
+        st = path.stat(follow_symlinks=False)
+        signatures[str(path)] = (st.st_dev,st.st_ino,st.st_mode,st.st_size,st.st_mtime_ns,st.st_ctime_ns)
+        r = expected.get(str(item['relative_path']))
+        if r is None or int(r['size_bytes']) != int(item['size_bytes']) or int(item['size_bytes']) in search_sizes:
+            hash_cache[str(path)] = _sha256_file(path)
+
+    def digest_for(item):
+        # A cache miss means the snapshot changed; never fall back to hashing
+        # under the writer transaction.
+        return hash_cache[str(item['path'])]
+
     with database_connection(database_path) as connection:
         # Recheck after filesystem enumeration. Holding the catalogue writer
         # lock prevents a new sort intent/status commit from racing this scan.
@@ -402,6 +423,19 @@ def reconcile_central_free_stock(
         if deferred is not None:
             return deferred
         rows = _free_rows(connection, excluded)
+        if rows != snapshot_rows:
+            return {'ready':False,'error':'inventory_snapshot_changed','deleted_file_count':0,'pending_missing_count':0}
+        current_files={str(i['relative_path']) for i in _actual_files(central_root) if i['relative_path'] not in reserved_targets}
+        if current_files!=set(actual_by_relative):
+            return {'ready':False,'error':'physical_snapshot_changed','deleted_file_count':0,'pending_missing_count':0}
+        for item in actual:
+            try:
+                st = Path(item['path']).stat(follow_symlinks=False)
+                current = (st.st_dev,st.st_ino,st.st_mode,st.st_size,st.st_mtime_ns,st.st_ctime_ns)
+            except OSError:
+                current = None
+            if current != signatures[str(item['path'])]:
+                return {'ready':False,'error':'physical_snapshot_changed','deleted_file_count':0,'pending_missing_count':0}
         prior_rows = connection.execute(
             "SELECT file_id,consecutive_misses FROM central_missing_file_observations"
         ).fetchall()
@@ -410,13 +444,6 @@ def reconcile_central_free_stock(
             for row in prior_rows
         }
 
-        def digest_for(item: dict[str, Any]) -> str:
-            key = str(item["path"])
-            digest = hash_cache.get(key)
-            if digest is None:
-                digest = _sha256_file(Path(item["path"]))
-                hash_cache[key] = digest
-            return digest
 
         for row in rows:
             file_id = int(row["file_id"])

@@ -790,7 +790,7 @@ def _require_coordinated_topology(root, databases):
 
 
 @contextmanager
-def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, rollback_check=None, expected_generation=None, precondition=None, details=None, wait_seconds=0):
+def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, rollback_check=None, expected_generation=None, precondition=None, details=None, wait_seconds=0, staging_precondition=None):
     from app.managed_storage_health import require_pinned_storage
     require_pinned_storage(workspace)
     root,parent=_control(workspace)
@@ -821,7 +821,7 @@ def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, roll
                 raise RootOperationError('Stammordnergeneration hat sich geändert. Bitte die aktuellen Einstellungen erneut laden.')
             if precondition is not None and not precondition():
                 raise RootOperationError('Bibliothekspfade haben sich vor der Reservationsentscheidung geändert.')
-            assert_no_pending(root,databases,library_id=library)
+            assert_no_pending(root,databases,library_id=library,staging_precondition=staging_precondition)
             for p in sorted(parent.glob('operation-*.json')):
                 record=_read(p)
                 if library is not None and record.get('library')!=library and not record.get('shared', True):continue
@@ -870,7 +870,7 @@ def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, roll
                 _MUTATION.reset(token)
 
 
-def assert_no_pending(workspace, databases, *, library_id=None, allowed_missing_roots=()):
+def assert_no_pending(workspace, databases, *, library_id=None, allowed_missing_roots=(), staging_precondition=None):
     from app.storage_config import load_storage_settings
     names=load_storage_settings(workspace_root=Path(workspace))
     paths={'metadata_root':Path(workspace)/names['metadata_directory_name'],'backup_root':Path(workspace)/names['backup_directory_name']}
@@ -894,7 +894,7 @@ def assert_no_pending(workspace, databases, *, library_id=None, allowed_missing_
                 raise RootOperationError('Stammordnerwechsel wegen eines ungeklärten Recoveryjournals nicht möglich: '+name)
     if any((paths['backup_root']/'.deleting-journals').glob('*.json')):
         raise RootOperationError('Ungeklärtes Sicherungs-Löschjournal verhindert den Stammordnerwechsel.')
-    if any(p.is_file() or p.is_symlink() for p in (paths['backup_root']/'.incoming').rglob('*')):
+    if any(p.is_file() or p.is_symlink() for p in (paths['backup_root']/'.incoming').rglob('*')) and (staging_precondition is None or not staging_precondition()):
         raise RootOperationError('Ungeklärtes Import-Staging verhindert den Stammordnerwechsel.')
     checks=[('jobs','state',{'queued','copying','verifying','analyzing','organizing','moving','running','interrupted'}),('sort_runs','status',{'queued','planned','verifying','moving','finalizing','rolling_back','interrupted','rollback_failed'}),('event_ssd_releases','status',None),('ssd_release_tasks','status',{'queued','running'}),('background_mutation_cancellations','status',{'queued','running','failed'}),('operation_batches','status',{'queued','running','interrupted'})]
     checks.extend([('metadata_corrections','status',{'queued','writing','interrupted','blocked'}),('event_mutations','status',{'pending_reassignment','pending_apply','manual_archive'}),('archive_recovery_incidents','status',{'manual_review'})])

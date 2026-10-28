@@ -317,7 +317,7 @@ def resolve_library_work_root(
             raise WorkspaceLayoutError(
                 "Der gespeicherte Bibliotheks-Arbeitsbereich ist nicht verfügbar: "
                 + str(target)
-                + ". Ein Ordner 'main' wird von Bibliothekar niemals automatisch angelegt."
+                + "."
             )
     if not target.is_dir():
         raise WorkspaceLayoutError(

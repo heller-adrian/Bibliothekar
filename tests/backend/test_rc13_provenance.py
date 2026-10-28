@@ -146,6 +146,7 @@ def test_new_secondary_after_confirmed_loss_uses_original_family(tmp_path):
     second_archive=tmp_path/'archive-second';second_archive.mkdir()
     register_library(reg,library_id='second',display_name='Second',database_path=second,
         workspace_root=ws,work_root=second_work,archive_root=second_archive)
+    with database_connection(db) as c:c.execute("UPDATE jobs SET state='completed' WHERE id='J'")
     project_import_job(db,second,'J')
     with sqlite3.connect(reg) as c:expected=c.execute("SELECT canonical_family_id FROM source_families WHERE source_family_key='main:J:F'").fetchone()[0]
     for _ in range(2):

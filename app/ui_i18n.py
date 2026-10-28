@@ -1533,6 +1533,10 @@ UI_TRANSLATIONS.update({k:workspace_words(v) for k,v in list(UI_TRANSLATIONS.ite
 UI_PATTERNS[:0] = RC13_PATTERNS
 UI_PATTERNS = [[workspace_words(k),workspace_words(v)] for k,v in UI_PATTERNS]
 
+from app.ui_rc14 import TRANSLATIONS as RC14_TRANSLATIONS, PATTERNS as RC14_PATTERNS
+UI_TRANSLATIONS.update(RC14_TRANSLATIONS)
+UI_PATTERNS[:0]=RC14_PATTERNS
+
 I18N_UI_JS = r"""
 (function () {
   "use strict";

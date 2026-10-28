@@ -4339,7 +4339,7 @@ BIBLIOTHEKAR_JS = r"""
     if (!response.ok) {
       const detail = data.detail;
       if (detail && typeof detail === "object") {
-        throw new Error((detail.errors || []).join("\n") || "Prüfung fehlgeschlagen.");
+        throw new Error((detail.errors || []).join("\n") || detail.reason || (detail.issues || detail.storage_health?.issues || []).map(i=>String(i.path||'')+': '+String(i.detail||i.code||'')).join('\n') || "Prüfung fehlgeschlagen.");
       }
       throw new Error(String(detail || "Anfrage fehlgeschlagen."));
     }
@@ -4406,7 +4406,7 @@ BIBLIOTHEKAR_JS = r"""
           ? '<button type="button" data-bk-library-activate class="bk-positive-action">Aktivieren</button>'
           : '<button type="button" data-bk-library-deactivate>Deaktivieren</button>'
       ))
-      +(row.is_main?'':'<button type="button" data-bk-library-unregister class="danger-button">Abmelden</button>')
+      +(row.is_main?'':'<button type="button" data-bk-library-unregister class="danger-button">Bibliothek entfernen</button>')
       +'</div><div class="bk-library-status" data-bk-library-status></div></div></details>';
   }
 
@@ -4495,9 +4495,9 @@ BIBLIOTHEKAR_JS = r"""
         } catch (error) { setLibraryCardStatus(card, error.message); }
       });
       card.querySelector("[data-bk-library-unregister]")?.addEventListener("click", async () => {
-        if (!(await window.BibliothekarI18n.confirmAsync("Bibliothek abmelden? Es werden keine Dateien, keine Datenbank und kein Archiv gelöscht."))) return;
+        if (!(await window.BibliothekarI18n.confirmAsync("Bibliothek entfernen? Archiv, Datenbank und Arbeitsordner bleiben erhalten. Historische Besitznachweise werden aufbewahrt. Späterer Wiedereinzug nur über Folder Import."))) return;
         try {
-          await bkJson("/api/libraries/"+encodeURIComponent(id)+"/unregister", {method:"POST"});
+          await bkJson("/api/libraries/"+encodeURIComponent(id)+"/unregister", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmation:'REMOVE LIBRARY'})});
           if (id === bkLibraryId) {
             window.location.assign(bkLibraryHref(window.location.pathname, "main"));
             return;
@@ -5920,7 +5920,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0-rc.13</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0-rc.14</span></p>
   </div>
 </dialog>
 

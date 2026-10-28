@@ -55,7 +55,11 @@ def test_startup_recovers_registered_databases_only(tmp_path,monkeypatch,registe
     missing=tmp_path/'removed-library.sqlite3'
     register_library(registry,library_id='removed',display_name='Removed',database_path=missing,
                      workspace_root=workspace,work_root=workspace/'Arbeitsbereiche/Removed',archive_root=tmp_path/'other-archive',is_active=False)
-    if not registered:unregister_library(registry,'removed')
+    if not registered:
+        # Historical pre-RC14 tombstone: removal cannot authorize missing DBs.
+        import sqlite3
+        with sqlite3.connect(registry) as c:
+            c.execute("UPDATE libraries SET is_registered=0,is_active=0 WHERE library_id='removed'")
     for key,value in dict(DATABASE_FILE=db,REGISTRY_DATABASE_FILE=registry,WORKSPACE_PATH=workspace,
                           CONFIG_PATH=tmp_path/'settings.json',LOG_PATH=tmp_path/'logs',
                           WORKER_THREAD=SimpleNamespace(is_alive=lambda:True)).items():

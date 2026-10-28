@@ -1,0 +1,187 @@
+"""Read-only qualification and explicit continuation of the SAME import.
+
+No camera source, catalogue family or journal is deleted. Shared-host writers
+remain part of RC12's administrative trust boundary; this is continuity proof.
+"""
+from pathlib import Path
+import json
+import os
+import stat
+from datetime import datetime, timezone
+
+from app.database import database_connection
+from app.import_publication import _parent, import_identity
+from app.pipeline import PipelineError, atomic_json
+from app.storage_config import storage_paths
+
+
+def read_record(path):
+    with _parent(Path(path)) as (parent, name):
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > 32*1024*1024:
+                raise PipelineError('import_recovery_invalid_record: '+str(path))
+            with os.fdopen(os.dup(fd)) as stream:
+                value = json.load(stream)
+            after = os.fstat(fd)
+            bound = os.stat(name,dir_fd=parent,follow_symlinks=False)
+            fields=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+            if fields(before)!=fields(after) or fields(after)!=fields(bound):
+                raise PipelineError('import_recovery_record_changed: '+str(path))
+            return value
+        finally:
+            os.close(fd)
+
+
+def relative(value):
+    raw=str(value)
+    if not raw or '\0' in raw or '\\' in raw or Path(raw).is_absolute() or any(p in ('','.','..') for p in raw.split('/')):
+        raise PipelineError('import_recovery_unsafe_path: '+raw)
+    return raw
+
+
+def qualify(database, registry, workspace, logs, job_id):
+    relative(job_id)
+    central=storage_paths(Path(workspace))['backup_root'].absolute()
+    stage=central/'.incoming'/job_id
+    journal=stage/'move-journal.json'
+    if not journal.exists() and not journal.is_symlink():
+        journal=Path(logs)/'backups'/job_id/'move-journal.json'
+    try:record=read_record(journal)
+    except FileNotFoundError as error:
+        raise PipelineError('import_recovery_journal_missing: '+str(journal)+'; copied files and history remain intact. No automatic cleanup or new origin registration is permitted.') from error
+    if record.get('format')!=1 or record.get('root')!=str(central.resolve()) or not isinstance(record.get('files'),list):
+        raise PipelineError('import_recovery_journal_mismatch: '+str(journal))
+    with database_connection(Path(database)) as c:
+        job=c.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
+        rows=[dict(r) for r in c.execute('SELECT * FROM files WHERE job_id=? ORDER BY id',(job_id,))]
+    if job is None or job['operation']!='folder_import':
+        raise PipelineError('import_recovery_job_mismatch: '+job_id)
+    # Require the registered database/library identity, and retain immutable
+    # source-family/member checks even for a failed publication.
+    from app.library_registry import get_library, read_library_identity
+    owner=get_library(Path(registry),'main',active_only=False)
+    if owner is None or Path(owner['database_path']).absolute()!=Path(database).absolute() or read_library_identity(Path(database))!='main':
+        raise PipelineError('import_recovery_database_identity: '+str(database))
+    from app.global_library_inventory import _database_family_rows, family_content_fingerprint
+    from app.source_provenance import qualify_origins
+    groups={}
+    for row in _database_family_rows(Path(database)):
+        groups.setdefault((str(row['job_id']),str(row['family_key'])),[]).append(row)
+    qualified=qualify_origins(Path(registry),Path(database),'main',groups,family_content_fingerprint)
+    if not rows or not {key for key in groups if key[0]==job_id} <= qualified:
+        raise PipelineError('import_recovery_origin_missing: '+job_id)
+    by_source={str(r['original_relative_path']):r for r in rows}
+    items=record['files']
+    if len(by_source)!=len(rows) or len(items)!=len(rows) or {str(i.get('source_relative_path')) for i in items}!=set(by_source):
+        raise PipelineError('import_recovery_catalogue_mismatch: '+job_id)
+    plan=[];staged=published=0;destinations=set()
+    for item in items:
+        src=relative(item['source_relative_path']);dst=relative(item['destination_relative_path'])
+        if dst in destinations:raise PipelineError('import_recovery_duplicate_target: '+dst)
+        destinations.add(dst)
+        row=by_source[src]
+        if (int(row['size_bytes'])!=int(item['size_bytes']) or row['sha256_original']!=item['sha256']
+            or row['current_root_kind'] not in ('job_root','shared_workspace')
+            or row['current_relative_path'] not in (src,dst)):
+            raise PipelineError('import_recovery_media_mismatch: '+src)
+        original=stage/'Original'/src;destination=central/dst
+        present=[p for p in (original,destination) if p.exists() or p.is_symlink()]
+        if len(present)!=1 or import_identity(present[0],item)!=item.get('inode'):
+            raise PipelineError('import_recovery_ownership_ambiguous: '+src)
+        if present[0]==original:staged+=1
+        else:published+=1
+        plan.append({**item,'selected_capture_time':row['selected_capture_time'],
+                     'capture_time_confidence':row['capture_time_confidence']})
+    # Do not silently ignore injected or excluded files in Original.
+    original=stage/'Original'
+    if original.exists():
+        for p in original.rglob('*'):
+            if p.is_symlink() or (p.is_file() and p.relative_to(original).as_posix() not in by_source):
+                raise PipelineError('import_recovery_unknown_file: '+str(p))
+    return {'job_id':job_id,'job':dict(job),'plan':plan,'journal':str(journal),
+            'staged_file_count':staged,'published_file_count':published,
+            'central':str(central),'stage':str(stage),'qualified':True}
+
+
+def resume(database, registry, workspace, logs, job_id, *, path_callback, history_callback, progress_callback):
+    from app.folder_import import move_import_into_workspace
+    proof=qualify(database,registry,workspace,logs,job_id)
+    plan=proof['plan'];central=Path(proof['central']);stage=Path(proof['stage'])
+    progress_callback('organizing','workspace_moving',0,len(plan),'Geprüfter Import wird mit ursprünglicher Identität fortgesetzt.')
+    move_import_into_workspace(stage/'Original',central,plan,post_move_callback=path_callback,
+                               ownership_record=read_record(Path(proof['journal'])))
+    entries=[{'relative_path':p['source_relative_path'],'sha256':p['sha256'],'size_bytes':p['size_bytes']} for p in plan]
+    history_callback(entries)
+    protocol=Path(logs)/'backups'/job_id
+    protocol.mkdir(parents=True,exist_ok=True)
+    atomic_json(protocol/'move-journal.json',read_record(Path(proof['journal'])))
+    result={'job_id':job_id,'state':'success','stage':'completed','recovered':True,
+            'temporary_backup_removed':False,'source':{'size_bytes':sum(p['size_bytes'] for p in plan)},
+            'organization':{'working_root':str(central),'verified':True,'file_count':len(plan),
+                            'imported_source_files':entries},
+            'outputs':{'protocol':str(protocol)},'snapshot':{'backend':'verification_receipt'}}
+    atomic_json(protocol/'recovery-completed.json',{'job_id':job_id,'completed_at':datetime.now(timezone.utc).isoformat(),
+                'staged_file_count':proof['staged_file_count'],'published_file_count':proof['published_file_count']})
+    return result
+
+
+def retain_completed_evidence(database, registry, workspace, logs, job_id):
+    """Move only a fully published job's technical envelope; delete no files.
+
+    Same-filesystem exclusive directory rename is restart-safe. Historical
+    files and their inodes remain intact, outside the active incoming queue.
+    """
+    central=storage_paths(Path(workspace))['backup_root'].absolute()
+    stage=central/'.incoming'/job_id
+    if not stage.exists():return
+    proof=qualify(database,registry,workspace,logs,job_id)
+    if proof['job']['state']!='completed' or proof['staged_file_count']:
+        raise PipelineError('import_recovery_not_completed: '+job_id)
+    from app.managed_directory_names import NAME_PAIRS
+    allowed={'Original','move-journal.json',*NAME_PAIRS['import_protocol']}
+    if any(p.name not in allowed or p.is_symlink() for p in stage.iterdir()):
+        raise PipelineError('import_recovery_unknown_envelope: '+str(stage))
+    for name in NAME_PAIRS['import_protocol']:
+        protocol=stage/name
+        if protocol.exists():
+            if any(p.is_symlink() or not p.is_file() or p.name not in {'status.json','manifest.json','snapshot.json'} for p in protocol.iterdir()):
+                raise PipelineError('import_recovery_unknown_protocol: '+str(protocol))
+    target=central/'.import-history'/job_id
+    from app.import_publication import _native_rename
+    from app.root_operations import validate_active_roots
+    validate_active_roots()
+    before=stage.stat(follow_symlinks=False)
+    with _parent(stage) as (src,name), _parent(target,create=True) as (dst,new):
+        _native_rename(src,name,dst,new)
+        after=os.stat(new,dir_fd=dst,follow_symlinks=False)
+        if (before.st_dev,before.st_ino)!=(after.st_dev,after.st_ino):
+            raise PipelineError('import_recovery_envelope_changed: '+str(target))
+        os.fsync(src);os.fsync(dst)
+
+
+def retained_staging_is_qualified(database, registry, workspace, logs):
+    """Only registry-only library lifecycle changes may use this predicate.
+
+    Storage replacement/root relocation never supplies it and stays strict.
+    """
+    incoming=storage_paths(Path(workspace))['backup_root']/'.incoming'
+    if not incoming.exists():return True
+    for child in incoming.iterdir():
+        if child.is_symlink() or not child.is_dir():return False
+        proof=qualify(database,registry,workspace,logs,child.name)
+        result=json.loads(proof['job']['result_json'] or '{}')
+        if proof['job']['state']!='failed' or result.get('import_recovery')!='retained':return False
+    return True
+
+
+def finish_published_envelopes(database, registry, workspace, logs):
+    """Finish only completed jobs; failed imports always require a user choice."""
+    incoming=storage_paths(Path(workspace))['backup_root']/'.incoming'
+    if not incoming.exists():return
+    with database_connection(Path(database)) as c:
+        completed={r[0] for r in c.execute("SELECT id FROM jobs WHERE state='completed' AND operation='folder_import'")}
+    for child in incoming.iterdir():
+        if child.name in completed and (child/'move-journal.json').is_file():
+            retain_completed_evidence(database,registry,workspace,logs,child.name)

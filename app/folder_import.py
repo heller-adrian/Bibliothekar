@@ -519,15 +519,16 @@ def move_import_into_workspace(
     *,
     post_move_callback: PathCallback | None = None,
     cancellation_callback: CancellationCallback | None = None,
+    ownership_record: dict | None = None,
 ) -> None:
-    if not temporary_original.is_dir():
+    if not temporary_original.is_dir() and ownership_record is None:
         raise PipelineError(
             f"Temporäre Sicherung fehlt: {temporary_original}"
         )
 
     validate_active_roots()
     shared_root.mkdir(parents=True, exist_ok=True)
-    if int(temporary_original.stat().st_dev) != int(shared_root.stat().st_dev):
+    if temporary_original.exists() and int(temporary_original.stat().st_dev) != int(shared_root.stat().st_dev):
         raise PipelineError(
             "Temporäre Sicherung und Arbeitsbereich liegen nicht auf demselben Dateisystem."
         )
@@ -536,21 +537,30 @@ def move_import_into_workspace(
     # The original inode survives an exclusive same-filesystem rename. Persist ownership
     # before the first move, including the gap before the path callback.
     journal = temporary_original.parent / "move-journal.json"
+    from app.import_recovery import read_record, relative
+    if ownership_record is None and (journal.exists() or journal.is_symlink()):
+        ownership_record = read_record(journal)
     ownership = []
-    for item in plan:
-        source = temporary_original / str(item["source_relative_path"])
-        for key in ('source_relative_path', 'destination_relative_path'):
-            raw = str(item[key])
-            relative = Path(raw)
-            if not raw or '\0' in raw or relative.is_absolute() or '\\' in raw or any(part in ('', '.', '..') for part in raw.split('/')):
-                raise PipelineError('Unsicherer relativer Importpfad: ' + raw)
-        inode = import_identity(source, item)
-        ownership.append(dict(source_relative_path=str(item["source_relative_path"]),
-                              destination_relative_path=str(item["destination_relative_path"]),
-                              sha256=str(item["sha256"]), size_bytes=int(item["size_bytes"]),
-                              inode=inode))
-    _atomic_json(journal, dict(format=1, root=str(shared_root.resolve()), files=ownership))
-    _sync_dir(journal.parent.parent)
+    supplied = (ownership_record or {}).get('files', [])
+    if ownership_record is not None and (ownership_record.get('format') != 1
+            or ownership_record.get('root') != str(shared_root.resolve()) or len(supplied) != len(plan)):
+        raise PipelineError('import_recovery_journal_mismatch: '+str(journal))
+    for index,item in enumerate(plan):
+        source = temporary_original / relative(item['source_relative_path'])
+        destination = shared_root / relative(item['destination_relative_path'])
+        if ownership_record is None:
+            owned = {**item,'inode':import_identity(source,item)}
+        else:
+            owned = supplied[index]
+            if any(owned.get(k) != item.get(k) for k in ('source_relative_path','destination_relative_path','sha256','size_bytes')):
+                raise PipelineError('import_recovery_plan_changed: '+str(source))
+            present = [p for p in (source,destination) if p.exists() or p.is_symlink()]
+            if len(present) != 1 or import_identity(present[0],owned) != owned.get('inode'):
+                raise PipelineError('import_recovery_ownership_ambiguous: '+str(source))
+        ownership.append(owned)
+    if ownership_record is None:
+        _atomic_json(journal, dict(format=1, root=str(shared_root.resolve()), files=ownership))
+        _sync_dir(journal.parent.parent)
     moved: list[tuple[Path, Path, dict]] = []
     try:
         for item, owned in zip(plan, ownership, strict=True):
@@ -558,6 +568,9 @@ def move_import_into_workspace(
                 raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
             source = temporary_original / str(item["source_relative_path"])
             destination = shared_root / str(item["destination_relative_path"])
+            if ownership_record is not None and not source.exists() and destination.exists():
+                moved.append((source,destination,owned))
+                continue
             if not source.is_file():
                 raise PipelineError(f"Quelldatei fehlt: {source}")
             if destination.exists() or destination.is_symlink():
@@ -588,10 +601,6 @@ def move_import_into_workspace(
                 "Temporäre Sicherung enthält nach der Überführung noch Dateien."
             )
 
-        _remove_empty_directories(temporary_original)
-        validate_active_roots()
-        temporary_original.rmdir()
-
         # SQLite wird erst nach vollständig geprüfter Dateibewegung
         # aktualisiert. Scheitert die Transaktion, stellt der folgende
         # Except-Block alle Dateien an ihren Sicherungspfad zurück.
@@ -599,6 +608,10 @@ def move_import_into_workspace(
             raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
         if post_move_callback is not None:
             post_move_callback(plan)
+        if temporary_original.exists():
+            _remove_empty_directories(temporary_original)
+            validate_active_roots()
+            temporary_original.rmdir()
     except Exception:
         rollback_errors: list[str] = []
         for source, destination, owned in reversed(moved):
@@ -1115,6 +1128,8 @@ def run_folder_import_job(
         atomic_json(status_path, status)
 
         archive_protocol_directory(temporary_protocol, permanent_protocol)
+        from app.import_recovery import read_record
+        atomic_json(permanent_protocol / 'move-journal.json', read_record(temporary_job_root / 'move-journal.json'))
         if temporary_job_root.exists():
             _remove_empty_directories(temporary_job_root)
             validate_active_roots()
@@ -1163,47 +1178,8 @@ def run_folder_import_job(
         )
         return status
     except ImportCancelled:
-        cleanup_errors: list[str] = []
-        for item in committed_plan:
-            destination = work_root / str(item["destination_relative_path"])
-            try:
-                if not destination.exists():
-                    continue
-                if not destination.is_file() or destination.is_symlink():
-                    raise PipelineError(
-                        "Unerwarteter Eintrag beim Abbruch: " + str(destination)
-                    )
-                if (
-                    destination.stat().st_size != int(item["size_bytes"])
-                    or sha256_file(destination) != str(item["sha256"])
-                ):
-                    raise PipelineError(
-                        "Datei hat sich während des Abbruchs verändert: "
-                        + str(destination)
-                    )
-                validate_active_roots()
-                destination.unlink()
-                _remove_empty_directories(destination.parent)
-            except Exception as cleanup_error:
-                cleanup_errors.append(str(cleanup_error))
-
-        if temporary_job_root.exists():
-            try:
-                shutil.rmtree(temporary_job_root)
-            except Exception as cleanup_error:
-                cleanup_errors.append(str(cleanup_error))
-        if permanent_protocol.exists():
-            try:
-                shutil.rmtree(permanent_protocol)
-            except Exception as cleanup_error:
-                cleanup_errors.append(str(cleanup_error))
-
-        if cleanup_errors:
-            raise PipelineError(
-                "Import wurde abgebrochen, aber die Bereinigung war unvollständig: "
-                + " | ".join(cleanup_errors)
-            )
-
+        # A stopped copy is evidence, not disposable scratch. Publication itself
+        # rolls owned moves back; preserve staged bytes and all protocol files.
         append_log(log_dir, {
             "time": datetime.now(timezone.utc).astimezone().isoformat(),
             "job_id": job_id,

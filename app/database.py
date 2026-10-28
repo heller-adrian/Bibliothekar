@@ -8,6 +8,7 @@ import json
 import sqlite3
 import re
 import uuid
+from app.sqlite_retry import WRITE_WAIT_MS, idempotent_write
 
 
 MIGRATION_DIR = Path(__file__).parent / "migrations"
@@ -25,7 +26,7 @@ def connect(database_path: Path) -> sqlite3.Connection:
 
     connection = sqlite3.connect(
         database_path,
-        timeout=30,
+        timeout=WRITE_WAIT_MS.get()/1000,
     )
 
     connection.row_factory = sqlite3.Row
@@ -43,7 +44,7 @@ def connect(database_path: Path) -> sqlite3.Connection:
     )
 
     connection.execute(
-        "PRAGMA busy_timeout = 30000"
+        f"PRAGMA busy_timeout = {WRITE_WAIT_MS.get()}"
     )
 
     return connection
@@ -847,6 +848,7 @@ def claim_next_job(
         connection.close()
 
 
+@idempotent_write
 def update_job_progress(
     database_path: Path,
     job_id: str,
@@ -1848,6 +1850,7 @@ def list_job_families(
     ]
 
 
+@idempotent_write
 def update_import_file_paths(
     database_path: Path,
     job_id: str,
@@ -4852,7 +4855,7 @@ def list_no_event_month_targets(database_path: Path, month_keys: list[str], pref
     return result
 
 
-def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
+def list_global_tasks(database_path: Path, *, eligible_family_ids: set[int] | None = None) -> list[dict[str, Any]]:
     """Open user-visible work across all jobs.
 
     These tasks are deliberately derived from durable DB state so closing a
@@ -5074,6 +5077,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                FROM released_free_families marker
                JOIN file_families ff ON ff.id=marker.family_id
                WHERE ff.selected_capture_time IS NOT NULL
+                 {eligibility}
                  AND NOT EXISTS (
                    SELECT 1 FROM event_assignments ea
                    JOIN events e ON e.id=ea.event_id
@@ -5230,8 +5234,9 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 "href": "/workspace?task=placement-conflicts",
             })
 
+        eligibility = '' if eligible_family_ids is None else (' AND ff.id IN ('+','.join(str(int(i)) for i in sorted(eligible_family_ids))+')' if eligible_family_ids else ' AND 0')
         row = connection.execute(
-            """SELECT COUNT(*) AS n,
+            f"""SELECT COUNT(*) AS n,
                       COUNT(DISTINCT ff.job_id) AS job_count,
                       MIN(COALESCE(j.source_volume_label,ff.job_id)) AS only_label
                FROM file_families ff JOIN jobs j ON j.id=ff.job_id

@@ -881,45 +881,9 @@ def remove_library_registration(
         connection.close()
 
 
-def unregister_library(
-    registry_path: Path,
-    library_id: str,
-) -> dict[str, Any]:
-    existing = get_library(registry_path, library_id, active_only=False)
-    if existing is None:
-        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
-    if existing.get("is_main"):
-        raise LibraryRegistryError("Die Hauptbibliothek kann nicht abgemeldet werden.")
-
-    now = _now()
-    connection = _connect(registry_path)
-    try:
-        connection.execute("BEGIN IMMEDIATE")
-        cursor = connection.execute(
-            """
-            UPDATE libraries
-            SET is_active = 0,
-                is_registered = 0,
-                deactivated_at = COALESCE(deactivated_at, ?),
-                unregistered_at = ?,
-                updated_at = ?
-            WHERE library_id = ?
-            """,
-            (now, now, now, str(library_id)),
-        )
-        if cursor.rowcount != 1:
-            raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
-
-    result = get_library(registry_path, library_id, active_only=False)
-    if result is None:
-        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
-    return result
+def unregister_library(registry_path: Path, library_id: str, *, confirmation: str = '') -> dict[str, Any]:
+    from app.library_retirement import remove
+    return remove(registry_path,library_id,confirmation)
 
 
 def get_source_backup(

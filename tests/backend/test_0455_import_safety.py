@@ -149,6 +149,6 @@ def test_0455_history_uses_real_phase_values():
     assert "bk-stage-badge" in code
     assert "requestForcedImportCancel" in code
     assert "preflight_folder_import(" in code
-    assert "for item in committed_plan:" in (
+    assert "A stopped copy is evidence" in (
         Path(__file__).resolve().parents[2] / "app/folder_import.py"
     ).read_text()

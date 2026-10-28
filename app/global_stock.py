@@ -69,7 +69,7 @@ def project_import_job(
 
     with database_connection(source_database) as source:
         raw_job = source.execute(
-            "SELECT * FROM jobs WHERE id=? AND kind='sd_import'",
+            "SELECT * FROM jobs WHERE id=? AND kind='sd_import' AND state='completed'",
             (str(job_id),),
         ).fetchone()
         if raw_job is None:

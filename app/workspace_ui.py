@@ -1410,8 +1410,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     #mobile-preview-dialog .preview-body, #mobile-preview-dialog #structure-preview { max-height:none; overflow:visible; }
     @media(max-width:820px) {
       #mobile-preview-button:not([hidden]) { display:inline-block; min-height:32px; }
-      .day-statuses { grid-column:2; flex-wrap:nowrap; min-width:0; }
-      .day-statuses .badge { font-size:clamp(.62rem,2.7vw,.76rem); padding:4px 6px; }
+      .day-statuses { grid-column:2; flex-wrap:wrap; min-width:0; }
+      .day-statuses .badge { font-size:clamp(.62rem,2.7vw,.76rem); padding:4px 6px; line-height:1.3; white-space:normal; max-width:100%; box-sizing:border-box; overflow-wrap:anywhere; }
       .day-statuses #mobile-preview-button { font-size:.72rem; padding:3px 7px; flex-shrink:0; }
       .timeline-event-statuses #mobile-preview-button { grid-column:1; justify-self:end; }
       .timeline-event-header > div:first-child { min-width:0; overflow-wrap:anywhere; }
@@ -3719,13 +3719,6 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-name";
         name.textContent =
           formatDay(group.day_key) + (group.start_time && (group.start_time !== "00:00" || group.end_time !== "23:59") ? ` · ${group.start_time}–${group.end_time}` : "");
-        if (group.released_archive) {
-          const marker=document.createElement("span");
-          marker.className="badge warning";
-          marker.textContent="Aus Archiv freigeworden";
-          marker.style.marginLeft="8px";
-          name.appendChild(marker);
-        }
         if (group.reassignment_pending || group.released_free) {
           const marker=document.createElement("span");
           marker.textContent="●";
@@ -3823,6 +3816,12 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         const statuses=document.createElement("span");
         statuses.className="day-statuses";
+        if (group.released_archive) {
+          const released=document.createElement('span');
+          released.className='badge warning archive-release-status';
+          released.textContent='Aus Archiv freigeworden';
+          statuses.appendChild(released);
+        }
         statuses.appendChild(badge);
         card.appendChild(statuses);
         dayList.appendChild(card);

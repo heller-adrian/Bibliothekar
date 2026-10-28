@@ -773,6 +773,8 @@ def _discard_terminal_import_job(job_id: str) -> dict[str, int]:
         )
 
     central_root = workspace_backup_root(WORKSPACE_PATH).resolve(strict=False)
+    if (central_root/'.incoming'/job_id/'move-journal.json').exists():
+        raise ValueError('import_recovery_required: Review the retained backup and resume the original import; no catalogue or source history was removed.')
     removed_files = 0
 
     with database_connection(DATABASE_FILE) as connection:
@@ -798,14 +800,19 @@ def _discard_terminal_import_job(job_id: str) -> dict[str, int]:
         if sha256_file(candidate) != expected_sha:
             raise ValueError("SHA-256 stimmt beim Bereinigen nicht mehr: " + str(candidate))
 
-    removed_files = discard_import_moves(central_root, job_id, rows, verify_callback=verify_candidate)
+    if rows or any(p.is_file() or p.is_symlink() for p in (central_root/'.incoming'/job_id).rglob('*')):
+        raise ValueError('import_recovery_required: Staged files and catalogue history remain intact. Review the original import; missing ownership evidence blocks automatic cleanup.')
+    removed_files = 0
 
     incoming = (central_root / ".incoming" / job_id).resolve(strict=False)
     try:
         incoming.relative_to(central_root)
     except ValueError as error:
         raise ValueError("Unsicherer temporärer Importpfad.") from error
-    shutil.rmtree(incoming, ignore_errors=True)
+    if incoming.exists():
+        for directory in sorted((p for p in incoming.rglob("*") if p.is_dir() and not p.is_symlink()),key=lambda p:len(p.parts),reverse=True):
+            directory.rmdir()
+        incoming.rmdir()
     try:
         incoming.parent.rmdir()
     except OSError:
@@ -1003,7 +1010,7 @@ async def library_context_middleware(request: Request, call_next):
         return await call_next(request)
     from app.managed_storage_health import inspect_storage
     storage = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
-    if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize", "/api/settings/storage-replace"}:
+    if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize", "/api/settings/storage-replace", "/api/libraries"} and (request.url.path!='/api/libraries' or request.method=='GET'):
         return await call_next(request)
     if DATABASE_INITIALIZATION_ERROR and storage['ready']:
         storage = {**storage, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'issues':[{'code':'source_inventory_conflict' if database_initialization_error_code(DATABASE_INITIALIZATION_ERROR)=='source_inventory_conflict' else 'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
@@ -1649,43 +1656,44 @@ def process_claimed_job(
                 except FreeStockLayoutError:
                     return None
 
-            result = run_folder_import_job(
-                source=source,
-                workspace=workspace_path,
-                pool_probe_path=pool_probe_path,
-                log_dir=LOG_PATH,
-                processing_buffer_percent=int(
-                    storage.get("processing_buffer_percent", 10)
-                ),
-                safety_reserve_gib=int(
-                    storage.get("safety_reserve_gib", 20)
-                ),
-                job_id=job_id,
-                progress_callback=report_progress,
-                metadata_callback=persist_metadata,
-                path_callback=persist_paths,
-                identity_callback=persist_identity,
-                imported_hashes=imported_hashes,
-                duplicate_origins=duplicate_origins,
-                imported_sha256=imported_sha256,
-                duplicate_origins_by_sha=duplicate_origins_by_sha,
-                import_history_callback=persist_import_history,
-                family_admission_callback=admit_families,
-                destination_directory_callback=central_destination_directory,
-                work_root=work_root,
-                central_stock=True,
-                allow_workspace_source=managed_metadata_import,
-                cancellation_callback=(
-                    (lambda: _import_cancel_requested(job_id))
-                    if operation == "folder_import"
-                    else None
-                ),
-            )
-            if operation == "folder_import" and _import_cancel_requested(job_id):
-                cleanup_completed_folder_import(
-                    result,
-                    Path(str((result.get("organization") or {}).get("working_root") or workspace_backup_root(workspace_path))),
+            if operation == 'folder_import' and (job.get('result') or {}).get('import_recovery') == 'resume':
+                from app.import_recovery import resume
+                result = resume(database_file,REGISTRY_DATABASE_FILE,workspace_path,LOG_PATH,job_id,
+                    path_callback=persist_paths,history_callback=persist_import_history,progress_callback=report_progress)
+            else:
+                result = run_folder_import_job(
+                    source=source,
+                    workspace=workspace_path,
+                    pool_probe_path=pool_probe_path,
+                    log_dir=LOG_PATH,
+                    processing_buffer_percent=int(
+                        storage.get("processing_buffer_percent", 10)
+                    ),
+                    safety_reserve_gib=int(
+                        storage.get("safety_reserve_gib", 20)
+                    ),
+                    job_id=job_id,
+                    progress_callback=report_progress,
+                    metadata_callback=persist_metadata,
+                    path_callback=persist_paths,
+                    identity_callback=persist_identity,
+                    imported_hashes=imported_hashes,
+                    duplicate_origins=duplicate_origins,
+                    imported_sha256=imported_sha256,
+                    duplicate_origins_by_sha=duplicate_origins_by_sha,
+                    import_history_callback=persist_import_history,
+                    family_admission_callback=admit_families,
+                    destination_directory_callback=central_destination_directory,
+                    work_root=work_root,
+                    central_stock=True,
+                    allow_workspace_source=managed_metadata_import,
+                    cancellation_callback=(
+                        (lambda: _import_cancel_requested(job_id))
+                        if operation == "folder_import"
+                        else None
+                    ),
                 )
+            if operation == "folder_import" and _import_cancel_requested(job_id):
                 raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
             organization = result.get("organization", {})
             if str(job.get("trigger_type") or "") in {"approved_sd", "usb_key"}:
@@ -1874,6 +1882,10 @@ def process_claimed_job(
             ),
         )
 
+        if operation == 'folder_import' and result.get('recovered'):
+            from app.import_recovery import retain_completed_evidence
+            retain_completed_evidence(database_file,REGISTRY_DATABASE_FILE,workspace_path,LOG_PATH,job_id)
+
         if is_import_operation:
             if operation=="trash_import":
                 view_cache.invalidate(database_file)
@@ -1922,29 +1934,18 @@ def process_claimed_job(
                 )
 
     except ImportCancelled:
+        # Cancellation stops execution. It never deletes copied originals or
+        # immutable provenance; the history UI offers qualified continuation.
         try:
-            _remove_cancelled_import_job(job_id)
-        except Exception as cleanup_error:
-            print(
-                "Abgebrochener Import konnte nicht vollständig bereinigt werden:",
-                cleanup_error,
-                flush=True,
-            )
-            try:
-                fail_job(
-                    database_file,
-                    job_id,
-                    error_message=(
-                        "Import wurde abgebrochen; Bereinigung fehlgeschlagen: "
-                        + str(cleanup_error)
-                    ),
-                )
-            except Exception:
-                pass
+            fail_job(database_file,job_id,stage='staging_retained',
+                     error_message='Import cancelled; staged copies and source history were retained for review.')
         finally:
             _clear_import_cancel(job_id)
         return
     except Exception as error:
+        import traceback
+        print('Import failure:',job_id,'database:',database_file,flush=True)
+        traceback.print_exc()
         _clear_import_cancel(job_id)
         try:
             if operation not in {"metadata_fixture_analysis", "sd_recheck"}:
@@ -2217,6 +2218,9 @@ def _coordinate_startup(fn):
         try:
             from app.appdata import prepare as prepare_appdata
             prepare_appdata()
+            from app.library_retirement import recover as recover_library_retirement
+            try: recover_library_retirement(WORKSPACE_PATH)
+            except LibraryRegistryError as error: raise RootOperationError(str(error)) from error
             from app.managed_storage_health import require_storage
             try:
                 preflight=require_storage(WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
@@ -2253,6 +2257,8 @@ def _coordinate_startup(fn):
                 result=fn()
                 if DATABASE_INITIALIZATION_ERROR:
                     raise RootOperationError(DATABASE_INITIALIZATION_ERROR)
+                from app.import_recovery import finish_published_envelopes
+                finish_published_envelopes(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH)
                 if preflight['can_initialize']:
                     from app.storage_bootstrap import complete
                     complete(WORKSPACE_PATH, startup_reservation)
@@ -3606,6 +3612,22 @@ def _library_slug(value: str) -> str:
     return slug[:32] or "bibliothek"
 
 
+def _new_workspace_name(value: str) -> str:
+    import unicodedata
+    value=unicodedata.normalize('NFC',value).strip()
+    if any(x in value for x in ('/','\\','\0','..')) or any(unicodedata.category(c).startswith('C') for c in value):
+        raise HTTPException(status_code=422,detail='library_workspace_name_invalid')
+    name=''.join(c.lower() if c.isalnum() or c in '-_' else '-' for c in value).strip('-_')[:64]
+    if not name:raise HTTPException(status_code=422,detail='library_workspace_name_invalid')
+    return name
+
+
+def _new_workspace_collision(path):
+    import unicodedata
+    key=lambda s:unicodedata.normalize('NFKC',s).casefold()
+    return any(key(p.name)==key(path.name) for p in path.parent.iterdir())
+
+
 def _mount_read_only(path: Path) -> bool:
     result = subprocess.run(
         [
@@ -3681,6 +3703,8 @@ def inspect_library_paths(
                         "Der verwaltete Stamm für Bibliotheks-Arbeitsbereiche "
                         "ist nicht vollständig zugreifbar."
                     )
+                elif _new_workspace_collision(work_root):
+                    errors.append('library_workspace_name_collision: '+str(work_root))
             else:
                 resolve_library_work_root(WORKSPACE_PATH, resolved_work)
         except (WorkspaceLayoutError, StorageSettingsError) as error:
@@ -3833,7 +3857,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
         default_work_id = (
             _library_slug(display_name)
             if first_library
-            else library_id
+            else _new_workspace_name(display_name)
         )
     checked = inspect_library_paths(
         requested_work,
@@ -3861,12 +3885,20 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
     known = list_libraries(REGISTRY_DATABASE_FILE,active_only=False,registered_only=False)
     databases = list(dict.fromkeys([Path(row['database_path']) for row in known]+([DATABASE_FILE] if DATABASE_FILE.is_file() else [])))
     try:
+        from app.import_recovery import retained_staging_is_qualified
         with mutate(WORKSPACE_PATH,databases=databases,expected_generation=expected_generation,wait_seconds=5,
+                    staging_precondition=lambda:retained_staging_is_qualified(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH),
                     details={'operation':'create_library','library_id':library_id,'registry_before':known,
                              'requested_work':checked['work_root'],'requested_archive':checked['archive_root']}):
             try:
                 resolved_work = Path(str(checked["work_root"]))
-                resolved_work.mkdir(parents=True, exist_ok=True)
+                if checked.get('managed_default_work_root'):
+                    if _new_workspace_collision(resolved_work):raise ValueError('library_workspace_name_collision: '+str(resolved_work))
+                    from app.import_publication import _parent
+                    with _parent(resolved_work) as (fd,name):
+                        os.mkdir(name,dir_fd=fd);os.fsync(fd)
+                else:
+                    resolved_work.mkdir(parents=True, exist_ok=True)
                 new_library_database = not database_path.is_file() or database_path.stat().st_size == 0
                 initialize_database(database_path)
                 if new_library_database:
@@ -4142,16 +4174,17 @@ def _api_activate_library(library_id: str) -> dict[str, Any]:
     "/api/libraries/{library_id}/unregister",
     tags=["Bibliotheken"],
 )
-@_root_request
-def api_unregister_library(library_id: str) -> dict[str, Any]:
+def api_unregister_library(library_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         row = unregister_library(
             REGISTRY_DATABASE_FILE,
             library_id,
+            confirmation=str(payload.get('confirmation') or ''),
         )
-    except LibraryRegistryError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    return {"library": _public_library_row(row)}
+    except (RuntimeError,ValueError,OSError) as error:
+        from app.ui_rc14 import error_text
+        raise HTTPException(status_code=409, detail={'code':'library_remove_blocked','library_id':library_id,'reason':error_text(error),'technical_reason':str(error)}) from error
+    return {"library": _public_library_row(row),'workspace_retained':row['work_root'],'archive_retained':row['archive_root']}
 
 
 @app.get(
@@ -4745,6 +4778,11 @@ def api_import_history(
             except Exception as error:
                 item["backup_delete_reason"] = str(error)
         rows.append(item)
+    for item in rows:
+        ident=str(item.get('id') or '')
+        item['import_recovery_available'] = bool(item.get('operation')=='folder_import' and item.get('state') in {'failed','interrupted'} and (
+            (workspace_backup_root(WORKSPACE_PATH)/'.incoming'/ident/'move-journal.json').is_file()
+            or (LOG_PATH/'backups'/ident/'move-journal.json').is_file()))
     return {"jobs": rows, "total": total, "has_more": offset + len(rows) < total}
 
 
@@ -4772,6 +4810,40 @@ def api_import_history_visibility(job_id: str, payload: dict[str, Any]) -> dict[
         )
     view_cache.invalidate(DATABASE_FILE)
     return {"job_id": job_id, "hidden": hidden}
+
+
+@app.post('/api/jobs/{job_id}/import-recovery', tags=['Import'])
+@_root_request
+def api_import_recovery(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    from app.import_recovery import qualify
+    try:
+        proof=qualify(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH,job_id)
+        if proof['job']['state'] not in {'failed','interrupted'}:
+            raise ValueError('import_recovery_job_not_terminal: '+job_id)
+        action=payload.get('action','inspect')
+        if action=='resume':
+            if payload.get('confirmation')!='RESUME ORIGINAL IMPORT':
+                raise ValueError('import_recovery_confirmation_required')
+            with database_connection(DATABASE_FILE) as c:
+                c.execute('BEGIN IMMEDIATE')
+                row=c.execute("SELECT result_json FROM jobs WHERE id=? AND state IN ('failed','interrupted')",(job_id,)).fetchone()
+                if row is None:raise ValueError('import_recovery_job_changed')
+                result=json.loads(row['result_json'] or '{}');result['import_recovery']='resume'
+                c.execute("UPDATE jobs SET state='queued',stage='recovery_queued',error_message=NULL,result_json=?,progress_message=? WHERE id=?",
+                    (json.dumps(result),'Verified original import queued for continuation.',job_id))
+        elif action=='retain':
+            if payload.get('confirmation')!='KEEP STAGED BACKUP':raise ValueError('import_recovery_confirmation_required')
+            with database_connection(DATABASE_FILE) as c:
+                c.execute('BEGIN IMMEDIATE')
+                result=json.loads(proof['job']['result_json'] or '{}');result['import_recovery']='retained'
+                changed=c.execute("UPDATE jobs SET state='failed',stage='staging_retained',result_json=? WHERE id=? AND state IN ('failed','interrupted')",(json.dumps(result),job_id)).rowcount
+                if changed!=1:raise ValueError('import_recovery_job_changed')
+        elif action!='inspect':raise ValueError('import_recovery_action_invalid')
+        return {'job_id':job_id,'qualified':True,'staged_file_count':proof['staged_file_count'],
+                'published_file_count':proof['published_file_count'],'queued':action=='resume'}
+    except (ValueError,OSError,RuntimeError) as error:
+        from app.ui_rc14 import error_text
+        raise HTTPException(status_code=409,detail={'code':'import_recovery_blocked','path':job_id,'reason':error_text(error),'technical_reason':str(error)}) from error
 
 
 @app.get(
@@ -9032,7 +9104,10 @@ def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
 
 @app.get("/api/tasks", tags=["Aufgaben"])
 def api_global_tasks() -> dict[str, Any]:
-    tasks = list_global_tasks(current_database_file())
+    from app.inventory_availability import available_families
+    blocked=blocked_family_ids(REGISTRY_DATABASE_FILE,database_path=current_database_file(),library_id=current_library_context().library_id)
+    eligible=available_families(current_database_file(),WORKSPACE_PATH,blocked=blocked)
+    tasks = list_global_tasks(current_database_file(),eligible_family_ids=eligible)
     return {"tasks": tasks, "count": sum(int(t.get("count", 1)) for t in tasks)}
 
 
@@ -9276,6 +9351,7 @@ def api_global_workspace_summary(
         selected,
         workspace_path=current_workspace_root(),
         excluded_family_ids_by_job=excluded_by_job,
+        availability_root=WORKSPACE_PATH,
     )
 
     suggestions: list[dict[str, Any]] = []
@@ -9326,6 +9402,10 @@ def api_workspace_summary(
         library_id=current_library_context().library_id,
         job_id=job_id,
     )
+    from app.inventory_availability import available_families
+    eligible=available_families(current_database_file(),WORKSPACE_PATH,blocked=blocked)
+    with database_connection(current_database_file()) as c:
+        blocked |= {int(r[0]) for r in c.execute('SELECT id FROM file_families WHERE job_id=?',(job_id,)) if int(r[0]) not in eligible}
     day_groups = list_job_day_groups(
         current_database_file(),
         job_id,
@@ -11913,7 +11993,9 @@ def index() -> str:
                  ${mayForceCancel ? `<button class="danger" type="button" data-force-import="${escapeHtml(jobId)}">Abbruch erzwingen</button>` : ""}`
               : ""}
             ${removableInterrupted
-              ? `<button class="danger" type="button" data-discard-import="${escapeHtml(jobId)}">Import entfernen</button>`
+              ? (job.import_recovery_available
+                ? `<button type="button" data-review-import="${escapeHtml(jobId)}">Import prüfen und fortsetzen</button><button type="button" data-retain-import="${escapeHtml(jobId)}">Staging behalten und Auftrag schließen</button>`
+                : `<button class="danger" type="button" data-discard-import="${escapeHtml(jobId)}">Import entfernen</button>`)
               : ""}
             ${completedBackup
               ? `<button class="danger" type="button"
@@ -12575,6 +12657,25 @@ def index() -> str:
           cancelEscalationPrompted.add(jobId);
           button.disabled = true;
           void requestForcedImportCancel(jobId).catch(showError);
+        });
+      }
+
+      for (const button of host.querySelectorAll('[data-review-import],[data-retain-import]')) {
+        button.addEventListener('click',async()=>{
+          const jobId=button.dataset.reviewImport||button.dataset.retainImport;
+          const retaining=Boolean(button.dataset.retainImport);
+          const endpoint='/api/jobs/'+encodeURIComponent(jobId)+'/import-recovery';
+          const send=async body=>{const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.detail?.reason||d.detail||'Importprüfung fehlgeschlagen.');return d};
+          button.disabled=true;
+          try {
+            const checked=await send({action:'inspect'});
+            const detail='Importprüfung: '+checked.staged_file_count+' Dateien im Staging, '+checked.published_file_count+' Dateien veröffentlicht.';
+            const question=retaining?'Staging bleibt erhalten. Es wird kein freier Bestand freigegeben.':'Geprüften ursprünglichen Import fortsetzen? Es wird dieselbe Auftrags- und Quellenidentität verwendet.';
+            if(!await window.BibliothekarI18n.confirmAsync(window.BibliothekarI18n.t(detail)+' '+window.BibliothekarI18n.t(question)))return;
+            await send({action:retaining?'retain':'resume',confirmation:retaining?'KEEP STAGED BACKUP':'RESUME ORIGINAL IMPORT'});
+            noticeElement.textContent=retaining?'Staging bleibt erhalten. Es wird kein freier Bestand freigegeben.':'Import wurde zur sicheren Fortsetzung vorgemerkt.';
+            await loadJobs();
+          }catch(error){showError(error)}finally{button.disabled=false}
         });
       }
 

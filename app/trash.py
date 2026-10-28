@@ -219,7 +219,21 @@ def reconcile_trash_inventory(
     exact = 0
     ambiguous = 0
 
+    # A later iteration may hash after an earlier iteration has acquired the
+    # SQLite writer. Compute physical fingerprints before entering that scope.
+    for item in entries:
+        if str(item.get('entry_type') or 'file')=='file' and not item.get('_sha256'):
+            absolute=Path(item.get('_absolute_path') or root/str(item.get('relative_path') or ''))
+            if absolute.is_file() and not absolute.is_symlink():
+                before=absolute.stat(follow_symlinks=False)
+                item['_sha256']=_sha256_file(absolute)
+                after=absolute.stat(follow_symlinks=False)
+                signature=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                if signature(before)!=signature(after):raise TrashError('trash_scan_changed: '+str(absolute))
+                item['_scan_signature']=signature(after)
+
     with database_connection(database_path) as connection:
+        connection.execute('BEGIN IMMEDIATE')
         for item in entries:
             if str(item.get("entry_type") or "file") != "file":
                 continue
@@ -271,9 +285,7 @@ def reconcile_trash_inventory(
                 if candidates:
                     digest = item.get("_sha256")
                     if not digest:
-                        absolute = item.get("_absolute_path") or (root / relative)
-                        digest = _sha256_file(Path(absolute))
-                        item["_sha256"] = digest
+                        continue  # No hash fallback while holding a writer.
                     matching = [
                         row for row in candidates
                         if str(row.get("sha256") or "") == str(digest)
@@ -291,6 +303,12 @@ def reconcile_trash_inventory(
 
             if selected is None:
                 continue
+
+            if item.get('_scan_signature'):
+                absolute=Path(item.get('_absolute_path') or root/relative)
+                observed=absolute.stat(follow_symlinks=False)
+                if (observed.st_dev,observed.st_ino,observed.st_size,observed.st_mtime_ns,observed.st_ctime_ns)!=item['_scan_signature']:
+                    raise TrashError('trash_scan_changed: '+str(absolute))
 
             file_id = int(selected["file_id"])
             previous_root_kind = str(selected.get("current_root_kind") or "")

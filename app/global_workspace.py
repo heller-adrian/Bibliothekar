@@ -254,10 +254,11 @@ def build_global_workspace_summary(
     workspace_path: Path | None = None,
     *,
     excluded_family_ids_by_job: dict[str, set[int]] | None = None,
+    availability_root: Path | None = None,
 ) -> dict[str, Any]:
     selected = {str(value) for value in selected_job_ids if str(value)}
     jobs = [get_job(database_path, value) for value in sorted(selected)]
-    jobs = [job for job in jobs if job is not None]
+    jobs = [job for job in jobs if job is not None and job.get('state')=='completed']
 
     available_items: list[tuple[str, dict[str, Any]]] = []
     day_groups: list[dict[str, Any]] = []
@@ -268,6 +269,11 @@ def build_global_workspace_summary(
         excluded = set(
             (excluded_family_ids_by_job or {}).get(job_id, set())
         )
+        if availability_root is not None:
+            from app.inventory_availability import available_families
+            eligible=available_families(database_path,availability_root)
+            with database_connection(database_path) as c:
+                excluded |= {int(r[0]) for r in c.execute('SELECT id FROM file_families WHERE job_id=?',(job_id,)) if int(r[0]) not in eligible}
         overview = list_job_planning_overview(
             database_path,
             job_id,

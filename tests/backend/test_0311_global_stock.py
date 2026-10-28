@@ -228,6 +228,8 @@ def test_0311_projection_is_idempotent_and_keeps_local_family_ids(tmp_path):
         data=data,
     )
 
+    with database_connection(source) as connection:
+        connection.execute("UPDATE jobs SET state='completed'")
     first = project_import_job(source, target, "GLOBAL_IMPORT")
     second = project_import_job(source, target, "GLOBAL_IMPORT")
 
@@ -290,6 +292,8 @@ def test_0311_released_family_refreshes_stale_projection_from_central_stock(tmp_
         capture_time="2026-10-01T12:00:00",
         data=data,
     )
+    with database_connection(main_db) as connection:
+        connection.execute("UPDATE jobs SET state='completed'")
     project_import_job(main_db, other_db, "GLOBAL_RELEASE")
 
     with database_connection(other_db) as connection:
@@ -429,6 +433,8 @@ def test_0311_central_sync_does_not_overwrite_locally_applied_path(tmp_path):
         capture_time="2026-10-01T10:00:00",
         data=data,
     )
+    with database_connection(main_db) as connection:
+        connection.execute("UPDATE jobs SET state='completed'")
     project_import_job(main_db, other_db, "OWNED_LOCAL")
 
     with database_connection(other_db) as connection:
