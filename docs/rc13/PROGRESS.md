@@ -112,3 +112,8 @@ Containerfixtures/CI. Heruntergeladene Gesamtbelege mit dem echten Releasegate
 unabhängig erfolgreich geprüft. Native TrueNAS-Abnahme ausdrücklich ausstehend.
 Nächster Schritt: Abschlussdokumentation committen, Publisher an diese exakten
 Nachweise binden, Prerelease/Image veröffentlichen und Registry-Pull verifizieren.
+
+Publikationsvorprüfung: falsche zusätzliche Privatheitsannahme für GHCR erkannt.
+Das existierende RC12-Manifest ist anonym mit HTTP 200 abrufbar. Repository bleibt
+privat; Publisher dokumentiert bestehende Paketsichtbarkeit und verlangt nach
+Veröffentlichung exakt dieselbe Sichtbarkeit. Noch kein RC13-Tag/Image erzeugt.

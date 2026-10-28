@@ -32,7 +32,8 @@ Erstinstallations-/ACL-Abnahme folgt später.
    die App-Logs sichern. Widersprüchliche oder fehlende Herkunftsbelege werden
    weiterhin gesperrt. Keine Belege löschen, um eine Freigabe zu erzwingen.
 
-Das Repository und das GHCR-Paket bleiben privat. Falls der Imageabruf abgelehnt
+Das Repository bleibt privat. Das bestehende GHCR-Paket ist öffentlich
+abrufbar und behält seine Zugriffsrechte. Falls der Imageabruf abgelehnt
 wird, die vorhandene Registry-Anmeldung für `ghcr.io` mit einem berechtigten
 GitHub-Konto und einem Token mit `read:packages` verwenden. Keine Zugangsdaten
 in Logs oder Supportberichte kopieren.

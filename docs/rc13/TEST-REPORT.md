@@ -107,4 +107,5 @@ zieht es anschließend tatsächlich per unveränderlichem Digest aus GHCR und
 prüft Version, OCI-Revision und Image-ID. Releaseartefakte enthalten
 `IMAGE-DIGEST.txt`, Pullbeleg, vollständige QA-Belege, `CHANGED-FILES.txt`,
 Quellpaket, Installationsanleitungen, digestgebundene Compose-Datei und
-`SHA256SUMS`. Repository und Paket bleiben privat.
+`SHA256SUMS`. Das Repository bleibt privat; die bestehenden GHCR-Paketzugriffsrechte bleiben
+unverändert und werden im Release dokumentiert.

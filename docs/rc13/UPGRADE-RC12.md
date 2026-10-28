@@ -18,8 +18,8 @@ Image-Digest und Pullbeleg; native Abnahme folgt separat.
    Quellenfamilienfehler erforderlich.
 4. Nach Veröffentlichung ausschließlich das im RC13-Release ausgewiesene
    geprüfte Image verwenden. In der Custom-App das Image aktualisieren und
-   dieselbe Instanz starten. Für private GHCR-Pakete die bereits eingerichteten
-   TrueNAS-Registry-Zugangsdaten verwenden.
+   dieselbe Instanz starten. Das bestehende GHCR-Paket ist öffentlich abrufbar. Bei einer Zugriffssperre
+   vorhandene TrueNAS-Registry-Zugangsdaten prüfen; das Repository bleibt privat.
 5. Anmelden. Der Startabgleich prüft ursprüngliche Registry-Mitglieder und
    passende bestätigte Löschbelege automatisch. Er schreibt keine verkürzte
    Herkunft und erfordert keinen SQL-Eingriff. Wiederholte Starts sind zulässig.
