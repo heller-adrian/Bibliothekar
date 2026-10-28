@@ -124,7 +124,9 @@ def _free_rows(
                    ff.family_key,ff.selected_capture_time
             FROM files f
             JOIN file_families ff ON ff.id=f.family_id
+            JOIN jobs import_job ON import_job.id=f.job_id
             WHERE f.current_root_kind='shared_workspace'
+              AND (import_job.operation!='folder_import' OR import_job.state='completed')
               AND COALESCE(TRIM(f.current_relative_path),'')<>''
               AND f.current_relative_path<>'Später zuordnen'
               AND f.current_relative_path NOT LIKE 'Später zuordnen/%'

@@ -264,14 +264,16 @@ def build_global_workspace_summary(
     day_groups: list[dict[str, Any]] = []
     time_segments: list[dict[str, Any]] = []
     reviews: list[dict[str, Any]] = []
+    eligible = None
+    if availability_root is not None:
+        from app.inventory_availability import available_families
+        eligible=available_families(database_path,availability_root)
     for job in jobs:
         job_id = str(job["id"])
         excluded = set(
             (excluded_family_ids_by_job or {}).get(job_id, set())
         )
-        if availability_root is not None:
-            from app.inventory_availability import available_families
-            eligible=available_families(database_path,availability_root)
+        if eligible is not None:
             with database_connection(database_path) as c:
                 excluded |= {int(r[0]) for r in c.execute('SELECT id FROM file_families WHERE job_id=?',(job_id,)) if int(r[0]) not in eligible}
         overview = list_job_planning_overview(

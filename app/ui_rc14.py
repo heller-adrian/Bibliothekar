@@ -52,8 +52,8 @@ TRANSLATIONS={
  'Import wurde zur sicheren Fortsetzung vorgemerkt.':'Import queued for verified continuation.',
 }
 PATTERNS=[
- [r'^([0-9]+) freie Familie$','$1 unassigned family'],
- [r'^([0-9]+) freie Familien$','$1 unassigned families'],
+ [r'^([0-9]+) freie Familie$','$1 available family'],
+ [r'^([0-9]+) freie Familien$','$1 available families'],
  [r'^([0-9]+) Familie · freier Tagesbestand$','$1 family · unassigned daily inventory'],
  [r'^([0-9]+) Familien · freier Tagesbestand$','$1 families · unassigned daily inventory'],
  [r'^Ereignis gelöscht: (.+) · ([0-9]+) Familie wieder frei\.$','Event deleted: $1 · $2 family returned to unassigned inventory.'],

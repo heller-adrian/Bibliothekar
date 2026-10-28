@@ -29,23 +29,27 @@ def connect(database_path: Path) -> sqlite3.Connection:
         timeout=WRITE_WAIT_MS.get()/1000,
     )
 
-    connection.row_factory = sqlite3.Row
+    try:
+        connection.row_factory = sqlite3.Row
 
-    connection.execute(
-        "PRAGMA foreign_keys = ON"
-    )
+        connection.execute(
+            "PRAGMA foreign_keys = ON"
+        )
 
-    connection.execute(
-        "PRAGMA journal_mode = WAL"
-    )
+        connection.execute(
+            "PRAGMA journal_mode = WAL"
+        )
 
-    connection.execute(
-        "PRAGMA synchronous = FULL"
-    )
+        connection.execute(
+            "PRAGMA synchronous = FULL"
+        )
 
-    connection.execute(
-        f"PRAGMA busy_timeout = {WRITE_WAIT_MS.get()}"
-    )
+        connection.execute(
+            f"PRAGMA busy_timeout = {WRITE_WAIT_MS.get()}"
+        )
+    except BaseException:
+        connection.close()
+        raise
 
     return connection
 
@@ -4862,6 +4866,7 @@ def list_global_tasks(database_path: Path, *, eligible_family_ids: set[int] | No
     dialog or reloading a page can never make pending work disappear.
     """
     tasks: list[dict[str, Any]] = []
+    eligibility = '' if eligible_family_ids is None else (' AND ff.id IN ('+','.join(str(int(i)) for i in sorted(eligible_family_ids))+')' if eligible_family_ids else ' AND 0')
     with database_connection(database_path) as connection:
         # Veraltete Neu-Zuordnungen sind keine Aufgaben. Sie entstehen z. B.,
         # wenn eine Familie spaeter wieder direkt einem gueltigen Ereignis
@@ -5072,7 +5077,7 @@ def list_global_tasks(database_path: Path, *, eligible_family_ids: set[int] | No
         # keinen separaten Neu-Zuordnungsauftrag mehr, sollen aber als offene
         # Aufgabe sichtbar bleiben, bis sie über „Aufnahmen“ neu verplant sind.
         for row in connection.execute(
-            """SELECT MIN(marker.job_id) AS anchor_job_id,
+            f"""SELECT MIN(marker.job_id) AS anchor_job_id,
                       COUNT(DISTINCT marker.family_id) AS n
                FROM released_free_families marker
                JOIN file_families ff ON ff.id=marker.family_id
@@ -5234,13 +5239,13 @@ def list_global_tasks(database_path: Path, *, eligible_family_ids: set[int] | No
                 "href": "/workspace?task=placement-conflicts",
             })
 
-        eligibility = '' if eligible_family_ids is None else (' AND ff.id IN ('+','.join(str(int(i)) for i in sorted(eligible_family_ids))+')' if eligible_family_ids else ' AND 0')
         row = connection.execute(
             f"""SELECT COUNT(*) AS n,
                       COUNT(DISTINCT ff.job_id) AS job_count,
                       MIN(COALESCE(j.source_volume_label,ff.job_id)) AS only_label
                FROM file_families ff JOIN jobs j ON j.id=ff.job_id
                WHERE ff.selected_capture_time IS NOT NULL
+                 {eligibility}
                  AND NOT EXISTS (
                    SELECT 1 FROM files undated_file
                    WHERE undated_file.family_id=ff.id

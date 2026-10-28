@@ -28,6 +28,8 @@ def _seed_free_file(db: Path, relative: str, data: bytes) -> tuple[int, int]:
         operation="folder_import",
     )
     with database_connection(db) as connection:
+        # This helper represents successfully published free stock.
+        connection.execute("UPDATE jobs SET state='completed' WHERE id='J'")
         family = connection.execute(
             """INSERT INTO file_families(
                    job_id,family_key,original_stem,status,

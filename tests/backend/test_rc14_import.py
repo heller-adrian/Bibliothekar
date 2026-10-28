@@ -112,3 +112,49 @@ def test_reconcile_hash_does_not_hold_catalogue_writer(tmp_path, monkeypatch):
     monkeypatch.setattr(stock,'_sha256_file',measured)
     stock.reconcile_central_free_stock(db,ws,library_id='main')
     assert calls
+
+
+def test_import_progress_retries_a_real_short_wal_writer(fixture):
+    import threading,time
+    from app.database import update_job_progress,get_job,connect,database_connection
+    db,reg,ws,central,stage,logs,job,plan=staged_case(fixture)
+    with database_connection(db) as c:c.execute("UPDATE jobs SET state='organizing' WHERE id=?",(job,))
+    held=threading.Event()
+    def other_writer():
+        with sqlite3.connect(db) as c:
+            c.execute('BEGIN IMMEDIATE');held.set();time.sleep(.35)
+    worker=threading.Thread(target=other_writer);worker.start();assert held.wait(2)
+    update_job_progress(db,job,state='organizing',stage='workspace_moving',current=900,total=1000,message='Progress after bounded retry')
+    worker.join(2);assert not worker.is_alive()
+    assert get_job(db,job)['progress_message']=='Progress after bounded retry'
+    with connect(db) as c:assert c.execute('PRAGMA busy_timeout').fetchone()[0]==30000
+
+
+def test_tasks_exclude_failed_and_missing_physical_families(fixture):
+    from app.database import list_global_tasks,database_connection
+    from app.inventory_availability import available_families
+    db,reg,ws,central,stage,logs,job,plan=staged_case(fixture)
+    tasks=list_global_tasks(db,eligible_family_ids=available_families(db,ws))
+    assert not any(t['kind']=='unassigned_families' for t in tasks)
+
+    with database_connection(db) as c:
+        c.execute("UPDATE jobs SET state='completed' WHERE id=?",(job,))
+        c.execute("UPDATE files SET current_root_kind='shared_workspace'")
+    # A completed label alone cannot make missing physical copies free stock.
+    tasks=list_global_tasks(db,eligible_family_ids=available_families(db,ws))
+    assert not any(t['kind']=='unassigned_families' for t in tasks)
+
+
+def test_failed_publication_is_not_reconciled_as_file_loss(fixture):
+    from app.database import database_connection
+    from app.central_stock_reconcile import reconcile_central_free_stock
+    db,reg,ws,central,stage,logs,job,plan=staged_case(fixture)
+    # Crash/rollback after path callback committed, before job completion.
+    with database_connection(db) as c:
+        for item in plan:
+            c.execute("UPDATE files SET current_root_kind='shared_workspace',current_relative_path=? WHERE job_id=? AND original_relative_path=?",(item['destination_relative_path'],job,item['source_relative_path']))
+    for _ in range(2):
+        result=reconcile_central_free_stock(db,ws,library_id='main')
+        assert result['deleted_file_count']==0
+    with database_connection(db) as c:
+        assert c.execute('SELECT COUNT(*) FROM files WHERE job_id=?',(job,)).fetchone()[0]==6

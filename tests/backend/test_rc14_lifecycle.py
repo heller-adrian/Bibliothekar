@@ -106,3 +106,56 @@ def test_retirement_registry_commit_crash_replays_own_receipt(fixture,monkeypatc
     assert ro.generation(ws,'second')==(before[0],before[1]+1)
     assert not (ro._control_location(ws)/'mutation.json').exists()
     assert len(list(ro._control_location(ws).glob('library-retirement-*.json')))==1
+
+
+def test_owned_claim_retires_only_with_archive_and_immutable_receipt(fixture,monkeypatch):
+    from app import main
+    from app.library_registry import get_library,claim_source_family,unregister_library
+    from app.import_recovery import resume
+    from app.database import update_import_file_paths,database_connection
+    from app.global_stock import project_import_job
+    db,reg,ws,central,stage,logs,job,plan=staged_case(fixture)
+    resume(db,reg,ws,logs,job,path_callback=lambda p:update_import_file_paths(db,job,p,working_path=str(central)),history_callback=lambda p:None,progress_callback=lambda *a:None)
+    with database_connection(db) as c:c.execute("UPDATE jobs SET state='completed' WHERE id=?",(job,))
+    project_import_job(db,fixture[3][1],job)
+    row=get_library(reg,'second',active_only=False);work=Path(row['work_root']);archive=Path(row['archive_root'])
+    (work/'original.JPG').unlink()
+    for item in plan:
+        path=archive/item['destination_relative_path'];path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_bytes((central/item['destination_relative_path']).read_bytes())
+    with database_connection(fixture[3][1]) as c:c.execute("UPDATE files SET current_root_kind='camera_archive'")
+    claim_source_family(reg,source_family_key='main:'+job+':F0',library_id='second',event_id='ARCHIVED',claim_state='owned')
+    # There is a fully qualified retained staging envelope until finalization.
+    from app.import_recovery import retain_completed_evidence
+    retain_completed_evidence(db,reg,ws,logs,job)
+    with sqlite3.connect(reg) as c:
+        before={t:c.execute('SELECT * FROM '+t+' ORDER BY 1,2').fetchall() for t in ('source_families','canonical_families','source_media','source_family_members')}
+        claims=c.execute('SELECT * FROM family_claims').fetchall()
+    monkeypatch.setattr(main,'_mount_read_only',lambda p:True)
+    result=unregister_library(reg,'second',confirmation='REMOVE LIBRARY')
+    receipt=result['settings']['retirement_receipt']
+    assert len(receipt['claims'])==len(claims)==1 and receipt['claims'][0]['claim_state']=='owned'
+    with sqlite3.connect(reg) as c:
+        assert not c.execute('SELECT * FROM family_claims').fetchall()
+        assert before=={t:c.execute('SELECT * FROM '+t+' ORDER BY 1,2').fetchall() for t in before}
+    # The retained immutable origin can be admitted by the ordinary claim path
+    # for another active library; no historical source binding is overwritten.
+    claim_source_family(reg,source_family_key='main:'+job+':F0',library_id='main',event_id='NEW',claim_state='reserved')
+    assert all((archive/i['destination_relative_path']).read_bytes()==(central/i['destination_relative_path']).read_bytes() for i in plan)
+
+
+def test_library_listing_survives_storage_fault_without_enabling_mutation(fixture):
+    from app import main,root_operations as ro
+    from app.library_registry import get_library
+    from fastapi.testclient import TestClient
+    case,ws,reg,dbs,_=fixture
+    row=get_library(reg,'second',active_only=False)
+    # Pin the exact old identity first; the new name is never adopted.
+    with ro.reserve(ws,library_id='second',paths=[Path(row['work_root'])],database=dbs[1],kind='inventory'):pass
+    Path(row['work_root']).rename(Path(row['work_root']).with_name('user-renamed'))
+    client=TestClient(main.app)
+    response=client.get('/api/libraries?include_inactive=true')
+    assert response.status_code==200 and len(response.json()['libraries'])==2
+    response=client.post('/api/libraries/second/unregister',json={'confirmation':'REMOVE LIBRARY'})
+    assert response.status_code==409
+    assert get_library(reg,'second',active_only=False)['is_registered']
