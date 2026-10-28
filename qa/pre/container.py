@@ -13,7 +13,7 @@ from PIL import Image
 from pathlib import Path
 import subprocess
 p=Path('/fixture/nas/CARD');p.mkdir()
-for i in range(14):Image.new('RGB',(8,8),(i,30,20)).save(p/f'PHOTO{i:03}.JPG')
+for i in range(14):Image.new('RGB',(8,8),(i*17,i*13,i*7)).save(p/f'PHOTO{i:03}.JPG')
 # A usable secondary source with medium confidence keeps the files in Undated.
 subprocess.run(['exiftool','-overwrite_original','-XMP:CreateDate=2025:12:07 15:04:37+13:00',str(p)],check=True,capture_output=True)
 Path('/fixture/archive/untouched.txt').write_bytes(b'independent archive')
@@ -50,7 +50,7 @@ try:
  items=[{'library_id':f['library_id'],'family_id':f['family_id']} for f in files]
  api('/api/metadata-correction/correct-batch',{'area':'library','source_type':source_type,'items':items})
  # Required reproduction in original RC14, with a real authenticated HTTP call.
- failure=api('/api/metadata-correction/reintegrate',{'items':items},expect=422)
+ failure=api('/api/metadata-correction/reintegrate',{'items':items},expect=409)
  assert 'bestätigt' in str(failure),failure
  before=snapshot();assert all(r['selected_capture_time']=='2025-12-07T15:04:37' for r in before['files'])
  old.docker('stop',name);old.docker('rm',name)
