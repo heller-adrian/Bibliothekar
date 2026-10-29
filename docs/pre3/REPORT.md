@@ -33,14 +33,17 @@ There is no import-continuity branch. A legitimate missing old path is consequen
 reported as `metadata_outcome_unverified: [Errno 2] ...` and startup is paused.
 
 E. The new read-only transfer qualifier follows an exact completed
-`metadata_general_import`: deterministic admission ID, full manifest selection,
+`metadata_general_import`: deterministic admission ID (or the specifically qualified
+RC14 timestamp ID), recomputed full-manifest SHA-256 fingerprint, full selection,
 source-stage path, job timestamps/signatures/fingerprint, completed protocol,
 exclusive publication journal, exact main catalogue row/family, canonical source
 family and immutable members. The destination is taken only from the journal and
 must agree with the catalogue, central-stock role binding, current output SHA/size
 and the journal's published inode. There is no filename/date/hash scan across media
 or libraries. Missing, duplicate, contradictory or unsupported evidence fails closed.
-A later sort/archive move that no longer agrees with this publication journal is
+RC14 timestamp IDs are accepted only for Main, with a plausible admission interval
+and the same complete publication/catalogue/immutable-origin checks; the timestamp
+is never destination or completion authority. A later sort/archive move that no longer agrees with this publication journal is
 not guessed; it needs its own reviewed continuity chain.
 
 F. The previous path confused an unreconciled successful intent with an unfinished
@@ -122,3 +125,11 @@ Targeted local reproduction before correction: exact pre.2 missing-path startup
 failure after a real General import; one failed test saved under the task evidence.
 Subsequent positive/negative cases and final Linux/container results are recorded in
 PROGRESS.md / EVIDENCE.json after completion. The targeted CI does not publish images.
+
+
+First Linux gate 40967129148: 176 passed, one old F14 assertion expected legacy
+startup to succeed with an unknown orphan lease. The updated contract deliberately
+fences that state, matching appdata behavior; the test now requires refusal and still
+checks all original bytes/evidence after three real restarts. No security check was
+relaxed. An additional source audit found RC14's timestamp General IDs; dedicated
+unchanged-RC14 positive/negative fixtures now cover that historical format.

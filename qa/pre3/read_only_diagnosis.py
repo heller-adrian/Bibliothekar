@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='bibliothekar-read-diagnosis-',dir='/tmp
             if len(jobs)>2000:raise RuntimeError('more than 2000 General import records; request a narrower diagnosis')
             for job in jobs:
                 job['files']=[dict(r) for r in c.execute('SELECT f.*,ff.family_key FROM files f JOIN file_families ff ON f.family_id=ff.id AND f.job_id=ff.job_id WHERE f.job_id=?',(job['id'],))]
-                if not re.fullmatch(r'GENERAL_IMPORT_[0-9a-f]{32}',job['id']):raise RuntimeError('unexpected General job identifier: '+job['id'])
+                if not re.fullmatch(r'GENERAL_IMPORT_(?:[0-9a-f]{32}|[0-9]{8}_[0-9]{6}_[0-9]{6})',job['id']):raise RuntimeError('unexpected General job identifier: '+job['id'])
                 logs=Path(os.environ.get('KAMERA_LOG_DIR','/appdata/logs'))/'backups'/job['id']
                 job['protocol']={}
                 if logs.resolve()!=logs:raise RuntimeError('protocol symlink: '+str(logs))

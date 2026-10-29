@@ -76,7 +76,7 @@ if os.getuid()==568 and 'uvicorn' in sys.orig_argv:
 NAME='20260719_175150_Fuji-X-E5.JPG'
 PAYLOAD="{'area':'general','relative_path':'"+NAME+"','proposed_datetime':'2026-07-19T17:51:50+02:00'}"
 
-def case(label,*,foreign=False,unknown=False,kill=False,import_kill=False):
+def case(label,*,foreign=False,unknown=False,kill=False,import_kill=False,rc14=False):
  root=ROOT/label;root.mkdir()
  for n in ('appdata','workspace','archive','hooks'):(root/n).mkdir()
  (root/'hooks/sitecustomize.py').write_text(HOOK)
@@ -109,15 +109,15 @@ def case(label,*,foreign=False,unknown=False,kill=False,import_kill=False):
   raise AssertionError('General import timeout: '+job)
  summary={'label':label}
  try:
-  create(BASE,'PRE3_OLD_FINISH_FAILURE')
+  create(os.environ['RC14_IMAGE'] if rc14 else BASE,'PRE3_OLD_FINISH_FAILURE')
   api("print(json.dumps(api('/api/libraries',{'display_name':'Main','work_root':'','archive_root':'/main-library'},201)))")
   docker('exec','--user','568:568',name,'python','-c',"from pathlib import Path;import json;p=Path('/appdata/config/settings.json');v=json.loads(p.read_text());v.setdefault('storage',{}).update(safety_reserve_gib=0,processing_buffer_percent=0);p.write_text(json.dumps(v))")
   photo('blue');correct(expect=409)
   corrected=snap();assert len(corrected['ops'])==1 and corrected['tasks'][0]['status']=='completed' and not corrected['outcomes']
   job=transfer();before=snap();assert NAME not in before['general_files'] and before['files'][0]['actual_sha']==before['tasks'][0]['output_sha256']
   docker('restart',name);health=api("print(json.dumps(api('/api/settings/storage-health')))")
-  assert not health['ready'] and 'metadata_outcome_unverified' in json.dumps(health),health
-  summary['released_pre2_exact_missing_path_block_reproduced']=True
+  assert not health['ready'] and ('unresolved_reservation' if rc14 else 'metadata_outcome_unverified') in json.dumps(health),health
+  summary['released_rc14_pending_intent_reproduced' if rc14 else 'released_pre2_exact_missing_path_block_reproduced']=True
   if foreign:
    docker('exec','--user','568:568',name,'python','-c',"from pathlib import Path;import sqlite3;from app.storage_config import storage_paths;c=sqlite3.connect('file:/appdata/database/kamera.sqlite3?mode=ro',uri=True);rel=c.execute('SELECT current_relative_path FROM files').fetchone()[0];c.close();(storage_paths(Path('/workspace'))['backup_root']/rel).write_bytes(b'foreign user bytes')")
   if unknown:
@@ -179,5 +179,5 @@ def case(label,*,foreign=False,unknown=False,kill=False,import_kill=False):
   (Path(os.environ['RUNNER_TEMP'])/'pre3-evidence.json').write_text(json.dumps(REPORT,indent=2))
   docker('rm','-f',name,check=False)
 
-for label,options in [('historical',{}),('foreign',{'foreign':True}),('three',{'unknown':True}),('sigkill',{'kill':True}),('import-sigkill',{'import_kill':True})]:case(label,**options)
+for label,options in [('historical',{}),('rc14',{'rc14':True}),('foreign',{'foreign':True}),('three',{'unknown':True}),('sigkill',{'kill':True}),('import-sigkill',{'import_kill':True})]:case(label,**options)
 REPORT['status']='PASS';(Path(os.environ['RUNNER_TEMP'])/'pre3-evidence.json').write_text(json.dumps(REPORT,indent=2));print(json.dumps(REPORT,indent=2))

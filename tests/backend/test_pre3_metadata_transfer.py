@@ -49,14 +49,14 @@ def transfer(fixture,monkeypatch):
     return job
 
 
-def historical(fixture,monkeypatch,*,move=True,prior_receipt=False):
+def historical(fixture,monkeypatch,*,move=True,prior_receipt=False,release="v1.0.0-pre.2"):
     case,ws,reg,dbs,ev=fixture;db=dbs[0]
     root=mc.metadata_area_paths(area='general',workspace_root=ws,library_id='main')['root']
     source=root/NAME;Image.new('RGB',(12,12),'blue').save(source)
     for _ in range(2):
         with ro.mutate(ws):pass
     old=case/'published-pre2';old.mkdir()
-    with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['git','archive','v1.0.0-pre.2','app']))) as t:t.extractall(old,filter='data')
+    with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['git','archive',release,'app']))) as t:t.extractall(old,filter='data')
     code=r"""
 import os,sys,signal,json
 from pathlib import Path
@@ -306,3 +306,24 @@ def test_diagnostic_script_opens_only_snapshot_sqlite_and_preserves_sources(fixt
     assert value['operations'][0]['record']==record
     assert value['general_imports'][0]['candidate_destination_files'][0]['sha256']==task['output_sha256']
     assert {str(p):p.read_bytes() for p in watched}==before
+
+
+@pytest.mark.parametrize('fault',['none','journal_inode','manifest_hash','job_time'])
+def test_actual_rc14_timestamp_admission_requires_complete_legacy_chain(fixture,monkeypatch,fault):
+    case,ws,reg,db,source,task,record,job=historical(fixture,monkeypatch,release='v1.0.0-rc.14')
+    assert job['id'].startswith('GENERAL_IMPORT_') and not list(ro._control_location(ws).glob('metadata-intent-*.json'))
+    protocol=case/'logs/backups'/job['id']
+    if fault in ('journal_inode','manifest_hash'):
+        p=protocol/('move-journal.json' if fault=='journal_inode' else 'manifest.json');v=json.loads(p.read_text())
+        if fault=='journal_inode':v['files'][0]['inode']=[0,0]
+        else:v['files'][0]['sha256']='f'*64
+        p.write_text(json.dumps(v))
+    if fault=='job_time':
+        with database_connection(db) as c:c.execute('UPDATE jobs SET created_at=? WHERE id=?',('2000-01-01T00:00:00+01:00',job['id']))
+    if fault=='none':
+        recovery.recover_general_outcomes(ws,reg)
+        assert receipt(ws)['source']['transfer']['admission_kind']=='legacy_verified_copy_chain'
+        assert receipt(ws)['reservation']==record
+    else:
+        with pytest.raises(ro.RootOperationError):recovery.recover_general_outcomes(ws,reg)
+        assert ro._read(next(ro._control_location(ws).glob('operation-*.json')))==record

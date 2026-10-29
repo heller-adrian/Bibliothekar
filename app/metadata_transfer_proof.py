@@ -8,6 +8,7 @@ from datetime import datetime
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 
@@ -84,8 +85,20 @@ def _qualify(task,record,owner,registry,logs):
         if type(e['size_bytes']) is not int or not isinstance(e['sha256'],str):fail('manifest_member',protocol)
         selection.append((rel,e['size_bytes'],e['sha256']))
     if len({x[0] for x in selection})!=len(selection) or len(entries)!=manifest.get('file_count'):fail('manifest_members_ambiguous',protocol)
+    from app.folder_import import manifest_fingerprint
+    if manifest.get('total_source_file_count')!=len(entries) or manifest_fingerprint(entries)!=job['source_fingerprint']:fail('manifest_fingerprint',protocol)
     expected='GENERAL_IMPORT_'+hashlib.sha256(json.dumps([owner['library_id'],sorted(selection)],ensure_ascii=False).encode()).hexdigest()[:32]
-    if job_id!=expected or (source_relative,size,sha) not in selection:fail('admission_identity',job_id)
+    if (source_relative,size,sha) not in selection:fail('admission_identity',job_id)
+    admission_kind='selection_sha256'
+    if job_id!=expected:
+        # RC14 recorded a timestamp queue ID, not a hash selection ID. It is
+        # accepted only with the full copy/publication/origin chain below and
+        # a Main authority; the timestamp alone authorizes nothing.
+        if owner['library_id']!='main' or not re.fullmatch(r'GENERAL_IMPORT_[0-9]{8}_[0-9]{6}_[0-9]{6}',job_id):fail('admission_identity',job_id)
+        try:admitted=datetime.strptime(job_id,'GENERAL_IMPORT_%Y%m%d_%H%M%S_%f').replace(tzinfo=timestamp(job['created_at']).tzinfo)
+        except ValueError:fail('legacy_admission_timestamp',job_id)
+        if not timestamp(task['completed_at'])<=admitted<=timestamp(job['created_at']):fail('legacy_admission_timestamp',job_id)
+        admission_kind='legacy_verified_copy_chain'
     if status.get('job_id')!=job_id or status.get('state')!='success' or status.get('stage')!='completed' or status.get('source_path')!=str(stage):fail('protocol_incomplete',protocol)
     if status.get('organization')!=result.get('organization'):fail('protocol_result_mismatch',protocol)
     if journal.get('format')!=1 or journal.get('root')!=str(central):fail('publication_root',protocol)
@@ -125,11 +138,11 @@ def _qualify(task,record,owner,registry,logs):
     except OSError as error:fail('target_unavailable',str(destination)+' · '+str(error))
     if proof['identity']!=item.get('inode'):fail('publication_inode',destination)
     if os.path.lexists(stage/source_relative):fail('staging_member_remains',stage/source_relative)
-    return dict(proof,transfer={'format':1,'kind':'qualified_general_import','job':job,'file':file,
+    return dict(proof,transfer={'format':1,'kind':'qualified_general_import','admission_kind':admission_kind,'job':job,'file':file,
        'original_general_path':task['output_path'],'protocol':str(protocol),
-       'manifest_sha256':hashlib.sha256(json.dumps(manifest,sort_keys=True).encode()).hexdigest(),
-       'publication_sha256':hashlib.sha256(json.dumps(journal,sort_keys=True).encode()).hexdigest(),
-       'status_sha256':hashlib.sha256(json.dumps(status,sort_keys=True).encode()).hexdigest(),
+       'manifest_canonical_sha256':hashlib.sha256(json.dumps(manifest,sort_keys=True).encode()).hexdigest(),
+       'publication_canonical_sha256':hashlib.sha256(json.dumps(journal,sort_keys=True).encode()).hexdigest(),
+       'status_canonical_sha256':hashlib.sha256(json.dumps(status,sort_keys=True).encode()).hexdigest(),
        'source_family_key':key,'canonical_family_id':origin['canonical_family_id'],
        'origin_members':members})
 

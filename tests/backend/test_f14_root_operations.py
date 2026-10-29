@@ -187,8 +187,8 @@ def test_f14_true_sigkill_preserves_reservation_and_blocks_changes(fixture,actio
         assert result.returncode==3,result.stdout+result.stderr
         from tests.backend import test_0562_process_recovery as recovery
         # The unchanged real application-start worker is used, not just a guard
-        # simulation. A root intent blocks startup; an unrelated orphan lease
-        # keeps ordinary startup possible while refusing subsequent root changes.
+        # simulation. Both a root intent and an unknown durable orphan lease
+        # fence worker startup, including legacy layouts. Evidence stays intact.
         monkey_env=dict(AUDIT_SCRATCH=str(case.parent),AUDIT_SOURCE=str(Path(__file__).resolve().parents[2]),AUDIT_OUTPUT=str(ev),AUDIT_LABEL='f14-real-start')
         saved={k:os.environ.get(k) for k in monkey_env};os.environ.update(monkey_env)
         try:start=recovery.invoke(case,'startup','none',ev/f'full-application-start{n}')
@@ -196,7 +196,7 @@ def test_f14_true_sigkill_preserves_reservation_and_blocks_changes(fixture,actio
             for k,v in saved.items():
                 if v is None:os.environ.pop(k,None)
                 else:os.environ[k]=v
-        assert (start['returncode']==0)==(action=='reserve'),start
+        assert start['returncode']!=0,start
         snapshot(case,ev/f'after-restart{n}.json')
     assert list(parent.glob('operation-*.json')) if action=='reserve' else (parent/'mutation.json').exists()
     originals=list(ws.rglob('original.JPG'));assert len(originals)==2
