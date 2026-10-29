@@ -1,0 +1,134 @@
+name: Publish verified Bibliothekar 1.0.0-pre
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'After explicit release approval, type PUBLISH v1.0.0-pre'
+        required: true
+        type: string
+permissions:
+  contents: write
+  packages: write
+  actions: read
+concurrency:
+  group: bibliothekar-v1.0.0-pre-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/prepare-1.0.0-pre-release' && inputs.confirmation == 'PUBLISH v1.0.0-pre'
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre-publish-${{ github.run_id }}-${{ github.run_attempt }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      APPROVE_PUBLISH: ${{ inputs.confirmation }}
+      ACCEPTED_SHA: 70c0bb57afa168efec83b1b60245b819b36161ff
+      ACCEPTED_QA: '40840603811'
+      IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-pre
+      TAG: v1.0.0-pre
+      PYTHONDONTWRITEBYTECODE: '1'
+      DOCKER_CONFIG: ${{ runner.temp }}/pre-docker-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre-publish-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Validate runner and create isolated release workspace
+        run: |
+          set -euo pipefail
+          umask 077
+          for tool in python3 git docker gh tar gzip sha256sum; do command -v "$tool" >/dev/null || { echo "Missing runner prerequisite: $tool" >&2; exit 1; }; done
+          python3 -c 'import sys; assert sys.version_info >= (3,12), "Python 3.12+ required"'
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          mkdir "$DOCKER_CONFIG"
+          echo REGISTRY_CONFIG_CREATED=true >> "$GITHUB_ENV"
+          WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre-publish.XXXXXXXX")"
+          printf 'WORK=%s\n' "$WORK" >> "$GITHUB_ENV"
+          printf 'ASSET_DIR=%s/release-assets\nEVIDENCE_DIR=%s/pre-accepted-evidence\nSOURCE_DIR=%s/source\n' "$WORK" "$WORK" "$WORK" >> "$GITHUB_ENV"
+          python3 docs/pre/release/publish.py audit-source
+      - name: Download and verify all eleven immutable accepted artifacts
+        run: |
+          set -euo pipefail
+          python3 docs/pre/release/publish.py download --work "$WORK"
+          mkdir "$SOURCE_DIR"
+          git archive "$ACCEPTED_SHA" | tar -x -C "$SOURCE_DIR"
+          python3 docs/pre/release/verify_evidence.py
+          python3 docs/pre/release/publish.py stage --work "$WORK"
+          python3 docs/pre/release/publish.py preflight --work "$WORK"
+      - name: Authenticate only this job to GHCR
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build only accepted source and verify every embedded app file
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$ACCEPTED_SHA" -t "$IMAGE" "$SOURCE_DIR"
+          python3 docs/pre/release/publish.py verify-image --ref "$IMAGE" --source "$SOURCE_DIR" --work "$WORK"
+          docker image inspect "$IMAGE" --format '{{.Id}}' > "$WORK/built-image-id"
+      - name: Reserve a new release tag atomically and push only the pre image
+        run: |
+          set -euo pipefail
+          python3 docs/pre/release/publish.py reserve-tag --work "$WORK"
+          docker push "$IMAGE" | tee "$ASSET_DIR/image-push.log"
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' "$ASSET_DIR/image-push.log" | tail -1)"
+          test "${#DIGEST}" -eq 71
+          printf 'DIGEST=%s\n' "$DIGEST" >> "$GITHUB_ENV"
+      - name: Real immutable pull, repeated payload proof, OCI and manifest checks
+        run: |
+          set -euo pipefail
+          REF="ghcr.io/heller-adrian/bibliothekar@$DIGEST"
+          docker pull "$REF" | tee "$ASSET_DIR/image-pull.log"
+          python3 docs/pre/release/publish.py verify-image --ref "$REF" --source "$SOURCE_DIR" --work "$WORK"
+          python3 docs/pre/release/publish.py finish --work "$WORK" --digest "$DIGEST"
+          (cd "$ASSET_DIR" && sha256sum --check SHA256SUMS)
+      - name: Publish only a verified GitHub prerelease and verify downloaded assets
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,sys
+          sys.path.insert(0,'docs/pre/release')
+          import publish as p
+          p.publication_context()
+          assert p.github('repos/'+p.REPO+'/git/ref/tags/'+p.TAG)['object']['sha']==os.environ['GITHUB_SHA']
+          assert p.github('repos/'+p.REPO+'/releases/tags/'+p.TAG,missing=True) is None
+          PY
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --prerelease --latest=false --notes-file "$ASSET_DIR/RELEASE-NOTES.md" "$ASSET_DIR"/*
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$WORK/release-verification.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads((Path(os.environ['WORK'])/'release-verification.json').read_text())
+          assert r['prerelease'] and not r['draft'] and r['tag_name']=='v1.0.0-pre'
+          actual={a['name'] for a in r['assets']}
+          expected={p.name for p in Path(os.environ['ASSET_DIR']).iterdir() if p.is_file()}
+          assert actual==expected
+          PY
+          mkdir "$WORK/downloaded-release"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$WORK/downloaded-release"
+          (cd "$WORK/downloaded-release" && sha256sum --check SHA256SUMS)
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
+          cat "$ASSET_DIR/IMAGE-DIGEST.txt" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve publication diagnostics
+        if: always() && env.ASSET_DIR != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre-publication-evidence
+          retention-days: 30
+          path: ${{ env.ASSET_DIR }}/
+      - name: Remove only this job's temporary registry credentials
+        if: always() && env.REGISTRY_CONFIG_CREATED == 'true'
+        run: |
+          python3 - <<'PY'
+          import os,shutil
+          from pathlib import Path
+          path=Path(os.environ['DOCKER_CONFIG'])
+          expected=Path(os.environ['RUNNER_TEMP'])/('pre-docker-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'])
+          assert path==expected and not path.is_symlink()
+          if path.is_dir():shutil.rmtree(path)
+          PY
