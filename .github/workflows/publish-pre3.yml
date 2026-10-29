@@ -1,4 +1,5 @@
 name: Publish verified Bibliothekar v1.0.0-pre.3
+# Retry after verifying source-identical local builder cache, not deleting Docker images.
 on:
   push:
     branches: [codex/publish-1.0.0-pre.3]
