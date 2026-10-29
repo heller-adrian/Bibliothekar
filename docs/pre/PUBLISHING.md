@@ -99,3 +99,36 @@ an einer ungeeigneten Maschine freigeschaltet werden.
 
 Native TrueNAS-/NFSv4-, physische SD-/USB- und DNG1.7-Abnahme bleiben NOT_RUN.
 Ein erfolgreicher Linux-Publisher darf diese Grenzen nicht als PASS umdeuten.
+
+## Kontrollierter Abschluss des vorhandenen Teilzustands
+
+Der erste Publisherlauf 40891738442 hat Tag und Image erfolgreich angelegt.
+Er darf nicht erneut ausgeführt werden. Auf `codex/prepare-1.0.0-pre-release`
+aktiviert ausschließlich die Eingabe **`COMPLETE v1.0.0-pre`** den getrennten Job
+`complete-existing` im bestehenden manuellen Workflow. Dessen Token hat nur
+lesende GHCR-Rechte. Dieser Job enthält keinen Build, Image-Push oder Tag-Schreiber.
+
+`complete.py` bindet den Abschluss an den ursprünglichen Tag-Commit
+`9e0fb0a2ff2166d8946c0589c3bc36d052bb03e5`, den vorhandenen OCI-Index
+`sha256:9e055cb8103285cf59da9e5c4f6c0ae697778e14441658f2ade6f877bd6b335b`,
+den unveränderten `latest`-Digest und die ursprüngliche Paket-/Repositorysichtbarkeit.
+Die elf ursprünglichen QA-Artefakte und das Diagnose-ZIP des ersten Publishers
+werden erneut anhand eingefrorener Digests geprüft. Erst nach vollständigem
+Digest-Pull, Appdateivergleich und OCI-Prüfung wird der fehlende Prerelease mit
+`--verify-tag --prerelease --latest=false` angelegt. Alle Anlagen werden erneut
+heruntergeladen und sowohl mit lokalen Bytes als auch GitHubs Asset-Digests verglichen.
+Bei jeder Abweichung stoppen; auch einen fehlgeschlagenen Abschluss nicht blind wiederholen.
+
+Die OCI-Prüfung folgt der [OCI-Indexstruktur](https://github.com/opencontainers/image-spec/blob/main/image-index.md)
+und dem [BuildKit-Attestationsformat](https://docs.docker.com/build/metadata/attestations/attestation-storage/).
+Alle Deskriptoren werden nach Typ, Größe und SHA-256 geprüft; genau ein linux/amd64-
+Anwendungsmanifest wird zugelassen. Provenance besitzt unknown/unknown als Plattform
+und muss auf genau dieses Anwendungsmanifest verweisen. Die Attestation ist kein
+unabhängiger signierter Vertrauensanker. Die Quellidentität wird zusätzlich durch
+vollständigen Appdateivergleich, Modivergleich, Version und OCI-Revision belegt.
+Docker-IDs aus klassischem oder containerd-basiertem Image Store sind nur zulässig,
+wenn sie exakt der geprüften Konfiguration, dem Plattformmanifest oder dem Index
+entsprechen; RootFS und Image-Konfiguration müssen zusätzlich übereinstimmen.
+
+Native TrueNAS-/NFSv4-, physische SD-/USB- und DNG-1.7-Abnahme bleiben NOT_RUN;
+das eigenständige Verlustabschlussmodell bleibt DEFERRED.

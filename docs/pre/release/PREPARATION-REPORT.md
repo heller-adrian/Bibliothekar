@@ -87,3 +87,57 @@ und lesende Veröffentlichungsvoraussetzungen bestätigt. Nur runner-smoke.yml
 wurde auf ci/runner-smoke-test geändert; der Backend-Pfadfilter blieb unberührt.
 Nächster Schritt: manuelle Workflowregistrierung auf main unter bestehenden
 Branchregeln klären; ausdrückliche Veröffentlichungsfreigabe abwarten.
+
+## Veröffentlichungsversuch vom 29. Oktober 2026
+
+Nach ausdrücklicher Freigabe wurde ausschließlich der vorbereitete
+Registrierungsworkflow auf main angelegt (Commit
+2a060b92b704f457fdb0e6653df757b461f95ce6). Der Publisher lief auf dem
+Self-Hosted-Runner im [Lauf 40891738442](https://github.com/heller-adrian/Bibliothekar/actions/runs/40891738442).
+Quellvergleich, die elf akzeptierten QA-Artefakte, Build und wiederholter
+Vergleich sämtlicher eingebetteter Anwendungsdateien bestanden. Anwendungscode:
+70c0bb57afa168efec83b1b60245b819b36161ff.
+
+Der Lauf wurde vor der GitHub-Releaseanlage gestoppt: registry_manifest()
+akzeptiert bisher nur einzelne OCI-/Docker-Manifeste. Docker 29 erzeugte einen
+OCI-Index mit Anwendungsmanifest und Provenance-Attestation; die eingeschränkte
+Accept-Aushandlung erhielt HTTP 404. Ein tatsächlicher Docker-Pull über den
+unveränderlichen Digest sowie die erneute Prüfung von Appdateien, Version und
+OCI-Revision waren zuvor erfolgreich. Die vollständige abschließende
+Registry-/Image-ID-/Berechtigungsprüfung und Releaseartefaktprüfung sind NICHT
+abgeschlossen; der Veröffentlichungsversuch gilt als fehlgeschlagen.
+
+Erhaltener Teilzustand (keine Löschung, kein Überschreiben, kein zweiter Lauf):
+
+- Git-Tag v1.0.0-pre: 9e0fb0a2ff2166d8946c0589c3bc36d052bb03e5.
+- Image ghcr.io/heller-adrian/bibliothekar:1.0.0-pre:
+  sha256:9e055cb8103285cf59da9e5c4f6c0ae697778e14441658f2ade6f877bd6b335b.
+- GitHub-Release: nicht angelegt.
+- Repository weiterhin privat; GHCR-Paket weiterhin anonym lesbar wie zuvor.
+- latest unverändert:
+  sha256:b2a523e09730fd28e6c3178182a15fb1a47e5a529790b7c9ba09f413377aeff1.
+
+Die anschließende ausschließlich lesende Diagnose konnte den OCI-Index mit
+geeigneter Accept-Aushandlung abrufen und dessen sowie der enthaltenen Manifeste
+SHA-256-Digests prüfen. Das ersetzt nicht den fehlgeschlagenen Abschlussgate.
+Der Lauf enthält das Diagnoseartefakt pre-publication-evidence, ID 12906075241,
+ZIP-Digest sha256:433839bee6b3482cc655cd539fc2f859d9d3ba3f58fffd251a20de07982adf47.
+Lokale Registrydiagnose: /private/tmp/bibliothekar-pre-publication-40891738442/.
+
+Nächster kontrollierter Schritt: OCI-Index-Unterstützung und Image-ID-Zuordnung
+im Publisher prüfen, anschließend ausschließlich die fehlenden Prüfungen und
+Releaseanlagen auf Grundlage des vorhandenen Tags/Images planen. Gemäß
+Stopregel wurde dies noch nicht ausgeführt. Keine NAS-Änderung.
+Native TrueNAS-/NFSv4-, SD-/USB- und DNG-1.7-Abnahme: NOT_RUN;
+eigenständiges Verlustabschlussmodell: DEFERRED.
+
+## Kontrollierte Fortsetzung vorbereitet
+
+Auf ausdrücklichen Folgeauftrag ergänzt: strenge OCI-Index-/Manifestlistenprüfung
+mit Plattform-, Descriptor-, Konfigurations-, Docker-ID- und Attestationszuordnung;
+getrennter `complete-existing`-Job mit ausschließlich lesenden GHCR-Rechten.
+Actionlint sowie Python- und Bash-Syntaxprüfung bestanden. Die korrigierte Prüfung
+hat den bereits vorhandenen OCI-Index samt Plattformmanifest, Konfiguration und
+Provenance ausschließlich lesend erfolgreich geprüft. Keine Anwendungscodeänderung.
+Nächster Schritt: gezielte Tests auf dem committed Quellstand und kontrollierter
+Dispatch mit `COMPLETE v1.0.0-pre`; keine neue erste Veröffentlichung.

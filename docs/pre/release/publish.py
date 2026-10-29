@@ -16,6 +16,8 @@ import tarfile
 from urllib import error, parse, request
 import zipfile
 
+import oci
+
 SHA='70c0bb57afa168efec83b1b60245b819b36161ff'
 DOC='30e492574b02579496fbaece8c3acfe657a70009'
 RUN=40840603811
@@ -30,6 +32,7 @@ RELEASE_FILES={'.github/workflows/publish-pre.yml',
     'docs/pre/RELEASE-NOTES.md','docs/pre/PUBLISHING.md',
     'docs/pre/release/publish.py','docs/pre/release/verify_evidence.py',
     'docs/pre/release/test_release.py','docs/pre/release/REGISTER-WORKFLOW.yml',
+    'docs/pre/release/oci.py','docs/pre/release/complete.py','docs/pre/release/test_oci.py',
     'docs/pre/release/PREPARATION-REPORT.md','docs/pre/release/actionlint.yaml'}
 
 
@@ -42,10 +45,11 @@ def git(*args):return run('git',*args)
 def dump(path,data):Path(path).write_text(json.dumps(data,indent=2,sort_keys=True)+'\n')
 
 
-def publication_context():
+def publication_context(mode="publish"):
     expected={'GITHUB_REPOSITORY':REPO,'GITHUB_REF':'refs/heads/'+BRANCH,
-              'GITHUB_EVENT_NAME':'workflow_dispatch','APPROVE_PUBLISH':'PUBLISH '+TAG,
+              'GITHUB_EVENT_NAME':'workflow_dispatch','APPROVE_PUBLISH':('COMPLETE ' if mode=='complete' else 'PUBLISH ')+TAG,
               'RUNNER_ENVIRONMENT':'self-hosted','RUNNER_OS':'Linux','RUNNER_ARCH':'X64'}
+    assert mode in {'publish','complete'}
     for key,value in expected.items():
         assert os.environ.get(key)==value,'Publication context refused: '+key
     assert os.environ.get('GITHUB_RUN_ATTEMPT')=='1','A partial publication requires inspection; never overwrite on retry'
@@ -166,15 +170,15 @@ def release_free():
     assert github('repos/'+REPO+'/releases/tags/'+TAG,missing=True) is None,'Release already exists'
 
 
-def registry_manifest(reference,*,missing=False):
+def registry_manifest(reference,*,missing=False,blob=False):
     credentials=base64.b64encode((os.environ['GITHUB_ACTOR']+':'+os.environ['GH_TOKEN']).encode()).decode()
     token_raw,_=http(REGISTRY+'/token?'+parse.urlencode({'service':'ghcr.io','scope':'repository:'+PREFIX+':pull'}),
                      {'Authorization':'Basic '+credentials})
     token=json.loads(token_raw)['token']
     headers={'Authorization':'Bearer '+token,'Accept':','.join([
-        'application/vnd.oci.image.manifest.v1+json','application/vnd.docker.distribution.manifest.v2+json'])}
+        *sorted(oci.INDEX_TYPES|oci.MANIFEST_TYPES)])}
     # A 404 may only mean MANIFEST_UNKNOWN; auth/network/other errors block.
-    req=request.Request(REGISTRY+'/v2/'+PREFIX+'/manifests/'+reference,headers=headers)
+    req=request.Request(REGISTRY+'/v2/'+PREFIX+('/blobs/' if blob else '/manifests/')+reference,headers=headers)
     try:
         with request.build_opener(StripAuthRedirect()).open(req,timeout=60) as r:return r.read(),r.headers
     except error.HTTPError as exc:
@@ -236,19 +240,29 @@ def reserve_tag(work):
 
 def finish(work,digest):
     assert re.fullmatch(r'sha256:[0-9a-f]{64}',digest)
-    assets=Path(work)/'release-assets';raw,headers=registry_manifest(digest)
-    assert hashlib.sha256(raw).hexdigest()==digest[7:]
-    assert headers.get('Docker-Content-Digest')==digest
-    manifest=json.loads(raw);assert manifest['mediaType'] in {
-        'application/vnd.oci.image.manifest.v1+json','application/vnd.docker.distribution.manifest.v2+json'}
+    assets=Path(work)/'release-assets'
+    proof,config,documents=oci.verify_graph(digest,registry_manifest,
+        lambda d:registry_manifest(d,blob=True),SHA)
     ref=IMAGE.rsplit(':',1)[0]+'@'+digest
-    info=json.loads(run('docker','image','inspect',ref))[0]
-    assert manifest['config']['digest']==info['Id']==(Path(work)/'built-image-id').read_text().strip()
-    assert ref in info['RepoDigests']
+    info=json.loads(run('docker','image','inspect','--platform','linux/amd64',ref))[0]
+    proof=oci.verify_docker(info,proof,config,ref)
+    assert info['Id']==(Path(work)/'built-image-id').read_text().strip()
+    save_graph(assets,proof,documents)
     assert package()==json.loads((assets/'existing-package.json').read_text()),'Package visibility changed'
     assert github('repos/'+REPO)['private'] is True
-    (assets/'registry-manifest.json').write_bytes(raw)
     dump(assets/'registry-repodigests.json',info['RepoDigests'])
+    finish_assets(assets,ref)
+
+
+def save_graph(assets,proof,documents):
+    assets=Path(assets)
+    dump(assets/'OCI-VERIFICATION.json',proof)
+    for sha,raw in documents.items():
+        (assets/('registry-'+sha[7:]+'.json')).write_bytes(raw)
+
+
+def finish_assets(assets,ref):
+    assets=Path(assets)
     (assets/'IMAGE-DIGEST.txt').write_text(ref+'\n')
     compose=assets/'compose.pre.yaml';text=compose.read_text();assert text.count(IMAGE)==1;compose.write_text(text.replace(IMAGE,ref))
     guide=assets/'TRUENAS-TEST.md'

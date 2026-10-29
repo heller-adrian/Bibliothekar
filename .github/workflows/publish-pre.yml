@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: 'After explicit release approval, type PUBLISH v1.0.0-pre'
+        description: 'First publication: PUBLISH v1.0.0-pre; frozen partial completion: COMPLETE v1.0.0-pre'
         required: true
         type: string
 permissions:
@@ -135,3 +135,95 @@ jobs:
           assert path==expected and not path.is_symlink()
           if path.is_dir():shutil.rmtree(path)
           PY
+
+  complete-existing:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/prepare-1.0.0-pre-release' && inputs.confirmation == 'COMPLETE v1.0.0-pre'
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    permissions:
+      contents: write
+      packages: read
+      actions: read
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre-complete-${{ github.run_id }}-${{ github.run_attempt }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      APPROVE_PUBLISH: ${{ inputs.confirmation }}
+      ACCEPTED_SHA: 70c0bb57afa168efec83b1b60245b819b36161ff
+      ACCEPTED_QA: '40840603811'
+      REF: ghcr.io/heller-adrian/bibliothekar@sha256:9e055cb8103285cf59da9e5c4f6c0ae697778e14441658f2ade6f877bd6b335b
+      TAG: v1.0.0-pre
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre-complete-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Qualify only the frozen partial publication
+        run: |
+          set -euo pipefail
+          umask 077
+          WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre-complete.XXXXXXXX")"
+          printf 'WORK=%s\nASSET_DIR=%s/release-assets\nEVIDENCE_DIR=%s/pre-accepted-evidence\nSOURCE_DIR=%s/source\n' "$WORK" "$WORK" "$WORK" "$WORK" >> "$GITHUB_ENV"
+          DOCKER_CONFIG="$WORK/docker-config"
+          mkdir "$DOCKER_CONFIG"
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          python3 - <<'PYTHON'
+          import sys
+          sys.path.insert(0,'docs/pre/release')
+          import publish as p
+          p.publication_context('complete');p.audit_source()
+          PYTHON
+          python3 -m unittest discover -s docs/pre/release -p 'test_*.py' -v
+          python3 docs/pre/release/complete.py guard
+      - name: Reconstruct and verify original QA and publication evidence
+        run: |
+          set -euo pipefail
+          python3 docs/pre/release/publish.py download --work "$WORK"
+          umask 022
+          mkdir "$SOURCE_DIR"
+          git archive "$ACCEPTED_SHA" | tar -x -C "$SOURCE_DIR"
+          python3 docs/pre/release/verify_evidence.py
+          python3 docs/pre/release/publish.py stage --work "$WORK"
+          python3 docs/pre/release/complete.py original --work "$WORK"
+      - name: Pull existing digest and verify unchanged payload and OCI graph
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull --platform linux/amd64 "$REF" | tee "$ASSET_DIR/completion-image-pull.log"
+          python3 docs/pre/release/publish.py verify-image --ref "$REF" --source "$SOURCE_DIR" --work "$WORK"
+          python3 docs/pre/release/complete.py verify --work "$WORK"
+          (cd "$ASSET_DIR" && sha256sum --check SHA256SUMS)
+      - name: Create only missing prerelease and independently verify its assets
+        run: |
+          set -euo pipefail
+          python3 docs/pre/release/complete.py guard
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --prerelease --latest=false --notes-file "$ASSET_DIR/RELEASE-NOTES.md" "$ASSET_DIR"/*
+          mkdir "$WORK/downloaded-release"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$WORK/downloaded-release"
+          (cd "$WORK/downloaded-release" && sha256sum --check SHA256SUMS)
+          python3 docs/pre/release/complete.py post --work "$WORK"
+      - name: Preserve completion evidence
+        if: always() && env.WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre-completion-evidence
+          retention-days: 30
+          path: |
+            ${{ env.ASSET_DIR }}/
+            ${{ env.WORK }}/completion-result.json
+      - name: Remove only this job's temporary registry credentials
+        if: always() && env.WORK != ''
+        run: |
+          python3 - <<'PYTHON'
+          import os,shutil
+          from pathlib import Path
+          root=Path(os.environ['WORK'])
+          assert root.parent==Path(os.environ['RUNNER_TEMP']) and root.name.startswith('bibliothekar-pre-complete.')
+          path=Path(os.environ['DOCKER_CONFIG'])
+          assert path==root/'docker-config' and not path.is_symlink()
+          if path.is_dir():shutil.rmtree(path)
+          PYTHON

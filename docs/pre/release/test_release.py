@@ -114,28 +114,24 @@ class ReleaseGates(unittest.TestCase):
                 digest,name=line.split('  ',1);self.assertEqual(hashlib.sha256((assets/name).read_bytes()).hexdigest(),digest)
 
     def test_digest_pull_manifest_and_visibility_gate(self):
-        for fault in (None,'digest','header','config','visibility','repo','index'):
+        from test_oci import Graph
+        for fault in (None,'visibility','repo','built-id'):
             with self.subTest(fault=fault),tempfile.TemporaryDirectory() as d:
                 root=Path(d);p.stage(root);assets=root/'release-assets'
-                built='sha256:'+'b'*64;(root/'built-image-id').write_text(built+'\n')
-                previous={'name':'bibliothekar','package_type':'container','visibility':'private'}
+                g=Graph().build();proof,config,_=g.verify()
+                built=proof['index_digest'];(root/'built-image-id').write_text('wrong' if fault=='built-id' else built+'\n')
+                previous={'name':'bibliothekar','package_type':'container','visibility':'public'}
                 p.dump(assets/'existing-package.json',previous)
-                manifest={'mediaType':'application/vnd.oci.image.manifest.v1+json','config':{'digest':built}}
-                if fault=='config':manifest['config']['digest']='sha256:'+'c'*64
-                if fault=='index':manifest['mediaType']='application/vnd.oci.image.index.v1+json'
-                raw=json.dumps(manifest).encode();digest='sha256:'+hashlib.sha256(raw).hexdigest()
-                if fault=='digest':digest='sha256:'+'0'*64
-                ref=p.IMAGE.rsplit(':',1)[0]+'@'+digest
-                info={'Id':built,'RepoDigests':[ref]}
-                headers={'Docker-Content-Digest':digest if fault!='header' else 'sha256:'+'f'*64}
-                pkg=dict(previous,visibility='public') if fault=='visibility' else previous
-                with patch.object(p,'registry_manifest',return_value=(raw,headers)),patch.object(p,'run',return_value=json.dumps([info])),patch.object(p,'package',return_value=pkg),patch.object(p,'github',return_value={'private':fault!='repo'}):
+                ref=p.IMAGE.rsplit(':',1)[0]+'@'+g.digest
+                info={'Id':built,'RepoDigests':[ref],'Os':'linux','Architecture':'amd64',
+                      'Config':config['config'],'RootFS':{'Type':'layers','Layers':config['rootfs']['diff_ids']}}
+                def registry(ref,**kw):return g.blob(ref) if kw.get('blob') else g.manifest(ref)
+                with patch.object(p,'registry_manifest',side_effect=registry),patch.object(p,'run',return_value=json.dumps([info])),patch.object(p,'package',return_value={} if fault=='visibility' else previous),patch.object(p,'github',return_value={'private':fault!='repo'}):
                     if fault:
-                        with self.assertRaises(AssertionError):p.finish(root,digest)
+                        with self.assertRaises(AssertionError):p.finish(root,g.digest)
                     else:
-                        p.finish(root,digest)
+                        p.finish(root,g.digest)
                         self.assertIn(ref,(assets/'compose.pre.yaml').read_text())
-                        self.assertNotIn('Kandidat ohne Veröffentlichung',(assets/'UPGRADE-RC14.md').read_text())
                         self.assertIn('/releases/download/v1.0.0-pre/',(assets/'RELEASE-NOTES.md').read_text())
 
     def test_registry_only_explicit_missing_manifest_is_free(self):
