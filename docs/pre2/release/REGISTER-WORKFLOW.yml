@@ -1,0 +1,18 @@
+# Registration stub ONLY: install as .github/workflows/publish-pre2.yml on main.
+name: Publish verified Bibliothekar v1.0.0-pre.2
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Select codex/publish-1.0.0-pre.2 and type PUBLISH v1.0.0-pre.2'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  select-prepared-branch:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    steps:
+      - run: |
+          echo 'Select codex/publish-1.0.0-pre.2 for the approved version-bound publisher.' >&2
+          exit 1
