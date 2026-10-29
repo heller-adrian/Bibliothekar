@@ -117,3 +117,59 @@ unverändert. Der folgende reine Container-Nachlauf verifiziert und verwendet de
 Jobschritt und ursprünglichem Artefakt-ZIP-Digest
 sha256:32ab7889908039cee4ff4600c721f419a0aadac663aba0fed52b0f71b1f800b0.
 Keine unnötige Wiederholung dieser bereits bestandenen Backendtests.
+
+## Abschließendes Ergebnis
+
+**SUCCESS:** [40906773810](https://github.com/heller-adrian/Bibliothekar/actions/runs/40906773810),
+getesteter Commit **79ab9c1f3c9906723e328873ad790074e3f7b60c**. Anwendungscode identisch
+mit Implementierungscommit 44c314308666cd68cbfe3583d64acbe15682dd77. Die 118 gezielten
+Linux-Tests aus 40904815727 wurden per identischem App-/Test-/Abhängigkeitsstand,
+erfolgreichem Jobschritt, ZIP-Digest und vollständigem JUnit-XML erneut verifiziert.
+Kein kompletter Backend-/Browser-Matrixlauf.
+
+Realer Docker-/Supervisor-Test: Original-RC14-Image
+`ghcr.io/heller-adrian/bibliothekar@sha256:86991ef46f1f29a990b63ea3983b1193adfe378247d1202e41fdfd7e21d44b9b`
+erzeugte die technische Installation und zwei Bibliotheken. Nach gestopptem
+Container wurden ausschließlich künstliche Kataloge und Dateien ergänzt.
+4.000 Dateien/Familien, UID 568, eigene RW-Appdaten/Workspace, echte RO-Archive,
+network=none mit tatsächlicher HTTP-Anmeldung im Container:
+
+- Erster Hotfixstart inklusive Anmeldung/Speicherprüfung: **5,370 s**.
+- Neustart inklusive Anmeldung/Speicherprüfung: **6,291 s**.
+- Beide Male ready; vollständige Herkunfts- und Dateikataloge vor/nach identisch.
+- 14 künstliche korrigierte +13:00-JPEGs in unveränderten Bytes und Inodes erhalten.
+- Archivbytes unverändert, authentifiziertes Storage-Recheck erfolgreich.
+- Uvicorn meldet startup complete, tatsächliche Web-UID 568, Helper deaktiviert.
+
+Zusätzliche bestehende originale RC14-Metadatenabnahme: **PASS**. RC14 importiert
+14 echte synthetische JPEGs über HTTP, korrigiert +13:00 und reproduziert selbst
+den Offset-/Reintegrationsfehler. Nach Hotfix-Upgrade bleiben dieselbe offene
+F14-Metadatareservation und sämtliche Herkunfts-/Archivnachweise erhalten. Erst
+der explizite Benutzerretry integriert die 14 Dateien mit vollständigem +13:00;
+Neustart und zweite Bibliothek bestehen ebenfalls.
+
+QA-Artefakt **pre-startup-hotfix-evidence**, ID 12911557324:
+`sha256:3500037d20ac14ad971eee4bdb35fb743b333a98e12488c49673cb307e426daf`.
+Das ZIP wurde separat heruntergeladen und gegen diesen Digest geprüft.
+Kurzbelege stehen in startup-evidence.json, accepted-targeted-evidence.json und
+rc14-metadata-summary.json neben diesem Bericht. Der vollständige Originalbeleg
+liegt im Actions-Artefakt. Lokale Kopie unter dem oben dokumentierten tmp-Verzeichnis.
+
+Die Nachläufe korrigierten ausschließlich QA-Probleme: partielle Testmarker,
+stdout/stderr-Auswertung, Export des QA-Verzeichnisses und Dockers erforderliche
+PID-Spalte bei docker top. Kein Produkt-Sicherheitscheck wurde entfernt;
+Anwendungscode blieb bei allen Nachläufen unverändert.
+
+Grenzen: kleine künstliche Mediendateien; kein Durchsatznachweis für viele GiB/TiB
+RAW-Daten und kein NAS-Aufrufstapel. Der quadratische CPU-Fehler ist nachgewiesen;
+seine konkrete Ausführung auf dem NAS bleibt ohne Stack/Phasenlog indirekt belegt.
+Für die Korrektur sind derzeit keine weiteren NAS-Daten nötig. Für die separate
+Helperfrage genügt KAMERA_SOURCE_HELPER_ENABLED aus den TrueNAS-App-Einstellungen.
+Bei weiterem Stillstand nach Hotfixtest zuerst die letzte neue Startphase samt
+Dauer melden; dann gegebenenfalls eine gezielte Stackprobe. Keine Shellpflicht
+für die reguläre Diagnose dieses neuen Logs.
+
+v1.0.0-pre bleibt unverändert (Tag erneut geprüft: 9e0fb0a2ff2166d8946c0589c3bc36d052bb03e5).
+Keine Veröffentlichung des Hotfixes; nur lokale QA-Images ohne Push. Keine Änderungen
+an TrueNAS, produktiven Daten, ACLs oder Datenbanken. Nächster empfohlener Kandidat:
+**1.0.0-pre.1**, getrennt zu versionieren und erst nach Freigabe zu veröffentlichen.
