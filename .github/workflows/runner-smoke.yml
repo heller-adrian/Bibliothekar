@@ -1,0 +1,36 @@
+
+name: Self-hosted runner smoke test
+
+on:
+  push:
+    branches:
+      - ci/runner-smoke-test
+
+permissions: {}
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 5
+
+    steps:
+      - name: Check runner isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$(whoami)" = "github-runner"
+
+          if findmnt -t nfs,nfs4,cifs,9p,virtiofs -n | grep -q .; then
+            echo "FAIL: Network filesystem mounted"
+            exit 1
+          fi
+
+          if [ -w /var/run/docker.sock ]; then
+            echo "FAIL: Runner can access Docker socket"
+            exit 1
+          fi
+
+          curl -fsS -o /dev/null --max-time 15 https://github.com
+
+          echo "PASS: Bibliothekar runner smoke test"
