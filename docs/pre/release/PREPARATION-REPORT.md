@@ -5,7 +5,9 @@
 Der eigenständige manuelle Publisher ist vorbereitet und lokal geprüft.
 Zur sofortigen Ausführung fehlt noch die GitHub-Registrierung auf dem
 Standardzweig. Runner-Verfügbarkeit und reale Docker-/GHCR-Berechtigungen sind
-mit der verfügbaren Verbindung nicht überprüfbar. Es wurde kein Workflow gestartet.
+mit der verfügbaren Verbindung nicht überprüfbar. Es wurde kein Veröffentlichungsjob gestartet. Ein zunächst von GitHub erzeugter
+Validierungsdatensatz ohne Jobs meldete einen unzulässigen runner.temp-Kontext
+im Job-env. Der Pfad wird jetzt erst im initialen Runner-Schritt gesetzt.
 
 Die technische Grundlage ist unverändert:
 
@@ -34,7 +36,12 @@ zusätzliche/fehlende/veränderte Image-Appdateien und Dateimodi, falsche OCI-
 Revision/Architektur, belegte Tags/Releases, Registry-Fehler, falsche Digest-/
 Manifest-/Config-Nachweise und geänderte Sichtbarkeit.
 
-Beide YAML-Dateien geparst, sämtliche Shellblöcke mit bash -n geprüft; nur
+Beide YAML-Dateien geparst und zusätzlich mit dem per offizieller Prüfsumme
+verifizierten Actionlint1.7.12 geprüft. Die vorgeschriebene eigene Runnerbezeichnung
+ist explizit als Custom-Label konfiguriert; Workflow-Lintregeln werden nicht
+ignoriert. Die externen Zusatzprogramme ShellCheck/Pyflakes sind hier nicht
+verfügbar; Shellsyntax und Python wurden zusätzlich separat geprüft.
+Sämtliche Shellblöcke mit bash -n geprüft; nur
 workflow_dispatch und ausschließlich die vorgeschriebenen Self-Hosted-Labels.
 Checkout und Artefaktupload sind auf gelesene offizielle Commit-SHAs gepinnt.
 Keine vollständige CI-Abnahme wiederholt. Kein lokaler Docker-/GHCR-Test behauptet:

@@ -30,7 +30,6 @@ jobs:
       IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-pre
       TAG: v1.0.0-pre
       PYTHONDONTWRITEBYTECODE: '1'
-      DOCKER_CONFIG: ${{ runner.temp }}/pre-docker-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -46,7 +45,9 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = self-hosted
           test "$RUNNER_OS" = Linux
           test "$RUNNER_ARCH" = X64
+          DOCKER_CONFIG="$RUNNER_TEMP/pre-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir "$DOCKER_CONFIG"
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "$GITHUB_ENV"
           echo REGISTRY_CONFIG_CREATED=true >> "$GITHUB_ENV"
           WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre-publish.XXXXXXXX")"
           printf 'WORK=%s\n' "$WORK" >> "$GITHUB_ENV"

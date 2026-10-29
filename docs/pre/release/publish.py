@@ -30,7 +30,7 @@ RELEASE_FILES={'.github/workflows/publish-pre.yml',
     'docs/pre/RELEASE-NOTES.md','docs/pre/PUBLISHING.md',
     'docs/pre/release/publish.py','docs/pre/release/verify_evidence.py',
     'docs/pre/release/test_release.py','docs/pre/release/REGISTER-WORKFLOW.yml',
-    'docs/pre/release/PREPARATION-REPORT.md'}
+    'docs/pre/release/PREPARATION-REPORT.md','docs/pre/release/actionlint.yaml'}
 
 
 def run(*args):
