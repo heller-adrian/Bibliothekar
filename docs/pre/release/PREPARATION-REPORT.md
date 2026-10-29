@@ -141,3 +141,34 @@ hat den bereits vorhandenen OCI-Index samt Plattformmanifest, Konfiguration und
 Provenance ausschließlich lesend erfolgreich geprüft. Keine Anwendungscodeänderung.
 Nächster Schritt: gezielte Tests auf dem committed Quellstand und kontrollierter
 Dispatch mit `COMPLETE v1.0.0-pre`; keine neue erste Veröffentlichung.
+
+## Veröffentlichung abgeschlossen
+
+[Abschlusslauf 40895159267](https://github.com/heller-adrian/Bibliothekar/actions/runs/40895159267)
+ist SUCCESS (Self-Hosted-Runner, 1m31s). Publisher-Korrektur und Abschlussmodus:
+a72aaed49053fa35a4014de36d4505d6a8d60ec0. Alle 23 gezielten Tests bestanden;
+die vollständige Anwendungstestmatrix wurde nicht wiederholt. Die elf akzeptierten
+QA-Artefakte und das ursprüngliche Publisherartefakt wurden erneut digestgeprüft.
+
+[Prerelease v1.0.0-pre](https://github.com/heller-adrian/Bibliothekar/releases/tag/v1.0.0-pre)
+veröffentlicht am 29. Oktober 2026, 14:49:32 UTC. Tag und Image entsprechen exakt
+dem oben dokumentierten Teilzustand. Kein Neubau, Image-Push oder Tag-Schreibvorgang.
+Tatsächlicher Digest-Pull, Appdatei-/Modivergleich, Version, OCI-Revision und die
+vollständige OCI-Index-/Attestations-/Konfigurationsprüfung bestanden.
+Docker 29 meldet bei Plattforminspektion als Image-ID das Plattformmanifest
+sha256:d9e421594c785393c6c300bffa9298a0948653ff194008cae2f7a65e9c21951c;
+die zugehörige Konfiguration ist
+sha256:e1aa13752203dc8393dafab42fc4ffbfa8d5a07114a79427802433150a0dfe69.
+
+42 Release-Anlagen inklusive SHA256SUMS wurden hochgeladen, unabhängig erneut
+heruntergeladen und byteweise sowie anhand der GitHub-Asset-Digests geprüft.
+Die SHA256SUMS-Datei selbst hat SHA-256
+c1bbf468a78fa7c55c2e5e72e7d27b7758974c7d6aebf81fed1a0da6d77d07df.
+Eine zusätzliche lokale Abfrage bestätigte alle 41 darin enthaltenen Digests
+gegen GitHubs Asset-Metadaten sowie die heruntergeladenen Identitätsnachweise.
+Repository weiterhin privat, Paket weiterhin öffentlich, latest-Image und
+bisherige neueste stabile Releasekennung unverändert. Keine NAS-Änderung.
+
+Nächster Schritt: praktische TrueNAS-Abnahme anhand der veröffentlichten
+TRUENAS-TEST.md und UPGRADE-RC14.md. Native TrueNAS-/NFSv4-, physische SD-/USB-
+und DNG-1.7-Abnahme bleiben NOT_RUN; eigenständiges Verlustabschlussmodell DEFERRED.
