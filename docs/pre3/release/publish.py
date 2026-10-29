@@ -155,7 +155,6 @@ def prepare(work):
     context();source_audit();free();fetch_evidence(work);unchanged(work,first=True)
     assert c.github('repos/'+c.REPO+'/branches/'+c.parse.quote(BRANCH,safe=''))['commit']['sha']==os.environ['GITHUB_SHA']
     local=subprocess.run(['docker','image','inspect',IMAGE],capture_output=True)
-    assert local.returncode!=0,'Local release tag exists: stop'
     c.run('docker','info')
     work=Path(work);assets=work/'release-assets';source=work/'source';source.mkdir()
     raw=subprocess.check_output(['git','archive','--format=tar',BUILD])
@@ -179,6 +178,14 @@ def prepare(work):
     c.dump(assets/'SOURCE-IDENTITY.json',{'accepted_hotfix':HOTFIX,'versioned_build_source':BUILD,'documentation':DOC,
         'publisher':os.environ['GITHUB_SHA'],'version':VERSION,'only_app_difference':'app/__init__.py version string',
         'native_truenas_nfs4':'NOT_RUN','physical_sd_usb':'NOT_RUN','DNG_1_7':'NOT_RUN','loss_finalization':'DEFERRED'})
+    if local.returncode==0:
+        # A previous aborted publisher may have built precisely this version
+        # without pushing it. Accept only after a full bytewise source check.
+        info=verify_image(work,IMAGE)
+        assert info['Config']['Labels']['org.opencontainers.image.revision']==BUILD
+        assert info['Config']['Labels']['org.opencontainers.image.version']==VERSION
+        c.dump(assets/'local-build-preexists.json',{'verified':True,'image_id':info['Id'],'build':BUILD})
+
 
 def verify_image(work,ref):
     work=Path(work);source=work/'source';expected={};raw_expected={}
