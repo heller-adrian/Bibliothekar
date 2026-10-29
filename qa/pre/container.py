@@ -62,13 +62,11 @@ try:
  assert all(r['selected_capture_time']=='2025-12-07T15:04:37+13:00' for r in after['files'])
  assert all('Undated' not in r['current_relative_path'] and '2025-12-07' in r['current_relative_path'] for r in after['files'])
  old.docker('restart',name);api=old.client();assert api('/api/settings/storage-health')['ready']
- api('/api/libraries',{'display_name':'After metadata upgrade','work_root':'','archive_root':'/Businessarchiv'},expect=201)
+ second=api('/api/libraries',{'display_name':'After metadata upgrade','work_root':'','archive_root':'/Businessarchiv'},expect=201)['library']
  final=snapshot();report['final']=final
- for table in before['origin']:
-  if final['origin'][table]!=before['origin'][table]:
-   print('ORIGIN DIFF',table,json.dumps({'before':before['origin'][table],'final':final['origin'][table]}))
- print('RO SAME',final['readonly']==before['readonly'])
- assert final['origin']==before['origin'] and final['readonly']==before['readonly']
+ from origin_proof import assert_projection_preserves_origins
+ assert_projection_preserves_origins(before['origin'],final['origin'],second['library_id'])
+ assert final['readonly']==before['readonly']
  report.update(status='PASS',corrected_files=14,rc14_failure=failure,origin_preserved=True,readonly_bytes_preserved=True)
 finally:
  log=old.docker('logs',name,check=False)
