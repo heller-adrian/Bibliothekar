@@ -4,8 +4,9 @@
 
 Der eigenständige manuelle Publisher ist vorbereitet und lokal geprüft.
 Zur sofortigen Ausführung fehlt noch die GitHub-Registrierung auf dem
-Standardzweig. Runner-Verfügbarkeit und reale Docker-/GHCR-Berechtigungen sind
-mit der verfügbaren Verbindung nicht überprüfbar. Es wurde kein Veröffentlichungsjob gestartet. Ein zunächst von GitHub erzeugter
+Standardzweig. Runner und Dockerzugriff sind inzwischen durch den kurzen Smoke-Test bestätigt.
+Lesender GitHub-/Paket-Zugriff funktioniert; Veröffentlichungsschreibaktionen
+bleiben bis zur ausdrücklichen Freigabe ausstehend. Es wurde kein Veröffentlichungsjob gestartet. Ein zunächst von GitHub erzeugter
 Validierungsdatensatz ohne Jobs meldete einen unzulässigen runner.temp-Kontext
 im Job-env. Der Pfad wird jetzt erst im initialen Runner-Schritt gesetzt.
 
@@ -23,9 +24,9 @@ Die technische Grundlage ist unverändert:
 - app-, tests-, qa-, Dockerfile-, Requirements- und Compose-Stände zwischen
   Anwendungscode und Dokumentationscommit sind identisch. Seitdem enthält der
   Vorbereitungszweig ausschließlich Publisher-/Releaseunterlagen.
-- Repository weiterhin privat. Die Runner-Verwaltungs- und Paketendpunkte sind
-  über die verfügbare Verbindung nicht zugänglich. Es wurden keine Berechtigungen
-  geändert; der spätere Workflow verweigert unbestätigte Zugriffe ausdrücklich.
+- Repository weiterhin privat. Der Runner-Smoke-Job bestätigt direkten lesenden
+  Zugriff mit GITHUB_TOKEN. Vorhandenes GHCR-Paket: public, unverändert.
+  Keine Zugriffsrechte wurden verändert.
 
 ## Lokale Prüfungen
 
@@ -76,3 +77,13 @@ GHCR bietet für sie keine transaktionale Tagreservierung durch diesen Workflow.
 
 Native TrueNAS-/NFSv4-, SD-/USB-Hardware- und DNG1.7-Abnahme bleiben NOT_RUN.
 Kein Tag, kein Release, kein GHCR-Push, keine NAS-Änderung in dieser Vorbereitung.
+
+## Fortschritt nach Runner-Ergänzung
+
+[Smoke40886496425](https://github.com/heller-adrian/Bibliothekar/actions/runs/40886496425):
+SUCCESS, ein Job/6 Sekunden, bibliothekar-truenas, Labels exakt wie vorgeschrieben.
+Alle angeforderten Tools, lokaler Dockerzugriff, Container ohne Netzwerk/Hostmounts
+und lesende Veröffentlichungsvoraussetzungen bestätigt. Nur runner-smoke.yml
+wurde auf ci/runner-smoke-test geändert; der Backend-Pfadfilter blieb unberührt.
+Nächster Schritt: manuelle Workflowregistrierung auf main unter bestehenden
+Branchregeln klären; ausdrückliche Veröffentlichungsfreigabe abwarten.

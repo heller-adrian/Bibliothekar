@@ -21,17 +21,21 @@ Der eigene Vorbereitungszweig löst keine erneute vollständige QA aus.
    nach ausdrücklicher Freigabe, unter den bestehenden Branchschutzregeln.
    Der Stub allein veröffentlicht nichts; beim manuellen Start muss der
    Vorbereitungszweig ausgewählt werden.
-2. Die Runner-Verwaltung ist mit der verfügbaren GitHub-Verbindung nicht abrufbar.
-   Ein Maintainer muss einen online verfügbaren Runner mit exakt den vier Labels,
-   vertrauenswürdigem isoliertem Arbeitsverzeichnis und freigegebenem Dockerzugriff
-   bestätigen. Die Prüfumgebung hier ist macOS und bietet weder Docker noch gh.
+2. Runner bestätigt: Der kurze Smoke-Test40886496425 bestand am29.10.2026
+   auf bibliothekar-truenas in6 Sekunden mit exakt den vorgeschriebenen Labels.
+   Python3.12.3, Node24.22.1, npm11.19.1, ExifTool12.76, gh2.103.3 und Docker29.1.3
+   sowie ACL-Werkzeuge sind verfügbar. Dockerzugriff ist auf dieser dedizierten
+   VM ausdrücklich vorgesehen. Ein gecachter hello-world-Container lief als
+   nicht privilegierter Benutzer, read-only, ohne Netzwerk und Host-Mounts.
 3. Auf dem Runner werden Python3.12+, Git, gh, Docker, tar, gzip und sha256sum
    benötigt. Der Workflow installiert nichts privilegiert und korrigiert keine
    Rechte. Fehlende Programme, Netzwerk- oder Dockerrechte brechen ab.
-4. GITHUB_TOKEN benötigt contents:write, packages:write und actions:read sowie
-   Zugriff auf das bestehende Paket. Die Paket-API muss dessen derzeitige
-   Sichtbarkeit lesbar liefern. Eine fehlende Berechtigung wird gemeldet;
-   Paketfreigaben, Repositorysichtbarkeit und ACLs werden nicht verändert.
+4. Der Smoke-Test bestätigt lesenden Job-Token-Zugriff auf das private Repository,
+   den genehmigten QA-Lauf und die bestehende Paket-API. Das Paket ist bereits
+   public, das Repository private; beides bleibt unverändert. Für den später
+   genehmigten Publisher sind contents:write, packages:write und actions:read
+   konfiguriert. Schreibaktionen bleiben bis zur Freigabe ungetestet und werden
+   bei fehlenden Rechten abgebrochen; keine Rechte werden automatisch verändert.
 5. Der veröffentlichte Versionsname muss in Git, Releases und GHCR noch frei sein.
    Alle anderen Paketpublisher müssen denselben Versionsnamen während dieser
    Veröffentlichung unbenutzt lassen. GHCR bietet hier keine transaktionale
