@@ -23,3 +23,5 @@ Kein F14-Formatwechsel in diesem Kandidaten. Neue korrigierte Katalogzeiten
 bewahren ihren Offset. Ein Rückwechsel nach neuen Schreibvorgängen ist trotzdem
 kein pauschal sicherer Rollback: gestoppte vollständige konsistente Sicherung
 wiederherstellen oder den Fehler im Kandidaten beheben; keine Einzeldateien mischen.
+
+Linux-Abnahme vollständig bestanden auf70c0bb57. Die eng begrenzt qualifizierte offene RC14-Reintegrationsreservation bleibt bis zum normalen Benutzer-Retry bestehen; keine manuelle F14- oder SQL-Korrektur erforderlich. Native TrueNAS-Abnahme und Veröffentlichung bleiben getrennt ausstehend.

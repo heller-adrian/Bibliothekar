@@ -1,0 +1,52 @@
+# Geänderte Dateien
+
+Basis v1.0.0-rc.14; Implementierungsgründe und19 Bildbefunde: TEST-REPORT.md und WORK-MATRIX.md.
+
+- `.github/workflows/publish-container.yml`
+- `.github/workflows/qa-pre.yml`
+- `Dockerfile`
+- `README.md`
+- `app/__init__.py`
+- `app/archive_change_assistant.py`
+- `app/archive_rename_guidance.py`
+- `app/archive_reversal.py`
+- `app/container_supervisor.py`
+- `app/events_ui.py`
+- `app/global_workspace.py`
+- `app/main.py`
+- `app/metadata_correction.py`
+- `app/metadata_correction_ui.py`
+- `app/metadata_reintegration_recovery.py`
+- `app/metadata_swap_recovery.py`
+- `app/ui_i18n.py`
+- `app/ui_pre.py`
+- `app/ui_shell.py`
+- `app/ui_workspace_cache.py`
+- `app/view_cache.py`
+- `app/workspace_ui.py`
+- `compose.example.yaml`
+- `docs/pre/OPEN-RISKS.md`
+- `docs/pre/TEST-REPORT.md`
+- `docs/pre/TRUENAS-TEST.md`
+- `docs/pre/UPGRADE-RC14.md`
+- `docs/pre/WORK-MATRIX.md`
+- `qa/pre/browser.cjs`
+- `qa/pre/container.py`
+- `qa/pre/export_ui.py`
+- `qa/pre/origin_proof.py`
+- `qa/pre/targeted.py`
+- `qa/release/pre.json`
+- `tests/backend/release_contract.py`
+- `tests/backend/test_0291_guided_custom_app.py`
+- `tests/backend/test_0336_patch.py`
+- `tests/backend/test_0421_hotfix.py`
+- `tests/backend/test_0422_metadata_autoscan.py`
+- `tests/backend/test_0504_english_ui_completion.py`
+- `tests/backend/test_pre_archive.py`
+- `tests/backend/test_pre_cache.py`
+- `tests/backend/test_pre_metadata.py`
+- `tests/backend/test_pre_metadata_retry.py`
+- `tests/backend/test_pre_ui.py`
+- `tests/backend/test_rc14_import.py`
+- `docs/pre/CHANGES.md`
+- `docs/pre/CI-EVIDENCE.json`

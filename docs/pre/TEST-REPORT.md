@@ -1,3 +1,42 @@
+# Abschließende Linux-Abnahme – 29. Oktober 2026
+
+Prüfcommit: `70c0bb57afa168efec83b1b60245b819b36161ff`, Branch `codex/1.0.0-pre`.
+[Schlusslauf40840603811](https://github.com/heller-adrian/Bibliothekar/actions/runs/40840603811): **SUCCESS**.
+
+| Gate | Nachgewiesenes Ergebnis |
+|---|---|
+| Gezieltes Gate |177 PASS|
+| Vollständige Backendmatrix |2269 PASS, jeder Knoten exakt einmal, 0 FAIL/ERROR/SKIP|
+| Chromium |195 PASS (147 RC14,44 RC13,4 pre; EN/DE und Mobil/Desktop)|
+| Supervisorcontainer |49 PASS (1 pre,2 RC13,2 RC14,25 RC12,19 RC11/RC10)|
+
+Alle11 Artefakte heruntergeladen und gegen ihre SHA-256-Digests geprüft.
+XML-Ergebnisse und vollständige disjunkte Knotenmanifeste abgeglichen.
+Alle Containerberichte nennen denselben Prüfcommit. Details: [CI-EVIDENCE.json](CI-EVIDENCE.json).
+
+Der zusätzliche Startupfehler ist ursächlich behoben: RC14 hinterließ nach
+fehlgeschlagener Reintegration eine valide, unzugeordnete F14-Reservation.
+Eine eng begrenzte Read-only-Qualifikation erlaubt nun den expliziten normalen
+Retry. Originalnonce, Generationen und Bindings bleiben bis dahin unverändert;
+erst der erfolgreiche geschützte Retry schließt die Reservation. Hash-/Nonce-/
+Generationsabweichung, unbekannter Vorgang, offene Journale und fehlende DB
+bleiben gesperrt. Der Container belegt den vollständigen14-Dateien-Weg mit+13,
+Neustart, zweiter Bibliothek und unveränderten Archivbytes.
+
+Die zweite Bibliothek ergänzt vorgesehene RC13-Projektionen mit projection_origin;
+Originalzeilen bleiben exakt erhalten, kanonische IDs/Fingerprints gleich.
+Der Test prüft jede Ergänzung und jeden Originalhash; kein pauschales Ignorieren.
+
+Grenzen: Native TrueNAS/NFSv4-ACL und physische SD-/USB-Hardware **NOT_RUN**.
+Container-ExifTool12.57, lokal13.30. DNG1.7-Originaldatei fehlt; keine Formatfreigabe.
+Verlustabschluss bleibt begründet DEFERRED; bestehende Sperren bleiben wirksam.
+Originalversionen wurden aus ihren exakten veröffentlichten Quellständen neu
+gebaut; dies behauptet keine Bitgleichheit mit früher veröffentlichten Images.
+Keine Veröffentlichung, kein Tag, kein GHCR-Push. Ein nachfolgender Dokumentations-
+commit verändert den geprüften Anwendungscode nicht.
+
+## Frühere Untersuchungsstände (durch obige Schlussabnahme ersetzt)
+
 # 1.0.0-pre – Prüfstand
 
 Basis: veröffentlichter Tag `v1.0.0-rc.14`,
