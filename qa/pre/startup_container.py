@@ -142,7 +142,7 @@ for _,db in rows:
     logs=docker('logs',name,check=False);log=logs.stdout+logs.stderr
     assert 'Source helper: disabled' in log
     assert 'Application startup complete' in log and '127.0.0.1:8090' not in log
-    web_users=[line.split()[0] for line in docker('top',name,'-eo','uid,args').splitlines()
+    web_users=[line.split()[1] for line in docker('top',name,'-eo','pid,uid,args').splitlines()
                if 'uvicorn app.main:app ' in line]
     assert web_users==['568'],web_users
     report.update(status='PASS',corrected_files_preserved=14,origins_preserved=True,readonly_bytes_preserved=True,
