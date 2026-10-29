@@ -83,3 +83,24 @@ def test_helper_is_only_enabled_by_explicit_environment(setting,expected):
     if setting is not None:env['KAMERA_SOURCE_HELPER_ENABLED']=setting
     value=subprocess.check_output([sys.executable,'-c','from app.container_supervisor import HELPER_ENABLED;print(HELPER_ENABLED)'],env=env,text=True)
     assert value.strip()==str(expected)
+
+
+def test_sigkill_controller_waits_for_complete_checkpoint_json(tmp_path,monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from tests.backend import test_f14_root_operations as harness
+    case=tmp_path/'case';case.mkdir();evidence=tmp_path/'evidence';evidence.mkdir()
+    control=evidence/'reserve';observed=[]
+    def launch(*args,**kwargs):
+        (control/'checkpoint.json').write_text('')
+        return SimpleNamespace(pid=12345,poll=lambda:None)
+    def publish(_delay):
+        observed.append('waited for complete JSON')
+        (control/'checkpoint.json').write_text(json.dumps({'pid':12345,'boundary':'reserved'}))
+    monkeypatch.setattr(harness.subprocess,'Popen',launch)
+    monkeypatch.setattr(harness.time,'sleep',publish)
+    process,actual,log=harness.spawn(case,case,case/'registry',evidence,'reserve')
+    try:
+        assert observed==['waited for complete JSON']
+        assert json.loads((actual/'checkpoint.json').read_text())['pid']==process.pid
+    finally:log.close()

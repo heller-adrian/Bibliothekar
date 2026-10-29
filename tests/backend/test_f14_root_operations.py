@@ -162,7 +162,12 @@ def spawn(case,ws,reg,ev,action):
     process=subprocess.Popen([sys.executable,str(worker),str(ws),str(control),action],stdout=log,stderr=subprocess.STDOUT,env=env,start_new_session=True)
     deadline=time.monotonic()+15
     while process.poll() is None and time.monotonic()<deadline:
-        if (control/'checkpoint.json').exists():return process,control,log
+        if (control/'checkpoint.json').exists():
+            # The worker creates then writes/fsyncs this test marker. Existence
+            # alone can expose an empty/partial JSON document to the controller.
+            try: json.loads((control/'checkpoint.json').read_text())
+            except json.JSONDecodeError: pass
+            else: return process,control,log
         time.sleep(.01)
     if process.poll() is None:os.killpg(process.pid,signal.SIGKILL);process.wait()
     log.close();raise AssertionError((control/'process.log').read_text())

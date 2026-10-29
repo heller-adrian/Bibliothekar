@@ -97,3 +97,12 @@ Weitergabe ursprünglicher Fehler durch die Startphasenprotokollierung.
 Actionlint (mit vorhandenem Self-Hosted-Labelvertrag) und Python-Kompilierung bestanden.
 Die Profilzusammenfassungen liegen neben diesem Bericht. Linux-Containerabnahme folgt
 als einzelner gezielter Lauf auf bibliothekar-safe; keine Publikationsrechte.
+
+Erster gezielter Linuxlauf 40903484665: 116 PASS, ein vorhandener Testcontroller
+las nach exists() eine noch leere checkpoint.json (JSONDecodeError im Test, nicht
+in F14). Die Worker schreiben diesen Testmarker mit create/write/flush/fsync.
+Der Controller wartet jetzt innerhalb derselben 15-s-Frist auf vollständiges JSON;
+alle anschließenden PID-, SIGKILL-, Reservations- und Identitätsassertionen bleiben
+bestehen. Ein deterministischer Test erzwingt die leere Zwischenphase. Unveränderter
+Anwendungscode gegenüber 44c31430; lokale gezielte Wiederholung des Controllers und
+der neuen Regressionen: **35 PASS**. Der nötige Linux-Nachlauf wird dokumentiert.
