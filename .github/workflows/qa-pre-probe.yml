@@ -1,0 +1,91 @@
+name: Isolated pre container diagnosis
+permissions:
+  contents: read
+concurrency:
+  group: pre-container-probe
+  cancel-in-progress: true
+jobs:
+  acceptance:
+    name: Real supervisor RC12 upgrade and crash acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      IMAGE: bibliothekar:pre-acceptance
+      RC12_IMAGE: bibliothekar:rc12-original
+      RC13_IMAGE: bibliothekar:rc13-original
+      RC14_IMAGE: bibliothekar:rc14-original
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - run: sudo apt-get update -qq && sudo apt-get install -y acl
+    - name: Compose contract
+      env:
+        BIBLIOTHEKAR_APPDATA_DIR: /tmp/rc14/appdata
+        BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/rc14/workspace
+        BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/rc14/archive
+        BIBLIOTHEKAR_NAS_SOURCE_DIR: /tmp/rc14/source
+        BIBLIOTHEKAR_ADMIN_PASSWORD: isolated-rc14-compose-password
+      run: docker compose -f compose.example.yaml -f compose.removable.yaml -f compose.nas-source.yaml
+        config -q
+    - name: Build exact candidate and original released RC12
+      run: 'docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA"
+        -t "$IMAGE" .
+
+        mkdir "$RUNNER_TEMP/rc12-source"
+
+        git archive 671d7e7eb96ff493ae51720bb2769eccd8f9048f | tar -x -C "$RUNNER_TEMP/rc12-source"
+
+        docker build --platform linux/amd64 --build-arg SOURCE_REVISION=671d7e7eb96ff493ae51720bb2769eccd8f9048f
+        -t "$RC12_IMAGE" "$RUNNER_TEMP/rc12-source"
+
+        mkdir "$RUNNER_TEMP/rc13-source"
+
+        git archive 1f59167e3bfcd38928f0ad32e20d88910a15d53a | tar -x -C "$RUNNER_TEMP/rc13-source"
+
+        docker build --platform linux/amd64 --build-arg SOURCE_REVISION=1f59167e3bfcd38928f0ad32e20d88910a15d53a
+        -t "$RC13_IMAGE" "$RUNNER_TEMP/rc13-source"
+
+        mkdir "$RUNNER_TEMP/rc14-source"
+
+        git archive 405bcce0593b4e82d13e656c110ec0bd06d59607 | tar -x -C "$RUNNER_TEMP/rc14-source"
+
+        docker build --platform linux/amd64 --build-arg SOURCE_REVISION=405bcce0593b4e82d13e656c110ec0bd06d59607
+        -t "$RC14_IMAGE" "$RUNNER_TEMP/rc14-source"
+
+        '
+    - name: Original RC14 14-file offset regression and upgrade
+      run: python qa/pre/container.py
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: rc14-container
+        path: '${{ runner.temp }}/pre-evidence.json
+
+          ${{ runner.temp }}/pre-container.log
+
+          ${{ runner.temp }}/rc13-evidence.json
+
+          ${{ runner.temp }}/rc14-evidence.json
+
+          ${{ runner.temp }}/rc13-container-logs
+
+          ${{ runner.temp }}/rc14-container-logs
+
+          ${{ runner.temp }}/rc12-evidence.json
+
+          ${{ runner.temp }}/rc12-container-logs
+
+          ${{ runner.temp }}/rc11-evidence.json
+
+          ${{ runner.temp }}/rc11-container-logs
+
+          '
+'on':
+  push:
+    branches:
+    - codex/pre-container-probe

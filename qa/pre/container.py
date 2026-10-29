@@ -55,7 +55,7 @@ try:
  assert 'bestätigt' in str(failure),failure
  before=snapshot();assert all(r['selected_capture_time']=='2025-12-07T15:04:37' for r in before['files'])
  old.docker('stop',name);old.docker('rm',name)
- create(os.environ['IMAGE']);api=old.client();assert api('/api/settings/storage-health')['ready']
+ create(os.environ['IMAGE']);api=old.client();health=api('/api/settings/storage-health');assert health['ready'],health
  report['candidate_exiftool']=old.docker('exec',name,'exiftool','-ver').strip()
  response=api('/api/metadata-correction/reintegrate',{'items':items});report['reintegrate']=response
  after=snapshot();assert after['origin']==before['origin'] and after['readonly']==before['readonly']
@@ -67,7 +67,8 @@ try:
  report.update(status='PASS',corrected_files=14,rc14_failure=failure,origin_preserved=True,readonly_bytes_preserved=True)
 finally:
  log=old.docker('logs',name,check=False)
- (root/'container.log').write_text(log.stdout+log.stderr)
+ (Path(os.environ['RUNNER_TEMP'])/'pre-container.log').write_text(log.stdout+log.stderr)
+ print((log.stdout+log.stderr)[-18000:])
  (Path(os.environ['RUNNER_TEMP'])/'pre-evidence.json').write_text(json.dumps(report,indent=2))
  old.docker('rm','-f',name,check=False)
 print(json.dumps(report,indent=2))
