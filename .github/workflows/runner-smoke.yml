@@ -1,36 +1,64 @@
-
 name: Self-hosted runner smoke test
-
 on:
   push:
-    branches:
-      - ci/runner-smoke-test
-
-permissions: {}
-
+    branches: [ci/runner-smoke-test]
+    paths: [.github/workflows/runner-smoke.yml]
+permissions:
+  contents: read
+  actions: read
+  packages: read
+concurrency:
+  group: bibliothekar-runner-smoke
+  cancel-in-progress: false
 jobs:
   smoke:
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 5
-
     steps:
-      - name: Check runner isolation
+      - name: Check isolation and installed tools
         shell: bash
         run: |
           set -euo pipefail
-
-          test "$(whoami)" = "github-runner"
-
+          test "$(whoami)" = github-runner
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
           if findmnt -t nfs,nfs4,cifs,9p,virtiofs -n | grep -q .; then
-            echo "FAIL: Network filesystem mounted"
+            echo 'FAIL: Network/shared filesystem mounted' >&2
             exit 1
           fi
-
-          if [ -w /var/run/docker.sock ]; then
-            echo "FAIL: Runner can access Docker socket"
-            exit 1
-          fi
-
-          curl -fsS -o /dev/null --max-time 15 https://github.com
-
-          echo "PASS: Bibliothekar runner smoke test"
+          for tool in python3 node npm exiftool gh docker getfacl setfacl git tar gzip sha256sum; do
+            command -v "$tool" >/dev/null || { echo "Missing tool: $tool" >&2; exit 1; }
+          done
+          python3 -c 'import sys; assert sys.version_info >= (3,12); print(sys.version)'
+          node --version
+          npm --version
+          exiftool -ver
+          gh --version
+          test "${DOCKER_HOST:-unix:///var/run/docker.sock}" = unix:///var/run/docker.sock
+          test "$(docker context inspect --format '{{.Endpoints.docker.Host}}')" = unix:///var/run/docker.sock
+          docker version --format 'Docker client={{.Client.Version}} server={{.Server.Version}}'
+          test "$(docker info --format '{{.OSType}}')" = linux
+          printf 'PASS: tools and local Docker access on %s\n' "$RUNNER_NAME"
+      - name: Run cached Docker container without network or host mounts
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_container_id=''
+          cleanup() { if [ -n "$smoke_container_id" ]; then docker rm "$smoke_container_id" >/dev/null; fi; }
+          trap cleanup EXIT
+          smoke_container_id="$(docker create --pull=never --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 32 --memory 32m --cpus 0.5 --user 65534:65534 hello-world:latest)"
+          docker inspect "$smoke_container_id" | python3 -c 'import json,sys; c=json.load(sys.stdin)[0]; h=c["HostConfig"]; assert h["NetworkMode"]=="none" and h["ReadonlyRootfs"] and not h["Privileged"]; assert not c["Mounts"] and not h.get("Binds"); assert "ALL" in h["CapDrop"]; assert c["Config"]["User"]=="65534:65534"'
+          docker start --attach "$smoke_container_id"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$smoke_container_id")" = 0
+          echo 'PASS: actual Docker container; network=none; no host mounts; read-only'
+      - name: Verify read-only publication prerequisites with the job token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/40840603811" --jq .conclusion)" = success
+          gh api users/heller-adrian/packages/container/bibliothekar --jq '{name,package_type,visibility}'
+          echo 'PASS: private repository, accepted QA and existing package metadata readable'
+          echo 'Runner smoke passed; no backend matrix, publication or NAS access performed.' >> "$GITHUB_STEP_SUMMARY"
