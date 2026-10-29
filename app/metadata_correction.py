@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.root_operations import protect, validate_active_roots
+from app.metadata_abort_recovery import deliver_verified_error
 
 
 from contextlib import contextmanager
@@ -1287,8 +1288,8 @@ def create_metadata_correction(
             """UPDATE metadata_corrections
                SET status='cancelled', updated_at=?, error_message=NULL
                WHERE area=? AND source_path=?
-                 AND status IN ('pending_review','prepared','blocked')""",
-            (now, str(area), str(source)),
+                 AND (status IN ('pending_review','prepared') OR (? <> 'general' AND status='blocked'))""",
+            (now, str(area), str(source), str(area)),
         )
         connection.execute(
             """
@@ -1437,11 +1438,20 @@ def write_metadata_datetime(path: Path, media_type: str, value: str) -> None:
 
     command.append(str(path))
     result = subprocess.run(command, check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise MetadataCorrectionError(
-            "ExifTool konnte die Metadaten nicht schreiben: "
-            + (result.stderr.strip() or result.stdout.strip())
+    diagnostics = '\n'.join(value.strip() for value in (result.stderr,result.stdout) if value.strip())
+    untested_dng = re.search(r'DNG Version [0-9.]+ not yet tested', result.stderr+'\n'+result.stdout)
+    if result.returncode != 0 or untested_dng:
+        explanation = (
+            " Die eingesetzte ExifTool-Version hat diese DNG-Version nicht zum Schreiben freigegeben; "
+            "Kompatibilitätswarnungen werden nicht übergangen."
+            if untested_dng else ""
         )
+        raise MetadataCorrectionError(
+            "ExifTool konnte die Metadaten nicht schreiben (Exit " + str(result.returncode) + "): "
+            + diagnostics + explanation
+        )
+    if result.stderr.strip():
+        print('ExifTool metadata writer: '+result.stderr.strip(), flush=True)
 
 
 def verify_metadata_datetime(path: Path, expected: str) -> dict[str, Any]:
@@ -2422,6 +2432,7 @@ def reintegrate_library_metadata_family(
         raise MetadataCorrectionError(str(error)) from error
 
 
+@deliver_verified_error
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def apply_metadata_correction(
     database_path: Path,
@@ -2447,15 +2458,21 @@ def apply_metadata_correction(
                 workspace_root=workspace_root,
                 library_id=library_id,
             )
-        return _apply_general_metadata_correction(
-            database_path,
-            task,
-            workspace_root=workspace_root,
-            library_id=library_id,
-        )
+        from app.metadata_abort_recovery import bind_task, verified_error
+        bind_task(database_path, workspace_root, task)
+        try:
+            return _apply_general_metadata_correction(
+                database_path, task, workspace_root=workspace_root, library_id=library_id,
+            )
+        except Exception as error:
+            result = verified_error(database_path, workspace_root, error)
+            if result is not None:
+                return result
+            raise
 
 
 
+@deliver_verified_error
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def execute_metadata_correction(
     database_path: Path,
@@ -2477,6 +2494,9 @@ def execute_metadata_correction(
     The durable correction row remains the audit/rollback evidence, but the
     normal 0.33.2 UI no longer exposes a separate prepare/apply workflow.
     """
+    if area == 'general':
+        from app.metadata_abort_recovery import assert_fresh_attempt
+        assert_fresh_attempt(database_path, workspace_root)
     task = create_metadata_correction(
         database_path,
         area=area,

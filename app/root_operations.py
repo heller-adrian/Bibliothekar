@@ -539,15 +539,20 @@ def admission(context, *, allow_missing_legacy=False):
 
 
 @contextmanager
-def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='operation', ids=None, expected_generation=None, shared=None, operation_wait=0):
+def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='operation', ids=None, expected_generation=None, shared=None, operation_wait=0, _recovery_record=None):
     from app.managed_storage_health import require_pinned_storage
     require_pinned_storage(workspace,initializing=(kind=='startup' and bool((ids or {}).get('initialize_storage'))))
     root, parent = _control(workspace)
     library_id = str(library_id)
     database=Path(database).absolute() if database is not None else None
     shared = bool(library_id == 'shared' or kind in {'startup', 'trash', 'backup'}) if shared is None else shared
+    if _recovery_record is not None and (kind != 'metadata' or (ids or {}).get('function') not in {
+            'app.metadata_correction.execute_metadata_correction', 'app.metadata_correction.apply_metadata_correction'}):
+        raise RootOperationError('Fachliche Wiederaufnahme ist nicht für diesen Auftrag freigegeben.')
     nested = next((r for r in _ACTIVE.get() if r['workspace']==str(root) and r['library']==library_id), None)
     if nested:
+        if _recovery_record is not None:
+            raise RootOperationError('Fachliche Wiederaufnahme benötigt ihre eigene ursprüngliche Reservation.')
         if shared and not nested.get('shared', False):
             raise RootOperationError('Gemeinsamer Bestand benötigt eine vorab erworbene Reservation; verschachtelte Erweiterung ist gesperrt.')
         if nested['database'] != (str(database) if database else None):
@@ -599,6 +604,8 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     state['bindings'][path]=identity
                 bindings[path]=identity
             old = _read(parent/('operation-'+key+'.json'))
+            if _recovery_record is not None and old != _recovery_record:
+                raise RootOperationError('Ursprüngliche Wiederaufnahme-Reservation wurde verändert.')
             if old:
                 previous=old.get('bindings',{})
                 # Nested recovery may have durably extended the outer startup
@@ -614,7 +621,7 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             init = state.get('storage_initialization') or {}
             if not nonce and kind == 'startup' and (ids or {}).get('initialize_storage') and init.get('operation_key') == key:
                 nonce = init.get('reservation_id')
-            if nonce and (parent/('finished-'+nonce+'.json')).exists() and _completed(old) and not (kind == 'startup' and (ids or {}).get('initialize_storage')):
+            if _recovery_record is None and nonce and (parent/('finished-'+nonce+'.json')).exists() and _completed(old) and not (kind == 'startup' and (ids or {}).get('initialize_storage')):
                 nonce = None  # a repeated successful operation is a new execution
             record = {'format':1,'reservation_id':nonce or uuid.uuid4().hex,'shared':shared,'workspace':str(root),'library':library_id,'generation':list(current),'bindings':bindings,'database':str(Path(database).absolute()) if database else None,'kind':kind,'ids':ids or {}}
             if kind == 'startup':
@@ -636,7 +643,7 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     pinned[path] = current_mount
             _write(parent/'state.json',state)
             _write(parent/('operation-'+key+'.json'),record)
-        record['_parent']=parent;record['_path']=parent/('operation-'+key+'.json')
+        record['_parent']=parent;record['_path']=parent/('operation-'+key+'.json');record['_resumed']=bool(old)
         token = _ACTIVE.set((*_ACTIVE.get(), record))
         completed = False
         try:
@@ -647,7 +654,7 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             # executes this block; identity uncertainty keeps durable evidence.
             try:
                 validate_active_roots()
-                if completed or _receipt_completed({k:v for k,v in record.items() if not k.startswith('_')}):
+                if completed or (_recovery_record is None and _receipt_completed({k:v for k,v in record.items() if not k.startswith('_')})):
                     if kind == 'startup' and (ids or {}).get('initialize_storage'):
                         from app.storage_bootstrap import finish
                         finish(root, parent, {k:v for k,v in record.items() if not k.startswith('_')})

@@ -34,11 +34,17 @@ def metadata_write_guard(metadata_root: Path):
     releases the kernel lock; the existing durable journals remain authoritative.
     """
     from app.root_operations import _control, _lock, RootOperationError
+    entered = False
     try:
         _, control = _control(Path(metadata_root).resolve(strict=False), allow_missing=True)
         with _lock(control / 'metadata-write.lock', exclusive=True):
+            entered = True
             yield
     except RootOperationError as error:
+        # A domain refusal raised by the protected body is not lock contention.
+        # Preserve its exact path/reason and every original safety assertion.
+        if entered:
+            raise
         raise MetadataSwapRecoveryError(
             "Eine Metadatenkorrektur oder Wiederherstellung ist bereits aktiv, "
             "oder ihre Sperre kann nicht sicher nachgewiesen werden."

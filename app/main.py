@@ -2279,6 +2279,9 @@ def _coordinate_startup(fn):
                     complete(WORKSPACE_PATH, startup_reservation)
             from app.appdata import finish as finish_appdata
             finish_appdata(WORKSPACE_PATH)
+            from app.metadata_abort_recovery import recover_general_outcomes
+            _startup_step('general-metadata-outcomes', recover_general_outcomes,
+                          WORKSPACE_PATH, REGISTRY_DATABASE_FILE)
             from app.appdata import pending_operations
             remaining = pending_operations(WORKSPACE_PATH,all_records=True)
             from app.import_recovery import pending_reservations
