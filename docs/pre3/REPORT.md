@@ -133,3 +133,18 @@ fences that state, matching appdata behavior; the test now requires refusal and 
 checks all original bytes/evidence after three real restarts. No security check was
 relaxed. An additional source audit found RC14's timestamp General IDs; dedicated
 unchanged-RC14 positive/negative fixtures now cover that historical format.
+
+## Final independent Linux acceptance (2026-10-29 UTC)
+
+[GitHub Actions run 40969680973](https://github.com/heller-adrian/Bibliothekar/actions/runs/40969680973) completed **SUCCESS** at source commit `7733c64bc7c555e7dc416ed7b953a00b6cf911b2`. The tested application code is unchanged from implementation commit `86d42d440b0340b82227b7b0d9f775da6b9a2de3`; the intervening source-tree difference is test-only (`qa/pre3/container.py`).
+
+- 181 targeted Python regression tests passed; zero failures/skips (five nonfatal framework/literal warnings).
+- Candidate linux/amd64 QA image built locally, original pre.2/pre.1/RC14 digest-pinned images pulled, no registry push.
+- All six new real-supervisor container cases passed: historical pre.2; actual RC14 timestamp-format General import; preserved foreign bytes and read-only recovery; three durable F14 operations with safe fencing; SIGKILL after completed metadata outcome; SIGKILL during import. Archive bytes remained unchanged.
+- All three pre2 DNG-error rollback/restart container cases passed; no genuine DNG 1.7 original was involved.
+- 4,000-file/two-library startup and restart passed in 6.015 s and 6.430 s, UID 568, authenticated HTTP, disabled helper, preserved origins and RO archive. Original 14 RC14-corrected iPhone JPEGs with +13:00 offset recovered without changing the historical evidence.
+- Downloaded QA artifact `12939434627` (55,466 bytes) matches GitHub-reported SHA-256 `e8f17247f477d46e115e4bdc351258451b829fd8734cf63c080e4ede08f94a03`; file-level digest ledger is in `docs/pre3/EVIDENCE.json`.
+
+The earlier failing CI runs were **not accepted**: `40967129148` caught an obsolete startup expectation for an orphan F14 reservation; `40968432390` caught a container test expecting no extra startup lease after a deliberate foreign-byte central-stock refusal. Both test assumptions were corrected while retaining the strict refusal and original evidence. The final full targeted workflow supersedes them.
+
+**Disposition:** Technical pre.3 implementation is ready for a separately authenticated and byte-verified `v1.0.0-pre.3` prerelease publication. This does **not** certify recovery of the three actual NAS reservations or native TrueNAS/NFSv4 acceptance. The subsequent TrueNAS installation must retain all current DB/appdata, F14 evidence, workspace and RO archives without Clean Slate. If a remaining unknown operation blocks startup, collect read-only evidence using `READ-ONLY-DIAGNOSIS.md` and do not auto-acknowledge it. Genuine DNG 1.7 writing, physical SD/USB and the deferred loss-completion model remain outside this patch. No release/tag/push to GHCR or NAS mutation was performed.
