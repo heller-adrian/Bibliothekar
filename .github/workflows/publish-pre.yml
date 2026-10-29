@@ -56,6 +56,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 docs/pre/release/publish.py download --work "$WORK"
+          # Reconstruct readable source files in our private build directory.
+          umask 022
           mkdir "$SOURCE_DIR"
           git archive "$ACCEPTED_SHA" | tar -x -C "$SOURCE_DIR"
           python3 docs/pre/release/verify_evidence.py
