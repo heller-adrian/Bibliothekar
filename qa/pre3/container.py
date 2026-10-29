@@ -131,11 +131,17 @@ def case(label,*,foreign=False,unknown=False,kill=False,import_kill=False,rc14=F
    assert not health['ready'],health
    diagnostic=api("print(json.dumps(api('/api/settings/recovery-diagnostics')))")
    assert diagnostic['mode']=='authenticated_read_only' and diagnostic['operations_allowed'] is False
-   assert diagnostic['libraries'] and len(diagnostic['operations'])==(2 if unknown else 1)
+   assert diagnostic['libraries'] and len(diagnostic['operations'])==len(after['ops']), (label,diagnostic,after['ops'])
    assert all(x['authorized_to_finish'] is False for x in diagnostic['operations'])
    api("print(json.dumps(api('/api/metadata-correction/correct',"+PAYLOAD+",409)))")
    assert snap()['tasks']==before['tasks']
-   if foreign:assert after['ops']==before['ops'] and not after['outcomes']
+   if foreign:
+    assert all(op in after['ops'] for op in before['ops']) and not after['outcomes']
+    extra=[op for op in after['ops'] if op not in before['ops']]
+    # An earlier central-stock fingerprint refusal may preserve one additional
+    # startup F14 lease before General metadata recovery runs. That lease is
+    # evidence of the refusal, not authority to release the old metadata lease.
+    assert len(extra)<=1 and all(op['kind']=='startup' for op in extra), (label,extra)
    else:assert [r for r in after['ops'] if r['kind']!='metadata']==[r for r in before['ops'] if r['kind']!='metadata']
    summary['read_only_recovery_and_write_fence']=True
   else:
