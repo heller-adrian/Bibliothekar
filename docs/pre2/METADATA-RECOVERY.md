@@ -124,3 +124,31 @@ needed: full task source/output/verification/detected fields, current source siz
 SHA-256, complete reservation/state/mount bindings, and remaining journal/staging/backup
 inventory. The reported task status/error alone cannot prove this real instance safe.
 Unknown or contradictory evidence requires a separate reviewed recovery decision.
+
+## Executed results (2026-10-29)
+
+- [Linux run 40957407776](https://github.com/heller-adrian/Bibliothekar/actions/runs/40957407776): **SUCCESS**, source `ff1cdf3557b87e5f390f8c1f71abe179ac9d4a52`.
+- 148 targeted Linux regression tests passed; zero failures/errors/skips. Includes all
+  32 new domain recovery cases and existing metadata, F14, provenance and RC12 storage tests.
+- Real supervisor containers: all three new historical/future-refusal, foreign-byte and
+  SIGKILL cases PASS. Original task row preserved, exact reservation retained in the
+  permanent receipt, authenticated access/restart works, independent RO archive unchanged.
+- Existing 4,000-file / two-library upgrade and restart: PASS, 6.023 / 5.732 seconds on
+  the isolated Linux runner. Origin evidence and 14 corrected files preserved.
+- Actual released RC14 fourteen-JPEG correction/reintegration upgrade: PASS. Offset
+  +13:00, same pending reintegration reservation, second-library projection and archive
+  fingerprints remain correct. Candidate native ExifTool reports **12.57**.
+- Evidence artifact `12933834151`, downloaded ZIP SHA-256 verified against GitHub:
+  `46a5015aaacf31c5307bfa2a5c9d2b34efe3594ba88073121748e60a4f201668`.
+  Per-file hashes and application-tree identity are recorded in `EVIDENCE.json`.
+- Local macOS: 32 new cases and 29 metadata/storage cases pass. These supplement the
+  decisive Linux results; they are not native TrueNAS acceptance.
+- Actionlint, Python compilation and `git diff --check`: PASS. The existing pre.1 tag,
+  published images and application version are unchanged. Only a local QA image was built.
+
+The implementation is suitable for a separately approved pre.2 candidate. It fixes the
+secondary permanent startup block; it does not claim DNG-1.7 writing support. Real NAS
+state remains unexamined; startup must perform its own full qualification at upgrade.
+Native TrueNAS/NFSv4 and a genuine DNG-1.7 original test are **NOT_RUN**. No additional NAS
+information was needed to implement and reproduce the fix. Read-only evidence is needed
+only to diagnose a real state that does not satisfy the documented qualification.
