@@ -53,17 +53,22 @@ try:
  # Required reproduction in original RC14, with a real authenticated HTTP call.
  failure=api('/api/metadata-correction/reintegrate',{'items':items},expect=409)
  assert 'bestätigt' in str(failure),failure
- before=snapshot();assert all(r['selected_capture_time']=='2025-12-07T15:04:37' for r in before['files'])
+ before=snapshot();report['before']=before;assert all(r['selected_capture_time']=='2025-12-07T15:04:37' for r in before['files'])
  old.docker('stop',name);old.docker('rm',name)
  create(os.environ['IMAGE']);api=old.client();health=api('/api/settings/storage-health');assert health['ready'],health
  report['candidate_exiftool']=old.docker('exec',name,'exiftool','-ver').strip()
  response=api('/api/metadata-correction/reintegrate',{'items':items});report['reintegrate']=response
- after=snapshot();assert after['origin']==before['origin'] and after['readonly']==before['readonly']
+ after=snapshot();report['after']=after;assert after['origin']==before['origin'] and after['readonly']==before['readonly']
  assert all(r['selected_capture_time']=='2025-12-07T15:04:37+13:00' for r in after['files'])
  assert all('Undated' not in r['current_relative_path'] and '2025-12-07' in r['current_relative_path'] for r in after['files'])
  old.docker('restart',name);api=old.client();assert api('/api/settings/storage-health')['ready']
  api('/api/libraries',{'display_name':'After metadata upgrade','work_root':'','archive_root':'/Businessarchiv'},expect=201)
- final=snapshot();assert final['origin']==before['origin'] and final['readonly']==before['readonly']
+ final=snapshot();report['final']=final
+ for table in before['origin']:
+  if final['origin'][table]!=before['origin'][table]:
+   print('ORIGIN DIFF',table,json.dumps({'before':before['origin'][table],'final':final['origin'][table]}))
+ print('RO SAME',final['readonly']==before['readonly'])
+ assert final['origin']==before['origin'] and final['readonly']==before['readonly']
  report.update(status='PASS',corrected_files=14,rc14_failure=failure,origin_preserved=True,readonly_bytes_preserved=True)
 finally:
  log=old.docker('logs',name,check=False)
