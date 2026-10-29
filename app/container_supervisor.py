@@ -86,6 +86,7 @@ def run() -> int:
 
     try:
         helper_available = HELPER_ENABLED
+        print('Source helper: '+('enabled by KAMERA_SOURCE_HELPER_ENABLED' if HELPER_ENABLED else 'disabled (standard profile)'), flush=True)
         from app.appdata import root as appdata_root
         if appdata_root():
             # Create app subdirectories using actual web credentials, not root.

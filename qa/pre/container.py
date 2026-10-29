@@ -7,7 +7,11 @@ spec=importlib.util.spec_from_file_location('oldqa',Path(__file__).parents[1]/'r
 old=importlib.util.module_from_spec(spec);spec.loader.exec_module(old)
 root=Path(os.environ['RUNNER_TEMP'])/'pre-container';root.mkdir()
 for folder in ('appdata','workspace','archive','business','nas'):(root/folder).mkdir()
-old.command('sudo','chown','-R','568:568',str(root))
+# These directories were just created by this isolated fixture. Use the
+# authorized Docker runtime; no sudo or host permission changes are required.
+old.docker('run','--rm','--network','none','-v',str(root)+':/fixture',
+           '--entrypoint','python',os.environ['IMAGE'],'-c',
+           "from pathlib import Path;import os;r=Path('/fixture');assert not r.is_symlink();os.chown(r,568,568);[os.chown(p,568,568) for p in r.iterdir() if p.is_dir() and not p.is_symlink()]")
 old.docker('run','--rm','--user','568:568','-v',str(root)+':/fixture','--entrypoint','python',os.environ['RC14_IMAGE'],'-c',r'''
 from PIL import Image
 from pathlib import Path

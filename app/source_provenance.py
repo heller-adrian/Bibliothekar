@@ -35,7 +35,42 @@ def _conflict(source, reason):
     raise LibraryRegistryError('source_inventory_conflict: '+source+': '+reason)
 
 
-def qualify_origins(registry_path, database_path, library_id, grouped, fingerprint):
+class _ProjectionAuthority:
+    """One fully qualified main inventory per backfill, never a process cache.
+
+    Startup already holds F14 exclusion. Keep this view local to that operation:
+    every subsequent backfill must read and qualify current evidence again.
+    """
+    def __init__(self, registry_path, database_path, fingerprint):
+        self.registry_path = registry_path
+        self.database_path = database_path
+        self.fingerprint = fingerprint
+        self.loaded = False
+        self.value = None
+
+    def get(self):
+        if self.loaded:
+            return self.value
+        from app.library_registry import get_library
+        from app.global_library_inventory import _database_family_rows
+        main = get_library(self.registry_path, 'main', active_only=False)
+        if main is not None:
+            main_db = Path(main['database_path'])
+            if main_db.resolve() == Path(self.database_path).resolve():
+                _conflict('projection', 'projection database aliases main')
+            groups = {}
+            for row in _database_family_rows(main_db):
+                groups.setdefault((str(row['job_id']), str(row['family_key'])), []).append(row)
+            # Qualify ALL main families, including those not projected locally.
+            # A cache entry is published only after the complete check succeeds.
+            qualify_origins(self.registry_path, main_db, 'main', groups, self.fingerprint)
+            origins = registry_origins(Path(self.registry_path).absolute(), 'main')
+            self.value = (groups, {o['source_family_key']: o for o in origins})
+        self.loaded = True
+        return self.value
+
+
+def qualify_origins(registry_path, database_path, library_id, grouped, fingerprint, *, _authority=None):
     origins=registry_origins(Path(registry_path).absolute(),library_id)
     if not origins:return set()
     with database_connection(database_path) as c:
@@ -44,6 +79,7 @@ def qualify_origins(registry_path, database_path, library_id, grouped, fingerpri
                            'trash_file_permanently_deleted') ORDER BY id''')]
         jobs={str(r['id']):dict(r) for r in c.execute('SELECT * FROM jobs')}
     qualified=set()
+    authority_view = _authority or _ProjectionAuthority(registry_path, database_path, fingerprint)
     for origin in origins:
         source=origin['source_family_key']
         try: meta=json.loads(origin['metadata_json'])
@@ -98,15 +134,9 @@ def qualify_origins(registry_path, database_path, library_id, grouped, fingerpri
         projected_missing=meta.get('projected_missing_members',[])
         if reference:
             if library_id=='main' or reference!=f'main:{job}:{family}':_conflict(source,'invalid projection origin')
-            from app.library_registry import get_library
-            from app.global_library_inventory import _database_family_rows
-            main=get_library(registry_path,'main',active_only=False)
-            if main is None:_conflict(source,'projection authority missing')
-            main_db=Path(main['database_path'])
-            groups={}
-            for row in _database_family_rows(main_db):groups.setdefault((str(row['job_id']),str(row['family_key'])),[]).append(row)
-            qualify_origins(registry_path,main_db,'main',groups,fingerprint)
-            authority=next((o for o in registry_origins(Path(registry_path).absolute(),'main') if o['source_family_key']==reference),None)
+            authority_data = authority_view.get()
+            if authority_data is None:_conflict(source,'projection authority missing')
+            authority = authority_data[1].get(reference)
             if authority is None or authority['canonical_family_id']!=origin['canonical_family_id']:
                 _conflict(source,'projection canonical origin changed')
             def member_signature(items):
@@ -152,25 +182,20 @@ def qualify_origins(registry_path, database_path, library_id, grouped, fingerpri
     return qualified
 
 
-def projection_origin(registry_path, database_path, library_id, job, family, current):
+def projection_origin(registry_path, database_path, library_id, job, family, current, *, _authority=None):
     """A new projection copies an already qualified origin, never invents one.
 
     The exact set absent at projection time is recorded as a reference to the
     original main loss evidence. This cannot excuse later unaudited local loss.
     """
     if library_id=='main':return None
-    from app.library_registry import get_library
-    from app.global_library_inventory import _database_family_rows, family_content_fingerprint
-    main=get_library(registry_path,'main',active_only=False)
-    if main is None:return None
-    main_db=Path(main['database_path'])
-    if main_db.resolve()==Path(database_path).resolve():_conflict(f'{library_id}:{job}:{family}','projection database aliases main')
-    candidates=registry_origins(Path(registry_path).absolute(),'main')
-    origin=next((o for o in candidates if o['source_family_key']==f'main:{job}:{family}'),None)
+    from app.global_library_inventory import family_content_fingerprint
+    authority_view = _authority or _ProjectionAuthority(registry_path, database_path, family_content_fingerprint)
+    authority_data = authority_view.get()
+    if authority_data is None:return None
+    groups, origins = authority_data
+    origin = origins.get(f'main:{job}:{family}')
     if origin is None:return None
-    groups={}
-    for row in _database_family_rows(main_db):groups.setdefault((str(row['job_id']),str(row['family_key'])),[]).append(row)
-    qualify_origins(registry_path,main_db,'main',groups,family_content_fingerprint)
     def signature(rows):
         return sorted((str(r['original_relative_path']),str(r['sha256_original']),int(r['size_bytes']),str(r['media_type'] or '')) for r in rows)
     if signature(current)!=signature(groups.get((job,family),[])):

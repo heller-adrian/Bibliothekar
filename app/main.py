@@ -2210,6 +2210,21 @@ def worker_loop() -> None:
             WORKER_STOP.wait(2.0)
 
 
+def _startup_step(name, function, *args, **kwargs):
+    """Expose the active startup phase without changing its safety decisions."""
+    library = kwargs.get('library_id')
+    label = name + (f' [{library}]' if library else '')
+    started = time.monotonic()
+    print(f'Startup phase {label}: started', flush=True)
+    try:
+        result = function(*args, **kwargs)
+    except BaseException:
+        print(f'Startup phase {label}: failed after {time.monotonic()-started:.3f}s', flush=True)
+        raise
+    print(f'Startup phase {label}: completed in {time.monotonic()-started:.3f}s', flush=True)
+    return result
+
+
 def _coordinate_startup(fn):
     from functools import wraps
     @wraps(fn)
@@ -2223,7 +2238,7 @@ def _coordinate_startup(fn):
             except LibraryRegistryError as error: raise RootOperationError(str(error)) from error
             from app.managed_storage_health import require_storage
             try:
-                preflight=require_storage(WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
+                preflight=_startup_step('storage-preflight', require_storage, WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
             except RootOperationError:
                 # Only a preflight refusal before any startup operation is
                 # eligible for explicit retry. Other recovery errors stay blocked.
@@ -2235,7 +2250,7 @@ def _coordinate_startup(fn):
             from app.storage_bootstrap import prepare_control
             prepare_control(WORKSPACE_PATH, DATABASE_FILE)
             # Migration/version fence may have published an audited transition.
-            preflight=require_storage(WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
+            preflight=_startup_step('storage-preflight', require_storage, WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
             assert_workspace_startable(WORKSPACE_PATH)
             from app.root_operations import _registered
             from app.storage_config import load_storage_settings
@@ -2308,7 +2323,7 @@ def startup_database() -> None:
     try:
         from app.managed_storage_health import catalog_has_history
         main_database_was_new = not catalog_has_history(DATABASE_FILE)
-        DATABASE_INITIALIZATION = initialize_database(
+        DATABASE_INITIALIZATION = _startup_step('catalogue-schema', initialize_database,
             DATABASE_FILE
         )
         # Provision English event-folder names only for a genuinely new database.
@@ -2323,7 +2338,7 @@ def startup_database() -> None:
             str(DATABASE_FILE.expanduser().resolve(strict=False))
         )
 
-        LIBRARY_REGISTRY_INITIALIZATION = initialize_library_registry(
+        LIBRARY_REGISTRY_INITIALIZATION = _startup_step('registry-schema', initialize_library_registry,
             REGISTRY_DATABASE_FILE
         )
         # Recover selected-trash partial commits before any worker or inventory
@@ -2346,9 +2361,9 @@ def startup_database() -> None:
         for recovery_database in recovery_databases:
             if not recovery_database.is_file():
                 raise RuntimeError("Registrierte Bibliotheksdatenbank fehlt: " + str(recovery_database))
-            initialize_database(recovery_database)
+            _startup_step('catalogue-schema', initialize_database, recovery_database)
             mark_incomplete_sort_runs_interrupted(recovery_database)
-            recovered_sort = recover_interrupted_sort_runs(recovery_database)
+            recovered_sort = _startup_step('sort-recovery', recover_interrupted_sort_runs, recovery_database)
             if recovered_sort["blocked"]:
                 raise RuntimeError("Sortier-Recovery wegen uneindeutiger Dateien gesperrt.")
         from app.trash_restore import recover_trash_restores
@@ -2367,7 +2382,7 @@ def startup_database() -> None:
             )
             if str(row.get("database_path") or "").strip()
         )
-        metadata_recovery = recover_metadata_swaps(
+        metadata_recovery = _startup_step('metadata-swap-recovery', recover_metadata_swaps,
             metadata_storage_paths(WORKSPACE_PATH)["metadata_root"],
             allowed_databases=metadata_db_allowlist,
         )
@@ -2380,7 +2395,7 @@ def startup_database() -> None:
         # The completed task and its pending projection marker share the local
         # SQLite commit. Replay before catalogue consumers see stale hashes.
         from app.metadata_correction import replay_pending_metadata_propagations
-        replay_pending_metadata_propagations(recovery_databases)
+        _startup_step('metadata-projection-recovery', replay_pending_metadata_propagations, recovery_databases)
 
         existing_main = get_library(
             REGISTRY_DATABASE_FILE,
@@ -2444,11 +2459,11 @@ def startup_database() -> None:
                 REGISTRY_DATABASE_FILE,
                 MAIN_LIBRARY_ID,
             )
-            legacy_layout = migrate_legacy_applied_files(
+            legacy_layout = _startup_step('legacy-layout', migrate_legacy_applied_files,
                 DATABASE_FILE,
                 WORKSPACE_PATH,
             )
-            global_stock_migration = migrate_main_free_stock_to_central(
+            global_stock_migration = _startup_step('central-stock-migration', migrate_main_free_stock_to_central,
                 DATABASE_FILE,
                 WORKSPACE_PATH,
                 main_work_root=MAIN_LIBRARY_CONTEXT.work_root,
@@ -2458,13 +2473,13 @@ def startup_database() -> None:
                     library_id=MAIN_LIBRARY_ID,
                 ),
             )
-            main_inventory = backfill_library_inventory(
+            main_inventory = _startup_step('source-inventory', backfill_library_inventory,
                 REGISTRY_DATABASE_FILE,
                 database_path=DATABASE_FILE,
                 library_id=MAIN_LIBRARY_ID,
                 claim_all_owned=False,
             )
-            main_claims = backfill_library_claims(
+            main_claims = _startup_step('family-claims', backfill_library_claims,
                 REGISTRY_DATABASE_FILE,
                 database_path=DATABASE_FILE,
                 library_id=MAIN_LIBRARY_ID,
@@ -2511,17 +2526,17 @@ def startup_database() -> None:
             )
             ensure_library_database_schema(secondary_context)
             ensure_library_identity(library_database, library_id)
-            projection = project_all_imports(
+            projection = _startup_step('library-projection', project_all_imports,
                 DATABASE_FILE,
                 library_database,
             )
-            inventory = backfill_library_inventory(
+            inventory = _startup_step('source-inventory', backfill_library_inventory,
                 REGISTRY_DATABASE_FILE,
                 database_path=library_database,
                 library_id=library_id,
                 claim_all_owned=False,
             )
-            claims = backfill_library_claims(
+            claims = _startup_step('family-claims', backfill_library_claims,
                 REGISTRY_DATABASE_FILE,
                 database_path=library_database,
                 library_id=library_id,
@@ -2532,7 +2547,7 @@ def startup_database() -> None:
                 "claims": claims,
             }
 
-        central_projection_sync = synchronize_global_central_stock()
+        central_projection_sync = _startup_step('central-stock-sync', synchronize_global_central_stock)
 
         LIBRARY_REGISTRY_INITIALIZATION = {
             **(LIBRARY_REGISTRY_INITIALIZATION or {}),

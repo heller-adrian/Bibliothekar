@@ -205,9 +205,10 @@ def backfill_library_inventory(
         ).append(row)
 
     # Current ownership is mutable; original source membership is not.
-    from app.source_provenance import qualify_origins
+    from app.source_provenance import qualify_origins, _ProjectionAuthority
+    authority = _ProjectionAuthority(registry_path, database_path, family_content_fingerprint)
     original = qualify_origins(registry_path, database_path, library_id, grouped,
-                               family_content_fingerprint)
+                               family_content_fingerprint, _authority=authority)
 
     backup_registered: set[str] = set()
     family_count = 0
@@ -279,7 +280,8 @@ def backfill_library_inventory(
         ]
         source_key = occurrence_key(library_id, job_id, family_key)
         from app.source_provenance import projection_origin
-        projection=projection_origin(registry_path,database_path,library_id,job_id,family_key,members)
+        projection=projection_origin(registry_path,database_path,library_id,job_id,family_key,members,
+                                     _authority=authority)
         origin_metadata={"library_id":library_id,"job_id":job_id}
         if projection is not None:
             normalized_members=projection['members']

@@ -1,0 +1,60 @@
+name: Targeted pre startup hotfix acceptance
+on:
+  push:
+    branches: [codex/pre-startup-performance]
+    paths-ignore: ['docs/**', 'README.md', 'CHANGELOG.md']
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: pre-startup-hotfix
+  cancel-in-progress: false
+jobs:
+  targeted-startup:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: startup-${{ github.run_id }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: ${{ github.workspace }}/startup-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: startup-${{ github.run_id }}
+      - name: Isolated targeted Python regressions
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-startup.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$QA_WORK/venv"
+          "$QA_WORK/venv/bin/pip" install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
+          "$QA_WORK/venv/bin/python" -m pytest -q --disable-warnings --junitxml="$QA_WORK/targeted.xml" tests/backend/test_pre_startup_performance.py tests/backend/test_rc13_provenance.py tests/backend/test_pre_metadata.py tests/backend/test_pre_metadata_retry.py tests/backend/test_0310_multi_library.py tests/backend/test_0334_patch.py tests/backend/test_rc14_lifecycle.py tests/backend/test_rc14_import.py tests/backend/test_f14_root_operations.py
+      - name: Build only isolated hotfix test image and read original RC14
+        run: |
+          set -euo pipefail
+          IMAGE="bibliothekar-startup-qa:$GITHUB_RUN_ID"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+          docker pull ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.14
+          RC14_IMAGE="$(docker image inspect ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.14 --format '{{index .RepoDigests 0}}')"
+          printf 'IMAGE=%s\nRC14_IMAGE=%s\n' "$IMAGE" "$RC14_IMAGE" >> "$GITHUB_ENV"
+          docker image inspect --platform linux/amd64 "$RC14_IMAGE" > "$QA_WORK/rc14-image.json"
+      - name: Real supervisor four thousand files and original fourteen corrected JPEGs
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/startup_container.py
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py
+      - name: Preserve targeted startup evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre-startup-hotfix-evidence
+          retention-days: 30
+          path: |
+            ${{ env.QA_WORK }}/*.json
+            ${{ env.QA_WORK }}/*.xml
+            ${{ env.QA_WORK }}/*.log
