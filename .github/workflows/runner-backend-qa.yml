@@ -1,0 +1,50 @@
+
+name: Bibliothekar Local Backend QA
+
+on:
+  push:
+    branches:
+      - ci/runner-smoke-test
+    paths:
+      - '.github/workflows/runner-backend-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 30
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTEST_ADDOPTS: ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare isolated Python environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/bibliothekar-venv"
+          echo "$RUNNER_TEMP/bibliothekar-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt pytest httpx
+
+      - name: Compile application
+        run: python3 -m compileall -q app qa
+
+      - name: Validate archive QA scripts
+        run: bash -n qa/archive_e2e/*.sh
+
+      - name: Collect backend tests
+        run: python3 -m pytest --collect-only -q -o addopts='' tests/backend
+
+      - name: Run backend tests
+        run: python3 -m pytest -q -o addopts='' tests/backend
