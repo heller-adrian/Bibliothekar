@@ -32,6 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-startup.XXXXXXXX")"
+          export QA_WORK
           printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
           # Only container QA changed since this exact successful targeted step.
           # Verify its frozen ZIP and XML; fail if app/tests/dependencies differ.
