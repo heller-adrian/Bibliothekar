@@ -93,7 +93,9 @@ jobs:
             ${{ runner.temp }}/pre-browser
   acceptance:
     name: Real supervisor RC12 upgrade and crash acceptance
-    needs: [backend, browser]
+    # Both complete suites remain mandatory. Start the independent container
+    # gate after focused tests, so container-fixture failures surface early.
+    needs: [targeted, browser]
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
