@@ -10,7 +10,7 @@ from app.storage_config import load_storage_settings
 from app.metadata_reintegration_recovery import pending_reservations
 
 
-@pytest.mark.parametrize('fault',[None,'hash','nonce','generation','unknown_function','journal'])
+@pytest.mark.parametrize('fault',[None,'hash','nonce','generation','unknown_function','journal','missing_database'])
 def test_rc14_retry_scope_retains_original_intent(tmp_path,monkeypatch,fault):
     stamp='2025-12-07T15:04:37+13:00'
     db,ws,source,family,task=real_family(tmp_path,stamp)
@@ -46,9 +46,11 @@ def test_rc14_retry_scope_retains_original_intent(tmp_path,monkeypatch,fault):
     # The function imported the binding; patch this exact test dependency too.
     import app.metadata_reintegration_recovery as recovery
     monkeypatch.setattr(recovery,'list_libraries',app.library_registry.list_libraries)
+    if fault=='missing_database':db.unlink()
     before=operation.read_bytes();state_before=(parent/'state.json').read_bytes()
     if fault=='unknown_function':assert pending_reservations(ws,tmp_path/'registry')==set()
     elif fault:
         with pytest.raises(ro.RootOperationError):pending_reservations(ws,tmp_path/'registry')
     else:assert pending_reservations(ws,tmp_path/'registry')=={str(operation)}
     assert operation.read_bytes()==before and (parent/'state.json').read_bytes()==state_before
+    if fault=='missing_database':assert not db.exists()

@@ -5,7 +5,8 @@ from that key and no operation is automatically replayed or acknowledged.
 """
 from pathlib import Path
 from datetime import datetime
-from app.database import database_connection
+import sqlite3
+from contextlib import closing
 from app.root_operations import _control_location, _read, _lock, _check, generation, RootOperationError
 from app.storage_bootstrap import key_for
 from app.library_registry import list_libraries
@@ -50,7 +51,10 @@ def _pending_reservations(workspace, registry):
                 work=metadata/'.reintegrate'
                 if work.exists() and (work.is_symlink() or any(work.iterdir())):
                     raise RootOperationError('metadata_retry_unrecovered_work: '+str(work))
-                with database_connection(database) as c:
+                with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)) as c:
+                    c.row_factory=sqlite3.Row
+                    c.execute('BEGIN')
+                    tasks=c.execute("SELECT proposed_datetime,detected_json,verification_json FROM metadata_corrections WHERE area='library' AND status='completed'").fetchall()
                     families=c.execute("SELECT * FROM file_families WHERE selected_capture_time IS NOT NULL").fetchall()
                     all_rows=[dict(r) for r in c.execute('SELECT *,id AS file_id FROM files')]
                 central=storage_paths(workspace)['backup_root']
@@ -65,7 +69,7 @@ def _pending_reservations(workspace, registry):
                         raise RootOperationError('metadata_retry_unqualified_family: '+str(family['id']))
                     stored=str(family['selected_capture_time'])
                     proposed=_reintegration_capture(database,family['id'],rows,stored,
-                        job_id=family['job_id'],family_key=family['family_key'])
+                        job_id=family['job_id'],family_key=family['family_key'],tasks=tasks)
                     if datetime.fromisoformat(stored).tzinfo is not None or proposed==stored:
                         raise RootOperationError('metadata_retry_missing_legacy_receipt: '+str(family['id']))
                     for row in rows:
@@ -97,5 +101,5 @@ def pending_reservations(workspace, registry):
     from app.metadata_swap_recovery import MetadataSwapRecoveryError
     try:
         return _pending_reservations(workspace,registry)
-    except (MetadataCorrectionError,MetadataSwapRecoveryError,ValueError,KeyError,TypeError,IndexError) as error:
+    except (MetadataCorrectionError,MetadataSwapRecoveryError,sqlite3.Error,ValueError,KeyError,TypeError,IndexError) as error:
         raise RootOperationError('metadata_retry_unverified: '+str(error)) from error

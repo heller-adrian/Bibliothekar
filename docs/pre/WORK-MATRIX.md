@@ -61,3 +61,23 @@ alte Quellen-Erwartungen für Helper-Opt-in, Undated-Status und Autoscan3.
 Erwartungen passend zur beauftragten Funktion aktualisiert; Schutzassertions
 bleiben erhalten. Reale RC14-Beleg-/Admission-Korrektur in1c0b3033 gesichert.
 Gebündelter Nachlauf folgt auf dem abschließenden Prüfstand.
+
+## Zweiter Budget-/Recovery-Stand
+
+42 % erreicht; bis44 % angefragt. Kandidatenbranch weiterhinbfebdfb1.
+Zusätzlicher Diagnosezweigcodex/pre-container-probe, Commit29c1e48f:
+Original-RC14 hinterlässt nach Verifikationsfehler valide F14-Metadatenreservation.
+Startup verweigerte deshalb trotz Offsetfix den Betrieb. Neue eng begrenzte
+Qualifikation erlaubt den expliziten normalen Retry, lässt Originalreservation
+vollständig bestehen; unbekannte/abweichende Nachweise bleiben gesperrt.
+Probe40792751100 bestätigt: Upgrade startet,14-Dateien-Reintegration HTTP200,
+vor/nach Reintegration Herkunft und RO-Bytes identisch, Neustart erfolgreich,
+zweite Bibliothek HTTP201. Danach scheitert strenger finaler Herkunfts-/RO-
+Vergleich; genauer Unterschied noch NICHT bestimmt. Keine Testabschwächung.
+Lokale zusätzliche reine Lesequalifikation (SQLite mode=ro, keine Neuanlage bei
+fehlender DB) und7 Positiv-/Negativtests bestanden. Diese sind im nächsten lokalen
+Commit gesichert, noch nicht im Container getestet.
+Nach Freigabe: before/after/final Snapshot-Diff im Probe-Artefakt sichern,
+Abweichung ursachenbezogen bewerten. Erst anschließend Korrektur/Tests in
+codex/1.0.0-pre übernehmen und vollständiges Gate auf finalem Anwendungscode.
+Keine Veröffentlichung und keine NAS-Änderung.

@@ -2002,7 +2002,7 @@ def _apply_library_metadata_correction(
         raise MetadataCorrectionError(str(error)) from error
 
 
-def _reintegration_capture(database_path, family_id, rows, stored, *, job_id, family_key):
+def _reintegration_capture(database_path, family_id, rows, stored, *, job_id, family_key, tasks=None):
     """Qualify RC14's truncated offset from its exact completed swap receipt.
 
     Never infer a correction from current EXIF alone or alter a source origin.
@@ -2010,8 +2010,9 @@ def _reintegration_capture(database_path, family_id, rows, stored, *, job_id, fa
     """
     if datetime.fromisoformat(stored).tzinfo is not None:return stored
     matches=set()
-    with database_connection(database_path) as connection:
-        tasks=connection.execute("SELECT proposed_datetime,detected_json,verification_json FROM metadata_corrections WHERE area='library' AND status='completed'").fetchall()
+    if tasks is None:
+        with database_connection(database_path) as connection:
+            tasks=connection.execute("SELECT proposed_datetime,detected_json,verification_json FROM metadata_corrections WHERE area='library' AND status='completed'").fetchall()
     by_id={int(r['file_id']):r for r in rows}
     for task in tasks:
         detected=json.loads(task['detected_json'] or '{}')
