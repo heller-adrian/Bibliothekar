@@ -106,3 +106,14 @@ alle anschließenden PID-, SIGKILL-, Reservations- und Identitätsassertionen bl
 bestehen. Ein deterministischer Test erzwingt die leere Zwischenphase. Unveränderter
 Anwendungscode gegenüber 44c31430; lokale gezielte Wiederholung des Controllers und
 der neuen Regressionen: **35 PASS**. Der nötige Linux-Nachlauf wird dokumentiert.
+
+Linux-Nachlauf 40904815727: **118 PASS** im gezielten Python-Gate. Beide Starts der
+4.000-Dateien-Containerfixture und sämtliche Vorher/Nachher-Bestandsvergleiche
+liefen durch. Die abschließende Testlogassertion berücksichtigte nur stdout;
+Uvicorn schreibt `Application startup complete` jedoch nach stderr. Nur die
+Testauswertung wurde auf beide Streams korrigiert. Der Anwendungscode bleibt
+unverändert. Der folgende reine Container-Nachlauf verifiziert und verwendet den
+118-PASS-Nachweis anhand exakter App-/Test-/Abhängigkeitsgleichheit, erfolgreichem
+Jobschritt und ursprünglichem Artefakt-ZIP-Digest
+sha256:32ab7889908039cee4ff4600c721f419a0aadac663aba0fed52b0f71b1f800b0.
+Keine unnötige Wiederholung dieser bereits bestandenen Backendtests.

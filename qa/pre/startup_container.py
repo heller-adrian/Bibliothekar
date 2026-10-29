@@ -139,7 +139,8 @@ for _,db in rows:
     # Recheck is authenticated and revalidates storage; no fixture reset.
     health=api("print(json.dumps(api('/api/settings/storage-recheck',{})))")
     assert health['ready'],health
-    log=docker('logs',name);assert 'Source helper: disabled' in log
+    logs=docker('logs',name,check=False);log=logs.stdout+logs.stderr
+    assert 'Source helper: disabled' in log
     assert 'Application startup complete' in log and '127.0.0.1:8090' not in log
     web_users=[line.split()[0] for line in docker('top',name,'-eo','uid,args').splitlines()
                if 'uvicorn app.main:app ' in line]

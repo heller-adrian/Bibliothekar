@@ -6,6 +6,7 @@ on:
 permissions:
   contents: read
   packages: read
+  actions: read
 concurrency:
   group: pre-startup-hotfix
   cancel-in-progress: false
@@ -19,6 +20,7 @@ jobs:
         working-directory: startup-${{ github.run_id }}
     env:
       PYTHONDONTWRITEBYTECODE: '1'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PYTHONPATH: ${{ github.workspace }}/startup-${{ github.run_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -31,9 +33,9 @@ jobs:
           set -euo pipefail
           QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-startup.XXXXXXXX")"
           printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
-          python3 -m venv "$QA_WORK/venv"
-          "$QA_WORK/venv/bin/pip" install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
-          "$QA_WORK/venv/bin/python" -m pytest -q --disable-warnings --junitxml="$QA_WORK/targeted.xml" tests/backend/test_pre_startup_performance.py tests/backend/test_rc13_provenance.py tests/backend/test_pre_metadata.py tests/backend/test_pre_metadata_retry.py tests/backend/test_0310_multi_library.py tests/backend/test_0334_patch.py tests/backend/test_rc14_lifecycle.py tests/backend/test_rc14_import.py tests/backend/test_f14_root_operations.py
+          # Only container QA changed since this exact successful targeted step.
+          # Verify its frozen ZIP and XML; fail if app/tests/dependencies differ.
+          python3 qa/pre/reuse_startup_gate.py
       - name: Build only isolated hotfix test image and read original RC14
         run: |
           set -euo pipefail
