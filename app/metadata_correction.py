@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.root_operations import protect, validate_active_roots
 from app.metadata_abort_recovery import deliver_verified_error
+from app.metadata_general_handoff import correction as _general_handoff
 
 
 from contextlib import contextmanager
@@ -2433,6 +2434,7 @@ def reintegrate_library_metadata_family(
 
 
 @deliver_verified_error
+@_general_handoff
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def apply_metadata_correction(
     database_path: Path,
@@ -2458,12 +2460,14 @@ def apply_metadata_correction(
                 workspace_root=workspace_root,
                 library_id=library_id,
             )
-        from app.metadata_abort_recovery import bind_task, verified_error
+        from app.metadata_abort_recovery import bind_task, verified_error, finish_success
         bind_task(database_path, workspace_root, task)
         try:
-            return _apply_general_metadata_correction(
+            result = _apply_general_metadata_correction(
                 database_path, task, workspace_root=workspace_root, library_id=library_id,
             )
+            finish_success(database_path, workspace_root)
+            return result
         except Exception as error:
             result = verified_error(database_path, workspace_root, error)
             if result is not None:
@@ -2473,6 +2477,7 @@ def apply_metadata_correction(
 
 
 @deliver_verified_error
+@_general_handoff
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def execute_metadata_correction(
     database_path: Path,

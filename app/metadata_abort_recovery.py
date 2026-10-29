@@ -147,7 +147,8 @@ def _source_proof(source,size,sha):
     from app.import_publication import _parent
     if not re.fullmatch('[0-9a-f]{64}',str(sha)) or type(size) is not int or size<0:_fail('source_fingerprint',source)
     with _parent(source) as (parent,name):
-        fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+        try:fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+        except FileNotFoundError:_fail('source_missing',source)
         try:
             before=os.fstat(fd)
             if not stat.S_ISREG(before.st_mode) or before.st_nlink!=1 or before.st_size!=size:_fail('source_type_or_size',source)
@@ -171,7 +172,7 @@ def _scan(metadata,general):
                 _fail('unknown_working_copy',Path(directory)/name)
 
 
-def _qualify(record,owner,parent):
+def _qualify(record,owner,parent,*,registry=None,logs=None):
     from app.metadata_correction import _safe_relative
     metadata,general=_paths(Path(record['workspace']));task,plan=_task(record,owner,parent)
     relative=_safe_relative(task['source_relative_path'])
@@ -179,7 +180,9 @@ def _qualify(record,owner,parent):
     source=general/relative
     if str(source)!=task['source_path'] or source.resolve()!=source or source.name!=task['source_filename']:_fail('source_path',source)
     _scan(metadata,general)
+    if not re.fullmatch('[0-9a-f]{64}',str(task['source_sha256'])) or type(task['source_size_bytes']) is not int or task['source_size_bytes']<0:_fail('task_source_fingerprint',task['id'])
     if task['status']=='completed':
+        if task['error_message'] not in (None,''):_fail('completed_task_has_error',task['id'])
         if not task['completed_at'] or task['output_path']!=str(source):_fail('completed_task',task['id'])
         try:verification=json.loads(task['verification_json'])
         except (ValueError,TypeError):_fail('completed_verification',task['id'])
@@ -191,7 +194,12 @@ def _qualify(record,owner,parent):
         except (ValueError,TypeError):_fail('uncommitted_verification',task['id'])
         if verification!={}:_fail('uncommitted_verification',task['id'])
         disposition='rolled_back';size=task['source_size_bytes'];sha=task['source_sha256']
-    proof=_source_proof(source,size,sha)
+    if disposition=='completed' and not os.path.lexists(source):
+        if registry is None:_fail('completed_source_missing_requires_transfer_proof',source)
+        from app.metadata_transfer_proof import qualify
+        proof=qualify(task,record,owner,registry,logs or Path(os.environ.get('KAMERA_LOG_DIR','/logs')))
+    else:
+        proof=_source_proof(source,size,sha)
     _binding(record,owner);_scan(metadata,general)
     return task,plan,disposition,proof
 
@@ -208,26 +216,61 @@ def bind_task(database,workspace,task):
     _save_once(parent/('metadata-intent-'+plain['reservation_id']+'.json'),plan)
 
 
-def _finish(record,owner,*,error=None):
+def _finish(record,owner,*,error=None,registry=None,logs=None):
     plain=_plain(record);parent,_=_binding(plain,owner)
-    task,plan,disposition,proof=_qualify(plain,owner,parent)
+    task,plan,disposition,proof=_qualify(plain,owner,parent,registry=registry,logs=logs)
     plan=plan or {'format':1,'reservation':plain,'task':task}
     _save_once(parent/('metadata-intent-'+plain['reservation_id']+'.json'),plan)
     if disposition=='rolled_back' and task['status']!='blocked':
         from app.metadata_correction import _mark_task_blocked
         _mark_task_blocked(Path(owner['database_path']),task['id'],error or RuntimeError('Unterbrochene allgemeine Metadatenkorrektur anhand unveränderter Originalbytes zurückgesetzt.'))
-    final,_,decision,again=_qualify(plain,owner,parent)
+    final,_,decision,again=_qualify(plain,owner,parent,registry=registry,logs=logs)
     if decision!=disposition or again!=proof:_fail('state_changed_during_qualification',task['id'])
     receipt={'format':1,'disposition':disposition,'reservation':plain,'task_before':plan['task'],
              'task_after':final,'source':proof,'not_inferred_from_blocked_status':True}
-    _save_once(parent/('metadata-outcome-'+plain['reservation_id']+'.json'),receipt)
+    outcome=parent/('metadata-outcome-'+plain['reservation_id']+'.json')
+    previous=ro._read(outcome)
+    if previous is not None and previous!=receipt and proof.get('transfer'):
+        # A later qualified move appends continuity; it never rewrites the
+        # original successful outcome or retroactively changes its old path.
+        if (previous.get('format')!=1 or previous.get('disposition')!='completed'
+            or previous.get('reservation')!=plain or previous.get('task_after')!=final
+            or previous.get('task_before')!=plan['task']
+            or previous.get('source',{}).get('path')!=final['output_path']
+            or previous['source'].get('sha256')!=final['output_sha256']
+            or previous['source'].get('size_bytes')!=final['output_size_bytes']):
+            _fail('previous_outcome_conflict',outcome)
+        _save_once(parent/('metadata-location-'+plain['reservation_id']+'.json'),{
+            'format':1,'previous_outcome':previous,'outcome':receipt})
+    else:_save_once(outcome,receipt)
     # A late external change must keep the pending operation, even after its
     # outcome receipt was persisted. Never use that receipt as a generic bypass.
     _binding(plain,owner)
     metadata,general=_paths(Path(plain['workspace']));_scan(metadata,general)
-    if _source_proof(Path(proof['path']),proof['size_bytes'],proof['sha256'])!=proof:
+    last,_,last_decision,last_proof=_qualify(plain,owner,parent,registry=registry,logs=logs)
+    if last!=final or last_decision!=decision or last_proof!=proof:
         _fail('source_changed_before_completion',proof['path'])
     return final,disposition
+
+
+def finish_success(database,workspace):
+    """Persist a verified completed outcome BEFORE F14 may release its lease."""
+    record=_active(database,workspace);owner=_owner(database)
+    if record is None or owner is None:return
+    _,decision=_finish(record,owner)
+    if decision!='completed':_fail('successful_result_not_committed',record['_path'])
+
+
+def settle_before_transfer(workspace,registry,*,logs):
+    """No General source cleanup may outlive an unresolved predecessor intent."""
+    from app.metadata_correction import MetadataCorrectionError
+    try:
+        parent=ro._control_location(workspace)
+        if not list(parent.glob('operation-*.json')):return
+        recover_general_outcomes(workspace,registry,logs=logs)
+        if list(parent.glob('operation-*.json')):
+            _fail('transfer_has_unresolved_predecessor',parent)
+    except ro.RootOperationError as error:raise MetadataCorrectionError(str(error)) from error
 
 
 def verified_error(database,workspace,error):
@@ -240,7 +283,7 @@ def verified_error(database,workspace,error):
     return _VerifiedFailure(error)
 
 
-def _recover_general_outcomes(workspace,registry):
+def _recover_general_outcomes(workspace,registry,*,logs=None):
     """Called after startup's lease exits, before any workers are released."""
     from app.library_registry import list_libraries
     from app.metadata_swap_recovery import metadata_write_guard
@@ -267,14 +310,14 @@ def _recover_general_outcomes(workspace,registry):
             if _plain(active)!=record:_fail('reservation_changed',path)
             metadata,_=_paths(workspace)
             with metadata_write_guard(metadata):
-                final,disposition=_finish(active,owner)
+                final,disposition=_finish(active,owner,registry=registry,logs=logs)
                 outcomes.append({'task_id':final['id'],'disposition':disposition,'reservation_id':record['reservation_id']})
     return outcomes
 
 
-def recover_general_outcomes(workspace,registry):
+def recover_general_outcomes(workspace,registry,*,logs=None):
     try:
-        return _recover_general_outcomes(workspace,registry)
+        return _recover_general_outcomes(workspace,registry,logs=logs)
     except ro.RootOperationError:
         raise
     except Exception as error:

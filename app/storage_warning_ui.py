@@ -111,7 +111,7 @@ def storage_warning_html(status):
 <style>body{font:16px system-ui;background:#141922;color:#edf0f5;margin:0}
 dialog{color:inherit;background:#202938;border:2px solid #ffbd57;border-radius:12px;width:min(710px,calc(100% - 36px));max-height:90dvh;overflow:auto;box-sizing:border-box;overflow-wrap:anywhere;padding:24px}
 dialog::backdrop{background:#000b}button{padding:11px;margin:6px;min-height:44px;border-radius:7px;cursor:pointer}
-li{margin:12px 0}code{font-size:.88em}.storage-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.storage-heading h1{margin:0}.languages{display:flex;gap:8px}.languages button{min-height:34px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere}li{margin:12px 0}code{font-size:.88em}.storage-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.storage-heading h1{margin:0}.languages{display:flex;gap:8px}.languages button{min-height:34px}
 #storage-recovery-panel[hidden]{display:none}section{margin:14px 0}</style></head><body>
 <dialog id="storage-protection" open aria-labelledby="storage-title">
 <div class="storage-heading"><h1 id="storage-title">'''+_phrase('Storage unavailable','Speicherordner nicht verfügbar')+'''</h1><div class="languages"><button type="button" class="bk-lang" data-lang="en">EN</button><button type="button" class="bk-lang" data-lang="de">DE</button></div></div>
@@ -129,6 +129,9 @@ li{margin:12px 0}code{font-size:.88em}.storage-heading{display:flex;align-items:
 '''+buttons+'''
 <p>'''+_phrase('The independent external archive is never automatically adopted or modified.',
              'Das unabhängige externe Archiv wird niemals automatisch übernommen oder verändert.')+'''</p></section>
+<button type="button" id="storage-diagnostics-open">'''+_phrase('Read-only recovery diagnosis','Wiederherstellungsdiagnose lesen')+'''</button>
+<section id="storage-diagnostics" hidden><h2>'''+_phrase('Libraries and pending operations','Bibliotheken und offene Vorgänge')+'''</h2>
+<p>'''+_phrase('You can inspect libraries and individual tasks here. No media or evidence is changed. Writes remain paused while any shared or unknown operation is unresolved.', 'Hier kannst du Bibliotheken und einzelne Aufträge prüfen. Medien und Nachweise bleiben unverändert. Schreibvorgänge bleiben bei ungeklärten gemeinsamen oder unbekannten Operationen angehalten.')+'''</p><div id="storage-diagnostics-content"></div></section>
 <p id="storage-setup-result" role="status" aria-live="polite"></p></dialog>
 <script>try{document.documentElement.lang=localStorage.getItem('bibliothekar-language')==='de'?'de':'en'}catch(_){document.documentElement.lang='en'}</script>
 <script>
@@ -161,6 +164,26 @@ li{margin:12px 0}code{font-size:.88em}.storage-heading{display:flex;align-items:
    const response=await fetch(path,{method:'POST',headers,credentials:'same-origin',body:JSON.stringify(payload)});
    let data={};try{data=await response.json()}catch(_){}if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail||data));return data;
  }
+ document.getElementById('storage-diagnostics-open').addEventListener('click',async e=>{
+  const panel=document.getElementById('storage-diagnostics'),target=document.getElementById('storage-diagnostics-content');
+  panel.hidden=false;e.currentTarget.disabled=true;target.textContent='';
+  try{
+   const response=await fetch('/api/settings/recovery-diagnostics',{credentials:'same-origin'});
+   if(!response.ok)throw new Error('HTTP '+response.status);
+   const data=await response.json();
+   const add=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;target.appendChild(node)};
+   for(const library of data.libraries||[])add('p',library.display_name+' · '+library.library_id+' · '+library.work_root);
+   for(const operation of data.operations||[]){
+    const file=operation.task;
+    add('h3',file?file.source_relative_path:(operation.kind||'Unknown operation'));
+    add('p',(file?file.status+' · ':'')+(operation.scope==='single_file_requires_qualification'?(lang()==='de'?'Einzeldatei: Nachweise prüfen':'Single file: evidence required'):(lang()==='de'?'Speicher oder ungeklärter Vorgang':'Storage or unclassified operation')));
+    add('pre',JSON.stringify(operation,null,2));
+   }
+   if(data.startup_error)add('p',data.startup_error);
+   for(const error of data.errors||[])add('pre',JSON.stringify(error));
+  }catch(error){target.textContent=error.message}
+  finally{e.currentTarget.disabled=false}
+ });
  document.getElementById('storage-retry').addEventListener('click',async e=>{e.currentTarget.disabled=true;try{await post('/api/settings/storage-recheck',{});location.reload()}catch(error){result.textContent=error.message;e.currentTarget.disabled=false}});
  const setup=document.getElementById('storage-initialize');
  if(setup)setup.addEventListener('click',async()=>{if(!confirm(lang()==='de'?'Geprüfte leere Installation neu einrichten?':'Initialize verified unused storage?'))return;

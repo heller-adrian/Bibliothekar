@@ -476,6 +476,19 @@ def _root_request(fn):
 
 
 
+def _general_transfer_request(function):
+    from functools import wraps
+    @wraps(function)
+    def call(*args, **kwargs):
+        from app.metadata_general_handoff import transition
+        try:
+            with transition(current_library_context().workspace_root):
+                return function(*args, **kwargs)
+        except (RootOperationError, MetadataCorrectionError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+    return call
+
+
 def _event_inspection_request(fn):
     """Translate live inventory contention, without hiding safety failures."""
     from functools import wraps
@@ -1010,6 +1023,8 @@ async def library_context_middleware(request: Request, call_next):
         return await call_next(request)
     from app.managed_storage_health import inspect_storage
     storage = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
+    if request.method == "GET" and request.url.path == "/api/settings/recovery-diagnostics":
+        return await call_next(request)
     if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize", "/api/settings/storage-replace", "/api/libraries"} and (request.url.path!='/api/libraries' or request.method=='GET'):
         return await call_next(request)
     if DATABASE_INITIALIZATION_ERROR and storage['ready']:
@@ -1740,11 +1755,19 @@ def process_claimed_job(
                     if managed_general_import
                     else None
                 )
+                if managed_general_import:
+                    from app.metadata_general_handoff import cleanup as cleanup_general_sources
+                    outcome = cleanup_general_sources(workspace_path, source,
+                        list((result.get("organization") or {}).get("imported_source_files") or []), job_id)
+                    cleanup_removed += outcome['removed_file_count']
+                    cleanup_errors.extend(outcome['errors'])
                 for entry in list(
                     (result.get("organization") or {}).get(
                         "imported_source_files"
                     ) or []
                 ):
+                    if managed_general_import:
+                        continue  # General cleanup owns the shared handoff lock and pinned descriptors.
                     try:
                         relative = Path(str(entry.get("relative_path") or ""))
                         if (
@@ -2281,7 +2304,7 @@ def _coordinate_startup(fn):
             finish_appdata(WORKSPACE_PATH)
             from app.metadata_abort_recovery import recover_general_outcomes
             _startup_step('general-metadata-outcomes', recover_general_outcomes,
-                          WORKSPACE_PATH, REGISTRY_DATABASE_FILE)
+                          WORKSPACE_PATH, REGISTRY_DATABASE_FILE, logs=LOG_PATH)
             from app.appdata import pending_operations
             remaining = pending_operations(WORKSPACE_PATH,all_records=True)
             from app.import_recovery import pending_reservations
@@ -3093,6 +3116,14 @@ def api_storage_health() -> dict[str, Any]:
         status = {**status, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'startup_error':DATABASE_INITIALIZATION_ERROR,
                   'issues':[{'code':'source_inventory_conflict' if database_initialization_error_code(DATABASE_INITIALIZATION_ERROR)=='source_inventory_conflict' else 'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
     return status
+
+
+@app.get("/api/settings/recovery-diagnostics", tags=["Einstellungen"])
+def api_recovery_diagnostics() -> dict[str, Any]:
+    """Owner authentication still wraps this read-only recovery endpoint."""
+    from app.metadata_recovery_status import inspect
+    return {**inspect(WORKSPACE_PATH, REGISTRY_DATABASE_FILE),
+            'startup_error': DATABASE_INITIALIZATION_ERROR}
 
 
 @app.post("/api/settings/storage-recheck", tags=["Einstellungen"])
@@ -10073,6 +10104,7 @@ def api_correct_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/metadata-correction/general/reintegrate", tags=["Metadatenkorrektur"], status_code=202)
 @_root_request
+@_general_transfer_request
 def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     """Queue selected corrected General files for the verified day-stock import path."""
     raw_items = payload.get("items")
@@ -10098,6 +10130,8 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
 
     context = current_library_context()
     try:
+        from app.metadata_abort_recovery import settle_before_transfer
+        settle_before_transfer(context.workspace_root, REGISTRY_DATABASE_FILE, logs=LOG_PATH)
         scan = scan_metadata_area(
             area="general",
             workspace_root=context.workspace_root,

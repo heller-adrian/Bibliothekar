@@ -194,7 +194,7 @@ def pending_operations(workspace, *, all_records=False):
     A valid *live* reservation may coexist with ordinary requests. Before worker
     release, no other process is allowed to leave an unresolved durable intent.
     """
-    if root() is None: return []
+    if root() is None and not all_records: return []
     from app.root_operations import _read,_control_location
     from app.storage_bootstrap import key_for
     parent = _control_location(workspace); state = _read(parent/'state.json',{})
