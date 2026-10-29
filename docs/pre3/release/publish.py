@@ -122,7 +122,7 @@ def fetch_evidence(work):
     assert len(cases)==181 and all(all(t.find(k) is None for k in ('failure','error','skipped')) for t in cases)
     stock=json.loads((evidence/'startup-evidence.json').read_text())
     iphone=json.loads((evidence/'pre-evidence.json').read_text())
-    pre2=json.loads((evidence/'pre3-evidence.json').read_text())
+    pre2=json.loads((evidence/'pre2-evidence.json').read_text())
     pre3=json.loads((evidence/'pre3-evidence.json').read_text())
     assert stock['source']==HOTFIX and iphone['commit']==HOTFIX and pre2['source']==HOTFIX and pre3['source']==HOTFIX
     qualify_runtime(stock,iphone,pre2,pre3)
