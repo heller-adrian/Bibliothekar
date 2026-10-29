@@ -64,10 +64,10 @@ jobs:
           mkdir "$WORK/runtime"
           export RUNNER_TEMP="$WORK/runtime"
           export GITHUB_SHA="$BUILD_SHA"
-          python3 "$WORK/source/qa/pre3/container.py"
-          python3 "$WORK/source/qa/pre2/container.py"
-          python3 "$WORK/source/qa/pre/startup_container.py"
-          python3 "$WORK/source/qa/pre/container.py"
+          python3 "$WORK/source/qa/pre3/container.py" 2>&1 | tee "$RUNNER_TEMP/pre3-container.log"
+          python3 "$WORK/source/qa/pre2/container.py" 2>&1 | tee "$RUNNER_TEMP/container.log"
+          python3 "$WORK/source/qa/pre/startup_container.py" 2>&1 | tee "$RUNNER_TEMP/startup.log"
+          python3 "$WORK/source/qa/pre/container.py" 2>&1 | tee "$RUNNER_TEMP/iphone.log"
           python3 docs/pre3/release/publish.py runtime --work "$WORK"
       - name: Atomically reserve only new pre3 tag and push only pre3 image
         run: |
