@@ -18,3 +18,18 @@ Local user token cannot read package metadata (HTTP 403); mandatory Actions-toke
 visibility/protected-release preflight must pass before tag or push. New manual
 publisher and main registration stub prepared. Next: register, dispatch exactly once,
 verify versioned container gates, immutable pull and downloaded release assets.
+
+
+Publication complete (2026-10-29): v1.0.0-pre.2 published and independently verified.
+Actions 40960151711 SUCCESS on the dedicated self-hosted runner. Versioned-image
+metadata abort/SIGKILL/foreign-byte, 4,000-file/two-library and 14 +13:00 JPEG gates
+PASS. Build/tag f8e128c9e5aec462d16f987d2e71dbe0d02f1549; only version metadata differs
+from the accepted application. Index digest:
+sha256:b9434137951a8f1e40de047bed6e3d8ee3be425e079b92aa6df9ec491c982c13.
+Real immutable pull and payload/OCI proof PASS. All 40 release assets independently
+downloaded and verified against GitHub digests; 39 SHA256SUMS entries PASS. Source
+archive's 196 app files match Git. Old releases/assets/tags/images/latest unchanged;
+repository private and package public as before. See PUBLISHED.json for exact IDs.
+No NAS access. Next: user upgrades the existing app using UPGRADE-TRUENAS.md and
+performs native acceptance. TrueNAS/NFSv4, actual DNG 1.7, physical SD/USB NOT_RUN;
+loss finalization DEFERRED. Never rerun this one-shot publisher for the existing version.
