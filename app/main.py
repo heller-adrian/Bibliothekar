@@ -2268,6 +2268,9 @@ def _coordinate_startup(fn):
             remaining = pending_operations(WORKSPACE_PATH,all_records=True)
             from app.import_recovery import pending_reservations
             recoverable=pending_reservations(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH) if remaining else set()
+            if remaining:
+                from app.metadata_reintegration_recovery import pending_reservations as pending_metadata_retries
+                recoverable |= pending_metadata_retries(WORKSPACE_PATH,REGISTRY_DATABASE_FILE)
             remaining=[r for r in remaining if r['path'] not in recoverable]
             if remaining:
                 raise RootOperationError('unresolved_reservation: '+remaining[0]['path']+': '+remaining[0]['detail'])

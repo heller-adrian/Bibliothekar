@@ -148,7 +148,7 @@ jobs:
           name: rc14-container
           path: |
             ${{ runner.temp }}/pre-evidence.json
-            ${{ runner.temp }}/pre-container/container.log
+            ${{ runner.temp }}/pre-container.log
             ${{ runner.temp }}/rc13-evidence.json
             ${{ runner.temp }}/rc14-evidence.json
             ${{ runner.temp }}/rc13-container-logs

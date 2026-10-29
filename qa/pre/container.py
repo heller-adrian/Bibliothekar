@@ -31,6 +31,9 @@ def create(image):
  for src,dst in [('appdata','/appdata'),('workspace','/workspace'),('archive','/main-library:ro'),('business','/Businessarchiv:ro'),('nas','/sources/nas:ro')]:args+=['-v',str(root/src)+':'+dst]
  old.docker('create','--name',name,*args,image);old.docker('start',name)
 def snapshot():return json.loads(old.docker('exec','--user','568:568',name,'python','-c',old.SNAPSHOT))
+def pending_metadata():
+ return json.loads(old.docker('exec','--user','568:568',name,'python','-c',"from pathlib import Path;import json;p=Path('/appdata/database/.bibliothekar-root-control');print(json.dumps([r for f in p.rglob('operation-*.json') if (r:=json.loads(f.read_text())).get('ids',{}).get('function')=='app.metadata_correction.reintegrate_library_metadata_family']))"))
+
 def wait_import(api,task):
  for _ in range(600):
   rows=api('/api/import-history')['jobs'];active=[j for j in rows if j['operation']=='folder_import']
@@ -53,21 +56,29 @@ try:
  # Required reproduction in original RC14, with a real authenticated HTTP call.
  failure=api('/api/metadata-correction/reintegrate',{'items':items},expect=409)
  assert 'bestätigt' in str(failure),failure
- before=snapshot();assert all(r['selected_capture_time']=='2025-12-07T15:04:37' for r in before['files'])
+ original_intents=pending_metadata();assert len(original_intents)==1;report['original_intent']=original_intents[0]
+ before=snapshot();report['before']=before;assert all(r['selected_capture_time']=='2025-12-07T15:04:37' for r in before['files'])
  old.docker('stop',name);old.docker('rm',name)
- create(os.environ['IMAGE']);api=old.client();assert api('/api/settings/storage-health')['ready']
+ create(os.environ['IMAGE']);api=old.client();health=api('/api/settings/storage-health');assert health['ready'],health
+ assert pending_metadata()==original_intents
  report['candidate_exiftool']=old.docker('exec',name,'exiftool','-ver').strip()
  response=api('/api/metadata-correction/reintegrate',{'items':items});report['reintegrate']=response
- after=snapshot();assert after['origin']==before['origin'] and after['readonly']==before['readonly']
+ assert pending_metadata()==[]
+ report['same_reservation_preserved_until_retry']=True
+ after=snapshot();report['after']=after;assert after['origin']==before['origin'] and after['readonly']==before['readonly']
  assert all(r['selected_capture_time']=='2025-12-07T15:04:37+13:00' for r in after['files'])
  assert all('Undated' not in r['current_relative_path'] and '2025-12-07' in r['current_relative_path'] for r in after['files'])
  old.docker('restart',name);api=old.client();assert api('/api/settings/storage-health')['ready']
- api('/api/libraries',{'display_name':'After metadata upgrade','work_root':'','archive_root':'/Businessarchiv'},expect=201)
- final=snapshot();assert final['origin']==before['origin'] and final['readonly']==before['readonly']
+ second=api('/api/libraries',{'display_name':'After metadata upgrade','work_root':'','archive_root':'/Businessarchiv'},expect=201)['library']
+ final=snapshot();report['final']=final
+ from origin_proof import assert_projection_preserves_origins
+ assert_projection_preserves_origins(before['origin'],final['origin'],second['library_id'])
+ assert final['readonly']==before['readonly']
  report.update(status='PASS',corrected_files=14,rc14_failure=failure,origin_preserved=True,readonly_bytes_preserved=True)
 finally:
  log=old.docker('logs',name,check=False)
- (root/'container.log').write_text(log.stdout+log.stderr)
+ (Path(os.environ['RUNNER_TEMP'])/'pre-container.log').write_text(log.stdout+log.stderr)
+ print((log.stdout+log.stderr)[-18000:])
  (Path(os.environ['RUNNER_TEMP'])/'pre-evidence.json').write_text(json.dumps(report,indent=2))
  old.docker('rm','-f',name,check=False)
 print(json.dumps(report,indent=2))
