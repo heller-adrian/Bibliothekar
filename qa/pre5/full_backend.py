@@ -38,12 +38,24 @@ for index in range(8):
         suites = ET.parse(xml_path).getroot()
         part['results'] = {key: sum(int(s.get(key, 0)) for s in suites.iter('testsuite'))
                            for key in ('tests', 'failures', 'errors', 'skipped')}
+        if part['results']['tests'] != part.get('selected'):
+            failed = True
+            part['coverage_error'] = 'JUnit result count differs from selected nodes'
+        # Native-tool checks run on this fully equipped Linux runner. A
+        # historical BLOCKED skip is an unresolved acceptance gap, not PASS.
+        if any(part['results'][k] for k in ('failures', 'errors', 'skipped')):
+            failed = True
+    else:
+        failed = True
+        part['coverage_error'] = 'JUnit results missing'
     failed |= result.returncode != 0
     parts.append(part)
     (root / 'summary.json').write_text(json.dumps({
         'source': os.environ['GITHUB_SHA'], 'parts': parts,
         'collected': len(all_nodes or []), 'selected_once': len(seen),
-        'complete': index == 7 and seen == set(all_nodes or []),
+        'complete': index == 7 and seen == set(all_nodes or [])
+            and all(p.get('results', {}).get('tests') == p.get('selected')
+                    and 'coverage_error' not in p for p in parts),
         'status': 'FAIL' if failed else 'IN_PROGRESS',
     }, indent=2))
     print(json.dumps(part), flush=True)

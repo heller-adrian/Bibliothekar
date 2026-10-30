@@ -66,7 +66,7 @@ jobs:
 
   container:
     needs: reproductions
-    if: contains(github.event.head_commit.message, '[pre5-container]')
+    if: contains(github.event.head_commit.message, '[pre5-container]') || contains(github.event.head_commit.message, '[pre5-full]')
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 35
     defaults:
@@ -145,7 +145,7 @@ jobs:
         run: rm -f "$DOCKER_CONFIG/config.json"
 
   backend:
-    needs: reproductions
+    needs: [reproductions, container]
     if: contains(github.event.head_commit.message, '[pre5-full]')
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 150
