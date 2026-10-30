@@ -2447,13 +2447,14 @@ def _coordinate_startup(fn):
                 # or running unrelated recovery under the recovery capability.
                 from app.database_diagnostics import inspect as inspect_database
                 DATABASE_INITIALIZATION=inspect_database(DATABASE_FILE)
-                LIBRARY_REGISTRY_INITIALIZATION=inspect_database(REGISTRY_DATABASE_FILE)
+                LIBRARY_REGISTRY_INITIALIZATION=inspect_database(REGISTRY_DATABASE_FILE,kind='registry')
                 operations=operation_health.inspect(WORKSPACE_PATH)
-                from app.database import available_migrations
-                expected=[version for version,_ in available_migrations()]
+                if not DATABASE_INITIALIZATION['schema_current'] or not LIBRARY_REGISTRY_INITIALIZATION['schema_current']:
+                    DATABASE_INITIALIZATION_ERROR='Technical startup: database_schema_requires_qualification'
+                    return
                 if (operations.get('workspace_writes_allowed')
                         and DATABASE_INITIALIZATION['consistent']
-                        and DATABASE_INITIALIZATION['applied_versions']==expected
+                        and DATABASE_INITIALIZATION['schema_current']
                         and LIBRARY_REGISTRY_INITIALIZATION['consistent']):
                     _STORAGE_STARTUP_PAUSED=False
                     _start_runtime_workers(recover_domain=False)
@@ -3271,7 +3272,7 @@ def api_recovery_diagnostics() -> dict[str, Any]:
     from app.metadata_recovery_status import inspect
     from app.database_diagnostics import inspect as database_inspect
     return {**inspect(WORKSPACE_PATH, REGISTRY_DATABASE_FILE),
-            'database':database_inspect(DATABASE_FILE),'registry':database_inspect(REGISTRY_DATABASE_FILE),
+            'database':database_inspect(DATABASE_FILE),'registry':database_inspect(REGISTRY_DATABASE_FILE,kind='registry'),
             'startup_error': DATABASE_INITIALIZATION_ERROR, 'operation_health': __import__('app.operation_health',fromlist=['inspect']).inspect(WORKSPACE_PATH)}
 
 
@@ -3675,6 +3676,12 @@ def get_health() -> dict[str, Any]:
             + LIBRARY_REGISTRY_ERROR
         )
 
+    from app.database_diagnostics import inspect as inspect_database
+    database_state=inspect_database(current_database_file())
+    if not database_state['connected']:
+        errors.append('Database connection unavailable: '+str(database_state.get('error','')))
+    elif not database_state['consistent'] or not database_state['schema_current']:
+        errors.append('Database integrity or schema requires qualified recovery.')
     trigger = settings.get("trigger", {})
 
     return {
@@ -3692,34 +3699,22 @@ def get_health() -> dict[str, Any]:
             "loaded": config_loaded,
         },
         "database": {
+            "connected":database_state['connected'],
+            "schema_current":database_state['schema_current'],
+            "schema_issues":database_state['schema_issues'],
             "error_code": database_initialization_error_code(DATABASE_INITIALIZATION_ERROR),
             "path": str(current_database_file()),
             "initialized":
-                DATABASE_INITIALIZATION_ERROR is None
-                and DATABASE_INITIALIZATION is not None,
+                database_state['connected'] and database_state['consistent'] and database_state['schema_current'],
             "error": DATABASE_INITIALIZATION_ERROR,
             "schema_versions": (
-                DATABASE_INITIALIZATION.get(
-                    "applied_versions",
-                    [],
-                )
-                if DATABASE_INITIALIZATION
-                else []
+                database_state['applied_versions']
             ),
             "tables": (
-                DATABASE_INITIALIZATION.get(
-                    "tables",
-                    [],
-                )
-                if DATABASE_INITIALIZATION
-                else []
+                database_state['tables']
             ),
             "integrity": (
-                DATABASE_INITIALIZATION.get(
-                    "integrity"
-                )
-                if DATABASE_INITIALIZATION
-                else None
+                database_state['integrity']
             ),
         },
         "library_registry": {

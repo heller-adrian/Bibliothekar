@@ -254,3 +254,11 @@ completed_at vorhanden, error_message=NULL, verified/moved counts vollständig.
 Nur QA korrigiert: auf terminal warten, anschließend exakt applied und sämtliche
 Abschluss-/Zählerbedingungen verlangen. Kein Produktstatus umgedeutet.
 Nächster Lauf führt nach kurzen Gates die historische Stufe und Containerstufe aus.
+
+Offene Diagnose-Lücke ergänzt: `quick_check` und FK-Prüfung bescheinigen keine
+vollständigen Tabellen/Spalten/FK-Definitionen oder Migrationen. Erwartetes Schema
+wird aus ausgelieferten SQL-Migrationen ausschließlich in SQLite `:memory:`
+ermittelt; Ist-Datenbank bleibt query_only. Registry erhält ihre eigene Rolle.
+Workerfreigabe nach Domain-Abbruch benötigt vollständiges Schema. Health trennt
+connected/consistent/schema_current, statt fehlenden Domain-Startup mit fehlender
+Verbindung gleichzusetzen. Neue gezielte Tests, noch nicht ausgeführt.

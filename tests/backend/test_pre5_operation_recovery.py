@@ -312,6 +312,45 @@ def test_database_diagnosis_never_creates_or_repairs_database(tmp_path):
     assert not report['connected'] and broken.read_bytes()==b'foreign bytes'
 
 
+@pytest.mark.parametrize('damage',['missing_table','missing_column','wrong_versions','registry_table'])
+def test_quick_check_alone_never_attests_a_complete_schema(ready,damage):
+    from app.database_diagnostics import inspect
+    _,ws,reg,dbs,_=ready
+    db=reg if damage=='registry_table' else dbs[0]
+    with closing(sqlite3.connect(db)) as connection:
+        if damage=='missing_table':connection.execute('DROP TABLE metadata_corrections')
+        elif damage=='missing_column':connection.execute('ALTER TABLE metadata_corrections DROP COLUMN proposed_datetime')
+        elif damage=='wrong_versions':connection.execute('DELETE FROM schema_versions WHERE version=55')
+        else:connection.execute('DROP TABLE source_family_members')
+        connection.commit()
+        assert connection.execute('PRAGMA quick_check').fetchone()[0]=='ok'
+    before=db.read_bytes()
+    report=inspect(db,kind='registry' if damage=='registry_table' else 'catalogue')
+    assert report['connected'] and report['consistent']
+    assert not report['schema_current'] and report['schema_issues'],report
+    assert not report['automatic_repair'] and db.read_bytes()==before
+
+
+def test_schema_diagnosis_matches_both_shipped_schemas(ready):
+    from app.database_diagnostics import inspect
+    _,_,reg,dbs,_=ready
+    assert inspect(dbs[0])['schema_current'],inspect(dbs[0])
+    assert inspect(reg,kind='registry')['schema_current'],inspect(reg,kind='registry')
+
+
+def test_incomplete_schema_does_not_start_workers_during_domain_recovery(ready,monkeypatch):
+    _,ws,_,dbs,_=ready
+    general_orphan(ws,dbs[0])
+    with closing(sqlite3.connect(dbs[0])) as connection:
+        connection.execute('DROP TABLE metadata_corrections');connection.commit()
+    workers=[]
+    monkeypatch.setattr(main,'_start_runtime_workers',lambda **kw:workers.append(kw))
+    main._coordinate_startup(lambda:pytest.fail('ordinary startup past unresolved intent'))()
+    assert not workers and 'database_schema_requires_qualification' in main.DATABASE_INITIALIZATION_ERROR
+    assert main.DATABASE_INITIALIZATION['connected'] and main.DATABASE_INITIALIZATION['consistent']
+    assert main.api_storage_health()['state']=='UNAVAILABLE'
+
+
 @pytest.mark.parametrize('conflict',['none','general','unknown'])
 def test_real_read_endpoints_never_mutate_catalogues_or_f14(ready,conflict):
     from tests.backend.test_pre4_operation_separation import orphan
