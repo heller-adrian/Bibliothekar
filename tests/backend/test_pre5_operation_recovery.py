@@ -344,3 +344,24 @@ def test_transient_scan_never_recreates_lost_registered_control_state(ready):
     with pytest.raises((RuntimeError,ro.RootOperationError)):
         reconcile_central_free_stock(dbs[0],ws,library_id='main')
     assert not state.exists()
+
+
+def test_empty_but_identity_pinned_stock_is_not_a_missing_mount(ready):
+    _,ws,_,dbs,_=ready
+    db=dbs[0];root=storage_paths(ws)['backup_root']
+    _,file_id,relative=_seed_free_file(db,family_key='moved',filename='moved.JPG',
+        day='2026-07-21',data=b'known bytes')
+    # All media may have left the pinned directory before its first scan.
+    result=reconcile_central_free_stock(db,ws,library_id='main')
+    assert result['ready'] and result['pending_missing_count']==1
+    assert not (root/'.bibliothekar-central-stock-v1').exists()
+    assert operations.inspect(ws)['writes_allowed']
+
+
+def test_legacy_sentinel_never_writes_outside_inventory_root(ready):
+    case,ws,_,dbs,_=ready
+    foreign=case/'foreign-retained.txt';foreign.write_bytes(b'untouched')
+    sentinel=storage_paths(ws)['backup_root']/'.bibliothekar-central-stock-v1'
+    sentinel.symlink_to(foreign)
+    assert reconcile_central_free_stock(dbs[0],ws,library_id='main')['ready']
+    assert foreign.read_bytes()==b'untouched' and sentinel.is_symlink()

@@ -1045,7 +1045,29 @@ def _registry_write_gate(row, arguments=None):
     if owner is not None and owner['workspace'] == str(context.workspace_root) and owner['library'] in {None,context.library_id}:
         yield
     else:
-        with admission(context):yield
+        with admission(context):
+            if row is None:
+                # First explicit registration must bind its administrative
+                # roots BEFORE publishing the first registry row. Otherwise a
+                # subsequent observer cannot distinguish initial control setup
+                # from loss of an existing installation's authority.
+                root,parent=_control(context.workspace_root)
+                with _lock(parent/'state.lock',exclusive=True,wait=True):
+                    if _read(parent/'state.json',None) is None:
+                        registry=Path(arguments['registry_path'])
+                        if registry.is_file():
+                            with closing(sqlite3.connect(registry.absolute().as_uri()+'?mode=ro',uri=True)) as c:
+                                exists=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='libraries'").fetchone()
+                                if exists and c.execute('SELECT 1 FROM libraries WHERE workspace_root=? LIMIT 1',(str(root),)).fetchone():
+                                    raise RootOperationError('Registered installation lost its control state: '+str(parent))
+                        state=_state(parent,root)
+                        from app.storage_config import load_storage_settings
+                        roots=[root,context.work_root,context.archive_root,
+                               *(root/name for name in load_storage_settings(workspace_root=root).values())]
+                        state['bindings']={str(Path(path).absolute()):identity for path in roots
+                                           if (identity:=_identity(path)) is not None}
+                        _write(parent/'state.json',state)
+            yield
 
 
 def guard_database_relink(fn):

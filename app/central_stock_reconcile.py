@@ -163,34 +163,14 @@ def _ensure_root_identity(
     central_root: Path,
     rows: list[dict[str, Any]],
 ) -> tuple[bool, str]:
-    if not central_root.is_dir():
+    # Identity belongs to F14's pinned directory/mount bindings. A content
+    # sample or a writable sentinel is neither identity nor proof of a mount.
+    # In particular, moving the last media file must not invalidate this root.
+    if central_root.is_symlink() or not central_root.is_dir():
         return False, "Der zentrale Sicherungsbestand ist nicht erreichbar."
-    sentinel = central_root / SENTINEL_NAME
-    if sentinel.is_file():
-        return True, ""
-    if not rows:
-        return True, ""
-
-    found_known = False
-    for row in rows[:256]:
-        for value in (
-            row.get("expected_relative_path"),
-            row.get("current_relative_path"),
-        ):
-            relative = _safe_relative(value)
-            if relative is not None and (central_root / relative).is_file():
-                found_known = True
-                break
-        if found_known:
-            break
-    if not found_known:
-        return (
-            False,
-            "Zentralbestand enthält bekannte SQLite-Dateien, aber keine davon ist "
-            "physisch erreichbar. Reconciliation wurde sicherheitshalber ausgesetzt.",
-        )
-
-    sentinel.write_text("Bibliothekar central stock v1\n", encoding="utf-8")
+    validate_active_roots()
+    if not os.access(central_root,os.R_OK|os.X_OK):
+        return False, "Der zentrale Sicherungsbestand ist nicht lesbar."
     return True, ""
 
 
