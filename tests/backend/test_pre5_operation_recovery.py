@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import main, root_operations as ro, operation_health as operations
 from app.central_stock_reconcile import reconcile_central_free_stock
-from app.database import database_connection
+from app.database import create_job, database_connection
 from app.library_context import resolve_library_context
 from app.storage_config import storage_paths
 from tests.backend.test_pre4_operation_separation import ready
@@ -49,6 +49,8 @@ def test_three_reported_file_changes_before_metadata(ready, actions):
     # These production fixture helpers create actual files, catalogue rows,
     # assignments and scan results, not a hypothetical recovery receipt.
     events = {}
+    create_job(db, job_id='J', kind='sd_import', trigger_type='approved_sd',
+        source_path='/synthetic/card', working_path=str(paths['backup_root']), operation='folder_import')
     for status, day in [('applied', '2026-07-19'), ('archived', '2026-07-20')]:
         root = context.archive_root if status == 'archived' else context.work_root
         events[status] = _event(db, root, name=status, day=day,
