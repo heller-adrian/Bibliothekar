@@ -277,7 +277,7 @@ def test_transient_observer_cannot_nest_durable_media_writes(ready):
 
 def test_private_view_resolves_trash_to_original_workspace_and_keeps_f14_read_only(ready):
     from app.trash import trash_root
-    from app.library_context import set_current_library,reset_current_library
+    from app.library_runtime import set_current_library,reset_current_library
     _,ws,reg,dbs,_=ready
     context=resolve_library_context(reg,'main')
     parent=ro._control_location(ws)
@@ -329,6 +329,18 @@ def test_real_read_endpoints_never_mutate_catalogues_or_f14(ready,conflict):
     with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
         for route in routes:
             response=client.get(route)
-            assert response.status_code==200,(route,response.status_code,response.text[:1000])
+            expected=409 if route.endswith('/reconcile-plan') else 200
+            assert response.status_code==expected,(route,response.status_code,response.text[:1000])
+            if expected==409:
+                assert 'keine gemeinsame Nachsortierung' in response.json()['detail']
     assert before=={p:dump(p) for p in before}
     assert evidence=={p:p.read_bytes() for p in control.glob('*.json')}
+
+
+def test_transient_scan_never_recreates_lost_registered_control_state(ready):
+    _,ws,_,dbs,_=ready
+    state=ro._control_location(ws)/'state.json'
+    state.rename(state.with_name('original-retained.json'))
+    with pytest.raises((RuntimeError,ro.RootOperationError)):
+        reconcile_central_free_stock(dbs[0],ws,library_id='main')
+    assert not state.exists()

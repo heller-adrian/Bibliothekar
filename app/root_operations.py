@@ -639,6 +639,11 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
     with (nullcontext() if owned_mutation else _lock(parent/'workspace.lock')), (nullcontext() if owned_mutation or not shared else _lock(parent/'shared.lock')), (nullcontext() if owned_mutation else _lock(parent/('library-'+hashlib.sha256(library_id.encode()).hexdigest()+'.lock'))), _lock(parent/('operation-'+key+'.lock'), exclusive=True, wait_seconds=operation_wait):
         if not owned_mutation:_assert_startable(parent, library_id)
         with _lock(parent/'state.lock', exclusive=True, wait=True):
+            previous_state=_read(parent/'state.json',None)
+            owner_row=(_registered(database) if database is not None else
+                       _registered(None,library_id=library_id if library_id!='shared' else 'main',workspace=root))
+            if previous_state is None and owner_row and owner_row.get('is_registered',True):
+                raise RootOperationError('Registered installation lost its control state: '+str(parent))
             state = _state(parent, root)
             current = (state['generation'],state['libraries'].get(library_id,0))
             if expected_generation is not None and tuple(expected_generation)!=current:
@@ -697,8 +702,9 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     if path in pinned and pinned[path] != current_mount:
                         raise RootOperationError('mount_identity_changed: '+path)
                     pinned[path] = current_mount
-            if durable:
+            if durable or previous_state is None:
                 _write(parent/'state.json',state)
+            if durable:
                 _write(parent/('operation-'+key+'.json'),record)
         record['_parent']=parent;record['_path']=parent/('operation-'+key+'.json');record['_resumed']=bool(old)
         record['_ephemeral']=not durable
@@ -826,11 +832,23 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
                     from app.managed_storage_health import require_pinned_storage
                     require_pinned_storage(workspace)
                     if kind!='inventory':raise RootOperationError('Unsupported read-only observer.')
-                    if row:_check({str(Path(row[k])):_identity(row[k]) for k in ('workspace_root','work_root','archive_root')})
+                    if view_context is not None:_check_view(view_context)
+                    if row and a.get('storage_root') is not None:
+                        role={'shared_workspace':'work_root','camera_archive':'archive_root'}.get(a.get('root_kind'))
+                        if role is None or os.path.abspath(a['storage_root'])!=os.path.abspath(row[role]):
+                            raise RootOperationError('Inventur verwendet keine aktuelle registrierte Dateiwurzel.')
+                    if tuple(expected)!=generation(workspace,library):
+                        raise RootOperationError('Read view uses a stale root generation.')
+                    observed={str(path):_identity(path) for path in paths()}
                     if fn.__module__== 'app.event_inventory':
-                        return fn(*args,**kwargs)
-                    from app.observation_recovery import read_snapshot
-                    return read_snapshot(fn.__module__+'.'+fn.__qualname__,database,workspace)
+                        result=fn(*args,**kwargs)
+                    else:
+                        from app.observation_recovery import read_snapshot
+                        result=read_snapshot(fn.__module__+'.'+fn.__qualname__,database,workspace)
+                    _check(observed)
+                    if tuple(expected)!=generation(workspace,library):
+                        raise RootOperationError('Read view root generation changed during scan.')
+                    return result
                 with reserve(workspace,library_id=library,paths=paths,database=database,kind=kind,ids=ids,expected_generation=expected,operation_wait=operation_wait, durable=durable, shared=True if global_import or kind in {'trash','backup','import_cleanup'} or (database_arg == 'None' and kind == 'recovery') else None) as reservation:
                     if view_context is not None: _check_view(view_context)
                     if context:reservation['_context_work_root']=str(context.work_root)

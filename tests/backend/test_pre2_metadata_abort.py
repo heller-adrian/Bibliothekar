@@ -214,17 +214,21 @@ def test_startup_recovers_historical_failure_before_workers(fixture,monkeypatch)
     assert seen==['workers may start'] and pending(ws)==[]
 
 
-def test_uncertain_startup_does_not_release_workers(fixture,monkeypatch):
+def test_uncertain_startup_only_releases_scoped_workers(fixture,monkeypatch):
     from app import main
     case,ws,reg,db,source=prepare(fixture);published_failure(case,ws,db,source);source.write_bytes(b'foreign')
-    seen=[];monkeypatch.setattr(main,'_start_runtime_workers',lambda:seen.append('unsafe'))
+    seen=[];monkeypatch.setattr(main,'_start_runtime_workers',lambda **kw:seen.append(kw))
     main.startup_database()
     from app.operation_health import inspect as operation_status
     assert main.DATABASE_INITIALIZATION_ERROR is None
     status=operation_status(ws)
     assert not status['writes_allowed'] and 'metadata_outcome_' in str(status['issues'])
     assert main.api_storage_health()['state']=='READY'
-    assert seen==[] and pending(ws)
+    assert seen==[{'recover_domain':False}] and pending(ws)
+    assert status['workspace_writes_allowed']
+    from app.operation_health import require_write
+    with pytest.raises(ro.RootOperationError):
+        require_write(ws,candidate={'_resources':{'metadata'}})
 
 
 def test_missing_backup_after_swap_stays_blocked(fixture):

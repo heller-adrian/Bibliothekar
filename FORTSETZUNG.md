@@ -81,3 +81,24 @@ Nächste Pushes führen zunächst nur die kurzen Zieltests aus. Historische Stuf
 wird mit `[pre5-historical]` in der Commitnachricht aktiviert. Keine vollständige
 Container-/Browserabnahme und keine Veröffentlichung erfolgt. Budget zuletzt:
 fünf Stunden 34 %, Woche 5 %.
+
+## Breitere Abnahme / aktuelle Korrekturen
+
+`41073034252` (auf `ec4035c4`): Zieltests bestanden; historische Stufe
+**204 PASS / 33 FAIL**. 32 Fehler: bei unregistrierten Legacy-Servicefixtures
+persistierte der transiente Scanner keinen initialen technischen State, während
+`check_active()` dessen Vorhandensein korrekt verlangte. Korrektur: erstmalige
+technische Bindung persistieren, keine Operationsreservation. Verlorener State
+einer registrierten Installation bleibt ausdrücklich gesperrt (neuer Negativtest).
+Ein weiterer Fehler: alte globale Worker-Sperrerwartung, jetzt auf unabhängige
+Workerfreigabe mit weiter wirksamer Metadaten-Schreibsperre umgestellt.
+
+`41074557116` (`687fccf0`): vier Zielfehler aus Tests: falscher Modulimport
+`library_context` statt `library_runtime`; drei erwartete fachliche 409 für einen
+nicht erforderlichen Nachsortierplan wurden fälschlich als 200 erwartet. Korrigiert;
+die Prüfkette kontrolliert weiterhin unveränderte Kataloge/F14-Belege nach GETs.
+
+Noch nicht gepusht/getestet: neue reine GET-Beobachtungspfade, expliziter POST-
+Refresh, UI-Diagnose, korrigierte Altfixture-Kompatibilität. Nächster kurzer Lauf
+enthält neue Zieltests plus die zuvor fehlgeschlagenen Provenienz-/Beobachtungstests;
+erst danach wieder vollständige historische Stufe und echte Container-/Browser-QA.

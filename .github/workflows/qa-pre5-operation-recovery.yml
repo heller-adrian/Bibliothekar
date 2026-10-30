@@ -30,6 +30,16 @@ jobs:
           python3 -m venv "$QA_WORK/venv"
           "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
           PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" -m pytest -v tests/backend/test_pre5_operation_recovery.py --tb=long --junitxml="$QA_WORK/pre5.xml" 2>&1 | tee "$QA_WORK/pre5.log"
+      - name: Focused provenance and inventory failures
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" -m pytest -q --junitxml="$QA_WORK/focused.xml" \
+            tests/backend/test_rc13_provenance.py \
+            tests/backend/test_rc14_import.py::test_reconcile_hash_does_not_hold_catalogue_writer \
+            tests/backend/test_0411_physical_truth.py tests/backend/test_0412_consistency_semantics.py \
+            tests/backend/test_0501_external_event_deletion.py tests/backend/test_0440_trash.py \
+            tests/backend/test_pre2_metadata_abort.py::test_uncertain_startup_only_releases_scoped_workers \
+            2>&1 | tee "$QA_WORK/focused.log"
       - name: Structural, historical metadata and F14 regressions
         if: contains(github.event.head_commit.message, '[pre5-historical]')
         run: |
