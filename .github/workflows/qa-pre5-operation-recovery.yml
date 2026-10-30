@@ -1,0 +1,40 @@
+name: pre5 targeted operation recovery
+on:
+  push:
+    branches: [codex/pre5-operation-recovery]
+    paths-ignore: ['docs/**', 'FORTSETZUNG.md']
+permissions:
+  contents: read
+concurrency:
+  group: pre5-operation-recovery
+  cancel-in-progress: false
+jobs:
+  reproductions:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre5-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: pre5-${{ github.run_id }}
+      - name: Isolated Linux reproductions
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre5.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$QA_WORK/venv"
+          "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
+          PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" -m pytest -v tests/backend/test_pre5_operation_recovery.py --tb=long --junitxml="$QA_WORK/pre5.xml" 2>&1 | tee "$QA_WORK/pre5.log"
+      - name: Preserve evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre5-reproductions-${{ github.run_attempt }}
+          path: |
+            ${{ env.QA_WORK }}/*.xml
+            ${{ env.QA_WORK }}/*.log
+          retention-days: 30
