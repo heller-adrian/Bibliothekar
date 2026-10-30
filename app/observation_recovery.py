@@ -35,6 +35,8 @@ def recover(workspace):
              ro._lock(path.with_suffix('.lock'), exclusive=True), \
              ro._lock(parent/'state.lock', exclusive=True, wait=True):
             record = ro._read(path)
+            if set(record.get('effect_resources',[])) - {'library:'+item['library']}:
+                raise ro.RootOperationError('inventory_recovery_contains_extended_effects: '+str(path))
             if (hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest() != item['record_sha256']
                     or path.name != 'operation-'+key_for(record)+'.json'):
                 raise ro.RootOperationError('inventory_recovery_record_changed: '+str(path))

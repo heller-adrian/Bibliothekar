@@ -561,7 +561,8 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
         if kind != 'inventory' or (ids or {}).get('function') not in FUNCTIONS:
             raise RootOperationError('Only audited media observers may use a transient reservation.')
     from app.operation_health import require_write
-    require_write(workspace,candidate={'kind':kind,'library':str(library_id),'database':str(Path(database).absolute()) if database is not None else None,'ids':ids or {}})
+    candidate={'kind':kind,'library':str(library_id),'database':str(Path(database).absolute()) if database is not None else None,'ids':ids or {}}
+    require_write(workspace,candidate=candidate)
     from app.managed_storage_health import require_pinned_storage
     require_pinned_storage(workspace,initializing=(kind=='startup' and bool((ids or {}).get('initialize_storage'))))
     root, parent = _control(workspace)
@@ -592,6 +593,13 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
         # Reentrant calls must attest additional roots as durably as the caller.
         with _lock(parent/'state.lock', exclusive=True, wait=True):
             state = _state(parent, root)
+            from app.operation_scopes import resources
+            outer=resources(nested)
+            additional=resources(candidate)-outer
+            if additional:
+                # Nested work cannot disappear from the outer durable intent
+                # merely because its original function named fewer resources.
+                nested['effect_resources']=sorted(outer | additional)
             for path in (paths() if callable(paths) else paths):
                 if path is None: continue
                 path = os.path.abspath(path); identity = _identity(path)
@@ -656,6 +664,8 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             if _recovery_record is None and nonce and (parent/('finished-'+nonce+'.json')).exists() and _completed(old) and not (kind == 'startup' and (ids or {}).get('initialize_storage')):
                 nonce = None  # a repeated successful operation is a new execution
             record = {'format':1,'reservation_id':nonce or uuid.uuid4().hex,'shared':shared,'workspace':str(root),'library':library_id,'generation':list(current),'bindings':bindings,'database':str(Path(database).absolute()) if database else None,'kind':kind,'ids':ids or {}}
+            if old and 'effect_resources' in old:
+                record['effect_resources']=old['effect_resources']
             if kind == 'startup':
                 from app.storage_config import load_storage_settings
                 names=load_storage_settings(workspace_root=root)

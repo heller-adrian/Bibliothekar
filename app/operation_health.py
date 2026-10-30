@@ -85,6 +85,7 @@ def inspect(workspace):
                 or any(type(g) is not int or g<0 for g in r['generation'])
                 or path.name!='operation-'+key_for(r)+'.json'):raise ValueError('operation record/key invalid')
             item.update({k:r.get(k) for k in ('kind','library','database','ids','reservation_id','generation')})
+            if 'effect_resources' in r:item['effect_resources']=r['effect_resources']
             item['live']=active.get(str(path))==r or _live(path)
             if r.get('kind')=='metadata' and r.get('ids',{}).get('area')=='general':
                 item['affected']={'area':'metadata_general','relative_path':r['ids'].get('relative_path'),'library':r.get('library')}
@@ -321,7 +322,13 @@ def _guard_workspace_connection(connection, workspace, *, library=None, registry
                     extra.add('trash')
                 if candidate is not None and extra:
                     from app.operation_scopes import resources
-                    candidate={'_resources':resources(candidate)|extra}
+                    effects=resources(candidate)
+                    # Only an already admitted General file lease may update
+                    # its task rows without acquiring the entire metadata area.
+                    from app.root_operations import _ACTIVE
+                    if any(r.get('kind')=='metadata' for r in _ACTIVE.get()) and any(r.startswith('metadata/general/') for r in effects):
+                        extra.discard('metadata')
+                    candidate={'_resources':effects|extra}
                 if candidate is None and library:
                     candidate={'_resources':{'library:'+str(library), 'central_stock', *extra}}
                 # Registry writes coordinate all catalogues and stock. A domain

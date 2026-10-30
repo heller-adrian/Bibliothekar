@@ -16,6 +16,14 @@ def register(function, kind):
 
 
 def resources(record):
+    baseline=_resources(record)
+    extra=record.get('effect_resources',[])
+    if not isinstance(extra,list) or any(not isinstance(r,str) or not r for r in extra):
+        return frozenset({'workspace'})
+    return baseline | frozenset(extra)
+
+
+def _resources(record):
     explicit = record.get('_resources')
     if explicit is not None:
         return frozenset(explicit)
@@ -33,14 +41,38 @@ def resources(record):
         # General operations modify their own unindexed work copy and task.
         # Reintegration/library operations additionally affect owned stock.
         general = ids.get('area') == 'general'
+        relative = ids.get('relative_path')
         if function == 'app.metadata_correction.apply_metadata_correction':
             from app.metadata_abort_recovery import _task_rows
             try:
                 tasks = _task_rows(record['database'], 'id=?', (ids.get('correction_id'),))
                 general = len(tasks) == 1 and tasks[0]['area'] == 'general'
+                if general:relative=tasks[0]['source_relative_path']
             except Exception:
                 return frozenset({'workspace'})
-        return frozenset({'metadata'} if general else {'metadata', own, 'central_stock'})
+        if general:
+            from pathlib import PurePosixPath
+            raw=str(relative or '')
+            path=PurePosixPath(raw)
+            if (not raw or path.is_absolute() or '\\' in raw
+                    or any(part in {'', '.', '..'} for part in raw.split('/'))):
+                return frozenset({'metadata'})
+            # A physical swap journal may cover shared metadata state. Without
+            # one, this audited single-file function cannot affect other inputs.
+            from pathlib import Path
+            from app import root_operations as ro
+            from app.storage_config import storage_paths
+            try:
+                owner=ro._registered(Path(record['database']))
+                if owner is None:return frozenset({'workspace'})
+                metadata=storage_paths(Path(owner['workspace_root']))['metadata_root']
+                for journal in (metadata/'.swap-journals').glob('*.json'):
+                    if not _own_live_general_journal(journal,metadata):
+                        return frozenset({'metadata'})
+            except Exception:
+                return frozenset({'metadata'})
+            return frozenset({'metadata/general/'+path.as_posix()})
+        return frozenset({'metadata', own, 'central_stock'})
     if kind in {'import', 'import_cleanup'}:
         result = {own, 'central_stock'}
         from contextlib import closing
@@ -68,7 +100,37 @@ def resources(record):
 
 
 def conflicts(left, right):
-    return 'workspace' in left or 'workspace' in right or bool(set(left) & set(right))
+    if 'workspace' in left or 'workspace' in right or set(left) & set(right):return True
+    return any((a=='metadata' and b.startswith('metadata/')) or
+               (b=='metadata' and a.startswith('metadata/')) for a in left for b in right)
+
+
+def _own_live_general_journal(path, metadata):
+    """Only this executing, privately bound task may cross its own swap fence.
+
+    Other requests lack this ContextVar authority. An orphan/unknown journal
+    therefore still fences the whole metadata area before their F14 admission.
+    """
+    from app import root_operations as ro
+    from app.metadata_swap_recovery import _load
+    try:
+        journal=_load(path,metadata)
+        if journal['kind']!='general':return False
+        for record in ro._ACTIVE.get():
+            if record['kind']!='metadata' or record['database']!=journal['database']:
+                continue
+            plan=ro._read(record['_parent']/('metadata-intent-'+record['reservation_id']+'.json'),None)
+            plain={k:v for k,v in record.items() if not k.startswith('_')}
+            if (plan and plan.get('reservation')==plain
+                    and plan['task']['id']==journal['task_id']
+                    and plan['task']['source_path']==journal['files'][0]['source']
+                    and plan['task']['source_sha256']==journal['files'][0]['before_sha']):
+                return True
+    except FileNotFoundError:
+        return not path.exists() and not path.is_symlink()
+    except Exception:
+        return False
+    return False
 
 
 def job_resources(library, operation):

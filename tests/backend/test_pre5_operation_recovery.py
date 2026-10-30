@@ -158,7 +158,7 @@ def test_known_general_conflict_allows_real_independent_catalogue_writes(ready):
     records=general_orphan(ws, dbs[0]);before={p:p.read_bytes() for p in records}
     status=operations.inspect(ws)
     assert not status['writes_allowed'] and status['workspace_writes_allowed']
-    assert status['blocked_scopes']==['metadata']
+    assert status['blocked_scopes']==['metadata/general/conflicted.JPG']
     # Genuine queued jobs/claims in each database, including the affected main
     # library. No fake completion or fabricated transfer proof is inserted.
     from app.database import create_job, claim_next_job
@@ -181,6 +181,26 @@ def test_conflicted_job_is_not_claimed(ready):
         source_path='/synthetic/general',working_path=str(ws),operation='metadata_general_import')
     assert claim_next_job(dbs[0],operation='metadata_general_import') is None
     assert get_job(dbs[0],'CONFLICTED')['state']=='queued'
+
+
+def test_independent_general_correction_still_runs_but_conflicted_file_cannot(ready):
+    from PIL import Image
+    from app import metadata_correction as mc
+    _,ws,_,dbs,_=ready
+    records=general_orphan(ws,dbs[0]);before={p:p.read_bytes() for p in records}
+    root=mc.metadata_area_paths(area='general',workspace_root=ws,library_id='main')['root']
+    source=root/'independent.JPG';Image.new('RGB',(12,12),'blue').save(source)
+    with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
+        response=client.post('/api/metadata-correction/correct',json={'area':'general','relative_path':source.name,
+            'proposed_datetime':'2026-07-21T12:00:00+02:00'})
+        assert response.status_code==200,response.text
+        assert response.json()['task']['status']=='completed'
+        denied=client.post('/api/metadata-correction/correct',json={'area':'general','relative_path':'conflicted.JPG',
+            'proposed_datetime':'2026-07-21T12:00:00+02:00'})
+        assert denied.status_code==409,denied.text
+    mc.verify_metadata_datetime(source,'2026-07-21T12:00:00+02:00')
+    # An unrelated file may complete, retaining the exact unresolved original.
+    assert before=={p:p.read_bytes() for p in records}
 
 
 def test_scoped_startup_reports_connected_database_and_releases_only_admitted_workers(ready,monkeypatch):

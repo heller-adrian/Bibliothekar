@@ -489,6 +489,14 @@ def _root_request(fn):
                 if accepted:retry=operation_health.qualified_retry(context.workspace_root,accepted)
             from app.operation_scopes import admission as scoped_admission
             extra = ('metadata',) if 'metadata' in fn.__name__ else ()
+            if fn.__name__=='api_correct_metadata':
+                payload=kwargs.get('payload') or (args[0] if args else {})
+                if isinstance(payload,dict) and str(payload.get('area') or '').strip().lower()=='general':
+                    from app.operation_scopes import resources
+                    extra=resources({'kind':'metadata','library':context.library_id,
+                        'database':str(context.database_path),'ids':{
+                            'function':'app.metadata_correction.execute_metadata_correction',
+                            'area':'general','relative_path':str(payload.get('relative_path') or '')}})
             if 'trash' in fn.__name__:extra = (*extra, 'trash')
             with retry, scoped_admission(context.workspace_root, context.library_id, extra=extra), admission(context):
                 result=fn(*args,**kwargs)
@@ -630,6 +638,9 @@ def compatibility_workspace_root(context: LibraryContext) -> Path:
     with _COMPATIBILITY_VIEW_LOCK:
         from app.root_operations import _check, _registered, generation
         row = _registered(context.database_path)
+        if row:
+            from app.managed_storage_health import require_pinned_storage
+            require_pinned_storage(context.workspace_root)
         if row and any(Path(getattr(context, key)).absolute() != Path(row[key]).absolute()
                        for key in ('workspace_root', 'work_root', 'archive_root')):
             raise RootOperationError('Kompatibilitätsansicht verwendet veraltete Bibliothekspfade.')
@@ -3254,7 +3265,9 @@ def api_storage_health() -> dict[str, Any]:
 def api_recovery_diagnostics() -> dict[str, Any]:
     """Owner authentication still wraps this read-only recovery endpoint."""
     from app.metadata_recovery_status import inspect
+    from app.database_diagnostics import inspect as database_inspect
     return {**inspect(WORKSPACE_PATH, REGISTRY_DATABASE_FILE),
+            'database':database_inspect(DATABASE_FILE),'registry':database_inspect(REGISTRY_DATABASE_FILE),
             'startup_error': DATABASE_INITIALIZATION_ERROR, 'operation_health': __import__('app.operation_health',fromlist=['inspect']).inspect(WORKSPACE_PATH)}
 
 
