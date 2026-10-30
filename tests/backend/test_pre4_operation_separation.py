@@ -119,7 +119,7 @@ def test_unknown_recovery_keeps_normal_ui_and_read_apis(ready,monkeypatch):
     assert calls==[] and main.DATABASE_INITIALIZATION_ERROR is None
     from contextlib import closing
     with closing(TestClient(main.app)) as client:
-        for path in ('/','/trash','/api/jobs','/api/metadata-correction/areas','/api/metadata-correction/scan?area=general','/api/operations/status'):
+        for path in ('/','/trash','/api/trash','/api/jobs','/api/metadata-correction/areas','/api/metadata-correction/scan?area=general','/api/operations/status'):
             response=client.get(path)
             assert response.status_code==200,(path,response.status_code,response.text[:600])
             if path=='/':

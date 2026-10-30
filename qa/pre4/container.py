@@ -110,7 +110,7 @@ try:
     frozen=snapshot();docker('restart',NAME)
     health=api("print(json.dumps(api('/api/settings/storage-health')))")
     assert health['state']=='READY' and not health['operation_health']['writes_allowed'],health
-    for path in ('/','/trash','/api/libraries','/api/jobs','/api/metadata-correction/tasks','/api/metadata-correction/scan?area=general'):
+    for path in ('/','/trash','/api/trash','/api/libraries','/api/jobs','/api/metadata-correction/tasks','/api/metadata-correction/scan?area=general'):
         response=api("print(json.dumps(api("+repr(path)+")))")
         if path=='/':assert 'Storage unavailable' not in response and 'bibliothekar-operation-notice' in response
     api("print(json.dumps(api('/api/metadata-correction/correct',{'area':'general','relative_path':'unknown.JPG'},409)))")

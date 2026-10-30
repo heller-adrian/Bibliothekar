@@ -5381,6 +5381,10 @@ def trash_interface() -> HTMLResponse:
 
 @app.get("/api/trash", tags=["Papierkorb"])
 def api_trash_inventory() -> dict[str, Any]:
+    from app.operation_health import read_only
+    if read_only():
+        from app.operation_ui import trash_catalogue
+        return trash_catalogue(REGISTRY_DATABASE_FILE)
     from app.trash_selective import _operation_lock
     with _operation_lock(WORKSPACE_PATH):
         return _trash_inventory_locked()
