@@ -68,5 +68,42 @@
       "four_thousand_families",
       "fourteen_iPhone_JPEGs"
     ]
-  }
+  },
+  "latest_application_candidate": "83b11dad16626c01460562caec8dd530ad4bbd42",
+  "additional_target_acceptance": {
+    "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
+    "run": 41119010880,
+    "new_targets": 46,
+    "focused": 46,
+    "failed": 0,
+    "skipped": 0,
+    "artifact_id": 13006773940,
+    "sha256": "62ab9617a9f4b6eea2922751584e7b755ad0ff96a51badc9003e3f23590c7875",
+    "downloaded_archive_digest_verified": true
+  },
+  "frontend_acceptance": {
+    "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
+    "run": 41119010880,
+    "RC13_cases": 44,
+    "RC14_cases": 147,
+    "artifact_id": 13007956754,
+    "sha256": "3cfac03c18077c10cd73572eb17bc591fd7422de47a8517b3ad2a5b69391792e",
+    "downloaded_archive_digest_verified": true
+  },
+  "latest_failed_container": {
+    "run": 41119010880,
+    "artifact_id": 13009140051,
+    "sha256": "4909e16323920692b91984fdd7adb3ce496aff580795de3ac852aa6d56dea1bc",
+    "downloaded_archive_digest_verified": true,
+    "failure": "startup retries legacy migration on already-central job with missing moved media",
+    "ninety_file_pre4_baseline_GET_results": [
+      200,
+      200,
+      200
+    ],
+    "pre4_orphan_operations": 0,
+    "original_NAS_first_inventory_exception": "NOT_ESTABLISHED",
+    "four_thousand_and_iPhone": "NOT_RUN"
+  },
+  "pending_run": 41121252978
 }

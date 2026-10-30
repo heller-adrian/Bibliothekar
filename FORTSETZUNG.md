@@ -1,3 +1,74 @@
+# Aktueller Einstieg – pre.5, 30.10.2026, 20:13 UTC
+
+- Branch: `codex/pre5-operation-recovery`.
+- Neuer Anwendungscode: `83b11dad16626c01460562caec8dd530ad4bbd42` (remote gesichert).
+- Zuerst Lauf **41121252978** lesen. Er prüft 49 neue Zieltests, danach erweiterte
+  fokussierte Regressionen, Container und erst bei Container-SUCCESS den gesamten
+  Backend. Frontend läuft ebenfalls nach grünen Zieltests. Keine weitere CI blind
+  neu starten. Noch keine Veröffentlichung, kein Publisher vorbereitet/ausgeführt.
+- Fünf-Stunden-Fenster zuletzt 64 %, Woche 25 %; ab 70 % Übergabe sichern.
+  Keine Subagents. Lokale Prüfungen nur Syntax/Quellen; ausführende QA auf Linux.
+
+## Letzter nachgewiesener Produktfehler und Korrektur
+
+`41119010880` auf `64645b5f`: 46 neue + 46 fokussierte PASS (0 FAIL/SKIP), Frontend
+44 RC13 + 147 RC14 Fälle PASS. Reale pre5/pre4 APIs, General-Import, zwei Neustarts,
+Import+Eventsortierung trotz erhaltenem Einzelkonflikt, sechs historische Fälle
+PASS. Der 90-Dateien-/47-Familien-/8-Tage-Ablauf erreichte Import, Applied/Archive,
+drei manuelle Änderungen und Upgrade. Alle drei ursprünglichen pre.4 GETs 200,
+keine pre.4-Reservation – der erste NAS-Inventarabbruch bleibt damit unbewiesen.
+Nach Upgrade: Storage READY, aber writes_allowed=false, weil
+`migrate_main_free_stock_to_central` eine bereits zentral geroutete Datei erneut
+im alten Main-Bestand sucht. Datei war regulär nach General verschoben;
+Job.working_path war nachweislich `/workspace/SD Card Backups`, keine offene F14.
+Log: `Migration kann nicht fortgesetzt werden, weil Quelle und Ziel fehlen`.
+
+Korrektur in `83b11dad`: SQL liest jobs.working_path; freie Dateien bereits zentral
+geführter Aufträge werden nicht erneut physisch migriert. Keine neue Position
+raten, keine Hash-/Katalogänderung. Echte Altaufträge bleiben vollständig geprüft;
+fehlende Quelle oder fremde Zielbytes blockieren weiterhin ihre Migration. Drei
+neue Regressionen einschließlich tatsächlichem veröffentlichtem pre.4-Code.
+Noch NICHT Linux-abgenommen. Zusätzliche fokussierte Stock-/F16-/F20-Tests im Gate.
+
+Ebenso in 83b11dad: optisch abgeschnittene DB-Diagnose aus schmaler Statuskarte in
+eigenen aufklappbaren Bereich verschoben. Browser verlangt jetzt reales Öffnen,
+verbundene/schema_current DB, automatic_repair=false und ungeänderten Scoped-Schutz.
+
+## Vollständige Matrix – Infrastruktur und ehrliche Testgrenzen
+
+Erster breiter Versuch 41119010880: **0 Backendtests ausgeführt**, acht wiederholte
+Collectionfehler in test_f14_o2_policy. QA-Scratch unter Runner-_work mit Modus0775
+verletzt alte private-ACL-Tests. Jetzt eigene private mktemp-Umgebung unter sticky
+`/tmp`, keine Änderungen am Runner-Elternverzeichnis. `e5cabf49`/`c49a081f` korrigieren
+QA-Coverage: JUnit-Testzahl muss Auswahl entsprechen; Fehler/Skips/fehlendes XML
+führen zu FAIL; Collectionfehler wird nicht achtmal wiederholt. Breite Matrix erst
+nach Container-SUCCESS. 4.000 Familien/14 iPhones in beiden jüngsten Containerläufen
+wegen vorherigem Fehler **NOT_RUN**, nicht aus alten Erfolgen als bestanden zählen.
+
+Alle neuen Workflows nur `[self-hosted, Linux, X64, bibliothekar-safe]`. Keine
+NAS-Zugriffe, bestehenden Veröffentlichungen/Images/latest unverändert.
+`qa/rc14.zip` bleibt bewusst unversioniert.
+
+## Nächste Schritte
+
+1. 41121252978 abschließen/analysieren; bei Fehler zuerst dessen konkrete Stufe.
+2. Nur nach grünen kurzen Gates Container prüfen: 90er Ablauf nach Migrationfix,
+   beide Chromium-Sprachen/Größen, historische SIGKILLs, 4.000 Familien, 14 iPhones.
+3. Vollständigen Backend (2.416 erwartete Nodes; tatsächliche Collection gilt)
+   sorgfältig auswerten. Alte Erwartungen und echte Regressionen trennen; keine
+   Sicherheitsprüfung abschwächen, keine BLOCKED-Skips als Abnahme akzeptieren.
+4. Artefakt-ZIPs erneut laden/Hashes prüfen, docs/pre5/EVIDENCE.json aktualisieren.
+5. Erst vollständiger SUCCESS erlaubt vorautorisierten separaten pre.5-Publisher.
+   Bewährte Vorlage: origin/codex/publish-1.0.0-pre.4 mit docs/pre4/release/* und
+   .github/workflows/publish-pre4.yml; frisch gelesen, nicht unverändert ausführen.
+6. General-Variante A bleibt begründet DEFERRED: bekannte Aufnahme lokal abgelehnt,
+   keine künstlichen SHA-Werte oder Entfernung von Herkunftsguards. Native TrueNAS,
+   NFSv4, physische SD/USB, echtes DNG1.7-Schreiben NOT_RUN. Kein Verlustabschlussmodell.
+
+CLI-Anmeldung und genaue bisherigen Befunde folgen unten in der Chronologie.
+
+---
+
 # Bibliothekar pre.5 – Fortsetzung
 
 Stand: 2026-10-30. Branch `codex/pre5-operation-recovery`.
