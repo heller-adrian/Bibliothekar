@@ -84,7 +84,19 @@ try:
         if result['state'] in ('completed','failed','interrupted'):break
         time.sleep(.25)
     assert result['state']=='completed',result
-    imported=snapshot();assert len(imported['files'])==1 and not imported['operations']
+    # The worker commits the job before exiting its F14 write reservation.
+    # Do not mistake this short, legitimate commit-to-lease-release interval
+    # for a failed import. Require BOTH durable catalogue and no pending lease.
+    for _ in range(120):
+        imported=snapshot()
+        if len(imported['files'])==1 and not imported['operations']:
+            break
+        time.sleep(.1)
+    assert len(imported['files'])==1 and not imported['operations'], {
+        'files':[(f['id'],f['job_id'],f['current_relative_path'],f['actual_sha']) for f in imported['files']],
+        'operations':[(o.get('kind'),o.get('reservation_id'),o.get('ids')) for o in imported['operations']],
+        'jobs':[(j['id'],j['state']) for j in imported['jobs']]
+    }
     file=imported['files'][0];assert file['actual_sha']==task['output_sha256']==file['sha256_current']
     assert '2026-07-19' in file['current_relative_path'],file
     assert imported['origins']['source_families'] and imported['origins']['source_family_members']
