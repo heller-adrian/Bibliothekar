@@ -20,6 +20,7 @@ def refresh_live_event_inventories(
     event_id: str | None = None,
 ) -> dict[str, Any]:
     """Refresh observational IST snapshots for applied/archived parent events."""
+    from app.operation_health import read_only
     reconcile_trash_inventory(database_path, workspace_path)
     where = [
         "parent_event_id IS NULL",
@@ -115,7 +116,7 @@ def refresh_live_event_inventories(
                                     current_event_id,
                                 )
                             ]
-                            if event is not None and expected_ids:
+                            if event is not None and expected_ids and not read_only():
                                 reconcile_missing_files(
                                     connection,
                                     dict(event),

@@ -2864,7 +2864,16 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       if (!workspace?.statistics || physicalRefresh) setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
       statusElement.classList.add("bk-loading-status");
+      let refreshWarning = "";
       try {
+        if (physicalRefresh) {
+          // An explicit refresh is a command. The subsequent projection is a
+          // pure GET, including when the command is currently protected.
+          try {
+            const refreshed=await fetch('/api/workspace/refresh',{method:'POST',credentials:'same-origin'});
+            if (!refreshed.ok) refreshWarning=JSON.stringify((await refreshed.json()).detail || 'Refresh requires review');
+          } catch (error) { refreshWarning=String(error.message || error); }
+        }
         const fresh=await getJson(
           `/api/workspace/summary?jobs=${query}&physical_refresh=${physicalRefresh ? "true" : "false"}`
         );
@@ -2885,7 +2894,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       renderPlannedActions();
       renderSelection();
 
-      setStatus("");
+      setStatus(refreshWarning);
     }
 
     function renderEventSuggestions() {

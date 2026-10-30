@@ -60,3 +60,24 @@ Read-only-Datenbankdiagnose und begrenzter Workerstart nach fachlich
 unterbrochenem Startup integriert. Ungeprüfte Domain-Recovery wird dabei nicht
 fortgesetzt. Zieltests und anschließend historische Tests laufen erst nach
 dem nächsten Push. Letzter Budgetcheck: fünf Stunden 18 %, Woche 3 %.
+
+## Lesepfade und engere Metadatensperren
+
+`77b081b0` / Lauf `41071741377`: 22/23 Zieltests bestanden; fehlendes Release-
+Tag im flachen Actions-Checkout verhinderte ausschließlich den Originalcode-
+Subprozesstest. `fetch-depth: 0` ergänzt. Lauf `41073034252` auf `ec4035c4`:
+alle gezielten Tests bestanden; historische Tests bei letzter Abfrage laufend.
+
+Danach (noch nicht getestet) integriert: Normal-GETs verwenden `read_session`,
+beobachtende Scanner besitzen reine Snapshot-Pfade; expliziter POST
+`/api/workspace/refresh` für Reconciliation mit UI-Aufruf. Datenbankdiagnose im
+vorhandenen Dashboard eingebunden. Attestierte private Kompatibilitätsansicht
+statt Erkennung nach festem /tmp-Pfad, einschließlich echtem Trash-Ziel.
+Einzel-General-Konflikte können dateibezogen begrenzt werden; ein unqualifiziertes
+Swap-Journal schützt weiterhin den gemeinsamen Metadatenbereich. Eigene aktive
+Journale benötigen exakt passenden privaten Task-/Reservationsnachweis.
+
+Nächste Pushes führen zunächst nur die kurzen Zieltests aus. Historische Stufe
+wird mit `[pre5-historical]` in der Commitnachricht aktiviert. Keine vollständige
+Container-/Browserabnahme und keine Veröffentlichung erfolgt. Budget zuletzt:
+fünf Stunden 34 %, Woche 5 %.

@@ -1425,6 +1425,8 @@ def detect_event_structure_change(
 def detect_all_event_structure_changes(
     database_path: Path, workspace_path: Path | None = None,
 ) -> dict[str, Any]:
+    from app.operation_health import read_only
+    if read_only():return {'detected':[],'errors':[],'read_only':True}
     with database_connection(database_path) as connection:
         ids = [
             str(row["id"])

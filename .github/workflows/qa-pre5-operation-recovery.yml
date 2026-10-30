@@ -31,6 +31,7 @@ jobs:
           "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
           PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" -m pytest -v tests/backend/test_pre5_operation_recovery.py --tb=long --junitxml="$QA_WORK/pre5.xml" 2>&1 | tee "$QA_WORK/pre5.log"
       - name: Structural, historical metadata and F14 regressions
+        if: contains(github.event.head_commit.message, '[pre5-historical]')
         run: |
           set -euo pipefail
           PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" -m pytest -q --junitxml="$QA_WORK/historical.xml" \

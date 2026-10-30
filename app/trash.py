@@ -77,12 +77,8 @@ def trash_root(workspace_root: Path, *, create: bool = True) -> Path:
     # Request-scoped legacy compatibility roots contain symlinks and live
     # under /tmp. The trash always belongs to the original shared RW mount,
     # never to the temporary per-library compatibility directory.
-    context = get_current_library()
-    if (
-        context is not None
-        and workspace.parent == Path("/tmp/bibliothekar-library-workspaces").resolve(strict=False)
-    ):
-        workspace = context.workspace_root.expanduser().resolve(strict=False)
+    from app.root_operations import canonical_workspace
+    workspace = canonical_workspace(workspace)
     raw = workspace / load_storage_settings()["trash_directory_name"]
     # Check the unresolved entry: Path.resolve() would hide a malicious
     # Finder-created symlink to another dataset before this security check.

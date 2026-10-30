@@ -131,6 +131,8 @@ def reconcile_stale_event_reassignments(connection, job_id: str | None = None, e
     again (including back to the edited source event), the durable queue row is
     stale and must not create a task or block further editing.
     """
+    from app.operation_health import read_only
+    if read_only():return 0
     clauses=["r.target_event_id IS NULL"]
     params=[]
     if job_id is not None:

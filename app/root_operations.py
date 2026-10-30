@@ -83,8 +83,10 @@ def bind_compatibility_view(view, context, aliases):
     This process-local receipt is intentionally unavailable after restart. A
     registered library always takes precedence over this legacy compatibility.
     """
-    if _registered(context.database_path) is not None:
-        return
+    owner=_registered(context.database_path)
+    if owner is not None and any(os.path.abspath(getattr(context,key))!=os.path.abspath(owner[key])
+                                 for key in ('workspace_root','work_root','archive_root')):
+        raise RootOperationError('Kompatibilitätsansicht besitzt eine veraltete registrierte Erzeugerbindung.')
     view = Path(os.path.abspath(view))
     identities = dict(_plain_chain(view))
     entries = []
@@ -157,6 +159,18 @@ def _view_context(view, database):
     if binding is not None:
         _check_view(binding)
     return binding
+
+
+def canonical_workspace(view):
+    """Resolve only a process-attested view; never guess from a tmp pathname."""
+    path=os.path.abspath(view)
+    with _VIEW_LOCK:
+        matches=[binding for (root,_),binding in _VIEWS.items() if root==path]
+    if not matches:return Path(path)
+    if len({str(binding.workspace_root) for binding in matches})!=1:
+        raise RootOperationError('Kompatibilitätsansicht besitzt mehrdeutige Workspace-Bindungen.')
+    for binding in matches:_check_view(binding)
+    return matches[0].workspace_root
 
 
 def _identity(path):
@@ -805,6 +819,18 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
             expected=getattr(context,'root_generation',None) if context else None
             if expected is None:expected=generation(workspace,library)
             try:
+                from app.operation_health import read_only
+                if not durable and read_only():
+                    # Pure snapshots keep the same pinned-root authority but
+                    # never acquire/persist a write reservation during a GET.
+                    from app.managed_storage_health import require_pinned_storage
+                    require_pinned_storage(workspace)
+                    if kind!='inventory':raise RootOperationError('Unsupported read-only observer.')
+                    if row:_check({str(Path(row[k])):_identity(row[k]) for k in ('workspace_root','work_root','archive_root')})
+                    if fn.__module__== 'app.event_inventory':
+                        return fn(*args,**kwargs)
+                    from app.observation_recovery import read_snapshot
+                    return read_snapshot(fn.__module__+'.'+fn.__qualname__,database,workspace)
                 with reserve(workspace,library_id=library,paths=paths,database=database,kind=kind,ids=ids,expected_generation=expected,operation_wait=operation_wait, durable=durable, shared=True if global_import or kind in {'trash','backup','import_cleanup'} or (database_arg == 'None' and kind == 'recovery') else None) as reservation:
                     if view_context is not None: _check_view(view_context)
                     if context:reservation['_context_work_root']=str(context.work_root)

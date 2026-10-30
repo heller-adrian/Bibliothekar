@@ -661,11 +661,15 @@ def _prepare_compatibility_workspace_root(context: LibraryContext) -> Path:
     # Alle Bibliotheken – auch die primäre – erhalten für Altcode intern eine
     # kleine Kompatibilitätsansicht. Dadurch hängt kein Arbeitsablauf mehr von
     # /workspace/Arbeitsbereich oder /workspace/Arbeitsbereiche/main ab.
-    root = Path(_COMPATIBILITY_DIRECTORY.name) / re.sub(
+    namespace = hashlib.sha256(json.dumps([
+        str(context.database_path),str(context.workspace_root),str(context.work_root),
+        str(context.archive_root),context.root_generation,
+    ],sort_keys=True).encode()).hexdigest()[:16]
+    root = Path(_COMPATIBILITY_DIRECTORY.name) / (re.sub(
         r"[^A-Za-z0-9._-]+",
         "-",
         context.library_id,
-    )
+    )+'-'+namespace)
     root.mkdir(parents=True, exist_ok=True)
     _ensure_compatibility_link(
         root / WORK_DIRECTORY_NAME,
@@ -1160,7 +1164,7 @@ async def library_context_middleware(request: Request, call_next):
             )
 
     try:
-        if operational['writes_allowed']:
+        if operational['writes_allowed'] and request.method not in {'GET','HEAD'}:
             ensure_library_database_schema(context)
     except RootOperationError as error:
         return JSONResponse(status_code=409,content={'detail':str(error)})
@@ -1178,7 +1182,7 @@ async def library_context_middleware(request: Request, call_next):
 
     token = set_current_library(context)
     try:
-        if not operational['writes_allowed'] and request.method in {'GET','HEAD'}:
+        if request.method in {'GET','HEAD'}:
             with operation_health.read_session():
                 try:
                     response = await call_next(request)
@@ -9502,6 +9506,28 @@ def api_background_cancellation_status(operation_id: str) -> dict[str, Any]:
     return result
 
 
+@app.post('/api/workspace/refresh',tags=['Arbeitsbereich'])
+@_root_request
+def api_refresh_workspace_state() -> dict[str,Any]:
+    """Explicit observational reconciliation; GET projections never write."""
+    context=current_library_context()
+    phases={}
+    try:
+        phases['inventory']=refresh_live_event_inventories(context.database_path,
+            current_workspace_root(),context.archive_root)
+        phases['central_stock']=reconcile_global_central_stock_state(force=True)
+        phases['structure']=detect_all_event_structure_changes(context.database_path,current_workspace_root())
+        phases['claims']=backfill_library_claims(REGISTRY_DATABASE_FILE,
+            database_path=context.database_path,library_id=context.library_id)
+        view_cache.mark_physical_checked(context.database_path)
+        view_cache.invalidate(context.database_path)
+        return {'refreshed':True,'phases':phases}
+    except (OSError,ValueError,RuntimeError) as error:
+        # An observational failure cannot create a persistent mutation intent.
+        raise HTTPException(status_code=409,detail={'code':'inventory_refresh_failed',
+            'error':str(error),'completed_phases':list(phases)}) from error
+
+
 @app.get("/api/workspace/summary", tags=["Arbeitsbereich"])
 def api_global_workspace_summary(
     jobs: str = "",
@@ -11543,6 +11569,12 @@ def index() -> str:
           <div class="status-label">Datenbank</div>
           <div class="status-value" id="database-status">Wird geprüft …</div>
           <div class="status-detail" id="database-detail"></div>
+          <details id="database-diagnosis" style="font-size:.8rem;margin-top:6px">
+            <summary>Datenbankdiagnose und Wiederherstellung</summary>
+            <p>Die Diagnose verändert keine Daten. Fachliche Konflikte werden getrennt von Verbindungs- und Integritätsfehlern angezeigt.</p>
+            <p>Bei einem beschädigten Katalog die App stoppen und einen zusammengehörigen, konsistenten Sicherungsstand von Appdaten und Workspace wiederherstellen. Keine Datenbank neu initialisieren oder F14-Nachweise löschen.</p>
+            <pre id="database-diagnosis-result" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto"></pre>
+          </details>
         </div>
       </article>
 
@@ -12364,6 +12396,16 @@ def index() -> str:
           <div class="bk-history-actions" data-history-actions>${actionMarkup}</div>
         </article>`;
     }
+
+    document.getElementById('database-diagnosis')?.addEventListener('toggle',async event=>{
+      if (!event.currentTarget.open) return;
+      const output=document.getElementById('database-diagnosis-result');
+      try {
+        const response=await fetch('/api/settings/recovery-diagnostics',{credentials:'same-origin',cache:'no-store'});
+        const result=await response.json();
+        output.textContent=JSON.stringify(result,null,2);
+      } catch (error) { output.textContent=String(error.message || error); }
+    });
 
     async function loadHealth() {
       const response = await fetch(

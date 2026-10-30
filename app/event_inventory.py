@@ -463,6 +463,8 @@ def scan_event_inventory(
     every scan and therefore never turns a later manual archive deletion into
     an integrity error by itself.
     """
+    from app.operation_health import read_only
+    if read_only():persist=False
     if root_kind not in {"shared_workspace", "camera_archive"}:
         raise EventInventoryError("Ungültige Ereigniswurzel: " + root_kind)
 

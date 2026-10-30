@@ -237,6 +237,10 @@ def ensure_event_layout_snapshot(connection: Any, event_id: str, *, now: str) ->
     ).fetchone()
     if row is None:
         default = get_global_default(connection)
+        from app.operation_health import read_only
+        if read_only():
+            return {'event_id':str(event_id),'structure_enabled':bool(default['structure_enabled']),
+                    'input_path':str(default['input_path']),'layout':default['layout'],'revision':1}
         connection.execute(
             """INSERT INTO event_folder_layouts(
                    event_id,structure_enabled,input_path,layout_json,revision,created_at,updated_at)

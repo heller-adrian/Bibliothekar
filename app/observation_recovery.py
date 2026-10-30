@@ -17,6 +17,42 @@ FUNCTIONS = frozenset({
 })
 
 
+def read_snapshot(function,database,workspace):
+    """Physical display snapshots, without catalogue reconciliation or adoption."""
+    from app.database import database_connection
+    from app.storage_config import storage_paths
+    if function=='app.central_stock_reconcile.reconcile_central_free_stock':
+        from app.central_stock_reconcile import _actual_files,_free_rows
+        actual=_actual_files(storage_paths(workspace)['backup_root'])
+        with database_connection(database) as connection:
+            expected=len(_free_rows(connection,set()))
+        return {'ready':True,'read_only':True,'reconciled':False,'expected_file_count':expected,
+                'physical_file_count':len(actual),'deleted_file_count':0,'pending_missing_count':0,
+                'misplaced_file_count':0,'modified_file_count':0,'trash_file_count':0}
+    if function!='app.trash.reconcile_trash_inventory':
+        raise ValueError('Unknown read-only inventory: '+function)
+    from app.trash import _physical_entries
+    root,entries,directories=_physical_entries(workspace)
+    with database_connection(database) as connection:
+        known={r['current_relative_path']:dict(r) for r in connection.execute(
+            "SELECT id,family_id,current_relative_path,size_bytes FROM files WHERE current_root_kind='trash'")}
+    public=[]
+    for entry in entries:
+        item={k:v for k,v in entry.items() if not k.startswith('_')}
+        row=known.get(item.get('relative_path'))
+        item['tracked']=bool(row and row['size_bytes']==item.get('size_bytes'))
+        item['physical_state']='observed_not_hash_verified'
+        if item['tracked']:item.update(file_id=row['id'],family_id=row['family_id'])
+        public.append(item)
+    files=[item for item in public if item.get('entry_type')=='file']
+    tracked=sum(bool(item['tracked']) for item in files)
+    return {'root':str(root),'folder_name':root.name,'entries':public,'read_only':True,
+            'file_count':len(files),'entry_count':len(public),'directory_count':directories,
+            'total_size_bytes':sum(item['size_bytes'] for item in files),
+            'tracked_file_count':tracked,'untracked_file_count':len(files)-tracked,
+            'adopted_file_count':0,'exact_file_count':tracked,'ambiguous_file_count':0}
+
+
 def recover(workspace):
     from app import operation_health, root_operations as ro
     from app.storage_bootstrap import key_for

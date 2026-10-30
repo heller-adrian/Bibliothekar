@@ -210,15 +210,12 @@ def test_0440_root_symlink_is_rejected_before_deletion(tmp_path: Path, monkeypat
 
 
 def test_0440_compatibility_workspace_uses_physical_root(tmp_path: Path, monkeypatch):
-    from types import SimpleNamespace
-    from app import trash as trash_module
+    from app import main,trash as trash_module
+    from app.library_context import resolve_library_context
 
     _db, workspace, paths = _fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        trash_module, "get_current_library",
-        lambda: SimpleNamespace(workspace_root=workspace),
-    )
-    compat = Path("/tmp/bibliothekar-library-workspaces/qa-0440")
+    context=resolve_library_context(Path(os.environ['KAMERA_REGISTRY_DATABASE']),'main')
+    compat=main.compatibility_workspace_root(context)
     assert trash_module.trash_root(compat) == Path(paths["trash_root"])
     assert not (compat / "Papierkorb").exists()
 

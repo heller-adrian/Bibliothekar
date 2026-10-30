@@ -275,6 +275,24 @@ def test_transient_observer_cannot_nest_durable_media_writes(ready):
                 pytest.fail('unsafe media mutation')
 
 
+def test_private_view_resolves_trash_to_original_workspace_and_keeps_f14_read_only(ready):
+    from app.trash import trash_root
+    from app.library_context import set_current_library,reset_current_library
+    _,ws,reg,dbs,_=ready
+    context=resolve_library_context(reg,'main')
+    parent=ro._control_location(ws)
+    before={p:p.read_bytes() for p in parent.glob('*.json')}
+    token=set_current_library(context)
+    try:
+        with operations.read_session():
+            view=main.compatibility_workspace_root(context)
+            assert ro.canonical_workspace(view)==ws
+            assert trash_root(view)==storage_paths(ws)['trash_root']
+            assert not (view/storage_paths(ws)['trash_root'].name).exists()
+    finally:reset_current_library(token)
+    assert before=={p:p.read_bytes() for p in parent.glob('*.json')}
+
+
 def test_database_diagnosis_never_creates_or_repairs_database(tmp_path):
     from app.database_diagnostics import inspect
     missing=tmp_path/'missing.sqlite3'
@@ -283,3 +301,34 @@ def test_database_diagnosis_never_creates_or_repairs_database(tmp_path):
     broken=tmp_path/'broken.sqlite3';broken.write_bytes(b'foreign bytes')
     report=inspect(broken)
     assert not report['connected'] and broken.read_bytes()==b'foreign bytes'
+
+
+@pytest.mark.parametrize('conflict',['none','general','unknown'])
+def test_real_read_endpoints_never_mutate_catalogues_or_f14(ready,conflict):
+    from tests.backend.test_pre4_operation_separation import orphan
+    _,ws,reg,dbs,_=ready
+    db=dbs[0];context=resolve_library_context(reg,'main')
+    create_job(db,job_id='J',kind='sd_import',trigger_type='approved_sd',
+        source_path='/synthetic/card',working_path=str(ws),operation='folder_import')
+    event,_,_=_event(db,context.work_root,name='read-event',day='2026-07-19',
+        items=[('read.JPG',b'synthetic media','Alle')],status='applied')
+    if conflict=='general':general_orphan(ws,db)
+    elif conflict=='unknown':orphan(ws,db)
+    def dump(path):
+        with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as c:
+            return '\n'.join(c.iterdump())
+    before={p:dump(p) for p in (*dbs,reg)}
+    control=ro._control_location(ws)
+    evidence={p:p.read_bytes() for p in control.glob('*.json')}
+    routes=['/api/workspace/summary?jobs=J&physical_refresh=true','/api/jobs/J/workspace-summary',
+        '/api/jobs','/api/jobs/J/events','/api/events/search?physical_refresh=true','/api/trash',
+        '/api/metadata-correction/areas','/api/metadata-correction/scan?area=general',
+        '/api/settings/event-folder-layout','/api/settings/recovery-diagnostics',
+        f'/api/events/{event}/folder-layout',f'/api/jobs/J/events/{event}/structure',
+        f'/api/jobs/J/events/{event}/edit',f'/api/jobs/J/events/{event}/reconcile-plan']
+    with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
+        for route in routes:
+            response=client.get(route)
+            assert response.status_code==200,(route,response.status_code,response.text[:1000])
+    assert before=={p:dump(p) for p in before}
+    assert evidence=={p:p.read_bytes() for p in control.glob('*.json')}

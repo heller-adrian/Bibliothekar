@@ -2293,7 +2293,14 @@ EVENTS_HTML = r"""<!doctype html>
       if (!currentEvents.length || physicalRefresh) setStatus("Ereignisse werden geladen …");
       statusElement.classList.add("bk-loading-status");
       let data;
+      let refreshWarning = "";
       try {
+        if (physicalRefresh) {
+          try {
+            const refreshed=await fetch('/api/workspace/refresh',{method:'POST',credentials:'same-origin'});
+            if (!refreshed.ok) refreshWarning=JSON.stringify((await refreshed.json()).detail || 'Refresh requires review');
+          } catch (error) { refreshWarning=String(error.message || error); }
+        }
         data = await requestJson(`/api/events/search?q=${encodeURIComponent(q)}&limit=${eventLimit}&offset=${eventOffset}&physical_refresh=${physicalRefresh ? "true" : "false"}`);
       } finally {
         statusElement.classList.remove("bk-loading-status");
@@ -2311,7 +2318,7 @@ EVENTS_HTML = r"""<!doctype html>
       eventResultInfo.textContent = q
         ? `${shown} von ${Number(data.matching_count||0)} Treffern · insgesamt ${Number(data.total_count||0)} Ereignisse`
         : `${shown} von ${Number(data.total_count||0)} Ereignissen · zuletzt geändert`;
-      setStatus("");
+      setStatus(refreshWarning);
       if (reset) {
         try {
           const packed = JSON.stringify({...data,resultInfo:eventResultInfo.textContent});
