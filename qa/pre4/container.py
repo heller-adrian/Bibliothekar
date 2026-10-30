@@ -67,10 +67,12 @@ def snapshot():return json.loads(script(SNAP))
 try:
     docker('start',NAME)
     assert api("print(json.dumps(api('/api/settings/storage-health')))")['state']=='READY'
+    assert api("print(json.dumps(api('/healthz')))")['status']=='ok'
     onboarding=api("print(json.dumps(api('/')))");assert 'id="create"' in onboarding
     api("print(json.dumps(api('/api/libraries',{'display_name':'Main','work_root':'','archive_root':'/main-library'},201)))")
     api("print(json.dumps(api('/api/libraries',{'display_name':'Second','work_root':'','archive_root':'/second-library'},201)))")
     script("from pathlib import Path;import json;p=Path('/appdata/config/settings.json');d=json.loads(p.read_text());d.setdefault('storage',{}).update(safety_reserve_gib=0,processing_buffer_percent=0);p.write_text(json.dumps(d))")
+    assert api("print(json.dumps(api('/healthz')))")['status']=='ok'
     before=snapshot()
     script("from pathlib import Path;from PIL import Image;from app.metadata_correction import metadata_area_paths;p=metadata_area_paths(area='general',workspace_root=Path('/workspace'),library_id='main')['root']/'20260719_175150_Fuji-X-E5.JPG';Image.new('RGB',(32,32),'blue').save(p)")
     # Real ExifTool and real HTTP API, no injected jobs/manifests/origin rows.
@@ -93,13 +95,16 @@ try:
     # Supervisor returns the web child's status; Unix SIGTERM can surface as
     # -15 translated to 241 by Python, or as conventional shell status 143.
     assert web_exit in (0,143,241),web_exit
-    shutdown=docker('logs',NAME)
+    shutdown_result=docker('logs',NAME,check=False)
+    assert shutdown_result.returncode==0,shutdown_result.stderr
+    shutdown=shutdown_result.stdout+shutdown_result.stderr
     assert 'Application shutdown complete' in shutdown and 'Traceback (most recent call last)' not in shutdown,shutdown[-5000:]
     REPORT['web_sigterm_exit_status']=web_exit
     docker('start',NAME)
     assert api("print(json.dumps(api('/api/settings/storage-health')))")['state']=='READY'
     docker('restart',NAME)
     assert api("print(json.dumps(api('/api/settings/storage-health')))")['state']=='READY'
+    assert api("print(json.dumps(api('/healthz')))")['status']=='ok'
     after=snapshot();assert after['origins']==imported['origins'] and after['files']==imported['files']
     REPORT['checks']['real_general_api_and_two_restarts']='PASS'
     # A missing media member alone remains a domain issue; no fabricated new location.
@@ -110,6 +115,7 @@ try:
     frozen=snapshot();docker('restart',NAME)
     health=api("print(json.dumps(api('/api/settings/storage-health')))")
     assert health['state']=='READY' and not health['operation_health']['writes_allowed'],health
+    assert api("print(json.dumps(api('/healthz')))")['status']=='ok'
     for path in ('/','/trash','/api/trash','/api/libraries','/api/jobs','/api/metadata-correction/tasks','/api/metadata-correction/scan?area=general'):
         response=api("print(json.dumps(api("+repr(path)+")))")
         if path=='/':assert 'Storage unavailable' not in response and 'bibliothekar-operation-notice' in response

@@ -76,3 +76,19 @@ bevor diese gezielten Prüfungen bestanden sind.
   Receipts sind absichtlich flüchtig). Additiven dauerhaften technischen
   Abschlussbeleg ergänzt. Historische Auswahl und Container wurden korrekt
   noch nicht gestartet. Verifikation des neuen Belegs folgt.
+
+## Gezielte Nachprüfung von f88db90b (zusätzlich freigegeben bis 92 %)
+
+Lauf 40984782546: 36 Vertragsfälle und 148 historische Regressionen bestanden;
+Containerstufe scheiterte an der Shutdown-Logprüfung. Artefakt 12946942630
+(b54d1adf65c8832934b92e7bcab2ddf60b4012b79f760e4adb05b37c16b7b755)
+enthält tatsächlich „Application shutdown complete“ und „Finished server process“.
+Die Testhilfe hatte bei docker logs nur stdout ausgewertet; Uvicorn schreibt stderr.
+Beide Streams werden nun geprüft, einschließlich Traceback-Ausschluss und Exitstatus.
+
+/healthz rief ohne Bibliothekskontext get_health auf. Nach Onboarding prüfte es
+somit den nicht angelegten Bootstrap-Arbeitsplatz statt der registrierten Struktur.
+Die öffentliche Probe nutzt jetzt die vollständige strukturelle Storage-Prüfung
+und technische Startup-Fehler. Fachliche Schreibsperren bleiben separat aktiv.
+Neue Regression: gesund und fachlich gesperrt → 200; technischer Fehler/fehlender
+Trash → 503. Reale Probeprüfungen in der Containerabnahme ergänzt.

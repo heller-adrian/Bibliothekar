@@ -13326,20 +13326,17 @@ def index() -> str:
     include_in_schema=False,
 )
 def healthz() -> JSONResponse:
-    health = get_health()
+    """Public structural readiness, independent of request library selection.
 
-    status_code = (
-        200
-        if health["status"] == "ok"
-        else 503
-    )
+    A domain write fence keeps safe views available; technical storage failures
+    remain unhealthy. Detailed tool/library diagnostics stay authenticated.
+    """
+    from app.managed_storage_health import inspect_storage
+    storage=inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
+    ready=storage['ready'] and not DATABASE_INITIALIZATION_ERROR
+    return JSONResponse(status_code=200 if ready else 503,
+                        content={'status':'ok' if ready else 'unavailable'})
 
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "status": health["status"],
-        },
-    )
 
 # ─────────────────────────────────────────────────────────────────
 # Neu-Zuordnung herausfallender Familien (0.16.3)

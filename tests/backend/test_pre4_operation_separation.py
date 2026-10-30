@@ -318,3 +318,18 @@ def test_required_subanchor_is_checked_during_active_operation(ready):
             ro.validate_active_roots()
     assert inspect_storage(ws,database=dbs[0])['state']=='UNAVAILABLE'
     assert list(ro._control_location(ws).glob('operation-*.json'))
+
+
+def test_probe_uses_real_roots_without_bootstrap_library_or_tools(ready,monkeypatch):
+    from app import main
+    _,ws,_,dbs,_=ready
+    monkeypatch.setattr(main,'current_library_context',lambda:pytest.fail('probe consulted bootstrap context'))
+    monkeypatch.setattr(main,'get_health',lambda:pytest.fail('probe ran optional capability diagnostics'))
+    assert main.healthz().status_code==200
+    orphan(ws,dbs[0])
+    assert main.healthz().status_code==200
+    monkeypatch.setattr(main,'DATABASE_INITIALIZATION_ERROR','synthetic structural failure')
+    assert main.healthz().status_code==503
+    monkeypatch.setattr(main,'DATABASE_INITIALIZATION_ERROR',None)
+    target=storage_paths(ws)['trash_root'];target.rename(target.with_name('lost-trash'))
+    assert main.healthz().status_code==503
