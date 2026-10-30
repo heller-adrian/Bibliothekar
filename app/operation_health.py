@@ -112,6 +112,16 @@ def require_write(workspace,*,candidate=None):
     # In RC14, multiple families share one historical F14 key. The first
     # successful family releases the key. Continue only THIS previously
     # qualified request after reserve() attests that exact F14 release.
+    if retry and not dead and status['reservations'] and _retry_issues_match(status):
+        # validate_active_roots() runs INSIDE the resumed F14 lease, before
+        # it has returned successfully. Its own live lease must pass, but no
+        # unrelated lease may gain this exception.
+        from app.root_operations import _ACTIVE
+        live={str(r['_path']):r for r in _ACTIVE.get() if r.get('_resumed')}
+        if all(r['live'] and retry.get(r['path'])==(r.get('reservation_id'),r.get('record_sha256'))
+               and r['path'] in live and live[r['path']]['reservation_id']==r['reservation_id']
+               for r in status['reservations']):
+            return
     if retry and not dead and _RETRY_COMPLETED.get()==frozenset(retry) and _retry_issues_match(status):
         return
     # Exact original retries still run their original domain qualification.
