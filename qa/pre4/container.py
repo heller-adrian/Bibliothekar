@@ -89,7 +89,13 @@ try:
     assert result['result']['organization']['imported_source_files'][0]['sha256']==task['output_sha256']
     # Native supervisor exits when web exits. Restart that same retained container.
     script("import os,signal;from pathlib import Path;found=[]\nfor p in Path('/proc').iterdir():\n if p.name.isdigit():\n  try:\n   cmd=(p/'cmdline').read_bytes().split(b'\\0')\n   if b'uvicorn' in cmd and b'app.main:app' in cmd and p.stat().st_uid==568:found.append(int(p.name))\n  except OSError:pass\nassert len(found)==1,found\nos.kill(found[0],signal.SIGTERM)")
-    assert docker('wait',NAME).strip()=='0'
+    web_exit=int(docker('wait',NAME).strip())
+    # Supervisor returns the web child's status; Unix SIGTERM can surface as
+    # -15 translated to 241 by Python, or as conventional shell status 143.
+    assert web_exit in (0,143,241),web_exit
+    shutdown=docker('logs',NAME)
+    assert 'Application shutdown complete' in shutdown and 'Traceback (most recent call last)' not in shutdown,shutdown[-5000:]
+    REPORT['web_sigterm_exit_status']=web_exit
     docker('start',NAME)
     assert api("print(json.dumps(api('/api/settings/storage-health')))")['state']=='READY'
     docker('restart',NAME)

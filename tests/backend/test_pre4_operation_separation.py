@@ -293,13 +293,18 @@ def test_trash_inventory_restore_and_confirmed_delete_preserve_global_ready(read
     assert inspect_storage(ws,database=dbs[0])['state']=='READY'
 
 
-def test_real_sd_recheck_keeps_global_ready_and_original_source(ready,monkeypatch):
+def test_sd_write_mount_refusal_keeps_global_ready_and_original_source(ready,monkeypatch):
+    from app import main
     from tests.backend.test_rc1_sd_reimport import setup_live_import,queue_and_run
-    from tests.backend.test_rc4_sd_recheck import test_complete_no_empty_import_history_and_idempotent_post
     data=setup_live_import(ready,monkeypatch)
     case,ws,reg,dbs,source,context=data
+    before=source.read_bytes()
     queue_and_run(dbs[0],context)
-    test_complete_no_empty_import_history_and_idempotent_post(data)
+    # This pytest source really is RW. Do not manufacture a RO success.
+    with pytest.raises(main.HTTPException) as error:
+        main.api_run_folder_import({'source_root_key':'removable','source_relative_path':'CARD','source_mode':'sd_card','confirm_reimport':True,'request_id':'isolated-read-write-card'})
+    assert error.value.status_code==409 and 'lesend' in str(error.value.detail)
+    assert source.read_bytes()==before
     assert inspect_storage(ws,database=dbs[0])['state']=='READY'
     assert operations.inspect(ws)['writes_allowed']
 
