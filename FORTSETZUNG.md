@@ -140,3 +140,104 @@ Anwendungsablauf, weitergehende Fehlerszenarien und Releaseunterlagen. Variante 
 ist noch nicht umgesetzt: unveränderte Herkunfts-/Zielkollisionsnachweise benötigen
 ein ausdrücklich getrenntes Kopien-/Reimportmodell; Schutz nicht einfach entfernen.
 Keine Veröffentlichung erfolgt. Nächster Budgetcheck vor dem Containerjob.
+
+## VERBINDLICHER FORTSETZUNGSPUNKT – Ende dieses Kontingentfensters
+
+Branch: `codex/pre5-operation-recovery`.
+Letzter Anwendungscode: **`969bc49f6138a0badf0dfa0361e2a4862a08e1ef`**.
+Nachfolgender Commit aktualisiert ausschließlich diese Übergabe und Nachweise.
+
+Aktueller Nachlauf: **41080385540**, bei letzter Abfrage `in_progress`.
+Er führt 34 neue Zieltests und die fokussierte historische Auswahl aus.
+Nur bei deren Erfolg startet die neue Container-/Browserstufe. Der Publisher
+existiert für pre.5 noch nicht; dieser Workflow kann nichts veröffentlichen.
+
+### Letzte Ergebnisse und Korrektur
+
+- `41078906708` / `5c6f868b`: **32 PASS / 1 FAIL**. Tatsächlicher Fehler:
+  SQLite-Authorizer klassifizierte `metadata_candidates` wie offene General-
+  Korrekturaufträge und blockierte dessen FK-Cascade beim bestätigten Löschen
+  einer unabhängigen Papierkorbdatei. EXIF-Kandidaten sind Dateikatalogdaten;
+  echte Korrektur-/Kontrolltabellen behalten ihre Metadatensperre.
+- `41079916862` / `668ba136`: **33 PASS / 1 FAIL**. Der Papierkorbfall besteht.
+  Neu verschärfte APPLY-Qualifikation benötigt den privaten Tasknachweis schon
+  vor Eintritt in APPLY. Bisher erzeugte APPLY ihn erst nach seiner Zulassung.
+  Korrigiert in `969bc49f`: EXECUTE bindet seinen gespeicherten General-Task
+  unmittelbar nach dessen Anlage, vor dem verschachtelten APPLY. Dessen
+  vorhandenes idempotentes `bind_task()` bleibt erhalten. Ergebnis ausstehend.
+- Syntaxprüfung und `git diff --check` erfolgreich. Bestehende SyntaxWarning
+  zu JS-Escape `\.` in main.py nicht als Laufzeitfehler umgedeutet.
+- Letzter Budgetcheck: Fünf-Stunden-Fenster **78 %**, Woche **12 %**. Geordneter
+  Stopp vor Erschöpfung gemäß Nutzerauftrag; keine weitere Freigabe erforderlich.
+
+### Nachweise
+
+`41076413534` / `937299bd` wurde kryptografisch nachgeprüft:
+Artefakt **12988280542**, ZIP-SHA-256
+`3d832596b79594a232cc17fe37269a8107aede9666b98f6c1f0e462033cfc01d`.
+JUnit: **32 neue PASS / 0 FAIL / 0 SKIP**; fokussierte Auswahl 45 PASS / 1 FAIL
+(fehlende settings.json der Testfixture, inzwischen ergänzt). Diese früheren
+Ergebnisse sind ausdrücklich keine Abnahme des später geänderten Anwendungscodes.
+Lokale heruntergeladene Logs/Artefakte: `/private/tmp/bibliothekar-pre5-evidence/`.
+
+### Exakte nächsten Schritte
+
+1. Aktuelle Limits lesen; beide Originalaufträge vollständig verfügbar unter
+   `/Users/adi/Downloads/Codex_Auftrag_Bibliothekar_v1.0.0-pre.5.md` und
+   `/Users/adi/Downloads/Bibliothekar_pre5_TrueNAS_Befunde_2026-10-30.md`.
+2. Zuerst **41080385540** lesen, keine neue CI blind starten. Bei FAIL ausschließlich
+   fehlgeschlagene Stufe diagnostizieren. Bei SUCCESS Artefakt-Digests prüfen.
+3. Falls der Containerjob gestartet ist, besonders prüfen:
+   - `qa/pre5/container.py`: tatsächlicher pre.4-Inventarabbruch und identische
+     Reservation nach Upgrade; abgeschlossener General-Task mit unterbrochenem
+     F14-Ack und extern entfernter synthetischer Kopie; danach tatsächlicher
+     HTTP-Import, Ereignisanlage/-sortierung und zwei Neustarts trotz Konflikt.
+   - Snapshot qualifiziert Dateiorte aus Katalog-/Ereigniszuordnung. Keine
+     Dateinamenssuche als Recovery-Autorität.
+   - `qa/pre4/container.py` / `historical_container.py`, 4.000 Familien und 14
+     iPhone-JPEGs bleiben zusätzliche Gates. Browser jeweils DE/EN, 390/1440 px.
+4. Vollständige historische Python-Stufe mit Commitmarker `[pre5-historical]`
+   nach grünen kurzen Gates neu abnehmen. Die frühere breite Stufe war
+   204 PASS / 33 FAIL und ist nicht abschließend nachgeprüft.
+5. Tatsächlichen 90-Dateien-/47-Familien-/8-Tage-Anwendungsablauf mit Applied-
+   Verschiebung, Archivkopie und Tagesbestandsverschiebung vollständig ergänzen.
+   Bisher sieben kleinere Kombinationen über reale Fachmodule bestanden;
+   ursprünglicher NAS-Auslöser bleibt ohne Erstexception nicht bewiesen.
+6. Weiterer Sicherheits-Audit: negative Mount-/Anker-/DB-Fälle, mehrere offene
+   Operationsarten, SIGKILL, parallele Requests; Vollständigkeit der Schema-
+   Diagnose prüfen (Verbindung/Integrität/Fremdschlüssel/Version/benötigte Tabellen).
+   Reale unbekannte Wirkungen dürfen weiter nicht freigegeben werden.
+7. Vollständige Backend-/Frontend-/Sicherheitsmatrix erst nach Stabilisierung
+   der gezielten Gates. Vorbild `qa/rc13/regression.py`; alle neuen Jobs ausschließlich
+   `[self-hosted, Linux, X64, bibliothekar-safe]`, keine Hostpakete/-rechte ändern.
+8. Gewünschte Metadaten-Variante A ist noch OFFEN. Bekannte Aufnahme wird beim
+   General-Reimport weiterhin bewusst abgelehnt. Kein Entfernen des SHA-Guards
+   ohne saubere Kopienidentität, Herkunft und Kollisionsprüfung; ggf. begründet
+   deferieren, wie der Auftrag ausdrücklich zulässt.
+9. Erst nach vollständig erfolgreicher Abnahme Version, Dokumentation und
+   eigenständigen abgesicherten Publisher vorbereiten; Quelle/Image byteweise,
+   OCI-Index/Manifest/Konfiguration, tatsächlicher Digest-Pull, Release-Anlagen
+   und SHA-256 prüfen. Keine bestehenden Releases/Images/latest überschreiben.
+
+CLI (authentifiziert, keine Tokens ausgeben):
+
+```sh
+export GH_CONFIG_DIR=/private/tmp/bibliothekar-gh-device
+export GH_BROWSER=true
+export GH_DEBUG=
+export GODEBUG=http2client=0
+/private/tmp/bibliothekar-gh-cli/gh run view 41080385540 -R heller-adrian/Bibliothekar --json status,conclusion,jobs
+/private/tmp/bibliothekar-gh-cli/gh run view 41080385540 -R heller-adrian/Bibliothekar --log-failed
+```
+
+`GODEBUG=http2client=0` vermeidet beobachtete HTTP/2-Abbrüche beim Log-/ZIP-Download.
+Git-Netzwerkzugriff mit bestehendem gh-Credentialhelper wie in dieser Session;
+keine neuen Zugangsdaten anfordern, sofern die bestehende Anmeldung funktioniert.
+Actionlint: `/private/tmp/pre-actionlint/actionlint -config-file docs/pre/release/actionlint.yaml .github/workflows/qa-pre5-operation-recovery.yml`.
+Lokale Pythonaufrufe nur Syntaxprüfung, keine Mac-Abnahme; ausführende Tests laufen
+isoliert auf Linux. Keine Subagents einsetzen. `qa/rc14.zip` war vorher unversioniert
+vorhanden und bleibt außerhalb sämtlicher Commits.
+
+**Freigabestatus: NICHT ERTEILT DURCH TESTERGEBNISSE / NICHT VERÖFFENTLICHT.**
+Native TrueNAS-/NFSv4-, physische SD-/USB- und echte DNG-1.7-Schreibtests: NOT_RUN.
+Kein Zugriff auf NAS, keine Datenbereinigung, keine Änderung früherer Releases.
