@@ -162,7 +162,10 @@ jobs:
       - name: Isolated runtime and all disjoint backend partitions
         run: |
           set -euo pipefail
-          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre5-full.XXXXXXXX")"
+          # Legacy private-authority tests deliberately audit every ancestor.
+          # The shared runner checkout parent is group-writable. Use an owned
+          # disposable subtree under sticky /tmp; never chmod runner parents.
+          QA_WORK="$(mktemp -d /tmp/bibliothekar-pre5-full.XXXXXXXX)"
           printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
           python3 -m venv "$QA_WORK/venv"
           "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0

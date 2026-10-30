@@ -59,6 +59,10 @@ for index in range(8):
         'status': 'FAIL' if failed else 'IN_PROGRESS',
     }, indent=2))
     print(json.dumps(part), flush=True)
+    if result.returncode not in (0, 1):
+        # A collection/infrastructure failure invalidates this attempt. Do
+        # not repeat the same failed collection for seven more partitions.
+        raise SystemExit(result.returncode)
 assert all_nodes and seen == set(all_nodes), 'Incomplete backend coverage'
 summary = json.loads((root / 'summary.json').read_text())
 summary['status'] = 'FAIL' if failed else 'PASS'

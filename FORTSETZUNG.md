@@ -336,3 +336,23 @@ Breite Backend-/Frontend-Jobs sind jetzt im selben Zielworkflow mit
 Marker `[pre5-full]` startet sie erst nach grünen kurzen Gates; Container
 zusätzlich `[pre5-container]`. Version auf pre.5 vor der finalen Abnahme gesetzt.
 Fünf-Stunden-Verbrauch zuletzt 43 %, Woche 22 %; bei 70 % mit Handoff beginnen.
+
+Finaler Anwendungskandidat `64645b5f60a8756f15eb172a4dc10bb19f0739a8`, Version
+pre.5. Lauf `41119010880`: **46 neue + 46 fokussierte PASS**, einschließlich
+tatsächlicher alter Sortierbestätigungs-Ablehnung und exaktem Reservationsbeleg.
+Frontend PASS: RC13 44 Fälle, RC14 147 Fälle. Backend wurde durch Collectionfehler
+in `test_f14_o2_policy.py` angehalten; **keine 2.413 Tests ausgeführt**. Ursache:
+vollständiger QA-Scratch lag unter gruppenbeschreibbarem Runner-Elternpfad
+`/home/github-runner/actions-runner/_work` (0775). Lokaler Workflowfix nutzt eigene
+private mktemp-Umgebung unter sticky `/tmp`, keine chmod-/ACL-/Hostrechteänderung.
+Alle acht Partitionsversuche scheiterten an derselben Collection; nicht als acht
+Produktregressionen werten. QA-Summary `complete=true` bezeichnete nur Auswahl,
+nicht Ausführung; in `e5cabf49` behoben: JUnit-Zahl muss zur Auswahl passen,
+fehlende Ergebnisse/Fehler/Skips führen zu FAIL. Breite Neuläufe benötigen zunächst
+SUCCESS des Containerjobs. `41119010880` Containerjob läuft noch.
+
+Bewährter pre.4-Publisher liegt auf frisch gelesener Remote-Referenz
+`origin/codex/publish-1.0.0-pre.4`: `.github/workflows/publish-pre4.yml` und
+`docs/pre4/release/{publish,core,oci,graph_fixture,test_publish}.py`.
+Erst nach gesamter Abnahme für pre.5 versiongebunden adaptieren; kein Push/Image
+oder Tag. Frühere Pipeline nicht unverändert wiederverwenden.
