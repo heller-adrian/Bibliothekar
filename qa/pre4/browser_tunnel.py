@@ -7,6 +7,7 @@ product code or application authentication is changed.
 """
 from contextlib import contextmanager
 from pathlib import Path
+import os
 import select
 import socket
 import socketserver
@@ -85,31 +86,42 @@ class _LoopbackServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 @contextmanager
 def chromium_loopback_tunnel(docker, container, fixture_workspace):
-    """Return a host loopback port for the Chromium check, never a Docker -p."""
-    socket_path = Path(fixture_workspace) / _SOCKET_NAME
+    """Loopback-only browser bridge. Linux AF_UNIX names max out near 108 bytes.
+
+    GitHub Runner temp paths are longer; the open directory descriptor gives
+    us a short, same-inode /proc/self/fd path without modifying global cwd.
+    """
+    workspace = Path(fixture_workspace)
+    socket_path = workspace / _SOCKET_NAME
     assert not socket_path.exists(), "Unexpected pre-existing QA bridge socket"
-    docker("exec", "-d", "--user", "568:568", container,
-           "python", "-c", _CONTAINER_SIDE)
-    ready = False
-    for _ in range(100):
-        if socket_path.is_socket():
+    directory_fd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        short_socket_path = f"/proc/self/fd/{directory_fd}/{_SOCKET_NAME}"
+        assert len(os.fsencode(short_socket_path)) < 100
+        docker("exec", "-d", "--user", "568:568", container,
+               "python", "-c", _CONTAINER_SIDE)
+        ready = False
+        for _ in range(100):
+            if socket_path.is_socket():
+                try:
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                        probe.settimeout(1)
+                        probe.connect(short_socket_path)
+                    ready = True
+                    break
+                except (ConnectionRefusedError, FileNotFoundError):
+                    pass
+            time.sleep(0.1)
+        assert ready, "Internal Unix socket for Chromium was not created by QA container"
+        with _LoopbackServer(("127.0.0.1", 0), _HostHandler) as server:
+            server.unix_path = short_socket_path
+            thread = threading.Thread(target=server.serve_forever,
+                                      kwargs={"poll_interval": 0.1}, daemon=True)
+            thread.start()
             try:
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
-                    probe.settimeout(1)
-                    probe.connect(str(socket_path))
-                ready = True
-                break
-            except (ConnectionRefusedError, FileNotFoundError):
-                pass
-        time.sleep(0.1)
-    assert ready, "Internal Unix socket for Chromium was not created by QA container"
-    with _LoopbackServer(("127.0.0.1", 0), _HostHandler) as server:
-        server.unix_path = str(socket_path)
-        thread = threading.Thread(target=server.serve_forever,
-                                  kwargs={"poll_interval": 0.1}, daemon=True)
-        thread.start()
-        try:
-            yield server.server_address[1]
-        finally:
-            server.shutdown()
-            thread.join(timeout=10)
+                yield server.server_address[1]
+            finally:
+                server.shutdown()
+                thread.join(timeout=10)
+    finally:
+        os.close(directory_fd)
