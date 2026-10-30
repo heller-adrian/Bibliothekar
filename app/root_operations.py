@@ -669,6 +669,15 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     if kind == 'startup' and (ids or {}).get('initialize_storage'):
                         from app.storage_bootstrap import finish
                         finish(root, parent, {k:v for k,v in record.items() if not k.startswith('_')})
+                    from app.operation_health import _TECHNICAL_STARTUP_IDS
+                    if kind=='startup' and ids==_TECHNICAL_STARTUP_IDS:
+                        permanent=parent/('technical-startup-'+record['reservation_id']+'.json')
+                        outcome={'format':1,'receipt':'technical_setup_returned_and_roots_verified',
+                                 'reservation':{k:v for k,v in record.items() if not k.startswith('_')}}
+                        previous=_read(permanent,None)
+                        if previous is not None and previous!=outcome:
+                            raise RootOperationError('Technischer Abschlussnachweis widerspricht der ursprünglichen Reservation.')
+                        if previous is None:_write(permanent,outcome)
                     proof = parent / ('finished-'+record['reservation_id']+'.json')
                     _write(proof, {'receipt': 'operation_returned_and_roots_verified',
                                    'reservation': {k:v for k,v in record.items() if not k.startswith('_')}})

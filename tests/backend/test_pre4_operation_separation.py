@@ -259,6 +259,6 @@ def test_technical_only_startup_retries_original_nonce(ready,monkeypatch):
     monkeypatch.setattr(main,'_prepare_technical_storage',prepare)
     main._coordinate_startup(lambda:None)()
     assert main.DATABASE_INITIALIZATION_ERROR is None and not path.exists()
-    proof=ro._read(path.parent/('finished-'+original['reservation_id']+'.json'))
+    proof=ro._read(path.parent/('technical-startup-'+original['reservation_id']+'.json'))
     assert proof['reservation']==original
     assert main.api_storage_health()['state']=='READY' and operations.inspect(ws)['writes_allowed']

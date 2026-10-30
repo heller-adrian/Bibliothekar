@@ -65,3 +65,14 @@ bevor diese gezielten Prüfungen bestanden sind.
   bis zum Abschluss UNAVAILABLE. Lauf auf 08d177eb prüft diese Änderungen.
 - Chromium-Prüfung der tatsächlichen, authentifizierten normalen Anwendung
   (DE/EN, mobil/Desktop) im isolierten Container ergänzt, noch ausstehend.
+
+- Lauf 40982068050 auf 08d177eb: 30 Vertragstests und alle 148 historischen
+  Regressionen bestanden. Reale Containerkorrektur und General-Import gelangen
+  bis zur Neustartkontrolle; deren Testprozess-Auswahl erfasste sich selbst.
+  Testhilfe korrigiert (exakte argv-Prüfung statt Teilstrings); keine Lockerung
+  fachlicher Prüfungen. Abnahme war dadurch insgesamt fehlgeschlagen.
+- Lauf 40983043058 auf 5d13dc2d: 32 Vertragsfälle bestanden, ein neuer
+  technischer Wiederanlauf-Nachweis fehlte nach Abschluss (generische finished-
+  Receipts sind absichtlich flüchtig). Additiven dauerhaften technischen
+  Abschlussbeleg ergänzt. Historische Auswahl und Container wurden korrekt
+  noch nicht gestartet. Verifikation des neuen Belegs folgt.
