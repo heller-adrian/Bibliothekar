@@ -60,6 +60,7 @@ def test_three_reported_file_changes_before_metadata(ready, actions):
     day_file = paths['backup_root'] / rel
     day_file.parent.mkdir(parents=True, exist_ok=True)
     day_file.write_bytes(b'synthetic-day')
+    assert reconcile_central_free_stock(db, ws, library_id='main')['ready']
     for action in actions:
         source = day_file if action == 'day' else events[action] / 'Alle' / (action + '.JPG')
         if action == 'archived':
@@ -78,9 +79,58 @@ def test_three_reported_file_changes_before_metadata(ready, actions):
 def test_inventory_exception_then_retry_does_not_poison_other_library(ready):
     _, ws, reg, dbs, _ = ready
     inventory_orphan(ws, dbs[0])
+    from app.observation_recovery import recover
+    recovered = recover(ws)
+    assert len(recovered) == 1
     context = resolve_library_context(reg, 'second')
     # A read/SQLite-only inventory interruption cannot claim unknown writes
     # throughout another library. All root and generation checks still apply.
     with ro.reserve(ws, library_id='second', database=dbs[1], paths=[context.work_root], kind='plan'):
         with database_connection(dbs[1]) as c:
             c.execute("INSERT INTO settings(key,value) VALUES ('pre5-independent','written')")
+
+
+def test_interrupted_hash_scan_preserves_media_and_has_no_durable_intent(ready, monkeypatch):
+    from app import central_stock_reconcile as stock
+    _, ws, _, dbs, _ = ready
+    root = storage_paths(ws)['backup_root']
+    source = root/'external.JPG'
+    source.write_bytes(b'synthetic external bytes')
+    before = source.read_bytes()
+    def denied(path):
+        raise PermissionError('synthetic SMB permission changed during scan')
+    monkeypatch.setattr(stock, '_sha256_file', denied)
+    with pytest.raises(PermissionError, match='synthetic SMB'):
+        stock.reconcile_central_free_stock(dbs[0], ws, library_id='main')
+    assert source.read_bytes() == before
+    assert not operations.inspect(ws)['reservations']
+    assert operations.inspect(ws)['writes_allowed']
+
+
+@pytest.mark.parametrize('damage', ['generation', 'database', 'record', 'receipt', 'unknown_function'])
+def test_historical_inventory_never_waives_contradictory_evidence(ready, damage):
+    from app.observation_recovery import recover
+    _, ws, _, dbs, _ = ready
+    path = inventory_orphan(ws, dbs[0])[0]
+    record = ro._read(path)
+    if damage == 'generation':
+        state_path = path.parent/'state.json'
+        state = ro._read(state_path);state['generation'] += 1;ro._write(state_path, state)
+    elif damage == 'database':
+        dbs[0].rename(dbs[0].with_suffix('.retained'))
+    elif damage == 'record':
+        record['bindings'][str(ws)] = [1,2];ro._write(path, record)
+    elif damage == 'receipt':
+        ro._write(path.parent/('inventory-interruption-'+record['reservation_id']+'.json'), {'unknown': 'preserve'})
+    else:
+        record['ids']['function'] = 'unknown.media_writer'
+        from app.storage_bootstrap import key_for
+        path.unlink();path = path.parent/('operation-'+key_for(record)+'.json');ro._write(path, record)
+    before = path.read_bytes()
+    if damage == 'unknown_function':
+        assert recover(ws) == []
+    else:
+        with pytest.raises((ro.RootOperationError, OSError, RuntimeError)):
+            recover(ws)
+    assert path.read_bytes() == before
+    assert not operations.inspect(ws)['writes_allowed']

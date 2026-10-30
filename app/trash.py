@@ -203,7 +203,7 @@ def _candidate_still_present(workspace_root: Path, row: dict[str, Any]) -> bool:
     return False
 
 
-@protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=TrashError, operation_wait=1)
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=TrashError, operation_wait=1, durable=False)
 @serialized_trash_operation("workspace_root", blocking=False)
 def reconcile_trash_inventory(
     database_path: Path,

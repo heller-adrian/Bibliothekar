@@ -349,7 +349,7 @@ def _pending_sort_inventory(connection, expected_count):
             'deleted_file_count': 0, 'misplaced_file_count': 0}
 
 
-@protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=RuntimeError)
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=RuntimeError, durable=False)
 def reconcile_central_free_stock(
     database_path: Path,
     workspace_root: Path,

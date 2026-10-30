@@ -23,3 +23,22 @@ Anzeigen 0 %, nächster Check: fünf Stunden 6 %, Woche 1 %.
 Nächster Schritt: Linux-Reproduktion mit eng begrenztem Self-Hosted-Workflow;
 danach Architekturkorrektur, gezielte und vollständige fachliche Abnahme.
 Veröffentlichung erst nach allen verbindlichen bestandenen Prüfungen.
+
+## Erster Reproduktionsstand
+
+`724a683f` / Lauf `41069647270`: GET false/true jeweils HTTP 500; unabhängige
+Bibliothek durch Inventory-Intent gesperrt. Ereignisfixture zunächst fehlerhaft
+(fehlender synthetischer Job); korrigiert in `a95415b2`, Lauf `41070150506`.
+Dort Applied-Verschiebung, Archivkopie und deren Kombination ohne Scan-Absturz.
+Tagesbestand-Test benötigte vorherigen initialen Inventarscan (Sentinel);
+dieser wurde ergänzt. Ursprünglicher NAS-Auslöser weiterhin nicht bewiesen.
+
+In Arbeit, noch nicht abgenommen: private prozesslokale Pfadansicht ohne
+F14-Schreibreservation; transiente, streng auf drei geprüfte Medien-Lesescanner
+begrenzte Reservationsart; qualifizierter historischer Inventory-Abschluss mit
+vollständigem Originalrecord im dauerhaften Unterbrechungsnachweis.
+Syntaxprüfung erfolgreich; vorhandene JS-Escape-SyntaxWarning in main.py.
+
+Weiter offen: scoped Schreibzulassung für echte Fachkonflikte, Startup/DB-
+Diagnose, vollständige GET-Prüfung, Metadaten-Variante A, echte Container-/API-
+Reproduktion und sämtliche Freigabetests. Noch keine Release-Eignung.

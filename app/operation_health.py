@@ -162,6 +162,8 @@ def technical_failure(error):
 
 def recover_known_before_startup(workspace,registry,logs,*,database=None):
     """Unknown intents never permit ordinary migrations/backfill as recovery."""
+    from app.observation_recovery import recover
+    recover(workspace)
     current=inspect(workspace)
     dead=[r for r in current['reservations'] if not r['live']]
     if not dead:return

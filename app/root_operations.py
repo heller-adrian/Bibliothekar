@@ -388,8 +388,9 @@ def validate_active_roots():
                     if state['bindings'].get(path) not in (None,identity):
                         raise RootOperationError('Neu angelegter Stammordner besitzt eine widersprüchliche Identität: '+path)
                     state['bindings'][path]=identity;record['bindings'][path]=identity
-                _write(parent/'state.json',state)
-                _write(record['_path'],{k:v for k,v in record.items() if not k.startswith('_')})
+                if not record.get('_ephemeral'):
+                    _write(parent/'state.json',state)
+                    _write(record['_path'],{k:v for k,v in record.items() if not k.startswith('_')})
 
 
 def _registered(database, library_id=None, workspace=None):
@@ -546,7 +547,11 @@ def admission(context, *, allow_missing_legacy=False):
 
 
 @contextmanager
-def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='operation', ids=None, expected_generation=None, shared=None, operation_wait=0, _recovery_record=None):
+def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='operation', ids=None, expected_generation=None, shared=None, operation_wait=0, _recovery_record=None, durable=True):
+    if not durable:
+        from app.observation_recovery import FUNCTIONS
+        if kind != 'inventory' or (ids or {}).get('function') not in FUNCTIONS:
+            raise RootOperationError('Only audited media observers may use a transient reservation.')
     from app.operation_health import require_write
     require_write(workspace,candidate={'kind':kind,'library':str(library_id),'database':str(Path(database).absolute()) if database is not None else None,'ids':ids or {}})
     from app.managed_storage_health import require_pinned_storage
@@ -556,6 +561,7 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
     database=Path(database).absolute() if database is not None else None
     shared = bool(library_id == 'shared' or kind in {'startup', 'trash', 'backup'}) if shared is None else shared
     if _recovery_record is not None:
+        if not durable:raise RootOperationError('Recovery requires its original durable reservation.')
         from app.operation_health import _TECHNICAL_STARTUP_IDS
         metadata_retry=kind=='metadata' and (ids or {}).get('function') in {
             'app.metadata_correction.execute_metadata_correction','app.metadata_correction.apply_metadata_correction'}
@@ -564,6 +570,8 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             raise RootOperationError('Fachliche Wiederaufnahme ist nicht für diesen Auftrag freigegeben.')
     nested = next((r for r in _ACTIVE.get() if r['workspace']==str(root) and r['library']==library_id), None)
     if nested:
+        if nested.get('_ephemeral') and durable:
+            raise RootOperationError('An observational scan cannot authorize a durable media mutation.')
         if _recovery_record is not None:
             raise RootOperationError('Fachliche Wiederaufnahme benötigt ihre eigene ursprüngliche Reservation.')
         if shared and not nested.get('shared', False):
@@ -584,8 +592,9 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     raise RootOperationError('Verschachtelte Stammordnerbindung hat sich geändert: '+path)
                 nested['bindings'][path] = identity
                 if identity is not None: state['bindings'][path] = identity
-            _write(parent/'state.json', state)
-            _write(nested['_path'], {k:v for k,v in nested.items() if not k.startswith('_')})
+            if not nested.get('_ephemeral'):
+                _write(parent/'state.json', state)
+                _write(nested['_path'], {k:v for k,v in nested.items() if not k.startswith('_')})
         yield nested
         validate_active_roots()
         return
@@ -617,6 +626,8 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     state['bindings'][path]=identity
                 bindings[path]=identity
             old = _read(parent/('operation-'+key+'.json'))
+            if old and not durable:
+                raise RootOperationError('Historical inventory requires verified recovery before a new scan.')
             if _recovery_record is not None and old != _recovery_record:
                 raise RootOperationError('Ursprüngliche Wiederaufnahme-Reservation wurde verändert.')
             if old:
@@ -654,9 +665,11 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     if path in pinned and pinned[path] != current_mount:
                         raise RootOperationError('mount_identity_changed: '+path)
                     pinned[path] = current_mount
-            _write(parent/'state.json',state)
-            _write(parent/('operation-'+key+'.json'),record)
+            if durable:
+                _write(parent/'state.json',state)
+                _write(parent/('operation-'+key+'.json'),record)
         record['_parent']=parent;record['_path']=parent/('operation-'+key+'.json');record['_resumed']=bool(old)
+        record['_ephemeral']=not durable
         token = _ACTIVE.set((*_ACTIVE.get(), record))
         completed = False
         try:
@@ -667,7 +680,12 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             # executes this block; identity uncertainty keeps durable evidence.
             try:
                 validate_active_roots()
-                if completed or (_recovery_record is None and _receipt_completed({k:v for k,v in record.items() if not k.startswith('_')})):
+                if not durable:
+                    # Observers never change media. Their SQLite transactions
+                    # commit or roll back; process death cannot leave a file
+                    # mutation requiring a durable F14 recovery intent.
+                    pass
+                elif completed or (_recovery_record is None and _receipt_completed({k:v for k,v in record.items() if not k.startswith('_')})):
                     if kind == 'startup' and (ids or {}).get('initialize_storage'):
                         from app.storage_bootstrap import finish
                         finish(root, parent, {k:v for k,v in record.items() if not k.startswith('_')})
@@ -695,7 +713,7 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             finally:_ACTIVE.reset(token)
 
 
-def protect(*, workspace_arg=None, database_arg='database_path', kind='operation', error_type=RootOperationError, context_provider=None, db_only_if_no_roots=False, operation_wait=0):
+def protect(*, workspace_arg=None, database_arg='database_path', kind='operation', error_type=RootOperationError, context_provider=None, db_only_if_no_roots=False, operation_wait=0, durable=True):
     def decorate(fn):
         signature=inspect.signature(fn)
         @wraps(fn)
@@ -767,7 +785,7 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
             expected=getattr(context,'root_generation',None) if context else None
             if expected is None:expected=generation(workspace,library)
             try:
-                with reserve(workspace,library_id=library,paths=paths,database=database,kind=kind,ids=ids,expected_generation=expected,operation_wait=operation_wait, shared=True if global_import or kind in {'trash','backup','import_cleanup'} or (database_arg == 'None' and kind == 'recovery') else None) as reservation:
+                with reserve(workspace,library_id=library,paths=paths,database=database,kind=kind,ids=ids,expected_generation=expected,operation_wait=operation_wait, durable=durable, shared=True if global_import or kind in {'trash','backup','import_cleanup'} or (database_arg == 'None' and kind == 'recovery') else None) as reservation:
                     if view_context is not None: _check_view(view_context)
                     if context:reservation['_context_work_root']=str(context.work_root)
                     current=_registered(database) if row else None

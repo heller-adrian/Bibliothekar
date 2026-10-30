@@ -617,12 +617,37 @@ def _ensure_compatibility_link(link: Path, target: Path) -> None:
     link.symlink_to(resolved_target, target_is_directory=True)
 
 
-@protect(kind='compatibility', context_provider=lambda a: a['context'], operation_wait=1)
+# A compatibility view is process-local path resolution, not a media mutation.
+# Its unique private tmp namespace cannot overlap another running app instance.
+_COMPATIBILITY_DIRECTORY = tempfile.TemporaryDirectory(prefix='bibliothekar-views-')
+_COMPATIBILITY_VIEW_LOCK = __import__('threading').RLock()
+
+
 def compatibility_workspace_root(context: LibraryContext) -> Path:
+    with _COMPATIBILITY_VIEW_LOCK:
+        from app.root_operations import _check, _registered, generation
+        row = _registered(context.database_path)
+        if row and any(Path(getattr(context, key)).absolute() != Path(row[key]).absolute()
+                       for key in ('workspace_root', 'work_root', 'archive_root')):
+            raise RootOperationError('Kompatibilitätsansicht verwendet veraltete Bibliothekspfade.')
+        expected = context.root_generation
+        if expected is not None and tuple(expected) != generation(context.workspace_root, context.library_id):
+            raise RootOperationError('Kompatibilitätsansicht verwendet eine veraltete Generation.')
+        roots = (context.workspace_root, context.work_root, context.archive_root)
+        from app.root_operations import _identity
+        bindings = {str(path): _identity(path) for path in roots}
+        if any(identity is None for identity in bindings.values()):
+            raise RootOperationError('Kompatibilitätsansicht benötigt erreichbare Verwaltungsanker.')
+        result = _prepare_compatibility_workspace_root(context)
+        _check(bindings)
+        return result
+
+
+def _prepare_compatibility_workspace_root(context: LibraryContext) -> Path:
     # Alle Bibliotheken – auch die primäre – erhalten für Altcode intern eine
     # kleine Kompatibilitätsansicht. Dadurch hängt kein Arbeitsablauf mehr von
     # /workspace/Arbeitsbereich oder /workspace/Arbeitsbereiche/main ab.
-    root = Path(tempfile.gettempdir()).resolve(strict=True) / "bibliothekar-library-workspaces" / re.sub(
+    root = Path(_COMPATIBILITY_DIRECTORY.name) / re.sub(
         r"[^A-Za-z0-9._-]+",
         "-",
         context.library_id,
