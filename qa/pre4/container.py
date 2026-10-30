@@ -139,9 +139,22 @@ try:
     script("import urllib.request,urllib.error\ntry:urllib.request.urlopen('http://127.0.0.1:8080/api/operations/status');raise AssertionError('anonymous diagnostics')\nexcept urllib.error.HTTPError as e:assert e.code==401")
     REPORT['checks']['missing_media_and_unknown_operation_readable_write_fenced']='PASS'
     REPORT['checks']['archives_unchanged']='PASS'
-    from browser_tunnel import chromium_loopback_tunnel
-    with chromium_loopback_tunnel(docker,NAME,ROOT/'workspace') as port:
-        browser=run('node',str(Path(__file__).with_name('browser.cjs')),'http://127.0.0.1:'+str(port),str(Path(os.environ['RUNNER_TEMP'])/'pre4-browser'),timeout=180)
+    # The self-hosted runner intentionally does not have system Chromium
+    # libraries (libatk et al.). Use the version-matched official browser QA
+    # image in the already isolated app network namespace. No host packages,
+    # external network exposure or Docker -p publication are necessary.
+    output=Path(os.environ['RUNNER_TEMP'])/'pre4-browser'
+    output.mkdir()
+    browser=docker('run','--rm','--network','container:'+NAME,
+        '--read-only','--tmpfs','/tmp:rw,size=256m,mode=1777',
+        '-v',str(Path(__file__).with_name('browser.cjs').absolute())+':/qa/browser.cjs:ro',
+        '-v',str(Path(os.environ['RUNNER_TEMP'])/'browser-tools/node_modules')+':/qa/node_modules:ro',
+        '-v',str(output)+':/qa/output',
+        '-e','NODE_PATH=/qa/node_modules',
+        '-e','PLAYWRIGHT_BROWSERS_PATH=/ms-playwright',
+        'mcr.microsoft.com/playwright:v1.62.1-noble',
+        'node','/qa/browser.cjs','http://127.0.0.1:8080','/qa/output',
+        timeout=240)
     REPORT['checks']['chromium_normal_pages_fenced_reads_de_en_mobile_desktop']='PASS'
     REPORT.update(status='PASS',before=before,imported=imported,final=final)
 finally:
