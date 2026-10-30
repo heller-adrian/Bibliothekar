@@ -9,12 +9,30 @@ from pathlib import Path
 import hashlib
 import json
 import sqlite3
+from datetime import datetime,timezone
+from app.sqlite_retry import idempotent_write
 
-FUNCTIONS = frozenset({
-    'app.central_stock_reconcile.reconcile_central_free_stock',
-    'app.event_inventory.scan_event_inventory',
-    'app.trash.reconcile_trash_inventory',
-})
+FUNCTIONS = {
+    'app.central_stock_reconcile.reconcile_central_free_stock':'inventory',
+    'app.event_inventory.scan_event_inventory':'inventory',
+    'app.trash.reconcile_trash_inventory':'inventory',
+    'app.archive_transfer.verify_event_archive':'verification',
+}
+
+
+@idempotent_write
+def record_failure(record,error):
+    """Domain history after the observer's SQL rollback, never completion proof."""
+    from app.database import database_connection
+    database=record.get('database')
+    if not database:return
+    plain={k:v for k,v in record.items() if not k.startswith('_')}
+    with database_connection(Path(database)) as connection:
+        job=record['ids'].get('job_id')
+        if job and not connection.execute('SELECT 1 FROM jobs WHERE id=?',(job,)).fetchone():job=None
+        connection.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'observer_failed','operation',?,?,?)",
+            (job,record['reservation_id'],json.dumps({'reservation':plain,'error':str(error),
+                'media_writes':False,'next_action':'retry_observation'},sort_keys=True),datetime.now(timezone.utc).isoformat()))
 
 
 def read_snapshot(function,database,workspace):
@@ -60,9 +78,9 @@ def recover(workspace):
     parent = ro._control_location(root)
     recovered = []
     for item in operation_health.inspect(root)['reservations']:
-        if item['live'] or not item['qualified'] or item.get('kind') != 'inventory':
+        if item['live'] or not item['qualified']:
             continue
-        if item.get('ids', {}).get('function') not in FUNCTIONS:
+        if FUNCTIONS.get(item.get('ids', {}).get('function')) != item.get('kind'):
             continue
         path = Path(item['path'])
         # Same lock order as reserve; never retire a record held by a writer.
@@ -98,7 +116,7 @@ def recover(workspace):
                 if (connection.execute('PRAGMA quick_check').fetchall() != [('ok',)]
                         or connection.execute('PRAGMA foreign_key_check').fetchall()):
                     raise ro.RootOperationError('inventory_recovery_database_inconsistent: '+str(db))
-            receipt = parent/('inventory-interruption-'+record['reservation_id']+'.json')
+            receipt = parent/(record['kind']+'-interruption-'+record['reservation_id']+'.json')
             proof = {'format': 1, 'disposition': 'observational_scan_interrupted',
                      'sqlite_integrity': 'ok', 'media_writes': False,
                      'reservation': record, 'scan_required': True}

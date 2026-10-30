@@ -112,6 +112,9 @@ def test_interrupted_hash_scan_preserves_media_and_has_no_durable_intent(ready, 
     assert source.read_bytes() == before
     assert not operations.inspect(ws)['reservations']
     assert operations.inspect(ws)['writes_allowed']
+    with database_connection(dbs[0]) as connection:
+        failure=connection.execute("SELECT details_json FROM audit_log WHERE action='observer_failed'").fetchone()
+    assert failure and 'synthetic SMB permission' in failure[0]
 
 
 @pytest.mark.parametrize('damage', ['generation', 'database', 'record', 'receipt', 'unknown_function'])
@@ -282,6 +285,54 @@ def test_transient_observer_cannot_nest_durable_media_writes(ready):
         with pytest.raises(ro.RootOperationError,match='observational scan'):
             with ro.reserve(ws,library_id='main',database=dbs[0],kind='import'):
                 pytest.fail('unsafe media mutation')
+
+
+def test_missing_archive_event_is_local_verification_failure_without_lease(ready):
+    from app.archive_transfer import verify_event_archive,ArchiveVerificationError
+    _,ws,reg,dbs,_=ready
+    context=resolve_library_context(reg,'main')
+    create_job(dbs[0],job_id='J',kind='sd_import',trigger_type='approved_sd',source_path='/synthetic/card',working_path=str(ws),operation='folder_import')
+    event,root,_=_event(dbs[0],context.archive_root,name='Archived verification',day='2026-07-20',
+        items=[('proof.JPG',b'retained original archive','Alle')],status='archived')
+    retained=root.with_name(root.name+'-operator-offline');root.rename(retained)
+    with pytest.raises(ArchiveVerificationError):
+        verify_event_archive(dbs[0],context.archive_root,'J',event,workspace_path=ws)
+    assert (retained/'Alle/proof.JPG').read_bytes()==b'retained original archive'
+    assert not operations.inspect(ws)['reservations'] and operations.inspect(ws)['writes_allowed']
+    with database_connection(dbs[0]) as connection:
+        failure=connection.execute("SELECT details_json FROM audit_log WHERE action='observer_failed'").fetchone()
+    assert failure and 'verify_event_archive' in failure[0]
+
+
+def test_real_pre4_failed_archive_verification_is_qualified_without_media_changes(ready):
+    from app.observation_recovery import recover
+    case,ws,reg,dbs,_=ready
+    context=resolve_library_context(reg,'main')
+    create_job(dbs[0],job_id='J',kind='sd_import',trigger_type='approved_sd',source_path='/synthetic/card',working_path=str(ws),operation='folder_import')
+    event,root,_=_event(dbs[0],context.archive_root,name='Historical verification',day='2026-07-20',
+        items=[('proof.JPG',b'historical original archive','Alle')],status='archived')
+    retained=root.with_name(root.name+'-operator-offline');root.rename(retained)
+    old=case/'pre4-archive-code';old.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['git','archive','v1.0.0-pre.4','app']))) as archive:
+        archive.extractall(old,filter='data')
+    code='''
+from pathlib import Path
+import sys
+from app.archive_transfer import verify_event_archive,ArchiveVerificationError
+try:verify_event_archive(Path(sys.argv[1]),Path(sys.argv[2]),'J',sys.argv[3],workspace_path=Path(sys.argv[4]))
+except ArchiveVerificationError:pass
+else:raise AssertionError('expected missing archive event')
+'''
+    process=subprocess.run([sys.executable,'-c',code,str(dbs[0]),str(context.archive_root),event,str(ws)],
+        cwd=old,env=dict(os.environ,PYTHONPATH=str(old),PYTHONDONTWRITEBYTECODE='1'),text=True,capture_output=True,timeout=30)
+    assert process.returncode==0,process.stdout+process.stderr
+    path=next(ro._control_location(ws).glob('operation-*.json'));record=ro._read(path)
+    assert record['kind']=='verification'
+    assert len(recover(ws))==1 and not path.exists()
+    proof=ro._read(path.parent/('verification-interruption-'+record['reservation_id']+'.json'))
+    assert proof['reservation']==record and not proof['media_writes']
+    assert (retained/'Alle/proof.JPG').read_bytes()==b'historical original archive'
+    assert operations.inspect(ws)['writes_allowed']
 
 
 def test_private_view_resolves_trash_to_original_workspace_and_keeps_f14_read_only(ready):

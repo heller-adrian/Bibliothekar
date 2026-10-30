@@ -10,9 +10,11 @@ from tests.backend.test_f14_root_operations import fixture,snapshot,settings_cha
 
 def test_f14_idle_claims_do_not_create_operation_journals(fixture):
     case,ws,reg,dbs,ev=fixture;ctx=resolve_library_context(reg,'main')
-    for n in range(5):assert main._claim_context_job(ctx) is None
     parent=ro._control_location(ws)
-    assert not list(parent.glob('*.json'))
+    before={p.name:p.read_bytes() for p in parent.glob('*.json')}
+    for n in range(5):assert main._claim_context_job(ctx) is None
+    assert before=={p.name:p.read_bytes() for p in parent.glob('*.json')}
+    assert not list(parent.glob('operation-*.json')) and not list(parent.glob('finished-*.json'))
     snapshot(case,ev/'idle-claims.json')
 
 

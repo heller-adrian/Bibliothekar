@@ -572,7 +572,7 @@ def _admission(context, *, allow_missing_legacy=False):
 def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='operation', ids=None, expected_generation=None, shared=None, operation_wait=0, _recovery_record=None, durable=True):
     if not durable:
         from app.observation_recovery import FUNCTIONS
-        if kind != 'inventory' or (ids or {}).get('function') not in FUNCTIONS:
+        if FUNCTIONS.get((ids or {}).get('function')) != kind:
             raise RootOperationError('Only audited media observers may use a transient reservation.')
     from app.operation_health import require_write
     candidate={'kind':kind,'library':str(library_id),'database':str(Path(database).absolute()) if database is not None else None,'ids':ids or {}}
@@ -713,6 +713,18 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
         try:
             yield record
             completed = True
+        except Exception as error:
+            if not durable:
+                try:
+                    validate_active_roots()
+                    from app.observation_recovery import record_failure
+                    record_failure(record,error)
+                except Exception as audit_error:
+                    # A locked/unwritable database cannot turn a failed audit
+                    # into a false successful observation or mask the cause.
+                    error.add_note('Observation failure audit unavailable: '+str(audit_error))
+                    print('Observation failure audit unavailable: '+str(audit_error),flush=True)
+            raise
         finally:
             # Only our own fully bound reservation is released. SIGKILL never
             # executes this block; identity uncertainty keeps durable evidence.

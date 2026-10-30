@@ -119,6 +119,10 @@ jobs:
           RUNNER_TEMP="$QA_WORK" python3 qa/pre5/container.py 2>&1 | tee "$QA_WORK/container.log"
           RUNNER_TEMP="$QA_WORK" python3 qa/pre4/container.py 2>&1 | tee "$QA_WORK/pre4-container.log"
           RUNNER_TEMP="$QA_WORK" python3 qa/pre4/historical_container.py 2>&1 | tee "$QA_WORK/historical-container.log"
+      - name: Ninety media files, real events, archive copy and three external moves
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre5/manual_changes_container.py 2>&1 | tee "$QA_WORK/manual-changes.log"
       - name: Four thousand families and fourteen iPhone JPEGs
         run: |
           set -euo pipefail

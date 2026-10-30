@@ -322,7 +322,7 @@ def list_archive_candidates(
     }
 
 
-@protect(workspace_arg='archive_root', database_arg='database_path', kind='verification', error_type=ArchiveVerificationError)
+@protect(workspace_arg='archive_root', database_arg='database_path', kind='verification', error_type=ArchiveVerificationError, durable=False)
 def verify_event_archive(
     database_path: Path,
     archive_root: Path,

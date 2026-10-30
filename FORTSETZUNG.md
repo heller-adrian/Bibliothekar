@@ -262,3 +262,23 @@ ermittelt; Ist-Datenbank bleibt query_only. Registry erhält ihre eigene Rolle.
 Workerfreigabe nach Domain-Abbruch benötigt vollständiges Schema. Health trennt
 connected/consistent/schema_current, statt fehlenden Domain-Startup mit fehlender
 Verbindung gleichzusetzen. Neue gezielte Tests, noch nicht ausgeführt.
+
+Nachlauf `41113291699` (reiner QA-Statusfix): **236/237 historische Tests PASS**.
+Letzter Fehler war die veraltete Annahme, die erste explizite Registrierung dürfe
+keinen technischen state.json besitzen. Idle-Claim-Test verlangt jetzt bytegleich
+unveränderte vorhandene Belege und weiterhin keine operation-/finished-Dateien.
+Diagnose-Nachlauf `41114245353` auf `8b5b53e7`: SUCCESS (gezielte/fokussierte Gates).
+
+Weiterer systematischer Fund: `verify_event_archive()` verändert Medien nicht,
+konnte aber wie Inventory bei abgelehnter Prüfung eine dauerhafte Reservation
+hinterlassen. In exakt auditierte transiente Beobachter aufgenommen, einschließlich
+qualifizierter historischer pre.4-Verifikation und unverändertem Archivschutz.
+Fehlgeschlagene Beobachtungen werden nach SQL-Rollback begrenzt im audit_log
+protokolliert; dies ist kein Abschluss- oder Dateiänderungsnachweis.
+
+Neuer echter 90-Dateien-/47-Familien-/8-Tage-Containerablauf erstellt: tatsächlicher
+Import, Applied-Ereignis, manuelle Archivübernahme mit Byteprüfung, drei dokumentierte
+SMB-ähnliche Änderungen, pre.4-Beobachtung, Upgrade und Metadatenkorrekturen. Die
+bekannte General-Reimport-Ablehnung bleibt lokal; anschließend echte unabhängige
+Ereignissortierung und zwei Neustarts. Noch nicht ausgeführt. RAF-Fixture ist
+synthetischer TIFF-Inhalt mit RAF-Endung; keine native RAW-/DNG-Schreibfreigabe.

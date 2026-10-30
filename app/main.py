@@ -3271,7 +3271,12 @@ def api_recovery_diagnostics() -> dict[str, Any]:
     """Owner authentication still wraps this read-only recovery endpoint."""
     from app.metadata_recovery_status import inspect
     from app.database_diagnostics import inspect as database_inspect
+    from app.operation_ui import rows
+    try:
+        observations=rows(DATABASE_FILE,"SELECT id,job_id,entity_id,details_json,created_at FROM audit_log WHERE action='observer_failed' ORDER BY id DESC LIMIT 30")
+    except (OSError,ValueError,__import__('sqlite3').Error):observations=[]
     return {**inspect(WORKSPACE_PATH, REGISTRY_DATABASE_FILE),
+            'observation_failures':observations,
             'database':database_inspect(DATABASE_FILE),'registry':database_inspect(REGISTRY_DATABASE_FILE,kind='registry'),
             'startup_error': DATABASE_INITIALIZATION_ERROR, 'operation_health': __import__('app.operation_health',fromlist=['inspect']).inspect(WORKSPACE_PATH)}
 
