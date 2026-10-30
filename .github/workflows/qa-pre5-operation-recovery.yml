@@ -39,6 +39,8 @@ jobs:
             tests/backend/test_rc14_import.py::test_reconcile_hash_does_not_hold_catalogue_writer \
             tests/backend/test_0411_physical_truth.py tests/backend/test_0412_consistency_semantics.py \
             tests/backend/test_0501_external_event_deletion.py tests/backend/test_0440_trash.py \
+            tests/backend/test_0311_global_stock.py tests/backend/test_0328_patch.py \
+            tests/backend/test_f16_f20_stock_consistency.py \
             tests/backend/test_pre2_metadata_abort.py::test_uncertain_startup_only_releases_scoped_workers \
             2>&1 | tee "$QA_WORK/focused.log"
       - name: Structural, historical metadata and F14 regressions

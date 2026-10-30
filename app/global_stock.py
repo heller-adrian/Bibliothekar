@@ -362,6 +362,7 @@ def migrate_main_free_stock_to_central(
                     f.size_bytes,
                     f.sha256_current,
                     f.sha256_original,
+                    j.working_path AS job_working_path,
                     EXISTS (
                         SELECT 1
                         FROM event_assignments ea
@@ -379,6 +380,7 @@ def migrate_main_free_stock_to_central(
                         WHERE pending.job_id=f.job_id AND pending.family_id=f.family_id
                     ) AS pending_reconcile
                 FROM files f
+                JOIN jobs j ON j.id=f.job_id
                 WHERE f.current_root_kind='shared_workspace'
                   AND COALESCE(TRIM(f.current_relative_path),'') <> ''
                 ORDER BY f.id
@@ -390,6 +392,7 @@ def migrate_main_free_stock_to_central(
     already = 0
     kept_applied = 0
     kept_staging = 0
+    already_central = 0
 
     excluded = set(excluded_family_ids or ())
     for row in rows:
@@ -409,6 +412,15 @@ def migrate_main_free_stock_to_central(
             continue
         if bool(row["belongs_to_applied"]) or bool(row["pending_reconcile"]):
             kept_applied += 1
+            continue
+
+        # New imports and completed legacy migrations already route this job
+        # to central stock. Its later media changes are inventory/domain
+        # matters, not a reason to repeat an old work-root file migration.
+        # Do not infer a replacement location or claim any missing byte valid.
+        routed=str(row.get('job_working_path') or '')
+        if routed and Path(routed).expanduser().absolute()==central:
+            already_central += 1
             continue
 
         source = work / relative
@@ -449,6 +461,7 @@ def migrate_main_free_stock_to_central(
         "already_migrated": already,
         "kept_applied": kept_applied,
         "kept_staging": kept_staging,
+        "already_central": already_central,
     }
 
 

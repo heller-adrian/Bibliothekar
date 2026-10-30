@@ -516,6 +516,63 @@ def test_empty_but_identity_pinned_stock_is_not_a_missing_mount(ready):
     assert operations.inspect(ws)['writes_allowed']
 
 
+@pytest.mark.parametrize('state',['moved_to_general','foreign_bytes'])
+def test_already_central_job_does_not_repeat_legacy_migration_on_media_changes(ready,state):
+    from app.global_stock import migrate_main_free_stock_to_central
+    from app.metadata_correction import metadata_area_paths
+    case,ws,reg,dbs,_=ready
+    db=dbs[0];context=resolve_library_context(reg,'main');central=storage_paths(ws)['backup_root']
+    _,file_id,relative=_seed_free_file(db,family_key='already-central',filename='moved.JPG',
+        day='2026-07-21',data=b'original photo')
+    with database_connection(db) as connection:
+        connection.execute('UPDATE jobs SET working_path=? WHERE id=?',(str(central),'J'))
+        before=[tuple(r) for r in connection.execute('SELECT * FROM files')]
+    original=metadata_area_paths(area='general',workspace_root=ws,library_id='main',create=False)['root']/'moved.JPG'
+    if state=='moved_to_general':original.write_bytes(b'original photo')
+    else:
+        target=central/relative;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(b'foreign bytes')
+    media={p:p.read_bytes() for p in ws.rglob('*') if p.is_file()}
+    if state=='moved_to_general':
+        old=case/'pre4-stock-code';old.mkdir()
+        with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['git','archive','v1.0.0-pre.4','app']))) as archive:
+            archive.extractall(old,filter='data')
+        code='''
+from pathlib import Path
+import sys
+from app.global_stock import migrate_main_free_stock_to_central
+try:migrate_main_free_stock_to_central(Path(sys.argv[1]),Path(sys.argv[2]),main_work_root=Path(sys.argv[3]))
+except RuntimeError as error:assert 'Quelle und Ziel fehlen' in str(error),str(error)
+else:raise AssertionError('published pre4 missing-media migration failure not reproduced')
+'''
+        result=subprocess.run([sys.executable,'-c',code,str(db),str(ws),str(context.work_root)],cwd=old,
+            env=dict(os.environ,PYTHONPATH=str(old),PYTHONDONTWRITEBYTECODE='1'),text=True,capture_output=True,timeout=30)
+        assert result.returncode==0,result.stdout+result.stderr
+    for _ in range(2):
+        result=migrate_main_free_stock_to_central(db,ws,main_work_root=context.work_root)
+        assert result['already_central']==1 and result['migrated']==0
+    assert media=={p:p.read_bytes() for p in ws.rglob('*') if p.is_file()}
+    with database_connection(db) as connection:
+        assert before==[tuple(r) for r in connection.execute('SELECT * FROM files')]
+
+
+def test_unfinished_real_legacy_migration_does_not_accept_missing_source_or_foreign_target(ready):
+    from app.global_stock import migrate_main_free_stock_to_central
+    _,ws,reg,dbs,_=ready
+    context=resolve_library_context(reg,'main');central=storage_paths(ws)['backup_root']
+    _,_,relative=_seed_free_file(dbs[0],family_key='legacy-missing',filename='legacy.JPG',
+        day='2026-07-21',data=b'expected old legacy bytes')
+    with database_connection(dbs[0]) as connection:
+        connection.execute('UPDATE jobs SET working_path=? WHERE id=?',(str(context.work_root),'J'))
+    with pytest.raises(RuntimeError,match='Quelle und Ziel fehlen'):
+        migrate_main_free_stock_to_central(dbs[0],ws,main_work_root=context.work_root)
+    target=central/relative;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(b'foreign bytes')
+    with pytest.raises(RuntimeError):
+        migrate_main_free_stock_to_central(dbs[0],ws,main_work_root=context.work_root)
+    assert target.read_bytes()==b'foreign bytes'
+    with database_connection(dbs[0]) as connection:
+        assert connection.execute("SELECT working_path FROM jobs WHERE id='J'").fetchone()[0]==str(context.work_root)
+
+
 def test_legacy_sentinel_never_writes_outside_inventory_root(ready):
     case,ws,_,dbs,_=ready
     foreign=case/'foreign-retained.txt';foreign.write_bytes(b'untouched')

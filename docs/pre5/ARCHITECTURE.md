@@ -32,6 +32,18 @@ Stand: Entwicklung; keine Veröffentlichung oder native TrueNAS-Abnahme.
    Diagnose prüft Verbindung, `quick_check`, Fremdschlüssel und das ausgelieferte
    Schema getrennt. SQL-Migrationen werden für den Vergleich ausschließlich in
    `:memory:` ausgeführt. Bestehende Kataloge werden nicht repariert oder ersetzt.
+5. Die vollständige 90-Dateien-Fixture hat einen weiteren Fehler tatsächlich
+   reproduziert: Nach Verschieben einer Tagesdatei nach General wird beim
+   Upgrade die alte Main→Zentralbestandsmigration erneut aufgerufen. Der Auftrag
+   verweist bereits auf den Zentralbestand; die Migration erwartet trotzdem
+   jede Datei im alten Main-Arbeitsbereich oder am früheren Zentralpfad. Fehlen
+   beide, entsteht ohne offene F14-Dateioperation eine Workspace-Schreibsperre.
+   Bereits zentral geroutete Aufträge werden jetzt nicht als alte Layoutmigration
+   interpretiert. Kein neuer Dateiort wird geraten und kein Hash umgedeutet.
+   Tatsächlich noch nicht migrierte Altaufträge bleiben vollständig geprüft;
+   fehlende Quellen oder fremde Zielbytes dürfen ihre Migration nicht abschließen.
+   Gezielte neue Regressionen und der erneute gesamte Containerablauf stehen
+   nach dieser Korrektur noch aus.
 
 ## Verbindliche Grenzen
 

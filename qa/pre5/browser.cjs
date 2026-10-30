@@ -16,6 +16,16 @@ assert(!(await page.locator('body').innerText()).includes('Storage unavailable')
 const health=await context.request.get(host+'/api/settings/storage-health');assert.equal(health.status(),200);
 const status=await health.json();assert.equal(status.state,'READY');assert.equal(status.operation_health.writes_allowed,false);assert.equal(status.operation_health.workspace_writes_allowed,true);
 assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+if(target==='/'){
+ const diagnosis=page.locator('#database-diagnosis');const summary=diagnosis.locator('summary');
+ assert(await summary.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'diagnosis summary is clipped');
+ await summary.click();await page.waitForFunction(()=>document.querySelector('#database-diagnosis-result')?.textContent.includes('schema_current'));
+ const report=JSON.parse(await page.locator('#database-diagnosis-result').innerText());
+ assert.equal(report.database.connected,true);assert.equal(report.database.schema_current,true);
+ assert.equal(report.database.automatic_repair,false);assert.equal(report.operation_health.workspace_writes_allowed,true);
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await summary.click();
+}
 await page.screenshot({path:path.join(out,`${lang}-${width}-${target==='/'?'import':'trash'}.png`),fullPage:true});
 cases.push({lang,width,target,status:'PASS'});
 }await context.close();}

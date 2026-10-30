@@ -11573,12 +11573,6 @@ def index() -> str:
           <div class="status-label">Datenbank</div>
           <div class="status-value" id="database-status">Wird geprüft …</div>
           <div class="status-detail" id="database-detail"></div>
-          <details id="database-diagnosis" style="font-size:.8rem;margin-top:6px">
-            <summary>Datenbankdiagnose und Wiederherstellung</summary>
-            <p>Die Diagnose verändert keine Daten. Fachliche Konflikte werden getrennt von Verbindungs- und Integritätsfehlern angezeigt.</p>
-            <p>Bei einem beschädigten Katalog die App stoppen und einen zusammengehörigen, konsistenten Sicherungsstand von Appdaten und Workspace wiederherstellen. Keine Datenbank neu initialisieren oder F14-Nachweise löschen.</p>
-            <pre id="database-diagnosis-result" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto"></pre>
-          </details>
         </div>
       </article>
 
@@ -11593,6 +11587,13 @@ def index() -> str:
         </div>
       </article>
     </div>
+
+    <details id="database-diagnosis" class="card" style="font-size:.85rem;margin-bottom:16px;min-width:0">
+      <summary style="white-space:normal;overflow-wrap:anywhere;cursor:pointer">Datenbankdiagnose und Wiederherstellung</summary>
+      <p>Die Diagnose verändert keine Daten. Fachliche Konflikte werden getrennt von Verbindungs- und Integritätsfehlern angezeigt.</p>
+      <p>Bei einem beschädigten Katalog die App stoppen und einen zusammengehörigen, konsistenten Sicherungsstand von Appdaten und Workspace wiederherstellen. Keine Datenbank neu initialisieren oder F14-Nachweise löschen.</p>
+      <pre id="database-diagnosis-result" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto"></pre>
+    </details>
 
     <section class="card import-panel">
       <div class="bk-import-head">
