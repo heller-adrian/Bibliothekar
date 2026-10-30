@@ -1,13 +1,37 @@
-# Aktueller Einstieg – pre.5, 30.10.2026, 20:13 UTC
+# Aktueller Einstieg – pre.5, 30.10.2026, aktueller Checkpoint
 
 - Branch: `codex/pre5-operation-recovery`.
-- Neuer Anwendungscode: `83b11dad16626c01460562caec8dd530ad4bbd42` (remote gesichert).
-- Zuerst Lauf **41121252978** lesen. Er prüft 49 neue Zieltests, danach erweiterte
+- Neuer Anwendungscode: `96d538fac1a6c7fa42785e821dbc20cad505b07c` (remote gesichert).
+  Funktionaler Migrationsfix auf `83b11dad16626c01460562caec8dd530ad4bbd42`;
+  danach im App-Code ausschließlich sichtbare Versionskennung in ui_shell geändert.
+- Zuerst Lauf **41122388040** lesen. Er prüft 49 neue Zieltests, danach erweiterte
   fokussierte Regressionen, Container und erst bei Container-SUCCESS den gesamten
   Backend. Frontend läuft ebenfalls nach grünen Zieltests. Keine weitere CI blind
   neu starten. Noch keine Veröffentlichung, kein Publisher vorbereitet/ausgeführt.
-- Fünf-Stunden-Fenster zuletzt 64 %, Woche 25 %; ab 70 % Übergabe sichern.
+- Fünf-Stunden-Fenster zuletzt 70 %, Woche 26 %; Übergabe rechtzeitig gesichert.
   Keine Subagents. Lokale Prüfungen nur Syntax/Quellen; ausführende QA auf Linux.
+
+## Neuester Gate-Befund (nach dem Migrationsfix)
+
+`41121252978` auf `83b11dad`: **49 Zieltests PASS**, 0 FAIL/SKIP. Die neuen
+Migrationstests inklusive echtem pre.4-Fehler bestanden. Erweiterte fokussierte
+Stufe: **67 PASS / 13 FAIL**. Zwei Tests erwarteten über `qa/release/pre.json`
+noch pre.1; ein Test provisionierte nur vier Wurzeln ohne General/Batch Correction;
+zehn F16/F20-/Prozessfälle scheiterten bereits beim Seed. Deren historische
+Foundation-/Provisionierungshelfer hatten ebenfalls die zwei verpflichtenden
+Metadatenanker noch nicht angelegt. Originale signierte QA-Dateien unverändert.
+`96d538fa` ergänzt nur die explizite Test-Provisionierung vor dem Seed, bessere
+Seed-Fehlerlogs und konsistente Versionsangaben in Manifest/README/ui_shell.
+Keine laufende Storage-/Recovery-Funktion zum Bestehen von Tests umgangen.
+Diese Fixture-Erklärung wird erst durch den Nachlauf bestätigt; noch NICHT PASS.
+Container und breite Backend-Stufe wurden im gescheiterten Gate korrekt SKIPPED.
+
+Lauf **41122388040** auf **96d538fac1a6c7fa42785e821dbc20cad505b07c** zuletzt QUEUED.
+Runner einmal rein lesend geprüft: online, idle, vier korrekte Labels. Schon der
+vorige Lauf benötigte einige Minuten bis Zuweisung; keine neue Runner-Diagnose,
+keine Rechteänderung und keinen doppelten Run starten. Bei nächster Fortsetzung
+zuerst Status/Artefakte dieses Laufs lesen und die tatsächliche Ursache weiterer
+Fehler anhand der nun genaueren Seed-Logs prüfen.
 
 ## Letzter nachgewiesener Produktfehler und Korrektur
 

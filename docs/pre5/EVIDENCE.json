@@ -69,7 +69,7 @@
       "fourteen_iPhone_JPEGs"
     ]
   },
-  "latest_application_candidate": "83b11dad16626c01460562caec8dd530ad4bbd42",
+  "latest_application_candidate": "96d538fac1a6c7fa42785e821dbc20cad505b07c",
   "additional_target_acceptance": {
     "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
     "run": 41119010880,
@@ -105,5 +105,18 @@
     "original_NAS_first_inventory_exception": "NOT_ESTABLISHED",
     "four_thousand_and_iPhone": "NOT_RUN"
   },
-  "pending_run": 41121252978
+  "pending_run": 41122388040,
+  "migration_fix_target_acceptance": {
+    "source": "83b11dad16626c01460562caec8dd530ad4bbd42",
+    "run": 41121252978,
+    "new_targets": 49,
+    "failed": 0,
+    "skipped": 0,
+    "focused_passed": 67,
+    "focused_failed": 13,
+    "focused_fix_status": "PENDING_RECHECK",
+    "artifact_id": 13008866591,
+    "sha256": "696fe3695f37dce07cdb10cbb435bdfd3463790d6d104f59e6ae08be936f1529",
+    "downloaded_archive_digest_verified": false
+  }
 }
