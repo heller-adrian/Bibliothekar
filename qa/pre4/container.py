@@ -22,7 +22,7 @@ docker('run','--rm','--network','none','-v',str(ROOT)+':/fixture','--entrypoint'
 # A dedicated internal bridge has no external connectivity; Chromium uses loopback only.
 NETWORK=NAME+'-internal'
 docker('network','create','--internal',NETWORK)
-docker('create','--name',NAME,'--network',NETWORK,'-p','127.0.0.1::8080','--read-only','--tmpfs','/tmp:size=64m,mode=1777',*envargs,*mounts,IMAGE)
+docker('create','--name',NAME,'--network',NETWORK,'--read-only','--tmpfs','/tmp:size=64m,mode=1777',*envargs,*mounts,IMAGE)
 API=r'''
 import http.cookiejar,json,time,urllib.request,urllib.error
 host='http://127.0.0.1:8080';jar=http.cookiejar.CookieJar();browser=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
@@ -127,8 +127,9 @@ try:
     script("import urllib.request,urllib.error\ntry:urllib.request.urlopen('http://127.0.0.1:8080/api/operations/status');raise AssertionError('anonymous diagnostics')\nexcept urllib.error.HTTPError as e:assert e.code==401")
     REPORT['checks']['missing_media_and_unknown_operation_readable_write_fenced']='PASS'
     REPORT['checks']['archives_unchanged']='PASS'
-    port=json.loads(docker('inspect',NAME))[0]['NetworkSettings']['Ports']['8080/tcp'][0]['HostPort']
-    browser=run('node',str(Path(__file__).with_name('browser.cjs')),'http://127.0.0.1:'+port,str(Path(os.environ['RUNNER_TEMP'])/'pre4-browser'),timeout=180)
+    from browser_tunnel import chromium_loopback_tunnel
+    with chromium_loopback_tunnel(docker,NAME,ROOT/'workspace') as port:
+        browser=run('node',str(Path(__file__).with_name('browser.cjs')),'http://127.0.0.1:'+str(port),str(Path(os.environ['RUNNER_TEMP'])/'pre4-browser'),timeout=180)
     REPORT['checks']['chromium_normal_pages_fenced_reads_de_en_mobile_desktop']='PASS'
     REPORT.update(status='PASS',before=before,imported=imported,final=final)
 finally:
