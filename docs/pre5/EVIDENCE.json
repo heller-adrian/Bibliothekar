@@ -105,7 +105,7 @@
     "original_NAS_first_inventory_exception": "NOT_ESTABLISHED",
     "four_thousand_and_iPhone": "NOT_RUN"
   },
-  "pending_run": 41122388040,
+  "pending_run": 41123293238,
   "migration_fix_target_acceptance": {
     "source": "83b11dad16626c01460562caec8dd530ad4bbd42",
     "run": 41121252978,
@@ -118,5 +118,15 @@
     "artifact_id": 13008866591,
     "sha256": "696fe3695f37dce07cdb10cbb435bdfd3463790d6d104f59e6ae08be936f1529",
     "downloaded_archive_digest_verified": false
+  },
+  "latest_QA_candidate": "08cee415a6a5c5a926825048c253891216cfd12b",
+  "last_gate_failure": {
+    "run": 41122388040,
+    "new_targets_passed": 49,
+    "focused_passed": 70,
+    "focused_failed": 10,
+    "cause": "historical seed checks layout before creating declared catalogue/registry",
+    "fix_commit": "08cee415a6a5c5a926825048c253891216cfd12b",
+    "fix_recheck": "PENDING"
   }
 }

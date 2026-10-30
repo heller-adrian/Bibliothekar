@@ -1,15 +1,36 @@
 # Aktueller Einstieg – pre.5, 30.10.2026, aktueller Checkpoint
 
 - Branch: `codex/pre5-operation-recovery`.
-- Neuer Anwendungscode: `96d538fac1a6c7fa42785e821dbc20cad505b07c` (remote gesichert).
+- Aktueller QA-/Buildkandidat: `08cee415a6a5c5a926825048c253891216cfd12b` (remote).
+  Anwendungscode identisch mit `96d538fac1a6c7fa42785e821dbc20cad505b07c`.
   Funktionaler Migrationsfix auf `83b11dad16626c01460562caec8dd530ad4bbd42`;
   danach im App-Code ausschließlich sichtbare Versionskennung in ui_shell geändert.
-- Zuerst Lauf **41122388040** lesen. Er prüft 49 neue Zieltests, danach erweiterte
+- Zuerst Lauf **41123293238** lesen (direkte API mit Cache-Control: no-cache). Er prüft 49 neue Zieltests, danach erweiterte
   fokussierte Regressionen, Container und erst bei Container-SUCCESS den gesamten
   Backend. Frontend läuft ebenfalls nach grünen Zieltests. Keine weitere CI blind
   neu starten. Noch keine Veröffentlichung, kein Publisher vorbereitet/ausgeführt.
-- Fünf-Stunden-Fenster zuletzt 70 %, Woche 26 %; Übergabe rechtzeitig gesichert.
+- Fünf-Stunden-Fenster zuletzt 79 %, Woche 28 %; jetzt geordnet gesicherter Zwischenstand.
   Keine Subagents. Lokale Prüfungen nur Syntax/Quellen; ausführende QA auf Linux.
+
+## Letzter Nachlauf und unmittelbarer nächster Schritt
+
+`41122388040` final FAIL: 49 neue PASS, fokussiert 70 PASS / 10 FAIL. Die drei
+Versions-/Ankerfehler sind behoben. Die verbliebenen Prozess-Seeds lehnten eine
+historische Arbeitswurzel ab, deren deklarierte Kataloge/Registry noch nicht
+angelegt waren (`catalog_unavailable`). `08cee415` provisioniert diese leeren
+Schemas explizit vor dem Layoutcheck; keine Produktprüfung wird umgangen.
+Originale signierte Dateien unberührt; externer Fixture-Plugin und mutable
+recovery_0562-Foundation geändert. Zusätzliche Original-Childlogs werden bei
+weiterem Fehler begrenzt in stdout.log bewahrt. **Noch nicht grün nachgeprüft.**
+
+Aktueller Lauf **41123293238** war zuletzt in_progress. Zuerst direkt lesen:
+`gh api repos/heller-adrian/Bibliothekar/actions/runs/41123293238 -H 'Cache-Control: no-cache'`
+und `/jobs` mit demselben Header. `gh run view/list` zeigte in dieser Session
+wiederholt einen veralteten queued/in_progress-Status, obwohl die direkte API
+bereits completed/failure meldete. Nicht wegen solcher Anzeige neue Runs starten.
+
+Aktueller Bericht: `docs/pre5/TEST-REPORT.md`; SHA-/Artefaktnachweise in EVIDENCE.json.
+Backend-/Container-/4000-/iPhone-Abnahme bleibt offen. Keine Veröffentlichung.
 
 ## Neuester Gate-Befund (nach dem Migrationsfix)
 
