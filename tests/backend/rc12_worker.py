@@ -35,10 +35,10 @@ if case in ('db-header','registry-header'):
 initial=inspect_storage(w,database=m.DATABASE_FILE)
 if case in ('legacy-lock','foreign','symlink'):
     assert not initial['can_initialize'],initial
-    assert initial['state']=='AMBIGUOUS',initial
+    assert initial['state']=='UNAVAILABLE',initial
     m.startup_database();assert m.DATABASE_INITIALIZATION_ERROR
 else:
-    assert initial['state']=='FRESH' and initial['can_initialize'],initial
+    assert initial['state']=='UNAVAILABLE' and initial['can_initialize'],initial
     m.startup_database();assert m.DATABASE_INITIALIZATION_ERROR is None,m.DATABASE_INITIALIZATION_ERROR
 client=TestClient(m.app,base_url='http://127.0.0.1')
 assert client.get('/api/settings/storage-health').status_code==401
@@ -48,7 +48,7 @@ def post(path,payload,status=200):
     r=client.post(path,json=payload,headers=headers);assert r.status_code==status,(path,r.status_code,r.text);return r.json()
 if case in ('legacy-lock','foreign','symlink'):
     assert 'Storage recovery' in client.get('/').text
-    assert client.get('/api/settings/storage-health').json()['state']=='AMBIGUOUS'
+    assert client.get('/api/settings/storage-health').json()['state']=='UNAVAILABLE'
 else:
     assert 'id="create"' in client.get('/').text
     assert m.api_storage_health()['ready']
@@ -61,7 +61,7 @@ else:
         target=w/'Trash';old=w/'saved-trash';target.rename(old)
         if case=='inode':target.mkdir()
         if case=='pending':ro._write(own/'operation-unknown.json',{'preserve':'unresolved'})
-        health=m.api_storage_health();assert health['state']=='DEGRADED' and not health['ready'],health
+        health=m.api_storage_health();assert health['state']=='UNAVAILABLE' and not health['ready'],health
         page=client.get('/').text
         assert ('class="storage-replace"' in page) == (case!='pending'),page
         assert client.post('/api/settings/storage-replace',json={'key':'trash_directory_name','confirmation':'I ACCEPT MISSING FILES'}).status_code==403
@@ -101,7 +101,7 @@ else:
         assert saved.exists()
     if case=='pending-ready':
         ro._write(own/'operation-unrecognized.json',{'preserve':'unresolved'})
-        health=m.api_storage_health();assert not health['ready'] and not health['can_initialize'],health
+        health=m.api_storage_health();assert health['state']=='READY' and not health['operation_health']['writes_allowed'],health
         post('/api/settings/storage-recheck',{},409)
         assert (own/'operation-unrecognized.json').exists()
     if case in ('missing-db','missing-state','missing-registry'):

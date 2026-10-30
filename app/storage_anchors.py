@@ -122,6 +122,8 @@ def pin(workspace):
         problems = issues(root, state)
         if problems:
             raise ro.RootOperationError('structural_anchor_qualification_failed: '+str(problems))
+        from app.storage_config import load_storage_settings
+        state.setdefault('storage_names',load_storage_settings(workspace_root=root))
         current = state.setdefault('structural_anchors', {})
         for name, row in definitions(root, state).items():
             if name in current:

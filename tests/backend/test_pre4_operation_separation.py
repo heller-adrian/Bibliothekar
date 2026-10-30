@@ -177,6 +177,9 @@ def test_loss_confirmed_replacement_retains_anchors(ready,key):
     target=Path(next(p for p,r in state['structural_anchors'].items() if r['role']==key))
     retained=target.with_name(target.name+'-offline');target.rename(retained)
     assert inspect_storage(ws,database=dbs[0])['state']=='UNAVAILABLE'
-    result=replace_managed_directory(ws,dbs[0],reg,key,CONFIRMATION)
+    try:
+        result=replace_managed_directory(ws,dbs[0],reg,key,CONFIRMATION)
+    except ro.RootOperationError as error:
+        raise AssertionError(str(error)+' '+json.dumps(inspect_storage(ws,database=dbs[0]))) from error
     assert result['loss_recorded'] and retained.is_dir()
     assert inspect_storage(ws,database=dbs[0])['state']=='READY',inspect_storage(ws,database=dbs[0])

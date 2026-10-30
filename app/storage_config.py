@@ -86,26 +86,34 @@ def load_storage_settings(*, workspace_root: Path | None = None) -> dict[str, st
     if not isinstance(storage, dict):
         storage = {}
 
+    # Once administration names have been observed under F14, absence of a
+    # German directory must not silently select an empty English replacement.
+    workspace=Path(workspace_root) if workspace_root is not None else Path(os.environ.get('KAMERA_WORKSPACE','/workspace'))
+    from app.root_operations import _control_location,_read
+    pinned=_read(_control_location(workspace)/'state.json',{}).get('storage_names',{})
+    def default(key):
+        return pinned.get(key) or _effective_directory_default(key,workspace_root)
+
     return {
         "backup_directory_name": _clean_name(
             storage.get("backup_directory_name"),
             field="SD-Kartensicherungen",
-            default=_effective_directory_default("backup_directory_name", workspace_root),
+            default=default("backup_directory_name"),
         ),
         "workspaces_directory_name": _clean_name(
             storage.get("workspaces_directory_name"),
             field="Arbeitsbereiche",
-            default=_effective_directory_default("workspaces_directory_name", workspace_root),
+            default=default("workspaces_directory_name"),
         ),
         "metadata_directory_name": _clean_name(
             storage.get("metadata_directory_name"),
             field="Metadatenkorrektur",
-            default=_effective_directory_default("metadata_directory_name", workspace_root),
+            default=default("metadata_directory_name"),
         ),
         "trash_directory_name": _clean_name(
             storage.get("trash_directory_name"),
             field="Papierkorb",
-            default=_effective_directory_default("trash_directory_name", workspace_root),
+            default=default("trash_directory_name"),
         ),
     }
 

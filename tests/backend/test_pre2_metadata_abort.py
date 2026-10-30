@@ -129,7 +129,9 @@ def test_historical_ambiguity_keeps_reservation_and_all_bytes(fixture,fault):
         if fault=='binding':record['bindings'][str(ws)]=[0,0]
         if fault=='nonce':record['reservation_id']='wrong'
         ro._write(operation,record)
-    with database_connection(db) as c:
+    # Controlled corrupt historical fixture; application writes are fenced.
+    import sqlite3
+    with sqlite3.connect(db) as c:
         if fault=='task':c.execute('DELETE FROM metadata_corrections')
         if fault=='library':c.execute('UPDATE metadata_corrections SET detected_json=?',(json.dumps({'library_id':'other'}),))
         if fault=='duplicate':
@@ -151,9 +153,10 @@ def test_interrupted_general_swap_and_exact_reservation_recover(fixture,boundary
     case,ws,reg,db,source=prepare(fixture);before=source.read_bytes()
     published_failure(case,ws,db,source,boundary=boundary)
     record=ro._read(pending(ws)[0])
-    swaps=recover_metadata_swaps(mc.storage_paths(ws)['metadata_root'],allowed_databases={db})
-    assert swaps['blocked']==0,swaps
-    result=recovery.recover_general_outcomes(ws,reg)
+    with ro.reserve(ws,library_id=record['library'],database=db,paths=list(record['bindings']),kind='metadata',ids=record['ids'],expected_generation=tuple(record['generation']),shared=False,_recovery_record=record):
+        swaps=recover_metadata_swaps(mc.storage_paths(ws)['metadata_root'],allowed_databases={db})
+        assert swaps['blocked']==0,swaps
+        result=recovery.recover_general_outcomes(ws,reg)
     assert result[0]['reservation_id']==record['reservation_id'] and pending(ws)==[]
     if boundary=='after-db':assert result[0]['disposition']=='completed' and source.read_bytes()==b'synthetic corrected staging bytes'
     else:assert result[0]['disposition']=='rolled_back' and source.read_bytes()==before
@@ -218,7 +221,11 @@ def test_uncertain_startup_does_not_release_workers(fixture,monkeypatch):
     case,ws,reg,db,source=prepare(fixture);published_failure(case,ws,db,source);source.write_bytes(b'foreign')
     seen=[];monkeypatch.setattr(main,'_start_runtime_workers',lambda:seen.append('unsafe'))
     main.startup_database()
-    assert 'metadata_outcome_' in main.DATABASE_INITIALIZATION_ERROR
+    from app.operation_health import inspect as operation_status
+    assert main.DATABASE_INITIALIZATION_ERROR is None
+    status=operation_status(ws)
+    assert not status['writes_allowed'] and 'metadata_outcome_' in str(status['issues'])
+    assert main.api_storage_health()['state']=='READY'
     assert seen==[] and pending(ws)
 
 

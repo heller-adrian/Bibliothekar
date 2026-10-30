@@ -18,11 +18,12 @@ def test_rc12_lifecycle(tmp_path,case):
     assert json.loads(result.stdout.splitlines()[-1])['status']=='PASS'
 
 
-def test_five_states_and_no_implicit_reset():
+def test_two_global_states_and_no_implicit_reset():
     from app.storage_status import describe
-    for observation,state in [({'ready':True},'READY'),({'can_initialize':True},'FRESH'),
-        ({'can_initialize':True,'initialization_evidence':'resumable_empty_structure'},'INITIALIZING'),
-        ({'issues':[{'code':'missing','path':'/test'}]},'DEGRADED'),
-        ({'issues':[{'code':'history_unknown','path':'/test'}]},'AMBIGUOUS')]:
-        result=describe(observation);assert result['state']==state
+    for observation in ({'ready':True},{'can_initialize':True},
+        {'can_initialize':True,'initialization_evidence':'resumable_empty_structure'},
+        {'issues':[{'code':'missing','path':'/test'}]},
+        {'issues':[{'code':'history_unknown','path':'/test'}]}):
+        result=describe(observation)
+        assert result['state']==('READY' if observation.get('ready') else 'UNAVAILABLE')
         assert result['recovery']['authenticated'] and not result['recovery']['automatic_reset']

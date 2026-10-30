@@ -167,7 +167,8 @@ def test_historical_transfer_counterevidence_preserves_operation(fixture,monkeyp
         if fault=='journal_root':journal['root']='/somewhere/else'
         (protocol/'move-journal.json').write_text(json.dumps(journal))
     if fault in ('job_state','catalogue_path','catalogue_hash','extra_job'):
-        with database_connection(db) as c:
+        with sqlite3.connect(db) as c:
+            c.row_factory=sqlite3.Row
             if fault=='job_state':c.execute("UPDATE jobs SET state='interrupted' WHERE id=?",(job['id'],))
             if fault=='catalogue_path':c.execute("UPDATE files SET current_relative_path='foreign/location.JPG' WHERE job_id=?",(job['id'],))
             if fault=='catalogue_hash':c.execute("UPDATE files SET sha256_current=? WHERE job_id=?",('f'*64,job['id']))
@@ -175,7 +176,7 @@ def test_historical_transfer_counterevidence_preserves_operation(fixture,monkeyp
                 row=dict(c.execute('SELECT * FROM jobs WHERE id=?',(job['id'],)).fetchone());row['id']='GENERAL_IMPORT_foreign'
                 c.execute('INSERT INTO jobs ('+','.join(row)+') VALUES ('+','.join('?' for _ in row)+')',tuple(row.values()))
     if fault.startswith('origin_'):
-        with database_connection(reg) as c:
+        with sqlite3.connect(reg) as c:
             if fault=='origin_missing':c.execute('DELETE FROM source_family_members')
             if fault=='origin_hash':c.execute("UPDATE source_media SET sha256=?",('f'*64,))
     if fault=='protocol_incomplete':
@@ -208,19 +209,25 @@ def test_historical_completed_source_still_present_has_durable_outcome(fixture,m
 
 def test_three_open_operations_are_classified_without_blanket_release(fixture,monkeypatch):
     case,ws,reg,db,source,task,record,job=historical(fixture,monkeypatch)
-    # Two additional, valid durable intents with deliberately unknown domain state.
+    # Construct a historical concurrent state directly in the isolated fixture.
+    # Current admission must NOT be used to create new writes past an orphan.
+    import uuid
+    from app.storage_bootstrap import key_for
+    parent=ro._control_location(ws)
     for kind in ('trash','import'):
-        with pytest.raises(RuntimeError):
-            with ro.reserve(ws,library_id='main',database=db,kind=kind,ids={'function':'unknown_domain','job_id':kind}):raise RuntimeError('simulated interrupted domain')
-    parent=ro._control_location(ws);assert len(list(parent.glob('operation-*.json')))==3
+        extra=dict(record,kind=kind,reservation_id=uuid.uuid4().hex,ids={'function':'unknown_domain','job_id':kind})
+        ro._write(parent/('operation-'+key_for(extra)+'.json'),extra)
     from app.metadata_recovery_status import inspect
     before=inspect(ws,reg)
     assert len(before['operations'])==3 and sum(x['scope']=='single_file_requires_qualification' for x in before['operations'])==1
-    recovery.recover_general_outcomes(ws,reg)
-    assert len(list(parent.glob('operation-*.json')))==2
-    assert all(not x['authorized_to_finish'] for x in inspect(ws,reg)['operations'])
+    preserved={p:p.read_bytes() for p in parent.glob('operation-*.json')}
     seen=[];monkeypatch.setattr(main,'_start_runtime_workers',lambda:seen.append(True))
-    main.startup_database();assert main.DATABASE_INITIALIZATION_ERROR and seen==[]
+    main.startup_database()
+    assert main.DATABASE_INITIALIZATION_ERROR is None and seen==[]
+    assert main.api_storage_health()['state']=='READY'
+    from app.operation_health import inspect as operation_status
+    assert not operation_status(ws)['writes_allowed']
+    assert preserved=={p:p.read_bytes() for p in parent.glob('operation-*.json')}
     with pytest.raises(mc.MetadataCorrectionError):recovery.settle_before_transfer(ws,reg,logs=case/'logs')
 
 
@@ -319,7 +326,7 @@ def test_actual_rc14_timestamp_admission_requires_complete_legacy_chain(fixture,
         else:v['files'][0]['sha256']='f'*64
         p.write_text(json.dumps(v))
     if fault=='job_time':
-        with database_connection(db) as c:c.execute('UPDATE jobs SET created_at=? WHERE id=?',('2000-01-01T00:00:00+01:00',job['id']))
+        with sqlite3.connect(db) as c:c.execute('UPDATE jobs SET created_at=? WHERE id=?',('2000-01-01T00:00:00+01:00',job['id']))
     if fault=='none':
         recovery.recover_general_outcomes(ws,reg)
         assert receipt(ws)['source']['transfer']['admission_kind']=='legacy_verified_copy_chain'
