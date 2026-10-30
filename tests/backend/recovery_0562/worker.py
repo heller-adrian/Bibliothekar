@@ -448,6 +448,8 @@ def startup():
             await asyncio.sleep(.3)
             if main.DATABASE_INITIALIZATION_ERROR:raise RuntimeError('Startup: '+str(main.DATABASE_INITIALIZATION_ERROR))
     asyncio.run(lifecycle())
+    from app.operation_health import inspect as operation_status
+    return {'storage_state':main.api_storage_health()['state'],'operation_health':operation_status(WS)}
 
 
 def operate(kind):

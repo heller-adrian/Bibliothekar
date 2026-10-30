@@ -254,9 +254,10 @@ def test_cleanup_with_unknown_predecessor_preserves_general_and_stage(fixture,mo
     stage=source.parent.parent/'.general-import/J';stage.mkdir(parents=True);copy=stage/NAME;copy.write_bytes(source.read_bytes())
     with pytest.raises(RuntimeError):
         with ro.reserve(ws,library_id='main',database=db,kind='metadata',ids={'function':'unknown_domain'}):raise RuntimeError('interrupted')
-    with ro.reserve(ws,library_id='main',database=db,kind='import',ids={'job_id':'J'},shared=True):
-        result=cleanup(ws,stage,[{'relative_path':NAME,'size_bytes':source.stat().st_size,'sha256':task['output_sha256']}],'J')
-    assert result['removed_file_count']==0 and 'unresolved_predecessor' in result['errors'][0] and source.is_file() and copy.is_file()
+    with pytest.raises(ro.RootOperationError,match='operation_recovery_required'):
+        with ro.reserve(ws,library_id='main',database=db,kind='import',ids={'job_id':'J'},shared=True):pytest.fail('unsafe import admitted')
+    result=cleanup(ws,stage,[{'relative_path':NAME,'size_bytes':source.stat().st_size,'sha256':task['output_sha256']}],'J')
+    assert result['removed_file_count']==0 and result['errors'] and source.is_file() and copy.is_file()
 
 
 def test_successful_outcome_sigkill_is_idempotently_recovered(fixture,monkeypatch):

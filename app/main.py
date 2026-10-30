@@ -2333,6 +2333,7 @@ def _coordinate_startup(fn):
                 pin(WORKSPACE_PATH)
             structural_phase=False
             if not preflight.get('can_initialize'):
+                _quiesce_runtime_for_recovery()
                 operation_health.recover_known_before_startup(WORKSPACE_PATH,REGISTRY_DATABASE_FILE,LOG_PATH)
             from app.root_operations import _registered
             from app.storage_config import load_storage_settings
@@ -2395,6 +2396,20 @@ def _coordinate_startup(fn):
                 operation_health.failed(WORKSPACE_PATH,'startup-recovery',error)
                 print('Operation recovery pending: '+str(error),flush=True)
     return coordinated
+
+
+def _quiesce_runtime_for_recovery():
+    """Never replay domain recovery beside a live writer or an idle job claimer."""
+    from app import operation_health
+    if any(r['live'] for r in operation_health.inspect(WORKSPACE_PATH)['reservations']):
+        raise operation_health.DomainStartupError('recovery_waits_for_live_operation')
+    for event in (WORKER_STOP,CANCEL_WORKER_STOP,RELEASE_WORKER_STOP):event.set()
+    CANCEL_WORKER_WAKE.set();RELEASE_WORKER_WAKE.set()
+    from threading import current_thread
+    for thread in (WORKER_THREAD,CANCEL_WORKER_THREAD,RELEASE_WORKER_THREAD):
+        if thread is not None and thread is not current_thread() and thread.is_alive():
+            thread.join(timeout=5)
+            if thread.is_alive():raise operation_health.DomainStartupError('recovery_waits_for_worker_exit')
 
 
 def _prepare_technical_storage():

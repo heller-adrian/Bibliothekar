@@ -61,6 +61,12 @@ jobs:
           docker pull "$PRE1_IMAGE"
           docker pull "$RC14_IMAGE"
           docker image inspect "$IMAGE" > "$QA_WORK/candidate-image.json"
+      - name: Isolated Chromium tooling
+        run: |
+          set -euo pipefail
+          npm install --prefix "$QA_WORK/browser-tools" playwright@1.62.1
+          "$QA_WORK/browser-tools/node_modules/.bin/playwright" install chromium
+          printf 'NODE_PATH=%s/browser-tools/node_modules\n' "$QA_WORK" >> "$GITHUB_ENV"
       - name: Real API, supervisor, web termination, container restart and protected reads
         run: |
           set -euo pipefail
@@ -79,6 +85,8 @@ jobs:
           path: |
             ${{ env.QA_WORK }}/*.xml
             ${{ env.QA_WORK }}/*.log
+            ${{ env.QA_WORK }}/pre4-browser/*
+            ${{ env.QA_WORK }}/pre4-historical/*.log
           retention-days: 30
       - name: Remove only this run's temporary registry credentials
         if: always() && env.DOCKER_CONFIG != ''

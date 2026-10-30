@@ -8,7 +8,7 @@ F14 identity/generation/journal checks always remain in force.
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-import fcntl,json,os,stat
+import fcntl,os,stat
 
 _RECOVERING=ContextVar('operation_recovery_session',default=False)
 _FAILURES={}
@@ -60,15 +60,21 @@ def inspect(workspace):
     root=Path(workspace).absolute();entries=[]
     try:parent=ro._control_location(root)
     except Exception as error:return {'writes_allowed':False,'issues':[{'detail':str(error),'scope':'workspace'}],'reservations':[],'blocked_scopes':['workspace'],'storage_state_independent':True}
-    active={r.get('reservation_id') for r in ro._ACTIVE.get()}
+    active={str(r['_path']):{k:v for k,v in r.items() if not k.startswith('_')} for r in ro._ACTIVE.get()}
     for path in sorted(parent.glob('operation-*.json')):
         item={'path':str(path),'scope':'workspace','live':False,'qualified':False}
         try:
             r=ro._read(path)
+            nonce=r.get('reservation_id')
             if (r.get('format')!=1 or r.get('workspace')!=str(root) or not isinstance(r.get('ids'),dict)
+                or not isinstance(r.get('kind'),str) or not isinstance(r.get('library'),str)
+                or not isinstance(r.get('bindings'),dict) or not isinstance(nonce,str)
+                or len(nonce)!=32 or any(c not in '0123456789abcdef' for c in nonce)
+                or not isinstance(r.get('generation'),list) or len(r['generation'])!=2
+                or any(type(g) is not int or g<0 for g in r['generation'])
                 or path.name!='operation-'+key_for(r)+'.json'):raise ValueError('operation record/key invalid')
             item.update({k:r.get(k) for k in ('kind','library','database','ids','reservation_id','generation')})
-            item['live']=r.get('reservation_id') in active or _live(path)
+            item['live']=active.get(str(path))==r or _live(path)
             if r.get('kind')=='metadata' and r.get('ids',{}).get('area')=='general':
                 item['affected']={'area':'metadata_general','relative_path':r['ids'].get('relative_path'),'library':r.get('library')}
             item['qualified']=True  # Record syntax only; NEVER completion authority.

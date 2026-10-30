@@ -61,12 +61,13 @@ def prepare():
     base = root()
     if base is None: return
     manifest = _json(base/'instance.json') if base.is_dir() else None
-    if manifest and manifest.get('phase')=='ready':
+    if manifest:
         for name in ('config','database','logs','removable-sources'):
             path=base/name
             if not path.is_dir() or path.is_symlink():raise OSError('required_appdata_directory_missing: '+str(path))
-        settings=Path(os.environ['KAMERA_CONFIG'])
-        if not settings.is_file() or settings.is_symlink():raise OSError('required_configuration_missing: '+str(settings))
+        if manifest.get('phase')=='ready':
+            settings=Path(os.environ['KAMERA_CONFIG'])
+            if not settings.is_file() or settings.is_symlink():raise OSError('required_configuration_missing: '+str(settings))
     from app.private_storage_security import qualified
     if not base.is_dir(): raise OSError('appdata_unavailable: '+str(base))
     if str(base) == '/appdata' and (mount(base) or {}).get('target') != str(base):

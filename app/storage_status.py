@@ -10,6 +10,8 @@ class State(StrEnum):
 def describe(observation):
     result = dict(observation)
     issues = result.get('issues',[])
+    if result.get('can_initialize'):
+        result['ready']=False  # Technical setup is not completed yet.
     state = State.READY if result.get('ready') else State.UNAVAILABLE
     result['state'] = state.value
     # Setup progress is not a third storage state.

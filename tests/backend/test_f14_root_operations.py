@@ -200,7 +200,12 @@ def test_f14_true_sigkill_preserves_reservation_and_blocks_changes(fixture,actio
             for k,v in saved.items():
                 if v is None:os.environ.pop(k,None)
                 else:os.environ[k]=v
-        assert start['returncode']!=0,start
+        if action=='reserve':
+            assert start['returncode']==0,start
+            observed=start['result']['result']
+            assert observed['storage_state']=='READY' and not observed['operation_health']['writes_allowed'],observed
+        else:
+            assert start['returncode']!=0,start
         snapshot(case,ev/f'after-restart{n}.json')
     assert list(parent.glob('operation-*.json')) if action=='reserve' else (parent/'mutation.json').exists()
     originals=list(ws.rglob('original.JPG'));assert len(originals)==2

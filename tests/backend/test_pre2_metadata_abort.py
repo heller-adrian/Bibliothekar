@@ -153,10 +153,8 @@ def test_interrupted_general_swap_and_exact_reservation_recover(fixture,boundary
     case,ws,reg,db,source=prepare(fixture);before=source.read_bytes()
     published_failure(case,ws,db,source,boundary=boundary)
     record=ro._read(pending(ws)[0])
-    with ro.reserve(ws,library_id=record['library'],database=db,paths=list(record['bindings']),kind='metadata',ids=record['ids'],expected_generation=tuple(record['generation']),shared=False,_recovery_record=record):
-        swaps=recover_metadata_swaps(mc.storage_paths(ws)['metadata_root'],allowed_databases={db})
-        assert swaps['blocked']==0,swaps
-        result=recovery.recover_general_outcomes(ws,reg)
+    result=recovery.recover_general_outcomes(ws,reg,physical=True)
+    assert not list((mc.storage_paths(ws)['metadata_root']/'.swap-journals').glob('*.json'))
     assert result[0]['reservation_id']==record['reservation_id'] and pending(ws)==[]
     if boundary=='after-db':assert result[0]['disposition']=='completed' and source.read_bytes()==b'synthetic corrected staging bytes'
     else:assert result[0]['disposition']=='rolled_back' and source.read_bytes()==before

@@ -183,3 +183,30 @@ def test_loss_confirmed_replacement_retains_anchors(ready,key):
         raise AssertionError(str(error)+' '+json.dumps(inspect_storage(ws,database=dbs[0]))) from error
     assert result['loss_recorded'] and retained.is_dir()
     assert inspect_storage(ws,database=dbs[0])['state']=='READY',inspect_storage(ws,database=dbs[0])
+
+
+@pytest.mark.parametrize('kind',['missing_media','hash_conflict','transfer_proof','failed_job'])
+def test_domain_startup_errors_never_become_storage_failure_or_new_startup_intent(ready,monkeypatch,kind):
+    from app import main
+    _,ws,_,dbs,_=ready
+    def domain():
+        if kind=='missing_media':raise FileNotFoundError('single synthetic medium missing')
+        if kind=='hash_conflict':raise ro.RootOperationError('individual media hash mismatch')
+        if kind=='transfer_proof':raise operations.DomainStartupError('metadata_transfer_admission_missing_or_ambiguous')
+        raise ValueError('single import result conflict')
+    monkeypatch.setattr(main,'_start_runtime_workers',lambda:pytest.fail('unqualified worker release'))
+    main._coordinate_startup(domain)()
+    assert main.DATABASE_INITIALIZATION_ERROR is None
+    assert main.api_storage_health()['state']=='READY'
+    assert not operations.inspect(ws)['writes_allowed']
+    assert not list(ro._control_location(ws).glob('operation-*.json'))
+
+
+def test_existing_connection_cannot_reuse_old_write_authorization(ready):
+    import sqlite3
+    from app.database import database_connection
+    _,ws,_,dbs,_=ready
+    with database_connection(dbs[0]) as c:
+        c.execute('DELETE FROM files');c.commit()
+        orphan(ws,dbs[0])
+        with pytest.raises(sqlite3.DatabaseError):c.execute('DELETE FROM files')
