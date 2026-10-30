@@ -221,7 +221,7 @@ print(json.dumps(job))
         'selected_family_ids':[independent[0]['family_id']]})+")))")
     event=created['parent_event']['id']
     confirmation=json.loads(script("import json;from app.sort_apply import CONFIRMATION_PHRASE;print(json.dumps(CONFIRMATION_PHRASE))"))
-    api("plan=api('/api/jobs/"+imported_job+"/events/"+event+"/sort-plan');result=api('/api/jobs/"+imported_job+"/events/"+event+"/apply-sort',{'plan_token':plan['plan_token'],'confirmation_phrase':"+repr(confirmation)+"},202)\nfor _ in range(240):\n run=api('/api/jobs/"+imported_job+"/sort-runs/'+result['run']['id'])\n if run['status'] in ('completed','blocked','failed','rollback_failed'):break\n time.sleep(.25)\nassert run['status']=='completed',run\nprint(json.dumps(run['status']))")
+    api("plan=api('/api/jobs/"+imported_job+"/events/"+event+"/sort-plan');result=api('/api/jobs/"+imported_job+"/events/"+event+"/apply-sort',{'plan_token':plan['plan_token'],'confirmation_phrase':"+repr(confirmation)+"},202)\nfor _ in range(240):\n run=api('/api/jobs/"+imported_job+"/sort-runs/'+result['run']['id'])\n if run.get('terminal'):break\n time.sleep(.25)\nassert run['status']=='applied' and run['progress_percent']==100 and run['completed_at'] and run['error_message'] is None,run\nassert run['verified_file_count']==run['file_count'] and run['moved_file_count']==run['move_count'],run\nprint(json.dumps(run['status']))")
     for _ in range(2):
         docker('restart',NAME)
         assert api("print(json.dumps(api('/api/settings/storage-health')))")['state']=='READY'

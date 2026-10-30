@@ -241,3 +241,16 @@ vorhanden und bleibt außerhalb sämtlicher Commits.
 **Freigabestatus: NICHT ERTEILT DURCH TESTERGEBNISSE / NICHT VERÖFFENTLICHT.**
 Native TrueNAS-/NFSv4-, physische SD-/USB- und echte DNG-1.7-Schreibtests: NOT_RUN.
 Kein Zugriff auf NAS, keine Datenbereinigung, keine Änderung früherer Releases.
+
+## Fortsetzung: Sortierstatus im Container (2026-10-30)
+
+Neues Kontingentfenster: fünf Stunden 0 %, Woche 15 %; Checkpoint künftig bereits
+bei 70 % des Fünf-Stunden-Fensters beginnen, um rechtzeitig fertig zu sichern.
+`41080385540` auf Anwendungscode `969bc49f`: Zieljob SUCCESS, Containerjob FAIL.
+Nachgewiesen falsche QA-Annahme: `sort_runs.status` ist erfolgreich `applied`,
+nicht `completed`. `TERMINAL_RUN_STATUSES`, der tatsächliche SQL-Abschluss in
+`sort_apply.py` und API-Ausgabe stimmen überein: terminal=true, progress=100,
+completed_at vorhanden, error_message=NULL, verified/moved counts vollständig.
+Nur QA korrigiert: auf terminal warten, anschließend exakt applied und sämtliche
+Abschluss-/Zählerbedingungen verlangen. Kein Produktstatus umgedeutet.
+Nächster Lauf führt nach kurzen Gates die historische Stufe und Containerstufe aus.
