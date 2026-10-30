@@ -23,5 +23,12 @@ def complete_historical_storage(monkeypatch):
             metadata=workspace/'Metadatenkorrektur'
             for kind in ('metadata_general','metadata_multiple'):
                 (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
+            # The original worker creates a legacy work folder before its
+            # layout check. Supply its declared empty schemas before seed;
+            # do not bypass the missing-catalogue protection in production.
+            from app.database import initialize_database
+            from app.library_registry import initialize_library_registry
+            initialize_database(Path(command[2])/'kamera.sqlite3')
+            initialize_library_registry(Path(command[2])/'registry.sqlite3')
         return actual(command,*args,**kwargs)
     monkeypatch.setattr(subprocess,'Popen',launch)

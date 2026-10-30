@@ -10,5 +10,9 @@ for key,value in {'KAMERA_WORKSPACE':'workspace','KAMERA_CONFIG':'settings.json'
 choices={'f16':'test_remaining.py::test_inventory_during_sort','f16_public':'test_combinations.py::test_public_inventory_during_sort','f20':'test_final_combinations.py::test_parallel_library_plans_and_promotion'}
 args=[sys.executable,str(original/'runner.py'),'-q','-p','no:cacheprovider','--import-mode=importlib','--basetemp',str(root/'pytest'),'--junitxml',str(root/'result.xml'),str(original/choices[case])]
 with (root/'stdout.log').open('w') as log:r=subprocess.run(args,env=env,cwd=source,stdout=log,stderr=subprocess.STDOUT,timeout=180)
+if r.returncode:
+ with (root/'stdout.log').open('a') as log:
+  for path in sorted(root.rglob('process.log'))[:12]:
+   log.write('\nHistorical child log: '+str(path.relative_to(root))+'\n'+path.read_text()[-6000:])
 (root/'execution.json').write_text(json.dumps({'argv':args,'returncode':r.returncode,'source':str(source),'historical_auth_bypass':True,'TMPDIR':str(temp)},indent=2))
 raise SystemExit(r.returncode)

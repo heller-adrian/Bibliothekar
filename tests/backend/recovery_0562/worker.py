@@ -69,6 +69,9 @@ def foundation():
     for kind in ('metadata_general','metadata_multiple'):
         (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
     (WS/'Arbeitsbereich').mkdir(exist_ok=True)
+    # This is an explicitly provisioned historical installation. Its legacy
+    # work folder must never be mistaken for an empty DB-less new bootstrap.
+    initialize_database(DB);initialize_library_registry(REG)
     ensure_workspace_layout(WS,configured_main_work_root=WS/'Arbeitsbereich')
     initialize_database(DB);initialize_library_registry(REG)
     adopt_main_library(REG,database_path=DB,workspace_root=WS,work_root=WS/'Arbeitsbereich',archive_root=case/'archive')
