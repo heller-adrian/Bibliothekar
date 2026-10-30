@@ -232,6 +232,15 @@ def test_domain_constraint_failure_is_not_database_corruption():
     assert not operations.technical_failure(sqlite3.IntegrityError('UNIQUE constraint failed: media'))
 
 
+def test_mutable_task_row_alone_cannot_narrow_historical_apply(ready,monkeypatch):
+    from tests.backend.test_pre3_metadata_transfer import completed
+    from app.operation_scopes import resources
+    _,ws,_,db,source,task=completed(ready,monkeypatch)
+    candidate={'kind':'metadata','library':'main','database':str(db),'ids':{
+        'function':'app.metadata_correction.apply_metadata_correction','correction_id':task['id']}}
+    assert resources(candidate)=={'metadata','library:main','central_stock'}
+
+
 def test_real_pre4_failed_scan_is_retained_then_qualified(ready):
     from app.observation_recovery import recover
     case,ws,_,dbs,_=ready

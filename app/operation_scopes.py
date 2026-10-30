@@ -20,6 +20,9 @@ def resources(record):
     extra=record.get('effect_resources',[])
     if not isinstance(extra,list) or any(not isinstance(r,str) or not r for r in extra):
         return frozenset({'workspace'})
+    if any(r not in {'workspace','libraries','central_stock','trash','metadata'}
+           and not r.startswith(('library:','metadata/general/')) for r in extra):
+        return frozenset({'workspace'})
     return baseline | frozenset(extra)
 
 
@@ -50,7 +53,7 @@ def _resources(record):
             from app.metadata_abort_recovery import _task_rows
             try:
                 tasks = _task_rows(record['database'], 'id=?', (ids.get('correction_id'),))
-                general = len(tasks) == 1 and tasks[0]['area'] == 'general'
+                general = len(tasks) == 1 and tasks[0]['area'] == 'general' and _bound_general_task(record,tasks[0])
                 if general:relative=tasks[0]['source_relative_path']
             except Exception:
                 return frozenset({'workspace'})
@@ -138,6 +141,31 @@ def _own_live_general_journal(path, metadata):
         return not path.exists() and not path.is_symlink()
     except Exception:
         return False
+    return False
+
+
+def _bound_general_task(record,task):
+    """Mutable SQLite task fields alone cannot narrow a historical APPLY."""
+    from app import root_operations as ro
+    from pathlib import Path
+    candidates=[record] if record.get('reservation_id') else list(ro._ACTIVE.get())
+    for original in candidates:
+        if original.get('database')!=record.get('database') or original.get('library')!=record.get('library'):
+            continue
+        try:
+            owner=ro._registered(Path(record['database']))
+            if not owner:continue
+            parent=ro._control_location(owner['workspace_root'])
+            plan=ro._read(parent/('metadata-intent-'+original['reservation_id']+'.json'),None)
+            if not plan:continue
+            if any(plan['reservation'].get(k)!=original.get(k) for k in
+                   ('kind','library','database','ids','generation','reservation_id')):continue
+            if all(plan['task'].get(k)==task.get(k) for k in (
+                'id','area','source_path','source_relative_path','source_size_bytes',
+                'source_sha256','media_type','proposed_datetime','created_at')):
+                return plan['task']['area']=='general'
+        except Exception:
+            continue
     return False
 
 

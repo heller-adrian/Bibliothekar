@@ -316,7 +316,11 @@ def _guard_workspace_connection(connection, workspace, *, library=None, registry
                 from app.operation_scopes import current
                 candidate=current(str(Path(workspace).absolute()))
                 extra=set()
-                if str(arg1 or '').startswith(('metadata_', 'batch_metadata_')):
+                # Per-file EXIF candidates are catalogue data (and FK children
+                # of files), not General correction tasks. A legitimate trash
+                # DELETE must be able to cascade those unrelated candidates.
+                table=str(arg1 or '')
+                if table!='metadata_candidates' and table.startswith(('metadata_', 'batch_metadata_')):
                     extra.add('metadata')
                 if 'trash' in str(arg1 or ''):
                     extra.add('trash')
