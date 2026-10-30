@@ -210,3 +210,55 @@ def test_existing_connection_cannot_reuse_old_write_authorization(ready):
         c.execute('DELETE FROM files');c.commit()
         orphan(ws,dbs[0])
         with pytest.raises(sqlite3.DatabaseError):c.execute('DELETE FROM files')
+
+
+def test_recovering_live_lease_cannot_release_other_request_writes(ready):
+    import threading
+    _,ws,_,dbs,_=ready
+    observations=[]
+    @operations.startup_session(lambda:ws)
+    def recovery():
+        with ro.reserve(ws,library_id='main',database=dbs[0],kind='metadata',ids={'id':'synthetic-recovery'}):
+            def other_request():
+                status=operations.inspect(ws)
+                assert not status['writes_allowed']
+                assert any(i['phase']=='recovery_in_progress' for i in status['issues'])
+                with pytest.raises(ro.RootOperationError):operations.require_write(ws)
+                observations.append(inspect_storage(ws,database=dbs[0])['state'])
+            thread=threading.Thread(target=other_request);thread.start();thread.join(5)
+            assert not thread.is_alive()
+    recovery()
+    assert observations==['READY'] and operations.inspect(ws)['writes_allowed']
+
+
+def test_technical_sqlite_startup_failure_keeps_authenticated_recovery_server(ready,monkeypatch):
+    import sqlite3
+    from app import main
+    _,ws,_,_,_=ready
+    def fail():raise sqlite3.DatabaseError('synthetic SQLite structural failure')
+    monkeypatch.setattr(main,'_prepare_technical_storage',fail)
+    main._coordinate_startup(lambda:pytest.fail('domain work past failed schema'))()
+    assert main.DATABASE_INITIALIZATION_ERROR
+    assert main.api_storage_health()['state']=='UNAVAILABLE'
+    assert list(ro._control_location(ws).glob('operation-*.json'))
+
+
+def test_technical_only_startup_retries_original_nonce(ready,monkeypatch):
+    from app import main
+    _,ws,_,_,_=ready
+    prepare=main._prepare_technical_storage
+    def fail():
+        prepare()
+        raise OSError('synthetic interruption after schema preparation')
+    monkeypatch.setattr(main,'_prepare_technical_storage',fail)
+    monkeypatch.setattr(main,'_start_runtime_workers',lambda:None)
+    main._coordinate_startup(lambda:None)()
+    path=next(ro._control_location(ws).glob('operation-*.json'))
+    original=ro._read(path)
+    assert original['ids']==operations._TECHNICAL_STARTUP_IDS
+    monkeypatch.setattr(main,'_prepare_technical_storage',prepare)
+    main._coordinate_startup(lambda:None)()
+    assert main.DATABASE_INITIALIZATION_ERROR is None and not path.exists()
+    proof=ro._read(path.parent/('finished-'+original['reservation_id']+'.json'))
+    assert proof['reservation']==original
+    assert main.api_storage_health()['state']=='READY' and operations.inspect(ws)['writes_allowed']

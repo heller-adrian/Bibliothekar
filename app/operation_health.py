@@ -8,10 +8,14 @@ F14 identity/generation/journal checks always remain in force.
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-import fcntl,os,stat
+import fcntl,hashlib,json,os,stat
+from threading import RLock
 
 _RECOVERING=ContextVar('operation_recovery_session',default=False)
 _FAILURES={}
+_RECOVERY_WORKSPACES={}
+_STATUS_LOCK=RLock()
+_TECHNICAL_STARTUP_IDS={'technical_setup':True,'protocol':'pre4'}
 _READ_ONLY=ContextVar('operation_read_only',default=False)
 _RETRIES=ContextVar('operation_qualified_retries',default=())
 
@@ -20,14 +24,16 @@ class TechnicalStartupError(RuntimeError):pass
 class DomainStartupError(RuntimeError):pass
 
 
-def reset(workspace):_FAILURES.pop(str(Path(workspace).absolute()),None)
+def reset(workspace):
+    with _STATUS_LOCK:_FAILURES.pop(str(Path(workspace).absolute()),None)
 
 
 def failed(workspace,phase,error):
     key=str(Path(workspace).absolute())
     item={'phase':phase,'detail':str(error),'scope':'workspace','reason':'effect_scope_requires_qualification'}
-    bucket=_FAILURES.setdefault(key,[])
-    if item not in bucket:bucket.append(item)
+    with _STATUS_LOCK:
+        bucket=_FAILURES.setdefault(key,[])
+        if item not in bucket:bucket.append(item)
 
 
 @contextmanager
@@ -77,10 +83,14 @@ def inspect(workspace):
             item['live']=active.get(str(path))==r or _live(path)
             if r.get('kind')=='metadata' and r.get('ids',{}).get('area')=='general':
                 item['affected']={'area':'metadata_general','relative_path':r['ids'].get('relative_path'),'library':r.get('library')}
+            item['record_sha256']=hashlib.sha256(json.dumps(r,sort_keys=True).encode()).hexdigest()
             item['qualified']=True  # Record syntax only; NEVER completion authority.
         except Exception as error:item['detail']=str(error)
         entries.append(item)
-    issues=list(_FAILURES.get(str(root),[]))
+    with _STATUS_LOCK:
+        issues=list(_FAILURES.get(str(root),[]))
+        if _RECOVERY_WORKSPACES.get(str(root)) and not _RECOVERING.get():
+            issues.append({'phase':'recovery_in_progress','scope':'workspace','detail':'Recovery holds write admission until qualification and startup finish.'})
     orphan=[r for r in entries if not r['live']]
     return {'writes_allowed':not orphan and not issues,'issues':issues,'reservations':entries,
             'blocked_scopes':['workspace'] if orphan or issues else [],
@@ -96,7 +106,7 @@ def require_write(workspace,*,candidate=None):
     # Explicitly qualified retry capabilities are bound to unchanged records.
     retry=dict(_RETRIES.get())
     dead=[r for r in status['reservations'] if not r['live']]
-    if retry and dead and all(r['qualified'] and retry.get(r['path'])==r.get('reservation_id') for r in dead):return
+    if retry and dead and not any(i.get('phase')=='recovery_in_progress' for i in status['issues']) and all(r['qualified'] and retry.get(r['path'])==(r.get('reservation_id'),r.get('record_sha256')) for r in dead):return
     # Exact original retries still run their original domain qualification.
     dead=[r for r in status['reservations'] if not r['live']]
     if candidate and not status['issues'] and dead and all(
@@ -106,12 +116,25 @@ def require_write(workspace,*,candidate=None):
                                  str((dead or status['issues'])[0]))
 
 
-def startup_session(function):
+def startup_session(workspace_provider):
+    """Other request/worker contexts cannot mistake a recovering lease for a
+    normal live operation and write beside its temporarily active kernel lock.
+    """
     from functools import wraps
-    @wraps(function)
-    def call(*args,**kwargs):
-        with recovery_session():return function(*args,**kwargs)
-    return call
+    def decorate(function):
+        @wraps(function)
+        def call(*args,**kwargs):
+            key=str(Path(workspace_provider()).absolute())
+            with _STATUS_LOCK:_RECOVERY_WORKSPACES[key]=_RECOVERY_WORKSPACES.get(key,0)+1
+            try:
+                with recovery_session():return function(*args,**kwargs)
+            finally:
+                with _STATUS_LOCK:
+                    remaining=_RECOVERY_WORKSPACES[key]-1
+                    if remaining:_RECOVERY_WORKSPACES[key]=remaining
+                    else:_RECOVERY_WORKSPACES.pop(key)
+        return call
+    return decorate
 
 
 def technical_failure(error):
@@ -120,11 +143,32 @@ def technical_failure(error):
     return isinstance(error,(TechnicalStartupError,sqlite3.DatabaseError,DatabaseError))
 
 
-def recover_known_before_startup(workspace,registry,logs):
+def recover_known_before_startup(workspace,registry,logs,*,database=None):
     """Unknown intents never permit ordinary migrations/backfill as recovery."""
     current=inspect(workspace)
     dead=[r for r in current['reservations'] if not r['live']]
     if not dead:return
+    # A pre4 technical-only lease can repeat its exact schema preparation. Old
+    # startup ids={} included domain writes and must never gain this authority.
+    if len(dead)==1 and dead[0].get('kind')=='startup' and dead[0].get('ids')==_TECHNICAL_STARTUP_IDS:
+        from app import root_operations as ro
+        from app.storage_config import load_storage_settings
+        path=Path(dead[0]['path'])
+        with ro._lock(path.with_suffix('.lock'),exclusive=True):
+            record=ro._read(path,{})
+            if database is None or hashlib.sha256(json.dumps(record,sort_keys=True).encode()).hexdigest()!=dead[0]['record_sha256']:
+                raise DomainStartupError('technical_startup_reservation_changed')
+            state=ro._read(path.parent/'state.json',{})
+            owner=ro._registered(Path(database)) if database is not None else None
+            required={str(Path(workspace).absolute()),*(str(Path(workspace)/n) for n in load_storage_settings(workspace_root=Path(workspace)).values())}
+            if owner and owner.get('is_registered',True):required.add(owner['work_root'])
+            if (record.get('library')!='main' or record.get('database')!=str(Path(database).absolute())
+                or record.get('generation')!=[state.get('generation'),state.get('libraries',{}).get('main',0)]
+                or set(record.get('bindings',{}))!=required
+                or any(v is None or state.get('bindings',{}).get(k)!=v for k,v in record['bindings'].items())):
+                raise DomainStartupError('technical_startup_reservation_not_qualified')
+            ro._check(record['bindings'])
+            return record
     known={'app.metadata_correction.execute_metadata_correction','app.metadata_correction.apply_metadata_correction'}
     if not all(r['qualified'] and r.get('kind')=='metadata' and r.get('ids',{}).get('function') in known for r in dead):
         raise DomainStartupError('unresolved_operation_scope: safe read views remain available; '+str(dead))
@@ -161,9 +205,9 @@ def qualified_retry(workspace, paths):
     from app.root_operations import RootOperationError
     status=inspect(workspace)
     dead=[r for r in status['reservations'] if not r['live']]
-    if not dead or any(not r['qualified'] or r['path'] not in paths for r in dead):
+    if any(i.get('phase')=='recovery_in_progress' for i in status['issues']) or not dead or any(not r['qualified'] or r['path'] not in paths for r in dead):
         raise RootOperationError('retry_has_other_unresolved_effects')
-    token=_RETRIES.set(tuple((r['path'],r['reservation_id']) for r in dead))
+    token=_RETRIES.set(tuple((r['path'],(r['reservation_id'],r['record_sha256'])) for r in dead))
     try:yield
     finally:_RETRIES.reset(token)
 

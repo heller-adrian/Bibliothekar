@@ -553,9 +553,13 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
     library_id = str(library_id)
     database=Path(database).absolute() if database is not None else None
     shared = bool(library_id == 'shared' or kind in {'startup', 'trash', 'backup'}) if shared is None else shared
-    if _recovery_record is not None and (kind != 'metadata' or (ids or {}).get('function') not in {
-            'app.metadata_correction.execute_metadata_correction', 'app.metadata_correction.apply_metadata_correction'}):
-        raise RootOperationError('Fachliche Wiederaufnahme ist nicht für diesen Auftrag freigegeben.')
+    if _recovery_record is not None:
+        from app.operation_health import _TECHNICAL_STARTUP_IDS
+        metadata_retry=kind=='metadata' and (ids or {}).get('function') in {
+            'app.metadata_correction.execute_metadata_correction','app.metadata_correction.apply_metadata_correction'}
+        technical_retry=kind=='startup' and ids==_TECHNICAL_STARTUP_IDS
+        if not (metadata_retry or technical_retry):
+            raise RootOperationError('Fachliche Wiederaufnahme ist nicht für diesen Auftrag freigegeben.')
     nested = next((r for r in _ACTIVE.get() if r['workspace']==str(root) and r['library']==library_id), None)
     if nested:
         if _recovery_record is not None:

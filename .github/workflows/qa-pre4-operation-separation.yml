@@ -45,6 +45,40 @@ jobs:
             tests/backend/test_pre_metadata.py tests/backend/test_pre_metadata_retry.py \
             tests/backend/test_pre_startup_performance.py tests/backend/test_rc12_storage.py \
             tests/backend/test_f14_root_operations.py tests/backend/test_f14_admission.py 2>&1 | tee "$QA_WORK/historical.log"
+      - name: Preserve evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre4-targeted-${{ github.run_attempt }}
+          path: |
+            ${{ env.QA_WORK }}/*.xml
+            ${{ env.QA_WORK }}/*.log
+          retention-days: 30
+  container:
+    needs: targeted
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre4-container-${{ github.run_id }}
+    env:
+      PRE2_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:b9434137951a8f1e40de047bed6e3d8ee3be425e079b92aa6df9ec491c982c13
+      PRE1_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:cbaa863fb6173736bcd43e917de994fadba3d05cc69c1688c618fad21d8a17b8
+      RC14_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:86991ef46f1f29a990b63ea3983b1193adfe378247d1202e41fdfd7e21d44b9b
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: ${{ github.workspace }}/pre4-container-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre4-container-${{ github.run_id }}
+      - name: Isolated container scratch directory
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre4-container.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
       - name: Build one isolated candidate and pull immutable historical fixtures
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -81,9 +115,9 @@ jobs:
         if: always() && env.QA_WORK != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: pre4-operation-separation-evidence
+          name: pre4-container-${{ github.run_attempt }}
           path: |
-            ${{ env.QA_WORK }}/*.xml
+            ${{ env.QA_WORK }}/*.json
             ${{ env.QA_WORK }}/*.log
             ${{ env.QA_WORK }}/pre4-browser/*
             ${{ env.QA_WORK }}/pre4-historical/*.log

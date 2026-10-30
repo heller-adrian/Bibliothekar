@@ -56,3 +56,12 @@ bevor diese gezielten Prüfungen bestanden sind.
   Fachfehler erzeugt dadurch keinen zusätzlichen technischen Startup-Altvorgang.
 - Zusätzliche Schreibbarrieren für Datenbank/Registry, explizit qualifizierte
   Original-Recovery, Verwaltungsunteranker und Integritätsprüfung in Arbeit.
+
+- Lauf 40981050859, Anwendung 78d453a3: 25 neue Vertragstests bestanden;
+  historische Auswahl 141 bestanden / 7 fehlgeschlagen (345,31 s).
+  Vier falsch verschachtelte Test-Recoveries auf die echte physische Original-
+  Recovery umgestellt; frühere globale Startup-Erwartungen durch READY plus
+  nachgewiesene Schreibsperre ersetzt. Unfertige technische Einrichtung meldet
+  bis zum Abschluss UNAVAILABLE. Lauf auf 08d177eb prüft diese Änderungen.
+- Chromium-Prüfung der tatsächlichen, authentifizierten normalen Anwendung
+  (DE/EN, mobil/Desktop) im isolierten Container ergänzt, noch ausstehend.

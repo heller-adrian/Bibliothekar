@@ -138,7 +138,9 @@ def _inspect_storage(workspace, *, database=None):
         if pinned and names!=pinned:
             issues.append({'code':'configuration_changed','path':str(root)})
         expected=pinned or names
-        tree_observation = {'empty':False,'issues':[]} if state.get('structural_anchors') else _initial_tree(root, names)
+        bootstrap_phase=(state.get('storage_initialization') or {}).get('phase')
+        established=bool(state.get('structural_anchors') or state.get('storage_names')) and bootstrap_phase not in {'initializing','prepared'}
+        tree_observation = {'empty':False,'issues':[]} if established else _initial_tree(root, names)
         structural_empty = tree_observation['empty']
         def identity(path):
             current=Path(path.anchor)

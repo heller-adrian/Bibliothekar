@@ -88,7 +88,7 @@ try:
     assert imported['origins']['source_families'] and imported['origins']['source_family_members']
     assert result['result']['organization']['imported_source_files'][0]['sha256']==task['output_sha256']
     # Native supervisor exits when web exits. Restart that same retained container.
-    script("import os,signal;from pathlib import Path;found=[]\nfor p in Path('/proc').iterdir():\n if p.name.isdigit():\n  try:\n   cmd=(p/'cmdline').read_bytes()\n   if b'uvicorn' in cmd and b'app.main:app' in cmd and p.stat().st_uid==568:found.append(int(p.name))\n  except OSError:pass\nassert len(found)==1,found\nos.kill(found[0],signal.SIGTERM)")
+    script("import os,signal;from pathlib import Path;found=[]\nfor p in Path('/proc').iterdir():\n if p.name.isdigit():\n  try:\n   cmd=(p/'cmdline').read_bytes().split(b'\\0')\n   if b'uvicorn' in cmd and b'app.main:app' in cmd and p.stat().st_uid==568:found.append(int(p.name))\n  except OSError:pass\nassert len(found)==1,found\nos.kill(found[0],signal.SIGTERM)")
     assert docker('wait',NAME).strip()=='0'
     docker('start',NAME)
     assert api("print(json.dumps(api('/api/settings/storage-health')))")['state']=='READY'

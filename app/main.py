@@ -2288,7 +2288,7 @@ def _startup_step(name, function, *args, **kwargs):
         result = function(*args, **kwargs)
     except BaseException as error:
         print(f'Startup phase {label}: failed after {time.monotonic()-started:.3f}s', flush=True)
-        if isinstance(error,Exception) and name in {'catalogue-schema','registry-schema'}:
+        if isinstance(error,Exception) and name in {'catalogue-schema','registry-schema','technical-storage'}:
             from app.operation_health import TechnicalStartupError
             raise TechnicalStartupError(name+': '+str(error)) from error
         raise
@@ -2300,7 +2300,7 @@ def _coordinate_startup(fn):
     from functools import wraps
     from app.operation_health import startup_session
     @wraps(fn)
-    @startup_session
+    @startup_session(lambda:WORKSPACE_PATH)
     def coordinated():
         global DATABASE_INITIALIZATION_ERROR, _STORAGE_STARTUP_PAUSED, WORKSPACE_LAYOUT_INITIALIZATION
         from app import operation_health
@@ -2332,9 +2332,10 @@ def _coordinate_startup(fn):
                 from app.storage_anchors import pin
                 pin(WORKSPACE_PATH)
             structural_phase=False
+            technical_resume=None
             if not preflight.get('can_initialize'):
                 _quiesce_runtime_for_recovery()
-                operation_health.recover_known_before_startup(WORKSPACE_PATH,REGISTRY_DATABASE_FILE,LOG_PATH)
+                technical_resume=operation_health.recover_known_before_startup(WORKSPACE_PATH,REGISTRY_DATABASE_FILE,LOG_PATH,database=DATABASE_FILE)
             from app.root_operations import _registered
             from app.storage_config import load_storage_settings
             def bindings():
@@ -2348,13 +2349,13 @@ def _coordinate_startup(fn):
                         except ValueError: pass
                     if not technical: paths.append(Path(row['work_root']))
                 return paths
-            with reserve(WORKSPACE_PATH, library_id=MAIN_LIBRARY_ID, paths=bindings, database=DATABASE_FILE, kind='startup', ids={'initialize_storage':True} if preflight['can_initialize'] else None) as startup_reservation:
+            with reserve(WORKSPACE_PATH, library_id=MAIN_LIBRARY_ID, paths=bindings, database=DATABASE_FILE, kind='startup', ids={'initialize_storage':True} if preflight['can_initialize'] else operation_health._TECHNICAL_STARTUP_IDS, _recovery_record=technical_resume) as startup_reservation:
                 # Initialize only a preflight-proven empty installation, before
                 # domain recovery or DB initialization can recreate missing roots.
                 WORKSPACE_LAYOUT_INITIALIZATION=ensure_workspace_layout(WORKSPACE_PATH)
                 from app.storage_anchors import pin
                 pin(WORKSPACE_PATH)
-                _prepare_technical_storage()
+                _startup_step('technical-storage',_prepare_technical_storage)
                 if DATABASE_INITIALIZATION_ERROR:
                     raise RootOperationError(DATABASE_INITIALIZATION_ERROR)
                 if preflight['can_initialize']:
@@ -2384,7 +2385,7 @@ def _coordinate_startup(fn):
                 raise operation_health.DomainStartupError('qualified_retry_pending: ordinary workers remain paused')
             _start_runtime_workers()
             return result
-        except (RootOperationError, PipelineError, OSError, ValueError, operation_health.DomainStartupError, operation_health.TechnicalStartupError) as error:
+        except Exception as error:
             _STORAGE_STARTUP_PAUSED = True
             from app.managed_storage_health import inspect_storage
             current=inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
