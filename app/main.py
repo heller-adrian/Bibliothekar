@@ -487,7 +487,10 @@ def _root_request(fn):
                     from app.root_operations import _read
                     accepted={p for p in accepted if _read(Path(p),{}).get('ids',{}).get('job_id')==ident}
                 if accepted:retry=operation_health.qualified_retry(context.workspace_root,accepted)
-            with retry, admission(context):
+            from app.operation_scopes import admission as scoped_admission
+            extra = ('metadata',) if 'metadata' in fn.__name__ else ()
+            if 'trash' in fn.__name__:extra = (*extra, 'trash')
+            with retry, scoped_admission(context.workspace_root, context.library_id, extra=extra), admission(context):
                 result=fn(*args,**kwargs)
                 if accepted and fn.__name__=='api_reintegrate_metadata_families':
                     operation_health.finish_qualified_retry(context.workspace_root)
@@ -1091,7 +1094,7 @@ async def library_context_middleware(request: Request, call_next):
     if request.url.path.startswith('/api/operations/'):
         from app.operation_ui import response_for
         return response_for(request, WORKSPACE_PATH, REGISTRY_DATABASE_FILE, operational)
-    if not operational['writes_allowed'] and request.method not in {'GET','HEAD','OPTIONS'}:
+    if not operational.get('workspace_writes_allowed', operational['writes_allowed']) and request.method not in {'GET','HEAD','OPTIONS'}:
         # Explicit domain retry endpoints perform their own complete qualification.
         if request.url.path != '/api/metadata-correction/reintegrate' and not (request.url.path.startswith('/api/jobs/') and request.url.path.endswith('/import-recovery')):
             return JSONResponse(status_code=409,content={'detail':'operation_recovery_required','storage_state':'READY','operations':operational})
@@ -2330,6 +2333,7 @@ def _coordinate_startup(fn):
     @startup_session(lambda:WORKSPACE_PATH)
     def coordinated():
         global DATABASE_INITIALIZATION_ERROR, _STORAGE_STARTUP_PAUSED, WORKSPACE_LAYOUT_INITIALIZATION
+        global DATABASE_INITIALIZATION, LIBRARY_REGISTRY_INITIALIZATION
         from app import operation_health
         operation_health.reset(WORKSPACE_PATH)
         structural_phase=True
@@ -2423,6 +2427,21 @@ def _coordinate_startup(fn):
                 DATABASE_INITIALIZATION_ERROR=None
                 operation_health.failed(WORKSPACE_PATH,'startup-recovery',error)
                 print('Operation recovery pending: '+str(error),flush=True)
+                # Domain recovery may not have reached schema setup at all.
+                # Report the real connection/integrity state without migrating
+                # or running unrelated recovery under the recovery capability.
+                from app.database_diagnostics import inspect as inspect_database
+                DATABASE_INITIALIZATION=inspect_database(DATABASE_FILE)
+                LIBRARY_REGISTRY_INITIALIZATION=inspect_database(REGISTRY_DATABASE_FILE)
+                operations=operation_health.inspect(WORKSPACE_PATH)
+                from app.database import available_migrations
+                expected=[version for version,_ in available_migrations()]
+                if (operations.get('workspace_writes_allowed')
+                        and DATABASE_INITIALIZATION['consistent']
+                        and DATABASE_INITIALIZATION['applied_versions']==expected
+                        and LIBRARY_REGISTRY_INITIALIZATION['consistent']):
+                    _STORAGE_STARTUP_PAUSED=False
+                    _start_runtime_workers(recover_domain=False)
     return coordinated
 
 
@@ -2842,7 +2861,7 @@ def startup_database() -> None:
         raise operation_health.DomainStartupError(str(error)) from error
 
 
-def _start_runtime_workers():
+def _start_runtime_workers(*, recover_domain=True):
     """No background writer is released before technical/F14 commit."""
     global WORKER_THREAD
     WORKER_STOP.clear()
@@ -2860,6 +2879,9 @@ def _start_runtime_workers():
 
     start_cancel_worker()
     start_release_worker()
+
+    if not recover_domain:
+        return  # Scoped admission still guards every worker claim and mutation.
 
     # 0.41.3: Persistente Mehrfach-Anwendungen und Sortierjournale
     # werden nach einem Neustart auch in sekundären Bibliotheken

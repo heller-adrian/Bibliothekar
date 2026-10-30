@@ -42,3 +42,21 @@ Syntaxprüfung erfolgreich; vorhandene JS-Escape-SyntaxWarning in main.py.
 Weiter offen: scoped Schreibzulassung für echte Fachkonflikte, Startup/DB-
 Diagnose, vollständige GET-Prüfung, Metadaten-Variante A, echte Container-/API-
 Reproduktion und sämtliche Freigabetests. Noch keine Release-Eignung.
+
+## Architekturintegration (noch nicht abgenommen)
+
+Lauf `41070853477` zu `f63eadd4`: 15/16 erfolgreich. GET false/true und alle
+sieben Kombinationen bestanden. Verbleibender Testfehler: falscher Tabellenname
+`settings`; auf echte Spalten von `app_settings` korrigiert.
+
+Neue zentrale Ressourcenklassifikation: ausschließlich registrierte geschützte
+Fachfunktionen erhalten begrenzte Bereiche. Unbekannte Wirkungen sperren weiter
+Workspace-Schreibzugriffe. General-Konflikte sichern den Metadatenbereich;
+unabhängige Katalog-/Importaktionen erhalten eigene Zulassung. SQLite-
+Authorizer und Queue-Claim prüfen dieselbe Zulassung. Ein gesperrter Job bleibt
+queued. Keine fingierte Fertigstellung.
+
+Read-only-Datenbankdiagnose und begrenzter Workerstart nach fachlich
+unterbrochenem Startup integriert. Ungeprüfte Domain-Recovery wird dabei nicht
+fortgesetzt. Zieltests und anschließend historische Tests laufen erst nach
+dem nächsten Push. Letzter Budgetcheck: fünf Stunden 18 %, Woche 3 %.

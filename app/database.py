@@ -804,6 +804,20 @@ def claim_next_job(
             connection.commit()
             return None
 
+        # A conflicted job stays queued. Never claim it and subsequently fail
+        # outside its worker's protected body, leaving an artificial running job.
+        from app import root_operations as ro
+        owner=ro._registered(database_path)
+        if owner is not None:
+            from app.operation_health import require_write
+            from app.operation_scopes import job_resources
+            try:
+                require_write(owner['workspace_root'],candidate={
+                    '_resources':job_resources(owner['library_id'],str(row['operation']))})
+            except ro.RootOperationError:
+                connection.rollback()
+                return None
+
         now = utc_now_iso()
         job_id = str(row["id"])
 

@@ -32,7 +32,10 @@ def reset(workspace):
 
 def failed(workspace,phase,error):
     key=str(Path(workspace).absolute())
-    item={'phase':phase,'detail':str(error),'scope':'workspace','reason':'effect_scope_requires_qualification'}
+    from app.operation_scopes import resources
+    status=inspect(workspace)
+    effects=frozenset().union(*(resources(r) for r in status['reservations'] if not r['live'])) or {'workspace'}
+    item={'phase':phase,'detail':str(error),'scope':sorted(effects),'reason':'effect_scope_requires_qualification'}
     with _STATUS_LOCK:
         bucket=_FAILURES.setdefault(key,[])
         if item not in bucket:bucket.append(item)
@@ -87,6 +90,8 @@ def inspect(workspace):
                 item['affected']={'area':'metadata_general','relative_path':r['ids'].get('relative_path'),'library':r.get('library')}
             item['record_sha256']=hashlib.sha256(json.dumps(r,sort_keys=True).encode()).hexdigest()
             item['qualified']=True  # Record syntax only; NEVER completion authority.
+            from app.operation_scopes import resources
+            item['scope']=sorted(resources(item))
         except Exception as error:item['detail']=str(error)
         entries.append(item)
     with _STATUS_LOCK:
@@ -94,9 +99,14 @@ def inspect(workspace):
         if _RECOVERY_WORKSPACES.get(str(root)) and not _RECOVERING.get():
             issues.append({'phase':'recovery_in_progress','scope':'workspace','detail':'Recovery holds write admission until qualification and startup finish.'})
     orphan=[r for r in entries if not r['live']]
+    blocked=set()
+    for record in orphan+issues:
+        scope=record.get('scope','workspace')
+        blocked.update([scope] if isinstance(scope,str) else scope)
     return {'writes_allowed':not orphan and not issues,'issues':issues,'reservations':entries,
-            'blocked_scopes':['workspace'] if orphan or issues else [],
-            'scope_policy':'unknown_or_shared_effects_fence_writes_only','storage_state_independent':True}
+            'workspace_writes_allowed':'workspace' not in blocked,
+            'blocked_scopes':sorted(blocked),
+            'scope_policy':'verified_resource_overlap_only_unknown_effects_fence_workspace','storage_state_independent':True}
 
 
 def require_write(workspace,*,candidate=None):
@@ -129,6 +139,10 @@ def require_write(workspace,*,candidate=None):
     if candidate and not status['issues'] and dead and all(
         r['qualified'] and all(r.get(k)==candidate.get(k) for k in ('kind','library','database','ids')) for r in dead):return
     if not status['writes_allowed']:
+        from app.operation_scopes import resources, conflicts, current
+        requested=resources(candidate or current(str(Path(workspace).absolute())) or {})
+        if not conflicts(requested,set(status['blocked_scopes'])):
+            return
         raise RootOperationError('operation_recovery_required: workspace writes paused; storage may remain READY; '+
                                  str((dead or status['issues'])[0]))
 
@@ -157,7 +171,12 @@ def startup_session(workspace_provider):
 def technical_failure(error):
     import sqlite3
     from app.database import DatabaseError
-    return isinstance(error,(TechnicalStartupError,sqlite3.DatabaseError,DatabaseError))
+    if isinstance(error,(TechnicalStartupError,DatabaseError)):return True
+    # A domain UNIQUE/FK violation or failed statement is not proof that the
+    # database file or required storage has been lost/corrupted.
+    return isinstance(error,sqlite3.DatabaseError) and (
+        getattr(error,'sqlite_errorcode',0) & 0xff
+    ) in {sqlite3.SQLITE_CORRUPT,sqlite3.SQLITE_NOTADB,sqlite3.SQLITE_CANTOPEN,sqlite3.SQLITE_IOERR,sqlite3.SQLITE_READONLY}
 
 
 def recover_known_before_startup(workspace,registry,logs,*,database=None):
@@ -279,7 +298,7 @@ def qualified_retry(workspace, paths):
         _RETRIES.reset(token)
 
 
-def _guard_workspace_connection(connection, workspace):
+def _guard_workspace_connection(connection, workspace, *, library=None, registry=False):
     import sqlite3
     from app.root_operations import RootOperationError
     writes={getattr(sqlite3,name) for name in (
@@ -292,7 +311,24 @@ def _guard_workspace_connection(connection, workspace):
         'SQLITE_ANALYZE','SQLITE_ATTACH','SQLITE_DETACH')}
     def authorize(action,arg1,arg2,db,origin):
         if action in writes:
-            try:require_write(workspace)
+            try:
+                from app.operation_scopes import current
+                candidate=current(str(Path(workspace).absolute()))
+                extra=set()
+                if str(arg1 or '').startswith(('metadata_', 'batch_metadata_')):
+                    extra.add('metadata')
+                if 'trash' in str(arg1 or ''):
+                    extra.add('trash')
+                if candidate is not None and extra:
+                    from app.operation_scopes import resources
+                    candidate={'_resources':resources(candidate)|extra}
+                if candidate is None and library:
+                    candidate={'_resources':{'library:'+str(library), 'central_stock', *extra}}
+                # Registry writes coordinate all catalogues and stock. A domain
+                # lease, when present, supplies the narrower proven footprint.
+                if candidate is None and registry:
+                    candidate={'_resources':{'central_stock'}}
+                require_write(workspace, candidate=candidate)
             except RootOperationError:return sqlite3.SQLITE_DENY
         return sqlite3.SQLITE_OK
     connection.set_authorizer(authorize)
@@ -304,11 +340,11 @@ def guard_connection(connection, database):
     from app import root_operations as ro
     owner=ro._registered(Path(database).absolute())
     if owner is None:return connection
-    return _guard_workspace_connection(connection,Path(owner['workspace_root']))
+    return _guard_workspace_connection(connection,Path(owner['workspace_root']),library=owner['library_id'])
 
 
 def guard_registry_connection(connection, registry):
     workspace=os.environ.get('KAMERA_WORKSPACE')
     configured=os.environ.get('KAMERA_REGISTRY_DATABASE')
     if not workspace or not configured or Path(configured).absolute()!=Path(registry).absolute():return connection
-    return _guard_workspace_connection(connection,Path(workspace))
+    return _guard_workspace_connection(connection,Path(workspace),registry=True)

@@ -502,6 +502,14 @@ def _completed(record):
 
 @contextmanager
 def admission(context, *, allow_missing_legacy=False):
+    from app.operation_scopes import admission as scoped_admission
+    with scoped_admission(context.workspace_root, context.library_id):
+        with _admission(context, allow_missing_legacy=allow_missing_legacy):
+            yield
+
+
+@contextmanager
+def _admission(context, *, allow_missing_legacy=False):
     """Short, nonpersistent gate before request/claim SQLite transactions.
 
     All domain mutations still own their existing durable journal/reservation.
@@ -715,6 +723,8 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
 
 def protect(*, workspace_arg=None, database_arg='database_path', kind='operation', error_type=RootOperationError, context_provider=None, db_only_if_no_roots=False, operation_wait=0, durable=True):
     def decorate(fn):
+        from app.operation_scopes import register
+        register(fn, kind)
         signature=inspect.signature(fn)
         @wraps(fn)
         def call(*args, **kwargs):
