@@ -91,3 +91,19 @@ def test_unknown_operation_never_runs_normal_startup_recovery(ready):
         with operations.recovery_session():operations.recover_known_before_startup(ws,reg,None)
     assert before==[p.read_bytes() for p in records]
     assert inspect_storage(ws,database=dbs[0])['state']=='READY'
+
+
+def test_refused_dng_write_preserves_verified_rollback(ready,monkeypatch):
+    from tests.backend.test_pre2_metadata_abort import test_refused_write_finishes_only_verified_rollback
+    test_refused_write_finishes_only_verified_rollback(ready,monkeypatch)
+    _,ws,_,dbs,_=ready
+    assert inspect_storage(ws,database=dbs[0])['state']=='READY'
+    assert operations.inspect(ws)['writes_allowed']
+
+
+def test_corrected_jpeg_actual_transfer_and_repeated_startup(ready,monkeypatch):
+    from tests.backend.test_pre3_metadata_transfer import test_new_success_receipt_then_transfer_and_two_restarts
+    test_new_success_receipt_then_transfer_and_two_restarts(ready,monkeypatch)
+    _,ws,_,dbs,_=ready
+    assert inspect_storage(ws,database=dbs[0])['state']=='READY'
+    assert operations.inspect(ws)['writes_allowed']

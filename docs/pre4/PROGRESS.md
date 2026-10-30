@@ -26,7 +26,9 @@ nicht unabhängig belegt. Keine Zielsuche nur nach Name/Hash und keine NAS-Ände
 
 ## Noch offen / nicht installationsreif
 
-- Gezielte Linux-Vertragstests neu angelegt, Ausführung ausstehend.
+- Erster Linux-Vertragstest erfolgreich: 40979277494, Commit b4c485d23d6f944d6a50e39e95232547fc4dcfc2; neun Tests bestanden.
+  Artefakt 12944092160, ZIP-SHA256 a40457a54966d931ace07f10b832f6944f257c4f8c2cef9729064957457faf85.
+  Zwei zusätzliche reale Fachfunktions-Regressionsfälle (DNG-Verweigerung, JPEG-Übernahme mit zweifachem Startup) ergänzt; deren Prüfung folgt.
 - Vollständiger echter API-/Containerablauf und historische Regressionen ausstehend.
 - Explizite Fortsetzung qualifizierter Bibliotheks-Reintegration und Folder-Import-
   Altoperationen bei aktiver Operationssperre noch zu integrieren. Gegenwärtig
