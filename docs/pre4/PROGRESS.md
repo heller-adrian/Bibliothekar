@@ -41,3 +41,18 @@ nicht unabhängig belegt. Keine Zielsuche nur nach Name/Hash und keine NAS-Ände
 Nächster Schritt: kleinen Self-Hosted-Linux-Vertragstest auswerten, danach gezielte
 Recovery-Integration und API-/Containerabnahme. Keine vollständige CI-Matrix starten,
 bevor diese gezielten Prüfungen bestanden sind.
+
+## Fortsetzung (zusätzlich freigegeben bis 90 %)
+
+- Elf gezielte Tests bestanden auf 67bc739312e688110d2f66870efa54c8bdf4b833,
+  Lauf 40979424380. Artefakt 12943833279,
+  SHA256 1528585f72117e9b425d89ea375b707707852d841c8330c4f25a6ebea5303cf6.
+- Erweiterter Lauf 40980313558: 22 bestanden, drei Reparaturfälle fehlgeschlagen.
+  Ursache: zusätzliche Ankerdiagnosen waren nicht mit der bestehenden strikten
+  Ersatzqualifikation abgestimmt. Diese Integration wird korrigiert; keine Freigabe.
+- Pauschale Ersatzoberfläche entfernt. Normale Seiten bleiben erreichbar;
+  fachlich gesperrte GET-Anfragen lesen SQLite über mode=ro/query_only.
+- Technischer Startup-Lease endet vor fachlicher Recovery. Ein späterer
+  Fachfehler erzeugt dadurch keinen zusätzlichen technischen Startup-Altvorgang.
+- Zusätzliche Schreibbarrieren für Datenbank/Registry, explizit qualifizierte
+  Original-Recovery, Verwaltungsunteranker und Integritätsprüfung in Arbeit.

@@ -421,6 +421,9 @@ def _root_background(fn=None, *, allow_missing_legacy=False):
     from functools import wraps
     @wraps(fn)
     def guarded(context,*args,**kwargs):
+        from app.operation_health import read_only
+        if read_only() and fn.__name__=='ensure_library_database_schema':
+            return None  # Storage preflight already validated the existing database.
         with admission(context,allow_missing_legacy=allow_missing_legacy):return fn(context,*args,**kwargs)
     return guarded
 

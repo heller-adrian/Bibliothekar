@@ -30,6 +30,7 @@ def connect(database_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(
         database_path,
         timeout=WRITE_WAIT_MS.get()/1000,
+        cached_statements=0,
     )
 
     try:

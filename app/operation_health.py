@@ -162,18 +162,9 @@ def qualified_retry(workspace, paths):
     finally:_RETRIES.reset(token)
 
 
-def guard_connection(connection, database):
-    """Last DB write barrier, including callers without an HTTP/F14 decorator.
-
-    Authorization runs when SQLite compiles a mutating statement. F14 checkpoints
-    still protect filesystem publication and the original transaction protocol.
-    """
+def _guard_workspace_connection(connection, workspace):
     import sqlite3
-    from app import root_operations as ro
-    owner=ro._registered(Path(database).absolute())
-    if owner is None:
-        return connection  # Unregistered isolated DBs have no root authority yet.
-    workspace=Path(owner['workspace_root'])
+    from app.root_operations import RootOperationError
     writes={getattr(sqlite3,name) for name in (
         'SQLITE_INSERT','SQLITE_UPDATE','SQLITE_DELETE','SQLITE_CREATE_INDEX',
         'SQLITE_CREATE_TABLE','SQLITE_CREATE_TEMP_INDEX','SQLITE_CREATE_TEMP_TABLE',
@@ -185,21 +176,22 @@ def guard_connection(connection, database):
     def authorize(action,arg1,arg2,db,origin):
         if action in writes:
             try:require_write(workspace)
-            except ro.RootOperationError:return sqlite3.SQLITE_DENY
+            except RootOperationError:return sqlite3.SQLITE_DENY
         return sqlite3.SQLITE_OK
     connection.set_authorizer(authorize)
     return connection
 
 
-def guard_registry_connection(connection, registry):
-    # Registry queries in _registered use raw read-only SQLite connections, so
-    # this does not recursively authorize itself. Use the configured workspace.
-    import os
-    workspace=os.environ.get('KAMERA_WORKSPACE')
-    if not workspace:return connection
-    configured=os.environ.get('KAMERA_REGISTRY_DATABASE')
-    if configured and Path(configured).absolute()!=Path(registry).absolute():return connection
+def guard_connection(connection, database):
+    """Additional DB write barrier; filesystem publication still owns F14 leases."""
     from app import root_operations as ro
-    owner=ro._registered(None,library_id='main',workspace=Path(workspace))
-    if owner:return guard_connection(connection,owner['database_path'])
-    return connection
+    owner=ro._registered(Path(database).absolute())
+    if owner is None:return connection
+    return _guard_workspace_connection(connection,Path(owner['workspace_root']))
+
+
+def guard_registry_connection(connection, registry):
+    workspace=os.environ.get('KAMERA_WORKSPACE')
+    configured=os.environ.get('KAMERA_REGISTRY_DATABASE')
+    if not workspace or not configured or Path(configured).absolute()!=Path(registry).absolute():return connection
+    return _guard_workspace_connection(connection,Path(workspace))
