@@ -686,6 +686,10 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
                     (parent/('operation-'+key+'.json')).unlink()
                     _sync(parent)
                     proof.unlink(); _sync(parent)
+                    # The original RC14 lease must finish durably BEFORE its
+                    # next family may run in the same pre-qualified API batch.
+                    from app.operation_health import note_completed_retry
+                    note_completed_retry(record)
                 # An exception is not proof of rollback. Keep the exact binding
                 # until an explicit retry or a verified domain recovery finishes.
             finally:_ACTIVE.reset(token)

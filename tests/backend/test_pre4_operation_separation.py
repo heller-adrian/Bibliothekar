@@ -333,3 +333,62 @@ def test_probe_uses_real_roots_without_bootstrap_library_or_tools(ready,monkeypa
     monkeypatch.setattr(main,'DATABASE_INITIALIZATION_ERROR',None)
     target=storage_paths(ws)['trash_root'];target.rename(target.with_name('lost-trash'))
     assert main.healthz().status_code==503
+
+
+def test_legacy_qualified_batch_retires_original_and_continues_without_global_unlock(ready):
+    """RC14's one historical lease covers a multi-family HTTP request."""
+    from app import operation_health as op
+    from app.root_operations import _control_location
+    import threading
+    _,ws,_,dbs,_=ready
+    ids={'function':'app.metadata_correction.reintegrate_library_metadata_family'}
+    try:
+        with ro.reserve(ws,library_id='main',database=dbs[0],kind='metadata',ids=ids):
+            raise RuntimeError('synthetic RC14 interrupted reintegration')
+    except RuntimeError:
+        pass
+    path=next(_control_location(ws).glob('operation-*.json'))
+    old=ro._read(path)
+    op.failed(ws,'startup-recovery','historical family reintegration')
+    with op.qualified_retry(ws,{str(path)}):
+        with ro.reserve(ws,library_id='main',database=dbs[0],kind='metadata',ids=ids):
+            pass
+        assert not path.exists()
+        outside=[]
+        def other_request():
+            try: op.require_write(ws)
+            except ro.RootOperationError: outside.append('fenced')
+        worker=threading.Thread(target=other_request)
+        worker.start();worker.join(5)
+        assert not worker.is_alive() and outside==['fenced']
+        with ro.reserve(ws,library_id='main',database=dbs[0],kind='metadata',ids=ids):
+            pass
+        op.finish_qualified_retry(ws)
+    assert not op.inspect(ws)['writes_allowed']  # Do not globally unblock yet.
+    op.reset(ws)  # Normal startup will do this behind its startup-session fence.
+    assert op.inspect(ws)['writes_allowed']
+    assert old['reservation_id'] and not path.exists()
+
+
+def test_legacy_qualified_batch_never_acknowledges_incomplete_or_new_error(ready):
+    from app import operation_health as op
+    _,ws,_,dbs,_=ready
+    ids={'function':'app.metadata_correction.reintegrate_library_metadata_family'}
+    try:
+        with ro.reserve(ws,library_id='main',database=dbs[0],kind='metadata',ids=ids):
+            raise RuntimeError('synthetic interrupted reintegration')
+    except RuntimeError:
+        pass
+    path=next(ro._control_location(ws).glob('operation-*.json'))
+    op.failed(ws,'startup-recovery','historical original failure')
+    with op.qualified_retry(ws,{str(path)}):
+        with pytest.raises(ro.RootOperationError,match='retry_has_unresolved_reservations'):
+            op.finish_qualified_retry(ws)
+    assert path.exists() and not op.inspect(ws)['writes_allowed']
+    with op.qualified_retry(ws,{str(path)}):
+        with ro.reserve(ws,library_id='main',database=dbs[0],kind='metadata',ids=ids):
+            pass
+        op.failed(ws,'startup-recovery','another failure')
+        with pytest.raises(ro.RootOperationError,match='retry_completion_not_verified'):
+            op.finish_qualified_retry(ws)
+    assert not op.inspect(ws)['writes_allowed']

@@ -489,6 +489,8 @@ def _root_request(fn):
                 if accepted:retry=operation_health.qualified_retry(context.workspace_root,accepted)
             with retry, admission(context):
                 result=fn(*args,**kwargs)
+                if accepted and fn.__name__=='api_reintegrate_metadata_families':
+                    operation_health.finish_qualified_retry(context.workspace_root)
             if accepted and fn.__name__=='api_reintegrate_metadata_families':
                 startup_database()
             return result

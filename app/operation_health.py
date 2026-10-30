@@ -18,6 +18,8 @@ _STATUS_LOCK=RLock()
 _TECHNICAL_STARTUP_IDS={'technical_setup':True,'protocol':'pre4'}
 _READ_ONLY=ContextVar('operation_read_only',default=False)
 _RETRIES=ContextVar('operation_qualified_retries',default=())
+_RETRY_COMPLETED=ContextVar('operation_retry_completed',default=frozenset())
+_RETRY_ISSUES=ContextVar('operation_retry_original_issues',default=None)
 
 
 class TechnicalStartupError(RuntimeError):pass
@@ -107,6 +109,11 @@ def require_write(workspace,*,candidate=None):
     retry=dict(_RETRIES.get())
     dead=[r for r in status['reservations'] if not r['live']]
     if retry and dead and not any(i.get('phase')=='recovery_in_progress' for i in status['issues']) and all(r['qualified'] and retry.get(r['path'])==(r.get('reservation_id'),r.get('record_sha256')) for r in dead):return
+    # In RC14, multiple families share one historical F14 key. The first
+    # successful family releases the key. Continue only THIS previously
+    # qualified request after reserve() attests that exact F14 release.
+    if retry and not dead and _RETRY_COMPLETED.get()==frozenset(retry) and _retry_issues_match(status):
+        return
     # Exact original retries still run their original domain qualification.
     dead=[r for r in status['reservations'] if not r['live']]
     if candidate and not status['issues'] and dead and all(
@@ -200,6 +207,49 @@ def read_connection(database):
     return connection
 
 
+def _retry_issues_match(status):
+    original=_RETRY_ISSUES.get()
+    return (original is not None
+            and all(issue.get('phase')=='startup-recovery' for issue in status['issues'])
+            and tuple(status['issues'])==original)
+
+
+def note_completed_retry(record):
+    """Trusted reserve() calls this only AFTER a resumed F14 lease is retired."""
+    if not record.get('_resumed'):
+        return
+    retry=dict(_RETRIES.get())
+    path=str(record.get('_path'))
+    original=retry.get(path)
+    if original is None:
+        return
+    public={k:v for k,v in record.items() if not k.startswith('_')}
+    digest=hashlib.sha256(json.dumps(public,sort_keys=True).encode()).hexdigest()
+    if original != (record.get('reservation_id'),digest):
+        raise ValueError('completed_retry_identity_changed')
+    _RETRY_COMPLETED.set(_RETRY_COMPLETED.get() | frozenset({path}))
+
+
+def finish_qualified_retry(workspace):
+    """Verify successful domain completion without globally dropping write fences.
+
+    The subsequent startup session first establishes its concurrent-writer fence,
+    then resets historical startup diagnostics and performs normal startup.
+    """
+    from app.root_operations import RootOperationError
+    retry=dict(_RETRIES.get())
+    status=inspect(workspace)
+    if not retry or status['reservations']:
+        raise RootOperationError('retry_has_unresolved_reservations')
+    if _RETRY_COMPLETED.get()!=frozenset(retry) or not _retry_issues_match(status):
+        raise RootOperationError('retry_completion_not_verified')
+    key=str(Path(workspace).absolute())
+    original=_RETRY_ISSUES.get()
+    with _STATUS_LOCK:
+        if tuple(_FAILURES.get(key,[]))!=original:
+            raise RootOperationError('retry_recovery_diagnostic_changed')
+
+
 @contextmanager
 def qualified_retry(workspace, paths):
     from app.root_operations import RootOperationError
@@ -208,8 +258,13 @@ def qualified_retry(workspace, paths):
     if any(i.get('phase')=='recovery_in_progress' for i in status['issues']) or not dead or any(not r['qualified'] or r['path'] not in paths for r in dead):
         raise RootOperationError('retry_has_other_unresolved_effects')
     token=_RETRIES.set(tuple((r['path'],(r['reservation_id'],r['record_sha256'])) for r in dead))
+    done_token=_RETRY_COMPLETED.set(frozenset())
+    issue_token=_RETRY_ISSUES.set(tuple(status['issues']))
     try:yield
-    finally:_RETRIES.reset(token)
+    finally:
+        _RETRY_ISSUES.reset(issue_token)
+        _RETRY_COMPLETED.reset(done_token)
+        _RETRIES.reset(token)
 
 
 def _guard_workspace_connection(connection, workspace):
