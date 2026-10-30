@@ -2519,6 +2519,11 @@ def execute_metadata_correction(
         _prevalidated_row=_prevalidated_row,
         _prevalidated_source=_prevalidated_source,
     )
+    if area == 'general':
+        # Bind the new task before the nested APPLY asks for its scope. Its
+        # SQLite row alone cannot authorize narrowing an older reservation.
+        from app.metadata_abort_recovery import bind_task
+        bind_task(database_path, workspace_root, task)
     return apply_metadata_correction(
         database_path,
         str(task["id"]),
