@@ -262,3 +262,54 @@ def test_technical_only_startup_retries_original_nonce(ready,monkeypatch):
     proof=ro._read(path.parent/('technical-startup-'+original['reservation_id']+'.json'))
     assert proof['reservation']==original
     assert main.api_storage_health()['state']=='READY' and operations.inspect(ws)['writes_allowed']
+
+
+def test_trash_inventory_restore_and_confirmed_delete_preserve_global_ready(ready,monkeypatch):
+    from app.database import database_connection
+    from app.trash import reconcile_trash_inventory
+    from app.trash_restore import restore_trash_files
+    from app.trash_selective import delete_selected_trash_files
+    from tests.backend.test_rc1_sd_reimport import setup_live_import,queue_and_run
+    from tests.backend.test_rc13_provenance import origin
+    case,ws,reg,dbs,source,context=setup_live_import(ready,monkeypatch)
+    queue_and_run(dbs[0],context)
+    historical=origin(reg)
+    with database_connection(dbs[0]) as c:row=dict(c.execute('SELECT * FROM files').fetchone())
+    paths=storage_paths(ws);published=paths['backup_root']/row['current_relative_path']
+    original=published.read_bytes();trash=paths['trash_root']/'Reviewed'/published.name
+    trash.parent.mkdir();published.rename(trash)
+    # The supported Finder intake is reconciled by the actual trash module.
+    reconcile_trash_inventory(dbs[0],ws)
+    assert inspect_storage(ws,database=dbs[0])['state']=='READY'
+    result=restore_trash_files(dbs,ws,relative_paths=['Reviewed/'+trash.name])
+    assert result['restored_file_count']==1 and published.read_bytes()==original
+    assert inspect_storage(ws,database=dbs[0])['state']=='READY'
+    published.rename(trash);reconcile_trash_inventory(dbs[0],ws)
+    deleted=delete_selected_trash_files(dbs,ws,['Reviewed/'+trash.name])
+    assert deleted['deleted_file_count']==1 and not trash.exists()
+    assert source.read_bytes()==original
+    current=origin(reg)
+    for table in ('source_families','source_media','source_family_members'):assert current[table]==historical[table]
+    assert inspect_storage(ws,database=dbs[0])['state']=='READY'
+
+
+def test_real_sd_recheck_keeps_global_ready_and_original_source(ready,monkeypatch):
+    from tests.backend.test_rc1_sd_reimport import setup_live_import,queue_and_run
+    from tests.backend.test_rc4_sd_recheck import test_complete_no_empty_import_history_and_idempotent_post
+    data=setup_live_import(ready,monkeypatch)
+    case,ws,reg,dbs,source,context=data
+    queue_and_run(dbs[0],context)
+    test_complete_no_empty_import_history_and_idempotent_post(data)
+    assert inspect_storage(ws,database=dbs[0])['state']=='READY'
+    assert operations.inspect(ws)['writes_allowed']
+
+
+def test_required_subanchor_is_checked_during_active_operation(ready):
+    _,ws,_,dbs,_=ready
+    root=storage_paths(ws)['metadata_root'];general=root/directory_name(root,'metadata_general')
+    with pytest.raises(ro.RootOperationError):
+        with ro.reserve(ws,library_id='main',database=dbs[0],kind='metadata'):
+            general.rename(general.with_name('preserved-general'));general.mkdir()
+            ro.validate_active_roots()
+    assert inspect_storage(ws,database=dbs[0])['state']=='UNAVAILABLE'
+    assert list(ro._control_location(ws).glob('operation-*.json'))

@@ -375,6 +375,8 @@ def validate_active_roots():
     roots={r['workspace'] for r in _ACTIVE.get()}
     for root in roots:require_write(root)
     for record in _ACTIVE.get():
+        from app.storage_anchors import check_active
+        check_active(record['workspace'],record['_parent'])
         _check(record['bindings'])
         additions={path:_identity(path) for path,identity in record['bindings'].items() if identity is None}
         additions={path:identity for path,identity in additions.items() if identity is not None}

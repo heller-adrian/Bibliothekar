@@ -186,3 +186,22 @@ def database_issues(workspace, database, state, *, initializing=False):
         except (sqlite3.Error, OSError, ValueError) as error:
             result.append({'code': 'catalog_unavailable', 'path': str(path), 'detail': str(error)})
     return result
+
+
+def check_active(workspace, parent):
+    """Recheck the added fixed roots at existing F14 publication checkpoints.
+
+    Do not add dynamic paths or alter a historical operation's original record.
+    Kernel-remounted private removable tmpfs retains its separate runtime policy.
+    """
+    from app import root_operations as ro
+    state=ro._read(Path(parent)/'state.json',None)
+    if state is None:
+        raise ro.RootOperationError('Active operation lost its control state: '+str(parent))
+    for name,row in state.get('structural_anchors',{}).items():
+        role=row.get('role','')
+        if row.get('policy')=='runtime_tmpfs':continue
+        if role in {'metadata_general','metadata_multiple'} or role.startswith('appdata'):
+            expected=expected_identity(state,name)
+            if expected is None or ro._identity(name)!=expected:
+                raise ro.RootOperationError('Required administration anchor changed during operation: '+name)
