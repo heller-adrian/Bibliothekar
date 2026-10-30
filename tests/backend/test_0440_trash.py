@@ -27,6 +27,7 @@ NOW = "2026-10-08T12:00:00+00:00"
 
 def _fixture(tmp_path: Path, monkeypatch):
     config = tmp_path / "settings.json"
+    config.write_text('{}')
     monkeypatch.setenv("KAMERA_CONFIG", str(config))
     db = tmp_path / "library.sqlite3"
     workspace = tmp_path / "workspace"

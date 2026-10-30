@@ -102,3 +102,41 @@ Noch nicht gepusht/getestet: neue reine GET-Beobachtungspfade, expliziter POST-
 Refresh, UI-Diagnose, korrigierte Altfixture-Kompatibilität. Nächster kurzer Lauf
 enthält neue Zieltests plus die zuvor fehlgeschlagenen Provenienz-/Beobachtungstests;
 erst danach wieder vollständige historische Stufe und echte Container-/Browser-QA.
+
+## Kontrollbindung korrigiert / erste Containerstufe vorbereitet
+
+`ad3dc60e` / `41075576005`: neue Ablehnung registrierter Installationen ohne
+Kontrollstate deckte eine Provisionierungslücke auf: `register_library()` ließ
+die erste Registryzeile vor ihrer technischen F14-Bindung sichtbar werden.
+Korrigiert in `937299bd`: erste explizite Registrierung bindet unter den
+vorhandenen Locks ihre Anker vor dem Registry-Commit. Bei bereits vorhandenen
+Registryzeilen und verlorenem State wird weiterhin abgebrochen; kein Reset.
+
+Lauf `41076413534` auf `937299bd`: alle neuen Zieltests PASS. Fokussierte
+historische Stufe **45 PASS / 1 FAIL**: Fixture `test_0440_trash` fehlte eine
+`settings.json`. Datei ergänzt, Schutzprüfung nicht geändert.
+
+Weiter implementiert, nächster Lauf ausstehend: globale Papierkorboperationen
+mit geprüftem Funktionsnamen besitzen einen gemeinsamen Trash-/Katalogbereich;
+ein unabhängiger General-Konflikt sperrt diese nicht pauschal. Neuer Test führt
+echten Import, Papierkorbaufnahme, Restore und bestätigte Löschung aus und
+prüft unveränderte Herkunfts- sowie ursprüngliche Konfliktnachweise.
+
+`qa/pre5/container.py` + `browser.cjs`: frischer Supervisor, zwei Bibliotheken,
+realer General-Import und Neustarts; Original-pre.4-Inventarabbruch per
+kontrolliertem Lesefehler bei gestoppter App, Upgrade-Qualifikation derselben
+Reservation; echter abgeschlossener JPEG-Auftrag mit fehlgeschlagenem F14-Ack,
+danach externe Entfernung seiner synthetischen Arbeitskopie. Erwartung:
+unabhängiger HTTP-Import und Ereignis-Sortierung + zwei Neustarts erfolgreich,
+ursprünglicher ungeklärter Auftrag bleibt erhalten. Noch NICHT ausgeführt.
+
+Containerjob wird nur mit `[pre5-container]` in einer Commitnachricht aktiviert
+und läuft erst nach bestandenen kurzen Gates. Er enthält zusätzlich pre.4-
+Generalfence-/Browserfälle, historische Containerfälle, 4.000 Dateien und 14
+iPhone-JPEGs. Alle Jobs auf dem dedizierten Self-Hosted-Runner; kein GHCR-Push.
+
+Offen bleiben vollständige Backendmatrix, Containerresultate, 90/47/8-Datei-
+Anwendungsablauf, weitergehende Fehlerszenarien und Releaseunterlagen. Variante A
+ist noch nicht umgesetzt: unveränderte Herkunfts-/Zielkollisionsnachweise benötigen
+ein ausdrücklich getrenntes Kopien-/Reimportmodell; Schutz nicht einfach entfernen.
+Keine Veröffentlichung erfolgt. Nächster Budgetcheck vor dem Containerjob.

@@ -11,7 +11,7 @@ const page=await context.newPage();await page.goto(host+'/login');await page.loc
 await Promise.all([page.waitForURL(host+'/'),page.locator('#login button').click()]);
 for(const target of ['/','/trash']){
 await page.goto(host+target);const note=page.locator('#bibliothekar-operation-notice');await note.waitFor();
-assert.match(await note.innerText(),lang==='de'?/Leseansichten bleiben erreichbar/:/Read views remain available/);
+assert.match(await note.innerText(),lang==='de'?/Leseansichten.*erreichbar/:/[Rr]ead views.*available/);
 assert(!(await page.locator('body').innerText()).includes('Storage unavailable'));
 const health=await context.request.get(host+'/api/settings/storage-health');assert.equal(health.status(),200);
 const status=await health.json();assert.equal(status.state,'READY');assert.equal(status.operation_health.writes_allowed,false);

@@ -365,3 +365,32 @@ def test_legacy_sentinel_never_writes_outside_inventory_root(ready):
     sentinel.symlink_to(foreign)
     assert reconcile_central_free_stock(dbs[0],ws,library_id='main')['ready']
     assert foreign.read_bytes()==b'untouched' and sentinel.is_symlink()
+
+
+def test_real_trash_restore_and_confirmed_delete_work_beside_general_conflict(ready,monkeypatch):
+    from tests.backend.test_rc1_sd_reimport import setup_live_import,queue_and_run
+    from tests.backend.test_rc13_provenance import origin
+    from app.trash import reconcile_trash_inventory
+    from app.trash_restore import restore_trash_files
+    from app.trash_selective import delete_selected_trash_files
+    case,ws,reg,dbs,source,context=setup_live_import(ready,monkeypatch)
+    queue_and_run(dbs[0],context)
+    before=origin(reg)
+    records=general_orphan(ws,dbs[0]);evidence={p:p.read_bytes() for p in records}
+    with database_connection(dbs[0]) as c:row=dict(c.execute('SELECT * FROM files').fetchone())
+    paths=storage_paths(ws);published=paths['backup_root']/row['current_relative_path']
+    data=published.read_bytes();trash=paths['trash_root']/published.name
+    published.rename(trash);reconcile_trash_inventory(dbs[0],ws)
+    with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
+        shown=client.get('/api/trash')
+        assert shown.status_code==200,shown.text
+        assert shown.json()['tracked_file_count']==1,shown.json()
+        assert not shown.json()['deletion_blocked'],shown.json()
+    restored=restore_trash_files(dbs,ws,relative_paths=[trash.name])
+    assert restored['restored_file_count']==1 and published.read_bytes()==data
+    published.rename(trash);reconcile_trash_inventory(dbs[0],ws)
+    deleted=delete_selected_trash_files(dbs,ws,[trash.name])
+    assert deleted['deleted_file_count']==1 and not trash.exists()
+    assert source.read_bytes()==data
+    assert before==origin(reg)
+    assert evidence=={p:p.read_bytes() for p in records}

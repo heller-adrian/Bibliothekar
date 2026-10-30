@@ -5449,8 +5449,11 @@ def trash_interface() -> HTMLResponse:
 def api_trash_inventory() -> dict[str, Any]:
     from app.operation_health import read_only
     if read_only():
-        from app.operation_ui import trash_catalogue
-        return trash_catalogue(REGISTRY_DATABASE_FILE)
+        from app.operation_health import inspect as operation_status
+        from app.operation_scopes import conflicts
+        if conflicts({'trash','central_stock','libraries'},operation_status(WORKSPACE_PATH)['blocked_scopes']):
+            from app.operation_ui import trash_catalogue
+            return trash_catalogue(REGISTRY_DATABASE_FILE)
     from app.trash_selective import _operation_lock
     with _operation_lock(WORKSPACE_PATH):
         return _trash_inventory_locked()
@@ -5481,7 +5484,8 @@ def _trash_inventory_without_conflicts() -> dict[str, Any]:
         for row in list_libraries(REGISTRY_DATABASE_FILE, active_only=False, registered_only=False)
         if str(row.get("database_path") or "").strip()
     )
-    recover_trash_deletions(WORKSPACE_PATH, allowed_databases=allowed)
+    from app.operation_health import read_only
+    if not read_only():recover_trash_deletions(WORKSPACE_PATH, allowed_databases=allowed)
     # The shared physical tree is the source of truth. Reconcile every
     # registered library so a Finder move cannot leave parallel active rows.
     results = []

@@ -31,8 +31,12 @@ def _resources(record):
     function = ids.get('function')
     kind = record.get('kind')
     library = record.get('library')
-    if (not library or library == 'shared' or not isinstance(ids, dict)
+    if (not library or not isinstance(ids, dict)
             or _POLICIES.get(function) != kind):
+        return frozenset({'workspace'})
+    if library=='shared':
+        if kind=='trash' or (kind=='recovery' and function.startswith(('app.trash_restore.','app.trash_selective.'))):
+            return frozenset({'libraries','central_stock','trash'})
         return frozenset({'workspace'})
     own = 'library:'+library
     if kind == 'inventory':
@@ -91,6 +95,8 @@ def _resources(record):
         return frozenset({own, 'central_stock'})
     if kind == 'trash':
         return frozenset({own, 'central_stock', 'trash'})
+    if kind == 'backup':
+        return frozenset({'libraries','central_stock'})
     if kind == 'recovery':
         if function.startswith(('app.sort_apply.', 'app.pipeline.')):
             return frozenset({own, 'central_stock'})
@@ -102,7 +108,9 @@ def _resources(record):
 def conflicts(left, right):
     if 'workspace' in left or 'workspace' in right or set(left) & set(right):return True
     return any((a=='metadata' and b.startswith('metadata/')) or
-               (b=='metadata' and a.startswith('metadata/')) for a in left for b in right)
+               (b=='metadata' and a.startswith('metadata/')) or
+               (a=='libraries' and b.startswith('library:')) or
+               (b=='libraries' and a.startswith('library:')) for a in left for b in right)
 
 
 def _own_live_general_journal(path, metadata):
