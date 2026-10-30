@@ -19,5 +19,9 @@ def complete_historical_storage(monkeypatch):
             workspace.mkdir(parents=True,exist_ok=True)
             for name in ['SD-Kartensicherungen','Arbeitsbereiche','Metadatenkorrektur','Papierkorb']:
                 (workspace/name).mkdir(exist_ok=True)
+            from app.managed_directory_names import directory_name
+            metadata=workspace/'Metadatenkorrektur'
+            for kind in ('metadata_general','metadata_multiple'):
+                (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
         return actual(command,*args,**kwargs)
     monkeypatch.setattr(subprocess,'Popen',launch)

@@ -18,7 +18,7 @@ def test_unchanged_original(tmp_path,case):
 
 
 def seeded(tmp_path,monkeypatch):
-    case=tmp_path/'case';case.mkdir();result=recovery.invoke(case,'seed','sort',tmp_path/'seed');assert result['returncode']==0,result
+    case=tmp_path/'case';case.mkdir();result=recovery.invoke(case,'seed','sort',tmp_path/'seed');assert result['returncode']==0,(result,(tmp_path/'seed/process.log').read_text())
     data=json.loads((case/'case.json').read_text());db=Path(data['db']);ws=Path(data['workspace'])
     for k,v in {'KAMERA_CONFIG':case/'settings.json','KAMERA_WORKSPACE':ws,'KAMERA_REGISTRY_DATABASE':case/'registry.sqlite3'}.items():monkeypatch.setenv(k,str(v))
     return case,data,db,ws

@@ -34,6 +34,10 @@ def _provisioned_storage(workspace, language='legacy'):
     from app.storage_config import LEGACY_STORAGE_DEFAULTS, ENGLISH_STORAGE_DEFAULTS
     names=LEGACY_STORAGE_DEFAULTS if language=='legacy' else ENGLISH_STORAGE_DEFAULTS
     for name in names.values():(workspace/name).mkdir(exist_ok=True)
+    from app.managed_directory_names import directory_name
+    metadata=workspace/names['metadata_directory_name']
+    for kind in ('metadata_general','metadata_multiple'):
+        (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
 
 
 def test_0328_fresh_workspace_uses_single_managed_root(tmp_path: Path, monkeypatch):

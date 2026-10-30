@@ -64,6 +64,10 @@ def foundation():
     # Explicit complete legacy installation, before creating its catalogue.
     for name in ['SD-Kartensicherungen','Arbeitsbereiche','Metadatenkorrektur','Papierkorb']:
         (WS/name).mkdir(exist_ok=True)
+    from app.managed_directory_names import directory_name
+    metadata=WS/'Metadatenkorrektur'
+    for kind in ('metadata_general','metadata_multiple'):
+        (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
     (WS/'Arbeitsbereich').mkdir(exist_ok=True)
     ensure_workspace_layout(WS,configured_main_work_root=WS/'Arbeitsbereich')
     initialize_database(DB);initialize_library_registry(REG)
