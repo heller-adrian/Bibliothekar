@@ -302,7 +302,7 @@ def test_sd_write_mount_refusal_keeps_global_ready_and_original_source(ready,mon
     queue_and_run(dbs[0],context)
     # This pytest source really is RW. Do not manufacture a RO success.
     with pytest.raises(main.HTTPException) as error:
-        main.api_run_folder_import({'source_root_key':'removable','source_relative_path':'CARD','source_mode':'sd_card','confirm_reimport':True,'request_id':'isolated-read-write-card'})
+        main.api_run_folder_import({'source_root_key':'removable','source_relative_path':'CARD','source_mode':'sd_card','confirm_reimport':True,'request_id':'123e4567-e89b-42d3-a456-426614174000'})
     assert error.value.status_code==409 and 'lesend' in str(error.value.detail)
     assert source.read_bytes()==before
     assert inspect_storage(ws,database=dbs[0])['state']=='READY'
