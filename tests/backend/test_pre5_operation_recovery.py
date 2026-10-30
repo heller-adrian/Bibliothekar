@@ -335,6 +335,48 @@ else:raise AssertionError('expected missing archive event')
     assert operations.inspect(ws)['writes_allowed']
 
 
+@pytest.mark.parametrize('module,function',[
+    ('sort_apply','prepare_sort_run'),
+    ('event_reapply','prepare_reapply_sort_run'),
+    ('workspace_reconcile','prepare_workspace_reconcile_run'),
+])
+def test_rejected_sql_only_sort_preparation_and_exact_pre4_recovery(ready,module,function):
+    """Run the actual old rejection first; preserve its nonce and every media byte."""
+    import importlib
+    from app.observation_recovery import recover
+    case,ws,reg,dbs,_=ready
+    context=resolve_library_context(reg,'main')
+    original=(context.work_root/'original.JPG').read_bytes()
+    old=case/'pre4-sort-code';old.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(subprocess.check_output(['git','archive','v1.0.0-pre.4','app']))) as archive:
+        archive.extractall(old,filter='data')
+    code='''
+from pathlib import Path
+import importlib,sys
+function=getattr(importlib.import_module('app.'+sys.argv[1]),sys.argv[2])
+try:function(Path(sys.argv[3]),'missing-job','missing-event',Path(sys.argv[4]),expected_plan_token='not-a-plan',confirmation_phrase='not-confirmed')
+except RuntimeError as error:assert 'Bestätigung' in str(error),str(error)
+else:raise AssertionError('unconfirmed sort was accepted')
+'''
+    process=subprocess.run([sys.executable,'-c',code,module,function,str(dbs[0]),str(ws)],
+        cwd=old,env=dict(os.environ,PYTHONPATH=str(old),PYTHONDONTWRITEBYTECODE='1'),text=True,capture_output=True,timeout=30)
+    assert process.returncode==0,process.stdout+process.stderr
+    path=next(ro._control_location(ws).glob('operation-*.json'));record=ro._read(path)
+    assert record['kind']=='plan' and record['ids']['function']=='app.'+module+'.'+function
+    assert len(recover(ws))==1 and not path.exists()
+    proof=ro._read(path.parent/('plan-interruption-'+record['reservation_id']+'.json'))
+    assert proof['reservation']==record and proof['media_writes'] is False
+    candidate=getattr(importlib.import_module('app.'+module),function)
+    with pytest.raises(RuntimeError,match='Bestätigung'):
+        candidate(dbs[0],'missing-job','missing-event',ws,
+            expected_plan_token='not-a-plan',confirmation_phrase='not-confirmed')
+    assert operations.inspect(ws)['writes_allowed'] and not tuple(path.parent.glob('operation-*.json'))
+    assert (context.work_root/'original.JPG').read_bytes()==original
+    with database_connection(dbs[0]) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM sort_runs').fetchone()[0]==0
+        assert connection.execute('SELECT COUNT(*) FROM sort_operations').fetchone()[0]==0
+
+
 def test_private_view_resolves_trash_to_original_workspace_and_keeps_f14_read_only(ready):
     from app.trash import trash_root
     from app.library_runtime import set_current_library,reset_current_library
