@@ -60,3 +60,21 @@ message.textContent=de?'Ein Vorgang erfordert Prüfung. Schreibvorgänge im betr
 box.append(message);const details=document.createElement('details');const title=document.createElement('summary');title.textContent=de?'Vorgänge und Diagnose':'Operations and diagnosis';details.append(title);const pre=document.createElement('pre');pre.style.whiteSpace='pre-wrap';pre.textContent=JSON.stringify(s,null,2);details.append(pre);box.append(details);
 const link=document.createElement('button');link.type='button';link.textContent=de?'Einstellungen und Wiederherstellung':'Settings and recovery';link.addEventListener('click',()=>document.querySelector('[data-bk-open-settings]')?.click());box.append(link);
 }catch(_){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',updateOperationNotice);else updateOperationNotice();})();</script>'''
+
+
+def trash_catalogue(registry):
+    """Recorded trash rows only; never infer physical ownership or auto-adopt."""
+    entries=[]
+    for library in rows(registry,'SELECT library_id,database_path FROM libraries WHERE COALESCE(is_registered,1)=1'):
+        for item in rows(library['database_path'],"SELECT id,current_relative_path,size_bytes,sha256_current,sha256_original FROM files WHERE current_root_kind='trash'"):
+            relative=item['current_relative_path']
+            entries.append({'entry_type':'file','relative_path':relative,'filename':Path(relative).name,
+                'size_bytes':item['size_bytes'],'tracked':True,'library_id':library['library_id'],
+                'sha256':item['sha256_current'] or item['sha256_original'],'physical_state':'not_verified'})
+    return {'entries':entries,'file_count':len(entries),'entry_count':len(entries),
+        'directory_count':0,'total_size_bytes':sum(r['size_bytes'] for r in entries),
+        'tracked_file_count':len(entries),'untracked_file_count':0,'adopted_file_count':0,
+        'exact_file_count':0,'ambiguous_file_count':0,'read_only':True,
+        'inventory_mode':'recorded_only_unverified_physical_state',
+        'restore_active':False,'deletion_blocked':True,'restore_conflicts':[],
+        'restore_failures':[{'status':'blocked','message':'Operation recovery required; catalogue view only.'}]}
