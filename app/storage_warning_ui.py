@@ -102,7 +102,7 @@ def storage_warning_html(status):
                 _phrase('Only use this when the original folder and its files cannot be recovered. Existing media records are retained as loss evidence. Missing copies can be imported again.',
                         'Nur verwenden, wenn sich der ursprüngliche Ordner und seine Dateien nicht wiederherstellen lassen. Medienhistorie bleibt als Verlustnachweis erhalten. Fehlende Kopien können erneut importiert werden.')+
                 '</p><ul>'+buttons+'</ul>')
-    state = status.get('state','AMBIGUOUS')
+    state = status.get('state','UNAVAILABLE')
     state_text = _phrase('Storage state: ','Speicherzustand: ')+'<code>'+escape(state)+'</code>'
     token=status.get('setup_token') or ''
     assert not token or (len(token)==64 and all(c in '0123456789abcdef' for c in token))

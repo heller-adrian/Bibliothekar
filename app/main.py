@@ -3213,6 +3213,8 @@ def api_recheck_storage() -> dict[str, Any]:
             status = api_storage_health()
         if DATABASE_INITIALIZATION_ERROR:
             raise HTTPException(status_code=409, detail='Die Wiederanlaufprüfung ist noch gesperrt: ' + DATABASE_INITIALIZATION_ERROR)
+        if not operation_status(WORKSPACE_PATH)['writes_allowed']:
+            raise HTTPException(status_code=409,detail={'code':'operation_recovery_required','storage_health':status,'operations':operation_status(WORKSPACE_PATH)})
         return status
 
 
