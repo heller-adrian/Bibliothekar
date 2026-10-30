@@ -462,13 +462,33 @@ def _root_request_context():
 
 
 def _root_request(fn):
-    """Prevent root changes through the complete planning/queue transaction."""
+    """Planning gate; qualified retries retain their original domain authority."""
     from functools import wraps
+    from contextlib import nullcontext
     @wraps(fn)
     def guarded(*args,**kwargs):
+        from app import operation_health
         try:
-            with admission(_root_request_context()):
-                return fn(*args,**kwargs)
+            context=_root_request_context()
+            retry=nullcontext()
+            accepted=set()
+            if not operation_health.inspect(context.workspace_root)['writes_allowed']:
+                accepted=set()
+                if fn.__name__=='api_reintegrate_metadata_families':
+                    from app.metadata_reintegration_recovery import pending_reservations
+                    accepted=pending_reservations(WORKSPACE_PATH,REGISTRY_DATABASE_FILE)
+                elif fn.__name__=='api_import_recovery':
+                    from app.import_recovery import pending_reservations
+                    accepted=pending_reservations(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH)
+                    ident=kwargs.get('job_id') or (args[0] if args else None)
+                    from app.root_operations import _read
+                    accepted={p for p in accepted if _read(Path(p),{}).get('ids',{}).get('job_id')==ident}
+                if accepted:retry=operation_health.qualified_retry(context.workspace_root,accepted)
+            with retry, admission(context):
+                result=fn(*args,**kwargs)
+            if accepted and fn.__name__=='api_reintegrate_metadata_families':
+                startup_database()
+            return result
         except RootOperationError as error:
             raise HTTPException(status_code=409,detail=str(error)) from error
     return guarded
@@ -1038,9 +1058,13 @@ async def library_context_middleware(request: Request, call_next):
         return JSONResponse(status_code=409,content={'detail':'Verwaltungsordner fehlen oder sind nicht eindeutig verfügbar. Vorgänge sind gesperrt.','storage_health':storage})
     from app import operation_health
     operational=operation_health.inspect(WORKSPACE_PATH)
-    if not operational['writes_allowed'] or request.url.path.startswith('/api/operations/'):
+    if request.url.path.startswith('/api/operations/'):
         from app.operation_ui import response_for
         return response_for(request, WORKSPACE_PATH, REGISTRY_DATABASE_FILE, operational)
+    if not operational['writes_allowed'] and request.method not in {'GET','HEAD','OPTIONS'}:
+        # Explicit domain retry endpoints perform their own complete qualification.
+        if request.url.path != '/api/metadata-correction/reintegrate' and not (request.url.path.startswith('/api/jobs/') and request.url.path.endswith('/import-recovery')):
+            return JSONResponse(status_code=409,content={'detail':'operation_recovery_required','storage_state':'READY','operations':operational})
     if _onboarding_required():
         path = request.url.path
         allowed_api = (
@@ -1092,7 +1116,8 @@ async def library_context_middleware(request: Request, call_next):
             )
 
     try:
-        ensure_library_database_schema(context)
+        if operational['writes_allowed']:
+            ensure_library_database_schema(context)
     except RootOperationError as error:
         return JSONResponse(status_code=409,content={'detail':str(error)})
     except Exception as error:
@@ -1109,7 +1134,15 @@ async def library_context_middleware(request: Request, call_next):
 
     token = set_current_library(context)
     try:
-        response = await call_next(request)
+        if not operational['writes_allowed'] and request.method in {'GET','HEAD'}:
+            with operation_health.read_session():
+                try:
+                    response = await call_next(request)
+                except __import__('sqlite3').OperationalError as error:
+                    if 'readonly' not in str(error).lower() and 'not authorized' not in str(error).lower():raise
+                    return JSONResponse(status_code=409,content={'detail':'read_view_requires_write_refresh','operations':operational})
+        else:
+            response = await call_next(request)
     finally:
         reset_current_library(token)
     return response
@@ -1151,6 +1184,8 @@ def reconcile_global_central_stock_state(
     global _CENTRAL_RECONCILE_LAST
     global _CENTRAL_RECONCILE_RESULT
 
+    from app.operation_health import read_only
+    if read_only():return {'skipped':True,'reason':'operation_write_fence'}
     with _CENTRAL_RECONCILE_LOCK:
         now_monotonic = time.monotonic()
         if (
@@ -2294,7 +2329,8 @@ def _coordinate_startup(fn):
                 from app.storage_anchors import pin
                 pin(WORKSPACE_PATH)
             structural_phase=False
-            operation_health.recover_known_before_startup(WORKSPACE_PATH,REGISTRY_DATABASE_FILE,LOG_PATH)
+            if not preflight.get('can_initialize'):
+                operation_health.recover_known_before_startup(WORKSPACE_PATH,REGISTRY_DATABASE_FILE,LOG_PATH)
             from app.root_operations import _registered
             from app.storage_config import load_storage_settings
             def bindings():
@@ -2314,16 +2350,18 @@ def _coordinate_startup(fn):
                 WORKSPACE_LAYOUT_INITIALIZATION=ensure_workspace_layout(WORKSPACE_PATH)
                 from app.storage_anchors import pin
                 pin(WORKSPACE_PATH)
-                result=fn()
+                _prepare_technical_storage()
                 if DATABASE_INITIALIZATION_ERROR:
                     raise RootOperationError(DATABASE_INITIALIZATION_ERROR)
-                from app.import_recovery import finish_published_envelopes
-                finish_published_envelopes(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH)
                 if preflight['can_initialize']:
                     from app.storage_bootstrap import complete
                     complete(WORKSPACE_PATH, startup_reservation)
             from app.appdata import finish as finish_appdata
             finish_appdata(WORKSPACE_PATH)
+            # Domain recovery never owns the already completed technical lease.
+            result=fn()
+            from app.import_recovery import finish_published_envelopes
+            finish_published_envelopes(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH)
             from app.metadata_abort_recovery import recover_general_outcomes
             _startup_step('general-metadata-outcomes', recover_general_outcomes,
                           WORKSPACE_PATH, REGISTRY_DATABASE_FILE, logs=LOG_PATH)
@@ -2356,6 +2394,16 @@ def _coordinate_startup(fn):
     return coordinated
 
 
+def _prepare_technical_storage():
+    """Only configuration and transactional schemas belong to startup's lease."""
+    global DATABASE_INITIALIZATION, LIBRARY_REGISTRY_INITIALIZATION, DATABASE_INITIALIZATION_ERROR
+    from app.config_bootstrap import ensure_settings_file
+    ensure_settings_file(CONFIG_PATH)
+    DATABASE_INITIALIZATION=_startup_step('catalogue-schema',initialize_database,DATABASE_FILE)
+    LIBRARY_REGISTRY_INITIALIZATION=_startup_step('registry-schema',initialize_library_registry,REGISTRY_DATABASE_FILE)
+    DATABASE_INITIALIZATION_ERROR=None
+
+
 @app.on_event("startup")
 @_coordinate_startup
 def startup_database() -> None:
@@ -2368,36 +2416,13 @@ def startup_database() -> None:
     global MAIN_LIBRARY_CONTEXT
     global WORKER_THREAD
 
-    # Fresh installations and clean slates lack /config/settings.json. The
-    # configuration must exist before any workers/API requests use load_settings().
-    # Never rewrite an existing settings file, even if malformed.
-    from app.config_bootstrap import ensure_settings_file
-    try:
-        ensure_settings_file(CONFIG_PATH)
-    except OSError as error:
-        raise RootOperationError('bootstrap_configuration_not_prepared: '+str(CONFIG_PATH)+': '+str(error)) from error
-
     try:
         from app.managed_storage_health import catalog_has_history
-        main_database_was_new = not catalog_has_history(DATABASE_FILE)
-        DATABASE_INITIALIZATION = _startup_step('catalogue-schema', initialize_database,
-            DATABASE_FILE
-        )
-        # Provision English event-folder names only for a genuinely new database.
-        # Existing databases and saved per-event layouts retain their exact paths.
-        if main_database_was_new:
+        if not catalog_has_history(DATABASE_FILE):
             with database_connection(DATABASE_FILE) as connection:
-                set_global_event_folder_layout(
-                    connection, ENGLISH_NEW_INSTALL_SETTING,
-                    updated_at=datetime.now(timezone.utc).isoformat(),
-                )
-        _LIBRARY_SCHEMA_READY.add(
-            str(DATABASE_FILE.expanduser().resolve(strict=False))
-        )
-
-        LIBRARY_REGISTRY_INITIALIZATION = _startup_step('registry-schema', initialize_library_registry,
-            REGISTRY_DATABASE_FILE
-        )
+                set_global_event_folder_layout(connection, ENGLISH_NEW_INSTALL_SETTING,
+                    updated_at=datetime.now(timezone.utc).isoformat())
+        _LIBRARY_SCHEMA_READY.add(str(DATABASE_FILE.expanduser().resolve(strict=False)))
         # Recover selected-trash partial commits before any worker or inventory
         # can mistake staged originals for missing media.
         from app.trash_selective import recover_trash_deletions
@@ -4930,6 +4955,15 @@ def api_import_recovery(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                 result=json.loads(row['result_json'] or '{}');result['import_recovery']='resume'
                 c.execute("UPDATE jobs SET state='queued',stage='recovery_queued',error_message=NULL,result_json=?,progress_message=? WHERE id=?",
                     (json.dumps(result),'Verified original import queued for continuation.',job_id))
+            from app import operation_health
+            if not operation_health.inspect(WORKSPACE_PATH)['writes_allowed']:
+                # No unrelated queue claims while the original lease is pending.
+                from app.library_context import _context_from_row
+                context=_context_from_row(get_library(REGISTRY_DATABASE_FILE,'main',active_only=False))
+                with admission(context):
+                    recovered_job=claim_next_job(DATABASE_FILE,job_id=job_id)
+                if recovered_job is None:raise ValueError('import_recovery_job_not_claimed')
+                process_claimed_job(recovered_job,library_context=context)
         elif action=='retain':
             if payload.get('confirmation')!='KEEP STAGED BACKUP':raise ValueError('import_recovery_confirmation_required')
             from app.import_recovery import retain
@@ -8732,7 +8766,8 @@ def api_search_events(
     physical_refresh: bool = True,
 ) -> dict[str, Any]:
     db_path = current_database_file()
-    must_check = physical_refresh or view_cache.needs_first_physical_check(db_path)
+    from app.operation_health import read_only
+    must_check = not read_only() and (physical_refresh or view_cache.needs_first_physical_check(db_path))
     if must_check:
         refresh_live_event_inventories(
             db_path, current_workspace_root(), current_archive_root()
@@ -9405,7 +9440,8 @@ def api_global_workspace_summary(
             )
 
     db_path = current_database_file()
-    must_check = physical_refresh or view_cache.needs_first_physical_check(db_path)
+    from app.operation_health import read_only
+    must_check = not read_only() and (physical_refresh or view_cache.needs_first_physical_check(db_path))
     if must_check:
         refresh_live_event_inventories(
             db_path,
@@ -9654,19 +9690,19 @@ def api_metadata_correction_areas() -> dict[str, Any]:
         area="general",
         workspace_root=current.workspace_root,
         library_id=current.library_id,
-        create=True,
+        create=not __import__("app.operation_health",fromlist=["read_only"]).read_only(),
     )
     multiple = metadata_area_paths(
         area="multiple",
         workspace_root=current.workspace_root,
         library_id=current.library_id,
-        create=True,
+        create=not __import__("app.operation_health",fromlist=["read_only"]).read_only(),
     )
     library_paths = metadata_area_paths(
         area="library",
         workspace_root=current.workspace_root,
         library_id=current.library_id,
-        create=True,
+        create=not __import__("app.operation_health",fromlist=["read_only"]).read_only(),
     )
     return {
         "areas": {

@@ -12,6 +12,8 @@ import fcntl,json,os,stat
 
 _RECOVERING=ContextVar('operation_recovery_session',default=False)
 _FAILURES={}
+_READ_ONLY=ContextVar('operation_read_only',default=False)
+_RETRIES=ContextVar('operation_qualified_retries',default=())
 
 
 class TechnicalStartupError(RuntimeError):pass
@@ -82,7 +84,13 @@ def inspect(workspace):
 def require_write(workspace,*,candidate=None):
     from app.root_operations import RootOperationError
     if _RECOVERING.get():return
+    if _READ_ONLY.get():
+        raise RootOperationError('operation_read_only_request: writes are paused')
     status=inspect(workspace)
+    # Explicitly qualified retry capabilities are bound to unchanged records.
+    retry=dict(_RETRIES.get())
+    dead=[r for r in status['reservations'] if not r['live']]
+    if retry and dead and all(r['qualified'] and retry.get(r['path'])==r.get('reservation_id') for r in dead):return
     # Exact original retries still run their original domain qualification.
     dead=[r for r in status['reservations'] if not r['live']]
     if candidate and not status['issues'] and dead and all(
@@ -117,3 +125,81 @@ def recover_known_before_startup(workspace,registry,logs):
     from app.metadata_abort_recovery import recover_general_outcomes
     recover_general_outcomes(workspace,registry,logs=logs,physical=True)
     if not inspect(workspace)['writes_allowed']:raise DomainStartupError('operation_recovery_incomplete')
+
+
+def read_only():
+    return _READ_ONLY.get()
+
+
+@contextmanager
+def read_session():
+    token=_READ_ONLY.set(True)
+    try:yield
+    finally:_READ_ONLY.reset(token)
+
+
+def read_connection(database):
+    import sqlite3
+    path=Path(database).absolute()
+    if not path.is_file() or path.resolve()!=path:
+        raise sqlite3.OperationalError('required catalogue unavailable: '+str(path))
+    connection=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=5)
+    connection.row_factory=sqlite3.Row
+    connection.execute('PRAGMA foreign_keys=ON')
+    connection.execute('PRAGMA query_only=ON')
+    return connection
+
+
+@contextmanager
+def qualified_retry(workspace, paths):
+    from app.root_operations import RootOperationError
+    status=inspect(workspace)
+    dead=[r for r in status['reservations'] if not r['live']]
+    if not dead or any(not r['qualified'] or r['path'] not in paths for r in dead):
+        raise RootOperationError('retry_has_other_unresolved_effects')
+    token=_RETRIES.set(tuple((r['path'],r['reservation_id']) for r in dead))
+    try:yield
+    finally:_RETRIES.reset(token)
+
+
+def guard_connection(connection, database):
+    """Last DB write barrier, including callers without an HTTP/F14 decorator.
+
+    Authorization runs when SQLite compiles a mutating statement. F14 checkpoints
+    still protect filesystem publication and the original transaction protocol.
+    """
+    import sqlite3
+    from app import root_operations as ro
+    owner=ro._registered(Path(database).absolute())
+    if owner is None:
+        return connection  # Unregistered isolated DBs have no root authority yet.
+    workspace=Path(owner['workspace_root'])
+    writes={getattr(sqlite3,name) for name in (
+        'SQLITE_INSERT','SQLITE_UPDATE','SQLITE_DELETE','SQLITE_CREATE_INDEX',
+        'SQLITE_CREATE_TABLE','SQLITE_CREATE_TEMP_INDEX','SQLITE_CREATE_TEMP_TABLE',
+        'SQLITE_CREATE_TEMP_TRIGGER','SQLITE_CREATE_TEMP_VIEW','SQLITE_CREATE_TRIGGER',
+        'SQLITE_CREATE_VIEW','SQLITE_DROP_INDEX','SQLITE_DROP_TABLE','SQLITE_DROP_TEMP_INDEX',
+        'SQLITE_DROP_TEMP_TABLE','SQLITE_DROP_TEMP_TRIGGER','SQLITE_DROP_TEMP_VIEW',
+        'SQLITE_DROP_TRIGGER','SQLITE_DROP_VIEW','SQLITE_ALTER_TABLE','SQLITE_REINDEX',
+        'SQLITE_ANALYZE','SQLITE_ATTACH','SQLITE_DETACH')}
+    def authorize(action,arg1,arg2,db,origin):
+        if action in writes:
+            try:require_write(workspace)
+            except ro.RootOperationError:return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    connection.set_authorizer(authorize)
+    return connection
+
+
+def guard_registry_connection(connection, registry):
+    # Registry queries in _registered use raw read-only SQLite connections, so
+    # this does not recursively authorize itself. Use the configured workspace.
+    import os
+    workspace=os.environ.get('KAMERA_WORKSPACE')
+    if not workspace:return connection
+    configured=os.environ.get('KAMERA_REGISTRY_DATABASE')
+    if configured and Path(configured).absolute()!=Path(registry).absolute():return connection
+    from app import root_operations as ro
+    owner=ro._registered(None,library_id='main',workspace=Path(workspace))
+    if owner:return guard_connection(connection,owner['database_path'])
+    return connection

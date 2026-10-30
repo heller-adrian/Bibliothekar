@@ -353,9 +353,14 @@ def inspect_storage(workspace, *, database=None):
             result['warnings'] = [{'code':'host_acl_is_administrative_trust','path':str(appdata_root()),
                 'detail':'Dataset owners and ACL writers are trusted host operators; F14 is continuity evidence, not tamper-proof authentication.'}]
         else: result['security_model'] = 'rc11_private_authority'
-        from app.storage_anchors import issues as anchor_issues
+        from app.storage_anchors import issues as anchor_issues, database_issues
         state = _read(_control_location(workspace)/'state.json',{})
         structural = anchor_issues(Path(workspace).absolute(),state,initializing=result.get('can_initialize',False))
+        structural.extend(database_issues(Path(workspace).absolute(),database,state,initializing=result.get('can_initialize',False)))
+        present={row['path'] for row in result.get('folders',[])}
+        for issue in structural:
+            if issue.get('key') in {'metadata_general','metadata_multiple'} and issue['path'] not in present:
+                result['folders'].append({'key':issue['key'],'name':Path(issue['path']).name,'path':issue['path'],'status':issue['code'],'expected_identity':issue.get('expected_identity')})
         if structural:
             result['issues'].extend(structural);result.update(ready=False,can_initialize=False)
         return describe(result)

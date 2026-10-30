@@ -7857,4 +7857,5 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         '});</script>\n</body>',
         1,
     )
-    return result
+    from app.operation_ui import NOTICE
+    return result.replace('</body>', NOTICE + '</body>')

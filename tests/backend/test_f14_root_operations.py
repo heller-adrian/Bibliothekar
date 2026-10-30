@@ -21,6 +21,10 @@ def fixture(tmp_path,monkeypatch):
     # This fixture represents a known historical installation.
     from app.storage_config import LEGACY_STORAGE_DEFAULTS
     for name in LEGACY_STORAGE_DEFAULTS.values():(ws/name).mkdir(exist_ok=True)
+    metadata=storage_paths(ws)['metadata_root']
+    from app.managed_directory_names import directory_name
+    for kind in ('metadata_general','metadata_multiple'):
+        (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
     initialize_library_registry(reg)
     dbs=[]
     for lid in ['main','second']:

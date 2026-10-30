@@ -74,6 +74,7 @@ def replacement_candidates(status):
         if row.get('status') in {'missing','identity_changed'}
         and row.get('expected_identity') is not None
         and (row.get('key') in load_storage_settings(workspace_root=Path(status['workspace']))
+             or row.get('key') in {'metadata_general','metadata_multiple'}
              or (str(row.get('key')).startswith('library_work_root:')
                  and Path(row['path']).is_relative_to(
                      Path(status['workspace'])/load_storage_settings(workspace_root=Path(status['workspace']))['workspaces_directory_name'])))
@@ -85,7 +86,7 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
         raise RootOperationError('replacement_confirmation_required')
     root, parent=_control(workspace)
     names=load_storage_settings(workspace_root=root)
-    if key not in names and not key.startswith('library_work_root:'):
+    if key not in names and key not in {'metadata_general','metadata_multiple'} and not key.startswith('library_work_root:'):
         raise RootOperationError('replacement_role_unknown')
     # The exact target of a library child root must come from a registered,
     # previously pinned row; the caller cannot supply an arbitrary path.
@@ -123,7 +124,8 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
         parent_identity = _identity(target.parent)
         if previous and parent_identity and previous[0] != parent_identity[0] and (actual_target is None or actual_target[0] != previous[0]):
             raise RootOperationError('replacement_dataset_mount_unproven: '+str(target))
-        if previous != state.get('bindings',{}).get(str(target)):
+        from app.storage_anchors import expected_identity
+        if previous != expected_identity(state,target):
             raise RootOperationError('replacement_binding_changed')
         if not _unoccupied(target):
             raise RootOperationError('replacement_destination_not_empty')
@@ -150,6 +152,10 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
                 if work.is_relative_to(target) and work!=target:
                     children.append(work)
             children.sort(key=lambda p:(len(p.parts),str(p)))
+        if key=='metadata_directory_name':
+            for bound,row in state.get('structural_anchors',{}).items():
+                if row.get('role') in {'metadata_general','metadata_multiple'} and Path(bound).parent==target:
+                    children.append(Path(bound))
         for bound, inode in state.get('bindings',{}).items():
             if inode is not None and Path(bound)!=target and Path(bound).is_relative_to(target):
                 if Path(bound) not in children:
@@ -184,9 +190,16 @@ def replace_managed_directory(workspace, database, registry, key, confirmation):
                 _mkdir_exact(directory)
         for path in [target,*children]:
             actual=_identity(path)
-            if actual is None or not _unoccupied(path):
+            if path==target and children:
+                allowed={c for child in children for c in [child,*child.parents] if c.is_relative_to(target) and c!=target}
+                safe=all((p.is_dir() and not p.is_symlink() and p in allowed) or (p.name=='.DS_Store' and _unoccupied(p.parent)) for p in target.rglob('*'))
+            else:
+                safe=_unoccupied(path)
+            if actual is None or not safe:
                 raise RootOperationError('replacement_changed_during_commit')
             state['bindings'][str(path)]=actual
+            if str(path) in state.get('structural_anchors',{}):
+                state['structural_anchors'][str(path)].update(identity=actual,mount=mount(path))
         state['generation']=int(state['generation'])+1
         for library_id in data['registered_libraries']:
             state['libraries'][library_id]=int(state['libraries'].get(library_id,0))+1

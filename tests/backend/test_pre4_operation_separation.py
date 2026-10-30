@@ -107,3 +107,76 @@ def test_corrected_jpeg_actual_transfer_and_repeated_startup(ready,monkeypatch):
     _,ws,_,dbs,_=ready
     assert inspect_storage(ws,database=dbs[0])['state']=='READY'
     assert operations.inspect(ws)['writes_allowed']
+
+
+def test_unknown_recovery_keeps_normal_ui_and_read_apis(ready,monkeypatch):
+    from app import main
+    from fastapi.testclient import TestClient
+    _,ws,_,dbs,_=ready
+    records=orphan(ws,dbs[0]);before={p:p.read_bytes() for p in records}
+    calls=[]
+    main._coordinate_startup(lambda:calls.append('ordinary startup mutation'))()
+    assert calls==[] and main.DATABASE_INITIALIZATION_ERROR is None
+    from contextlib import closing
+    with closing(TestClient(main.app)) as client:
+        for path in ('/','/trash','/api/jobs','/api/metadata-correction/areas','/api/metadata-correction/scan?area=general','/api/operations/status'):
+            response=client.get(path)
+            assert response.status_code==200,(path,response.status_code,response.text[:600])
+            if path=='/':
+                assert 'Storage unavailable' not in response.text
+                assert 'bibliothekar-operation-notice' in response.text
+        denied=client.post('/api/metadata-correction/correct',json={'area':'general','relative_path':'unknown.JPG'})
+        assert denied.status_code==409 and denied.json()['storage_state']=='READY'
+    assert {p:p.read_bytes() for p in records}==before
+
+
+def test_read_session_and_direct_db_write_barrier(ready):
+    from app.database import database_connection
+    import sqlite3
+    _,ws,_,dbs,_=ready
+    orphan(ws,dbs[0])
+    with operations.read_session(), database_connection(dbs[0]) as c:
+        assert c.execute('SELECT COUNT(*) FROM files').fetchone()[0]==0
+        with pytest.raises(sqlite3.DatabaseError):c.execute("INSERT INTO settings(key,value) VALUES ('unsafe','value')")
+    with pytest.raises(sqlite3.DatabaseError):
+        with database_connection(dbs[0]) as c:c.execute("DELETE FROM files")
+
+
+@pytest.mark.parametrize('failure',['missing_database','corrupt_database','missing_state','missing_workspace','symlink_general','binding_contradiction'])
+def test_technical_failures_still_unavailable(ready,failure):
+    _,ws,_,dbs,_=ready
+    parent=ro._control_location(ws)
+    if failure=='missing_database':dbs[0].unlink()
+    elif failure=='corrupt_database':
+        # Remove WAL checkpoint ambiguity in this isolated fixture, not a repair.
+        import sqlite3
+        c=sqlite3.connect(dbs[0]);c.execute('PRAGMA wal_checkpoint(TRUNCATE)');c.close()
+        dbs[0].write_bytes(b'not a SQLite database')
+    elif failure=='missing_state':(parent/'state.json').rename(parent/'state-lost-synthetic.json')
+    elif failure=='missing_workspace':ws.rename(ws.with_name('workspace-offline'))
+    elif failure=='symlink_general':
+        root=storage_paths(ws)['metadata_root'];general=root/directory_name(root,'metadata_general');saved=general.with_name('original-general');general.rename(saved);general.symlink_to(saved,target_is_directory=True)
+    else:
+        record=orphan(ws,dbs[0])[0];data=ro._read(record);data['bindings'][str(ws)]=[1,2];ro._write(record,data)
+    assert inspect_storage(ws,database=dbs[0])['state']=='UNAVAILABLE'
+
+
+def test_malformed_domain_intent_fences_without_replacing_normal_storage(ready):
+    _,ws,_,dbs,_=ready
+    parent=ro._control_location(ws);path=parent/'operation-unknown.json';path.write_bytes(b'{"unknown":"preserve"}')
+    assert inspect_storage(ws,database=dbs[0])['state']=='READY'
+    assert not operations.inspect(ws)['writes_allowed']
+    assert path.read_bytes()==b'{"unknown":"preserve"}'
+
+
+@pytest.mark.parametrize('key',['trash_directory_name','metadata_general','metadata_multiple','metadata_directory_name','workspaces_directory_name'])
+def test_loss_confirmed_replacement_retains_anchors(ready,key):
+    from app.storage_replacement import replace_managed_directory,CONFIRMATION
+    _,ws,reg,dbs,_=ready
+    state=ro._read(ro._control_location(ws)/'state.json')
+    target=Path(next(p for p,r in state['structural_anchors'].items() if r['role']==key))
+    retained=target.with_name(target.name+'-offline');target.rename(retained)
+    assert inspect_storage(ws,database=dbs[0])['state']=='UNAVAILABLE'
+    result=replace_managed_directory(ws,dbs[0],reg,key,CONFIRMATION)
+    assert result['loss_recorded'] and retained.is_dir()
+    assert inspect_storage(ws,database=dbs[0])['state']=='READY',inspect_storage(ws,database=dbs[0])

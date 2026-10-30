@@ -203,6 +203,8 @@ def metadata_area_paths(
     library_id: str,
     create: bool = True,
 ) -> dict[str, Path]:
+    from app.operation_health import read_only
+    create = create and not read_only()
     kind = str(area or "").strip().lower()
     if kind not in {"library", "general", "multiple"}:
         raise MetadataCorrectionError("Unbekannter Metadatenbereich.")
@@ -212,7 +214,8 @@ def metadata_area_paths(
     if create:
         validate_active_roots()
         metadata_root.mkdir(parents=True, exist_ok=True)
-    _cleanup_empty_legacy_metadata_tree(metadata_root)
+    if create:
+        _cleanup_empty_legacy_metadata_tree(metadata_root)
 
     if kind == "library":
         # Undated camera material is global free stock. The technical library

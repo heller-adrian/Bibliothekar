@@ -186,6 +186,9 @@ def _now() -> str:
 
 
 def _connect(path: Path) -> sqlite3.Connection:
+    from app.operation_health import read_only, read_connection
+    if read_only():
+        return read_connection(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path, timeout=30)
     connection.row_factory = sqlite3.Row
@@ -193,7 +196,9 @@ def _connect(path: Path) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode = WAL")
     connection.execute("PRAGMA synchronous = FULL")
     connection.execute("PRAGMA busy_timeout = 30000")
-    return connection
+    # Registry transactions share the same workspace write barrier.
+    from app.operation_health import guard_registry_connection
+    return guard_registry_connection(connection,path)
 
 
 def _ensure_registry_schema_table(connection: sqlite3.Connection) -> None:

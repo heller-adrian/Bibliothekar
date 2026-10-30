@@ -19,6 +19,9 @@ class DatabaseError(RuntimeError):
 
 
 def connect(database_path: Path) -> sqlite3.Connection:
+    from app.operation_health import read_only, read_connection
+    if read_only():
+        return read_connection(database_path)
     database_path.parent.mkdir(
         parents=True,
         exist_ok=True,
@@ -51,7 +54,8 @@ def connect(database_path: Path) -> sqlite3.Connection:
         connection.close()
         raise
 
-    return connection
+    from app.operation_health import guard_connection
+    return guard_connection(connection,database_path)
 
 
 @contextmanager
@@ -749,6 +753,7 @@ def claim_next_job(
     database_path: Path,
     *,
     operation: str | None = None,
+    job_id: str | None = None,
 ) -> dict[str, Any] | None:
     connection = connect(
         database_path
@@ -759,7 +764,9 @@ def claim_next_job(
             "BEGIN IMMEDIATE"
         )
 
-        if operation is None:
+        if job_id is not None:
+            row=connection.execute("SELECT * FROM jobs WHERE state='queued' AND id=? AND operation='folder_import'",(job_id,)).fetchone()
+        elif operation is None:
             row = connection.execute(
                 """
                 SELECT *
