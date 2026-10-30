@@ -1021,6 +1021,8 @@ async def library_context_middleware(request: Request, call_next):
         "/manifest.webmanifest",
     }:
         return await call_next(request)
+    if request.method == "GET" and request.url.path == "/healthz":
+        return await call_next(request)
     from app.managed_storage_health import inspect_storage
     storage = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
     if request.method == "GET" and request.url.path == "/api/settings/recovery-diagnostics":
@@ -1028,12 +1030,17 @@ async def library_context_middleware(request: Request, call_next):
     if request.url.path in {"/api/settings/storage-health", "/api/settings/storage-paths", "/api/settings/storage-recheck", "/api/settings/storage-initialize", "/api/settings/storage-replace", "/api/libraries"} and (request.url.path!='/api/libraries' or request.method=='GET'):
         return await call_next(request)
     if DATABASE_INITIALIZATION_ERROR and storage['ready']:
-        storage = {**storage, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'issues':[{'code':'source_inventory_conflict' if database_initialization_error_code(DATABASE_INITIALIZATION_ERROR)=='source_inventory_conflict' else 'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
+        storage = {**storage, 'ready':False, 'state':'UNAVAILABLE', 'operations_allowed':False, 'issues':[{'code':'source_inventory_conflict' if database_initialization_error_code(DATABASE_INITIALIZATION_ERROR)=='source_inventory_conflict' else 'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
     if not storage['ready']:
         if request.method == "GET" and not request.url.path.startswith("/api/"):
             from app.storage_warning_ui import storage_warning_html
             return HTMLResponse(storage_warning_html(storage),status_code=200)
         return JSONResponse(status_code=409,content={'detail':'Verwaltungsordner fehlen oder sind nicht eindeutig verfügbar. Vorgänge sind gesperrt.','storage_health':storage})
+    from app import operation_health
+    operational=operation_health.inspect(WORKSPACE_PATH)
+    if not operational['writes_allowed'] or request.url.path.startswith('/api/operations/'):
+        from app.operation_ui import response_for
+        return response_for(request, WORKSPACE_PATH, REGISTRY_DATABASE_FILE, operational)
     if _onboarding_required():
         path = request.url.path
         allowed_api = (
@@ -2241,8 +2248,11 @@ def _startup_step(name, function, *args, **kwargs):
     print(f'Startup phase {label}: started', flush=True)
     try:
         result = function(*args, **kwargs)
-    except BaseException:
+    except BaseException as error:
         print(f'Startup phase {label}: failed after {time.monotonic()-started:.3f}s', flush=True)
+        if isinstance(error,Exception) and name in {'catalogue-schema','registry-schema'}:
+            from app.operation_health import TechnicalStartupError
+            raise TechnicalStartupError(name+': '+str(error)) from error
         raise
     print(f'Startup phase {label}: completed in {time.monotonic()-started:.3f}s', flush=True)
     return result
@@ -2250,9 +2260,14 @@ def _startup_step(name, function, *args, **kwargs):
 
 def _coordinate_startup(fn):
     from functools import wraps
+    from app.operation_health import startup_session
     @wraps(fn)
+    @startup_session
     def coordinated():
-        global DATABASE_INITIALIZATION_ERROR, _STORAGE_STARTUP_PAUSED
+        global DATABASE_INITIALIZATION_ERROR, _STORAGE_STARTUP_PAUSED, WORKSPACE_LAYOUT_INITIALIZATION
+        from app import operation_health
+        operation_health.reset(WORKSPACE_PATH)
+        structural_phase=True
         try:
             from app.appdata import prepare as prepare_appdata
             prepare_appdata()
@@ -2275,6 +2290,11 @@ def _coordinate_startup(fn):
             # Migration/version fence may have published an audited transition.
             preflight=_startup_step('storage-preflight', require_storage, WORKSPACE_PATH,database=DATABASE_FILE,allow_new=True)
             assert_workspace_startable(WORKSPACE_PATH)
+            if not preflight.get('can_initialize'):
+                from app.storage_anchors import pin
+                pin(WORKSPACE_PATH)
+            structural_phase=False
+            operation_health.recover_known_before_startup(WORKSPACE_PATH,REGISTRY_DATABASE_FILE,LOG_PATH)
             from app.root_operations import _registered
             from app.storage_config import load_storage_settings
             def bindings():
@@ -2291,7 +2311,9 @@ def _coordinate_startup(fn):
             with reserve(WORKSPACE_PATH, library_id=MAIN_LIBRARY_ID, paths=bindings, database=DATABASE_FILE, kind='startup', ids={'initialize_storage':True} if preflight['can_initialize'] else None) as startup_reservation:
                 # Initialize only a preflight-proven empty installation, before
                 # domain recovery or DB initialization can recreate missing roots.
-                ensure_workspace_layout(WORKSPACE_PATH)
+                WORKSPACE_LAYOUT_INITIALIZATION=ensure_workspace_layout(WORKSPACE_PATH)
+                from app.storage_anchors import pin
+                pin(WORKSPACE_PATH)
                 result=fn()
                 if DATABASE_INITIALIZATION_ERROR:
                     raise RootOperationError(DATABASE_INITIALIZATION_ERROR)
@@ -2316,12 +2338,21 @@ def _coordinate_startup(fn):
             if remaining:
                 raise RootOperationError('unresolved_reservation: '+remaining[0]['path']+': '+remaining[0]['detail'])
             DATABASE_INITIALIZATION_ERROR = None
+            if not operation_health.inspect(WORKSPACE_PATH)['writes_allowed']:
+                raise operation_health.DomainStartupError('qualified_retry_pending: ordinary workers remain paused')
             _start_runtime_workers()
             return result
-        except (RootOperationError, PipelineError, OSError, ValueError) as error:
+        except (RootOperationError, PipelineError, OSError, ValueError, operation_health.DomainStartupError, operation_health.TechnicalStartupError) as error:
             _STORAGE_STARTUP_PAUSED = True
-            DATABASE_INITIALIZATION_ERROR = "Startup: " + str(error)
-            print(DATABASE_INITIALIZATION_ERROR, flush=True)
+            from app.managed_storage_health import inspect_storage
+            current=inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
+            if structural_phase or not current['ready'] or operation_health.technical_failure(error):
+                DATABASE_INITIALIZATION_ERROR = "Technical startup: " + str(error)
+                print(DATABASE_INITIALIZATION_ERROR, flush=True)
+            else:
+                DATABASE_INITIALIZATION_ERROR=None
+                operation_health.failed(WORKSPACE_PATH,'startup-recovery',error)
+                print('Operation recovery pending: '+str(error),flush=True)
     return coordinated
 
 
@@ -2725,12 +2756,19 @@ def startup_database() -> None:
 
 
     except Exception as error:
-        DATABASE_INITIALIZATION = None
-        DATABASE_INITIALIZATION_ERROR = str(error)
-        WORKSPACE_LAYOUT_INITIALIZATION = None
-        WORKSPACE_LAYOUT_ERROR = str(error)
-        LIBRARY_REGISTRY_INITIALIZATION = None
-        LIBRARY_REGISTRY_ERROR = str(error)
+        from app import operation_health
+        if operation_health.technical_failure(error):
+            DATABASE_INITIALIZATION_ERROR=str(error)
+            raise
+        from app.managed_storage_health import inspect_storage
+        if not inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)['ready']:
+            DATABASE_INITIALIZATION_ERROR=str(error)
+            raise
+        # Never translate domain recovery/provenance failures into missing storage.
+        DATABASE_INITIALIZATION_ERROR=None
+        WORKSPACE_LAYOUT_ERROR=None
+        LIBRARY_REGISTRY_ERROR=None
+        raise operation_health.DomainStartupError(str(error)) from error
 
 
 def _start_runtime_workers():
@@ -3113,9 +3151,10 @@ def api_storage_health() -> dict[str, Any]:
     from app.managed_storage_health import inspect_storage
     status = inspect_storage(WORKSPACE_PATH,database=DATABASE_FILE)
     if DATABASE_INITIALIZATION_ERROR and status['ready']:
-        status = {**status, 'ready':False, 'state':'AMBIGUOUS', 'operations_allowed':False, 'startup_error':DATABASE_INITIALIZATION_ERROR,
+        status = {**status, 'ready':False, 'state':'UNAVAILABLE', 'operations_allowed':False, 'startup_error':DATABASE_INITIALIZATION_ERROR,
                   'issues':[{'code':'source_inventory_conflict' if database_initialization_error_code(DATABASE_INITIALIZATION_ERROR)=='source_inventory_conflict' else 'startup_failed','path':str(WORKSPACE_PATH),'detail':DATABASE_INITIALIZATION_ERROR}]}
-    return status
+    from app.operation_health import inspect as operation_status
+    return {**status,'operation_health':operation_status(WORKSPACE_PATH)}
 
 
 @app.get("/api/settings/recovery-diagnostics", tags=["Einstellungen"])
@@ -3123,7 +3162,7 @@ def api_recovery_diagnostics() -> dict[str, Any]:
     """Owner authentication still wraps this read-only recovery endpoint."""
     from app.metadata_recovery_status import inspect
     return {**inspect(WORKSPACE_PATH, REGISTRY_DATABASE_FILE),
-            'startup_error': DATABASE_INITIALIZATION_ERROR}
+            'startup_error': DATABASE_INITIALIZATION_ERROR, 'operation_health': __import__('app.operation_health',fromlist=['inspect']).inspect(WORKSPACE_PATH)}
 
 
 @app.post("/api/settings/storage-recheck", tags=["Einstellungen"])
@@ -3140,7 +3179,8 @@ def api_recheck_storage() -> dict[str, Any]:
         status = inspect_storage(WORKSPACE_PATH, database=DATABASE_FILE)
         if not status['ready'] and not status.get('can_initialize'):
             raise HTTPException(status_code=409, detail={'code':'storage_recheck_blocked','issues':status['issues']})
-        if _STORAGE_STARTUP_PAUSED or status.get('can_initialize'):
+        from app.operation_health import inspect as operation_status
+        if _STORAGE_STARTUP_PAUSED or status.get('can_initialize') or not operation_status(WORKSPACE_PATH)['writes_allowed']:
             startup_database()
             status = api_storage_health()
         if DATABASE_INITIALIZATION_ERROR:

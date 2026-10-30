@@ -1,0 +1,43 @@
+name: Targeted pre4 storage operation separation
+on:
+  push:
+    branches: [codex/pre4-storage-operation-separation]
+    paths-ignore: ['docs/**']
+permissions:
+  contents: read
+concurrency:
+  group: pre4-storage-operation-separation
+  cancel-in-progress: false
+jobs:
+  targeted:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre4-${{ github.run_id }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: ${{ github.workspace }}/pre4-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: pre4-${{ github.run_id }}
+      - name: Isolated contract regressions only
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre4.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$QA_WORK/venv"
+          "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
+          "$QA_WORK/venv/bin/python" -m pytest -q tests/backend/test_pre4_operation_separation.py --junitxml="$QA_WORK/contracts.xml" 2>&1 | tee "$QA_WORK/contracts.log"
+      - name: Preserve evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre4-operation-separation-evidence
+          path: |
+            ${{ env.QA_WORK }}/*.xml
+            ${{ env.QA_WORK }}/*.log
+          retention-days: 30

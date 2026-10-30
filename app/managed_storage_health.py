@@ -138,7 +138,7 @@ def _inspect_storage(workspace, *, database=None):
         if pinned and names!=pinned:
             issues.append({'code':'configuration_changed','path':str(root)})
         expected=pinned or names
-        tree_observation = _initial_tree(root, names)
+        tree_observation = {'empty':False,'issues':[]} if state.get('structural_anchors') else _initial_tree(root, names)
         structural_empty = tree_observation['empty']
         def identity(path):
             current=Path(path.anchor)
@@ -330,7 +330,10 @@ def inspect_storage(workspace, *, database=None):
             state = _read(_control_location(workspace)/'state.json',{})
             if state and state.get('format') != 3:
                 raise ValueError('legacy_layout_requires_explicit_migration: '+str(_control_location(workspace)))
+            from app.storage_anchors import definitions
+            protected=definitions(workspace,state)
             for path, expected in state.get('mounts',{}).items():
+                if path not in protected: continue
                 actual = mount(path)
                 if actual != expected:
                     result['issues'].append({'code':'mount_identity_changed','path':path,
@@ -340,8 +343,8 @@ def inspect_storage(workspace, *, database=None):
                 for operation in _control_location(workspace).glob('operation-*.json'):
                     result['issues'].append({'code':'unresolved_reservation','path':str(operation),
                         'detail':'Restore original roots and reconcile this operation before accepting a replacement.'})
-            from app.appdata import pending_operations, catalogue_issues
-            invalid_operations = pending_operations(Path(workspace).absolute()) + catalogue_issues(Path(workspace).absolute())
+            from app.appdata import catalogue_issues
+            invalid_operations = catalogue_issues(Path(workspace).absolute())
             if invalid_operations:
                 result['issues'].extend(invalid_operations)
                 result.update(ready=False,can_initialize=False)
@@ -350,6 +353,11 @@ def inspect_storage(workspace, *, database=None):
             result['warnings'] = [{'code':'host_acl_is_administrative_trust','path':str(appdata_root()),
                 'detail':'Dataset owners and ACL writers are trusted host operators; F14 is continuity evidence, not tamper-proof authentication.'}]
         else: result['security_model'] = 'rc11_private_authority'
+        from app.storage_anchors import issues as anchor_issues
+        state = _read(_control_location(workspace)/'state.json',{})
+        structural = anchor_issues(Path(workspace).absolute(),state,initializing=result.get('can_initialize',False))
+        if structural:
+            result['issues'].extend(structural);result.update(ready=False,can_initialize=False)
         return describe(result)
     except Exception as error:
         text=str(error); pieces=text.split(': ',2)

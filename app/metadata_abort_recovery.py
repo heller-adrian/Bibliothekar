@@ -283,7 +283,7 @@ def verified_error(database,workspace,error):
     return _VerifiedFailure(error)
 
 
-def _recover_general_outcomes(workspace,registry,*,logs=None):
+def _recover_general_outcomes(workspace,registry,*,logs=None,physical=False):
     """Called after startup's lease exits, before any workers are released."""
     from app.library_registry import list_libraries
     from app.metadata_swap_recovery import metadata_write_guard
@@ -310,14 +310,25 @@ def _recover_general_outcomes(workspace,registry,*,logs=None):
             if _plain(active)!=record:_fail('reservation_changed',path)
             metadata,_=_paths(workspace)
             with metadata_write_guard(metadata):
+                if physical:
+                    # Qualify the entire journal set BEFORE replaying any member.
+                    from app.metadata_swap_recovery import _journal_dir, recover_swap_journal
+                    from app.import_recovery import read_record
+                    task,_=_task(record,owner,parent)
+                    journals=list(_journal_dir(metadata).glob('*.json'))
+                    for journal in journals:
+                        data=read_record(journal)
+                        if data.get('kind')!='general' or data.get('task_id')!=task['id'] or data.get('database')!=owner['database_path']:
+                            _fail('unrelated_physical_journal',journal)
+                    for journal in journals:recover_swap_journal(metadata,journal,allowed_databases={Path(owner['database_path'])})
                 final,disposition=_finish(active,owner,registry=registry,logs=logs)
                 outcomes.append({'task_id':final['id'],'disposition':disposition,'reservation_id':record['reservation_id']})
     return outcomes
 
 
-def recover_general_outcomes(workspace,registry,*,logs=None):
+def recover_general_outcomes(workspace,registry,*,logs=None,physical=False):
     try:
-        return _recover_general_outcomes(workspace,registry,logs=logs)
+        return _recover_general_outcomes(workspace,registry,logs=logs,physical=physical)
     except ro.RootOperationError:
         raise
     except Exception as error:

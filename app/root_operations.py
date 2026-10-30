@@ -371,6 +371,9 @@ def _check(bindings):
 
 
 def validate_active_roots():
+    from app.operation_health import require_write
+    roots={r['workspace'] for r in _ACTIVE.get()}
+    for root in roots:require_write(root)
     for record in _ACTIVE.get():
         _check(record['bindings'])
         additions={path:_identity(path) for path,identity in record['bindings'].items() if identity is None}
@@ -502,6 +505,8 @@ def admission(context, *, allow_missing_legacy=False):
     Idle claims therefore write neither state JSON nor completion receipts.
     Lock order is identical to a shared file operation.
     """
+    from app.operation_health import require_write
+    require_write(context.workspace_root)
     from app.managed_storage_health import require_pinned_storage
     require_pinned_storage(context.workspace_root)
     root,parent = _control(context.workspace_root,allow_missing=allow_missing_legacy)
@@ -540,6 +545,8 @@ def admission(context, *, allow_missing_legacy=False):
 
 @contextmanager
 def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='operation', ids=None, expected_generation=None, shared=None, operation_wait=0, _recovery_record=None):
+    from app.operation_health import require_write
+    require_write(workspace,candidate={'kind':kind,'library':str(library_id),'database':str(Path(database).absolute()) if database is not None else None,'ids':ids or {}})
     from app.managed_storage_health import require_pinned_storage
     require_pinned_storage(workspace,initializing=(kind=='startup' and bool((ids or {}).get('initialize_storage'))))
     root, parent = _control(workspace)
@@ -798,6 +805,8 @@ def _require_coordinated_topology(root, databases):
 
 @contextmanager
 def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, rollback_check=None, expected_generation=None, precondition=None, details=None, wait_seconds=0, staging_precondition=None):
+    from app.operation_health import require_write
+    require_write(workspace)
     from app.managed_storage_health import require_pinned_storage
     require_pinned_storage(workspace)
     root,parent=_control(workspace)

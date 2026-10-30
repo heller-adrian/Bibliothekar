@@ -28,6 +28,13 @@ class AmbiguousManagedDirectoryError(ValueError):
 
 def directory_name(root: Path, kind: str) -> str:
     """Return a directory *name* without performing any filesystem mutation."""
+    import os
+    if kind in ('metadata_general','metadata_multiple') and Path(root).absolute().parent==Path(os.environ.get('KAMERA_WORKSPACE','/workspace')).absolute():
+        from app.root_operations import _control_location,_read
+        base=Path(root).absolute()
+        state=_read(_control_location(base.parent)/'state.json',{})
+        saved=[Path(p).name for p,r in state.get('structural_anchors',{}).items() if r.get('role')==kind and Path(p).parent==base]
+        if len(saved)==1:return saved[0]
     legacy, english = NAME_PAIRS[kind]
     base = Path(root)
     old = base / legacy
