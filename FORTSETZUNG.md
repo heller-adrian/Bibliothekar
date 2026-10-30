@@ -282,3 +282,57 @@ SMB-ähnliche Änderungen, pre.4-Beobachtung, Upgrade und Metadatenkorrekturen. 
 bekannte General-Reimport-Ablehnung bleibt lokal; anschließend echte unabhängige
 Ereignissortierung und zwei Neustarts. Noch nicht ausgeführt. RAF-Fixture ist
 synthetischer TIFF-Inhalt mit RAF-Endung; keine native RAW-/DNG-Schreibfreigabe.
+
+## Abnahme-Fortsetzung (2026-10-30, laufend)
+
+Branch `codex/pre5-operation-recovery`. Anwendung auf `c548e308d795f459ff854fb6a5843431fb71eef1`:
+`41116260923` Zieljob SUCCESS: **42 Zieltests + 46 fokussierte + 237 historische**,
+jeweils 0 FAIL / 0 SKIP. Artefakt 13005609337, SHA-256
+`954b432c2162f70cc1f149425671ca41688a9a3f9b44c3ede1441f88e6a4abc5`;
+ZIP erneut heruntergeladen, Digest stimmt. Containerjob desselben Laufs läuft.
+Sortierstatusfix fordert applied + terminal + vollständige verified/moved counts.
+
+`fda778f227a2193c51911678e0a0ba084cc41d44` ergänzt vollständigen Linux-Workflow
+und disjunkte Backend-Abnahme mit Coverage-Nachweis. Breite Matrix `41116894939`
+noch vor Jobstart bewusst abgebrochen: erst weitere nachgewiesene Planablehnung
+stabilisieren, dann die vollständige Matrix einmal ausführen. Kein voller Test
+wurde dadurch als bestanden dargestellt.
+
+`d8dfdb05441a8528bf3cfc8cf319d23ddb72be63` ist reine Reproduktion: tatsächlicher
+pre.4-Code hinterlässt nach ungültiger Sortierbestätigung eine Planreservation.
+Lauf `41117269501` ist hinter dem laufenden Containerjob eingeordnet. Die neuen
+Tests verlangen anschließend qualifizierte historische Wiederaufnahme und keine
+Reservation bei erneut bewusst abgelehnter Vorbereitung; vor Korrektur erwartet rot.
+
+Weitere lokale Korrektur vorbereitet: drei exakt auditierte SQL-only-Planer
+(`prepare_sort_run`, `prepare_reapply_sort_run`, `prepare_workspace_reconcile_run`)
+werden transient; echte Sortierexecutoren bleiben dauerhaft reserviert. SQL-Pläne
+bleiben in ihren atomaren Warteschlangentransaktionen erhalten. Historische
+Planreservationen erhalten einen eigenen vollständigen Unterbrechungsbeleg, keine
+falsche Erfolgsbestätigung. Zusätzlich schützt Inventory-Admission ausdrücklich
+den gemeinsamen Zentralbestand gegen ungeklärte Imports anderer Bibliotheken.
+Neue Gegenprobe dafür ergänzt. Diese Änderungen sind noch nicht Linux-abgenommen.
+
+Architekturdokument `docs/pre5/ARCHITECTURE.md` enthält Ursachen, Wirkungsgrenzen,
+Datenbankdiagnose und die ehrlich zurückgestellte Metadaten-Variante A.
+Containerlauf `41116260923`: echter General-HTTP-Import, zwei Neustarts,
+independent Import+Event+applied-Sortierung trotz Einzeldateikonflikt, beide
+Chromium-Stufen und sechs historische pre.2/pre.1/RC14-Fälle PASS. Neuer
+90-Dateien-Test FAIL vor Appstart bei synthetischer RAF-Erzeugung: ExifTool
+verweigert Schreiben unter .RAF. Fixture schreibt jetzt erst TIFF-Metadaten
+und benennt anschließend die synthetische Datei um. Keine native RAF-Aussage.
+Containerartefakt 13007910318, SHA-256
+`ba1e51a5fdbd9fe4cc04b3bc9fd702d7a17e3e283bc5c7e77d38c3886ce00735`,
+unabhängig heruntergeladen und verifiziert. 4.000/iPhone in diesem Lauf NOT_RUN.
+
+Neue reine Reproduktion `41117269501`: 42 PASS / 3 FAIL durch falschen
+Testparameter: Sortierplan benötigt Bibliotheks-Kompatibilitätsansicht statt
+kanonischem Workspace. Der alte Code brach bereits an der Root-Prüfung ab.
+Fixture korrigiert, verwendet nun die echte alte bzw. neue View-Funktion.
+Kein Beleg einer Bestätigungs-Reproduktion aus diesem Fehlversuch behaupten.
+
+Breite Backend-/Frontend-Jobs sind jetzt im selben Zielworkflow mit
+`needs: reproductions` integriert, statt als unabhängig startbare Matrix.
+Marker `[pre5-full]` startet sie erst nach grünen kurzen Gates; Container
+zusätzlich `[pre5-container]`. Version auf pre.5 vor der finalen Abnahme gesetzt.
+Fünf-Stunden-Verbrauch zuletzt 43 %, Woche 22 %; bei 70 % mit Handoff beginnen.

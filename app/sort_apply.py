@@ -451,7 +451,7 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
     return {"recovered": recovered, "blocked": blocked}
 
 
-@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=SortApplyError)
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=SortApplyError, durable=False)
 def prepare_sort_run(
     database_path: Path,
     job_id: str,

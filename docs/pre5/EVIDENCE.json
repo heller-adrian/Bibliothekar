@@ -1,0 +1,72 @@
+{
+  "status": "PARTIAL_ACCEPTANCE_NOT_RELEASED",
+  "branch": "codex/pre5-operation-recovery",
+  "base_tag": "v1.0.0-pre.4",
+  "accepted_target_source": "c548e308d795f459ff854fb6a5843431fb71eef1",
+  "target_run": 41116260923,
+  "target_job": 124271170153,
+  "tests": {
+    "new_targets": {
+      "passed": 42,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused": {
+      "passed": 46,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "historical": {
+      "passed": 237,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "artifact": {
+    "id": 13005609337,
+    "name": "pre5-reproductions-1",
+    "sha256": "954b432c2162f70cc1f149425671ca41688a9a3f9b44c3ede1441f88e6a4abc5",
+    "downloaded_archive_digest_verified": true
+  },
+  "not_yet_accepted": [
+    "Final application source after SQL-only planning and shared-stock admission changes",
+    "Complete backend node coverage",
+    "Complete frontend and supervisor/container acceptance",
+    "Ninety-file, forty-seven-family, eight-day application scenario",
+    "Final versioned image and release integrity"
+  ],
+  "limits": {
+    "native_TrueNAS_NFSv4": "NOT_RUN",
+    "physical_SD_USB": "NOT_RUN",
+    "genuine_DNG_1_7_write": "NOT_RUN",
+    "native_RAF_write": "NOT_RUN",
+    "known_origin_metadata_variant_A": "DEFERRED",
+    "independent_loss_finalization": "DEFERRED"
+  },
+  "production_data_access": false,
+  "published": false,
+  "partial_container": {
+    "source": "c548e308d795f459ff854fb6a5843431fb71eef1",
+    "run": 41116260923,
+    "artifact_id": 13007910318,
+    "sha256": "ba1e51a5fdbd9fe4cc04b3bc9fd702d7a17e3e283bc5c7e77d38c3886ce00735",
+    "downloaded_archive_digest_verified": true,
+    "result": "FAIL_fixture_generation_before_ninety_file_scenario",
+    "passed": [
+      "pre5_real_general_api_two_restarts",
+      "pre5_exact_pre4_inventory_recovery",
+      "pre5_independent_import_event_sort_beside_conflict",
+      "pre4_read_views_unknown_effects_still_fenced",
+      "historical_pre2_pre1_RC14_recovery",
+      "Chromium_DE_EN_mobile_desktop"
+    ],
+    "not_run": [
+      "ninety_file_scenario",
+      "four_thousand_families",
+      "fourteen_iPhone_JPEGs"
+    ]
+  }
+}

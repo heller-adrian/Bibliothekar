@@ -287,6 +287,20 @@ def test_transient_observer_cannot_nest_durable_media_writes(ready):
                 pytest.fail('unsafe media mutation')
 
 
+def test_shared_stock_observation_cannot_bypass_another_librarys_unresolved_import(ready):
+    _,ws,_,dbs,_=ready
+    with pytest.raises(RuntimeError,match='interrupted import'):
+        with ro.reserve(ws,library_id='second',database=dbs[1],kind='import',ids={
+                'function':'app.main.process_claimed_job','job_id':'synthetic-pending'}):
+            raise RuntimeError('interrupted import')
+    control=ro._control_location(ws)
+    evidence={p:p.read_bytes() for p in control.glob('*.json')}
+    with pytest.raises(RuntimeError,match='operation_recovery_required'):
+        reconcile_central_free_stock(dbs[0],ws,library_id='main')
+    assert evidence=={p:p.read_bytes() for p in control.glob('*.json')}
+    assert operations.inspect(ws)['workspace_writes_allowed'] is True
+
+
 def test_missing_archive_event_is_local_verification_failure_without_lease(ready):
     from app.archive_transfer import verify_event_archive,ArchiveVerificationError
     _,ws,reg,dbs,_=ready
@@ -353,12 +367,15 @@ def test_rejected_sql_only_sort_preparation_and_exact_pre4_recovery(ready,module
     code='''
 from pathlib import Path
 import importlib,sys
+from app.main import compatibility_workspace_root
+from app.library_context import resolve_library_context
 function=getattr(importlib.import_module('app.'+sys.argv[1]),sys.argv[2])
-try:function(Path(sys.argv[3]),'missing-job','missing-event',Path(sys.argv[4]),expected_plan_token='not-a-plan',confirmation_phrase='not-confirmed')
+view=compatibility_workspace_root(resolve_library_context(Path(sys.argv[5]),'main'))
+try:function(Path(sys.argv[3]),'missing-job','missing-event',view,expected_plan_token='not-a-plan',confirmation_phrase='not-confirmed')
 except RuntimeError as error:assert 'Bestätigung' in str(error),str(error)
 else:raise AssertionError('unconfirmed sort was accepted')
 '''
-    process=subprocess.run([sys.executable,'-c',code,module,function,str(dbs[0]),str(ws)],
+    process=subprocess.run([sys.executable,'-c',code,module,function,str(dbs[0]),str(ws),str(reg)],
         cwd=old,env=dict(os.environ,PYTHONPATH=str(old),PYTHONDONTWRITEBYTECODE='1'),text=True,capture_output=True,timeout=30)
     assert process.returncode==0,process.stdout+process.stderr
     path=next(ro._control_location(ws).glob('operation-*.json'));record=ro._read(path)
@@ -368,7 +385,7 @@ else:raise AssertionError('unconfirmed sort was accepted')
     assert proof['reservation']==record and proof['media_writes'] is False
     candidate=getattr(importlib.import_module('app.'+module),function)
     with pytest.raises(RuntimeError,match='Bestätigung'):
-        candidate(dbs[0],'missing-job','missing-event',ws,
+        candidate(dbs[0],'missing-job','missing-event',main.compatibility_workspace_root(context),
             expected_plan_token='not-a-plan',confirmation_phrase='not-confirmed')
     assert operations.inspect(ws)['writes_allowed'] and not tuple(path.parent.glob('operation-*.json'))
     assert (context.work_root/'original.JPG').read_bytes()==original

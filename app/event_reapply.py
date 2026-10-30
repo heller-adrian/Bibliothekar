@@ -65,7 +65,7 @@ def active_sort_run_exists(
     return row is not None
 
 
-@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=RuntimeError)
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=RuntimeError, durable=False)
 def prepare_reapply_sort_run(
     database_path: Path,
     job_id: str,

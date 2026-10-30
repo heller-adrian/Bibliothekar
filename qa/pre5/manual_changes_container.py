@@ -98,12 +98,16 @@ index=0
 for day,count in zip(range(19,27),(8,8,6,5,5,5,5,5)):
  directory=root/str(day);directory.mkdir()
  for number in range(count):
-  index+=1;stem=f'DSCF{index:04d}';paths=[]
+  index+=1;stem=f'DSCF{index:04d}';paths=[];renames=[]
   for suffix in ('.JPG',) if day==26 and number>0 else ('.JPG','.RAF'):
    target=directory/(stem+suffix)
+   if suffix=='.RAF':
+    final=target;target=target.with_suffix('.tiff');renames.append((target,final))
    Image.new('RGB',(16,16),((index*41)%255,(index*61)%255,(index*79)%255)).save(target,format='JPEG' if suffix=='.JPG' else 'TIFF')
    paths.append(str(target))
-  subprocess.run(['exiftool','-overwrite_original',f'-DateTimeOriginal=2026:07:{day} 12:{number:02d}:00',f'-CreateDate=2026:07:{day} 12:{number:02d}:00','-OffsetTimeOriginal=+02:00','-Model=Synthetic Camera','-Make=QA',*paths],check=True,capture_output=True)
+  written=subprocess.run(['exiftool','-overwrite_original',f'-DateTimeOriginal=2026:07:{day} 12:{number:02d}:00',f'-CreateDate=2026:07:{day} 12:{number:02d}:00','-OffsetTimeOriginal=+02:00','-Model=Synthetic Camera','-Make=QA',*paths],text=True,capture_output=True)
+  assert written.returncode==0,written.stdout+written.stderr
+  for source,target in renames:source.rename(target)
 assert index==47 and len(list(root.rglob('*.JPG')))+len(list(root.rglob('*.RAF')))==90
 ''')
     docker('start',NAME)

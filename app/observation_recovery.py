@@ -1,4 +1,4 @@
-"""Retire audited, media-read-only pre.4 inventory intents after qualification.
+"""Retire audited, media-read-only pre.4 intents after qualification.
 
 SQLite transactions already committed remain evidence; uncommitted transactions
 are rolled back by SQLite. This never declares a media mutation successful.
@@ -17,6 +17,9 @@ FUNCTIONS = {
     'app.event_inventory.scan_event_inventory':'inventory',
     'app.trash.reconcile_trash_inventory':'inventory',
     'app.archive_transfer.verify_event_archive':'verification',
+    'app.sort_apply.prepare_sort_run':'plan',
+    'app.event_reapply.prepare_reapply_sort_run':'plan',
+    'app.workspace_reconcile.prepare_workspace_reconcile_run':'plan',
 }
 
 
@@ -32,7 +35,7 @@ def record_failure(record,error):
         if job and not connection.execute('SELECT 1 FROM jobs WHERE id=?',(job,)).fetchone():job=None
         connection.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'observer_failed','operation',?,?,?)",
             (job,record['reservation_id'],json.dumps({'reservation':plain,'error':str(error),
-                'media_writes':False,'next_action':'retry_observation'},sort_keys=True),datetime.now(timezone.utc).isoformat()))
+                'media_writes':False,'next_action':'retry_preparation' if record['kind']=='plan' else 'retry_observation'},sort_keys=True),datetime.now(timezone.utc).isoformat()))
 
 
 def read_snapshot(function,database,workspace):
@@ -117,9 +120,11 @@ def recover(workspace):
                         or connection.execute('PRAGMA foreign_key_check').fetchall()):
                     raise ro.RootOperationError('inventory_recovery_database_inconsistent: '+str(db))
             receipt = parent/(record['kind']+'-interruption-'+record['reservation_id']+'.json')
-            proof = {'format': 1, 'disposition': 'observational_scan_interrupted',
+            preparation=record['kind']=='plan'
+            proof = {'format': 1, 'disposition': 'sql_only_preparation_interrupted' if preparation else 'observational_scan_interrupted',
                      'sqlite_integrity': 'ok', 'media_writes': False,
-                     'reservation': record, 'scan_required': True}
+                     'reservation': record, 'scan_required': not preparation}
+            if preparation:proof['preparation_retry_required']=True
             previous = ro._read(receipt, None)
             if previous is not None and previous != proof:
                 raise ro.RootOperationError('inventory_recovery_receipt_conflict: '+str(receipt))

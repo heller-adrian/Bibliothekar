@@ -43,7 +43,11 @@ def _resources(record):
         return frozenset({'workspace'})
     own = 'library:'+library
     if kind == 'inventory':
-        return frozenset({own})
+        # No media writes, but persisted scans update shared-stock catalogue
+        # projections. An unresolved import/deletion must still fence them.
+        result={own,'central_stock'}
+        if function=='app.trash.reconcile_trash_inventory':result.add('trash')
+        return frozenset(result)
     if kind == 'metadata':
         # General operations modify their own unindexed work copy and task.
         # Reintegration/library operations additionally affect owned stock.

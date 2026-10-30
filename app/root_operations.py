@@ -573,7 +573,7 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
     if not durable:
         from app.observation_recovery import FUNCTIONS
         if FUNCTIONS.get((ids or {}).get('function')) != kind:
-            raise RootOperationError('Only audited media observers may use a transient reservation.')
+            raise RootOperationError('Only audited media-read-only functions may use a transient reservation.')
     from app.operation_health import require_write
     candidate={'kind':kind,'library':str(library_id),'database':str(Path(database).absolute()) if database is not None else None,'ids':ids or {}}
     require_write(workspace,candidate=candidate)
@@ -731,7 +731,10 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
             try:
                 validate_active_roots()
                 if not durable:
-                    # Observers never change media. Their SQLite transactions
+                    # Audited observers/preparations never change media. SQL
+                    # plans are committed atomically before a durable executor
+                    # may begin; they remain queued after a process restart.
+                    # Their SQLite transactions
                     # commit or roll back; process death cannot leave a file
                     # mutation requiring a durable F14 recovery intent.
                     pass

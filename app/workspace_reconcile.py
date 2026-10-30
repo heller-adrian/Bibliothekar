@@ -416,7 +416,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     }
 
 
-@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=SortApplyError)
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=SortApplyError, durable=False)
 def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_id:str,workspace_path:Path,*,expected_plan_token:str,confirmation_phrase:str)->dict[str,Any]:
     if confirmation_phrase != CONFIRMATION_PHRASE: raise SortApplyError("Die ausdrückliche Bestätigung für den Arbeitsbereich-Abgleich fehlt.")
     plan=build_workspace_reconcile_plan(database_path,job_id,anchor_event_id,workspace_path)
