@@ -237,7 +237,7 @@ def runtime(work):
     browser=json.loads((work/'runtime/pre4-browser/results.json').read_text())
     qualify_runtime(data['startup-evidence.json'],data['pre-evidence.json'],data['pre3-evidence.json'],data['pre4-live.json'],browser)
     c.dump(assets/'release-pre4-browser-results.json',browser)
-    for name in ('startup.log','iphone.log','container.log','pre4-container.log','historical-container.log'):
+    for name in ('startup.log','iphone.log','pre4-container.log','historical-container.log'):
         shutil.copyfile(work/'runtime'/name,assets/('release-'+name))
     for folder in ('pre4-historical',):
         for path in sorted((work/'runtime'/folder).glob('*.log')):
