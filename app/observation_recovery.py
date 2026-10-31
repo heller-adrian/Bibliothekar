@@ -83,6 +83,10 @@ def recover(workspace):
     for item in operation_health.inspect(root)['reservations']:
         if item['live'] or not item['qualified']:
             continue
+        if (item.get('kind')=='import'
+            and item.get('ids',{}).get('function')=='app.main.process_claimed_job'):
+            _retire_original_readonly_sd_recheck(root,parent,item)
+            continue
         if FUNCTIONS.get(item.get('ids', {}).get('function')) != item.get('kind'):
             continue
         path = Path(item['path'])
@@ -138,3 +142,107 @@ def recover(workspace):
             ro._sync(parent)
             recovered.append({'reservation_id': record['reservation_id'], 'receipt': str(receipt)})
     return recovered
+
+
+
+def _retire_original_readonly_sd_recheck(root,parent,item):
+    """Retire ONLY an orphaned read-only SD check after proving original scope.
+
+    Import jobs that may have published media are never eligible. A persisted
+    SD check must be rehashed from the source on restart; its old F14 record
+    does not supply reusable media, hash or import-completion evidence.
+    """
+    from app import root_operations as ro
+    from app.storage_bootstrap import key_for
+    from app.storage_anchors import check_active
+    from app.sd_recheck import identity
+    from app.library_registry import list_libraries
+
+    path=Path(item['path'])
+    if not item.get('qualified') or item.get('live'):
+        raise ro.RootOperationError('sd_recheck_recovery_needs_orphaned_valid_lease')
+    with ro._lock(parent/'workspace.lock'), ro._lock(parent/'shared.lock'), \
+         ro._lock(parent/('library-'+hashlib.sha256(b'main').hexdigest()+'.lock')), \
+         ro._lock(path.with_suffix('.lock'),exclusive=True), \
+         ro._lock(parent/'state.lock',exclusive=True,wait=True):
+        record=ro._read(path)
+        expected={'function':'app.main.process_claimed_job',
+                  'job_id':record.get('ids',{}).get('job_id')}
+        if (record.get('kind')!='import' or record.get('library')!='main'
+            or record.get('ids')!=expected
+            or not isinstance(expected['job_id'],str) or not expected['job_id']
+            or record.get('database') is None
+            or set(record)-{'format','reservation_id','shared','workspace',
+                             'library','generation','bindings','database',
+                             'kind','ids','effect_resources'}
+            or set(record.get('effect_resources',[])) - {'library:main','central_stock'}
+            or hashlib.sha256(json.dumps(record,sort_keys=True).encode()).hexdigest()!=item['record_sha256']
+            or path.name!='operation-'+key_for(record)+'.json'):
+            raise ro.RootOperationError('sd_recheck_original_lease_mismatch')
+        state=ro._state(parent,root)
+        owner=ro._registered(record['database'])
+        if (not owner or owner['library_id']!='main'
+            or Path(owner['database_path']).absolute()!=Path(record['database']).absolute()
+            or Path(owner['workspace_root']).absolute()!=root
+            or record['generation']!=[state['generation'],state['libraries'].get('main',0)]
+            or any(v is None or state['bindings'].get(k)!=v
+                   for k,v in record['bindings'].items())):
+            raise ro.RootOperationError('sd_recheck_library_scope_changed')
+        ro._check(record['bindings'])
+        check_active(root,parent)
+        db=Path(record['database']).absolute()
+        with closing(sqlite3.connect(db.as_uri()+'?mode=ro',uri=True)) as connection:
+            connection.row_factory=sqlite3.Row
+            connection.execute('PRAGMA query_only=ON')
+            connection.execute('BEGIN')
+            if (connection.execute('PRAGMA quick_check').fetchone()[0]!='ok'
+                or connection.execute('PRAGMA foreign_key_check').fetchall()):
+                raise ro.RootOperationError('sd_recheck_database_integrity_changed')
+            row=connection.execute('SELECT * FROM jobs WHERE id=?',(expected['job_id'],)).fetchone()
+            if (row is None or row['operation']!='sd_recheck'
+                or row['state'] not in {'copying','verifying','completed','interrupted'}):
+                raise ro.RootOperationError('sd_recheck_original_job_not_readonly_check')
+            try:bound=json.loads(row['result_json'])
+            except (TypeError,ValueError) as error:
+                raise ro.RootOperationError('sd_recheck_source_proof_missing') from error
+            if (not isinstance(bound,dict)
+                or set(['source_root','root_identity','source_identity'])-set(bound)):
+                raise ro.RootOperationError('sd_recheck_source_proof_incomplete')
+            source=Path(row['source_path']).absolute()
+            source_root=Path(bound['source_root']).absolute()
+            if (not source.is_relative_to(source_root) or
+                identity(source)!=bound['source_identity'] or
+                identity(source_root)!=bound['root_identity']):
+                raise ro.RootOperationError('sd_recheck_source_identity_changed')
+            child_id='FOLDER_IMPORT_'+expected['job_id']
+            children=connection.execute(
+                "SELECT id,state,operation FROM jobs WHERE id=?",(child_id,)).fetchall()
+            if row['state']=='completed':
+                if bound.get('status')=='import_queued':
+                    if (bound.get('import_job_id')!=child_id or len(children)!=1
+                        or children[0]['operation']!='folder_import'
+                        or children[0]['state']!='queued'):
+                        raise ro.RootOperationError('sd_recheck_atomic_import_handoff_unverified')
+                elif bound.get('status')=='already_backed_up':
+                    if children:raise ro.RootOperationError('sd_recheck_unexpected_child_import')
+                else:
+                    raise ro.RootOperationError('sd_recheck_terminal_evidence_missing')
+            elif children:
+                raise ro.RootOperationError('sd_recheck_child_without_verified_handoff')
+        proof={'format':1,'disposition':'readonly_sd_check_requires_rehash' if row['state']!='completed' else 'readonly_sd_handoff_sql_verified',
+               'media_writes':False,'original_job_id':expected['job_id'],'reservation':record,
+               'source_binding':{'source':str(source),'root':str(source_root),
+                                 'source_identity':bound['source_identity'],
+                                 'root_identity':bound['root_identity']}}
+        receipt=parent/('sd-check-interruption-'+record['reservation_id']+'.json')
+        prior=ro._read(receipt,None)
+        if prior is not None and prior!=proof:
+            raise ro.RootOperationError('sd_recheck_disposition_conflict')
+        if prior is None:ro._write(receipt,proof)
+        ro._check(record['bindings'])
+        if identity(source)!=bound['source_identity'] or identity(source_root)!=bound['root_identity']:
+            raise ro.RootOperationError('sd_recheck_source_changed_during_retirement')
+        if ro._read(path)!=record:
+            raise ro.RootOperationError('sd_recheck_original_reservation_changed')
+        path.unlink()
+        ro._sync(parent)
