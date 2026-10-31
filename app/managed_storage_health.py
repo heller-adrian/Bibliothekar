@@ -406,6 +406,49 @@ def require_pinned_storage(workspace, *, initializing=False):
     if state.get('storage_names'):require_storage(workspace,allow_new=bootstrap)
 
 
+def _technical_startup_evidence(parent,root,database,state,names):
+    """Recognize only our completed technical lease, never a media outcome.
+
+    Older generations require a digest-linked explicit setup history. Receipts
+    are retained; recognizing one grants neither initialization nor write access.
+    """
+    import hashlib,json
+    from app.root_operations import _read
+    from app.operation_health import _TECHNICAL_STARTUP_IDS
+    paths=list(parent.glob('technical-startup-*.json'))
+    if not paths:return set()
+    states=[state];seen=set()
+    while states[-1].get('setup_reset'):
+        reset=states[-1]['setup_reset'];name=reset.get('history','')
+        if (not isinstance(name,str) or Path(name).name!=name or not name.startswith('setup-history-')
+            or name in seen or len(seen)>=64 or reset.get('confirmation')!='SET UP AGAIN'):
+            raise ValueError('unknown_control_evidence')
+        previous=_read(parent/name,None)
+        if not isinstance(previous,dict) or hashlib.sha256(json.dumps(previous,sort_keys=True).encode()).hexdigest()!=reset.get('previous_state_sha256'):
+            raise ValueError('unknown_control_evidence')
+        seen.add(name);states.append(previous)
+    expected={str(root),*(str(root/n) for n in names.values())};accepted=set()
+    for path in paths:
+        nonce=path.name[len('technical-startup-'):-5]
+        receipt=_read(path,None);record=receipt.get('reservation') if isinstance(receipt,dict) else None
+        if (len(nonce)!=32 or any(c not in '0123456789abcdef' for c in nonce)
+            or not isinstance(receipt,dict) or set(receipt)!={'format','receipt','reservation'}
+            or receipt.get('format')!=1 or receipt.get('receipt')!='technical_setup_returned_and_roots_verified'
+            or not isinstance(record,dict) or set(record)!={'format','reservation_id','shared','workspace','library','generation','bindings','database','kind','ids'}
+            or record.get('format')!=1 or record.get('reservation_id')!=nonce or record.get('shared') is not True
+            or record.get('workspace')!=str(root) or record.get('database')!=str(Path(database).absolute())
+            or record.get('library')!='main' or record.get('kind')!='startup' or record.get('ids')!=_TECHNICAL_STARTUP_IDS
+            or not isinstance(record.get('generation'),list) or len(record['generation'])!=2 or any(type(i) is not int or i<0 for i in record['generation'])
+            or not isinstance(record.get('bindings'),dict) or set(record['bindings'])!=expected
+            or any(not isinstance(v,list) or len(v)!=2 or any(type(i) is not int or i<0 for i in v) or v[1]==0 for v in record['bindings'].values())
+            or not any(s.get('workspace')==state.get('workspace')==record['bindings'][str(root)]
+                and record.get('generation')==[s.get('generation'),0]
+                and all(s.get('bindings',{}).get(k)==v for k,v in record['bindings'].items()) for s in states)):
+            raise ValueError('unknown_control_evidence')
+        accepted.add(path.name)
+    return accepted
+
+
 def setup_again_evidence(workspace, *, database):
     """Narrow reset qualification, not an inference from an absent catalogue.
 
@@ -478,6 +521,7 @@ def setup_again_evidence(workspace, *, database):
             from app.storage_bootstrap import completed
             if init.get('phase') == 'completed' and completed(root, state):
                 technical_receipts.update({'bootstrap-completed-'+init['bootstrap_id']+'.json', 'bootstrap-operation-'+init['bootstrap_id']+'.json'})
+        technical_receipts.update(_technical_startup_evidence(parent,root,database,state,names))
         if any(p.is_symlink() or (p.suffix=='.json' and p.name not in technical_receipts and not p.name.startswith('setup-history-')) for p in (parent.iterdir() if parent.exists() else [])):
             raise ValueError('unknown_control_evidence')
         # Every private media retention and every surviving catalogue is evidence

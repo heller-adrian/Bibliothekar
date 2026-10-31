@@ -462,5 +462,27 @@
       "scope": "two historical behavioral contract modules only",
       "status": "PENDING"
     }
-  ]
+  ],
+  "bounded_legacy_diagnosis": {
+    "closure_run": 41219852833,
+    "source": "f0e692473c4dd9bc24db1114a94068b3c87c9bea",
+    "tests": 66,
+    "passed": 65,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0,
+    "artifact_id": 13050100813,
+    "sha256": "efa22efebbd5b972d7fda4979e350f5ea7ed118309373f9758b83a30534a0b25",
+    "downloaded_archive_digest_verified": true,
+    "unprofiled_deadlines": {
+      "3892_files_seconds": 213.948,
+      "hundred_files_seconds": 80.796,
+      "status": "PASS"
+    },
+    "contracts_run": 41220098240,
+    "contracts_tests_passed": 17,
+    "contracts_artifact_id": 13049483491,
+    "contracts_sha256": "fd574cf0f4af6709218f426cb42729f49ab52dc97f37c8a5503a9f61e9372ef6",
+    "contracts_archive_digest_verified": true
+  }
 }

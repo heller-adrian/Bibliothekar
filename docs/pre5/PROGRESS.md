@@ -147,3 +147,30 @@ Die ausgetauschte Quelltextzeile verlangte gerade den inzwischen verbotenen
 schreibenden Refresh innerhalb eines Read-Requests. Produktcode unverändert.
 Separate[pre5-contracts]-Stufe prüft ausschließlich diese zwei kleinen Module;
 kein erneuter Performance-, Container- oder Standardzieltestlauf dadurch.
+
+## 31.10.2026 – ausschließlich unknown_control_evidence
+
+41219852833:65/66 PASS, ein Legacy-Live-Wipe-Fehler. Artefakt13050100813,
+SHA256 efa22efebbd5b972d7fda4979e350f5ea7ed118309373f9758b83a30534a0b25
+verifiziert. Beide tatsächlichen Laufzeitfälle ohne Profiling PASS unter den
+unveränderten Fristen:3892 Dateien213,948s,100 Dateien80,796s. Alle sieben
+Statement-/übrigen gewählten Sicherheitsverträge bestehen.41220098240:
+17/17 PASS, Artefakt13049483491 SHA256
+fd574cf0f4af6709218f426cb42729f49ab52dc97f37c8a5503a9f61e9372ef6 verifiziert.
+
+Eigentliche Lücke: Der reale F14-Produzent schreibt nach rein technischem
+Startup technical-startup-<Nonce>.json dauerhaft. Die spätere leere Setup-
+Qualifikation kannte diesen Beleg nicht und meldet unknown_control_evidence.
+Keine Fixture-Ausnahme: nur exakte technische Receipt-/Reservationsstruktur,
+Nonce/Dateiname, Datenbank, Workspace, IDs, Generation und alle fünf Bindungen
+gegen aktuellen State qualifizieren. Frühere Generationen ausschließlich über
+digestverknüpfte explizite SET-UP-AGAIN-Statehistorie, zyklus-/größenbegrenzt.
+Weder SQL-/F14-/Recovery-/Read-only-Regeln noch Lösch-/Resetablauf geändert.
+Belege bleiben unverändert erhalten. Jede unbekannte Datei/offene Operation,
+Medien-/Registry-/Katalog-/Retentionhistorie und alle alten Token-/Lockprüfungen
+bleiben Sperrgründe.13 neue Fälle verwenden einen vom echten ro.reserve erzeugten
+Beleg, zeigen die bisherige Ablehnung und prüfen zwei explizite Wiederholungen
+sowie Fremddaten/Nonce/Generation/Scope/DB/Binding/History-Angriffe.
+[pre5-contracts] wählt diesmal ausschließlich diese neue Datei, den einen echten
+Live-Wipe-/Restart-/Onboardingfall und die bestehenden negativen Resetfälle.
+Die vorherigen17 Vertragsfälle bleiben unverändert im Testbestand/Full-Matrix.

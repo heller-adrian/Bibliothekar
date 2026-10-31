@@ -1,4 +1,5 @@
 [
-  "tests/backend/test_0554_config_brand.py",
-  "tests/backend/test_0414_patch_regressions.py"
+  "tests/backend/test_pre5_technical_setup_receipt.py",
+  "tests/backend/test_rc6_legacy_setup.py::test_incomplete_live_wipe_then_process_restart_and_confirmed_onboarding",
+  "tests/backend/test_rc6_legacy_setup.py::test_legacy_reset_never_discards_surviving_evidence"
 ]
