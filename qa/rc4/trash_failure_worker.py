@@ -25,11 +25,12 @@ if boundary=='none':
         def is_alive(self):return True
         def join(self,*a,**kw):pass
     main.Thread=NoThread  # Only suppress concurrent scheduling, not startup recovery.
-    main.startup_database()
+    from contextlib import redirect_stdout
+    with redirect_stdout(sys.stderr):main.startup_database()
     assert main.DATABASE_INITIALIZATION_ERROR is None,main.DATABASE_INITIALIZATION_ERROR
     assert main.WORKSPACE_LAYOUT_ERROR is None,main.WORKSPACE_LAYOUT_ERROR
-    # Startup does not silently finish the pending failure. This is the
-    # same explicit, verified retry as the user's confirmed action.
+    # Startup may finish exactly this interrupted, verified finalizer. Repeated
+    # explicit finalization must then remain idempotent with one audit receipt.
 result=tf.finalize_failure(db,ws,jid)
 assert tf.validate_finalized(None,ws,jid)
 assert not ti.protected_trash_paths(None,ws)

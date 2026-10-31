@@ -30,3 +30,16 @@ belegten Laufzeitfälle mit cProfile. Vorhandene90/300s-Deadlines, Assertions un
 Audit-/F14-/SQLite-Guards bleiben aktiv. Profile werden auch nach FAIL gesichert.
 Keine weiteren Reproduktions-, Frontend-, Container- oder Vollmatrixwiederholungen
 in diesem reinen Diagnoselauf; Ausführung ebenfalls sequenziell auf safe-Runner.
+
+41215262628 auf4a24b2575ef85a61fdbe6b4cc3d72d40c8e8c58a:76/89 PASS,
+13 FAIL,0 ERROR/SKIP; Artefakt13047866550 SHA256
+c0cd0f203710fb8f0fda138e9f2ba8e4e0cf42625a4db7db98c7e407e1c1ef80 verifiziert.
+Die acht Legacy-Finalizerprozesse starten jetzt erfolgreich; anschließend
+scheitert ihr JSON-Parser an erhaltenen Startup-stdout-Logs. Adapter leiten nur
+Startupdiagnosen nach stderr, der gesamte Log bleibt erhalten. Vier private
+Retention-Fixtures fehlen General/Batch-Anker: vor Beginn der simulierten
+Altoperation vollständig bereitstellen, produktive Fehlankerprüfung bleibt.
+Der neue positive Medientest verglich irrtümlich auch das zu aktualisierende
+Journal; Vergleich erfasst jetzt ausschließlich alle tatsächlichen Stage-Medien.
+Fremd-/Fehlbytes- und laufende Recovery-Schreibbarrieren bestehen bereits.
+Alle erneuten Linuxbeweise für diese QA-Korrekturen noch PENDING.

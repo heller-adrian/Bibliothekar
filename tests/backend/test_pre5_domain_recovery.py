@@ -92,7 +92,7 @@ def test_failed_restore_replay_requires_complete_retained_bytes(fixture,monkeypa
     copy=ti.stage_parent(ws)/jid/data['files'][0]['relative_path']
     if damage=='foreign_copy':copy.write_bytes(b'foreign retained bytes')
     if damage=='missing_copy':copy.unlink()
-    remaining={p:p.read_bytes() for p in ti.stage_parent(ws).rglob('*') if p.is_file()}
+    remaining={p:p.read_bytes() for p in (ti.stage_parent(ws)/jid).rglob('*') if p.is_file()}
     if damage=='none':
         assert domain_recovery.replay(ws,fixture[2],database=db)
         assert not path.exists() and tf.validate_finalized(db,ws,jid)
@@ -107,7 +107,7 @@ def test_failed_restore_replay_requires_complete_retained_bytes(fixture,monkeypa
         assert not health.inspect(ws)['writes_allowed']
     after=get_job(db,jid)
     assert all(after[k]==before[k] for k in ('state','stage','error_message'))
-    assert remaining=={p:p.read_bytes() for p in ti.stage_parent(ws).rglob('*') if p.is_file()}
+    assert remaining=={p:p.read_bytes() for p in (ti.stage_parent(ws)/jid).rglob('*') if p.is_file()}
 
 
 def test_live_recovery_fences_cached_sql_and_root_changes_but_keeps_safe_reads(ready,monkeypatch):

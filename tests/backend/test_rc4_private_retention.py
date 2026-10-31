@@ -21,6 +21,12 @@ def fixture(tmp_path,monkeypatch):
     settings=private/'settings.json';settings.write_text('{}')
     for key,value in {'KAMERA_WORKSPACE':ws,'KAMERA_CONFIG':settings,'KAMERA_REGISTRY_DATABASE':reg}.items():monkeypatch.setenv(key,str(value))
     for name in LEGACY_STORAGE_DEFAULTS.values():(ws/name).mkdir(exist_ok=True)
+    # Known complete installation: fixed General/Batch administration anchors
+    # already exist before any historical reservation or failure is published.
+    from app.managed_directory_names import directory_name
+    metadata=storage_paths(ws)['metadata_root']
+    for kind in ('metadata_general','metadata_multiple'):
+        (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
     initialize_library_registry(reg);dbs=[]
     for lid in ['main','second']:
         db=private/(lid+'.sqlite3');initialize_database(db);ensure_library_identity(db,lid);dbs.append(db)

@@ -66,7 +66,7 @@
       "fourteen_iPhone_JPEGs"
     ]
   },
-  "latest_application_candidate": "3404ddcf020e56bd4f82aedf80cec4c69c4753ef",
+  "latest_application_candidate": "4a24b2575ef85a61fdbe6b4cc3d72d40c8e8c58a",
   "additional_target_acceptance": {
     "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
     "run": 41119010880,
@@ -347,5 +347,48 @@
     "linux_verification": "PENDING",
     "run": 41207207207,
     "full_matrix_started": false
-  }
+  },
+  "backend_stabilization_focus": [
+    {
+      "run": 41207207207,
+      "source": "3404ddcf020e56bd4f82aedf80cec4c69c4753ef",
+      "tests": 66,
+      "passed": 62,
+      "failed": 4,
+      "errors": 0,
+      "skipped": 0,
+      "artifact_id": 13045485079,
+      "sha256": "c30a7e62b52bb1c318fb9309ce46633c8a0bf7d559b3b54f4259ab059356d411",
+      "downloaded_archive_digest_verified": true
+    },
+    {
+      "run": 41214162298,
+      "source": "efb500279e34847d0a2dc485422304e945f31c64",
+      "tests": 75,
+      "passed": 73,
+      "failed": 2,
+      "errors": 0,
+      "skipped": 0,
+      "artifact_id": 13047268858,
+      "sha256": "39f54946acf3f887e34e5a0628305fb5cfee1203737bc95cb4e37c7e3844d324",
+      "downloaded_archive_digest_verified": true
+    },
+    {
+      "run": 41215262628,
+      "source": "4a24b2575ef85a61fdbe6b4cc3d72d40c8e8c58a",
+      "tests": 89,
+      "passed": 76,
+      "failed": 13,
+      "errors": 0,
+      "skipped": 0,
+      "artifact_id": 13047866550,
+      "sha256": "c0cd0f203710fb8f0fda138e9f2ba8e4e0cf42625a4db7db98c7e407e1c1ef80",
+      "downloaded_archive_digest_verified": true,
+      "remaining_failures": {
+        "json_stdout_protocol": 8,
+        "missing_fixed_administration_directories_in_fixture": 4,
+        "test_compared_intentionally_updated_journal_as_media": 1
+      }
+    }
+  ]
 }

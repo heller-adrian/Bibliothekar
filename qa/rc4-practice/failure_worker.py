@@ -30,7 +30,10 @@ if boundary=='none':
         def is_alive(self):return True
         def join(self,*a,**kw):pass
     main.Thread=NoThread  # Only suppress concurrent scheduling, not startup recovery.
-    main.startup_database()
+    # stdout is this adapter's JSON protocol. Preserve real startup diagnostics
+    # on stderr, which the caller already retains alongside the JSON result.
+    from contextlib import redirect_stdout
+    with redirect_stdout(sys.stderr):main.startup_database()
     assert main.DATABASE_INITIALIZATION_ERROR is None,main.DATABASE_INITIALIZATION_ERROR
     assert main.WORKSPACE_LAYOUT_ERROR is None,main.WORKSPACE_LAYOUT_ERROR
     # The actual startup must complete the verified failed attempt itself.
