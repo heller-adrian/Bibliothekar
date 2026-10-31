@@ -1,77 +1,66 @@
 # Bibliothekar pre.5 – Fortsetzung, 31.10.2026
 
-## Sofortiger Einstieg – ausschließlich Legacy-Setupfehler
+## Aktueller Stand – gezielter Legacy-Setupfehler behoben
 
 Branch `codex/pre5-operation-recovery`.
-Anwendungscode: **bd9451206c6ac447e0d1d71f07fa4ee4263e25c2**.
-**Zuerst41221622586 auswerten** (zuletzt in_progress). Ausschließlich:
-13 neue technische Receiptfälle, ursprünglicher Live-Wipe-/Restart-/Onboarding-
-Fall und17 vorhandene negative Legacy-Resetfälle. Kein vollständiger Workflow,
-keine Performance-/Container-/Standardzieltestwiederholung. Die Auswahldatei
-qa/pre5/backend_contracts.json ist für diese Runde auf diese31 Fälle begrenzt;
-alle übrigen Testdateien und die volle Matrix bleiben vollständig vorhanden.
+**Letzter geprüfter Anwendungscode:** `ff11f88b8116bae5b0d39f824b1eef828d39e659`.
+Dazugehöriger isolierter Linux-Workflow **41222109431: SUCCESS, 31/31 PASS,
+0 FAIL/ERROR/SKIP, 40,11 s**. GitHub-Artefakt **13050372420**, von GitHub
+gemeldeter ZIP-SHA256:
+`0df7bbe15f1d5e3f9ba0300f7ab8e8f46de42f560263deb5341223e6d054cd33`.
+Workflowlogs vollständig ausgewertet; Artefakt nicht zusätzlich lokal heruntergeladen.
+Fünf nicht testblockierende Python-Warnungen.
 
-Aktueller Benutzerauftrag ausschließlich unknown_control_evidence klären.
-KEINE Veröffentlichung, Tags, Images/latest/main oder TrueNAS verändern.
-Gesamtabnahme folgt später in eigener Runde; danach Benutzerentscheidung zur
-Veröffentlichung. Frühere automatische Freigabe für diese Runde NICHT verwenden.
-Fünf-Stunden-Anzeige90%, Woche57%: jetzt geordnet gesichert stoppen.
-Diese Runde bei83% begonnen, etwa acht Punkte als Arbeitsbudget gewählt;
-Reserve erhalten. Keine aktive Warteschleife oder weitere CI-Läufe starten.
+### Ursache und Korrektur
 
-### Nachgewiesener Befund / gezielte Korrektur
+- Frühere Stufe 41219852833 (65/66 PASS) meldete nach Live-Wipe
+  `unknown_control_evidence`. Codex ergänzte in
+  `managed_storage_health._technical_startup_evidence` die streng begrenzte
+  Qualifikation des selbst erzeugten `technical-startup-<Nonce>.json`-Belegs.
+- Nachlauf **41221622586 (30/31 PASS, 1 FAIL)** kam über diese erste Schranke
+  hinaus. Der Originaltest scheiterte nun beim folgenden tatsächlichen Bootstrap
+  an `bootstrap_additional_operation` für exakt denselben technischen Beleg.
+  Der zweite private JSON-Whitelist-Verbraucher lag in
+  `app/storage_bootstrap.py::evidence`.
+- Commit **ff11f88b** ergänzt ausschließlich dort die Wiederverwendung
+  von `managed_storage_health._technical_startup_evidence` vor der
+  privaten JSON-Inventur. Nur strukturell, nach Nonce, reserviertem Kontext,
+  Datenbank, Rollen, Identitäten, Generation und vollständig digestverketteter
+  bestätigter Setup-Historie qualifizierte Receipts gelangen auf die Allowlist.
+  Unbekannte, beschädigte oder zusätzliche Operationen bleiben gesperrt.
+  Keine pauschale Präfixausnahme; keine Änderung an SQLite-Guards, F14-Produzent,
+  Locking, Archiv-Read-only-Regeln oder Medienoperationen.
+- **41222109431** führt dieselben 31 Kontrakttests erfolgreich aus:
+  13 neuere Beleg-/Negativfälle, 17 bestehende negative Resetvarianten und
+  den echten alten Live-Wipe/Neustart/Ersteinrichtung-End-to-End-Fall.
+  Backend-, Container- und Frontend-Volljobs waren ausdrücklich nicht Teil
+  dieses kleinen Prüflaufs.
 
-41219852833 auf f0e69247:65/66 PASS, ein Fehler in
- test_incomplete_live_wipe_then_process_restart_and_confirmed_onboarding.
-setup_blocker=unknown_control_evidence nach erfolgreichem realem ersten Startup.
-Der F14-Produzent schreibt nach rein technischer Vorbereitung dauerhaft
-technical-startup-<Nonce>.json (root_operations.reserve); die spätere private
-Setup-Whitelist in managed_storage_health.setup_again_evidence kannte diesen
-selbst erzeugten technischen Abschlussbeleg nicht. Produktlogiklücke, keine
-weitere pauschale Fixture-Ausnahme.
+### Weitere verifizierte Teilnachweise
 
-_technical_startup_evidence qualifiziert nur exakte Receipt-/Reservationsfelder,
-Nonce/Dateiname, kind=startup, _TECHNICAL_STARTUP_IDS, library=main, DB-Pfad,
-Workspace und genau Workspace+vier EN-Rollenbindungen. Generation/Identitäten
-müssen zum aktuellen State passen. Alte Generationen nur über vollständig
-SHA256-verknüpfte explizite SET-UP-AGAIN-Historie; Zyklen/mehr als64 Links gesperrt.
-Erkennung bleibt read-only, Originalbelege werden nicht gelöscht/umgeschrieben.
-Alle bisherigen Medien-/Katalog-/Registry-/Retention-, Token-, Kernel-Lock-,
-ACL-/F14- und Pending-Operation-Prüfungen bleiben aktiv. Keine Änderungen an
-SQLite-Optimierung, F14-Produzent, Root-Locks oder Read-only-/Recoverycapabilities.
+- 41219852833: 3.892 Dateien **213,948 s** (Grenze 300 s),
+  100 Dateien **80,796 s** (Grenze 90 s), ohne Profiling PASS;
+  sieben neue und acht ältere SQL-Autorisierungsverträge PASS.
+- 41220098240: **17/17 PASS** für historische Verhaltensverträge.
+- Der alte vollständige Ausgangslauf **41194643144** bleibt historisch rot
+  (2204/2444 PASS, 240 FAIL). Sein Inventar
+  `docs/pre5/BACKEND-FIX-STATUS.json` ist noch nicht auf den nun erfolgreichen
+  Live-Wipe-Nachlauf synchronisiert; dort stehen zuletzt 92 PASS/1 FAIL/
+  147 nicht erneut geprüfte Originalfehler.
 
-Neue Regression erzeugt Receipt mit echtem ro.reserve und reproduziert die
-alte Ablehnung bei fehlender Erkennung. Danach zwei explizite Resets, Original-
-receipt bytegleich. Negative Varianten: falsche Art/IDs/DB/Bindung/Generation/
-Nonce, zusätzlicher Wirkungsbereich, kaputtes JSON-Format, Fremd-JSON, offene
-Operation, Medienbestand und manipulierte Historien-Digests. Ergebnis PENDING.
-Originaltest muss bis bewusster Wiederaufnahme UND erster Bibliothek bestehen.
+### Nächste Schritte und Grenzen
 
-### Bereits verifizierte neue Ergebnisse
-
-41219852833: beide bisherigen Laufzeitfälle OHNE Profiling PASS unter den
-unveränderten90/300s-Fristen:3892 Dateien213,948s,100 Dateien80,796s.
-Sieben neue SQL-Statement-Sicherheitsverträge und acht vorherige SQL-Verträge
-bestehen. Artefakt13050100813 SHA256
-efa22efebbd5b972d7fda4979e350f5ea7ed118309373f9758b83a30534a0b25 verifiziert.
-41220098240 SUCCESS:17/17 Vertragsfälle,0 ERROR/SKIP; Artefakt13049483491,
-SHA256 fd574cf0f4af6709218f426cb42729f49ab52dc97f37c8a5503a9f61e9372ef6
-verifiziert. Keine großen Altartefakte erneut heruntergeladen.
-
-### Nächster konkreter Schritt / enge Grenze
-
-1. Run41221622586 samt Artefakt-Digest/XML vollständig auswerten. Keine neue
- Vollmatrix und keine parallelen umfangreichen Tests in dieser Runde.
-2. Falls Rot: zunächst klären, ob technische Receiptfelder mit dem echten
- Produzenten übereinstimmen. Keine Namenspräfix-Ausnahme und kein Entfernen von
- Belegen. Der vollständige Live-Wipe-Test kann hinter der bisherigen frühen
- Sperre weitere Verbraucher freilegen. Insbesondere storage_bootstrap.evidence
- hat ebenfalls eine private JSON-Whitelist; falls der Test später DORT scheitert,
- konkrete Datei/Phase belegen und dieselbe enge Qualifikation prüfen, niemals
- pauschal alle technical-startup-Dateien ignorieren. Dort bislang NICHT geändert.
-3. Falls Grün: nur diese gezielte Fehlergruppe als bestanden dokumentieren.
- Die vollständige Endabnahme auf finalem Code ist weiterhin Aufgabe einer
- weiteren Runde.147 ursprüngliche Backendfehler noch nicht erneut ausgeführt.
+1. Nicht noch einmal den behobenen Live-Wipe-Fehler bearbeiten. Erst die
+   übrigen fachlichen Ursachen-Gruppen (Backup/Sort/Import/Recheck/Restore)
+   gezielt nachweisen und das Originalfehler-Inventar abgleichen.
+2. Erst danach auf *einem finalen Anwendungscode* alle Backendpartitionen,
+   Zieltests, Frontend/Browser und reale isolierte Container-/Supervisor-/
+   90-Dateien-/4000-Familien-/iPhone-Abnahmen laufen lassen. Alte grüne
+   Teiltests nicht als vollständige Release-Freigabe ausgeben.
+3. **Keine Veröffentlichung**: kein `v1.0.0-pre.5`-Tag, kein Image,
+   kein `latest`, kein `main`-Merge, kein Eingriff in TrueNAS/NAS oder
+   Produktivdaten. Release erst nach vollständig grüner Endabnahme und
+   erneuter Benutzerentscheidung.
 
 ## Gesicherte Ergebnisse
 
