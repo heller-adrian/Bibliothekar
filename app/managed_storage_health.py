@@ -335,6 +335,11 @@ def inspect_storage(workspace, *, database=None):
     try:
         if appdata_root(): verify(workspace)
         result = _inspect_storage(workspace,database=database)
+        # Anchor definitions themselves need the settings. Preserve the exact
+        # already qualified configuration error instead of parsing it again
+        # and replacing its path/code with a generic evidence error.
+        if result.get('setup_blocker')=='configuration_invalid':
+            return describe(result)
         if appdata_root():
             state = _read(_control_location(workspace)/'state.json',{})
             if state and state.get('format') != 3:

@@ -69,7 +69,45 @@ def test_unknown_journal_bytes_are_not_a_successful_recovery(ready,function):
     with pytest.raises((ValueError,ro.RootOperationError,RuntimeError)):
         domain_recovery.replay(ws,reg,database=dbs[0])
     assert ro._read(path)==original and journal.read_bytes()==b'unknown journal bytes must survive'
-    assert not list(path.parent.glob('domain-recovery-*.json'))
+    assert not (path.parent/('domain-recovery-'+original['reservation_id']+'.json')).exists()
+    intent=ro._read(path.parent/('domain-recovery-intent-'+original['reservation_id']+'.json'))
+    assert intent=={'format':1,'reservation':original,'phase':'qualified_recovery_not_finished'}
+
+
+@pytest.mark.parametrize('damage',['none','foreign_copy','missing_copy'])
+def test_failed_restore_replay_requires_complete_retained_bytes(fixture,monkeypatch,damage):
+    from tests.backend.test_rc4_practice import protocol_failure
+    from app import trash_failure as tf,trash_import as ti
+    from app.database import get_job
+    db,ws,jid,journal,data,incoming,status=protocol_failure(fixture)
+    before=get_job(db,jid)
+    def die(point):
+        if point=='journal_prepared':raise RuntimeError('synthetic finalizer interruption')
+    monkeypatch.setattr(tf,'checkpoint',die)
+    with pytest.raises(RuntimeError,match='synthetic finalizer interruption'):
+        tf.finalize_failure(db,ws,jid)
+    monkeypatch.setattr(tf,'checkpoint',lambda point:None)
+    parent=ro._control_location(ws)
+    path=next(parent.glob('operation-*.json'));original=ro._read(path)
+    copy=ti.stage_parent(ws)/jid/data['files'][0]['relative_path']
+    if damage=='foreign_copy':copy.write_bytes(b'foreign retained bytes')
+    if damage=='missing_copy':copy.unlink()
+    remaining={p:p.read_bytes() for p in ti.stage_parent(ws).rglob('*') if p.is_file()}
+    if damage=='none':
+        assert domain_recovery.replay(ws,fixture[2],database=db)
+        assert not path.exists() and tf.validate_finalized(db,ws,jid)
+        receipt=ro._read(parent/('domain-recovery-'+original['reservation_id']+'.json'))
+        assert receipt['reservation']==original
+        assert receipt['disposition']=='verified_failed_restore_finalized_error_preserved'
+    else:
+        with pytest.raises((RuntimeError,ValueError)):
+            domain_recovery.replay(ws,fixture[2],database=db)
+        assert ro._read(path)==original
+        assert not (parent/('domain-recovery-'+original['reservation_id']+'.json')).exists()
+        assert not health.inspect(ws)['writes_allowed']
+    after=get_job(db,jid)
+    assert all(after[k]==before[k] for k in ('state','stage','error_message'))
+    assert remaining=={p:p.read_bytes() for p in ti.stage_parent(ws).rglob('*') if p.is_file()}
 
 
 def test_live_recovery_fences_cached_sql_and_root_changes_but_keeps_safe_reads(ready,monkeypatch):

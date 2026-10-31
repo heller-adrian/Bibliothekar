@@ -93,7 +93,9 @@ def inspect(workspace):
             item['qualified']=True  # Record syntax only; NEVER completion authority.
             from app.operation_scopes import resources
             item['scope']=sorted(resources(item))
-            if r['kind']=='recovery' and item['live'] and active.get(str(path))!=r:
+            replay_intent=parent/('domain-recovery-intent-'+r['reservation_id']+'.json')
+            replaying=replay_intent.exists() or replay_intent.is_symlink()
+            if (r['kind']=='recovery' or replaying) and item['live'] and active.get(str(path))!=r:
                 recovering.append({'phase':'domain_recovery_in_progress','scope':item['scope'],
                     'detail':str(path)})
         except Exception as error:item['detail']=str(error)
