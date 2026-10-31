@@ -26,7 +26,7 @@ jobs:
       - name: Isolated Linux runtime
         run: |
           set -euo pipefail
-          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre5.XXXXXXXX")"
+          QA_WORK="$(mktemp -d /tmp/bibliothekar-pre5.XXXXXXXX)"
           printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
           python3 -m venv "$QA_WORK/venv"
           "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
@@ -34,11 +34,14 @@ jobs:
         if: contains(github.event.head_commit.message, '[pre5-db-auth]')
         run: |
           set -euo pipefail
-          PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" -m pytest -q --tb=long \
-            tests/backend/test_pre5_sqlite_authorization.py \
-            tests/backend/test_rc11_bootstrap.py \
-            'tests/backend/test_rc4_practice.py::test_automatic_protocol_failure_sigkill_and_startup[before_db_commit]' \
-            --junitxml="$QA_WORK/backend-focus.xml" 2>&1 | tee "$QA_WORK/backend-focus.log"
+          mkdir "$QA_WORK/authorization"
+          printf '%s\n' '["tests/backend/test_pre5_sqlite_authorization.py", "tests/backend/test_pre5_domain_recovery.py", "tests/backend/test_rc11_bootstrap.py", "tests/backend/test_rc4_practice.py::test_automatic_protocol_failure_sigkill_and_startup[before_db_commit]"]' > "$QA_WORK/backend-focus-targets.json"
+          set +e
+          RUNNER_TEMP="$QA_WORK/authorization" "$QA_WORK/venv/bin/python" qa/f14/linux/run_linux.py "$PWD" targets "$QA_WORK/backend-focus-targets.json" 2>&1 | tee "$QA_WORK/backend-focus.log"
+          RESULT=${PIPESTATUS[0]}
+          set -e
+          if test -f "$QA_WORK/authorization/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/authorization/f14-qa/targets/results/result.xml" "$QA_WORK/backend-focus.xml"; fi
+          exit "$RESULT"
       - name: Isolated Linux reproductions
         run: |
           set -euo pipefail
@@ -77,6 +80,7 @@ jobs:
           path: |
             ${{ env.QA_WORK }}/*.xml
             ${{ env.QA_WORK }}/*.log
+            ${{ env.QA_WORK }}/authorization/f14-qa/targets/results/
           retention-days: 30
 
   container:

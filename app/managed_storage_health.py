@@ -127,8 +127,15 @@ def _inspect_storage(workspace, *, database=None):
     root=Path(os.path.abspath(workspace));issues=[];folders=[]
     try:
         from app.private_storage_security import qualify_existing
-        from app.storage_config import _config_path
+        from app.storage_config import _config_path, StorageSettingsError
         qualify_existing(_config_path().parent)
+        import json
+        try:
+            if _config_path().is_file():
+                config_data=json.loads(_config_path().read_text(encoding='utf-8'))
+                if not isinstance(config_data,dict):raise ValueError('Configuration must be a JSON object')
+        except (ValueError,UnicodeError) as error:
+            raise StorageSettingsError('Die Anwendungskonfiguration ist nicht lesbar: '+str(error)) from error
         if database is not None: qualify_existing(Path(database).absolute().parent)
         configured_registry = os.environ.get('KAMERA_REGISTRY_DATABASE')
         if configured_registry: qualify_existing(Path(configured_registry).absolute().parent)

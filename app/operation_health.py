@@ -68,7 +68,7 @@ def _live(path):
 def inspect(workspace):
     from app import root_operations as ro
     from app.storage_bootstrap import key_for
-    root=Path(workspace).absolute();entries=[]
+    root=Path(workspace).absolute();entries=[];recovering=[]
     try:parent=ro._control_location(root)
     except Exception as error:return {'writes_allowed':False,'issues':[{'detail':str(error),'scope':'workspace'}],'reservations':[],'blocked_scopes':['workspace'],'storage_state_independent':True}
     active={str(r['_path']):{k:v for k,v in r.items() if not k.startswith('_')} for r in ro._ACTIVE.get()}
@@ -93,10 +93,14 @@ def inspect(workspace):
             item['qualified']=True  # Record syntax only; NEVER completion authority.
             from app.operation_scopes import resources
             item['scope']=sorted(resources(item))
+            if r['kind']=='recovery' and item['live'] and active.get(str(path))!=r:
+                recovering.append({'phase':'domain_recovery_in_progress','scope':item['scope'],
+                    'detail':str(path)})
         except Exception as error:item['detail']=str(error)
         entries.append(item)
     with _STATUS_LOCK:
         issues=list(_FAILURES.get(str(root),[]))
+        issues.extend(recovering)
         if _RECOVERY_WORKSPACES.get(str(root)) and not _RECOVERING.get():
             issues.append({'phase':'recovery_in_progress','scope':'workspace','detail':'Recovery holds write admission until qualification and startup finish.'})
     orphan=[r for r in entries if not r['live']]
@@ -184,6 +188,9 @@ def recover_known_before_startup(workspace,registry,logs,*,database=None):
     """Unknown intents never permit ordinary migrations/backfill as recovery."""
     from app.observation_recovery import recover
     recover(workspace)
+    from app.domain_recovery import replay
+    if replay(workspace,registry,database=database):
+        return
     current=inspect(workspace)
     dead=[r for r in current['reservations'] if not r['live']]
     if not dead:return
