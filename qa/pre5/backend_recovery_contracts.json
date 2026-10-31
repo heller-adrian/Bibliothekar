@@ -1,0 +1,12 @@
+[
+  "tests/backend/test_0500_backup_delete_recovery.py::test_0500_staging_crash_before_main_commit_rolls_back",
+  "tests/backend/test_0500_backup_delete_recovery.py::test_0500_after_main_commit_crash_completes_purge",
+  "tests/backend/test_0500_backup_delete_recovery.py::test_0500_tampered_staged_file_is_never_deleted",
+  "tests/backend/test_r1_restore_recovery.py::test_r1_batch_collision_after_first_move_stays_blocked",
+  "tests/backend/test_r1_restore_recovery.py::test_r1_direct_restore_commits_resume_once[r1.completed]",
+  "tests/backend/test_0562_process_recovery.py::test_0562_restore_recovery_two_progressive_sigkills",
+  "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[after_handoff]",
+  "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[hash]",
+  "tests/backend/test_rc5_practice_followup.py::test_folder_actual_sigkill_atomic_handoff_and_three_restarts[after_handoff]",
+  "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[bytes]"
+]
