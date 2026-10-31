@@ -41,6 +41,7 @@ jobs:
             tests/backend/test_0501_external_event_deletion.py tests/backend/test_0440_trash.py \
             tests/backend/test_0311_global_stock.py tests/backend/test_0328_patch.py \
             tests/backend/test_f16_f20_stock_consistency.py \
+            tests/backend/test_pre_metadata.py::test_general_admission_reuses_durable_job_for_same_bytes \
             tests/backend/test_pre2_metadata_abort.py::test_uncertain_startup_only_releases_scoped_workers \
             2>&1 | tee "$QA_WORK/focused.log"
       - name: Structural, historical metadata and F14 regressions

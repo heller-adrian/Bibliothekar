@@ -101,6 +101,15 @@ def test_general_admission_reuses_durable_job_for_same_bytes(tmp_path,monkeypatc
     monkeypatch.setattr(main,'current_library_context',lambda:context)
     monkeypatch.setattr(main,'DATABASE_FILE',db)
     monkeypatch.setattr(main,'WORKSPACE_PATH',ws)
+    # Admission now checks durable history as well as live file rows. This
+    # isolated unit fixture needs its own real, empty registry; the container
+    # and pre5 API cases exercise fully registered libraries and retained
+    # source memberships. Never fall back to the process-wide /database path.
+    from app.library_registry import initialize_library_registry
+    registry=tmp_path/'bibliothekar-global.sqlite3'
+    initialize_library_registry(registry)
+    monkeypatch.setattr(main,'REGISTRY_DATABASE_FILE',registry)
+    monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(registry))
     paths=mc.metadata_area_paths(area='general',workspace_root=ws,library_id='main',create=True)
     p=paths['root']/'new.JPG';p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'unique-unregistered-test-bytes')
     row={'relative_path':'new.JPG','selected_capture_time':'2025-12-07T15:04:37+13:00','capture_time_confidence':'high'}
@@ -117,6 +126,7 @@ def test_general_admission_reuses_durable_job_for_same_bytes(tmp_path,monkeypatc
         with pytest.raises(HTTPException) as error:
             endpoint({'items':[{'relative_path':'new.JPG'}]})
         assert error.value.status_code==409
+        assert 'Staging-Kopie konnte nicht verifiziert werden' in error.value.detail
         with database_connection(db) as c:
             assert c.execute("SELECT COUNT(*) FROM jobs WHERE operation='metadata_general_import'").fetchone()[0]==0
         return
