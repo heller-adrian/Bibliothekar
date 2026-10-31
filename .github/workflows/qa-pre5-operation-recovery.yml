@@ -164,6 +164,7 @@ jobs:
             ${{ env.QA_WORK }}/fixture/f14-qa/targets/results/
             ${{ env.QA_WORK }}/read-contracts/f14-qa/targets/results/
             ${{ env.QA_WORK }}/recovery-contracts/f14-qa/targets/results/
+            ${{ env.QA_WORK }}/original-unretested/f14-qa/targets/results/
             ${{ env.QA_WORK }}/import-diagnostic/f14-qa/targets/results/
             ${{ env.QA_WORK }}/import-diagnostic/f14-qa/targets/scratch/pytest/**/process.log
             ${{ env.QA_WORK }}/import-diagnostic/f14-qa/targets/scratch/pytest/**/result.json
