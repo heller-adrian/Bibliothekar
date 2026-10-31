@@ -261,3 +261,15 @@ breite Statussynchronisierung noch aussteht. Die restlichen Recovery-/Restore-/
 Recheck-Fehler sind separat zu untersuchen. Die weiteren B01-Altverträge wurden
 hier nicht als erfolgreich nachgewiesen. Keine Tags, Images, main oder TrueNAS
 verändert; **Pre.5 nicht veröffentlichen**.
+
+## 31.10.2026 – B01 vollständig grün; Wiederherstellung eindeutig rot
+
+- **B01 complete test file**, Run [41227607033](https://github.com/heller-adrian/Bibliothekar/actions/runs/41227607033), commit `df1c1f43529c5a174c3bf6386906a182cf2653c7`: **10 PASS, 0 FAIL/ERROR/SKIP**. Zwei zuvor rote historische Fälle (`test_b01_parallel_edit_structure`, `test_b01_live_trash_operation_is_not_waited_on_indefinitely`) durch echte parallele lesende GET-Verträge mit überprüft unveränderten F14-JSON, Medien und Schlüsseldatenbankwerten ersetzt. Kein Anwendungscode geändert.
+- **Backup/Restore/SD-Recheck/Import original contracts**, Run [41227720942](https://github.com/heller-adrian/Bibliothekar/actions/runs/41227720942), QA commit `f52d1c4318f0aaf1dc588e7daf34cbf330e78acd`: **0 PASS, 10 FAIL, 0 ERROR/SKIP**. Vollständig gesicherte JUnit-/stdout-ZIP **13052616493**, SHA-256 nach eigenem Download überprüft: `f3fa99af869a5163864a72182738f7bafe235202ac724bcbed5d8837aa7e5066`.
+  - Backup 3/3 FAIL: `operation_recovery_required` vor ursprünglicher `recover_backup_deletions`-Journalprüfung; auch Tamper-Gegenfall kommt nicht durch den F14-Eintritt.
+  - R1 2/2 FAIL: unsicherer Kollisionstest erlebt Start mit RC 0, anderes Szenario behält `.trash-restores`-JSON trotz DB-/Audit-Abschluss.
+  - 0562 Restore 1/1 FAIL: zweiter echter SIGKILL-Hook wird durch belegte Recovery-Sperre nicht erreicht.
+  - SD-Recheck 3/3 FAIL: `verifying` statt `completed` am Hash-Handoff bzw. Kindauftrag bleibt `queued` statt `completed`.
+  - 0562 Import-Discard 1/1 FAIL: Auftrag bleibt `organizing` statt `interrupted` nach schützend abgelehnter fremder Byte-Manipulation.
+- Die 10 Fehlerfälle sind echte **Release-Blocker**, nicht zehn unabhängig bewiesene Ursachen. Nicht mit angepassten Erwartungen schönfärben. Insbesondere `app/domain_recovery.py` hat für Backup kein dem ursprünglichen `delete_backup`-Record entsprechendes qualifiziertes F14-Reentry. Änderungen hier erfordern neue positive und negative Byte-/Registry-/Root-/Reservationstests und eigenen freigegebenen Sicherheits-Patch.
+- **Full backend wurde absichtlich nicht gestartet**, weil die vorgeschalteten Original-Crash-Verträge ROT sind. Frontend-/Container-Neuabnahme ebenfalls ausstehend. Kein Release, keine Images/Tags und keinerlei Änderung an `main` oder TrueNAS. **App-Code weiterhin ff11f88b**.

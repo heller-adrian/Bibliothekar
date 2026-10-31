@@ -1,7 +1,7 @@
 {
   "baseline_run": 41194643144,
   "baseline_failed_nodes": 240,
-  "status": "PARTIAL_FOCUSED_ACCEPTANCE_FINAL_MATRIX_PENDING",
+  "status": "PARTIAL_FOCUSED_ACCEPTANCE_RECOVERY_CONTRACTS_RED_FINAL_MATRIX_PENDING",
   "latest_focused_outcomes_of_original_failures": {
     "tests/backend/test_rc11_bootstrap.py::test_real_template_requires_explicit_review_and_preserves_original_bytes": {
       "run": 41217778080,
@@ -419,8 +419,8 @@
       "group": "storage_setup_anchor_and_reset"
     },
     "tests/backend/test_rc6_legacy_setup.py::test_incomplete_live_wipe_then_process_restart_and_confirmed_onboarding": {
-      "run": 41217778080,
-      "outcome": "FAIL",
+      "run": 41222109431,
+      "outcome": "PASS",
       "group": "storage_setup_anchor_and_reset"
     },
     "tests/backend/test_rc5_practice_followup.py::test_empty_explicit_reset_is_offered_but_not_automatically_rebound": {
@@ -467,12 +467,42 @@
       "run": 41217778080,
       "outcome": "PASS",
       "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_rc9_setup_separation.py::test_populated_unregistered_archive_allows_first_library_setup[technical_control]": {
+      "run": 41226912195,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_0562_process_recovery.py::test_0562_metadata_projection_recovery_two_sigkills": {
+      "run": 41226912195,
+      "outcome": "PASS",
+      "group": "startup_domain_recovery_not_reached"
+    },
+    "tests/backend/test_rc1_b01.py::test_b01_live_inventory_conflict_is_bounded_and_visible": {
+      "run": 41227115670,
+      "outcome": "PASS",
+      "group": "read_view_and_contention_contract"
+    },
+    "tests/backend/test_rc1_b01.py::test_b01_compatibility_request_collision": {
+      "run": 41227115670,
+      "outcome": "PASS",
+      "group": "read_view_and_contention_contract"
+    },
+    "tests/backend/test_rc1_b01.py::test_b01_parallel_edit_structure": {
+      "run": 41227607033,
+      "outcome": "PASS",
+      "group": "read_view_and_contention_contract"
+    },
+    "tests/backend/test_rc1_b01.py::test_b01_live_trash_operation_is_not_waited_on_indefinitely": {
+      "run": 41227607033,
+      "outcome": "PASS",
+      "group": "read_view_and_contention_contract"
     }
   },
   "counts": {
-    "PASS": 92,
-    "FAIL": 1
+    "PASS": 99,
+    "FAIL": 0
   },
-  "note": "Focused outcomes on the stated source only. Current application f0e69247 pending; complete final matrix remains required.",
-  "not_retested": 147
+  "note": "Last focused PASS per original baseline failure, source-specific; 99/240 recently tested PASS, 141 still without a focused outcome in this index. Separate broad 147-case run 41222826726 was 30 PASS/117 FAIL. Recovery focused 41227720942 was 0 PASS/10 FAIL; those 10 remain unaccepted, even where the earlier inventory had no focused outcome. B01 whole file 41227607033 10 PASS. No full current-backend release acceptance. Never infer release-ready from this partial per-node inventory.",
+  "not_retested": 141
 }
