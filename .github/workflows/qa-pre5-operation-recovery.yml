@@ -30,6 +30,13 @@ jobs:
           printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
           python3 -m venv "$QA_WORK/venv"
           "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - name: Check all 147 original backend failures not covered by previous focused evidence
+        if: contains(github.event.head_commit.message, '[pre5-full]')
+        run: |
+          set -euo pipefail
+          mkdir "$QA_WORK/original-unretested"
+          RUNNER_TEMP="$QA_WORK/original-unretested" "$QA_WORK/venv/bin/python" qa/f14/linux/run_linux.py "$PWD" targets qa/pre5/backend_unretested.json 2>&1 | tee "$QA_WORK/backend-unretested.log"
+          cp "$QA_WORK/original-unretested/f14-qa/targets/results/result.xml" "$QA_WORK/backend-unretested.xml"
       - name: Focused SQLite authorization and historical bootstrap qualification
         if: contains(github.event.head_commit.message, '[pre5-db-auth]') || contains(github.event.head_commit.message, '[pre5-profile]') || contains(github.event.head_commit.message, '[pre5-closure]') || contains(github.event.head_commit.message, '[pre5-contracts]')
         env:
