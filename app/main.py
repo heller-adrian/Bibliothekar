@@ -553,8 +553,14 @@ def _root_thumbnail(fn):
     # A process death therefore needs no media-operation recovery journal.
     from functools import wraps
     @wraps(fn)
-    def guarded(job_id, *, library_context=None):
+    def guarded(job_id, *, library_context=None, read_only=False):
         context = library_context or _root_request_context()
+        if read_only:
+            from app.managed_storage_health import require_pinned_storage
+            require_pinned_storage(context.workspace_root)
+            result=fn(job_id,library_context=context,read_only=True)
+            require_pinned_storage(context.workspace_root)
+            return result
         with admission(context,allow_missing_legacy=True):
             return fn(job_id,library_context=context)
     return guarded
@@ -923,12 +929,15 @@ def ensure_job_thumbnail(
     job_id: str,
     *,
     library_context: LibraryContext | None = None,
-) -> Path | None:
+    read_only: bool = False,
+) -> Path | bytes | None:
     context = library_context or current_library_context()
     target = _thumbnail_path(
         job_id,
         library_id=context.library_id,
     )
+    if target.is_symlink():
+        return None
     if target.is_file():
         return target
 
@@ -972,22 +981,26 @@ def ensure_job_thumbnail(
             continue
 
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
+            if not read_only:
+                target.parent.mkdir(parents=True, exist_ok=True)
+            from io import BytesIO
+            output=BytesIO() if read_only else target
             with Image.open(source) as image:
                 image = ImageOps.exif_transpose(image)
                 image.thumbnail((320, 220))
                 if image.mode not in {"RGB", "L"}:
                     image = image.convert("RGB")
                 image.save(
-                    target,
+                    output,
                     format="JPEG",
                     quality=72,
                     optimize=True,
                     progressive=True,
                 )
-            return target
+            return output.getvalue() if read_only else target
         except Exception:
-            target.unlink(missing_ok=True)
+            if not read_only:
+                target.unlink(missing_ok=True)
 
     return None
 
@@ -5312,15 +5325,17 @@ def api_job_thumbnail(job_id: str):
     job = get_job(DATABASE_FILE, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Auftrag wurde nicht gefunden.")
-    # Import workers build disposable previews under their write admission.
-    # A GET must not enter that gate or modify a cache while serving reads,
-    # including when an unrelated operation is quarantined. A pending/missing
-    # preview is a normal 404; the original media never becomes a GET target.
-    path = _thumbnail_path(job_id, library_id=current_library_context().library_id)
-    if path.is_symlink() or not path.is_file():
+    # Workers populate persistent caches under write admission. Cache misses
+    # (including projected/historical jobs) render only into memory on GET.
+    # Display bytes never authorize ownership, recovery or any media change.
+    preview = ensure_job_thumbnail(job_id,read_only=True)
+    if preview is None:
         raise HTTPException(status_code=404, detail="Kein JPEG-Vorschaubild verfügbar.")
+    if isinstance(preview,bytes):
+        from fastapi.responses import Response
+        return Response(preview,media_type='image/jpeg',headers={'Cache-Control':'private, max-age=86400'})
     return FileResponse(
-        path,
+        preview,
         media_type="image/jpeg",
         filename=f"{job_id}-thumbnail.jpg",
         headers={"Cache-Control": "public, max-age=86400"},

@@ -18,12 +18,13 @@ page.on('response',r=>{
  if(r.status()===503&&new URL(r.url()).pathname==='/api/source-devices'){
   optionalChecks.push(r.json().then(data=>{
    if(data.detail!=='Quellen-Helfer ist nicht erreichbar.')serverErrors.push({...error,body:data});
-  }).catch(()=>serverErrors.push(error)));
+  }).catch(failure=>serverErrors.push({...error,read_error:String(failure)})));
  }else serverErrors.push(error);
 });
 await Promise.all([page.waitForURL(host+'/'),page.locator('#login button').click()]);
+await page.waitForLoadState('networkidle');
 for(const target of ['/','/trash']){
-await page.goto(host+target);const note=page.locator('#bibliothekar-operation-notice');await note.waitFor();
+await page.goto(host+target);await page.waitForLoadState('networkidle');const note=page.locator('#bibliothekar-operation-notice');await note.waitFor();
 assert.match(await note.innerText(),lang==='de'?/unabhängige Aktionen bleiben verfügbar/:/independent actions remain available/);
 assert(!(await page.locator('body').innerText()).includes('Storage unavailable'));
 const health=await context.request.get(host+'/api/settings/storage-health');assert.equal(health.status(),200);

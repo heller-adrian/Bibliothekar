@@ -693,7 +693,11 @@ def test_thumbnail_get_is_a_read_even_with_unresolved_writes(ready,monkeypatch,c
     if cache=='regular':target.write_bytes(jpeg.getvalue())
     if cache=='symlink':target.symlink_to(ws/'Arbeitsbereiche/main/original.JPG')
     records=general_orphan(ws,dbs[0]);before={p:p.read_bytes() for p in records}
-    monkeypatch.setattr(main,'ensure_job_thumbnail',lambda *a,**kw:pytest.fail('GET entered worker thumbnail generation'))
+    builder=main.ensure_job_thumbnail
+    def read_preview(*args,**kwargs):
+        assert kwargs.get('read_only') is True,'GET entered worker cache generation'
+        return builder(*args,**kwargs)
+    monkeypatch.setattr(main,'ensure_job_thumbnail',read_preview)
     with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
         response=client.get('/api/jobs/THUMB/thumbnail')
     assert response.status_code==(200 if cache=='regular' else 404),response.text
@@ -701,3 +705,23 @@ def test_thumbnail_get_is_a_read_even_with_unresolved_writes(ready,monkeypatch,c
     if cache=='absent':assert not target.exists()
     assert before=={p:p.read_bytes() for p in records}
     assert operations.inspect(ws)['workspace_writes_allowed']
+
+
+def test_uncached_job_thumbnail_renders_in_memory_without_f14_or_cache_writes(ready,monkeypatch):
+    from PIL import Image
+    case,ws,_,dbs,_=ready
+    jpeg=io.BytesIO();Image.new('RGB',(400,250),'purple').save(jpeg,format='JPEG')
+    _,_,relative=_seed_free_file(dbs[0],family_key='preview',filename='preview.JPG',
+        day='2026-07-19',data=jpeg.getvalue())
+    source=storage_paths(ws)['backup_root']/relative;source.parent.mkdir(parents=True);source.write_bytes(jpeg.getvalue())
+    monkeypatch.setattr(main,'LOG_PATH',case/'not-created-by-GET')
+    records=general_orphan(ws,dbs[0]);before={p:p.read_bytes() for p in records}
+    with closing(sqlite3.connect(dbs[0])) as c:catalogue='\n'.join(c.iterdump())
+    with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
+        response=client.get('/api/jobs/J/thumbnail')
+    assert response.status_code==200,response.text
+    assert response.headers['content-type']=='image/jpeg'
+    with Image.open(io.BytesIO(response.content)) as image:assert image.size==(320,200)
+    assert not main.LOG_PATH.exists() and source.read_bytes()==jpeg.getvalue()
+    assert before=={p:p.read_bytes() for p in records}
+    with closing(sqlite3.connect(dbs[0])) as c:assert '\n'.join(c.iterdump())==catalogue
