@@ -1,0 +1,5 @@
+[
+  "tests/backend/test_rc9_setup_separation.py::test_populated_unregistered_archive_allows_first_library_setup[legacy_roots]",
+  "tests/backend/test_rc9_setup_separation.py::test_populated_unregistered_archive_allows_first_library_setup[technical_control]",
+  "tests/backend/test_0562_process_recovery.py::test_0562_metadata_projection_recovery_two_sigkills"
+]

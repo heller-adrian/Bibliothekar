@@ -126,8 +126,15 @@ def seed(kind):
             # as foundation(). Complete its fixture before operating or crashing;
             # recovery must never manufacture the missing administrative roots.
             from app.storage_config import LEGACY_STORAGE_DEFAULTS
+            from app.managed_directory_names import directory_name
             for directory in LEGACY_STORAGE_DEFAULTS.values():
                 (ws/directory).mkdir(exist_ok=True)
+            # This synthetic legacy installation existed before the crash.
+            # Prepare every required metadata role *before* taking recovery
+            # snapshots; never let startup create missing administrative roots.
+            metadata_root=ws/LEGACY_STORAGE_DEFAULTS['metadata_directory_name']
+            for role in ('metadata_general','metadata_multiple'):
+                (metadata_root/directory_name(metadata_root,role)).mkdir(exist_ok=True)
             Image.new('RGB',(16,16),(30,60,90)).save(src)
             if kind=='reintegrate':mc.write_metadata_datetime(src,'jpeg','2026-07-20T14:15:30')
             digest=hashlib.sha256(src.read_bytes()).hexdigest();size=src.stat().st_size

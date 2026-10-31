@@ -21,9 +21,11 @@ def test_populated_unregistered_archive_allows_first_library_setup(legacy,monkey
         ro._write(parent/'state.json',old)
     health=inspect_storage(ws,database=db)
     assert health['can_setup_again'],health
-    # The historical F14 binding still reports the missing main catalogue,
-    # but unlike RC8, an unrelated populated archive does not deny recovery.
-    assert len([i for i in health['issues'] if i['code']=='catalog_unavailable'])==(1 if state=='legacy_roots' else 0),health
+    # Neither synthetic state has a main catalogue yet: technical_registry
+    # prepares only the unregistered registry. Missing DB is correctly reported
+    # in both states, but may not revoke explicit empty setup or touch archive.
+    assert not db.exists()
+    assert len([i for i in health['issues'] if i['code']=='catalog_unavailable' and i['path']==str(db)])==1,health
     result=setup_child(case,case/('archive-'+state),'api-reset')
     assert result['ready'] and result['onboarding'] and result['error'] is None,result
     assert picture.read_bytes()==b'old archive photography must survive'
