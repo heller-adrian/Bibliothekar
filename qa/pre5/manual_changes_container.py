@@ -160,7 +160,21 @@ assert index==47 and len(list(root.rglob('*.JPG')))+len(list(root.rglob('*.RAF')
         assert task['status']=='completed'
         # Variant A is not silently enabled by removing its origin checks.
         # The documented known-origin rejection must be a local, clean failure.
-        refused=api("print(json.dumps(api('/api/metadata-correction/general/reintegrate',{'items':[{'relative_path':"+repr(relative)+"}]},409)))")
+        # An unexpected 202 must be investigated through the real worker,
+        # never treated as successful rejection or hidden by this assertion.
+        before_transfer=snapshot()
+        response=api("payload={'items':[{'relative_path':"+repr(relative)+"}]}\nrequest=urllib.request.Request(host+'/api/metadata-correction/general/reintegrate',data=json.dumps(payload).encode(),headers={'Origin':host,'Content-Type':'application/json','X-Bibliothekar-CSRF':next(c.value for c in jar if c.name=='bibliothekar_csrf')})\ntry:reply=browser.open(request,timeout=60)\nexcept urllib.error.HTTPError as error:reply=error\nwith reply:print(json.dumps({'status':reply.status,'body':json.loads(reply.read())}))")
+        if response['status']==202:
+            accepted=response['body']['job']['id']
+            terminal=api("\nfor _ in range(360):\n value=api('/api/jobs/"+accepted+"')\n if value['state'] in ('completed','failed','interrupted','discarded'):break\n time.sleep(.25)\nprint(json.dumps(value))")
+            REPORT['unexpected_general_admission']={'case':label,'correction':task,'response':response,
+                'terminal_job':terminal,'before':before_transfer,'after':snapshot()}
+            docker('restart',NAME)
+            REPORT['unexpected_general_admission']['restart_health']=api("print(json.dumps(api('/api/settings/storage-health')))")
+            REPORT['unexpected_general_admission']['after_restart']=snapshot()
+        assert response['status']==409,{'case':label,'status':response['status'],
+            'terminal_job':REPORT.get('unexpected_general_admission',{}).get('terminal_job')}
+        refused=response['body']
         assert 'bekannten Kameraimport' in str(refused),refused
         assert api("print(json.dumps(api('/api/operations/status')))")['writes_allowed']
         REPORT['checks'][label+'_correction_local_rejection']='PASS'
