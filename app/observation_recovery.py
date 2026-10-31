@@ -85,7 +85,24 @@ def recover(workspace):
             continue
         if (item.get('kind')=='import'
             and item.get('ids',{}).get('function')=='app.main.process_claimed_job'):
-            _retire_original_readonly_sd_recheck(root,parent,item)
+            # The same worker entry processes real folder imports, whose
+            # published bytes MUST retain their old F14 lease. Decide solely
+            # from the original existing catalogue, never from an ID prefix.
+            job_id=item.get('ids',{}).get('job_id')
+            database=item.get('database')
+            is_check=False
+            if isinstance(job_id,str) and job_id and isinstance(database,str):
+                try:
+                    db=Path(database).absolute()
+                    if db.is_file() and not db.is_symlink():
+                        with closing(sqlite3.connect(db.as_uri()+'?mode=ro',uri=True)) as read:
+                            read.execute('PRAGMA query_only=ON')
+                            row=read.execute('SELECT operation FROM jobs WHERE id=?',(job_id,)).fetchone()
+                            is_check=bool(row and row[0]=='sd_recheck')
+                except (sqlite3.Error,OSError):
+                    pass  # Unknown provenance is never sufficient to retire a lease.
+            if is_check:
+                _retire_original_readonly_sd_recheck(root,parent,item)
             continue
         if FUNCTIONS.get(item.get('ids', {}).get('function')) != item.get('kind'):
             continue
