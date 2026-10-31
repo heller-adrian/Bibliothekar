@@ -1,5 +1,6 @@
 """Candidate UI messages. Captured paths, EXIF names and raw tool output stay data."""
 TRANSLATIONS={
+ 'Diese Datei gehört bereits zu einem bekannten Kameraimport. Es wird keine neue Sicherung/Provenienz angelegt. Die Herkunft bleibt auch nach dem Entfernen eines Katalogeintrags erhalten. Vorhandenen Import bzw. die Aufnahme prüfen oder das Original wiederherstellen; die Übernahme als eigenständige Kopie ist noch nicht unterstützt.':'This file already belongs to a known camera import. No new backup or provenance record will be created. Origin history remains after a catalogue entry is removed. Review the existing import or capture, or restore the original; importing it as an independent copy is not yet supported.',
  'Diese lokale Uhrzeit ist wegen der Zeitumstellung ungültig oder mehrdeutig. Bitte einen expliziten UTC-Offset angeben.':'This local time is invalid or ambiguous because of a daylight saving transition. Specify an explicit UTC offset.',
  'Gemeinsamer Arbeitsbereich-Abgleich wartet auf SHA-256-Prüfung':'Shared workspace reconciliation is waiting for SHA-256 verification.',
  'Diese Datei gehört bereits zu einem bekannten Kameraimport. Es wird keine neue Sicherung/Provenienz angelegt; bitte die bekannte Aufnahme im Bibliotheksbestand korrigieren.':'This file already belongs to a known camera import. No new backup or provenance record will be created; correct the known capture in the library inventory.',
@@ -23,6 +24,7 @@ TRANSLATIONS={
  'Ordner umbenennen, danach die geprüfte event.json ersetzen. Keine weiteren Archivdateien verändern.':'Rename the folder, then replace event.json with the verified version. Do not change other archive files.',
 }
 PATTERNS=[
+ [r'^Herkunftsnachweise konnten vor der Allgemein-Übernahme nicht vollständig geprüft werden: ([\s\S]+)$','Origin history could not be fully verified before General transfer: $1'],
  [r'^ExifTool konnte die Metadaten nicht schreiben: ([\s\S]+)$','ExifTool could not write the metadata: $1'],
  [r'^Die geschriebenen Aufnahmeinformationen konnten nicht bestätigt werden\. ([\s\S]+)$','The written capture metadata could not be verified. $1'],
  [r'^([0-9]+) Datei zur verifizierten Übernahme in den Tagesbestand vorgemerkt\.$','$1 file queued for verified transfer to daily inventory.'],

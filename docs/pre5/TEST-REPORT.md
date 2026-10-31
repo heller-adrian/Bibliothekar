@@ -14,6 +14,8 @@ Anzahl unterschiedlicher Regressionen. Kein Zugriff auf TrueNAS.
 | 41121252978, Quelle 83b11dad | 49 neue Tests bestanden, darunter tatsächliche pre.4-Migrationsreproduktion, positive Fortsetzung und Ablehnung fehlender/fremder Bytes bei echter Alt-Migration. Fokussiert 67 PASS / 13 FAIL: zwei alte Versionsvorgaben, ein unvollständiger Ankeraufbau, zehn Seed-Fehler. |
 | 41122388040, Quelle 96d538fa | 49 neue Tests bestanden. Fokussiert 70 PASS / 10 FAIL: verbliebene Prozess-Seeds scheitern an noch nicht angelegten Katalogen/Registry vor dem Legacy-Layoutcheck. Pflichtschemata werden in der Fixture jetzt vorher erzeugt. Originale signierte QA-Dateien bleiben unverändert. |
 | 41123293238, Quelle 08cee415 | Nachlauf läuft; Ergebnis offen. Container und vollständige Matrix starten nur nach erfolgreichen Vorstufen. |
+| 41123293238, abgeschlossen | 49 Zieltests und 80 fokussierte Tests PASS; Frontend PASS. Container erreichte General-Reintegration und erhielt unerwartet 202; vor Auswertung des Auftrags gestoppt. |
+| 41190356694, Quelle cefeb5cb | Strikte Diagnose gegen unveränderte Anwendung: unerwarteten 202-Auftrag bis completed/organized_verified verfolgt. Zieldatei hat korrekten Ergebnis-Hash; ursprüngliche Herkunftsbelege und Read-only-Archive bleiben erhalten; nach Neustart READY und keine offene Reservation. Dennoch neue Herkunft erzeugt: Quellenfamilien 47→48, Medien/Mitgliedschaften 90→91. Diagnose bleibt korrekt FAIL. |
 
 ## Verifizierte Belege
 

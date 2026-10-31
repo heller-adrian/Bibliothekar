@@ -609,3 +609,72 @@ def test_real_trash_restore_and_confirmed_delete_work_beside_general_conflict(re
     assert source.read_bytes()==data
     assert before==origin(reg)
     assert evidence=={p:p.read_bytes() for p in records}
+
+
+@pytest.mark.parametrize('library',['main','second'])
+@pytest.mark.parametrize('corrections',[1,2])
+def test_general_known_camera_history_survives_catalogue_loss_and_repeated_corrections(ready,library,corrections):
+    from PIL import Image
+    from app.global_library_inventory import backfill_library_inventory
+    from app.metadata_correction import metadata_area_paths,execute_metadata_correction
+    from app.metadata_origin_admission import known_camera_hashes
+    _,ws,reg,dbs,_=ready
+    camera_db=dbs[0 if library=='main' else 1]
+    stream=io.BytesIO();Image.new('RGB',(12,12),'orange').save(stream,format='JPEG');data=stream.getvalue()
+    _,_,relative=_seed_free_file(camera_db,family_key='known-camera',filename='camera.JPG',day='2026-07-19',data=data)
+    central=storage_paths(ws)['backup_root'];source=central/relative
+    source.parent.mkdir(parents=True,exist_ok=True);source.write_bytes(data)
+    backfill_library_inventory(reg,database_path=camera_db,library_id=library,claim_all_owned=False)
+    with database_connection(reg) as connection:
+        original=[tuple(r) for r in connection.execute('SELECT * FROM source_family_members')]
+    general=metadata_area_paths(area='general',workspace_root=ws,library_id='main',create=False)['root']/'renamed-copy.JPG'
+    source.rename(general)
+    for _ in range(2):reconcile_central_free_stock(camera_db,ws,library_id=library)
+    with database_connection(camera_db) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM files').fetchone()[0]==0
+    for number in range(corrections):
+        task=execute_metadata_correction(dbs[0],area='general',relative_path=general.name,
+            proposed_datetime=f'2026-07-19T14:{30+number:02d}:00+02:00',workspace_root=ws,library_id='main')
+        assert task['status']=='completed'
+    before=general.read_bytes();control=ro._control_location(ws)
+    evidence={p:p.read_bytes() for p in control.glob('*.json')}
+    assert hashlib.sha256(before).hexdigest() in known_camera_hashes(reg)
+    with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
+        response=client.post('/api/metadata-correction/general/reintegrate',json={'items':[{'relative_path':general.name}]})
+    assert response.status_code==409,response.text
+    assert 'bekannten Kameraimport' in response.text
+    assert general.read_bytes()==before and evidence=={p:p.read_bytes() for p in control.glob('*.json')}
+    with database_connection(dbs[0]) as connection:
+        assert not connection.execute("SELECT 1 FROM jobs WHERE operation='metadata_general_import'").fetchone()
+    with database_connection(reg) as connection:
+        assert original==[tuple(r) for r in connection.execute('SELECT * FROM source_family_members')]
+    assert operations.inspect(ws)['writes_allowed'] and main.api_storage_health()['state']=='READY'
+
+
+def test_unrelated_general_correction_still_queues_a_new_verified_import(ready):
+    from pathlib import Path
+    from PIL import Image
+    from app.metadata_correction import metadata_area_paths,execute_metadata_correction
+    _,ws,_,dbs,_=ready
+    source=metadata_area_paths(area='general',workspace_root=ws,library_id='main',create=False)['root']/'new.JPG'
+    Image.new('RGB',(12,12),'purple').save(source,format='JPEG')
+    task=execute_metadata_correction(dbs[0],area='general',relative_path=source.name,
+        proposed_datetime='2026-07-19T12:00:00+02:00',workspace_root=ws,library_id='main')
+    with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
+        response=client.post('/api/metadata-correction/general/reintegrate',json={'items':[{'relative_path':source.name}]})
+    assert response.status_code==202,response.text
+    job=response.json()['job'];assert job['operation']=='metadata_general_import' and job['state']=='queued'
+    staged=Path(job['source_path'])/source.name
+    assert staged.read_bytes()==source.read_bytes() and hashlib.sha256(staged.read_bytes()).hexdigest()==task['output_sha256']
+    assert operations.inspect(ws)['writes_allowed']
+
+
+@pytest.mark.parametrize('damage',['missing','corrupt'])
+def test_unavailable_origin_history_never_becomes_empty_new_origin(tmp_path,damage):
+    from app.metadata_origin_admission import known_camera_hashes
+    from app.metadata_correction import MetadataCorrectionError
+    path=tmp_path/'unavailable-registry.sqlite3'
+    if damage=='corrupt':path.write_bytes(b'unknown registry bytes')
+    with pytest.raises(MetadataCorrectionError,match='Herkunftsnachweise'):
+        known_camera_hashes(path)
+    assert (not path.exists()) if damage=='missing' else path.read_bytes()==b'unknown registry bytes'

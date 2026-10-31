@@ -44,6 +44,20 @@ Stand: Entwicklung; keine Veröffentlichung oder native TrueNAS-Abnahme.
    fehlende Quellen oder fremde Zielbytes dürfen ihre Migration nicht abschließen.
    Gezielte neue Regressionen und der erneute gesamte Containerablauf stehen
    nach dieser Korrektur noch aus.
+6. Die General-Aufnahmeprüfung verwendete nur aktuelle Katalogdateizeilen als
+   Liste bekannter Kamera-Hashes. Nach bestätigtem Dateiverlust fehlen diese
+   Zeilen, die unveränderliche Quellenmitgliedschaft besteht aber weiter.
+   Der echte API-/Worker-Test 41190356694 nahm deshalb eine korrigierte bekannte
+   JPEG per HTTP 202 an, schloss den Import ab und erzeugte eine zusätzliche
+   Quellenfamilie ohne explizite Kopienherkunft. Datei-Hash, Neustart und Archive
+   blieben korrekt; ein bloßes Ändern der erwarteten HTTP-Antwort wäre dennoch
+   eine falsche Abnahme gewesen. Die Aufnahmeprüfung liest jetzt zusätzlich
+   unveränderliche Mitgliedschaften und verfolgt abgeschlossene Korrekturketten
+   linear über alle registrierten Bibliotheken. Diese Hashes verweigern nur eine
+   implizite neue Herkunft. Sie werden nicht für Retained-Copy-/Duplikatentscheidungen
+   oder zur Autorisierung von Dateioperationen verwendet. Unbekannte neue General-
+   Dateien bleiben asynchron importierbar. Frühere bereits erzeugte Herkunftsbelege
+   werden nicht gelöscht, zusammengeführt oder rückwirkend umgedeutet.
 
 ## Verbindliche Grenzen
 

@@ -10386,6 +10386,11 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                 if str(row["sha256"] or "")
             }
         known_camera_sha = known_original_sha | known_current_sha
+        # Confirmed loss may remove current rows, never original source
+        # membership or completed correction lineage. This conservative
+        # admission guard is separate from retained-copy duplicate decisions.
+        from app.metadata_origin_admission import known_camera_hashes
+        known_camera_sha |= known_camera_hashes(REGISTRY_DATABASE_FILE)
 
         with database_connection(context.database_path) as connection:
             for relative, source, _row in selected:
@@ -10406,7 +10411,10 @@ def api_reintegrate_general_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                 ):
                     raise MetadataCorrectionError(
                         "Diese Datei gehört bereits zu einem bekannten Kameraimport. "
-                        "Es wird keine neue Sicherung/Provenienz angelegt; bitte die bekannte Aufnahme im Bibliotheksbestand korrigieren."
+                        "Es wird keine neue Sicherung/Provenienz angelegt. "
+                        "Die Herkunft bleibt auch nach dem Entfernen eines Katalogeintrags erhalten. "
+                        "Vorhandenen Import bzw. die Aufnahme prüfen oder das Original wiederherstellen; "
+                        "die Übernahme als eigenständige Kopie ist noch nicht unterstützt."
                     )
 
         metadata_root = storage_paths(context.workspace_root)["metadata_root"].resolve(strict=False)
