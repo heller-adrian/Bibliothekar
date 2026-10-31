@@ -531,6 +531,27 @@ def recover_trash_restores(workspace_root: Path, *, allowed_databases: set[Path]
                     validate_active_roots()
                     journal.unlink(); _sync_dir(journal.parent)
                     continue
+                if not request.exists():
+                    # A direct, fully committed restore has no queued trash
+                    # import request. Its completed journal is still a durable
+                    # record until every original DB row, target identity/hash
+                    # and exactly-once audit entry are independently verified.
+                    _preflight_restore(plans,root,central)
+                    for plan in plans:
+                        for db,row in plan["rows"]:
+                            with database_connection(db) as connection:
+                                current=connection.execute(
+                                    "SELECT current_root_kind,current_relative_path FROM files WHERE id=?",
+                                    (row["id"],)).fetchone()
+                                receipt_count=connection.execute(
+                                    "SELECT COUNT(*) FROM audit_log WHERE action='trash_file_restored' AND entity_id=? AND job_id=?",
+                                    (str(row["id"]),row["job_id"])).fetchone()[0]
+                                if (current is None or tuple(current)!=("shared_workspace",plan["target_relative"])
+                                    or receipt_count!=1):
+                                    raise TrashError("Restore-Abschluss ohne eindeutigen Katalog-/Auditnachweis.")
+                    validate_active_roots()
+                    journal.unlink(); _sync_dir(journal.parent)
+                    continue
             try:_preflight_restore(plans,root,central)
             except RestoreCollision as error:
                 _isolate_conflict(journal,data,plans,root,_databases(allowed_databases),error)
