@@ -1,44 +1,77 @@
 # Bibliothekar pre.5 – Fortsetzung, 31.10.2026
 
-## Sofortiger Einstieg
+## Sofortiger Einstieg – ausschließlich Legacy-Setupfehler
 
 Branch `codex/pre5-operation-recovery`.
-Letzter Anwendungscode: **f0e692473c4dd9bc24db1114a94068b3c87c9bea**.
-QA-Vertragsstand: **1004e846805d160f02c8a7a919a79515e3a95f42**; Appdateien
-bytegleich zuf0e69247 (git diff für app/Dockerfile/Requirements leer).
+Anwendungscode: **bd9451206c6ac447e0d1d71f07fa4ee4263e25c2**.
+**Zuerst41221622586 auswerten** (zuletzt in_progress). Ausschließlich:
+13 neue technische Receiptfälle, ursprünglicher Live-Wipe-/Restart-/Onboarding-
+Fall und17 vorhandene negative Legacy-Resetfälle. Kein vollständiger Workflow,
+keine Performance-/Container-/Standardzieltestwiederholung. Die Auswahldatei
+qa/pre5/backend_contracts.json ist für diese Runde auf diese31 Fälle begrenzt;
+alle übrigen Testdateien und die volle Matrix bleiben vollständig vorhanden.
 
-**Zuerst41219852833 auswerten** (zuletzt in_progress): kleine Schlussgruppe
-mit SQL-/F14-Sicherheitsverträgen, den vier konkret behobenen Fehlern und den
-beiden realen Laufzeitfällen OHNE Profiling unter unveränderten90/300s-Grenzen.
-Erst nach grüner Fokusstufe folgen die normalen60/82 Zieltests.
-**Danach41220098240 auswerten** (zuletzt pending): ausschließlich zwei kleine
-historische Vertragsmodule; keine Wiederholung von Performance/Container/142Zielen.
-Keine parallele Vollmatrix; beide laufen ohne aktive Codex-Warteschleife weiter.
+Aktueller Benutzerauftrag ausschließlich unknown_control_evidence klären.
+KEINE Veröffentlichung, Tags, Images/latest/main oder TrueNAS verändern.
+Gesamtabnahme folgt später in eigener Runde; danach Benutzerentscheidung zur
+Veröffentlichung. Frühere automatische Freigabe für diese Runde NICHT verwenden.
+Fünf-Stunden-Anzeige90%, Woche57%: jetzt geordnet gesichert stoppen.
+Diese Runde bei83% begonnen, etwa acht Punkte als Arbeitsbudget gewählt;
+Reserve erhalten. Keine aktive Warteschleife oder weitere CI-Läufe starten.
 
-41217778080 ist vollständig ausgewertet:264 Tests,260 PASS/4 FAIL/0 ERROR/SKIP,
-1014,825s. Alle sieben neuen Statement-Sicherheitsverträge PASS; auch die acht
-vorherigen SQLite-Autorisierungsverträge, Domain-/Retentions-/SIGKILL-Nachweise
-im gewählten Subset bestehen. Kein Deadlineübertritt in dieser264er-Stufe.
-Die beiden großen Laufzeitfälle waren dort NICHT enthalten.
+### Nachgewiesener Befund / gezielte Korrektur
 
-Vier konkrete Ursachen und Korrekturen:
-- Bestätigung[]/{}: TypeError im neuen Setcheck. Expliziter Stringtyp-Check in
- API-Gate UND Domainhelper, ungültige Werte bleiben422/gesperrt. Fünf zusätzliche
- direkte Negativverträge vor jeglicher Recovery, ursprüngliche Belege unverändert.
-- Legacy-Live-Wipe-Fixture fehlten General/Batch-Verwaltungsanker. Behauptete
- vollständige Struktur jetzt vor dem historischen Startup angelegt. Produktive
- Missing-Anchor-Prüfung unverändert. Nachfolgende Live-Wipe-/Reset-Assertions
- laufen weiterhin echt und könnten weitere bisher verdeckte Fehler zeigen.
-- Gezielt ausgeführtem Job fehlte tinycss2; gepinntes Testwerkzeug1.4.0 ergänzt.
- In der bisherigen vollen Matrix war es bereits vorhanden. Keine Appabhängigkeit.
+41219852833 auf f0e69247:65/66 PASS, ein Fehler in
+ test_incomplete_live_wipe_then_process_restart_and_confirmed_onboarding.
+setup_blocker=unknown_control_evidence nach erfolgreichem realem ersten Startup.
+Der F14-Produzent schreibt nach rein technischer Vorbereitung dauerhaft
+technical-startup-<Nonce>.json (root_operations.reserve); die spätere private
+Setup-Whitelist in managed_storage_health.setup_again_evidence kannte diesen
+selbst erzeugten technischen Abschlussbeleg nicht. Produktlogiklücke, keine
+weitere pauschale Fixture-Ausnahme.
 
-Originalfehler-Inventar jetzt im gezielten Nachlauf:92 ursprüngliche Fehler PASS,
-1 weiterhin FAIL,147 noch nicht erneut geprüft. Kein Ersatz der Schlussmatrix.
-Die vier Fehler sind implementiert korrigiert, erneuter Linuxbeweis noch PENDING.
+_technical_startup_evidence qualifiziert nur exakte Receipt-/Reservationsfelder,
+Nonce/Dateiname, kind=startup, _TECHNICAL_STARTUP_IDS, library=main, DB-Pfad,
+Workspace und genau Workspace+vier EN-Rollenbindungen. Generation/Identitäten
+müssen zum aktuellen State passen. Alte Generationen nur über vollständig
+SHA256-verknüpfte explizite SET-UP-AGAIN-Historie; Zyklen/mehr als64 Links gesperrt.
+Erkennung bleibt read-only, Originalbelege werden nicht gelöscht/umgeschrieben.
+Alle bisherigen Medien-/Katalog-/Registry-/Retention-, Token-, Kernel-Lock-,
+ACL-/F14- und Pending-Operation-Prüfungen bleiben aktiv. Keine Änderungen an
+SQLite-Optimierung, F14-Produzent, Root-Locks oder Read-only-/Recoverycapabilities.
 
-Wochenanzeige55%, Fünf-Stunden-Anzeige81%. Diese begrenzte Runde bei70/53 begonnen;
-jetzt geordnet gesichert stoppen. Keine weiteren Polls oder neue Testläufe.
-Keine Veröffentlichung vor kompletter erfolgreicher Gesamtabnahme.
+Neue Regression erzeugt Receipt mit echtem ro.reserve und reproduziert die
+alte Ablehnung bei fehlender Erkennung. Danach zwei explizite Resets, Original-
+receipt bytegleich. Negative Varianten: falsche Art/IDs/DB/Bindung/Generation/
+Nonce, zusätzlicher Wirkungsbereich, kaputtes JSON-Format, Fremd-JSON, offene
+Operation, Medienbestand und manipulierte Historien-Digests. Ergebnis PENDING.
+Originaltest muss bis bewusster Wiederaufnahme UND erster Bibliothek bestehen.
+
+### Bereits verifizierte neue Ergebnisse
+
+41219852833: beide bisherigen Laufzeitfälle OHNE Profiling PASS unter den
+unveränderten90/300s-Fristen:3892 Dateien213,948s,100 Dateien80,796s.
+Sieben neue SQL-Statement-Sicherheitsverträge und acht vorherige SQL-Verträge
+bestehen. Artefakt13050100813 SHA256
+efa22efebbd5b972d7fda4979e350f5ea7ed118309373f9758b83a30534a0b25 verifiziert.
+41220098240 SUCCESS:17/17 Vertragsfälle,0 ERROR/SKIP; Artefakt13049483491,
+SHA256 fd574cf0f4af6709218f426cb42729f49ab52dc97f37c8a5503a9f61e9372ef6
+verifiziert. Keine großen Altartefakte erneut heruntergeladen.
+
+### Nächster konkreter Schritt / enge Grenze
+
+1. Run41221622586 samt Artefakt-Digest/XML vollständig auswerten. Keine neue
+ Vollmatrix und keine parallelen umfangreichen Tests in dieser Runde.
+2. Falls Rot: zunächst klären, ob technische Receiptfelder mit dem echten
+ Produzenten übereinstimmen. Keine Namenspräfix-Ausnahme und kein Entfernen von
+ Belegen. Der vollständige Live-Wipe-Test kann hinter der bisherigen frühen
+ Sperre weitere Verbraucher freilegen. Insbesondere storage_bootstrap.evidence
+ hat ebenfalls eine private JSON-Whitelist; falls der Test später DORT scheitert,
+ konkrete Datei/Phase belegen und dieselbe enge Qualifikation prüfen, niemals
+ pauschal alle technical-startup-Dateien ignorieren. Dort bislang NICHT geändert.
+3. Falls Grün: nur diese gezielte Fehlergruppe als bestanden dokumentieren.
+ Die vollständige Endabnahme auf finalem Code ist weiterhin Aufgabe einer
+ weiteren Runde.147 ursprüngliche Backendfehler noch nicht erneut ausgeführt.
 
 ## Gesicherte Ergebnisse
 
@@ -121,33 +154,12 @@ Backend-ZIP:248983932 Bytes, SHA256
  previously_observed/not_observed ehrlich. Auth-only prüft503 ohne initialisierten
  Storage bei weiterhin401 für geschützte Routen und keinerlei angelegten Dateien.
 
-## Nächste konkrete Schritte
+## Weitere Abnahme ausschließlich in späterer Runde
 
-1.41219852833 vollständig anhand XML/guarded Logs bewerten und Artefaktdigest
- prüfen. Vorrang: sieben Statement-Verträge bleiben grün,3892-Dateien-/100-Dateien-
- Tests bestehen unter normalen unveränderten Fristen. Keine pauschale Deadline-
- Erhöhung bei Rot. Bestätigung[]/{} muss422 liefern, alle fünf direkten ungültigen
- Bestätigungen dürfen keine Recovery-Belege erzeugen. Legacy-Live-Wipe bis echter
- bestätigter Neuaufnahme und erster Bibliothek prüfen, nicht nur ersten Start.
-2.41220098240 prüfen: zwei frühere Source-Substring-Verträge wurden durch
- Verhaltenstests ersetzt. _prepare_technical_storage erstellt echte Config/
- Katalog-/Registryschemata in Reihenfolge und bewahrt bestehende Einstellungen.
- Sieben reale Ereignissuche-Varianten: read_session bleibt bei physical_refresh/
- first_check rein lesend; erlaubte normale Refresh-Aufrufe bleiben funktional.
- UI-Textverträge und übrige Tests beider Module bleiben erhalten. Appcode gleich.
-3. Bei Rot nur diese klaren Ursachen zuerst korrigieren. Keine volle Matrix
- starten, solange relevante Gruppen rot/offen sind. Falls diese kleinen Gruppen
- vollständig grün sind, die bisherigen264 ggf. gebündelt auf gleichem Appcode
- bestätigen und nächste gemeinsame Recovery-Ursache auswählen. Für Backup-/
- Sort-/Import-/Recheck-/Restore-Leases sind weiterhin viele ursprüngliche Fälle
- offen; kein pauschales _RECOVERING-Bypass, kein SQL-Status-only-Abschluss.
-4. Erst nach weitgehend grünen Ursachen-Gruppen komplette Backendmatrix und
- Ziel-/Frontend-/Browser-/Supervisor-/90-Dateien-/4000-Familien-/14-iPhone-
- Abnahme auf finalem Code. Nicht alte Container-/Frontend-PASS dem neuen Code
- zuschreiben. Keine parallelen Volltests, keine aktive Warteschleife.
-5. Erst danach pre.5 veröffentlichen. Publisher unter docs/pre5/release PENDING;
- große Backend-ZIPs erfordern begrenzte Extraktion der Pflichtnachweise. Keine
- blinde Aufhebung der300MB-Grenze und keine Veröffentlichung mit ungeklärtem Rot.
+Die aktuellen nächsten Schritte stehen oben. Die offenen Backup-/Sort-/Import-/
+Recheck-/Restore-Gruppen und finale Backend-/Frontend-/Container-/Browsermatrix
+hier NICHT neu starten. Alte PASS nicht dem endgültigen Code zuschreiben.
+Keine Veröffentlichung vor späterer vollständiger Endabnahme und Entscheidung.
 
 ## Aktuelle Nachweise und Grenzen
 
