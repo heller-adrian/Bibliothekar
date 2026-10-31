@@ -1,7 +1,7 @@
 {
   "baseline_run": 41194643144,
   "baseline_failed_nodes": 240,
-  "status": "BACKEND_NOT_ACCEPTED_FOCUSED_RECOVERY_RED_FULL_MATRIX_NOT_RUN",
+  "status": "BACKEND_NOT_ACCEPTED_BACKUP_RECOVERY_VERIFIED_RESTORE_AND_RECHECK_RED",
   "latest_focused_outcomes_of_original_failures": {
     "tests/backend/test_rc11_bootstrap.py::test_real_template_requires_explicit_review_and_preserves_original_bytes": {
       "run": 41217778080,
@@ -499,18 +499,18 @@
       "group": "read_view_and_contention_contract"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_staging_crash_before_main_commit_rolls_back": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41228704454,
+      "outcome": "PASS",
       "group": "backup_recovery_admission"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_after_main_commit_crash_completes_purge": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41228704454,
+      "outcome": "PASS",
       "group": "backup_recovery_admission"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_tampered_staged_file_is_never_deleted": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41228704454,
+      "outcome": "PASS",
       "group": "backup_recovery_admission"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_batch_collision_after_first_move_stays_blocked": {
@@ -547,12 +547,37 @@
       "run": 41227720942,
       "outcome": "FAIL",
       "group": "startup_domain_recovery_not_reached"
+    },
+    "tests/backend/test_0500_backup_delete_recovery.py::test_0500_interrupted_rollback_keeps_journal_and_bytes": {
+      "run": 41228704454,
+      "outcome": "PASS",
+      "group": "backup_recovery_admission"
+    },
+    "tests/backend/test_0500_backup_delete_recovery.py::test_0500_mid_purge_crash_recovery_is_idempotent": {
+      "run": 41228704454,
+      "outcome": "PASS",
+      "group": "backup_recovery_admission"
+    },
+    "tests/backend/test_0500_backup_delete_recovery.py::test_0500_multilibrary_crash_after_secondary_delete_restores_projection": {
+      "run": 41228704454,
+      "outcome": "PASS",
+      "group": "backup_recovery_admission"
+    },
+    "tests/backend/test_0500_backup_delete_recovery.py::test_0500_unknown_empty_subdirectory_blocks_deletion": {
+      "run": 41228704454,
+      "outcome": "PASS",
+      "group": "backup_recovery_admission"
+    },
+    "tests/backend/test_0500_backup_delete_recovery.py::test_0500_unknown_stage_file_blocks_destructive_purge": {
+      "run": 41228704454,
+      "outcome": "PASS",
+      "group": "backup_recovery_admission"
     }
   },
   "counts": {
-    "PASS": 99,
-    "FAIL": 10
+    "PASS": 107,
+    "FAIL": 7
   },
-  "note": "Disjoint latest focused outcomes for all 240 initial failures: 99 PASS, 10 FAIL (original crash/recovery contracts reproduced on 41227720942), 131 without individually catalogued subsequent focused outcome. Broader original-147 run 41222826726 found 30 PASS/117 FAIL, without complete per-node artifact, and is not treated as resolved. Source-specific results, not full-backend release acceptance. App code ff11f88b remains unchanged. Repro 10/10 recovery FAIL blocks acceptance; B01 whole file 41227607033 10/10 PASS.",
-  "not_retested": 131
+  "note": "Per-node focused evidence for 240 originally failing backend cases: 107 PASS (all 8 BA-02 original nodes now pass on run 41228704454), 7 FAIL in restore/recheck/import from run 41227720942, 126 without separately catalogued focused outcome. Broad 147-case run 41222826726 remains 30 PASS / 117 FAIL. BA-02 full file 11 PASS includes two new tamper/foreign-journal negatives. No current full backend matrix, frontend/container recertification or release.",
+  "not_retested": 126
 }
