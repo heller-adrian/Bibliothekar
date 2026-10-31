@@ -599,6 +599,12 @@ def _finish_verified_known_restore_handoff(journal, data, plans, root, central, 
         or sorted(item.get('relative_paths') or [])!=selected
         or not selected or len(selected)!=len(set(selected))):
         raise TrashError('Restore-Abschluss widerspricht der gesicherten Originalauswahl.')
+    stage=stage_parent(workspace)/journal.stem
+    # A known-only replay cannot silently accept any unowned payload in the
+    # private staging directory, even if its manifest lists no unknown files.
+    if (stage.is_symlink()
+        or (stage.exists() and (not stage.is_dir() or any(stage.iterdir())))):
+        raise TrashError('Restore-Zwischenbestand enthält unbekannte Dateien.')
     _preflight_restore(plans,root,central)
     for plan in plans:
         for database,row in plan['rows']:
