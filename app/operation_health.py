@@ -95,7 +95,11 @@ def inspect(workspace):
             item['scope']=sorted(resources(item))
             replay_intent=parent/('domain-recovery-intent-'+r['reservation_id']+'.json')
             replaying=replay_intent.exists() or replay_intent.is_symlink()
-            if (r['kind']=='recovery' or replaying) and item['live'] and active.get(str(path))!=r:
+            # Only an admitted orphan replay crosses the orphan-to-live gap.
+            # A newly started recovery may still be WAITING for the trash lock
+            # held by a live normal writer; fencing that owner would interrupt
+            # the very operation the recovery is waiting to finish.
+            if replaying and item['live'] and active.get(str(path))!=r:
                 recovering.append({'phase':'domain_recovery_in_progress','scope':item['scope'],
                     'detail':str(path)})
         except Exception as error:item['detail']=str(error)

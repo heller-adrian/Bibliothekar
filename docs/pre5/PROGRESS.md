@@ -97,3 +97,15 @@ wird nicht aus seinem historischen Registrypfad neu angelegt oder geöffnet.
 Deaktivierte, aber noch registrierte Bibliotheken bleiben einbezogen. Ein Journal
 mit nicht registrierten DB-Verweisen bleibt abgewiesen. Neue synthetische Prüfung
 behält den ausgetragenen Katalog bytegleich unter einem Retentionspfad.
+
+Quellabgleich des bereits im Fokus enthaltenen Live-Deletion-Vertrags zeigt eine
+zusätzliche Eintrittskollision: Eine frisch gestartete Recovery kann noch auf
+den Trash-Lock eines laufenden normalen Schreibers warten. Ihr bloß lebender
+F14-Beleg darf diesen Besitzer nicht selbst unterbrechen. Die zusätzliche
+prozessübergreifende Resume-Sperre greift deshalb ausschließlich bei dem vor
+Wiederaufnahme dauerhaft geschriebenen domain-recovery-intent derselben Nonce.
+Die normalen F14-/Trash-Locks, Journale und SQLite-Prüfungen gelten weiterhin;
+Startup besitzt außerdem seine bestehende gemeinsame Writer-Barriere. Der Test
+für laufende Orphan-Recovery verlangt unverändert gesperrte fremde SQL-/Root-
+Schreiber. test_recovery_waits_for_live_deletion prüft gleichzeitig den normalen
+wartenden Recovery-Fall. Beide im nächsten Linux-Fokus, Ergebnis noch PENDING.
