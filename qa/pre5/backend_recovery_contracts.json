@@ -8,5 +8,10 @@
   "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[after_handoff]",
   "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[hash]",
   "tests/backend/test_rc5_practice_followup.py::test_folder_actual_sigkill_atomic_handoff_and_three_restarts[after_handoff]",
-  "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[bytes]"
+  "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[bytes]",
+  "tests/backend/test_r1_restore_recovery.py::test_r1_partial_commit_foreign_target_requires_global_block",
+  "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[source_bytes]",
+  "tests/backend/test_0562_process_recovery.py::test_0562_restore_preserves_ambiguous_evidence[bytes]",
+  "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[same_bytes_new_inode]",
+  "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[symlink]"
 ]
