@@ -276,3 +276,57 @@ m.delete_backup(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), "IMPORT
     assert journal.exists()
     staged.write_bytes(expected)
     assert recover_backup_deletions(db, registry, root)["completed"] == 1
+
+
+def test_0500_backup_reentry_rejects_changed_original_lease_in_journal(tmp_path):
+    """A forged reservation ID cannot turn old delete authority into new rights."""
+    db,registry,root,original,_=_seed(tmp_path)
+    script = """
+import os,sys
+from pathlib import Path
+import app.backup_management as m
+m._finish_deletion=lambda *_a,**_kw:os._exit(42)
+m.delete_backup(Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),"IMPORT_0400")
+"""
+    _run_child(db,registry,root,script)
+    journal,stage=_journal("IMPORT_0400",root)
+    clean=journal.read_bytes()
+    changed=json.loads(clean)
+    changed["root_reservation"]["reservation_id"]="0"*32
+    journal.write_text(json.dumps(changed))
+    staged=stage/"2026/2026-10-04/20261004_120000_Test.JPG"
+    original_bytes=staged.read_bytes()
+    with pytest.raises(BackupDeletionError,match="backup_recovery_journal_not_bound_to_original_lease"):
+        recover_backup_deletions(db,registry,root)
+    assert journal.exists() and staged.read_bytes()==original_bytes
+    assert get_job(db,"IMPORT_0400") is None
+    journal.write_bytes(clean)
+    result=recover_backup_deletions(db,registry,root)
+    assert result=={"completed":1,"rolled_back":0,"blocked":0,"errors":[]}
+    assert not journal.exists() and not stage.exists()
+
+
+def test_0500_backup_reentry_rejects_foreign_journal_without_erasing_bytes(tmp_path):
+    """Unknown private operation evidence must never be quietly deleted."""
+    db,registry,root,original,_=_seed(tmp_path)
+    script = """
+import os,sys
+from pathlib import Path
+import app.backup_management as m
+m._finish_deletion=lambda *_a,**_kw:os._exit(42)
+m.delete_backup(Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),"IMPORT_0400")
+"""
+    _run_child(db,registry,root,script)
+    journal,stage=_journal("IMPORT_0400",root)
+    foreign=journal.parent/"foreign-unknown.json"
+    foreign.write_text('{"never":"discard"}')
+    staged=stage/"2026/2026-10-04/20261004_120000_Test.JPG"
+    original_bytes=staged.read_bytes()
+    with pytest.raises(BackupDeletionError,match="backup_recovery_journal_scope_changed"):
+        recover_backup_deletions(db,registry,root)
+    assert foreign.read_text()=='{"never":"discard"}'
+    assert journal.exists() and staged.read_bytes()==original_bytes
+    foreign.unlink()
+    result=recover_backup_deletions(db,registry,root)
+    assert result=={"completed":1,"rolled_back":0,"blocked":0,"errors":[]}
+    assert not journal.exists() and not stage.exists()

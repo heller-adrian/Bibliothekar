@@ -850,8 +850,12 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
                     if resumed is not None:return resumed
                 if kind=='backup' and fn.__module__+'.'+fn.__qualname__=='app.backup_management.recover_backup_deletions' and not read_only():
                     from app.domain_recovery import try_backup_entry
-                    resumed=try_backup_entry(workspace,database=database,
-                                             registry=a['registry_path'],central_root=a['central_root'])
+                    from app.operation_health import DomainStartupError
+                    try:
+                        resumed=try_backup_entry(workspace,database=database,
+                                                 registry=a['registry_path'],central_root=a['central_root'])
+                    except DomainStartupError as error:
+                        raise error_type(str(error)) from error
                     if resumed is not None:return resumed
                 if not durable and read_only():
                     # Pure snapshots keep the same pinned-root authority but
