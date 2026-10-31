@@ -1,549 +1,134 @@
-# Aktuell – 31.10.2026: Herkunftslücke korrigiert, neuer vollständiger Nachlauf
+# Bibliothekar pre.5 – reproduzierbare Fortsetzung, 31.10.2026
 
-Branch `codex/pre5-operation-recovery`, Anwendungskandidat
-`5f741f93f8fdb34535d87f6d71ec79e380ffe940`.
-**Zuerst Lauf 41192396662 direkt per gh api prüfen.**
-
-Voriger Lauf 41191231150: 56 neue + 80 fokussierte PASS, Frontend PASS;
-pre5/pre4-Livecontainer PASS. Historische Fälle historical/rc14/foreign/three PASS.
-Beim Seed des sigkill-Falls scheiterte ein GET auf einen gerade abschließenden
-Import unter dem unveränderten veröffentlichten pre.2. Dessen Middleware fordert
-für jeden Job-GET eine schreibende Schema-Freigabe und kann im SQL-/F14-Fenster
-409 liefern. Historischer Seed wartet jetzt read-only auf completed und das
-Entfernen exakt seiner Importreservation, verlangt danach weiterhin HTTP200 und
-completed. Alle Recovery-/Hash-/Originalreservationsprüfungen unverändert.
-
-Zusätzlicher echter Produktfehler aus dem Live-Log: Thumbnail-GET rief den
-schreibgeschützten Worker-Builder auf und lieferte operation_read_only_request/500.
-GET liefert jetzt ausschließlich vorhandenen regulären Cache oder 404; der
-Importworker erzeugt Vorschaubilder weiterhin unter seiner Schreibfreigabe.
-Drei neue GET-Tests (fehlend/regulär/Symlink, ungelöster General-Konflikt), Browser
-prüft nun zusätzlich alle beobachteten Serverantworten auf 5xx. Der 90er Test
-verlangt am Ende alle tatsächlichen Katalog-Hashes, drei unveränderte korrigierte
-General-Kopien, SQLite quick_check und Fremdschlüssel beider Datenbanken.
-Lokale Syntax-/JS-/Diffprüfung PASS; ausführende Abnahme läuft ausschließlich Linux.
-
-Kontingent zuletzt fünf Stunden32%, Woche33%; Handoff spätestens ab70% beginnen.
-Kein NAS-Zugriff, keine Veröffentlichung, qa/rc14.zip nicht stage'n.
-
---- Bisherige Chronologie ---
-
-# Aktuell – 31.10.2026: General-202 bis Endzustand untersucht
-
-Branch `codex/pre5-operation-recovery`. Anwendungskandidat:
-`d05c61890205f5c0722883ebb3a7eb984c761d45`.
-**Zuerst Lauf 41191231150 über gh api mit Cache-Control: no-cache lesen.**
-Neue Zielstufe 56 PASS und fokussiert 80 PASS (0 FAIL/SKIP). Container läuft;
-erst nach dessen SUCCESS startet die gesamte Backend-Matrix. Keine neuen Runs
-blind starten, keine Veröffentlichung vor vollständiger Abnahme.
-
-Die ursprüngliche Annahme „bekannte Datei muss 409 liefern“ wurde ausdrücklich
-nicht einfach auf 202 geändert. Probe `cefeb5cb` / Lauf 41190356694 führte den
-angenommenen General-Auftrag vollständig aus: completed/organized_verified,
-Ergebnis-JPEG mit richtigem SHA am neuen 14:30-Tagespfad, Neustart READY und
-writes_allowed=true, keine offene F14-Reservation. Originale Belege und Archive
-blieben erhalten. Trotzdem wurden eine neue Quellenfamilie (47→48) und ein neues
-Medium/Mitglied (90→91) angelegt. Ursache: der alte General-Guard liest nur noch
-vorhandene Dateien; nach den zwei bestätigenden Verlustscans fehlt die Kamera-
-JPEG-Zeile, obwohl ihre unveränderliche Herkunft in der Registry weiter besteht.
-Dies ist eine echte Herkunfts-Aufnahmelücke, kein falscher asynchroner Jobstatus.
-
-Korrektur: `app/metadata_origin_admission.py` qualifiziert Registry/Katalogpfade
-und liest sie query_only. Unveränderliche Quellenmitgliedschaften plus vorhandene
-Katalog-Hashes bilden positive Kamerahistorie; abgeschlossene Korrekturketten aller
-registrierten Bibliotheken werden linear verfolgt. Das verweigert ausschließlich
-implizite neue Herkunft in General. Keine Änderung an retained-copy-Duplikatlogik,
-keine automatische Merge-/Löschmigration älterer fehlerhaft angenommener Importe.
-Neue wirkliche General-Dateien bleiben HTTP202/Worker-importierbar. Sieben neue
-Tests: beide Bibliotheken, ein/zwei Korrekturen nach echter Katalogverlustbestätigung,
-positive neue Datei, fehlende/kaputte Registry. Alle sieben in den 56 Zieltests PASS.
-DE/EN-Meldung nennt erhaltene Herkunft und noch nicht unterstützte Kopienvariante.
-
-Prüfnachweise:
-- Probe-Container: Artefakt 13038543693, SHA256
-  54ab44c0d4716e0fe94baa5ab31e73b440b6ce5f2b7a563b2b7d570debfda6fc.
-- Neuer Zieljob: Artefakt 13038996100, SHA256
-  1646e5873ac0d6ff235f4be8d2f93915ca3a6e3367246007ca20753819406f3e.
-Beide ZIPs erneut heruntergeladen und gegen GitHub-Digest geprüft.
-Scratch: `/private/tmp/bibliothekar-pre5-evidence/41190356694-container` und
-`41191231150-targets`. Probebericht `pre5-manual-changes.json` enthält vollständige
-Vorher/Nachher/Neustart-Kataloge, Herkunft, Hashes und den echten endgültigen Job.
-Aktuelles Fünf-Stunden-Fenster startete bei 0%, Woche28%; zuletzt 23% / Woche31%.
-Checkpoint weiterhin rechtzeitig ab70%. Kein NAS-Zugriff. qa/rc14.zip nicht stage'n.
-
---- Vorherige Chronologie ---
-
-# Aktueller Einstieg – pre.5, 30.10.2026, aktueller Checkpoint
+## Zuerst prüfen
 
 - Branch: `codex/pre5-operation-recovery`.
-- Aktueller QA-/Buildkandidat: `08cee415a6a5c5a926825048c253891216cfd12b` (remote).
-  Anwendungscode identisch mit `96d538fac1a6c7fa42785e821dbc20cad505b07c`.
-  Funktionaler Migrationsfix auf `83b11dad16626c01460562caec8dd530ad4bbd42`;
-  danach im App-Code ausschließlich sichtbare Versionskennung in ui_shell geändert.
-- Zuerst Lauf **41123293238** lesen (direkte API mit Cache-Control: no-cache). Er prüft 49 neue Zieltests, danach erweiterte
-  fokussierte Regressionen, Container und erst bei Container-SUCCESS den gesamten
-  Backend. Frontend läuft ebenfalls nach grünen Zieltests. Keine weitere CI blind
-  neu starten. Noch keine Veröffentlichung, kein Publisher vorbereitet/ausgeführt.
-- Fünf-Stunden-Fenster zuletzt 79 %, Woche 28 %; jetzt geordnet gesicherter Zwischenstand.
-  Keine Subagents. Lokale Prüfungen nur Syntax/Quellen; ausführende QA auf Linux.
+- Aktueller Anwendungscode/QA-Kandidat: `2908eacbf73e891ebd46078cb9ae4af43e0dd454`.
+- **Lauf 41194643144 über direkte GitHub-API prüfen.** Containerjob
+  124519051403 SUCCESS. Backendjob124521156657 führt die acht Partitionen aus.
+- Ziele: 60 neue +82 fokussierte PASS, jeweils 0 FAIL/SKIP. Frontend: 44 RC13
+  +147 RC14 PASS. Container einschließlich90 Dateien/4.000 Familien/14 iPhones ebenfalls PASS;
+  vollständige Backendmatrix bleibt offen.
+- Erneut heruntergeladene, kryptografisch verifizierte ZIPs:
+  Ziele13040405805: `88a4098ba8118817918b9417c880f134fc7ba9259b28dd3e098ea00c7d7b858f`;
+  Frontend13040415276: `bf0f6991e222259c51be5e2148d4985b68a835bfddf16cf93947f04d09c137a4`.
+- Scratch: `/private/tmp/bibliothekar-pre5-evidence/41194643144-{targets,frontend}`.
+  Alle früheren Logs/ZIPs liegen ebenfalls unter diesem Evidence-Stamm.
+- Container13040432071: `d656fc55af18966b4a244df052ad57b2f215beb69c773ccb9aa8ba3a05547a20`,
+  ZIP erneut verifiziert. Starts5,374/5,366s; unveränderte Archive/Herkunft/General-Kopien.
+- Letztes Kontingent: fünf Stunden68%, Woche39%. Ab70% Handoff sichern,
+  deutlich vor Erschöpfung geordnet stoppen. Nutzerauftrag erlaubt Fortsetzung
+  im nächsten Fenster; Veröffentlichung nur nach sämtlichen bestandenen Gates.
 
-## Letzter Nachlauf und unmittelbarer nächster Schritt
+## Gegenwärtige Ursachen und Fixes
 
-`41122388040` final FAIL: 49 neue PASS, fokussiert 70 PASS / 10 FAIL. Die drei
-Versions-/Ankerfehler sind behoben. Die verbliebenen Prozess-Seeds lehnten eine
-historische Arbeitswurzel ab, deren deklarierte Kataloge/Registry noch nicht
-angelegt waren (`catalog_unavailable`). `08cee415` provisioniert diese leeren
-Schemas explizit vor dem Layoutcheck; keine Produktprüfung wird umgangen.
-Originale signierte Dateien unberührt; externer Fixture-Plugin und mutable
-recovery_0562-Foundation geändert. Zusätzliche Original-Childlogs werden bei
-weiterem Fehler begrenzt in stdout.log bewahrt. **Noch nicht grün nachgeprüft.**
+Details: docs/pre5/ARCHITECTURE.md, TEST-REPORT.md, EVIDENCE.json. Originalaufträge:
+`/Users/adi/Downloads/Codex_Auftrag_Bibliothekar_v1.0.0-pre.5.md` und
+`/Users/adi/Downloads/Bibliothekar_pre5_TrueNAS_Befunde_2026-10-30.md`.
+Ausgangspunkt pre.4: `adcc2aa9a444042440ff764be10fe1e42191904d`.
 
-Aktueller Lauf **41123293238** war zuletzt in_progress. Zuerst direkt lesen:
-`gh api repos/heller-adrian/Bibliothekar/actions/runs/41123293238 -H 'Cache-Control: no-cache'`
-und `/jobs` mit demselben Header. `gh run view/list` zeigte in dieser Session
-wiederholt einen veralteten queued/in_progress-Status, obwohl die direkte API
-bereits completed/failure meldete. Nicht wegen solcher Anzeige neue Runs starten.
+1. GET-Kompatibilitätsansicht verlangte F14-Schreibreservation. Jetzt private
+   prozesslokale temporäre View mit qualifizierter echter Rootbindung.
+2. Exakt auditierte medienlesende Inventory-/Archivprüfungen und SQL-Planer
+   sind transient. Historische Belege werden ausschließlich nach kompletter
+   Qualifikation mit vollständigem Originalrecord im dauerhaften Unterbrechungs-
+   nachweis behandelt. Echte unbekannte Schreibwirkungen bleiben geschützt.
+3. Scope-Admission, SQL-Authorizer und Queueclaim sichern konkrete Ressourcen.
+   Verschachtelte Wirkungen werden dauerhaft erweitert, nie verengt. General-
+   APPLY benötigt privaten Tasknachweis; mutable SQL alleine ist keine Autorität.
+4. Bereits zentral geroutete Jobs werden nicht erneut als alte Main→Zentral-
+   Migration ausgeführt. Drei echte Migrationstests bestanden. Echte Altfälle
+   mit fehlender Quelle/fremden Zielbytes bleiben blockiert.
+5. General-202 wurde bis completed/organized_verified + Neustart untersucht
+   (41190356694). Datei/Hash/Archive korrekt, dennoch neue Herkunft47→48 Familien,
+   90→91 Medien/Mitgliedschaften nach bestätigtem Katalogverlust. Korrektur liest
+   unveränderliche Mitgliedschaften und abgeschlossene Korrekturketten aller
+   registrierten Bibliotheken linear. Keine historischen Belege werden verändert.
+   Echte neue General-Dateien bleiben asynchron importierbar; bekannte Kopien-
+   Variante A ist ausdrücklich DEFERRED, kein Entfernen der Herkunftsprüfung.
+6. Thumbnail-GET erzeugte operation_read_only_request/500. Jetzt vorhandener
+   regulärer Cache oder BytesIO ohne persistente Wirkung; gepinnte Struktur vor/
+   nach Rendern qualifiziert. Worker-Cache behält volle Schreibadmission. Neuer
+   realer JPEG-Test bestätigt Ausgabe320x200, gleiche Originalbytes, komplette
+   SQL-Dumps und F14-JSONs sowie kein angelegtes Cacheverzeichnis. PASS.
 
-Aktueller Bericht: `docs/pre5/TEST-REPORT.md`; SHA-/Artefaktnachweise in EVIDENCE.json.
-Backend-/Container-/4000-/iPhone-Abnahme bleibt offen. Keine Veröffentlichung.
+Der erste Inventory-Abbruch auf dem tatsächlichen NAS bleibt nicht bewiesen.
+Keine konkrete historische NAS-Operation ungeprüft als sicher behandeln.
 
-## Neuester Gate-Befund (nach dem Migrationsfix)
+## Letzte CI-Hindernisse / mögliche nächste Diagnose
 
-`41121252978` auf `83b11dad`: **49 Zieltests PASS**, 0 FAIL/SKIP. Die neuen
-Migrationstests inklusive echtem pre.4-Fehler bestanden. Erweiterte fokussierte
-Stufe: **67 PASS / 13 FAIL**. Zwei Tests erwarteten über `qa/release/pre.json`
-noch pre.1; ein Test provisionierte nur vier Wurzeln ohne General/Batch Correction;
-zehn F16/F20-/Prozessfälle scheiterten bereits beim Seed. Deren historische
-Foundation-/Provisionierungshelfer hatten ebenfalls die zwei verpflichtenden
-Metadatenanker noch nicht angelegt. Originale signierte QA-Dateien unverändert.
-`96d538fa` ergänzt nur die explizite Test-Provisionierung vor dem Seed, bessere
-Seed-Fehlerlogs und konsistente Versionsangaben in Manifest/README/ui_shell.
-Keine laufende Storage-/Recovery-Funktion zum Bestehen von Tests umgangen.
-Diese Fixture-Erklärung wird erst durch den Nachlauf bestätigt; noch NICHT PASS.
-Container und breite Backend-Stufe wurden im gescheiterten Gate korrekt SKIPPED.
+- 41191231150: Ziele56+80, Frontend, pre5/pre4-Live und vier historische Fälle
+  PASS. Historischer pre.2-Seed pollte Job-GET im SQL-/F14-Abschlussfenster; alte
+  Middleware fordert dabei Schreibschemafreigabe. Seed wartet jetzt read-only
+  auf completed und Release exakt seiner Importreservation, verlangt danach
+  weiterhin HTTP200/completed. Originale Metadata-Orphan bleibt Recoveryziel.
+- 41192396662: 59+80 PASS, historisch236 PASS/1 FAIL/0 SKIP. Ein alter Unit-Test
+  hatte keine eigene Registry. Echte isolierte Registry ergänzt, Race-Gegenprobe
+  verlangt genau den Staging-Hashfehler. Beide Fälle im kurzen Gate: jetzt PASS.
+- 41193453760 und41193996176: 59+82/Frontend PASS, alle fünf pre5-Live-API-/
+  Recovery-/Archivprüfungen PASS. Neuer Browsercheck sah den absichtlich
+  deaktivierten optionalen Gerätehelfer: source-devices503 mit genau belegtem
+  JSON. Dieser konkrete Fall wird qualifiziert, andere5xx bleiben Fehler.
+  Danach verlor Navigation asynchrone Response-Bodys. Test wartet nun
+  networkidle; falls es erneut scheitert, `read_error` im tatsächlichen Log
+  untersuchen, nicht pauschal HTTP500/503 erlauben.
+- Der90er Ablauf verlangt nach beiden Neustarts alle aktuellen Katalog-SHAs,
+  genau drei erhaltene korrigierte General-Kopien, SQLite quick_check und
+  Fremdschlüsselprüfung beider Datenbanken. Nie nur202/409 austauschen.
 
-Lauf **41122388040** auf **96d538fac1a6c7fa42785e821dbc20cad505b07c** zuletzt QUEUED.
-Runner einmal rein lesend geprüft: online, idle, vier korrekte Labels. Schon der
-vorige Lauf benötigte einige Minuten bis Zuweisung; keine neue Runner-Diagnose,
-keine Rechteänderung und keinen doppelten Run starten. Bei nächster Fortsetzung
-zuerst Status/Artefakte dieses Laufs lesen und die tatsächliche Ursache weiterer
-Fehler anhand der nun genaueren Seed-Logs prüfen.
+## Vollständiger nächster Prüfpfad
 
-## Letzter nachgewiesener Produktfehler und Korrektur
+1. Fehlgeschlagene aktuelle Stufe untersuchen, falls41194643144 nicht SUCCESS.
+   Keine zweite CI blind starten. Bei reinem QA-Fix App-Quellgleichheit belegen.
+2. Container: pre5/pre4-Livebrowser DE/EN390/1440, sechs historische Recovery-
+   Fälle samt echten SIGKILLs, echter90-Dateien-/47-Familien-/8-Tage-Ablauf,
+   4.000 Familien/zwei Bibliotheken und14 iPhone-JPEGs mit+13:00.
+3. Backend: qa/pre5/full_backend.py führt acht disjunkte Partitionsläufe aus.
+   Auswahl allein ist kein Testnachweis: passende JUnit-Zahlen, vollständige
+   Nodes,0 FAIL/ERROR/SKIP zwingend. QA-Scratch privat unter /tmp; gruppen-
+   beschreibbare Runner-Eltern dürfen nicht chmod'ed werden. Collectionfehler
+   stoppt statt acht Wiederholungen. Originale signierte QA-Dateien unverändert.
+   Deadlines90s, bekannter3-Lifecycle-Test240s, RC14-3892-Fixture300s.
+4. ZIP-Digests aller vier finalen Artefakte erneut prüfen; Bericht/EVIDENCE.json
+   mit tatsächlichem finalem SHA, Run, Zahlen und Grenzen abschließen.
+5. Erst bei vollem SUCCESS Publisher binden und eigenständig veröffentlichen.
 
-`41119010880` auf `64645b5f`: 46 neue + 46 fokussierte PASS (0 FAIL/SKIP), Frontend
-44 RC13 + 147 RC14 Fälle PASS. Reale pre5/pre4 APIs, General-Import, zwei Neustarts,
-Import+Eventsortierung trotz erhaltenem Einzelkonflikt, sechs historische Fälle
-PASS. Der 90-Dateien-/47-Familien-/8-Tage-Ablauf erreichte Import, Applied/Archive,
-drei manuelle Änderungen und Upgrade. Alle drei ursprünglichen pre.4 GETs 200,
-keine pre.4-Reservation – der erste NAS-Inventarabbruch bleibt damit unbewiesen.
-Nach Upgrade: Storage READY, aber writes_allowed=false, weil
-`migrate_main_free_stock_to_central` eine bereits zentral geroutete Datei erneut
-im alten Main-Bestand sucht. Datei war regulär nach General verschoben;
-Job.working_path war nachweislich `/workspace/SD Card Backups`, keine offene F14.
-Log: `Migration kann nicht fortgesetzt werden, weil Quelle und Ziel fehlen`.
+## Publisher – vorbereitet, gesperrt, noch nicht Linux-getestet
 
-Korrektur in `83b11dad`: SQL liest jobs.working_path; freie Dateien bereits zentral
-geführter Aufträge werden nicht erneut physisch migriert. Keine neue Position
-raten, keine Hash-/Katalogänderung. Echte Altaufträge bleiben vollständig geprüft;
-fehlende Quelle oder fremde Zielbytes blockieren weiterhin ihre Migration. Drei
-neue Regressionen einschließlich tatsächlichem veröffentlichtem pre.4-Code.
-Noch NICHT Linux-abgenommen. Zusätzliche fokussierte Stock-/F16-/F20-Tests im Gate.
+`docs/pre5/release/`: core/oci/graph_fixture aus erfolgreichem pre.4-Publisher;
+pre5-spezifische Quell-, QA-, Runtime-, Tag-/Image-/Release- und Download-Gates.
+ACCEPTANCE.json=PENDING; source_audit verweigert dies vor externen Schreibvorgängen.
+PUBLISH-WORKFLOW.yml liegt nur unter docs, ist kein aktiver GitHub-Workflow.
 
-Ebenso in 83b11dad: optisch abgeschnittene DB-Diagnose aus schmaler Statuskarte in
-eigenen aufklappbaren Bereich verschoben. Browser verlangt jetzt reales Öffnen,
-verbundene/schema_current DB, automatic_repair=false und ungeänderten Scoped-Schutz.
+Vor Verwendung finalen geprüften Quellcommit, erfolgreiche Run-ID, vier ZIP-IDs/
+Digests, genaue pytest-/Frontendzahlen und vollständige Backend-Nodes binden.
+Finaler reiner Dokumentationscommit muss EVIDENCE.json im akzeptierten Schema
+enthalten; app-Baum unverändert. Publisherbranch `codex/publish-1.0.0-pre.5`,
+Workflowvorlage erst dort nach `.github/workflows/publish-pre5.yml` kopieren.
+Alle Jobs self-hosted/Linux/X64/bibliothekar-safe. Source-Audit/Unittests/Actionlint,
+Bytevergleich aller eingebetteten App-Dateien, tatsächliche Release-Container-QA,
+OCI-Index/Plattformmanifest/Konfiguration/Docker-ID, Digest-Pull, erneuter Download
+aller Release-Anlagen zwingend. Alte pre bis pre.4, latest, Stable und bestehende
+Privatsphäre/Paketrechte schützen. Unklarer Teilzustand: stoppen, nichts überschreiben.
+README/REPORT/Release Notes sind noch Entwürfe und müssen Abnahmeergebnis erhalten.
 
-## Vollständige Matrix – Infrastruktur und ehrliche Testgrenzen
-
-Erster breiter Versuch 41119010880: **0 Backendtests ausgeführt**, acht wiederholte
-Collectionfehler in test_f14_o2_policy. QA-Scratch unter Runner-_work mit Modus0775
-verletzt alte private-ACL-Tests. Jetzt eigene private mktemp-Umgebung unter sticky
-`/tmp`, keine Änderungen am Runner-Elternverzeichnis. `e5cabf49`/`c49a081f` korrigieren
-QA-Coverage: JUnit-Testzahl muss Auswahl entsprechen; Fehler/Skips/fehlendes XML
-führen zu FAIL; Collectionfehler wird nicht achtmal wiederholt. Breite Matrix erst
-nach Container-SUCCESS. 4.000 Familien/14 iPhones in beiden jüngsten Containerläufen
-wegen vorherigem Fehler **NOT_RUN**, nicht aus alten Erfolgen als bestanden zählen.
-
-Alle neuen Workflows nur `[self-hosted, Linux, X64, bibliothekar-safe]`. Keine
-NAS-Zugriffe, bestehenden Veröffentlichungen/Images/latest unverändert.
-`qa/rc14.zip` bleibt bewusst unversioniert.
-
-## Nächste Schritte
-
-1. 41121252978 abschließen/analysieren; bei Fehler zuerst dessen konkrete Stufe.
-2. Nur nach grünen kurzen Gates Container prüfen: 90er Ablauf nach Migrationfix,
-   beide Chromium-Sprachen/Größen, historische SIGKILLs, 4.000 Familien, 14 iPhones.
-3. Vollständigen Backend (2.416 erwartete Nodes; tatsächliche Collection gilt)
-   sorgfältig auswerten. Alte Erwartungen und echte Regressionen trennen; keine
-   Sicherheitsprüfung abschwächen, keine BLOCKED-Skips als Abnahme akzeptieren.
-4. Artefakt-ZIPs erneut laden/Hashes prüfen, docs/pre5/EVIDENCE.json aktualisieren.
-5. Erst vollständiger SUCCESS erlaubt vorautorisierten separaten pre.5-Publisher.
-   Bewährte Vorlage: origin/codex/publish-1.0.0-pre.4 mit docs/pre4/release/* und
-   .github/workflows/publish-pre4.yml; frisch gelesen, nicht unverändert ausführen.
-6. General-Variante A bleibt begründet DEFERRED: bekannte Aufnahme lokal abgelehnt,
-   keine künstlichen SHA-Werte oder Entfernung von Herkunftsguards. Native TrueNAS,
-   NFSv4, physische SD/USB, echtes DNG1.7-Schreiben NOT_RUN. Kein Verlustabschlussmodell.
-
-CLI-Anmeldung und genaue bisherigen Befunde folgen unten in der Chronologie.
-
----
-
-# Bibliothekar pre.5 – Fortsetzung
-
-Stand: 2026-10-30. Branch `codex/pre5-operation-recovery`.
-Ausgangspunkt: veröffentlichtes `v1.0.0-pre.4`, Commit
-`adcc2aa9a444042440ff764be10fe1e42191904d`.
-
-Beide vollständigen Auftragsunterlagen vom 30.10. gelesen. Keine NAS-Zugriffe.
-Budget zunächst ungefähr 10–15 Wochenprozentpunkte; spätestens bei 80 % des
-Fünf-Stunden-Fensters reproduzierbaren Zwischenstand sichern. Anfang: beide
-Anzeigen 0 %, nächster Check: fünf Stunden 6 %, Woche 1 %.
-
-## Befund / nächste Schritte
-
-- GET Workspace ruft schreibende `compatibility_workspace_root()` auf.
-- `operation_health` sperrt nach jeder verwaisten Reservation den gesamten
-  Workspace. Unbekannte Wirkungen müssen weiter geschützt bleiben, bekannte
-  unabhängige Bereiche benötigen eine belastbare Freigabe.
-- Erster Inventory-Abbruch auf TrueNAS bislang nicht bewiesen. Zuerst drei
-  Dateiwege getrennt und kombiniert gegen unveränderten Release-Code testen.
-- Noch keine pre.5-Anwendungsänderung oder Veröffentlichung. Vorhandene
-  unversionierte Datei `qa/rc14.zip` gehört nicht zu diesem Auftrag.
-
-Nächster Schritt: Linux-Reproduktion mit eng begrenztem Self-Hosted-Workflow;
-danach Architekturkorrektur, gezielte und vollständige fachliche Abnahme.
-Veröffentlichung erst nach allen verbindlichen bestandenen Prüfungen.
-
-## Erster Reproduktionsstand
-
-`724a683f` / Lauf `41069647270`: GET false/true jeweils HTTP 500; unabhängige
-Bibliothek durch Inventory-Intent gesperrt. Ereignisfixture zunächst fehlerhaft
-(fehlender synthetischer Job); korrigiert in `a95415b2`, Lauf `41070150506`.
-Dort Applied-Verschiebung, Archivkopie und deren Kombination ohne Scan-Absturz.
-Tagesbestand-Test benötigte vorherigen initialen Inventarscan (Sentinel);
-dieser wurde ergänzt. Ursprünglicher NAS-Auslöser weiterhin nicht bewiesen.
-
-In Arbeit, noch nicht abgenommen: private prozesslokale Pfadansicht ohne
-F14-Schreibreservation; transiente, streng auf drei geprüfte Medien-Lesescanner
-begrenzte Reservationsart; qualifizierter historischer Inventory-Abschluss mit
-vollständigem Originalrecord im dauerhaften Unterbrechungsnachweis.
-Syntaxprüfung erfolgreich; vorhandene JS-Escape-SyntaxWarning in main.py.
-
-Weiter offen: scoped Schreibzulassung für echte Fachkonflikte, Startup/DB-
-Diagnose, vollständige GET-Prüfung, Metadaten-Variante A, echte Container-/API-
-Reproduktion und sämtliche Freigabetests. Noch keine Release-Eignung.
-
-## Architekturintegration (noch nicht abgenommen)
-
-Lauf `41070853477` zu `f63eadd4`: 15/16 erfolgreich. GET false/true und alle
-sieben Kombinationen bestanden. Verbleibender Testfehler: falscher Tabellenname
-`settings`; auf echte Spalten von `app_settings` korrigiert.
-
-Neue zentrale Ressourcenklassifikation: ausschließlich registrierte geschützte
-Fachfunktionen erhalten begrenzte Bereiche. Unbekannte Wirkungen sperren weiter
-Workspace-Schreibzugriffe. General-Konflikte sichern den Metadatenbereich;
-unabhängige Katalog-/Importaktionen erhalten eigene Zulassung. SQLite-
-Authorizer und Queue-Claim prüfen dieselbe Zulassung. Ein gesperrter Job bleibt
-queued. Keine fingierte Fertigstellung.
-
-Read-only-Datenbankdiagnose und begrenzter Workerstart nach fachlich
-unterbrochenem Startup integriert. Ungeprüfte Domain-Recovery wird dabei nicht
-fortgesetzt. Zieltests und anschließend historische Tests laufen erst nach
-dem nächsten Push. Letzter Budgetcheck: fünf Stunden 18 %, Woche 3 %.
-
-## Lesepfade und engere Metadatensperren
-
-`77b081b0` / Lauf `41071741377`: 22/23 Zieltests bestanden; fehlendes Release-
-Tag im flachen Actions-Checkout verhinderte ausschließlich den Originalcode-
-Subprozesstest. `fetch-depth: 0` ergänzt. Lauf `41073034252` auf `ec4035c4`:
-alle gezielten Tests bestanden; historische Tests bei letzter Abfrage laufend.
-
-Danach (noch nicht getestet) integriert: Normal-GETs verwenden `read_session`,
-beobachtende Scanner besitzen reine Snapshot-Pfade; expliziter POST
-`/api/workspace/refresh` für Reconciliation mit UI-Aufruf. Datenbankdiagnose im
-vorhandenen Dashboard eingebunden. Attestierte private Kompatibilitätsansicht
-statt Erkennung nach festem /tmp-Pfad, einschließlich echtem Trash-Ziel.
-Einzel-General-Konflikte können dateibezogen begrenzt werden; ein unqualifiziertes
-Swap-Journal schützt weiterhin den gemeinsamen Metadatenbereich. Eigene aktive
-Journale benötigen exakt passenden privaten Task-/Reservationsnachweis.
-
-Nächste Pushes führen zunächst nur die kurzen Zieltests aus. Historische Stufe
-wird mit `[pre5-historical]` in der Commitnachricht aktiviert. Keine vollständige
-Container-/Browserabnahme und keine Veröffentlichung erfolgt. Budget zuletzt:
-fünf Stunden 34 %, Woche 5 %.
-
-## Breitere Abnahme / aktuelle Korrekturen
-
-`41073034252` (auf `ec4035c4`): Zieltests bestanden; historische Stufe
-**204 PASS / 33 FAIL**. 32 Fehler: bei unregistrierten Legacy-Servicefixtures
-persistierte der transiente Scanner keinen initialen technischen State, während
-`check_active()` dessen Vorhandensein korrekt verlangte. Korrektur: erstmalige
-technische Bindung persistieren, keine Operationsreservation. Verlorener State
-einer registrierten Installation bleibt ausdrücklich gesperrt (neuer Negativtest).
-Ein weiterer Fehler: alte globale Worker-Sperrerwartung, jetzt auf unabhängige
-Workerfreigabe mit weiter wirksamer Metadaten-Schreibsperre umgestellt.
-
-`41074557116` (`687fccf0`): vier Zielfehler aus Tests: falscher Modulimport
-`library_context` statt `library_runtime`; drei erwartete fachliche 409 für einen
-nicht erforderlichen Nachsortierplan wurden fälschlich als 200 erwartet. Korrigiert;
-die Prüfkette kontrolliert weiterhin unveränderte Kataloge/F14-Belege nach GETs.
-
-Noch nicht gepusht/getestet: neue reine GET-Beobachtungspfade, expliziter POST-
-Refresh, UI-Diagnose, korrigierte Altfixture-Kompatibilität. Nächster kurzer Lauf
-enthält neue Zieltests plus die zuvor fehlgeschlagenen Provenienz-/Beobachtungstests;
-erst danach wieder vollständige historische Stufe und echte Container-/Browser-QA.
-
-## Kontrollbindung korrigiert / erste Containerstufe vorbereitet
-
-`ad3dc60e` / `41075576005`: neue Ablehnung registrierter Installationen ohne
-Kontrollstate deckte eine Provisionierungslücke auf: `register_library()` ließ
-die erste Registryzeile vor ihrer technischen F14-Bindung sichtbar werden.
-Korrigiert in `937299bd`: erste explizite Registrierung bindet unter den
-vorhandenen Locks ihre Anker vor dem Registry-Commit. Bei bereits vorhandenen
-Registryzeilen und verlorenem State wird weiterhin abgebrochen; kein Reset.
-
-Lauf `41076413534` auf `937299bd`: alle neuen Zieltests PASS. Fokussierte
-historische Stufe **45 PASS / 1 FAIL**: Fixture `test_0440_trash` fehlte eine
-`settings.json`. Datei ergänzt, Schutzprüfung nicht geändert.
-
-Weiter implementiert, nächster Lauf ausstehend: globale Papierkorboperationen
-mit geprüftem Funktionsnamen besitzen einen gemeinsamen Trash-/Katalogbereich;
-ein unabhängiger General-Konflikt sperrt diese nicht pauschal. Neuer Test führt
-echten Import, Papierkorbaufnahme, Restore und bestätigte Löschung aus und
-prüft unveränderte Herkunfts- sowie ursprüngliche Konfliktnachweise.
-
-`qa/pre5/container.py` + `browser.cjs`: frischer Supervisor, zwei Bibliotheken,
-realer General-Import und Neustarts; Original-pre.4-Inventarabbruch per
-kontrolliertem Lesefehler bei gestoppter App, Upgrade-Qualifikation derselben
-Reservation; echter abgeschlossener JPEG-Auftrag mit fehlgeschlagenem F14-Ack,
-danach externe Entfernung seiner synthetischen Arbeitskopie. Erwartung:
-unabhängiger HTTP-Import und Ereignis-Sortierung + zwei Neustarts erfolgreich,
-ursprünglicher ungeklärter Auftrag bleibt erhalten. Noch NICHT ausgeführt.
-
-Containerjob wird nur mit `[pre5-container]` in einer Commitnachricht aktiviert
-und läuft erst nach bestandenen kurzen Gates. Er enthält zusätzlich pre.4-
-Generalfence-/Browserfälle, historische Containerfälle, 4.000 Dateien und 14
-iPhone-JPEGs. Alle Jobs auf dem dedizierten Self-Hosted-Runner; kein GHCR-Push.
-
-Offen bleiben vollständige Backendmatrix, Containerresultate, 90/47/8-Datei-
-Anwendungsablauf, weitergehende Fehlerszenarien und Releaseunterlagen. Variante A
-ist noch nicht umgesetzt: unveränderte Herkunfts-/Zielkollisionsnachweise benötigen
-ein ausdrücklich getrenntes Kopien-/Reimportmodell; Schutz nicht einfach entfernen.
-Keine Veröffentlichung erfolgt. Nächster Budgetcheck vor dem Containerjob.
-
-## VERBINDLICHER FORTSETZUNGSPUNKT – Ende dieses Kontingentfensters
-
-Branch: `codex/pre5-operation-recovery`.
-Letzter Anwendungscode: **`969bc49f6138a0badf0dfa0361e2a4862a08e1ef`**.
-Nachfolgender Commit aktualisiert ausschließlich diese Übergabe und Nachweise.
-
-Aktueller Nachlauf: **41080385540**, bei letzter Abfrage `in_progress`.
-Er führt 34 neue Zieltests und die fokussierte historische Auswahl aus.
-Nur bei deren Erfolg startet die neue Container-/Browserstufe. Der Publisher
-existiert für pre.5 noch nicht; dieser Workflow kann nichts veröffentlichen.
-
-### Letzte Ergebnisse und Korrektur
-
-- `41078906708` / `5c6f868b`: **32 PASS / 1 FAIL**. Tatsächlicher Fehler:
-  SQLite-Authorizer klassifizierte `metadata_candidates` wie offene General-
-  Korrekturaufträge und blockierte dessen FK-Cascade beim bestätigten Löschen
-  einer unabhängigen Papierkorbdatei. EXIF-Kandidaten sind Dateikatalogdaten;
-  echte Korrektur-/Kontrolltabellen behalten ihre Metadatensperre.
-- `41079916862` / `668ba136`: **33 PASS / 1 FAIL**. Der Papierkorbfall besteht.
-  Neu verschärfte APPLY-Qualifikation benötigt den privaten Tasknachweis schon
-  vor Eintritt in APPLY. Bisher erzeugte APPLY ihn erst nach seiner Zulassung.
-  Korrigiert in `969bc49f`: EXECUTE bindet seinen gespeicherten General-Task
-  unmittelbar nach dessen Anlage, vor dem verschachtelten APPLY. Dessen
-  vorhandenes idempotentes `bind_task()` bleibt erhalten. Ergebnis ausstehend.
-- Syntaxprüfung und `git diff --check` erfolgreich. Bestehende SyntaxWarning
-  zu JS-Escape `\.` in main.py nicht als Laufzeitfehler umgedeutet.
-- Letzter Budgetcheck: Fünf-Stunden-Fenster **78 %**, Woche **12 %**. Geordneter
-  Stopp vor Erschöpfung gemäß Nutzerauftrag; keine weitere Freigabe erforderlich.
-
-### Nachweise
-
-`41076413534` / `937299bd` wurde kryptografisch nachgeprüft:
-Artefakt **12988280542**, ZIP-SHA-256
-`3d832596b79594a232cc17fe37269a8107aede9666b98f6c1f0e462033cfc01d`.
-JUnit: **32 neue PASS / 0 FAIL / 0 SKIP**; fokussierte Auswahl 45 PASS / 1 FAIL
-(fehlende settings.json der Testfixture, inzwischen ergänzt). Diese früheren
-Ergebnisse sind ausdrücklich keine Abnahme des später geänderten Anwendungscodes.
-Lokale heruntergeladene Logs/Artefakte: `/private/tmp/bibliothekar-pre5-evidence/`.
-
-### Exakte nächsten Schritte
-
-1. Aktuelle Limits lesen; beide Originalaufträge vollständig verfügbar unter
-   `/Users/adi/Downloads/Codex_Auftrag_Bibliothekar_v1.0.0-pre.5.md` und
-   `/Users/adi/Downloads/Bibliothekar_pre5_TrueNAS_Befunde_2026-10-30.md`.
-2. Zuerst **41080385540** lesen, keine neue CI blind starten. Bei FAIL ausschließlich
-   fehlgeschlagene Stufe diagnostizieren. Bei SUCCESS Artefakt-Digests prüfen.
-3. Falls der Containerjob gestartet ist, besonders prüfen:
-   - `qa/pre5/container.py`: tatsächlicher pre.4-Inventarabbruch und identische
-     Reservation nach Upgrade; abgeschlossener General-Task mit unterbrochenem
-     F14-Ack und extern entfernter synthetischer Kopie; danach tatsächlicher
-     HTTP-Import, Ereignisanlage/-sortierung und zwei Neustarts trotz Konflikt.
-   - Snapshot qualifiziert Dateiorte aus Katalog-/Ereigniszuordnung. Keine
-     Dateinamenssuche als Recovery-Autorität.
-   - `qa/pre4/container.py` / `historical_container.py`, 4.000 Familien und 14
-     iPhone-JPEGs bleiben zusätzliche Gates. Browser jeweils DE/EN, 390/1440 px.
-4. Vollständige historische Python-Stufe mit Commitmarker `[pre5-historical]`
-   nach grünen kurzen Gates neu abnehmen. Die frühere breite Stufe war
-   204 PASS / 33 FAIL und ist nicht abschließend nachgeprüft.
-5. Tatsächlichen 90-Dateien-/47-Familien-/8-Tage-Anwendungsablauf mit Applied-
-   Verschiebung, Archivkopie und Tagesbestandsverschiebung vollständig ergänzen.
-   Bisher sieben kleinere Kombinationen über reale Fachmodule bestanden;
-   ursprünglicher NAS-Auslöser bleibt ohne Erstexception nicht bewiesen.
-6. Weiterer Sicherheits-Audit: negative Mount-/Anker-/DB-Fälle, mehrere offene
-   Operationsarten, SIGKILL, parallele Requests; Vollständigkeit der Schema-
-   Diagnose prüfen (Verbindung/Integrität/Fremdschlüssel/Version/benötigte Tabellen).
-   Reale unbekannte Wirkungen dürfen weiter nicht freigegeben werden.
-7. Vollständige Backend-/Frontend-/Sicherheitsmatrix erst nach Stabilisierung
-   der gezielten Gates. Vorbild `qa/rc13/regression.py`; alle neuen Jobs ausschließlich
-   `[self-hosted, Linux, X64, bibliothekar-safe]`, keine Hostpakete/-rechte ändern.
-8. Gewünschte Metadaten-Variante A ist noch OFFEN. Bekannte Aufnahme wird beim
-   General-Reimport weiterhin bewusst abgelehnt. Kein Entfernen des SHA-Guards
-   ohne saubere Kopienidentität, Herkunft und Kollisionsprüfung; ggf. begründet
-   deferieren, wie der Auftrag ausdrücklich zulässt.
-9. Erst nach vollständig erfolgreicher Abnahme Version, Dokumentation und
-   eigenständigen abgesicherten Publisher vorbereiten; Quelle/Image byteweise,
-   OCI-Index/Manifest/Konfiguration, tatsächlicher Digest-Pull, Release-Anlagen
-   und SHA-256 prüfen. Keine bestehenden Releases/Images/latest überschreiben.
-
-CLI (authentifiziert, keine Tokens ausgeben):
+## Werkzeuge und Grenzen
 
 ```sh
 export GH_CONFIG_DIR=/private/tmp/bibliothekar-gh-device
-export GH_BROWSER=true
-export GH_DEBUG=
-export GODEBUG=http2client=0
-/private/tmp/bibliothekar-gh-cli/gh run view 41080385540 -R heller-adrian/Bibliothekar --json status,conclusion,jobs
-/private/tmp/bibliothekar-gh-cli/gh run view 41080385540 -R heller-adrian/Bibliothekar --log-failed
+export GH_BROWSER=true GH_DEBUG= GODEBUG=http2client=0
+/private/tmp/bibliothekar-gh-cli/gh api repos/heller-adrian/Bibliothekar/actions/runs/41194643144/jobs -H 'Cache-Control: no-cache'
 ```
 
-`GODEBUG=http2client=0` vermeidet beobachtete HTTP/2-Abbrüche beim Log-/ZIP-Download.
-Git-Netzwerkzugriff mit bestehendem gh-Credentialhelper wie in dieser Session;
-keine neuen Zugangsdaten anfordern, sofern die bestehende Anmeldung funktioniert.
-Actionlint: `/private/tmp/pre-actionlint/actionlint -config-file docs/pre/release/actionlint.yaml .github/workflows/qa-pre5-operation-recovery.yml`.
-Lokale Pythonaufrufe nur Syntaxprüfung, keine Mac-Abnahme; ausführende Tests laufen
-isoliert auf Linux. Keine Subagents einsetzen. `qa/rc14.zip` war vorher unversioniert
-vorhanden und bleibt außerhalb sämtlicher Commits.
+`gh run view/list` kann veraltet sein; direkte API nutzen. Rohlogs/ZIPs benötigen
+`--allow-escape-sequences` und Ausgabe in Scratchdatei. Token niemals ausgeben.
+Push mit bestehendem gh-Credentialhelper wie bisher. Actionlint:
+`/private/tmp/pre-actionlint/actionlint -config-file docs/pre/release/actionlint.yaml FILE`.
+Lokale Prüfung nur Syntax/Quellen; ausführende Abnahme ausschließlich isoliertes
+Linux/Docker. Kein Docker lokal, keine Subagents. Keine NAS-/GUI-Zugriffe.
+`qa/rc14.zip` war vorher unversioniert vorhanden: niemals stage'n.
 
-**Freigabestatus: NICHT ERTEILT DURCH TESTERGEBNISSE / NICHT VERÖFFENTLICHT.**
-Native TrueNAS-/NFSv4-, physische SD-/USB- und echte DNG-1.7-Schreibtests: NOT_RUN.
-Kein Zugriff auf NAS, keine Datenbereinigung, keine Änderung früherer Releases.
-
-## Fortsetzung: Sortierstatus im Container (2026-10-30)
-
-Neues Kontingentfenster: fünf Stunden 0 %, Woche 15 %; Checkpoint künftig bereits
-bei 70 % des Fünf-Stunden-Fensters beginnen, um rechtzeitig fertig zu sichern.
-`41080385540` auf Anwendungscode `969bc49f`: Zieljob SUCCESS, Containerjob FAIL.
-Nachgewiesen falsche QA-Annahme: `sort_runs.status` ist erfolgreich `applied`,
-nicht `completed`. `TERMINAL_RUN_STATUSES`, der tatsächliche SQL-Abschluss in
-`sort_apply.py` und API-Ausgabe stimmen überein: terminal=true, progress=100,
-completed_at vorhanden, error_message=NULL, verified/moved counts vollständig.
-Nur QA korrigiert: auf terminal warten, anschließend exakt applied und sämtliche
-Abschluss-/Zählerbedingungen verlangen. Kein Produktstatus umgedeutet.
-Nächster Lauf führt nach kurzen Gates die historische Stufe und Containerstufe aus.
-
-Offene Diagnose-Lücke ergänzt: `quick_check` und FK-Prüfung bescheinigen keine
-vollständigen Tabellen/Spalten/FK-Definitionen oder Migrationen. Erwartetes Schema
-wird aus ausgelieferten SQL-Migrationen ausschließlich in SQLite `:memory:`
-ermittelt; Ist-Datenbank bleibt query_only. Registry erhält ihre eigene Rolle.
-Workerfreigabe nach Domain-Abbruch benötigt vollständiges Schema. Health trennt
-connected/consistent/schema_current, statt fehlenden Domain-Startup mit fehlender
-Verbindung gleichzusetzen. Neue gezielte Tests, noch nicht ausgeführt.
-
-Nachlauf `41113291699` (reiner QA-Statusfix): **236/237 historische Tests PASS**.
-Letzter Fehler war die veraltete Annahme, die erste explizite Registrierung dürfe
-keinen technischen state.json besitzen. Idle-Claim-Test verlangt jetzt bytegleich
-unveränderte vorhandene Belege und weiterhin keine operation-/finished-Dateien.
-Diagnose-Nachlauf `41114245353` auf `8b5b53e7`: SUCCESS (gezielte/fokussierte Gates).
-
-Weiterer systematischer Fund: `verify_event_archive()` verändert Medien nicht,
-konnte aber wie Inventory bei abgelehnter Prüfung eine dauerhafte Reservation
-hinterlassen. In exakt auditierte transiente Beobachter aufgenommen, einschließlich
-qualifizierter historischer pre.4-Verifikation und unverändertem Archivschutz.
-Fehlgeschlagene Beobachtungen werden nach SQL-Rollback begrenzt im audit_log
-protokolliert; dies ist kein Abschluss- oder Dateiänderungsnachweis.
-
-Neuer echter 90-Dateien-/47-Familien-/8-Tage-Containerablauf erstellt: tatsächlicher
-Import, Applied-Ereignis, manuelle Archivübernahme mit Byteprüfung, drei dokumentierte
-SMB-ähnliche Änderungen, pre.4-Beobachtung, Upgrade und Metadatenkorrekturen. Die
-bekannte General-Reimport-Ablehnung bleibt lokal; anschließend echte unabhängige
-Ereignissortierung und zwei Neustarts. Noch nicht ausgeführt. RAF-Fixture ist
-synthetischer TIFF-Inhalt mit RAF-Endung; keine native RAW-/DNG-Schreibfreigabe.
-
-## Abnahme-Fortsetzung (2026-10-30, laufend)
-
-Branch `codex/pre5-operation-recovery`. Anwendung auf `c548e308d795f459ff854fb6a5843431fb71eef1`:
-`41116260923` Zieljob SUCCESS: **42 Zieltests + 46 fokussierte + 237 historische**,
-jeweils 0 FAIL / 0 SKIP. Artefakt 13005609337, SHA-256
-`954b432c2162f70cc1f149425671ca41688a9a3f9b44c3ede1441f88e6a4abc5`;
-ZIP erneut heruntergeladen, Digest stimmt. Containerjob desselben Laufs läuft.
-Sortierstatusfix fordert applied + terminal + vollständige verified/moved counts.
-
-`fda778f227a2193c51911678e0a0ba084cc41d44` ergänzt vollständigen Linux-Workflow
-und disjunkte Backend-Abnahme mit Coverage-Nachweis. Breite Matrix `41116894939`
-noch vor Jobstart bewusst abgebrochen: erst weitere nachgewiesene Planablehnung
-stabilisieren, dann die vollständige Matrix einmal ausführen. Kein voller Test
-wurde dadurch als bestanden dargestellt.
-
-`d8dfdb05441a8528bf3cfc8cf319d23ddb72be63` ist reine Reproduktion: tatsächlicher
-pre.4-Code hinterlässt nach ungültiger Sortierbestätigung eine Planreservation.
-Lauf `41117269501` ist hinter dem laufenden Containerjob eingeordnet. Die neuen
-Tests verlangen anschließend qualifizierte historische Wiederaufnahme und keine
-Reservation bei erneut bewusst abgelehnter Vorbereitung; vor Korrektur erwartet rot.
-
-Weitere lokale Korrektur vorbereitet: drei exakt auditierte SQL-only-Planer
-(`prepare_sort_run`, `prepare_reapply_sort_run`, `prepare_workspace_reconcile_run`)
-werden transient; echte Sortierexecutoren bleiben dauerhaft reserviert. SQL-Pläne
-bleiben in ihren atomaren Warteschlangentransaktionen erhalten. Historische
-Planreservationen erhalten einen eigenen vollständigen Unterbrechungsbeleg, keine
-falsche Erfolgsbestätigung. Zusätzlich schützt Inventory-Admission ausdrücklich
-den gemeinsamen Zentralbestand gegen ungeklärte Imports anderer Bibliotheken.
-Neue Gegenprobe dafür ergänzt. Diese Änderungen sind noch nicht Linux-abgenommen.
-
-Architekturdokument `docs/pre5/ARCHITECTURE.md` enthält Ursachen, Wirkungsgrenzen,
-Datenbankdiagnose und die ehrlich zurückgestellte Metadaten-Variante A.
-Containerlauf `41116260923`: echter General-HTTP-Import, zwei Neustarts,
-independent Import+Event+applied-Sortierung trotz Einzeldateikonflikt, beide
-Chromium-Stufen und sechs historische pre.2/pre.1/RC14-Fälle PASS. Neuer
-90-Dateien-Test FAIL vor Appstart bei synthetischer RAF-Erzeugung: ExifTool
-verweigert Schreiben unter .RAF. Fixture schreibt jetzt erst TIFF-Metadaten
-und benennt anschließend die synthetische Datei um. Keine native RAF-Aussage.
-Containerartefakt 13007910318, SHA-256
-`ba1e51a5fdbd9fe4cc04b3bc9fd702d7a17e3e283bc5c7e77d38c3886ce00735`,
-unabhängig heruntergeladen und verifiziert. 4.000/iPhone in diesem Lauf NOT_RUN.
-
-Neue reine Reproduktion `41117269501`: 42 PASS / 3 FAIL durch falschen
-Testparameter: Sortierplan benötigt Bibliotheks-Kompatibilitätsansicht statt
-kanonischem Workspace. Der alte Code brach bereits an der Root-Prüfung ab.
-Fixture korrigiert, verwendet nun die echte alte bzw. neue View-Funktion.
-Kein Beleg einer Bestätigungs-Reproduktion aus diesem Fehlversuch behaupten.
-
-Breite Backend-/Frontend-Jobs sind jetzt im selben Zielworkflow mit
-`needs: reproductions` integriert, statt als unabhängig startbare Matrix.
-Marker `[pre5-full]` startet sie erst nach grünen kurzen Gates; Container
-zusätzlich `[pre5-container]`. Version auf pre.5 vor der finalen Abnahme gesetzt.
-Fünf-Stunden-Verbrauch zuletzt 43 %, Woche 22 %; bei 70 % mit Handoff beginnen.
-
-Finaler Anwendungskandidat `64645b5f60a8756f15eb172a4dc10bb19f0739a8`, Version
-pre.5. Lauf `41119010880`: **46 neue + 46 fokussierte PASS**, einschließlich
-tatsächlicher alter Sortierbestätigungs-Ablehnung und exaktem Reservationsbeleg.
-Frontend PASS: RC13 44 Fälle, RC14 147 Fälle. Backend wurde durch Collectionfehler
-in `test_f14_o2_policy.py` angehalten; **keine 2.413 Tests ausgeführt**. Ursache:
-vollständiger QA-Scratch lag unter gruppenbeschreibbarem Runner-Elternpfad
-`/home/github-runner/actions-runner/_work` (0775). Lokaler Workflowfix nutzt eigene
-private mktemp-Umgebung unter sticky `/tmp`, keine chmod-/ACL-/Hostrechteänderung.
-Alle acht Partitionsversuche scheiterten an derselben Collection; nicht als acht
-Produktregressionen werten. QA-Summary `complete=true` bezeichnete nur Auswahl,
-nicht Ausführung; in `e5cabf49` behoben: JUnit-Zahl muss zur Auswahl passen,
-fehlende Ergebnisse/Fehler/Skips führen zu FAIL. Breite Neuläufe benötigen zunächst
-SUCCESS des Containerjobs. `41119010880` Containerjob läuft noch.
-
-Bewährter pre.4-Publisher liegt auf frisch gelesener Remote-Referenz
-`origin/codex/publish-1.0.0-pre.4`: `.github/workflows/publish-pre4.yml` und
-`docs/pre4/release/{publish,core,oci,graph_fixture,test_publish}.py`.
-Erst nach gesamter Abnahme für pre.5 versiongebunden adaptieren; kein Push/Image
-oder Tag. Frühere Pipeline nicht unverändert wiederverwenden.
+Native TrueNAS/NFSv4, physische SD/USB, echtes DNG1.7-/natives RAF-Schreiben:
+NOT_RUN. Verlustabschlussmodell und bekannte-Aufnahme-Variante A: DEFERRED.
+Keine Veröffentlichung mit offenen Pflicht-/Sicherheitstests. Noch kein pre.5-
+Tag/Release/GHCR-Push ausgeführt. Frühere Chronologie bleibt in Git erhalten.

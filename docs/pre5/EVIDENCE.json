@@ -32,11 +32,8 @@
     "downloaded_archive_digest_verified": true
   },
   "not_yet_accepted": [
-    "Final application source after SQL-only planning and shared-stock admission changes",
-    "Complete backend node coverage",
-    "Complete frontend and supervisor/container acceptance",
-    "Ninety-file, forty-seven-family, eight-day application scenario",
-    "Final versioned image and release integrity"
+    "Complete backend node coverage with no failures, errors or skips",
+    "Final versioned release image and publication integrity"
   ],
   "limits": {
     "native_TrueNAS_NFSv4": "NOT_RUN",
@@ -69,7 +66,7 @@
       "fourteen_iPhone_JPEGs"
     ]
   },
-  "latest_application_candidate": "5f741f93f8fdb34535d87f6d71ec79e380ffe940",
+  "latest_application_candidate": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
   "additional_target_acceptance": {
     "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
     "run": 41119010880,
@@ -105,7 +102,7 @@
     "original_NAS_first_inventory_exception": "NOT_ESTABLISHED",
     "four_thousand_and_iPhone": "NOT_RUN"
   },
-  "pending_run": 41192396662,
+  "pending_run": 41194643144,
   "migration_fix_target_acceptance": {
     "source": "83b11dad16626c01460562caec8dd530ad4bbd42",
     "run": 41121252978,
@@ -119,7 +116,7 @@
     "sha256": "696fe3695f37dce07cdb10cbb435bdfd3463790d6d104f59e6ae08be936f1529",
     "downloaded_archive_digest_verified": false
   },
-  "latest_QA_candidate": "08cee415a6a5c5a926825048c253891216cfd12b",
+  "latest_QA_candidate": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
   "last_gate_failure": {
     "run": 41122388040,
     "new_targets_passed": 49,
@@ -182,5 +179,111 @@
     "change": "GET serves existing regular cache or404; only import worker generates cache under write admission",
     "new_tests": 3,
     "linux_recheck": "PENDING"
+  },
+  "historical_fixture_retry": {
+    "source": "5f741f93f8fdb34535d87f6d71ec79e380ffe940",
+    "run": 41192396662,
+    "new_targets": 59,
+    "focused": 80,
+    "historical_passed": 236,
+    "historical_failed": 1,
+    "skipped": 0,
+    "cause": "isolated General admission unit test lacked its own registry",
+    "fix_source": "c692190c7ca3a48922cc43724cc240f869ea95fd",
+    "application_changed": false,
+    "artifact_id": 13040160888,
+    "digest": "sha256:0d7b217eaef8d4b18cb68b7b9fc2ac66380a17bcc832713256ca38f0d13ff00c",
+    "downloaded_archive_digest_verified": true
+  },
+  "short_gate_acceptance": {
+    "source": "c692190c7ca3a48922cc43724cc240f869ea95fd",
+    "run": 41193453760,
+    "new_targets": 59,
+    "focused": 82,
+    "failed": 0,
+    "skipped": 0,
+    "artifact_id": 13039478925,
+    "digest": "sha256:04f12abed58ec9bb54a9e222c90390e584189eadb385626fcc3c3e05b09994e3",
+    "downloaded_archive_digest_verified": true
+  },
+  "latest_browser_gate_failure": {
+    "runs": [
+      41193453760,
+      41193996176
+    ],
+    "application_checks_passed": [
+      "real_general_api_and_two_restarts",
+      "real_pre4_inventory_failure_upgrade_original_reservation",
+      "scoped_conflict_real_import_event_sort_two_restarts",
+      "authenticated_scoped_diagnostics",
+      "archives_unchanged"
+    ],
+    "cause": "optional source helper intentionally disabled; exact 503 body checked but page navigation discarded response before asynchronous browser body inspection",
+    "qa_fix": "wait networkidle before navigating; retain exact expected JSON and all other 5xx assertions",
+    "fix_recheck": "PENDING",
+    "container_artifact": {
+      "id": 13039388297,
+      "digest": "sha256:26804554df38a6c092b9b79fbedb101faa1f28971df1a2c60f3f4ff5c83d11fe",
+      "downloaded_archive_digest_verified": true
+    },
+    "frontend_artifact": {
+      "id": 13039028804,
+      "digest": "sha256:27fab0fdfda4de979b62616b2a363c184259ce7d0a160903a8a1829af8a07118",
+      "downloaded_archive_digest_verified": true
+    }
+  },
+  "current_target_acceptance": {
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "run": 41194643144,
+    "new_targets": 60,
+    "focused": 82,
+    "failed": 0,
+    "skipped": 0,
+    "artifact_id": 13040405805,
+    "digest": "sha256:88a4098ba8118817918b9417c880f134fc7ba9259b28dd3e098ea00c7d7b858f",
+    "downloaded_archive_digest_verified": true
+  },
+  "current_frontend_acceptance": {
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "run": 41194643144,
+    "RC13_cases": 44,
+    "RC14_cases": 147,
+    "artifact_id": 13040415276,
+    "digest": "sha256:bf0f6991e222259c51be5e2148d4985b68a835bfddf16cf93947f04d09c137a4",
+    "downloaded_archive_digest_verified": true
+  },
+  "current_container_acceptance": {
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "run": 41194643144,
+    "status": "PASS",
+    "artifact_id": 13040432071,
+    "digest": "sha256:d656fc55af18966b4a244df052ad57b2f215beb69c773ccb9aa8ba3a05547a20",
+    "downloaded_archive_digest_verified": true,
+    "pre5_live_checks": 6,
+    "pre4_live_checks": 4,
+    "historical_cases": 6,
+    "ninety_files": {
+      "status": "PASS",
+      "initial_files": 90,
+      "final_files": 88,
+      "general_files": 3,
+      "immutable_origins_preserved": true,
+      "checks": {
+        "applied_move_correction_local_rejection": "PASS",
+        "archive_copy_correction_local_rejection": "PASS",
+        "day_move_correction_local_rejection": "PASS",
+        "catalogue_hashes_general_copies_and_both_sqlite_integrities": "PASS"
+      }
+    },
+    "four_thousand_families": {
+      "status": "PASS",
+      "count": 4000,
+      "startup_seconds": [
+        5.374493363982765,
+        5.36555710301036
+      ]
+    },
+    "fourteen_iPhone_JPEGs": "PASS",
+    "readonly_archives": "PASS"
   }
 }

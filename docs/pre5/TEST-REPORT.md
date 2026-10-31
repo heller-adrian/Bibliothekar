@@ -17,7 +17,11 @@ Anzahl unterschiedlicher Regressionen. Kein Zugriff auf TrueNAS.
 | 41190356694, Quelle cefeb5cb | Strikte Diagnose gegen unveränderte Anwendung: unerwarteten 202-Auftrag bis completed/organized_verified verfolgt. Zieldatei hat korrekten Ergebnis-Hash; ursprüngliche Herkunftsbelege und Read-only-Archive bleiben erhalten; nach Neustart READY und keine offene Reservation. Dennoch neue Herkunft erzeugt: Quellenfamilien 47→48, Medien/Mitgliedschaften 90→91. Diagnose bleibt korrekt FAIL. |
 
 | 41191231150, Quelle d05c6189 | 56 neue + 80 fokussierte Tests PASS, Frontend PASS. pre5/pre4-Livecontainer und vier historische Fälle PASS; historischer sigkill-Seed scheitert beim Polling unter veröffentlichtem pre.2 im Importabschlussfenster. 90er-/4.000-/iPhone-Stufen deshalb NOT_RUN. |
-| 41192396662, Quelle 5f741f93 | Läuft. Zusätzlich drei Thumbnail-GET-Regressionsfälle, vollständige historische Python-Stufe, Browser-5xx-Kontrolle und strengere General-/Katalog-/SQLite-Prüfung im 90er Ablauf. |
+| 41192396662, Quelle 5f741f93 | 59 neue +80 fokussierte PASS, historisch236 PASS/1 FAIL/0 SKIP. General-Unit-Fixture ohne eigene Registry; korrigiert durch echte isolierte Registry und genaue Prüfung des erwarteten Staging-Fehlers. Kein Anwendungscode geändert. |
+| 41193453760, Quelle c692190c | Vollständiger Nachlauf läuft. 59 Zieltests und82 fokussierte Fälle; historische Fälle zusätzlich in der vollständigen Backendmatrix. |
+
+| 41193453760 und41193996176 | 59 neue +82 fokussierte PASS; Frontend PASS. Alle fünf pre5-Live-API-/Recovery-/Archivprüfungen PASS, neuer Browsercheck zunächst zu pauschal für den ausdrücklich deaktivierten Gerätehelfer; danach Response-Body bei Navigation verloren. Beide QA-Ursachen werden exakt geprüft, andere5xx bleiben Fehler. Weitere Containerstufen und gesamte Backendmatrix noch NOT_RUN. |
+| 41194643144, Quelle2908eacb | 60 neue +82 fokussierte PASS/0 SKIP; Frontend44+147 PASS. Neuer nur-lesender BytesIO-Vorschautest mit gleichen SQL-/F14-/Originalbytes PASS. Container vollständig PASS: pre5/pre4-Live, sechs historische Recovery-/SIGKILL-Fälle,90 Dateien,4.000 Familien und14 iPhones. Kalt-/Neustart5,374/5,366s. Vollständige Backendmatrix läuft. |
 
 ## Verifizierte Belege
 
@@ -28,14 +32,8 @@ Downloads sind entsprechend markiert.
 
 ## Noch verbindlich offen
 
-- Seed-Nachlauf und vollständige fokussierte Stufe ohne ungeklärte Fehler.
-- Gesamter 90er Ablauf nach Migrationskorrektur einschließlich Korrekturen,
-  lokaler Ablehnung bekannter Reimporte, unabhängiger Sortierung und Neustarts.
 - Vollständige Backend-Ausführung mit disjunkten Nodes und passenden JUnit-Zahlen.
   Collection/Auswahl ist kein Ausführungsnachweis; BLOCKED-Skips sind kein PASS.
-- Abschließende Container-/Chromium-Abnahme einschließlich bedienbarer DB-Diagnose.
-- 4.000-Familien-/14-iPhone-JPEG-Stufen auf dem endgültigen Anwendungscode. In den
-  jüngsten Containerläufen wegen vorheriger Fehler nicht ausgeführt.
 - Versionierter Publisher, Source/Image-Bytevergleich, OCI-/Digest-Pull und
   Release-Anlagen erst nach gesamter Abnahme.
 

@@ -1,0 +1,129 @@
+name: Publish verified Bibliothekar v1.0.0-pre.5
+# One-shot publication, enabled only after the complete pinned pre5 acceptance.
+on:
+  push:
+    branches: [codex/publish-1.0.0-pre.5]
+    paths: ['.github/workflows/publish-pre5.yml']
+permissions:
+  contents: write
+  packages: write
+  actions: read
+concurrency:
+  group: bibliothekar-v1.0.0-pre.5-publication
+  cancel-in-progress: false
+jobs:
+  publish-pre5:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/publish-1.0.0-pre.5' && github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre5-publish-${{ github.run_id }}-${{ github.run_attempt }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      APPROVE_PUBLISH: PUBLISH v1.0.0-pre.5
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONOPTIMIZE: '0'
+      BUILD_SHA: 2908eacbf73e891ebd46078cb9ae4af43e0dd454
+      IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-pre.5
+      TAG: v1.0.0-pre.5
+      VERSION: 1.0.0-pre.5
+      PRE4_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:0678dca61f426a01ae724852741bcad6fd7cf45ae3c13df873ed6f14349c4d77
+      PRE2_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:b9434137951a8f1e40de047bed6e3d8ee3be425e079b92aa6df9ec491c982c13
+      PRE1_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:cbaa863fb6173736bcd43e917de994fadba3d05cc69c1688c618fad21d8a17b8
+      RC14_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:86991ef46f1f29a990b63ea3983b1193adfe378247d1202e41fdfd7e21d44b9b
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre5-publish-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify exact source, publisher guards, SHA256 evidence and unchanged releases
+        run: |
+          set -euo pipefail
+          umask 077
+          for tool in python3 git docker gh tar gzip sha256sum; do command -v "$tool" >/dev/null || exit 1; done
+          WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre5-publish.XXXXXXXX")"
+          printf 'WORK=%s\nASSET_DIR=%s/release-assets\nDOCKER_CONFIG=%s/docker-config\n' "$WORK" "$WORK" "$WORK" >> "$GITHUB_ENV"
+          export DOCKER_CONFIG="$WORK/docker-config"
+          mkdir "$DOCKER_CONFIG"
+          python3 -m unittest discover -s docs/pre5/release -p 'test_publish.py' -v
+          python3 docs/pre5/release/publish.py prepare --work "$WORK"
+      - name: Build version-only frozen linux/amd64 source and compare every embedded file
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$BUILD_SHA" --label "org.opencontainers.image.version=$VERSION" -t "$IMAGE" "$WORK/source"
+          python3 docs/pre5/release/publish.py verify-image --work "$WORK" --ref "$IMAGE"
+          docker image inspect --platform linux/amd64 "$IMAGE" --format '{{.Id}}' > "$WORK/built-platform-id"
+      - name: Recheck final image supervisor, scoped writes, 90 media, historical recovery, 4000 families and iPhones
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "$PRE4_IMAGE"
+          docker pull "$PRE2_IMAGE"
+          docker pull "$PRE1_IMAGE"
+          docker pull "$RC14_IMAGE"
+          mkdir -p "$WORK/runtime"
+          npm install --prefix "$WORK/runtime/browser-tools" playwright@1.62.1
+          export RUNNER_TEMP="$WORK/runtime"
+          export GITHUB_SHA="$BUILD_SHA"
+          python3 "$WORK/source/qa/pre5/container.py" 2>&1 | tee "$RUNNER_TEMP/pre5-container.log"
+          python3 "$WORK/source/qa/pre4/container.py" 2>&1 | tee "$RUNNER_TEMP/pre4-container.log"
+          python3 "$WORK/source/qa/pre4/historical_container.py" 2>&1 | tee "$RUNNER_TEMP/historical-container.log"
+          python3 "$WORK/source/qa/pre5/manual_changes_container.py" 2>&1 | tee "$RUNNER_TEMP/manual-changes.log"
+          python3 "$WORK/source/qa/pre/startup_container.py" 2>&1 | tee "$RUNNER_TEMP/startup.log"
+          python3 "$WORK/source/qa/pre/container.py" 2>&1 | tee "$RUNNER_TEMP/iphone.log"
+          python3 docs/pre5/release/publish.py runtime --work "$WORK"
+      - name: Atomically reserve only new pre5 tag and push only pre5 image
+        run: |
+          set -euo pipefail
+          python3 docs/pre5/release/publish.py reserve --work "$WORK"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE" | tee "$ASSET_DIR/image-push.log"
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' "$ASSET_DIR/image-push.log" | tail -1)"
+          test "${#DIGEST}" -eq 71
+          printf 'DIGEST=%s\n' "$DIGEST" >> "$GITHUB_ENV"
+      - name: Pull immutable image and verify OCI graph, source bytes, tag and protected releases
+        run: |
+          set -euo pipefail
+          REF="ghcr.io/heller-adrian/bibliothekar@$DIGEST"
+          docker pull --platform linux/amd64 "$REF" | tee "$ASSET_DIR/image-pull.log"
+          python3 docs/pre5/release/publish.py finish --work "$WORK" --digest "$DIGEST"
+          (cd "$ASSET_DIR" && sha256sum --check SHA256SUMS)
+      - name: Create only new prerelease and independently verify all downloaded assets
+        run: |
+          set -euo pipefail
+          python3 docs/pre5/release/publish.py release-guard --work "$WORK" --digest "$DIGEST"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --prerelease --latest=false --notes-file "$ASSET_DIR/RELEASE-NOTES.md" "$ASSET_DIR"/*
+          mkdir "$WORK/downloaded-release"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$WORK/downloaded-release"
+          (cd "$WORK/downloaded-release" && sha256sum --check SHA256SUMS)
+          python3 docs/pre5/release/publish.py post --work "$WORK" --digest "$DIGEST"
+      - name: Preserve immutable publication evidence and partial-state diagnostics
+        if: always() && env.WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre5-publication-evidence
+          retention-days: 30
+          path: |
+            ${{ env.ASSET_DIR }}/
+            ${{ env.WORK }}/publication-result.json
+            ${{ env.WORK }}/runtime/*.json
+            ${{ env.WORK }}/runtime/*.log
+            ${{ env.WORK }}/runtime/pre2-general/*.log
+            ${{ env.WORK }}/runtime/pre4-live.log
+            ${{ env.WORK }}/runtime/pre4-browser/*
+            ${{ env.WORK }}/runtime/pre5-browser/*
+            ${{ env.WORK }}/runtime/pre4-historical/*.log
+      - name: Remove only job-local registry credentials
+        if: always() && env.WORK != ''
+        run: |
+          python3 - <<'PY'
+          import os,shutil
+          from pathlib import Path
+          root=Path(os.environ['WORK']);path=Path(os.environ['DOCKER_CONFIG'])
+          assert root.parent==Path(os.environ['RUNNER_TEMP']) and root.name.startswith('bibliothekar-pre5-publish.')
+          assert path==root/'docker-config' and not path.is_symlink()
+          if path.is_dir():shutil.rmtree(path)
+          PY

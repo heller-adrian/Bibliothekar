@@ -19,6 +19,7 @@ class Pre5PublisherGates(unittest.TestCase):
     def test_only_exact_push_first_attempt_and_safe_runner(self):
         good={'GITHUB_REPOSITORY':'heller-adrian/Bibliothekar','GITHUB_REF':'refs/heads/'+p.BRANCH,
               'GITHUB_EVENT_NAME':'push','APPROVE_PUBLISH':'PUBLISH '+p.TAG,
+              'BUILD_SHA':p.BUILD,'IMAGE':p.IMAGE,'VERSION':p.VERSION,'TAG':p.TAG,
               'RUNNER_ENVIRONMENT':'self-hosted','RUNNER_OS':'Linux','RUNNER_ARCH':'X64',
               'GITHUB_RUN_ATTEMPT':'1','GITHUB_SHA':'a'*40}
         with patch.object(p.c,'git',return_value='a'*40),patch.dict(os.environ,good,clear=True):p.context()

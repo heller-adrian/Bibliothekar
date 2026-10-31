@@ -119,10 +119,11 @@ GET/HEAD lesen Katalog und Dateisystem ohne persistente Katalog-/F14-Schreibwirk
 Schreibgrenzen; ein fehlgeschlagener Refresh verhindert die anschließende sichere
 Ansicht nicht. Die Tests vergleichen komplette SQL-Dumps und F14-JSON-Bytes.
 
-Thumbnail-GETs liefern nur vorhandene reguläre Cachedateien. Fehlende oder als
-Symlink vorliegende Caches ergeben 404. Der Importworker erzeugt Vorschauen
-weiterhin unter seiner normalen Schreibfreigabe; ein GET darf diesen Builder
-weder bei normalem Betrieb noch während eines fachlichen Konflikts aufrufen.
+Thumbnail-GETs liefern vorhandene reguläre Cachedateien oder rendern fehlende
+Vorschauen ausschließlich in BytesIO. Der Read-Pfad prüft vor und nach dem
+Rendern die gepinnten Verwaltungsanker, verändert aber weder Medien noch Cache,
+SQL oder F14. Nicht verfügbare JPEGs und Symlink-Caches ergeben 404. Der Importworker
+erzeugt persistente Vorschauen weiterhin unter seiner normalen Schreibfreigabe.
 
 ## Metadaten-Variante A
 

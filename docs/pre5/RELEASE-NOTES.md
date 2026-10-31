@@ -6,7 +6,8 @@ und die Integritätsprüfung des Release-Images sind zwingende Freigabebedingung
 ## Korrekturen
 
 - Workspace-GETs und Thumbnail-GETs fordern keine schreibende Dateioperation an.
-  Vorschaubilder werden durch Importworker erzeugt; sichere Katalogansichten
+  Persistente Vorschaubilder werden durch Importworker erzeugt; Cache-Misses
+  werden lesend im Speicher gerendert. Sichere Katalogansichten
   bleiben bei einem unabhängigen fachlichen Konflikt erreichbar.
 - Nur ausdrücklich auditierte, medienlesende Bestandsprüfungen, Archivprüfungen
   und SQL-Planvorbereitungen verwenden kurzlebige F14-Reservationen. Ein solcher
