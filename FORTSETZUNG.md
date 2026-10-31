@@ -1,145 +1,111 @@
-# Bibliothekar pre.5 – reproduzierbare Fortsetzung, 31.10.2026
+# Bibliothekar pre.5 – Backend-Triage, 31.10.2026
 
-## Geordneter Stopp auf Nutzerwunsch
+## Aktueller Einstieg
 
-Aktive Arbeit und Statusüberwachung beendet. Der bereits gestartete GitHub-Lauf
-41194643144 läuft unabhängig weiter. Kein Cancel, kein paralleler Testlauf und
-keine Veröffentlichung. Letzte Limitanzeige: fünf Stunden78% verbraucht/22% frei,
-Woche40% verbraucht/60% frei. Bei der nächsten Fortsetzung zuerst das endgültige
-Ergebnis dieses Laufs auswerten, dann gezielt Fehler beheben beziehungsweise bei
-vollständigem SUCCESS die weiterhin autorisierte Veröffentlichung vorbereiten.
-Eine ausstehende weitere Statusabfrage wurde entsprechend dem Nutzerstopp durch
-die automatische Freigabeprüfung abgelehnt; keine Ersatzabfrage gestartet.
+Branch `codex/pre5-operation-recovery`.
+Neuer Anwendungscode: `3404ddcf020e56bd4f82aedf80cec4c69c4753ef`.
+**Zuerst den gezielten Lauf41207207207 auswerten.** Keine volle Matrix starten.
+Das Fünf-Stunden-Fenster stand zuletzt bei92% Verbrauch, Woche42%. Deshalb
+jetzt geordnet gesicherter Stopp; Workflow unabhängig weiterlaufen lassen.
+Keine aktive Warteschleife und keine wiederholten Statusabfragen.
 
-## Zuerst prüfen
+## Vollständiges Basisergebnis
 
-- Branch: `codex/pre5-operation-recovery`.
-- Aktueller Anwendungscode/QA-Kandidat: `2908eacbf73e891ebd46078cb9ae4af43e0dd454`.
-- **Lauf 41194643144 über direkte GitHub-API prüfen.** Containerjob
-  124519051403 SUCCESS. Backendjob124521156657 führt die acht Partitionen aus.
-- Ziele: 60 neue +82 fokussierte PASS, jeweils 0 FAIL/SKIP. Frontend: 44 RC13
-  +147 RC14 PASS. Container einschließlich90 Dateien/4.000 Familien/14 iPhones ebenfalls PASS;
-  vollständige Backendmatrix bleibt offen.
-- Erneut heruntergeladene, kryptografisch verifizierte ZIPs:
-  Ziele13040405805: `88a4098ba8118817918b9417c880f134fc7ba9259b28dd3e098ea00c7d7b858f`;
-  Frontend13040415276: `bf0f6991e222259c51be5e2148d4985b68a835bfddf16cf93947f04d09c137a4`.
-- Scratch: `/private/tmp/bibliothekar-pre5-evidence/41194643144-{targets,frontend}`.
-  Alle früheren Logs/ZIPs liegen ebenfalls unter diesem Evidence-Stamm.
-- Container13040432071: `d656fc55af18966b4a244df052ad57b2f215beb69c773ccb9aa8ba3a05547a20`,
-  ZIP erneut verifiziert. Starts5,374/5,366s; unveränderte Archive/Herkunft/General-Kopien.
-- Letztes Kontingent: fünf Stunden78%, Woche40%. Ab70% Handoff sichern,
-  deutlich vor Erschöpfung geordnet stoppen. Nutzerauftrag erlaubt Fortsetzung
-  im nächsten Fenster; Veröffentlichung nur nach sämtlichen bestandenen Gates.
+41194643144 auf2908eacbf73e891ebd46078cb9ae4af43e0dd454:
+- Zieltests60+82 PASS, Frontend44+147 PASS.
+- Reale Containerabnahme komplett PASS: pre5/pre4, sechs historische Recovery-
+  und SIGKILL-Fälle,90 Dateien/47 Familien/8 Tage, drei korrigierte General-Kopien,
+  Katalog-/Registryintegrität, zwei Neustarts,4.000 Familien/zwei Bibliotheken,
+ 14 iPhone-JPEGs+13:00, unveränderte Archive/Herkunft. Starts5,374/5,366s.
+- Backend alle2444 Nodes in acht disjunkten Partitionen ausgeführt:
+ 2204 PASS,240 FAIL,0 ERROR/SKIP. Diese roten Fälle blockieren Veröffentlichung.
+- Vollständiges Backend-ZIP13044081687,248983932 Bytes, SHA256
+ `7838e1590c892d24deb7a071276353ec35447e985c98b42da050806eacf6b996` nach Download verifiziert.
+- ZIP hat51527 Einträge/16,46GB unkomprimiert. Nur notwendige vollständige
+  JUnit-/stdout-/Ergebnis-/Deadline-/Nodeprotokolle extrahiert; alle übrigen
+  Snapshots weiterhin im unveränderten ZIP. Nicht unnötig16GB entpacken.
 
-## Gegenwärtige Ursachen und Fixes
+Alle240 Nodes mit Gruppe, Partition, Prüfstatus und vollständigem Trace-Digest:
+`docs/pre5/BACKEND-FAILURES.{md,json}`. Reproduzierbare Klassifikation:
+`python3 qa/pre5/classify_backend.py EVIDENCE_ROOT OUTPUT_DIRECTORY`.
+Klassifikation ist ausdrücklich erste Triage; SUSPECT/MIXED/REQUIRES ungeklärt.
+Keine alte Erwartung ohne Verhaltensbeweis als falsch erklären.
 
-Details: docs/pre5/ARCHITECTURE.md, TEST-REPORT.md, EVIDENCE.json. Originalaufträge:
-`/Users/adi/Downloads/Codex_Auftrag_Bibliothekar_v1.0.0-pre.5.md` und
-`/Users/adi/Downloads/Bibliothekar_pre5_TrueNAS_Befunde_2026-10-30.md`.
-Ausgangspunkt pre.4: `adcc2aa9a444042440ff764be10fe1e42191904d`.
+## Nachgewiesene Gruppen / erste Implementierung
 
-1. GET-Kompatibilitätsansicht verlangte F14-Schreibreservation. Jetzt private
-   prozesslokale temporäre View mit qualifizierter echter Rootbindung.
-2. Exakt auditierte medienlesende Inventory-/Archivprüfungen und SQL-Planer
-   sind transient. Historische Belege werden ausschließlich nach kompletter
-   Qualifikation mit vollständigem Originalrecord im dauerhaften Unterbrechungs-
-   nachweis behandelt. Echte unbekannte Schreibwirkungen bleiben geschützt.
-3. Scope-Admission, SQL-Authorizer und Queueclaim sichern konkrete Ressourcen.
-   Verschachtelte Wirkungen werden dauerhaft erweitert, nie verengt. General-
-   APPLY benötigt privaten Tasknachweis; mutable SQL alleine ist keine Autorität.
-4. Bereits zentral geroutete Jobs werden nicht erneut als alte Main→Zentral-
-   Migration ausgeführt. Drei echte Migrationstests bestanden. Echte Altfälle
-   mit fehlender Quelle/fremden Zielbytes bleiben blockiert.
-5. General-202 wurde bis completed/organized_verified + Neustart untersucht
-   (41190356694). Datei/Hash/Archive korrekt, dennoch neue Herkunft47→48 Familien,
-   90→91 Medien/Mitgliedschaften nach bestätigtem Katalogverlust. Korrektur liest
-   unveränderliche Mitgliedschaften und abgeschlossene Korrekturketten aller
-   registrierten Bibliotheken linear. Keine historischen Belege werden verändert.
-   Echte neue General-Dateien bleiben asynchron importierbar; bekannte Kopien-
-   Variante A ist ausdrücklich DEFERRED, kein Entfernen der Herkunftsprüfung.
-6. Thumbnail-GET erzeugte operation_read_only_request/500. Jetzt vorhandener
-   regulärer Cache oder BytesIO ohne persistente Wirkung; gepinnte Struktur vor/
-   nach Rendern qualifiziert. Worker-Cache behält volle Schreibadmission. Neuer
-   realer JPEG-Test bestätigt Ausgabe320x200, gleiche Originalbytes, komplette
-   SQL-Dumps und F14-JSONs sowie kein angelegtes Cacheverzeichnis. PASS.
+- Zwölf alte Prozessfälle: schema_versions wird auch bei aktuellem Schema per
+  CREATE TABLE IF NOT EXISTS angefragt. SQLite verlangt dafür Schreibautorität.
+  `ensure_schema_version_table` und Registry-Pendant lesen vorhandene Tabellen
+  jetzt zuerst per SELECT; echte Anlage und Migrationen bleiben geschützt.
+- Neunzehn RC11-Fixtures publizierten ihren historischen Orphan VOR dem Anlegen
+  der angeblich bereits vorhandenen Schemas. Fixture stellt die Schemas nun
+  vorher her; kein Runtime-/ACL-/Reservationsbypass.
+- Sechs negative Fixtures verändern absichtlich SQL-Zustand über App-Verbindungen,
+  die dies korrekt verbieten. Externe Beschädigung muss ausschließlich in
+  synthetischen Daten separat aufgebaut werden. Noch NICHT geändert.
+- Zwei echte Testdeadlines.3892-Dateien-Test löst300s-SIGALRM im Authorizer aus;
+  SQLite verschluckt den Callbackfehler als not authorized (Dauer374,859s).
+  Zweiter Fall100 bekannte Dateien/90s. Keine pauschale Deadline-Erhöhung.
+- Viele Backup-/Trash-/Restore-/Import-Recoveries werden vor ihrer eigentlichen
+  Qualifikation durch die neue Eintrittssperre abgehalten. Bekanntes Problem,
+  noch nicht sicher gelöst. Nicht mit globalem recovery_session() umgehen.
+-25 Fälle zeigen fremden globalen Bootstrap-Registrypfad bei Ad-hoc-Workspaces;
+  Fixture-/Kontextvertrag gezielt prüfen, keine schwächere Ankerprüfung.
+- Source-String-/Fehlerwortlaut-/state.json-Erwartungen teilweise veraltet;
+  durch positive Verhaltens- und negative Schutzbeweise ersetzen, nicht löschen.
+- Andere200/409-, Startup-returncode- und Warteschlangenfälle sind NICHT pauschal
+  veraltet. Safe Reads, echte Schreibsperren, Abschlussstatus und Medien prüfen.
 
-Der erste Inventory-Abbruch auf dem tatsächlichen NAS bleibt nicht bewiesen.
-Keine konkrete historische NAS-Operation ungeprüft als sicher behandeln.
+## Gezielter neuer Nachweis
 
-## Letzte CI-Hindernisse / mögliche nächste Diagnose
+`tests/backend/test_pre5_sqlite_authorization.py`: acht Fälle für Katalog/Registry,
+aktuelle Schemaabfrage mit ungelöster Reservation, reine Leseverbindung, weiterhin
+verbotene DDL/UPDATE/DELETE, fehlende Versionstabelle und echte offene Migration.
+Original-SQL-Dumps und F14-Records müssen unverändert bleiben.
 
-- 41191231150: Ziele56+80, Frontend, pre5/pre4-Live und vier historische Fälle
-  PASS. Historischer pre.2-Seed pollte Job-GET im SQL-/F14-Abschlussfenster; alte
-  Middleware fordert dabei Schreibschemafreigabe. Seed wartet jetzt read-only
-  auf completed und Release exakt seiner Importreservation, verlangt danach
-  weiterhin HTTP200/completed. Originale Metadata-Orphan bleibt Recoveryziel.
-- 41192396662: 59+80 PASS, historisch236 PASS/1 FAIL/0 SKIP. Ein alter Unit-Test
-  hatte keine eigene Registry. Echte isolierte Registry ergänzt, Race-Gegenprobe
-  verlangt genau den Staging-Hashfehler. Beide Fälle im kurzen Gate: jetzt PASS.
-- 41193453760 und41193996176: 59+82/Frontend PASS, alle fünf pre5-Live-API-/
-  Recovery-/Archivprüfungen PASS. Neuer Browsercheck sah den absichtlich
-  deaktivierten optionalen Gerätehelfer: source-devices503 mit genau belegtem
-  JSON. Dieser konkrete Fall wird qualifiziert, andere5xx bleiben Fehler.
-  Danach verlor Navigation asynchrone Response-Bodys. Test wartet nun
-  networkidle; falls es erneut scheitert, `read_error` im tatsächlichen Log
-  untersuchen, nicht pauschal HTTP500/503 erlauben.
-- Der90er Ablauf verlangt nach beiden Neustarts alle aktuellen Katalog-SHAs,
-  genau drei erhaltene korrigierte General-Kopien, SQLite quick_check und
-  Fremdschlüsselprüfung beider Datenbanken. Nie nur202/409 austauschen.
+41207207207 hat Commitmarker[pre5-db-auth]. Einziger Workflow:
+`.github/workflows/qa-pre5-operation-recovery.yml`. Vor der bisherigen kurzen
+Stufe läuft die neue Datei, RC11-Bootstrap und ein alter RC4-Prozessfall.
+Letzterer und zwei RC11-Recoveries können die nächste bereits erkannte
+Reservationsbarriere sichtbar machen; rote Ergebnisse vollständig lesen.
+Bei roter Fokusstufe stoppen die nachfolgenden kurzen Tests; XML/Log bleiben
+in pre5-reproductions erhalten. Ohne full/container-Marker keine teure Matrix,
+keine Images, keine Veröffentlichung. Lokale Syntax/Actionlint/Diffprüfung PASS;
+neue Linuxergebnisse noch PENDING. Nur Syntax/Analysen lokal, Ausführung Linux.
 
-## Vollständiger nächster Prüfpfad
+## Weitere Reihenfolge
 
-1. Fehlgeschlagene aktuelle Stufe untersuchen, falls41194643144 nicht SUCCESS.
-   Keine zweite CI blind starten. Bei reinem QA-Fix App-Quellgleichheit belegen.
-2. Container: pre5/pre4-Livebrowser DE/EN390/1440, sechs historische Recovery-
-   Fälle samt echten SIGKILLs, echter90-Dateien-/47-Familien-/8-Tage-Ablauf,
-   4.000 Familien/zwei Bibliotheken und14 iPhone-JPEGs mit+13:00.
-3. Backend: qa/pre5/full_backend.py führt acht disjunkte Partitionsläufe aus.
-   Auswahl allein ist kein Testnachweis: passende JUnit-Zahlen, vollständige
-   Nodes,0 FAIL/ERROR/SKIP zwingend. QA-Scratch privat unter /tmp; gruppen-
-   beschreibbare Runner-Eltern dürfen nicht chmod'ed werden. Collectionfehler
-   stoppt statt acht Wiederholungen. Originale signierte QA-Dateien unverändert.
-   Deadlines90s, bekannter3-Lifecycle-Test240s, RC14-3892-Fixture300s.
-4. ZIP-Digests aller vier finalen Artefakte erneut prüfen; Bericht/EVIDENCE.json
-   mit tatsächlichem finalem SHA, Run, Zahlen und Grenzen abschließen.
-5. Erst bei vollem SUCCESS Publisher binden und eigenständig veröffentlichen.
+1. Fokuslauf auswerten; positive8 Sicherheitsfälle und RC11-Fixture getrennt
+   vom weiterhin blockierten historischen RC4-Recovery bewerten.
+2. Für echte Recovery exakte ursprüngliche Reservation, Nonce, Schlüssel,
+   Generation, Bindungen und Journal-/Datenbankbeweise qualifizieren. Niemals
+   alle blockierten Aufträge freigeben, unbekannte Intents löschen oder mutable
+   SQL-Felder allein als Scope-/Abschlussautorität verwenden.
+3. Anschließend Wiederaufnahme von Backup, Papierkorb/Restore, Sortierung,
+   Recheck und Import in kleinen Gruppen, einschließlich Fremdbytes/SIGKILL.
+4. Fixture-/HTTP-/Setupgruppen und reale Laufzeitursachen abarbeiten. Erst danach
+   alle2444+neuen Nodes erneut vollständig, anschließend erforderliche Container-
+   und Browser-Abnahme auf exakt finalem Code. Keine parallelen Volltests.
+5. Erst bei komplettem SUCCESS selbstständig pre.5 veröffentlichen. Vorbereiteter
+   Publisher docs/pre5/release bleibt PENDING; Workflow nur Vorlage unter docs.
+   Er benötigt für das große Backend-ZIP eine streng begrenzte Extraktion der
+   Pflichtbelege; bisherige300MB-Gesamtgrenze nicht blind aufheben.
 
-## Publisher – vorbereitet, gesperrt, noch nicht Linux-getestet
+## Nachweise / Werkzeuge / Grenzen
 
-`docs/pre5/release/`: core/oci/graph_fixture aus erfolgreichem pre.4-Publisher;
-pre5-spezifische Quell-, QA-, Runtime-, Tag-/Image-/Release- und Download-Gates.
-ACCEPTANCE.json=PENDING; source_audit verweigert dies vor externen Schreibvorgängen.
-PUBLISH-WORKFLOW.yml liegt nur unter docs, ist kein aktiver GitHub-Workflow.
+`docs/pre5/EVIDENCE.json`, TEST-REPORT.md, ARCHITECTURE.md, UPGRADE-TRUENAS.md.
+Scratch `/private/tmp/bibliothekar-pre5-evidence/41194643144-backend.zip` und
+`41194643144-backend/`; dort zusätzlich failures.json mit vollständigen Traces.
+Die übrigen drei ZIPs sind ebenfalls heruntergeladen und kryptografisch geprüft.
 
-Vor Verwendung finalen geprüften Quellcommit, erfolgreiche Run-ID, vier ZIP-IDs/
-Digests, genaue pytest-/Frontendzahlen und vollständige Backend-Nodes binden.
-Finaler reiner Dokumentationscommit muss EVIDENCE.json im akzeptierten Schema
-enthalten; app-Baum unverändert. Publisherbranch `codex/publish-1.0.0-pre.5`,
-Workflowvorlage erst dort nach `.github/workflows/publish-pre5.yml` kopieren.
-Alle Jobs self-hosted/Linux/X64/bibliothekar-safe. Source-Audit/Unittests/Actionlint,
-Bytevergleich aller eingebetteten App-Dateien, tatsächliche Release-Container-QA,
-OCI-Index/Plattformmanifest/Konfiguration/Docker-ID, Digest-Pull, erneuter Download
-aller Release-Anlagen zwingend. Alte pre bis pre.4, latest, Stable und bestehende
-Privatsphäre/Paketrechte schützen. Unklarer Teilzustand: stoppen, nichts überschreiben.
-README/REPORT/Release Notes sind noch Entwürfe und müssen Abnahmeergebnis erhalten.
-
-## Werkzeuge und Grenzen
-
-```sh
-export GH_CONFIG_DIR=/private/tmp/bibliothekar-gh-device
-export GH_BROWSER=true GH_DEBUG= GODEBUG=http2client=0
-/private/tmp/bibliothekar-gh-cli/gh api repos/heller-adrian/Bibliothekar/actions/runs/41194643144/jobs -H 'Cache-Control: no-cache'
-```
-
-`gh run view/list` kann veraltet sein; direkte API nutzen. Rohlogs/ZIPs benötigen
-`--allow-escape-sequences` und Ausgabe in Scratchdatei. Token niemals ausgeben.
-Push mit bestehendem gh-Credentialhelper wie bisher. Actionlint:
-`/private/tmp/pre-actionlint/actionlint -config-file docs/pre/release/actionlint.yaml FILE`.
-Lokale Prüfung nur Syntax/Quellen; ausführende Abnahme ausschließlich isoliertes
-Linux/Docker. Kein Docker lokal, keine Subagents. Keine NAS-/GUI-Zugriffe.
+GH_CONFIG_DIR=/private/tmp/bibliothekar-gh-device, GH_BROWSER=true, GH_DEBUG=,
+GODEBUG=http2client=0; CLI=/private/tmp/bibliothekar-gh-cli/gh. Direkte API mit
+Cache-Control:no-cache statt veraltetem gh run view/list. Logs/ZIPs benötigen
+--allow-escape-sequences und Umleitung in Scratchdatei. Tokens niemals ausgeben.
+Actionlint /private/tmp/pre-actionlint/actionlint mit docs/pre/release/actionlint.yaml.
+Alle Jobs ausschließlich[self-hosted,Linux,X64,bibliothekar-safe]. Keine Subagents.
+Kein NAS-/GUI-Zugriff, kein Clean Slate, keine manuellen produktiven SQL-Änderungen.
 `qa/rc14.zip` war vorher unversioniert vorhanden: niemals stage'n.
-
-Native TrueNAS/NFSv4, physische SD/USB, echtes DNG1.7-/natives RAF-Schreiben:
-NOT_RUN. Verlustabschlussmodell und bekannte-Aufnahme-Variante A: DEFERRED.
-Keine Veröffentlichung mit offenen Pflicht-/Sicherheitstests. Noch kein pre.5-
-Tag/Release/GHCR-Push ausgeführt. Frühere Chronologie bleibt in Git erhalten.
+Keine bestehenden Tags, Images, Releases, latest oder Rechte verändern.
+Native TrueNAS/NFSv4, physische SD/USB, echtes DNG1.7-/RAF-Schreiben NOT_RUN.
+Bekannte-Aufnahme-VarianteA und eigenständiger Verlustabschluss DEFERRED.

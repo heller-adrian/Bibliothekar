@@ -1,5 +1,5 @@
 {
-  "status": "PARTIAL_ACCEPTANCE_NOT_RELEASED",
+  "status": "BACKEND_FAILURES_UNRESOLVED_NOT_RELEASED",
   "branch": "codex/pre5-operation-recovery",
   "base_tag": "v1.0.0-pre.4",
   "accepted_target_source": "c548e308d795f459ff854fb6a5843431fb71eef1",
@@ -66,7 +66,7 @@
       "fourteen_iPhone_JPEGs"
     ]
   },
-  "latest_application_candidate": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+  "latest_application_candidate": "3404ddcf020e56bd4f82aedf80cec4c69c4753ef",
   "additional_target_acceptance": {
     "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
     "run": 41119010880,
@@ -102,7 +102,7 @@
     "original_NAS_first_inventory_exception": "NOT_ESTABLISHED",
     "four_thousand_and_iPhone": "NOT_RUN"
   },
-  "pending_run": 41194643144,
+  "pending_run": 41207207207,
   "migration_fix_target_acceptance": {
     "source": "83b11dad16626c01460562caec8dd530ad4bbd42",
     "run": 41121252978,
@@ -299,5 +299,53 @@
     "weekly_used_percent": 40,
     "parallel_test_runs_started": false,
     "published": false
+  },
+  "complete_backend_baseline": {
+    "run": 41194643144,
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "artifact_id": 13044081687,
+    "digest": "sha256:7838e1590c892d24deb7a071276353ec35447e985c98b42da050806eacf6b996",
+    "downloaded_archive_digest_verified": true,
+    "tests": 2444,
+    "passed": 2204,
+    "failed": 240,
+    "errors": 0,
+    "skipped": 0,
+    "coverage": "all_eight_partitions_disjoint_and_complete",
+    "groups": {
+      "ambient_registry_fixture_context": 25,
+      "backup_recovery_admission": 8,
+      "domain_sql_authorization": 3,
+      "error_wording_contract": 2,
+      "external_tamper_uses_guarded_connection": 6,
+      "f14_initial_state_contract": 10,
+      "health_without_startup_contract": 1,
+      "historical_completion_and_retry": 4,
+      "independent_operation_scope": 7,
+      "rc11_snapshot_schema_order": 19,
+      "read_view_and_contention_contract": 4,
+      "restore_recovery_and_scope": 33,
+      "runtime_deadline": 2,
+      "schema_read_requests_ddl": 12,
+      "source_text_contract": 2,
+      "startup_domain_recovery_not_reached": 49,
+      "storage_setup_anchor_and_reset": 20,
+      "trash_recovery_and_scope": 27,
+      "worker_resume_queued_or_verifying": 6
+    },
+    "classification": "initial_causal_triage_not_all_causes_resolved",
+    "reports": [
+      "BACKEND-FAILURES.md",
+      "BACKEND-FAILURES.json"
+    ]
+  },
+  "first_backend_correction": {
+    "source": "3404ddcf020e56bd4f82aedf80cec4c69c4753ef",
+    "change": "Existing schema-version tables are read without CREATE DDL; genuine schema writes remain guarded. RC11 fixture schemas precede orphan snapshot.",
+    "new_authorization_tests": 8,
+    "local_syntax_and_actionlint": "PASS",
+    "linux_verification": "PENDING",
+    "run": 41207207207,
+    "full_matrix_started": false
   }
 }

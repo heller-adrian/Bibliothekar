@@ -41,3 +41,18 @@ Native TrueNAS-/NFSv4-, physische SD-/USB-, echte DNG-1.7- und native RAF-Schrei
 **NOT_RUN**. Bekannte-Aufnahme-Variante A und eigenständiges Verlustabschlussmodell:
 **DEFERRED**. Fehlgeschlagene echte Dateioperationen behalten ihre F14-/Hash-/
 Journalprüfungen. Keine Sicherheitsprüfung zum Bestehen einer Fixture entfernt.
+
+## Vollständiger Backendbefund und erste Korrektur
+
+41194643144: alle2444 Nodes in acht disjunkten Partitionen ausgeführt,2204 PASS,
+240 FAIL,0 ERROR/SKIP. Vollständiges heruntergeladenes ZIP13044081687, SHA256
+7838e1590c892d24deb7a071276353ec35447e985c98b42da050806eacf6b996 verifiziert.
+BACKEND-FAILURES.md und .json erfassen jeden roten Node in19 Ursachen-/Prüfgruppen,
+mit Partition, Trace-Digest, Prüfstatus und noch ungeklärten Zuordnungen.
+
+Erste Korrektur3404ddcf: vorhandene Versionstabellen werden ohne DDL gelesen;
+neue Migrationen bleiben durch denselben Authorizer gesperrt. RC11-Snapshot
+modelliert vorbereitete Schemas vor dem Absturz. Acht neue Sicherheitsfälle.
+Lokale Syntax/Actionlint PASS. Gezielter Linuxlauf41207207207 gestartet, Ergebnis
+noch offen; kein neuer voller Backend-/Container-/Frontendlauf gestartet.
+Keine Behebung aller240 Fälle behaupten und keine Veröffentlichung.
