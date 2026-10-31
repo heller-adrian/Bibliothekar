@@ -285,5 +285,19 @@
     },
     "fourteen_iPhone_JPEGs": "PASS",
     "readonly_archives": "PASS"
+  },
+  "handoff": {
+    "reason": "explicit_user_stop_while_full_backend_runs",
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "run": 41194643144,
+    "targeted": "PASS",
+    "frontend": "PASS",
+    "container": "PASS",
+    "backend": "IN_PROGRESS_at_last_observation",
+    "next_step": "Read final run result before any additional test or release action",
+    "five_hour_used_percent": 78,
+    "weekly_used_percent": 40,
+    "parallel_test_runs_started": false,
+    "published": false
   }
 }

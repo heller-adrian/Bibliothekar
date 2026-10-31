@@ -1,5 +1,16 @@
 # Bibliothekar pre.5 – reproduzierbare Fortsetzung, 31.10.2026
 
+## Geordneter Stopp auf Nutzerwunsch
+
+Aktive Arbeit und Statusüberwachung beendet. Der bereits gestartete GitHub-Lauf
+41194643144 läuft unabhängig weiter. Kein Cancel, kein paralleler Testlauf und
+keine Veröffentlichung. Letzte Limitanzeige: fünf Stunden78% verbraucht/22% frei,
+Woche40% verbraucht/60% frei. Bei der nächsten Fortsetzung zuerst das endgültige
+Ergebnis dieses Laufs auswerten, dann gezielt Fehler beheben beziehungsweise bei
+vollständigem SUCCESS die weiterhin autorisierte Veröffentlichung vorbereiten.
+Eine ausstehende weitere Statusabfrage wurde entsprechend dem Nutzerstopp durch
+die automatische Freigabeprüfung abgelehnt; keine Ersatzabfrage gestartet.
+
 ## Zuerst prüfen
 
 - Branch: `codex/pre5-operation-recovery`.
@@ -16,7 +27,7 @@
   Alle früheren Logs/ZIPs liegen ebenfalls unter diesem Evidence-Stamm.
 - Container13040432071: `d656fc55af18966b4a244df052ad57b2f215beb69c773ccb9aa8ba3a05547a20`,
   ZIP erneut verifiziert. Starts5,374/5,366s; unveränderte Archive/Herkunft/General-Kopien.
-- Letztes Kontingent: fünf Stunden68%, Woche39%. Ab70% Handoff sichern,
+- Letztes Kontingent: fünf Stunden78%, Woche40%. Ab70% Handoff sichern,
   deutlich vor Erschöpfung geordnet stoppen. Nutzerauftrag erlaubt Fortsetzung
   im nächsten Fenster; Veröffentlichung nur nach sämtlichen bestandenen Gates.
 
