@@ -158,6 +158,10 @@ def test_incomplete_live_wipe_then_process_restart_and_confirmed_onboarding(lega
     # schema while lacking the newer storage_initialization field entirely.
     for name in ENGLISH_STORAGE_DEFAULTS.values():
         (ws/name).mkdir();old['bindings'][str(ws/name)]=ro._identity(ws/name)
+    from app.managed_directory_names import directory_name
+    metadata=ws/ENGLISH_STORAGE_DEFAULTS['metadata_directory_name']
+    for kind in ('metadata_general','metadata_multiple'):
+        (metadata/directory_name(metadata,kind)).mkdir()
     from app.library_registry import initialize_library_registry
     ro._write(parent/'state.json',old);initialize_database(db);initialize_library_registry(reg);(case/'logs').mkdir()
     output=case/'live';p,log=worker(case,output,'live')

@@ -10,6 +10,15 @@ from tests.backend.test_pre4_operation_separation import ready
 FUNCTIONS=['app.trash_selective.recover_trash_deletions','app.trash_restore.recover_trash_restores']
 
 
+@pytest.mark.parametrize('confirmation',[None,[],{},True,'YES'])
+def test_retry_requires_valid_typed_confirmation_before_any_recovery(ready,confirmation):
+    _,ws,_,dbs,_=ready
+    parent=ro._control_location(ws);before={p.name:p.read_bytes() for p in parent.glob('*.json')}
+    with pytest.raises(ro.RootOperationError,match='confirmation_missing'):
+        domain_recovery.retry_failed_completion(dbs[0],ws,'synthetic',confirmation=confirmation)
+    assert before=={p.name:p.read_bytes() for p in parent.glob('*.json')}
+
+
 def interrupted(ready,function):
     _,ws,_,_,_=ready
     domain_recovery.handlers()

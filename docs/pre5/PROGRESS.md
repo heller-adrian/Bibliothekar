@@ -117,3 +117,21 @@ bleiben unverändert. Keine Testabdeckung reduziert und keine Produktfrist erhö
 GitHub behält nur einen wartenden Lauf: Die nie gestarteten Zwischenstände
 5c109d83/f47627ee wurden durch den jeweils neueren wartenden Fokus ersetzt.
 Der laufende a4edf56e-Lauf wurde nicht unterbrochen. Keine parallele Vollmatrix.
+
+## 31.10.2026 – begrenzte Schlusskorrektur im verbleibenden Kontingent
+
+41217778080 vollständig ausgewertet:264 Fälle/260 PASS/4 FAIL/0 ERROR/SKIP,
+1014,825s. Artefakt13049571446 SHA256
+63302fc2692d83a237acfba303051098df85152ddffed06b07aacfcf0016184e verifiziert;
+vollständige guarded Logs/XML und Workflow-Logs lokal gesichert.
+Alle sieben SQL-Statement-Sicherheitsverträge PASS: Katalog/Registry und Cursor,
+frischer Orphan vor erneutem Statement, Orphan innerhalb eines Skripts sowie
+Metadaten-Trigger mit eigenem Scope. Keinen alten Freigabeentscheid wiederverwenden.
+Vier konkrete Ursachen: neuer Confirmation-Setcheck wirft bei[]/{} TypeError;
+Legacy-Live-Wipe-Fixture behauptet vollständige Struktur ohne General/Batch;
+gezieltem Job fehlt bereits in der vollen Matrix vorhandenes tinycss2-Testwerkzeug.
+Typcheck vor Bestätigung, vollständige Fixture vor historischem Startup und
+gepinntes QA-Tool ergänzt. Keine produktive Rechte-/Ankerprüfung geändert.
+Kleine Stufe[pre5-closure] prüft nur diese Fälle, alle SQL-/Domainverträge,
+negative Legacy-Resetfälle und beide Laufzeitfälle OHNE Profiling unter den
+unveränderten90/300s-Fristen. Danach normale60/82 Zieltests. Keine volle Matrix.

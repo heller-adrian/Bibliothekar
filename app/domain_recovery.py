@@ -198,7 +198,7 @@ def retry_failed_completion(database,workspace,job_id,*,confirmation):
     """
     from app import root_operations as ro,operation_health as health
     import os
-    if confirmation not in {'SAFE_ABORT_FAILED_RESTORE','RETAIN_ALL_FAILED_RESTORE_VARIANTS'}:
+    if not isinstance(confirmation,str) or confirmation not in {'SAFE_ABORT_FAILED_RESTORE','RETAIN_ALL_FAILED_RESTORE_VARIANTS'}:
         raise ro.RootOperationError('domain_recovery_confirmation_missing')
     dead=[r for r in health.inspect(workspace)['reservations'] if not r['live']]
     if not dead:return None

@@ -477,7 +477,7 @@ def _root_request(fn):
                 bound=__import__('inspect').signature(fn).bind(*args,**kwargs)
                 payload=bound.arguments['payload']
                 confirmation=payload.get('confirmation')
-                if confirmation not in {'SAFE_ABORT_FAILED_RESTORE','RETAIN_ALL_FAILED_RESTORE_VARIANTS'}:
+                if not isinstance(confirmation,str) or confirmation not in {'SAFE_ABORT_FAILED_RESTORE','RETAIN_ALL_FAILED_RESTORE_VARIANTS'}:
                     raise HTTPException(status_code=422,detail='Die ausdrückliche Sicherheitsbestätigung fehlt.')
                 from app.domain_recovery import retry_failed_completion
                 try:
