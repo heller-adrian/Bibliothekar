@@ -12,6 +12,7 @@ import hashlib,json
 _APPROVED=ContextVar('qualified_domain_recovery',default=None)
 DELETE_FUNCTIONS={'app.trash_selective.delete_selected_trash_files','app.trash.empty_trash_filesystem'}
 RECOVERY_FUNCTIONS={'app.trash_selective.recover_trash_deletions','app.trash_restore.recover_trash_restores'}
+ORIGINAL_TRASH_RESTORE='app.trash_restore.restore_trash_files'
 
 
 def handlers():
@@ -21,6 +22,7 @@ def handlers():
     return {
         'app.trash_selective.recover_trash_deletions':recover_trash_deletions,
         'app.trash_restore.recover_trash_restores':recover_trash_restores,
+        ORIGINAL_TRASH_RESTORE:recover_trash_restores,
         'app.trash_failure.finalize_failure':finalize_failure,
         'app.trash_failure.rescue_failure':rescue_failure,
         **{name:recover_trash_deletions for name in DELETE_FUNCTIONS},
@@ -44,7 +46,8 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
     failures={'app.trash_failure.finalize_failure','app.trash_failure.rescue_failure'}
     if not dead or not all(r['qualified'] and r['ids'].get('function') in dispatch
             and r['kind']==('trash' if r['ids']['function'] in failures
-                           or r['ids']['function'] in DELETE_FUNCTIONS else 'recovery') for r in dead):
+                           or r['ids']['function'] in DELETE_FUNCTIONS
+                           or r['ids']['function']==ORIGINAL_TRASH_RESTORE else 'recovery') for r in dead):
         return False
     if not confirmed_rescue and any(r['ids']['function']=='app.trash_failure.rescue_failure' for r in dead):
         return False  # Never infer or renew a user's explicit rescue decision.
@@ -83,6 +86,38 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
         owner=owners.get(record.get('database')) if failure_finish else None
         expected_ids={'function':record['ids']['function']}
         expected_roots=set(required)
+        if record['ids']['function']==ORIGINAL_TRASH_RESTORE:
+            from app.trash_restore import _restore_parent, _load_restore, _relative
+            # Replaying arbitrary restore work would turn an unknown source into
+            # ownership. Accept only a unique, existing journal matching the
+            # exact original F14 selection and registered DB identities.
+            raw=record['ids'].get('relative_paths')
+            if raw is not None:
+                try:
+                    paths=json.loads(raw)
+                    if (not isinstance(paths,list) or not paths
+                        or not all(isinstance(p,str) and _relative(p).as_posix()==p for p in paths)
+                        or json.dumps(sorted(paths))!=raw or len(paths)!=len(set(paths))):
+                        raise ValueError('invalid relative path selection')
+                except (ValueError,TypeError,KeyError) as error:
+                    raise health.DomainStartupError('restore_recovery_invalid_original_selection') from error
+                expected_ids['relative_paths']=raw
+            request_id=record['ids'].get('operation_id')
+            if request_id is not None:
+                if not isinstance(request_id,str) or not request_id or '/' in request_id or '..' in request_id:
+                    raise health.DomainStartupError('restore_recovery_invalid_request_identity')
+                expected_ids['operation_id']=request_id
+            directory=_restore_parent(root)
+            journals=sorted(directory.glob('*.json'))
+            if len(journals)!=1 or any(p.is_symlink() for p in journals):
+                raise health.DomainStartupError('restore_recovery_ambiguous_journal_scope')
+            try:
+                saved,_,_,plans=_load_restore(journals[0],root,sorted(registered))
+            except Exception as error:
+                raise health.DomainStartupError('restore_recovery_invalid_original_journal') from error
+            if (saved.get('operation_id')!=request_id
+                or (raw is not None and sorted(paths)!=sorted(plan['relative'] for plan in plans))):
+                raise health.DomainStartupError('restore_recovery_selection_does_not_match_journal')
         if record['ids']['function']=='app.trash_selective.delete_selected_trash_files':
             from app.trash_restore import _relative
             try:
