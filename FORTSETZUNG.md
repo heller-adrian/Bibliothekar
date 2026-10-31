@@ -178,3 +178,35 @@ Unversioniertes qa/rc14.zip ist Benutzerartefakt, niemals stage'n.
 Kein NAS-Zugriff, keine produktive SQL-/F14-Bereinigung, keine alten Tags/Images/
 Releases/latest oder Rechte ändern. Native TrueNAS/NFSv4, physische SD/USB und
 echtes DNG1.7-/RAF-Schreiben NOT_RUN. VarianteA und Verlustabschluss DEFERRED.
+
+## 31.10.2026 – Benutzerfreigabe zur vollständigen Endabnahme (noch KEIN Release)
+
+Der Benutzer hat ausdrücklich die vollständige erneute Abnahme und eine **nur bei
+vollständig grünen Nachweisen** zulässige pre.5-Veröffentlichung freigegeben;
+bei jedem roten/unklaren Test ist vor Veröffentlichung zu stoppen und der Befund
+mit Handlungsvorschlag mitzuteilen. Kein Freibrief für Safety-Bypasses.
+
+Der alte Zweistundenlauf **41194643144** war: reproductions SUCCESS,
+container SUCCESS, frontend SUCCESS, backend FAILURE (2204/2444 PASS,
+240 FAIL). Er lief auf Anwendungscode 2908eacb, nicht auf dem nun finalen
+ff11f88b; die grünen Container-/Frontend-Ergebnisse sind kein neuer Nachweis.
+
+QA-only Commit **ffe05f61c83d9d990d0c4b834ff8a76f685aba40** ergänzt
+`qa/pre5/backend_unretested.json` mit exakt den 147 ursprünglichen Fehlernodes,
+die in `BACKEND-FIX-STATUS.json` keinen jüngeren gerichteten Status hatten,
+sowie ein vorgelagertes, isoliertes Linux-Gate in
+`.github/workflows/qa-pre5-operation-recovery.yml` nur bei `[pre5-full]`.
+Keine Anwendungscodeänderung. **GitHub Actions 41222826726** ist die
+beauftragte vollständige Freigabeprüfung; das erste aktive Gate prüft die
+147 Nodes. Bei Rot wird die abhängige Container-/Frontend-/Backend-Matrix
+nicht ausgeführt. Bei Grün folgen die bisherigen reproductions, echte Container-
+/Frontend-Abnahme und 8 disjunkte Backendpartitionen mit vollständigem
+Node-Manifest; Veröffentlichung folgt erst nach tatsächlicher Auswertung.
+
+Der bestehende vorbereitete Publisher in `docs/pre5/release` ist derzeit
+**NICHT einsatzbereit**: `ACCEPTANCE.json` steht auf PENDING und Source 2908eacb,
+`PUBLISH-WORKFLOW.yml` hat noch den alten `BUILD_SHA=2908eacb`. Ohne
+vollständig verifizierte, an die neue Quelle gebundene Akzeptanz darf daraus
+kein Tag/Registry-Image/Release erstellt werden. Bis dahin keinerlei Änderung an
+main, bisherigen Tags, latest oder TrueNAS.
+
