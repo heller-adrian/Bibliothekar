@@ -1,0 +1,4 @@
+[
+  "tests/backend/test_rc1_b01.py::test_b01_live_inventory_conflict_is_bounded_and_visible",
+  "tests/backend/test_rc1_b01.py::test_b01_compatibility_request_collision"
+]

@@ -113,7 +113,9 @@ def test_b01_terminal_hidden_task_is_not_a_kernel_lock(fixture,state):
 
 
 def test_b01_live_inventory_conflict_is_bounded_and_visible(fixture):
-    import hashlib
+    # GET requests are observational; holding a distinct active inventory
+    # reservation must neither turn a safe read into a writer nor let it
+    # silently rewrite private F14 receipts or stored media.
     case,ws,reg,dbs,ev=seed(fixture)
     entered=threading.Event();release=threading.Event();errors=[]
     def holder():
@@ -122,13 +124,22 @@ def test_b01_live_inventory_conflict_is_bounded_and_visible(fixture):
                 entered.set();assert release.wait(5)
         except BaseException as e:errors.append(repr(e))
     thread=threading.Thread(target=holder);thread.start();assert entered.wait(5)
+    parent=ro._control_location(ws)
+    evidence_before={p.name:p.read_bytes() for p in parent.glob('*.json')}
+    with database_connection(dbs[0]) as c:
+        business_before=(c.execute('SELECT state FROM jobs WHERE id=?',('j',)).fetchone()[0],
+                         c.execute('SELECT status FROM events WHERE id=?',('e',)).fetchone()[0])
     client=TestClient(main.app,raise_server_exceptions=False)
     try:
         start=time.monotonic();response=client.get('/api/jobs/j/events/e/edit')
-        assert response.status_code==409,response.text
-        assert 'erneut' in response.json()['detail']
+        assert response.status_code==200,response.text
+        assert response.json()['event']['id']=='e'
         assert time.monotonic()-start<3
+        assert {p.name:p.read_bytes() for p in parent.glob('*.json')}==evidence_before
         assert (ws/'Arbeitsbereiche/main/original.JPG').read_bytes()==b'synthetic-main'
+        with database_connection(dbs[0]) as c:
+            assert (c.execute('SELECT state FROM jobs WHERE id=?',('j',)).fetchone()[0],
+                    c.execute('SELECT status FROM events WHERE id=?',('e',)).fetchone()[0])==business_before
     finally:release.set();thread.join(5);client.close()
     assert not errors and not thread.is_alive()
     assert_open()
@@ -179,30 +190,38 @@ with ro.reserve(Path(sys.argv[1]),library_id='main',database=Path(sys.argv[2]),k
 
 
 def test_b01_compatibility_request_collision(fixture,monkeypatch):
-    monkeypatch.setenv("BIBLIOTHEKAR_AUTH_TEST_BYPASS", "pytest-isolated")
-    case,ws,reg,dbs,ev=fixture
-    with database_connection(dbs[0]) as c:
-        seed_job(c);seed_event(c,status='planned');seed_family(c,content=b'synthetic-main',current_path='original.JPG')
-    entered=threading.Event();release=threading.Event();result={};holders=[]
-    original=main._ensure_compatibility_link
-    def paused(*a,**kw):
+    # The former hook on _ensure_compatibility_link was a mutation-side
+    # implementation detail. Concurrent GETs must instead be safe, complete
+    # and free of new durable F14 records without requiring that hook.
+    monkeypatch.setenv("BIBLIOTHEKAR_AUTH_TEST_BYPASS","pytest-isolated")
+    case,ws,reg,dbs,ev=seed(fixture)
+    entered=threading.Event();release=threading.Event();result={}
+    original=main.get_event_edit_context
+    def paused(*args,**kwargs):
         if not entered.is_set():
-            r=ro._ACTIVE.get()[-1]
-            holders.append({'pid':os.getpid(),'thread':threading.get_ident(),'record':{k:v for k,v in r.items() if not k.startswith('_')},'lock':str(r['_path'].with_suffix('.lock'))})
             entered.set();assert release.wait(5)
-        return original(*a,**kw)
-    monkeypatch.setattr(main,'_ensure_compatibility_link',paused)
+        return original(*args,**kwargs)
+    monkeypatch.setattr(main,'get_event_edit_context',paused)
+    parent=ro._control_location(ws)
+    evidence_before={p.name:p.read_bytes() for p in parent.glob('*.json')}
     def request(endpoint):
         client=TestClient(main.app,raise_server_exceptions=False)
         try:result[endpoint]=client.get('/api/jobs/j/events/e/'+endpoint)
         finally:client.close()
-    first=threading.Thread(target=request,args=('structure',));first.start();assert entered.wait(5)
-    timer=threading.Timer(.2,release.set);timer.start()
-    try:request('edit')
-    finally:release.set();first.join(5);timer.join()
-    (ev/'holder-compatibility.json').write_text(json.dumps(holders,indent=2))
+    first=threading.Thread(target=request,args=('structure',));first.start()
+    try:
+        assert entered.wait(5),'read-only event context was never consulted'
+        timer=threading.Timer(.2,release.set);timer.start()
+        try:request('edit')
+        finally:timer.join()
+    finally:release.set();first.join(5)
+    assert not first.is_alive()
     assert result['structure'].status_code==200,result['structure'].text
     assert result['edit'].status_code==200,result['edit'].text
+    assert result['structure'].json()['event']['id']=='e'
+    assert result['edit'].json()['event']['id']=='e'
+    assert {p.name:p.read_bytes() for p in parent.glob('*.json')}==evidence_before
+    assert (ws/'Arbeitsbereiche/main/original.JPG').read_bytes()==b'synthetic-main'
 
 
 def test_b01_nested_inventory_reuses_its_own_reservation(fixture):
