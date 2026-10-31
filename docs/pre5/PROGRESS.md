@@ -174,3 +174,43 @@ sowie Fremddaten/Nonce/Generation/Scope/DB/Binding/History-Angriffe.
 [pre5-contracts] wählt diesmal ausschließlich diese neue Datei, den einen echten
 Live-Wipe-/Restart-/Onboardingfall und die bestehenden negativen Resetfälle.
 Die vorherigen17 Vertragsfälle bleiben unverändert im Testbestand/Full-Matrix.
+
+## 31.10.2026 – zweiter technischer Receipt-Verbraucher geschlossen (ChatGPT/GitHub)
+
+41221622586 auf bd9451206c6ac447e0d1d71f07fa4ee4263e25c2:
+30/31 PASS, 1 FAIL (echter Live-Wipe-/Restart-/Onboarding-Fall).
+Nach Erfolg der strengen `managed_storage_health`-Receiptprüfung blockierte
+`storage_bootstrap.evidence` den identischen technisch abgeschlossenen
+F14-Startup-Receipt noch als `bootstrap_additional_operation`.
+Die Logzeilen benennen den exakten
+`technical-startup-<Nonce>.json`-Pfad. Es ist eine zweite, nicht synchronisierte
+private Kontrollnachweis-Allowlist; die ursprüngliche fachliche Diagnose wurde
+dadurch bestätigt.
+
+Anwendungscode-Commit ff11f88b8116bae5b0d39f824b1eef828d39e659:
+`storage_bootstrap.evidence` verwendet unmittelbar vor der privaten
+JSON-Inventur dieselbe read-only `_technical_startup_evidence`-Qualifikation.
+Nur geprüfte Nonce, vollständiger Receipt, unveränderte Wirkungsbereichs-/
+Datenbank-/Workspace-/Bibliotheks-/Generation-/Rollenbindung und digestverkettete,
+bestätigte Setup-Historie autorisieren die **Einordnung als technischer Beleg**,
+nicht eine Medienmutation. Ungültige Historien bleiben blockiert; keine
+Datei wird entfernt, keine F14-/SQLite-/Read-only-/Lock-Prüfung gelockert.
+Kein Eingriff in `main`, Tags, Registry-Images oder TrueNAS.
+
+Gezielte Linux-Abnahme **41222109431 SUCCESS: 31/31 PASS,
+0 FAIL/ERROR/SKIP** in 40,11 s. Originaler Live-Wipe-/Wiederanlauf-/
+Ersteinrichtungstest besteht jetzt vollständig; zusätzlich die 13
+technischen Positiv-/Negativfälle und 17 negativen Legacy-Resetvarianten.
+Das Reproduktionsjob-Artefakt 13050372420 wurde veröffentlicht; GitHub
+meldet ZIP-SHA256
+`0df7bbe15f1d5e3f9ba0300f7ab8e8f46de42f560263deb5341223e6d054cd33`.
+Workflowlog vollständig gelesen; keine zusätzliche unabhängige
+ZIP-Downloadprüfung. Fünf Warnungen im Pythonlauf, keine Fehler.
+Container-, Frontend- und Backend-Volljobs in dieser Runde absichtlich SKIPPED.
+
+Die **globale pre.5-Freigabe ist weiterhin NICHT erfolgt**. Der alte 2444er
+Backendlauf 41194643144 enthält 240 damalige Fehler. Von den ursprünglichen
+Nodes stehen 147 noch ohne erneute gezielte Abnahme; die bestehende
+`BACKEND-FIX-STATUS.json`-Inventur wurde durch diese Mini-Runde nicht
+automatisch aktualisiert. Vor einem Release sind aktuelle vollständige
+Backend-, Frontend-, Browser- und Container-Evidenzen Pflicht.
