@@ -1,0 +1,45 @@
+{
+  "source_baseline": 41194643144,
+  "source_failed_nodes": 240,
+  "unretested_previous_run": 41222826726,
+  "unretested_147": {
+    "passed": 30,
+    "failed": 117
+  },
+  "scope": "DIAGNOSTIC_ONLY_NO_RELEASE",
+  "excluded": [
+    "runtime_deadline (already independently accepted, 3892/100 cases)"
+  ],
+  "groups": {
+    "setup_backup_scope": [
+      "tests/backend/test_0414_patch_regressions.py::test_0414_planned_save_uses_fast_post_write_refresh_only",
+      "tests/backend/test_0554_config_brand.py::test_0554_startup_calls_bootstrap_before_database",
+      "tests/backend/test_rc9_setup_separation.py::test_populated_unregistered_archive_allows_first_library_setup[technical_control]",
+      "tests/backend/test_0500_backup_delete_recovery.py::test_0500_after_main_commit_crash_completes_purge",
+      "tests/backend/test_0500_backup_delete_recovery.py::test_0500_unknown_stage_file_blocks_destructive_purge",
+      "tests/backend/test_0561_audit_regressions.py::test_P202b_F1_journal_write_error_must_leave_recovery_evidence",
+      "tests/backend/test_0561_recovery.py::test_committed_journal_sync_failure_retains_original_until_retry",
+      "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[direct-failed]",
+      "tests/backend/test_rc1_b01.py::test_b01_live_inventory_conflict_is_bounded_and_visible"
+    ],
+    "recovery_and_restore": [
+      "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[bytes]",
+      "tests/backend/test_0562_process_recovery.py::test_0562_metadata_projection_recovery_two_sigkills",
+      "tests/backend/test_0562_process_recovery.py::test_0562_restore_recovery_two_progressive_sigkills",
+      "tests/backend/test_r1_restore_recovery.py::test_r1_batch_collision_after_first_move_stays_blocked",
+      "tests/backend/test_r1_restore_recovery.py::test_r1_direct_restore_commits_resume_once[r1.completed]",
+      "tests/backend/test_r1_restore_recovery.py::test_r1_conflict_job_is_not_automatically_requeued",
+      "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f17_current]"
+    ],
+    "workers_and_authorization": [
+      "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_active]",
+      "tests/backend/test_rc6_handoff.py::test_two_real_process_checks_sigkill_and_three_restarts[True]",
+      "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[after_handoff]",
+      "tests/backend/test_rc5_practice_followup.py::test_folder_actual_sigkill_atomic_handoff_and_three_restarts[after_handoff]",
+      "tests/backend/test_rc1_b01.py::test_b01_compatibility_request_collision",
+      "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-failed]",
+      "tests/backend/test_r1_restore_recovery.py::test_r1_collision_sigkill[r1.prepared]",
+      "tests/backend/test_f14_continuation.py::test_f14_finished_receipt_survives_repeated_sigkill"
+    ]
+  }
+}
