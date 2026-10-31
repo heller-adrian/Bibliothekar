@@ -354,3 +354,33 @@ Release-Gate: PRE.5 NICHT FREIGEGEBEN. Die 15er-Sicherheitsabnahme
 steht noch aus; der neue 147er-Originalcheck, alle 8 Backendpartitionen,
 Frontend und Container wurden auf dem neuen Source-Stand nicht abgenommen.
 Kein main/tag/GHCR/TrueNAS veraendert. Bei roten Resultaten nicht publishen.
+
+## 31.10.2026 – 15/15 Crash-/Tamper-Gate unabhaengig PASS; Vollabnahme gestartet
+
+- QA-Commit dc00ddc1: `tests/backend/test_r1_restore_recovery.py` und `test_0562_process_recovery.py`
+  pruefen jetzt bei einem absichtlich blockierten Restore nicht mehr bloss einen
+  nonzero Prozess-Exitcode, sondern durch `operation_health.inspect`
+  die nachweislich bestehende F14-Schreibsperre, einen qualifizierten
+  orphaned Trash-Record und weiterhin unveraenderte Medien-/Fremdbytes.
+  RC14 darf geschuetzte Leseanfragen im Prozess weiter beantworten.
+- GitHub Actions [41231315552](https://github.com/heller-adrian/Bibliothekar/actions/runs/41231315552):
+  **15 von 15 PASS, 0 FAIL/ERROR/SKIP** auf Commit dc00ddc1.
+  Darunter alle zehn zuerst roten Backup-, Restore-, SD-Recheck-
+  und Import-Crash-Tests sowie fuenf Tamper-/Kollision-Gegenproben.
+- Artefakt 13054435099: vollstaendiges XML + Restart-/Subprozesslogs.
+  ZIP unabhaengig heruntergeladen und SHA256 verifiziert:
+  `3be575a58f2c708f6302ca7ea37787193767b27920770f96d538791e42461694`.
+  Das XML enthaelt exakt 15 eindeutige Testcases und keinen Fail/Skip.
+- docs/pre5/BACKEND-FIX-STATUS.json nun **119 zuletzt gezielt PASS,
+  0 zuletzt gezielt FAIL und 121 ohne einzeln katalogisierte neue Nachpruefung**
+  der urspruenglichen 240 roten Nodes. Nicht als volle Suite missverstehen.
+- GitHub Actions **[41231600475](https://github.com/heller-adrian/Bibliothekar/actions/runs/41231600475)**
+  auf **7838a7062565b712a4f24fa481967d46df173d45** wurde gestartet:
+  die 15er-Gate-Pruefung steht vor der exakten 147er-Originalfehlerpruefung.
+  Erst wenn beide gruen, werden container/frontend und danach die acht
+  vollstaendigen disjunkten Backendpartitionen ausgefuehrt.
+- Standardlauf 41231036891 SUCCESS wurde separat ausgefuehrt; er
+  ersetzt nicht die vollstaendige neue Abnahme.
+- **Freigabestatus: NICHT ABGENOMMEN, PRE.5 NICHT RELEASED.**
+  Bis zum endgueltigen Resultat der vollständigen Matrix weder Publish
+  noch main/TrueNAS/GHCR/Tag veraendern.

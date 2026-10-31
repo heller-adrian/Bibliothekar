@@ -1,7 +1,7 @@
 {
   "baseline_run": 41194643144,
   "baseline_failed_nodes": 240,
-  "status": "BACKEND_NOT_ACCEPTED_BACKUP_RECOVERY_VERIFIED_RESTORE_AND_RECHECK_RED",
+  "status": "PARTIAL_FOCUSED_15_CRASH_GATE_GREEN_FULL_147_AND_BACKEND_MATRIX_IN_PROGRESS_NOT_ACCEPTED",
   "latest_focused_outcomes_of_original_failures": {
     "tests/backend/test_rc11_bootstrap.py::test_real_template_requires_explicit_review_and_preserves_original_bytes": {
       "run": 41217778080,
@@ -499,53 +499,53 @@
       "group": "read_view_and_contention_contract"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_staging_crash_before_main_commit_rolls_back": {
-      "run": 41228704454,
+      "run": 41231315552,
       "outcome": "PASS",
       "group": "backup_recovery_admission"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_after_main_commit_crash_completes_purge": {
-      "run": 41228704454,
+      "run": 41231315552,
       "outcome": "PASS",
       "group": "backup_recovery_admission"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_tampered_staged_file_is_never_deleted": {
-      "run": 41228704454,
+      "run": 41231315552,
       "outcome": "PASS",
       "group": "backup_recovery_admission"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_batch_collision_after_first_move_stays_blocked": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41231315552,
+      "outcome": "PASS",
       "group": "restore_recovery_and_scope"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_direct_restore_commits_resume_once[r1.completed]": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41231315552,
+      "outcome": "PASS",
       "group": "restore_recovery_and_scope"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_restore_recovery_two_progressive_sigkills": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41231315552,
+      "outcome": "PASS",
       "group": "startup_domain_recovery_not_reached"
     },
     "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[after_handoff]": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41231315552,
+      "outcome": "PASS",
       "group": "worker_resume_queued_or_verifying"
     },
     "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[hash]": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41231315552,
+      "outcome": "PASS",
       "group": "worker_resume_queued_or_verifying"
     },
     "tests/backend/test_rc5_practice_followup.py::test_folder_actual_sigkill_atomic_handoff_and_three_restarts[after_handoff]": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41231315552,
+      "outcome": "PASS",
       "group": "worker_resume_queued_or_verifying"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[bytes]": {
-      "run": 41227720942,
-      "outcome": "FAIL",
+      "run": 41231315552,
+      "outcome": "PASS",
       "group": "startup_domain_recovery_not_reached"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_interrupted_rollback_keeps_journal_and_bytes": {
@@ -572,12 +572,37 @@
       "run": 41228704454,
       "outcome": "PASS",
       "group": "backup_recovery_admission"
+    },
+    "tests/backend/test_r1_restore_recovery.py::test_r1_partial_commit_foreign_target_requires_global_block": {
+      "run": 41231315552,
+      "outcome": "PASS",
+      "group": "restore_recovery_and_scope"
+    },
+    "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[source_bytes]": {
+      "run": 41231315552,
+      "outcome": "PASS",
+      "group": "restore_recovery_and_scope"
+    },
+    "tests/backend/test_0562_process_recovery.py::test_0562_restore_preserves_ambiguous_evidence[bytes]": {
+      "run": 41231315552,
+      "outcome": "PASS",
+      "group": "startup_domain_recovery_not_reached"
+    },
+    "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[same_bytes_new_inode]": {
+      "run": 41231315552,
+      "outcome": "PASS",
+      "group": "startup_domain_recovery_not_reached"
+    },
+    "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[symlink]": {
+      "run": 41231315552,
+      "outcome": "PASS",
+      "group": "startup_domain_recovery_not_reached"
     }
   },
   "counts": {
-    "PASS": 107,
-    "FAIL": 7
+    "PASS": 119,
+    "FAIL": 0
   },
-  "note": "Per-node focused evidence for 240 originally failing backend cases: 107 PASS (all 8 BA-02 original nodes now pass on run 41228704454), 7 FAIL in restore/recheck/import from run 41227720942, 126 without separately catalogued focused outcome. Broad 147-case run 41222826726 remains 30 PASS / 117 FAIL. BA-02 full file 11 PASS includes two new tamper/foreign-journal negatives. No current full backend matrix, frontend/container recertification or release.",
-  "not_retested": 126
+  "note": "Source-specific latest focused outcome for 240 historical backend failures: 119 PASS including all 15 crash and negative tamper contracts on GitHub run 41231315552 (full verified JUnit 15/15, artifact SHA-256 3be575a58f2c708f6302ca7ea37787193767b27920770f96d538791e42461694), 0 latest individually known FAIL, and 121 without individually catalogued focused rerun. Historical full 147 run 41222826726 was still 117 FAIL; this list does NOT establish backend acceptance. New full release-quality chain run 41231600475 on commit 7838a706 (15->147->frontend/container->8 full backend partitions) in progress or queued. Do not publish until entire chain and source pins verified.",
+  "not_retested": 121
 }
