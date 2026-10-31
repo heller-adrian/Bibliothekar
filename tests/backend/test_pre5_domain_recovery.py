@@ -198,3 +198,18 @@ def test_original_delete_without_journal_is_not_inferred_complete(ready):
         domain_recovery.replay(ws,reg,database=dbs[0])
     assert ro._read(path)==original and not health.inspect(ws)['writes_allowed']
     assert not (path.parent/('domain-recovery-'+original['reservation_id']+'.json')).exists()
+
+
+def test_shared_recovery_does_not_reopen_a_retired_catalogue(ready):
+    import hashlib
+    from app.library_registry import _connect
+    _,ws,reg,dbs,_=ready
+    with closing(_connect(reg)) as connection:
+        connection.execute("UPDATE libraries SET is_registered=0,unregistered_at='synthetic-retired' WHERE library_id='second'")
+        connection.commit()
+    retained=dbs[1].with_suffix('.retired');dbs[1].rename(retained)
+    original_hash=hashlib.sha256(retained.read_bytes()).hexdigest()
+    path,original=interrupted(ready,FUNCTIONS[0])
+    assert domain_recovery.replay(ws,reg,database=dbs[0])
+    assert not dbs[1].exists() and hashlib.sha256(retained.read_bytes()).hexdigest()==original_hash
+    assert ro._read(path.parent/('domain-recovery-'+original['reservation_id']+'.json'))['reservation']==original

@@ -57,7 +57,7 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
     registered=set();owners={}
     with closing(read_connection(Path(registry))) as c:
         c.execute('BEGIN')
-        for row in c.execute('SELECT library_id,workspace_root,database_path,work_root,archive_root FROM libraries'):
+        for row in c.execute('SELECT library_id,workspace_root,database_path,work_root,archive_root FROM libraries WHERE COALESCE(is_registered,1)=1'):
             if Path(row['workspace_root']).absolute()!=root:
                 raise health.DomainStartupError('domain_recovery_registry_workspace_mismatch')
             registered.add(Path(row['database_path']).absolute())

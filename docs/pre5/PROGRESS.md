@@ -90,3 +90,10 @@ Struktur vor Beginn an. Auth-only ohne Storage verlangt öffentliche503-Readines
 bei weiterhin401 für private Routen und keinerlei neu angelegten Appdaten.
 Zwei Wortlautasserts prüfen den tatsächlichen präzisen Recovery-Fehlercode.
 Neue Linuxergebnisse für diese Änderungen weiterhin PENDING; keine Vollmatrix.
+
+Zusätzlicher Scope-Vertrag: Domain-Recovery öffnet nur weiterhin registrierte
+Kataloge, wie die bestehende Trash-Recovery selbst. Ein ausgetragener Katalog
+wird nicht aus seinem historischen Registrypfad neu angelegt oder geöffnet.
+Deaktivierte, aber noch registrierte Bibliotheken bleiben einbezogen. Ein Journal
+mit nicht registrierten DB-Verweisen bleibt abgewiesen. Neue synthetische Prüfung
+behält den ausgetragenen Katalog bytegleich unter einem Retentionspfad.
