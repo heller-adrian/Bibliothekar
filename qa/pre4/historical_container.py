@@ -98,9 +98,19 @@ def case(label,*,foreign=False,unknown=False,kill=False,import_kill=False,rc14=F
  def photo(color):
   docker('exec','--user','568:568',name,'python','-c',"from pathlib import Path;from PIL import Image;from app.metadata_correction import metadata_area_paths;p=metadata_area_paths(area='general',workspace_root=Path('/workspace'),library_id='main')['root']/'"+NAME+"';Image.new('RGB',(16,16),'"+color+"').save(p)")
  def correct(expect=200,check=True):return api("print(json.dumps(api('/api/metadata-correction/correct',"+PAYLOAD+","+str(expect)+")))",check=check)
- def transfer():
+ def transfer(*,historical_seed=False):
   job=api("print(json.dumps(api('/api/metadata-correction/general/reintegrate',{'items':[{'relative_path':'"+NAME+"'}]},202)))")['job']['id']
   for _ in range(240):
+   if historical_seed:
+    # Released pre.2 runs a write-gated schema check on every job GET. Polling
+    # in the SQL-completed/F14-release window therefore sometimes returns 409.
+    # Wait read-only for that exact old import to release its own lease; the
+    # metadata orphan injected above must remain for candidate recovery.
+    state=snap()
+    value=next(r for r in state['jobs'] if r['id']==job)
+    own=[r for r in state['ops'] if r.get('kind')=='import' and r.get('ids',{}).get('job_id')==job]
+    if value['state'] not in ('completed','failed','interrupted') or own:
+     time.sleep(.25);continue
    value=api("print(json.dumps(api('/api/jobs/"+job+"')))")
    # /api/jobs/{id} is the native general-import polling endpoint.
    if value.get('state') in ('completed','failed','interrupted'):
@@ -114,7 +124,7 @@ def case(label,*,foreign=False,unknown=False,kill=False,import_kill=False,rc14=F
   docker('exec','--user','568:568',name,'python','-c',"from pathlib import Path;import json;p=Path('/appdata/config/settings.json');v=json.loads(p.read_text());v.setdefault('storage',{}).update(safety_reserve_gib=0,processing_buffer_percent=0);p.write_text(json.dumps(v))")
   photo('blue');correct(expect=409)
   corrected=snap();assert len(corrected['ops'])==1 and corrected['tasks'][0]['status']=='completed' and not corrected['outcomes']
-  job=transfer();before=snap();assert NAME not in before['general_files'] and before['files'][0]['actual_sha']==before['tasks'][0]['output_sha256']
+  job=transfer(historical_seed=True);before=snap();assert NAME not in before['general_files'] and before['files'][0]['actual_sha']==before['tasks'][0]['output_sha256']
   docker('restart',name);health=api("print(json.dumps(api('/api/settings/storage-health')))")
   assert not health['ready'] and ('unresolved_reservation' if rc14 else 'metadata_outcome_unverified') in json.dumps(health),health
   summary['released_rc14_pending_intent_reproduced' if rc14 else 'released_pre2_exact_missing_path_block_reproduced']=True

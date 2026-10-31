@@ -678,3 +678,26 @@ def test_unavailable_origin_history_never_becomes_empty_new_origin(tmp_path,dama
     with pytest.raises(MetadataCorrectionError,match='Herkunftsnachweise'):
         known_camera_hashes(path)
     assert (not path.exists()) if damage=='missing' else path.read_bytes()==b'unknown registry bytes'
+
+
+@pytest.mark.parametrize('cache',['absent','regular','symlink'])
+def test_thumbnail_get_is_a_read_even_with_unresolved_writes(ready,monkeypatch,cache):
+    from PIL import Image
+    case,ws,_,dbs,_=ready
+    create_job(dbs[0],job_id='THUMB',kind='sd_import',trigger_type='manual',
+        source_path='/synthetic/card',working_path=str(ws),operation='folder_import')
+    monkeypatch.setattr(main,'LOG_PATH',case/'logs')
+    target=main._thumbnail_path('THUMB')
+    target.parent.mkdir(parents=True)
+    jpeg=io.BytesIO();Image.new('RGB',(12,12),'blue').save(jpeg,format='JPEG')
+    if cache=='regular':target.write_bytes(jpeg.getvalue())
+    if cache=='symlink':target.symlink_to(ws/'Arbeitsbereiche/main/original.JPG')
+    records=general_orphan(ws,dbs[0]);before={p:p.read_bytes() for p in records}
+    monkeypatch.setattr(main,'ensure_job_thumbnail',lambda *a,**kw:pytest.fail('GET entered worker thumbnail generation'))
+    with closing(TestClient(main.app,raise_server_exceptions=False)) as client:
+        response=client.get('/api/jobs/THUMB/thumbnail')
+    assert response.status_code==(200 if cache=='regular' else 404),response.text
+    if cache=='regular':assert response.content==jpeg.getvalue()
+    if cache=='absent':assert not target.exists()
+    assert before=={p:p.read_bytes() for p in records}
+    assert operations.inspect(ws)['workspace_writes_allowed']

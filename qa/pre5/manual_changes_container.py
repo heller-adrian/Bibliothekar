@@ -55,7 +55,7 @@ from app import root_operations as r
 from app.storage_config import storage_paths
 ws=Path('/workspace');db=Path('/appdata/database/kamera.sqlite3');registry=db.parent/'bibliothekar-global.sqlite3'
 c=sqlite3.connect(db.as_uri()+'?mode=ro',uri=True);c.row_factory=sqlite3.Row
-files=[dict(row) for row in c.execute('SELECT * FROM files')];tasks=[dict(row) for row in c.execute('SELECT * FROM metadata_corrections')];jobs=[dict(row) for row in c.execute('SELECT * FROM jobs')];assert c.execute('PRAGMA quick_check').fetchone()[0]=='ok';c.close()
+files=[dict(row) for row in c.execute('SELECT * FROM files')];tasks=[dict(row) for row in c.execute('SELECT * FROM metadata_corrections')];jobs=[dict(row) for row in c.execute('SELECT * FROM jobs')];assert c.execute('PRAGMA quick_check').fetchone()[0]=='ok';assert not c.execute('PRAGMA foreign_key_check').fetchall();c.close()
 central=storage_paths(ws)['backup_root']
 c=sqlite3.connect(db.as_uri()+'?mode=ro',uri=True)
 applied={r[0] for r in c.execute("SELECT DISTINCT a.family_id FROM event_assignments a JOIN events e ON e.id=a.event_id JOIN events parent ON parent.id=COALESCE(e.parent_event_id,e.id) WHERE parent.status='applied'")};c.close()
@@ -63,9 +63,12 @@ c=sqlite3.connect(registry.as_uri()+'?mode=ro',uri=True);work=Path(c.execute("SE
 for f in files:
  root=Path('/main-library') if f['current_root_kind']=='camera_archive' else work if f['family_id'] in applied else central
  p=root/f['current_relative_path'];f['actual_path']=str(p);f['actual_sha']=hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
-c=sqlite3.connect(registry.as_uri()+'?mode=ro',uri=True);origin={t:c.execute('SELECT * FROM '+t+' ORDER BY 1,2').fetchall() for t in ('source_media','source_family_members','source_families')};c.close()
+c=sqlite3.connect(registry.as_uri()+'?mode=ro',uri=True);assert c.execute('PRAGMA quick_check').fetchone()[0]=='ok';assert not c.execute('PRAGMA foreign_key_check').fetchall();origin={t:c.execute('SELECT * FROM '+t+' ORDER BY 1,2').fetchall() for t in ('source_media','source_family_members','source_families')};c.close()
+from app.metadata_correction import metadata_area_paths
+general=metadata_area_paths(area='general',workspace_root=ws,library_id='main',create=False)['root']
+general_media={str(p.relative_to(general)):hashlib.sha256(p.read_bytes()).hexdigest() for p in general.rglob('*') if p.is_file()}
 parent=r._control_location(ws)
-print(json.dumps({'files':files,'tasks':tasks,'jobs':jobs,'origins':origin,'operations':[r._read(p) for p in sorted(parent.glob('operation-*.json'))],'outcomes':[r._read(p) for p in sorted(parent.glob('metadata-outcome-*.json'))],'archives':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for root in ('/main-library','/second-library') for p in Path(root).rglob('*') if p.is_file()}}))
+print(json.dumps({'general_media':general_media,'files':files,'tasks':tasks,'jobs':jobs,'origins':origin,'operations':[r._read(p) for p in sorted(parent.glob('operation-*.json'))],'outcomes':[r._read(p) for p in sorted(parent.glob('metadata-outcome-*.json'))],'archives':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for root in ('/main-library','/second-library') for p in Path(root).rglob('*') if p.is_file()}}))
 '''
 def snapshot():return json.loads(script(SNAP))
 
@@ -188,6 +191,10 @@ assert index==47 and len(list(root.rglob('*.JPG')))+len(list(root.rglob('*.RAF')
     final=snapshot()
     assert final['archives']==archive_before and final['origins']==initial['origins']
     assert not final['operations']
+    assert all(f['actual_sha']==f['sha256_current'] for f in final['files']),final['files']
+    expected_general={t['source_relative_path']:t['output_sha256'] for t in final['tasks'] if t['area']=='general' and t['status']=='completed'}
+    assert len(expected_general)==3 and final['general_media']==expected_general,(expected_general,final['general_media'])
+    REPORT['checks']['catalogue_hashes_general_copies_and_both_sqlite_integrities']='PASS'
     REPORT.update(status='PASS',initial=initial,final=final,
         fixture={'files':90,'families':47,'days':8,'native_RAW':'NOT_RUN'},
         known_origin_variant_A='DEFERRED; local rejection tested')

@@ -5312,8 +5312,12 @@ def api_job_thumbnail(job_id: str):
     job = get_job(DATABASE_FILE, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Auftrag wurde nicht gefunden.")
-    path = ensure_job_thumbnail(job_id)
-    if path is None:
+    # Import workers build disposable previews under their write admission.
+    # A GET must not enter that gate or modify a cache while serving reads,
+    # including when an unrelated operation is quarantined. A pending/missing
+    # preview is a normal 404; the original media never becomes a GET target.
+    path = _thumbnail_path(job_id, library_id=current_library_context().library_id)
+    if path.is_symlink() or not path.is_file():
         raise HTTPException(status_code=404, detail="Kein JPEG-Vorschaubild verfügbar.")
     return FileResponse(
         path,

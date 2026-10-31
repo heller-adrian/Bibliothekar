@@ -8,6 +8,7 @@ const context=await browser.newContext({viewport:{width,height:900}});
 await context.addInitScript(l=>localStorage.setItem('bibliothekar-language',l),lang);
 await context.route('**/*',r=>new URL(r.request().url()).origin===host?r.continue():r.abort());
 const page=await context.newPage();await page.goto(host+'/login');await page.locator('#password').fill('isolated-pre5-test-password');
+const serverErrors=[];page.on('response',r=>{if(r.status()>=500)serverErrors.push({url:r.url(),status:r.status()});});
 await Promise.all([page.waitForURL(host+'/'),page.locator('#login button').click()]);
 for(const target of ['/','/trash']){
 await page.goto(host+target);const note=page.locator('#bibliothekar-operation-notice');await note.waitFor();
@@ -28,6 +29,6 @@ if(target==='/'){
 }
 await page.screenshot({path:path.join(out,`${lang}-${width}-${target==='/'?'import':'trash'}.png`),fullPage:true});
 cases.push({lang,width,target,status:'PASS'});
-}await context.close();}
+}assert.deepEqual(serverErrors,[],'live browser requests returned server errors');await context.close();}
 }finally{await browser.close();fs.writeFileSync(path.join(out,'results.json'),JSON.stringify({cases,status:cases.length===8?'PASS':'FAIL'},null,2));}
 })().catch(e=>{console.error(e);process.exit(1)});
