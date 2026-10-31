@@ -135,3 +135,15 @@ gepinntes QA-Tool ergänzt. Keine produktive Rechte-/Ankerprüfung geändert.
 Kleine Stufe[pre5-closure] prüft nur diese Fälle, alle SQL-/Domainverträge,
 negative Legacy-Resetfälle und beide Laufzeitfälle OHNE Profiling unter den
 unveränderten90/300s-Fristen. Danach normale60/82 Zieltests. Keine volle Matrix.
+
+Zwei als source_text_contract klassifizierte Erwartungen hängen noch an der
+früheren Ein-Funktions-Architektur. Historischen Konfigurationsvertrag durch
+wirkliche Schema-/Configanlage, Reihenfolge und unveränderte bestehende Settings
+belegt; Beobachtungsfunktionen werden nicht als erfolgreich gemockt. Der alte
+0414-UI-Vertrag bleibt, zusätzlich sieben Ablaufvarianten der echten Ereignis-
+Suche mit SQLite: GET/read_session bleibt bei explizitem/erstmaligem Refresh
+rein lesend; zugelassener normaler Refresh ruft seine vorhandenen Inventarwege.
+Die ausgetauschte Quelltextzeile verlangte gerade den inzwischen verbotenen
+schreibenden Refresh innerhalb eines Read-Requests. Produktcode unverändert.
+Separate[pre5-contracts]-Stufe prüft ausschließlich diese zwei kleinen Module;
+kein erneuter Performance-, Container- oder Standardzieltestlauf dadurch.

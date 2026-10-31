@@ -1,4 +1,5 @@
 from pathlib import Path
+import pytest
 
 
 def test_0414_planned_save_uses_fast_post_write_refresh_only():
@@ -6,11 +7,31 @@ def test_0414_planned_save_uses_fast_post_write_refresh_only():
     workspace = Path("app/workspace_ui.py").read_text(encoding="utf-8")
 
     assert "physical_refresh: bool = True" in main
-    assert "must_check = physical_refresh or view_cache.needs_first_physical_check(db_path)" in main
     assert "loadWorkspace({physicalRefresh=false}={})" in workspace
     assert 'physical_refresh=${physicalRefresh ? "true" : "false"}' in workspace
     assert "fastPlannedRefresh" in workspace
     assert "loadWorkspace({physicalRefresh: !fastPlannedRefresh})" in workspace
+
+
+@pytest.mark.parametrize('read_request,physical_refresh,first_check',[
+    (True,True,True),(True,True,False),(True,False,True),(True,False,False),
+    (False,False,False),(False,True,False),(False,False,True)])
+def test_event_refresh_keeps_reads_pure_and_explicit_refresh_functional(tmp_path,monkeypatch,read_request,physical_refresh,first_check):
+    from contextlib import nullcontext
+    from app import main,operation_health
+    from app.database import initialize_database
+    db=tmp_path/'catalogue.sqlite3';initialize_database(db);effects=[]
+    monkeypatch.setattr(main,'current_database_file',lambda:db)
+    monkeypatch.setattr(main,'current_workspace_root',lambda:tmp_path/'workspace')
+    monkeypatch.setattr(main,'current_archive_root',lambda:tmp_path/'archive')
+    for function,label in [('refresh_live_event_inventories','refresh'),('reconcile_global_central_stock_state','reconcile'),('detect_all_event_structure_changes','detect')]:
+        monkeypatch.setattr(main,function,lambda *args,_label=label,**kwargs:effects.append(_label))
+    monkeypatch.setattr(main.view_cache,'needs_first_physical_check',lambda path:first_check)
+    monkeypatch.setattr(main.view_cache,'get_snapshot',lambda *args:None)
+    with operation_health.read_session() if read_request else nullcontext():
+        result=main.api_search_events(physical_refresh=physical_refresh)
+    assert isinstance(result,dict)
+    assert effects==(['refresh','reconcile','detect'] if not read_request and (physical_refresh or first_check) else [])
 
 
 def test_0414_loading_contract_covers_requested_nearby_surfaces():

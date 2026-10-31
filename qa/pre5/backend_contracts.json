@@ -1,0 +1,4 @@
+[
+  "tests/backend/test_0554_config_brand.py",
+  "tests/backend/test_0414_patch_regressions.py"
+]

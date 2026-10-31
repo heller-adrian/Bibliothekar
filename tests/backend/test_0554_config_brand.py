@@ -58,10 +58,34 @@ def test_0554_does_not_repair_invalid_or_symlink_settings(tmp_path: Path):
     assert other.read_text() == '{"keep":true}'
 
 
-def test_0554_startup_calls_bootstrap_before_database():
-    import inspect
-    source = inspect.getsource(main.startup_database)
-    assert source.index("ensure_settings_file(CONFIG_PATH)") < source.index("initialize_database(")
+def test_0554_startup_calls_bootstrap_before_database(tmp_path,monkeypatch):
+    # Technical bootstrap was separated from domain recovery. Verify its real
+    # effects/order rather than requiring both calls in one function's source.
+    from app import config_bootstrap
+    config=tmp_path/'config'/'settings.json';config.parent.mkdir()
+    db=tmp_path/'catalogue.sqlite3';registry=tmp_path/'registry.sqlite3'
+    calls=[];actual_config=config_bootstrap.ensure_settings_file
+    actual_database=main.initialize_database;actual_registry=main.initialize_library_registry
+    def settings(path):
+        calls.append('config');return actual_config(path)
+    def catalogue(path):
+        assert config.is_file() and isinstance(json.loads(config.read_text()),dict)
+        calls.append('catalogue');return actual_database(path)
+    def libraries(path):
+        assert config.is_file() and db.is_file()
+        calls.append('registry');return actual_registry(path)
+    for key,value in {'CONFIG_PATH':config,'DATABASE_FILE':db,'REGISTRY_DATABASE_FILE':registry,
+        'DATABASE_INITIALIZATION':None,'LIBRARY_REGISTRY_INITIALIZATION':None,'DATABASE_INITIALIZATION_ERROR':None}.items():monkeypatch.setattr(main,key,value)
+    monkeypatch.setattr(config_bootstrap,'ensure_settings_file',settings)
+    monkeypatch.setattr(main,'initialize_database',catalogue)
+    monkeypatch.setattr(main,'initialize_library_registry',libraries)
+    main._prepare_technical_storage()
+    assert calls==['config','catalogue','registry'] and json.loads(config.read_text())=={}
+    config.write_text('{"ui":{"language":"de"}}\n');before=config.read_bytes();calls.clear()
+    main._prepare_technical_storage()
+    assert calls==['config','catalogue','registry'] and config.read_bytes()==before
+    assert main.DATABASE_INITIALIZATION['newly_applied_versions']==[]
+    assert main.LIBRARY_REGISTRY_INITIALIZATION['newly_applied_versions']==[]
 
 
 def test_0554_desktop_logo_no_form_displacement_and_mobile_unchanged():

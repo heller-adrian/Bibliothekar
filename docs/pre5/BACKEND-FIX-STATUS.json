@@ -4,359 +4,475 @@
   "status": "PARTIAL_FOCUSED_ACCEPTANCE_FINAL_MATRIX_PENDING",
   "latest_focused_outcomes_of_original_failures": {
     "tests/backend/test_rc11_bootstrap.py::test_real_template_requires_explicit_review_and_preserves_original_bytes": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[library_generation]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[extra_operation]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[retention]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[job]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[media_sequence]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[registry_history]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[changed_inode]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[changed_key]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[changed_reservation]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[unknown_file]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[symlink]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[config_library]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_history_blocks_resume_even_after_adoption[journal]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_token_rechecks_catalogue_changes_and_backup_confirmation": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_sigkill_same_reservation_and_following_mutation[recovery]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "storage_setup_anchor_and_reset"
     },
     "tests/backend/test_rc11_bootstrap.py::test_sigkill_same_reservation_and_following_mutation[private-lock]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "storage_setup_anchor_and_reset"
     },
     "tests/backend/test_rc11_bootstrap.py::test_legacy_migration_crash_preserves_source_and_can_finish[adoption-receipt]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_legacy_migration_crash_preserves_source_and_can_finish[control-format]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_legacy_migration_crash_preserves_source_and_can_finish[completed]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc11_bootstrap.py::test_malformed_configuration_reports_actual_path": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "rc11_snapshot_schema_order"
     },
     "tests/backend/test_rc4_practice.py::test_automatic_protocol_failure_sigkill_and_startup[before_db_commit]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_practice.py::test_automatic_protocol_failure_sigkill_and_startup[journal_prepared]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_practice.py::test_automatic_protocol_failure_sigkill_and_startup[db_committed]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_practice.py::test_automatic_protocol_failure_sigkill_and_startup[journal_committed]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_private_retention.py::test_private_retention_real_sigkill_and_three_independent_restarts[retention_writing]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_private_retention.py::test_private_retention_real_sigkill_and_three_independent_restarts[retention_copied]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_private_retention.py::test_private_retention_real_sigkill_and_three_independent_restarts[private_before_db_commit]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_private_retention.py::test_private_retention_real_sigkill_and_three_independent_restarts[private_db_committed]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_trash_failure.py::test_sigkill_error_completion_and_three_independent_restarts[journal_prepared]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_trash_failure.py::test_sigkill_error_completion_and_three_independent_restarts[before_db_commit]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_trash_failure.py::test_sigkill_error_completion_and_three_independent_restarts[db_committed]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_trash_failure.py::test_sigkill_error_completion_and_three_independent_restarts[journal_committed]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "schema_read_requests_ddl"
     },
     "tests/backend/test_rc4_private_retention.py::test_missing_anchor_requires_explicit_rescue_and_preserves_different_variants[None]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "storage_setup_anchor_and_reset"
     },
     "tests/backend/test_rc4_private_retention.py::test_missing_anchor_requires_explicit_rescue_and_preserves_different_variants[e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855]": {
-      "run": 41215645263,
-      "outcome": "FAIL",
+      "run": 41217778080,
+      "outcome": "PASS",
       "group": "storage_setup_anchor_and_reset"
     },
     "tests/backend/test_0280_archived_cross_backup.py::test_0280_later_backup_extends_archived_event_via_change_request": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0283_structure_simplification.py::test_0283_cancel_applied_layout_change_restores_layout_and_creates_no_manual_task": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0283_structure_simplification.py::test_0283_direct_archived_structure_off_flattens_camera_and_sidecar_plan": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0283_structure_simplification.py::test_0283_manual_folder_created_while_structure_off_reenables_applied_layout": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0283_structure_simplification.py::test_0283_structure_off_flattens_camera_xmp_and_export_without_manual_task": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0284_patch.py::test_0284_archive_verification_accepts_os_collision_names[A (1).JPG-A.jpg]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0284_patch.py::test_0284_archive_verification_accepts_os_collision_names[A 1.JPG-A.jpg]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0284_patch.py::test_0284_archive_verification_accepts_os_collision_names[A copy 2.JPG-A.jpg]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0284_patch.py::test_0284_archive_verification_accepts_os_collision_names[A.JPG-A (1).jpg]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0284_patch.py::test_0284_archive_verification_accepts_os_collision_names[A.JPG-A Kopie.jpg]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0285_patch.py::test_0285_arbitrary_image_is_advisory_but_configured_master_is_export": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0285_patch.py::test_0285_identical_xmp_and_export_copies_are_advisory_and_deletable": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0285_patch.py::test_0285_lightroom_export_variants_share_camera_family": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0286_patch.py::test_0286_deleting_planned_event_restores_archive_release_marker": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0286_patch.py::test_0286_released_archive_assets_follow_cross_job_family_and_layout_roles": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0287_patch.py::test_0287_delete_applied_archive_origin_flattens_all_assets_in_archive_release_stock": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0287_patch.py::test_0287_delete_applied_flattens_xmp_and_export_into_free_day": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0300_library_foundation.py::test_0300_library_work_root_isolated_below_shared_work_area": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0311_global_stock.py::test_0311_central_sync_does_not_overwrite_locally_applied_path": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0311_global_stock.py::test_0311_main_migration_moves_only_free_stock_to_central": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_03211_patch.py::test_03211_applied_edit_reservation_closes_multi_library_race": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_03211_patch.py::test_03211_applied_no_event_extension_absorbs_other_backup": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0329_patch.py::test_0329_first_library_is_user_named_primary_without_main_work_folder[existing-german-default]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_0329_patch.py::test_0329_first_library_is_user_named_primary_without_main_work_folder[existing-german-explicit]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_f16_f20_stock_consistency.py::test_migration_skips_foreign_family_but_moves_real_main_stock": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "ambient_registry_fixture_context"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_unattested_physical_rename_has_no_effect[api-backup_directory_name]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_unattested_physical_rename_has_no_effect[api-workspaces_directory_name]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_unattested_physical_rename_has_no_effect[api-metadata_directory_name]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_unattested_physical_rename_has_no_effect[api-trash_directory_name]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_unattested_physical_rename_has_no_effect[helper-backup_directory_name]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_unattested_physical_rename_has_no_effect[helper-workspaces_directory_name]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_unattested_physical_rename_has_no_effect[helper-metadata_directory_name]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_unattested_physical_rename_has_no_effect[helper-trash_directory_name]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_sigkill_and_three_real_lifecycle_starts_preserve_state[before-denial]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_f14_o2_policy.py::test_f14_o2_sigkill_and_three_real_lifecycle_starts_preserve_state[after-denial]": {
-      "run": 41215645263,
+      "run": 41217778080,
       "outcome": "PASS",
       "group": "f14_initial_state_contract"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[stage]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "trash_recovery_and_scope"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[first_db]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "trash_recovery_and_scope"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[last_db]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "trash_recovery_and_scope"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[committed]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "trash_recovery_and_scope"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[cleanup]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "trash_recovery_and_scope"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_recovery_can_itself_be_interrupted[catalogue]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "trash_recovery_and_scope"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_recovery_can_itself_be_interrupted[file_return]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "trash_recovery_and_scope"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_recovery_can_itself_be_interrupted[journal_removal]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "trash_recovery_and_scope"
+    },
+    "tests/backend/test_0561_recovery.py::test_partial_commit_restores_cascade_and_set_null_preserves_other_edits": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "external_tamper_uses_guarded_connection"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_recovery_refuses_ambiguous_state_and_keeps_evidence[schema]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "external_tamper_uses_guarded_connection"
+    },
+    "tests/backend/test_0561_recovery.py::test_trash_recovery_refuses_ambiguous_state_and_keeps_evidence[row_conflict]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "external_tamper_uses_guarded_connection"
+    },
+    "tests/backend/test_rc6_legacy_setup.py::test_historical_missing_intent_offers_confirmed_setup": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_rc6_legacy_setup.py::test_catalog_issue_is_not_duplicated_and_blocker_is_explained": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_rc6_legacy_setup.py::test_incomplete_live_wipe_then_process_restart_and_confirmed_onboarding": {
+      "run": 41217778080,
+      "outcome": "FAIL",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_rc5_practice_followup.py::test_empty_explicit_reset_is_offered_but_not_automatically_rebound": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_0500_http_owner_auth.py::test_0500_real_app_routes_are_behind_auth": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "health_without_startup_contract"
+    },
+    "tests/backend/test_f14_continuation.py::test_f14_exception_retains_unproven_reservation": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "error_wording_contract"
+    },
+    "tests/backend/test_f14_continuation.py::test_f14_orphan_shared_reservation_blocks_other_library_after_sigkill": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "error_wording_contract"
+    },
+    "tests/backend/test_f14_fixed_storage.py::test_f14_existing_names_never_migrate[legacy]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_f14_fixed_storage.py::test_f14_existing_names_never_migrate[custom]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_wave1_integration.py::test_registered_import_preserves_both_security_contracts[normal-True]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_wave1_integration.py::test_registered_import_preserves_both_security_contracts[late-collision-True]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
+    },
+    "tests/backend/test_wave1_integration.py::test_registered_import_preserves_both_security_contracts[root-replaced-before-native-True]": {
+      "run": 41217778080,
+      "outcome": "PASS",
+      "group": "storage_setup_anchor_and_reset"
     }
   },
   "counts": {
-    "PASS": 56,
-    "FAIL": 14
+    "PASS": 92,
+    "FAIL": 1
   },
-  "note": "Subset outcomes only, never replacement of the required final 2444+ node matrix. Latest application 99d0f2bd0ce7e7dbd9c4032bbfda5e8dd67f5170 pending in run 41217778080."
+  "note": "Focused outcomes on the stated source only. Current application f0e69247 pending; complete final matrix remains required.",
+  "not_retested": 147
 }
