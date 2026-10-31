@@ -202,6 +202,10 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 
 def _ensure_registry_schema_table(connection: sqlite3.Connection) -> None:
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='registry_schema_versions'"
+    ).fetchone():
+        return
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS registry_schema_versions (

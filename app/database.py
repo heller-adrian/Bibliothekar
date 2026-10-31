@@ -80,6 +80,13 @@ def database_connection(
 def ensure_schema_version_table(
     connection: sqlite3.Connection,
 ) -> None:
+    # Even CREATE TABLE IF NOT EXISTS invokes SQLite's write authorizer.
+    # Reading an already initialized catalogue must not request DDL authority
+    # while an unrelated or unresolved file operation is protected.
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_versions'"
+    ).fetchone():
+        return
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS schema_versions (

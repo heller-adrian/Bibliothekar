@@ -58,9 +58,12 @@ def legacy(case, *, completed=False):
     operation.update(workspace=str(root),database=str(db),bindings=bindings)
     _, parent=ro._control(root)
     ro._write(parent/'state.json',state)
-    op=parent/('operation-'+bootstrap.key_for(operation)+'.json');ro._write(op,operation)
     (case/'config/settings.json').write_text('{}')
+    # This snapshot represents schemas prepared BEFORE the RC10 process died.
+    # Publishing its orphan first and then using production migration APIs
+    # wrongly asks for new DDL while an unresolved historical intent is fenced.
     initialize_database(db);initialize_library_registry(case/'database/bibliothekar-global.sqlite3')
+    op=parent/('operation-'+bootstrap.key_for(operation)+'.json');ro._write(op,operation)
     return root,db,parent,state,operation,lock
 
 
