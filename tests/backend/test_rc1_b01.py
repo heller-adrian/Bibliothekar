@@ -30,47 +30,49 @@ def test_b01_idle_event_inspection(fixture):
 
 
 def test_b01_parallel_edit_structure(fixture, monkeypatch):
+    # Read-only GETs no longer enter the former trash._physical_entries
+    # writer reservation. Prove both independent views remain concurrently
+    # inspectable while one database read is deliberately suspended.
     case, ws, reg, dbs, ev = seed(fixture)
-    entered = threading.Event()
-    release = threading.Event()
-    results = {}
-    holders = []
-    original = trash._physical_entries
-
+    entered=threading.Event();release=threading.Event();results={}
+    actual=main.get_event_edit_context
     def paused(*args, **kwargs):
         if not entered.is_set():
-            record = ro._ACTIVE.get()[-1]
-            holders.append({'pid': os.getpid(), 'thread': threading.get_ident(),
-                            'record': {k: v for k, v in record.items() if not k.startswith('_')},
-                            'lock': str(record['_path'].with_suffix('.lock'))})
             entered.set()
             assert release.wait(5)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(trash, '_physical_entries', paused)
-
+        return actual(*args, **kwargs)
+    monkeypatch.setattr(main, 'get_event_edit_context', paused)
+    control=ro._control_location(ws)
+    before_receipts={p.name:p.read_bytes() for p in control.glob('*.json')}
+    before_media=(ws/'Arbeitsbereiche/main/original.JPG').read_bytes()
+    with database_connection(dbs[0]) as c:
+        before_rows=(dict(c.execute('SELECT id,state FROM jobs WHERE id=?',('j',)).fetchone()),
+                     dict(c.execute('SELECT id,status,revision FROM events WHERE id=?',('e',)).fetchone()))
     def request(endpoint):
-        client = TestClient(main.app, raise_server_exceptions=False)
-        try:
-            results[endpoint] = client.get('/api/jobs/j/events/e/' + endpoint)
-        finally:
-            client.close()
-
-    first = threading.Thread(target=request, args=('structure',))
+        client=TestClient(main.app, raise_server_exceptions=False)
+        try:results[endpoint]=client.get('/api/jobs/j/events/e/'+endpoint)
+        finally:client.close()
+    first=threading.Thread(target=request, args=('structure',))
     first.start()
-    assert entered.wait(5)
-    timer = threading.Timer(.2, release.set)
-    timer.start()
     try:
-        request('edit')
+        assert entered.wait(5), 'structure GET did not reach its event context'
+        second=threading.Thread(target=request, args=('edit',))
+        second.start()
+        second.join(2)
+        assert not second.is_alive(), 'independent read-only edit GET was serialized behind structure GET'
     finally:
         release.set()
         first.join(5)
-        timer.join()
-    (ev / 'b01-lock-holder.json').write_text(json.dumps(holders, indent=2))
-    assert results['structure'].status_code == 200, results['structure'].text
-    assert results['edit'].status_code == 200, results['edit'].text
-    assert not list(ro._control_location(ws).glob('operation-*.json'))
+        if 'second' in locals():second.join(5)
+    assert not first.is_alive()
+    for endpoint in ('edit','structure'):
+        assert results[endpoint].status_code==200,results[endpoint].text
+        assert results[endpoint].json()['event']['id']=='e'
+    assert {p.name:p.read_bytes() for p in control.glob('*.json')}==before_receipts
+    assert (ws/'Arbeitsbereiche/main/original.JPG').read_bytes()==before_media
+    with database_connection(dbs[0]) as c:
+        assert (dict(c.execute('SELECT id,state FROM jobs WHERE id=?',('j',)).fetchone()),
+                dict(c.execute('SELECT id,status,revision FROM events WHERE id=?',('e',)).fetchone()))==before_rows
 
 
 import pytest
@@ -149,15 +151,39 @@ def test_b01_live_trash_operation_is_not_waited_on_indefinitely(fixture):
     from app.trash_selective import _operation_lock
     case,ws,reg,dbs,ev=seed(fixture)
     entered=threading.Event();release=threading.Event()
+    errors=[]
     def holder():
-        with _operation_lock(ws):entered.set();assert release.wait(5)
-    thread=threading.Thread(target=holder);thread.start();assert entered.wait(5)
+        try:
+            with _operation_lock(ws):
+                entered.set()
+                assert release.wait(5)
+        except BaseException as error:errors.append(repr(error))
+    thread=threading.Thread(target=holder)
+    thread.start()
+    assert entered.wait(5)
+    control=ro._control_location(ws)
+    receipts_before={p.name:p.read_bytes() for p in control.glob('*.json')}
+    media_before=(ws/'Arbeitsbereiche/main/original.JPG').read_bytes()
+    with database_connection(dbs[0]) as c:
+        rows_before=(dict(c.execute('SELECT id,state FROM jobs WHERE id=?',('j',)).fetchone()),
+                     dict(c.execute('SELECT id,status,revision FROM events WHERE id=?',('e',)).fetchone()))
     client=TestClient(main.app,raise_server_exceptions=False)
     try:
+        start=time.monotonic()
         response=client.get('/api/jobs/j/events/e/edit')
-        assert response.status_code==409,response.text
-        assert 'Papierkorboperation' in response.json()['detail']
-    finally:release.set();thread.join(5);client.close()
+        assert response.status_code==200,response.text
+        assert response.json()['event']['id']=='e'
+        assert time.monotonic()-start<3
+        assert {p.name:p.read_bytes() for p in control.glob('*.json')}==receipts_before
+        assert (ws/'Arbeitsbereiche/main/original.JPG').read_bytes()==media_before
+        with database_connection(dbs[0]) as c:
+            assert (dict(c.execute('SELECT id,state FROM jobs WHERE id=?',('j',)).fetchone()),
+                    dict(c.execute('SELECT id,status,revision FROM events WHERE id=?',('e',)).fetchone()))==rows_before
+    finally:
+        release.set()
+        thread.join(5)
+        client.close()
+    assert not thread.is_alive() and not errors
     assert_open()
 
 
