@@ -304,7 +304,19 @@ def test_r1_batch_collision_after_first_move_stays_blocked(tmp_path,monkeypatch)
         return real(src,dst,*a,**kw)
     monkeypatch.setattr(tr.os,'link',clash)
     with pytest.raises(TrashError):tr.restore_trash_files(data['dbs'],ws,relative_paths=['A.JPG','B.JPG'])
-    monkeypatch.setattr(tr.os,'link',real);before=r.snapshot(case,ev/'partial-physical-before-start.json');state=starts(case,ev,True)
+    monkeypatch.setattr(tr.os,'link',real);before=r.snapshot(case,ev/'partial-physical-before-start.json')
+    # RC14 may keep the process available for protected read views even when
+    # the abandoned original F14 lease blocks all further trash mutations.
+    # A process exit code is not proof that the dangerous partial move was
+    # safely reconciled; require the actual durable write fence and byte state.
+    state=starts(case,ev)
+    from app.operation_health import inspect as operation_status
+    held=operation_status(ws)
+    assert not held['writes_allowed'] and any(
+        not item['live'] and item.get('kind')=='trash' for item in held['reservations']
+    ),held
+    with pytest.raises(TrashError):
+        tr.restore_trash_files(data['dbs'],ws,relative_paths=['A.JPG','B.JPG'])
     assert r.business_rows(before)==r.business_rows(state) and targets[0].read_bytes()==b'foreign-b'
     assert digest(ws/'Papierkorb/B.JPG')==data['expected']['B.JPG']
     assert any(digest(p)==data['expected']['A.JPG'] for p in (ws/'SD-Kartensicherungen').rglob('A.JPG'))
