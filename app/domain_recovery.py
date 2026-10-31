@@ -87,7 +87,7 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
         expected_ids={'function':record['ids']['function']}
         expected_roots=set(required)
         if record['ids']['function']==ORIGINAL_TRASH_RESTORE:
-            from app.trash_restore import _restore_parent, _load_restore, _relative
+            from app.trash_restore import _load_restore, _relative
             # Replaying arbitrary restore work would turn an unknown source into
             # ownership. Accept only a unique, existing journal matching the
             # exact original F14 selection and registered DB identities.
@@ -107,7 +107,9 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
                 if not isinstance(request_id,str) or not request_id or '/' in request_id or '..' in request_id:
                     raise health.DomainStartupError('restore_recovery_invalid_request_identity')
                 expected_ids['operation_id']=request_id
-            directory=_restore_parent(root)
+            directory=storage_paths(root)['metadata_root']/'.trash-restores'
+            if directory.is_symlink() or not directory.is_dir():
+                raise health.DomainStartupError('restore_recovery_journal_directory_unavailable')
             journals=sorted(directory.glob('*.json'))
             if len(journals)!=1 or any(p.is_symlink() for p in journals):
                 raise health.DomainStartupError('restore_recovery_ambiguous_journal_scope')
