@@ -42,8 +42,8 @@ Stand: Entwicklung; keine Veröffentlichung oder native TrueNAS-Abnahme.
    interpretiert. Kein neuer Dateiort wird geraten und kein Hash umgedeutet.
    Tatsächlich noch nicht migrierte Altaufträge bleiben vollständig geprüft;
    fehlende Quellen oder fremde Zielbytes dürfen ihre Migration nicht abschließen.
-   Gezielte neue Regressionen und der erneute gesamte Containerablauf stehen
-   nach dieser Korrektur noch aus.
+   Drei gezielte Migrationsregressionen sind bestanden. Die erneute vollständige
+   Containerabnahme steht nach dieser Korrektur noch aus.
 6. Die General-Aufnahmeprüfung verwendete nur aktuelle Katalogdateizeilen als
    Liste bekannter Kamera-Hashes. Nach bestätigtem Dateiverlust fehlen diese
    Zeilen, die unveränderliche Quellenmitgliedschaft besteht aber weiter.
@@ -118,6 +118,11 @@ GET/HEAD lesen Katalog und Dateisystem ohne persistente Katalog-/F14-Schreibwirk
 `POST /api/workspace/refresh` aktualisiert den Bestand unter den normalen
 Schreibgrenzen; ein fehlgeschlagener Refresh verhindert die anschließende sichere
 Ansicht nicht. Die Tests vergleichen komplette SQL-Dumps und F14-JSON-Bytes.
+
+Thumbnail-GETs liefern nur vorhandene reguläre Cachedateien. Fehlende oder als
+Symlink vorliegende Caches ergeben 404. Der Importworker erzeugt Vorschauen
+weiterhin unter seiner normalen Schreibfreigabe; ein GET darf diesen Builder
+weder bei normalem Betrieb noch während eines fachlichen Konflikts aufrufen.
 
 ## Metadaten-Variante A
 

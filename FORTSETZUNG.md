@@ -1,3 +1,33 @@
+# Aktuell – 31.10.2026: Herkunftslücke korrigiert, neuer vollständiger Nachlauf
+
+Branch `codex/pre5-operation-recovery`, Anwendungskandidat
+`5f741f93f8fdb34535d87f6d71ec79e380ffe940`.
+**Zuerst Lauf 41192396662 direkt per gh api prüfen.**
+
+Voriger Lauf 41191231150: 56 neue + 80 fokussierte PASS, Frontend PASS;
+pre5/pre4-Livecontainer PASS. Historische Fälle historical/rc14/foreign/three PASS.
+Beim Seed des sigkill-Falls scheiterte ein GET auf einen gerade abschließenden
+Import unter dem unveränderten veröffentlichten pre.2. Dessen Middleware fordert
+für jeden Job-GET eine schreibende Schema-Freigabe und kann im SQL-/F14-Fenster
+409 liefern. Historischer Seed wartet jetzt read-only auf completed und das
+Entfernen exakt seiner Importreservation, verlangt danach weiterhin HTTP200 und
+completed. Alle Recovery-/Hash-/Originalreservationsprüfungen unverändert.
+
+Zusätzlicher echter Produktfehler aus dem Live-Log: Thumbnail-GET rief den
+schreibgeschützten Worker-Builder auf und lieferte operation_read_only_request/500.
+GET liefert jetzt ausschließlich vorhandenen regulären Cache oder 404; der
+Importworker erzeugt Vorschaubilder weiterhin unter seiner Schreibfreigabe.
+Drei neue GET-Tests (fehlend/regulär/Symlink, ungelöster General-Konflikt), Browser
+prüft nun zusätzlich alle beobachteten Serverantworten auf 5xx. Der 90er Test
+verlangt am Ende alle tatsächlichen Katalog-Hashes, drei unveränderte korrigierte
+General-Kopien, SQLite quick_check und Fremdschlüssel beider Datenbanken.
+Lokale Syntax-/JS-/Diffprüfung PASS; ausführende Abnahme läuft ausschließlich Linux.
+
+Kontingent zuletzt fünf Stunden32%, Woche33%; Handoff spätestens ab70% beginnen.
+Kein NAS-Zugriff, keine Veröffentlichung, qa/rc14.zip nicht stage'n.
+
+--- Bisherige Chronologie ---
+
 # Aktuell – 31.10.2026: General-202 bis Endzustand untersucht
 
 Branch `codex/pre5-operation-recovery`. Anwendungskandidat:

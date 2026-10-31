@@ -69,7 +69,7 @@
       "fourteen_iPhone_JPEGs"
     ]
   },
-  "latest_application_candidate": "d05c61890205f5c0722883ebb3a7eb984c761d45",
+  "latest_application_candidate": "5f741f93f8fdb34535d87f6d71ec79e380ffe940",
   "additional_target_acceptance": {
     "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
     "run": 41119010880,
@@ -105,7 +105,7 @@
     "original_NAS_first_inventory_exception": "NOT_ESTABLISHED",
     "four_thousand_and_iPhone": "NOT_RUN"
   },
-  "pending_run": 41191231150,
+  "pending_run": 41192396662,
   "migration_fix_target_acceptance": {
     "source": "83b11dad16626c01460562caec8dd530ad4bbd42",
     "run": 41121252978,
@@ -161,5 +161,26 @@
     "artifact_id": 13038996100,
     "sha256": "1646e5873ac0d6ff235f4be8d2f93915ca3a6e3367246007ca20753819406f3e",
     "downloaded_archive_digest_verified": true
+  },
+  "last_container_gate_failure": {
+    "run": 41191231150,
+    "pre5_live": "PASS",
+    "pre4_live": "PASS",
+    "historical_cases_passed": [
+      "historical",
+      "rc14",
+      "foreign",
+      "three"
+    ],
+    "failure": "released pre.2 job GET write-gated schema check during its own import completion",
+    "candidate_fault": false,
+    "ninety_file_and_4000_iphone": "NOT_RUN"
+  },
+  "thumbnail_get_fix": {
+    "source": "5f741f93f8fdb34535d87f6d71ec79e380ffe940",
+    "evidence": "pre5 live container log: GET thumbnail attempted worker write admission and returned 500",
+    "change": "GET serves existing regular cache or404; only import worker generates cache under write admission",
+    "new_tests": 3,
+    "linux_recheck": "PENDING"
   }
 }
