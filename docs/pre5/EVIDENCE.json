@@ -66,7 +66,7 @@
       "fourteen_iPhone_JPEGs"
     ]
   },
-  "latest_application_candidate": "99d0f2bd0ce7e7dbd9c4032bbfda5e8dd67f5170",
+  "latest_application_candidate": "f0e692473c4dd9bc24db1114a94068b3c87c9bea",
   "additional_target_acceptance": {
     "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
     "run": 41119010880,
@@ -430,9 +430,13 @@
     "source": "aeaa7c5ddd6973d3744c6057ed694e3bdc4c117a",
     "application_source": "99d0f2bd0ce7e7dbd9c4032bbfda5e8dd67f5170",
     "run": 41217778080,
-    "result": "PENDING",
+    "result": "FAIL",
     "scope": "small_causal_backend_groups_only",
-    "full_matrix_started": false
+    "full_matrix_started": false,
+    "tests": 264,
+    "passed": 260,
+    "failed": 4,
+    "sqlite_statement_security_contracts_passed": 7
   },
   "deadline_profile": {
     "run": 41215816086,
@@ -443,5 +447,20 @@
     "downloaded_archive_digest_verified": true,
     "found_cause": "Repeated full operation-health observation for every SQL authorizer opcode",
     "after_fix_retest": "PENDING"
-  }
+  },
+  "pending_limited_acceptance": [
+    {
+      "run": 41219852833,
+      "source": "f0e692473c4dd9bc24db1114a94068b3c87c9bea",
+      "scope": "SQL security, bounded recovery closure, unprofiled 3892/100 file deadlines, then 60/82 targets",
+      "status": "PENDING"
+    },
+    {
+      "run": 41220098240,
+      "source": "1004e846805d160f02c8a7a919a79515e3a95f42",
+      "application_source": "f0e692473c4dd9bc24db1114a94068b3c87c9bea",
+      "scope": "two historical behavioral contract modules only",
+      "status": "PENDING"
+    }
+  ]
 }

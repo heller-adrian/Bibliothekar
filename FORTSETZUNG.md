@@ -3,18 +3,42 @@
 ## Sofortiger Einstieg
 
 Branch `codex/pre5-operation-recovery`.
-Letzter Anwendungscode: **99d0f2bd0ce7e7dbd9c4032bbfda5e8dd67f5170**.
-QA-/Dokumentationsstand: **aeaa7c5ddd6973d3744c6057ed694e3bdc4c117a**;
-Appdateien dazu identisch. Zuerst **41217778080** auswerten (zuletzt pending).
-Vorgänger **41216774058** aufa4edf56e lief noch; sein Ergebnis ist nützlich,
-gilt aber ausdrücklich NICHT als Abnahme der späteren SQL-/Live-Recovery-Fixes.
-Nie gestartete Zwischenläufe41217275546/41217482164/41217630423 wurden durch
-GitHubs einzigen wartenden Concurrency-Platz ersetzt. Keine parallele Matrix.
+Letzter Anwendungscode: **f0e692473c4dd9bc24db1114a94068b3c87c9bea**.
+QA-Vertragsstand: **1004e846805d160f02c8a7a919a79515e3a95f42**; Appdateien
+bytegleich zuf0e69247 (git diff für app/Dockerfile/Requirements leer).
 
-Wochenanzeige53%, Fünf-Stunden-Anzeige68%; geplante sechs zusätzliche
-Wochenprozentpunkte dieses Fortsetzungsschritts erreicht. Geordnet sichern,
-keine aktive Warteschleife. Der gestartete Workflow läuft unabhängig weiter.
-Keine Veröffentlichung vor vollständigem Grün; Freigabe danach besteht fort.
+**Zuerst41219852833 auswerten** (zuletzt in_progress): kleine Schlussgruppe
+mit SQL-/F14-Sicherheitsverträgen, den vier konkret behobenen Fehlern und den
+beiden realen Laufzeitfällen OHNE Profiling unter unveränderten90/300s-Grenzen.
+Erst nach grüner Fokusstufe folgen die normalen60/82 Zieltests.
+**Danach41220098240 auswerten** (zuletzt pending): ausschließlich zwei kleine
+historische Vertragsmodule; keine Wiederholung von Performance/Container/142Zielen.
+Keine parallele Vollmatrix; beide laufen ohne aktive Codex-Warteschleife weiter.
+
+41217778080 ist vollständig ausgewertet:264 Tests,260 PASS/4 FAIL/0 ERROR/SKIP,
+1014,825s. Alle sieben neuen Statement-Sicherheitsverträge PASS; auch die acht
+vorherigen SQLite-Autorisierungsverträge, Domain-/Retentions-/SIGKILL-Nachweise
+im gewählten Subset bestehen. Kein Deadlineübertritt in dieser264er-Stufe.
+Die beiden großen Laufzeitfälle waren dort NICHT enthalten.
+
+Vier konkrete Ursachen und Korrekturen:
+- Bestätigung[]/{}: TypeError im neuen Setcheck. Expliziter Stringtyp-Check in
+ API-Gate UND Domainhelper, ungültige Werte bleiben422/gesperrt. Fünf zusätzliche
+ direkte Negativverträge vor jeglicher Recovery, ursprüngliche Belege unverändert.
+- Legacy-Live-Wipe-Fixture fehlten General/Batch-Verwaltungsanker. Behauptete
+ vollständige Struktur jetzt vor dem historischen Startup angelegt. Produktive
+ Missing-Anchor-Prüfung unverändert. Nachfolgende Live-Wipe-/Reset-Assertions
+ laufen weiterhin echt und könnten weitere bisher verdeckte Fehler zeigen.
+- Gezielt ausgeführtem Job fehlte tinycss2; gepinntes Testwerkzeug1.4.0 ergänzt.
+ In der bisherigen vollen Matrix war es bereits vorhanden. Keine Appabhängigkeit.
+
+Originalfehler-Inventar jetzt im gezielten Nachlauf:92 ursprüngliche Fehler PASS,
+1 weiterhin FAIL,147 noch nicht erneut geprüft. Kein Ersatz der Schlussmatrix.
+Die vier Fehler sind implementiert korrigiert, erneuter Linuxbeweis noch PENDING.
+
+Wochenanzeige55%, Fünf-Stunden-Anzeige81%. Diese begrenzte Runde bei70/53 begonnen;
+jetzt geordnet gesichert stoppen. Keine weiteren Polls oder neue Testläufe.
+Keine Veröffentlichung vor kompletter erfolgreicher Gesamtabnahme.
 
 ## Gesicherte Ergebnisse
 
@@ -27,8 +51,8 @@ RO-Archive/Herkunft erhalten. Auf neuem Anwendungscode erneut erforderlich.
 
 Alle240 ursprünglichen Fehler: `docs/pre5/BACKEND-FAILURES.{md,json}`.
 Einzelner fokussierter Nachweis je Originalnode: `BACKEND-FIX-STATUS.json`:
-56 ursprüngliche Fehler inzwischen PASS,14 noch FAIL im zuletzt ausgeführten
-passenden Subset,170 noch nicht erneut geprüft. KEIN Ersatz der Schlussmatrix.
+92 ursprüngliche Fehler inzwischen PASS,1 noch FAIL im zuletzt ausgeführten
+passenden Subset,147 noch nicht erneut geprüft. KEIN Ersatz der Schlussmatrix.
 
 -41207207207:62/66 PASS. Acht neue SQLite-Autorisierungsverträge bestehen.
 -41214162298/efb50027:73/75 PASS. Beide RC11-Recovery-/Private-Lock-SIGKILL-
@@ -99,28 +123,44 @@ Backend-ZIP:248983932 Bytes, SHA256
 
 ## Nächste konkrete Schritte
 
-1. Run41217778080 inklusive vollständiger Fokus-XML/Guardlogs auswerten, Digest
- prüfen. Der altea4edf56e-Lauf enthält noch die normale LIVE-Recovery-Kollision;
- keine spätere Korrektur als bereits getestet erklären. `backend_focus.json`
- enthält SQL-/Domain-Verträge, RC11, RC4-SIGKILL/Retentionnegative,25 Registry-
- Nodes, O2, Trash-Recovery/-Fremdbytes/-SQL-FK-Fälle, Legacy-Setup, Auth und Wave1.
- Jobrahmen45min wegen erweitertem Umfang; einzelne Testgrenzen90/300s unverändert.
-2. Gemeinsame Ursachen der verbleibenden roten Fälle beheben, einschließlich
- Restore-Konfliktisolierung, originaler Backup-/Sort-/Import-/Recheck-Leases,
- vorhandener mehrfacher Intents, alter Startup-/Source-Text-Verträge. Kein
- generisches _RECOVERING-Bypass, kein Status-only-Abschluss, keine SQL-Handreparatur.
- Neue variant-rescue-/deletion-Protokolle zunächst negativ und realen SIGKILL prüfen.
-3. Nach grünen SQL-Negativverträgen die zwei Laufzeitfälle gezielt erneut
- ausführen. Vorhandener Marker[pre5-profile] führt ausschließlich diese beiden
- mit Profiling und bestehenden Deadlines aus; kein voller Testlauf. FAIL wegen
- Profiling ist weiterhin kein PASS; gegebenenfalls normale instrumentfreie
- Zweifall-Stufe vorbereiten, niemals pauschal Deadlines erhöhen.
-4. Erst nach weitgehend grünen Ursachen-Gruppen die vollständige Backendmatrix
- und neue Ziel-/Frontend-/Browser-/Supervisor-/90-Dateien-/4000-Familien-/14-iPhone-
- Abnahme auf finalem Anwendungscode wiederholen. Keine parallelen Vollläufe.
-5. Erst dann pre.5 veröffentlichen. Publisher unter docs/pre5/release PENDING,
- kein Releaseworkflow aktiv. Großes Backend-ZIP verlangt begrenzte Whitelist-
- Extraktion der Pflichtnachweise, keine blind aufgehobene300MB-Extraktionsgrenze.
+1.41219852833 vollständig anhand XML/guarded Logs bewerten und Artefaktdigest
+ prüfen. Vorrang: sieben Statement-Verträge bleiben grün,3892-Dateien-/100-Dateien-
+ Tests bestehen unter normalen unveränderten Fristen. Keine pauschale Deadline-
+ Erhöhung bei Rot. Bestätigung[]/{} muss422 liefern, alle fünf direkten ungültigen
+ Bestätigungen dürfen keine Recovery-Belege erzeugen. Legacy-Live-Wipe bis echter
+ bestätigter Neuaufnahme und erster Bibliothek prüfen, nicht nur ersten Start.
+2.41220098240 prüfen: zwei frühere Source-Substring-Verträge wurden durch
+ Verhaltenstests ersetzt. _prepare_technical_storage erstellt echte Config/
+ Katalog-/Registryschemata in Reihenfolge und bewahrt bestehende Einstellungen.
+ Sieben reale Ereignissuche-Varianten: read_session bleibt bei physical_refresh/
+ first_check rein lesend; erlaubte normale Refresh-Aufrufe bleiben funktional.
+ UI-Textverträge und übrige Tests beider Module bleiben erhalten. Appcode gleich.
+3. Bei Rot nur diese klaren Ursachen zuerst korrigieren. Keine volle Matrix
+ starten, solange relevante Gruppen rot/offen sind. Falls diese kleinen Gruppen
+ vollständig grün sind, die bisherigen264 ggf. gebündelt auf gleichem Appcode
+ bestätigen und nächste gemeinsame Recovery-Ursache auswählen. Für Backup-/
+ Sort-/Import-/Recheck-/Restore-Leases sind weiterhin viele ursprüngliche Fälle
+ offen; kein pauschales _RECOVERING-Bypass, kein SQL-Status-only-Abschluss.
+4. Erst nach weitgehend grünen Ursachen-Gruppen komplette Backendmatrix und
+ Ziel-/Frontend-/Browser-/Supervisor-/90-Dateien-/4000-Familien-/14-iPhone-
+ Abnahme auf finalem Code. Nicht alte Container-/Frontend-PASS dem neuen Code
+ zuschreiben. Keine parallelen Volltests, keine aktive Warteschleife.
+5. Erst danach pre.5 veröffentlichen. Publisher unter docs/pre5/release PENDING;
+ große Backend-ZIPs erfordern begrenzte Extraktion der Pflichtnachweise. Keine
+ blinde Aufhebung der300MB-Grenze und keine Veröffentlichung mit ungeklärtem Rot.
+
+## Aktuelle Nachweise und Grenzen
+
+41217778080: Artefakt13049571446 SHA256
+63302fc2692d83a237acfba303051098df85152ddffed06b07aacfcf0016184e,
+nach Download verifiziert. Vollständige Logs/XML unter
+/private/tmp/bibliothekar-pre5-evidence/41217778080-targets/.
+Zusätzlich alle neun Workflowlogs/1022Zeilen gelesen; keine weitere verborgene
+Infrastrukturfehlermeldung neben dem normalen Exit1. ZIP-SHA256
+013a4b7dc2bb7f8a7b0333b883c428b9506f4cac4eaddb9d15b867f02c82f06f,
+Datei41217778080-job-logs.zip. Keine großen Altartefakte erneut heruntergeladen.
+Der letzte sichere vollständige Backendnachweis bleibt41194643144 rot.
+Neuere gezielte PASS sind echte Teilnachweise, nicht globale Freigabe.
 
 ## Werkzeuge / Arbeitsgrenzen
 
