@@ -109,3 +109,11 @@ Startup besitzt außerdem seine bestehende gemeinsame Writer-Barriere. Der Test
 für laufende Orphan-Recovery verlangt unverändert gesperrte fremde SQL-/Root-
 Schreiber. test_recovery_waits_for_live_deletion prüft gleichzeitig den normalen
 wartenden Recovery-Fall. Beide im nächsten Linux-Fokus, Ergebnis noch PENDING.
+
+Der gezielte Reproduktionsjob enthält inzwischen mehrere ursachenbezogene
+historische Gruppen statt nur der ursprünglichen60 neuen Fälle. Jobrahmen auf
+45min angepasst; die einzelnen90/300s-Testgrenzen und die40min-Harnessgrenze
+bleiben unverändert. Keine Testabdeckung reduziert und keine Produktfrist erhöht.
+GitHub behält nur einen wartenden Lauf: Die nie gestarteten Zwischenstände
+5c109d83/f47627ee wurden durch den jeweils neueren wartenden Fokus ersetzt.
+Der laufende a4edf56e-Lauf wurde nicht unterbrochen. Keine parallele Vollmatrix.
