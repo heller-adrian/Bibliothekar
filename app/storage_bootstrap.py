@@ -271,6 +271,14 @@ def evidence(root, database, state, *, require_adoption=True):
         allowed.update({'bootstrap-completed-'+init['bootstrap_id']+'.json', 'bootstrap-operation-'+init['bootstrap_id']+'.json'})
     migration = state.get('control_migration') or {}
     if migration.get('receipt'): allowed.add(migration['receipt'])
+    # A completed technical startup receipt is not an orphan operation, but it
+    # must pass the same exact, read-only F14/state/history qualification as an
+    # explicitly confirmed empty setup. Never trust the filename prefix alone.
+    from app.managed_storage_health import _technical_startup_evidence
+    try:
+        allowed.update(_technical_startup_evidence(parent, root, database, state, names))
+    except ValueError as error:
+        raise RootOperationError('bootstrap_additional_operation: '+str(parent)) from error
     adoption_files = []
     for path in parent.glob('*.json'):
         if path.name.startswith('rc11-adoption-') and path.name not in allowed:
