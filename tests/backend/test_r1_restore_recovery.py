@@ -10,6 +10,7 @@ from app.library_context import resolve_library_context
 from app.library_registry import register_library,ensure_library_identity
 from tests.backend import test_0562_process_recovery as r
 from tests.backend.test_0562_process_recovery import isolated_process_environment
+from tests.backend.external_sql import external_edit
 
 
 def seed(tmp_path,monkeypatch):
@@ -180,7 +181,7 @@ def test_r1_unsafe_invariant_blocks_global_start(tmp_path,monkeypatch,tamper):
         register_library(case/'registry.sqlite3',library_id='new',display_name='New',database_path=db,workspace_root=ws,work_root=work,archive_root=archive)
 
     else:
-        with database_connection(data['dbs'][1]) as c:
+        with external_edit(data['dbs'][1],fixture_root=case) as c:
             if tamper=='catalogue':c.execute("UPDATE files SET current_root_kind='shared_workspace' WHERE original_filename='A.JPG'")
             else:c.execute("UPDATE file_families SET family_key=family_key||'-external' WHERE id=(SELECT family_id FROM files WHERE original_filename='A.JPG')")
     # Family identity is stronger than physical bytes: changing the natural
@@ -251,7 +252,9 @@ def test_r1_conflict_job_is_not_automatically_requeued(tmp_path,monkeypatch):
     monkeypatch.setattr(tr.os,'link',fail)
     with pytest.raises(TrashError):ti.prepare_queued_trash_restore(data['dbs'][0],data['dbs'],ws,jid)
     monkeypatch.setattr(tr.os,'link',actual)
-    with database_connection(data['dbs'][0]) as c:c.execute("UPDATE jobs SET state='interrupted',stage='interrupted' WHERE id=?",(jid,))
+    # Build a historical interrupted SQL state independently of the application
+    # writer, whose existing unresolved-operation guard must remain effective.
+    with external_edit(data['dbs'][0],fixture_root=case) as c:c.execute("UPDATE jobs SET state='interrupted',stage='interrupted' WHERE id=?",(jid,))
     assert ti.resume_safe_queued_trash_restores(data['dbs'][0],ws)==0
     starts(case,ev);preserved(data,ws,target_holder[0]);assert get_job(data['dbs'][0],jid)['state']=='interrupted'
     assert json.loads(journal(case).read_text())['state']=='conflict'

@@ -30,5 +30,10 @@
   "tests/backend/test_0329_patch.py::test_0329_first_library_is_user_named_primary_without_main_work_folder[existing-german-default]",
   "tests/backend/test_0329_patch.py::test_0329_first_library_is_user_named_primary_without_main_work_folder[existing-german-explicit]",
   "tests/backend/test_f16_f20_stock_consistency.py::test_migration_skips_foreign_family_but_moves_real_main_stock",
-  "tests/backend/test_f14_o2_policy.py"
+  "tests/backend/test_f14_o2_policy.py",
+  "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary",
+  "tests/backend/test_0561_recovery.py::test_trash_recovery_can_itself_be_interrupted",
+  "tests/backend/test_0561_recovery.py::test_partial_commit_restores_cascade_and_set_null_preserves_other_edits",
+  "tests/backend/test_0561_recovery.py::test_trash_recovery_refuses_ambiguous_state_and_keeps_evidence",
+  "tests/backend/test_0561_recovery.py::test_recovery_waits_for_live_deletion"
 ]

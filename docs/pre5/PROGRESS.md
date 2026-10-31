@@ -43,3 +43,23 @@ Der neue positive Medientest verglich irrtümlich auch das zu aktualisierende
 Journal; Vergleich erfasst jetzt ausschließlich alle tatsächlichen Stage-Medien.
 Fremd-/Fehlbytes- und laufende Recovery-Schreibbarrieren bestehen bereits.
 Alle erneuten Linuxbeweise für diese QA-Korrekturen noch PENDING.
+
+41215645263 aufa292b916c1ff6fd032f99a8e6a36dcba616819ea:164/179 PASS,
+15 FAIL,0 ERROR/SKIP; Artefakt13048875357 SHA256
+5e3db9376c87ba7b2375eaa73c0fd67be73f9b328d7da4da14637e075b31af19 verifiziert.
+Alle25 Ambient-Registry-Nodes und sämtliche O2-Verträge bestehen.13 bereits
+erklärte QA-Folgefehler; zwei echte Planungsbarrieren vor bestätigter Varianten-
+rettung. Neuer Schritt erweitert das gleiche Original-Lease-Protokoll auf
+selektive und vollständige Papierkorblöschung mit vorhandenem passendem Journal
+oder unveränderlichem F14-Fertigbeleg. Kein Journal fehlt als Erfolgsbeweis.
+Explizite Retentionrettung braucht erneut die vorhandene Bestätigung, exakt
+einen ursprünglichen Finalizer, unveränderte Rollen/Generationen, alle aktuellen
+Varianten und den bestehenden privaten Retentionbeweis. Dauerhafter Entscheid
+und Originalreservation bleiben erhalten; historischer Fehler bleibt failed.
+Unbekannte/zusätzliche Intents blockieren; ein GET darf keinerlei Replaybeleg
+anlegen. Negativtests und echte Abbruchgrenzen im nächsten Fokus enthalten.
+Externe synthetische SQL-Beschädigung wird nun ausdrücklich separat aufgebaut;
+die produktive SQLite-Schreibbarriere bleibt bestehen. Die alte Zwei-Katalog-
+Fixture registriert ihre zweite Bibliothek vor Operationsbeginn ordnungsgemäß.
+Automatischer Neustart nach API-Abschluss nur bei vorhandener alter Startup-
+Diagnose; normale laufende Worker erhalten keine erneute Vollinitialisierung.

@@ -473,6 +473,25 @@ def _root_request(fn):
         from app import operation_health
         try:
             context=_root_request_context()
+            if fn.__name__=='api_finalize_trash_failure':
+                bound=__import__('inspect').signature(fn).bind(*args,**kwargs)
+                payload=bound.arguments['payload']
+                confirmation=payload.get('confirmation')
+                if confirmation not in {'SAFE_ABORT_FAILED_RESTORE','RETAIN_ALL_FAILED_RESTORE_VARIANTS'}:
+                    raise HTTPException(status_code=422,detail='Die ausdrückliche Sicherheitsbestätigung fehlt.')
+                from app.domain_recovery import retry_failed_completion
+                try:
+                    restored=retry_failed_completion(context.database_path,context.workspace_root,
+                        bound.arguments['job_id'],confirmation=confirmation)
+                except (OSError,ValueError,KeyError,TypeError,TrashError) as error:
+                    raise HTTPException(status_code=409,detail=str(error)) from error
+                if restored is not None:
+                    # Completion was verified under the original lease. Only
+                    # the normal fenced startup may reset old diagnostics and
+                    # restart ordinary workers; no generic write waiver.
+                    if operation_health.inspect(context.workspace_root)['issues']:
+                        startup_database()
+                    return {**restored,'inventory':api_trash_inventory()}
             retry=nullcontext()
             accepted=set()
             if not operation_health.inspect(context.workspace_root)['writes_allowed']:

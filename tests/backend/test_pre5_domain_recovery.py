@@ -142,3 +142,59 @@ def test_live_recovery_fences_cached_sql_and_root_changes_but_keeps_safe_reads(r
     finally:release.set();thread.join(10);connection.close()
     assert not thread.is_alive() and not errors,errors
     assert not path.exists() and health.inspect(ws)['writes_allowed']
+
+
+@pytest.mark.parametrize('boundary',['stage','first_db','committed'])
+def test_original_delete_is_recovered_under_original_identity(tmp_path,monkeypatch,boundary):
+    from tests.backend.test_0561_audit_regressions import trash_case
+    from app import trash_selective as ts
+    db,other,ws,paths,payload=trash_case(tmp_path,monkeypatch,two=True)
+    class Cut(BaseException):pass
+    name={'stage':'_move_checked','first_db':'_purge_selected','committed':'_atomic_json'}[boundary]
+    real=getattr(ts,name)
+    def cut(*args,**kwargs):
+        value=real(*args,**kwargs)
+        if boundary!='committed' or args[1].get('state')=='committed':raise Cut()
+        return value
+    with monkeypatch.context() as patch:
+        patch.setattr(ts,name,cut)
+        with pytest.raises(Cut):ts.delete_selected_trash_files([db,other],ws,['A.JPG'])
+    path=next(ro._control_location(ws).glob('operation-*.json'));original=ro._read(path)
+    ts.recover_trash_deletions(ws,allowed_databases={db,other})
+    assert not path.exists()
+    assert ro._read(path.parent/('domain-recovery-'+original['reservation_id']+'.json'))['reservation']==original
+    assert health.inspect(ws)['writes_allowed']
+    from pathlib import Path
+    media=Path(paths['trash_root'])/'A.JPG'
+    if boundary=='committed':assert not media.exists()
+    else:assert media.read_bytes()==payload
+    from app.database import database_connection
+    for target in (db,other):
+        with database_connection(target) as c:
+            assert c.execute('PRAGMA integrity_check').fetchall()[0][0]=='ok'
+            assert not c.execute('PRAGMA foreign_key_check').fetchall()
+            assert c.execute('SELECT count(*) FROM files').fetchone()[0]==(0 if boundary=='committed' else 1)
+
+
+def test_get_cannot_start_domain_recovery_or_write_a_recovery_intent(ready):
+    from app import trash_selective as ts
+    _,ws,_,dbs,_=ready
+    path,original=interrupted(ready,FUNCTIONS[0]);before={p.name:p.read_bytes() for p in path.parent.glob('*.json')}
+    with health.read_session(),pytest.raises(RuntimeError):
+        ts.recover_trash_deletions(ws,allowed_databases=set(dbs))
+    assert before=={p.name:p.read_bytes() for p in path.parent.glob('*.json')}
+
+
+def test_original_delete_without_journal_is_not_inferred_complete(ready):
+    _,ws,reg,dbs,_=ready
+    domain_recovery.handlers()
+    with pytest.raises(RuntimeError):
+        with ro.reserve(ws,library_id='shared',kind='trash',ids={
+                'function':'app.trash_selective.delete_selected_trash_files','relative_paths':'["A.JPG"]'},
+                paths=[ws,*(ws/n for n in load_storage_settings(workspace_root=ws).values())]):
+            raise RuntimeError('unproved original deletion')
+    path=next(ro._control_location(ws).glob('operation-*.json'));original=ro._read(path)
+    with pytest.raises(health.DomainStartupError,match='missing_delete_journal_or_receipt'):
+        domain_recovery.replay(ws,reg,database=dbs[0])
+    assert ro._read(path)==original and not health.inspect(ws)['writes_allowed']
+    assert not (path.parent/('domain-recovery-'+original['reservation_id']+'.json')).exists()

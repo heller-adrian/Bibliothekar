@@ -60,6 +60,14 @@ def trash_case(tmp_path,monkeypatch,two=False):
     if two:
         initialize_database(other)
         create_job(other,job_id='J',kind='sd_import',trigger_type='approved_sd',operation='folder_import',source_path='synthetic-only')
+        # A second catalogue participating in shared recovery is a registered
+        # library, not an unexplained database discovered by directory scan.
+        from app.library_registry import register_library,ensure_library_identity
+        ensure_library_identity(other,'second')
+        work=Path(paths['workspaces_root'])/'second';work.mkdir()
+        archive=tmp_path/'archive-second';archive.mkdir()
+        register_library(tmp_path/'registry.sqlite3',library_id='second',display_name='Second',
+            database_path=other,workspace_root=workspace,work_root=work,archive_root=archive)
     payload=b'synthetic-retain-provenance'
     _file(db,'A.JPG',payload)
     if two:_file(other,'A.JPG',payload)

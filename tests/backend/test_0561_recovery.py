@@ -14,6 +14,7 @@ from app.library_registry import initialize_library_registry
 from app.storage_config import load_storage_settings, storage_paths
 from app.trash import TrashError
 from tests.backend.test_0561_audit_regressions import trash_case, sha
+from tests.backend.external_sql import external_edit
 
 
 class Interrupted(BaseException):
@@ -122,7 +123,9 @@ def test_partial_commit_restores_cascade_and_set_null_preserves_other_edits(tmp_
         c.execute("INSERT INTO qa_cascade VALUES(1,?,'provenance')", (fid,))
         c.execute("INSERT INTO qa_nullable VALUES(1,?,'before')", (fid,))
     interrupt_after_first_db(db, other, workspace, monkeypatch)
-    with database_connection(db) as c:
+    # Explicit external edits to synthetic QA-only tables, made while the
+    # original operation is interrupted. Application writers stay fenced.
+    with external_edit(db,fixture_root=tmp_path) as c:
         assert c.execute('SELECT count(*) FROM qa_cascade').fetchone()[0] == 0
         assert c.execute('SELECT file_id FROM qa_nullable').fetchone()[0] is None
         c.execute("UPDATE qa_nullable SET note='independent edit'")
@@ -151,9 +154,9 @@ def test_trash_recovery_refuses_ambiguous_state_and_keeps_evidence(tmp_path, mon
         staged.symlink_to(tmp_path/'outside')
     elif tamper == 'unregistered_db': data['databases'][0]['path'] = str(tmp_path/'unregistered.sqlite3')
     elif tamper == 'schema':
-        with database_connection(db) as c: c.execute('CREATE TABLE qa_new(id INTEGER PRIMARY KEY)')
+        with external_edit(db,fixture_root=tmp_path) as c: c.execute('CREATE TABLE qa_new(id INTEGER PRIMARY KEY)')
     elif tamper == 'row_conflict':
-        with database_connection(db) as c:
+        with external_edit(db,fixture_root=tmp_path) as c:
             row = dict(next(e['row'] for e in data['databases'][0]['snapshot']['deleted'] if e['table']=='file_families'))
             row['original_stem'] = 'foreign conflict'
             c.execute('INSERT INTO file_families ('+','.join(row)+') VALUES ('+','.join('?' for _ in row)+')', tuple(row.values()))

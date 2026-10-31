@@ -173,9 +173,18 @@ def test_missing_anchor_requires_explicit_rescue_and_preserves_different_variant
     old_journal=journal.read_bytes();old_status=status.read_bytes()
     assert tf.recover_failed_restores(db,ws)[0]['status']=='blocked'
     assert tf.describe_failures(db,ws)[0]['rescue_available']
+    from app import root_operations as ro
+    operation=next(ro._control_location(ws).glob('operation-*.json'));original=ro._read(operation)
     with pytest.raises(main.HTTPException) as e:main.api_finalize_trash_failure(jid,{'confirmation':'yes'})
     assert e.value.status_code==422
+    assert ro._read(operation)==original
     result=main.api_finalize_trash_failure(jid,{'confirmation':'RETAIN_ALL_FAILED_RESTORE_VARIANTS'})
+    assert not operation.exists()
+    parent=operation.parent;nonce=original['reservation_id']
+    completed=ro._read(parent/('domain-recovery-'+nonce+'.json'))
+    assert completed['reservation']==original and completed['disposition']=='confirmed_all_current_variants_retained_error_preserved'
+    decision=ro._read(parent/('domain-rescue-decision-'+nonce+'.json'))
+    assert decision=={'format':1,'reservation':original,'confirmation':'RETAIN_ALL_FAILED_RESTORE_VARIANTS'}
     proof=private.recorded(db,ws,jid)['proof'];location=Path(result['recovery_path'])/'media'
     assert proof['mode']=='confirmed-current-variants' and proof['source_fingerprint']==anchor
     assert (location/'staging'/rel).read_bytes()==b'other preserved variant'

@@ -843,6 +843,11 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
             if expected is None:expected=generation(workspace,library)
             try:
                 from app.operation_health import read_only
+                if kind=='recovery' and not read_only():
+                    from app.domain_recovery import try_entry
+                    resumed=try_entry(fn.__module__+'.'+fn.__qualname__,workspace,
+                                      allowed_databases=a.get('allowed_databases'))
+                    if resumed is not None:return resumed
                 if not durable and read_only():
                     # Pure snapshots keep the same pinned-root authority but
                     # never acquire/persist a write reservation during a GET.
