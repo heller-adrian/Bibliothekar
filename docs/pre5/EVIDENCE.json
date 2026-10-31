@@ -66,7 +66,7 @@
       "fourteen_iPhone_JPEGs"
     ]
   },
-  "latest_application_candidate": "4a24b2575ef85a61fdbe6b4cc3d72d40c8e8c58a",
+  "latest_application_candidate": "99d0f2bd0ce7e7dbd9c4032bbfda5e8dd67f5170",
   "additional_target_acceptance": {
     "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
     "run": 41119010880,
@@ -389,6 +389,36 @@
         "missing_fixed_administration_directories_in_fixture": 4,
         "test_compared_intentionally_updated_journal_as_media": 1
       }
+    },
+    {
+      "run": 41215645263,
+      "source": "a292b916c1ff6fd032f99a8e6a36dcba616819ea",
+      "tests": 179,
+      "passed": 164,
+      "failed": 15,
+      "errors": 0,
+      "skipped": 0,
+      "artifact_id": 13048875357,
+      "sha256": "5e3db9376c87ba7b2375eaa73c0fd67be73f9b328d7da4da14637e075b31af19",
+      "downloaded_archive_digest_verified": true
     }
-  ]
+  ],
+  "latest_focused_qa": {
+    "source": "aeaa7c5ddd6973d3744c6057ed694e3bdc4c117a",
+    "application_source": "99d0f2bd0ce7e7dbd9c4032bbfda5e8dd67f5170",
+    "run": 41217778080,
+    "result": "PENDING",
+    "scope": "small_causal_backend_groups_only",
+    "full_matrix_started": false
+  },
+  "deadline_profile": {
+    "run": 41215816086,
+    "source": "2ad5023eed4e59aaa977a7671947e5e630b71072",
+    "result": "FAIL_DIAGNOSTIC_NOT_ACCEPTANCE",
+    "artifact_id": 13047948572,
+    "sha256": "f5c51c12f6e625dd165d0c83c0258abb58bbc4b7758aea081423555609d37b3c",
+    "downloaded_archive_digest_verified": true,
+    "found_cause": "Repeated full operation-health observation for every SQL authorizer opcode",
+    "after_fix_retest": "PENDING"
+  }
 }
