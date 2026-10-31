@@ -24,3 +24,9 @@ O2 vergleicht sämtliche vorbestehenden privaten JSON-Bytes vor/nach Ablehnung
 und verlangt weiterhin keine neuen Operationsnachweise. Die frühere Annahme,
 dass keinerlei JSON existieren dürfe, widersprach der bereits angelegten state.json.
 Byte-/Inode-/Katalog-/Generations- und echte SIGKILL-Grenzen bleiben geprüft.
+
+Optionale getrennte Profilstufe[pre5-profile] erfasst ausschließlich die beiden
+belegten Laufzeitfälle mit cProfile. Vorhandene90/300s-Deadlines, Assertions und
+Audit-/F14-/SQLite-Guards bleiben aktiv. Profile werden auch nach FAIL gesichert.
+Keine weiteren Reproduktions-, Frontend-, Container- oder Vollmatrixwiederholungen
+in diesem reinen Diagnoselauf; Ausführung ebenfalls sequenziell auf safe-Runner.

@@ -23,6 +23,7 @@ with (output/'bootstrap.log').open('w') as log:
 if result.returncode:
  print((output/'bootstrap.log').read_text());raise SystemExit(result.returncode)
 args=[sys.executable,str(tools/'runner.py'),'-q','-p','no:cacheprovider','--import-mode=importlib','-o','addopts=','--basetemp',str(scratch/'pytest'),'--junitxml',str(output/'result.xml'),'-p','finite_execution']
+if env.get('AUDIT_PROFILE_MATCH'):args+=['-p','profile_execution']
 if mode=='targets' and 'RC13_PARTITION' in env:args+=['-p','qa.rc13.partition']
 if mode=='backend':args+=[str(source/'tests/backend')]
 elif mode=='targets':
