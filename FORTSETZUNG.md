@@ -228,3 +228,36 @@ Detaillierter Bericht jetzt `docs/pre5/DIAGNOSTIC-20261031.md`.
 Produktcode, Branch `main`, Tags, GHCR, `latest` oder TrueNAS. Release blockiert.
 Nicht ungezielt die 147 oder Vollmatrix wiederholen, bevor Ursachen gruppiert
 und mit positiven/negativen Gegenbeweisen korrigiert wurden.
+
+## 31.10.2026 – nachgewiesene Fixture-/Erwartungskorrekturen, keine App-Änderung
+
+Zielgerichtete Linux-Nachprüfung auf **cc4cbe47b35e1f5d59eb231796e7e4f82bb37f31**:
+GitHub Actions **41226912195 SUCCESS, 3/3 PASS, 0 FAIL/ERROR/SKIP**.
+`test_rc9_setup_separation` prüft beide Varianten der ersten Bibliothek:
+`technical_registry` legt nur die Registry an, nicht die Hauptdatenbank.
+Daher ist `catalog_unavailable` in beiden synthetischen Zuständen korrekt,
+`can_setup_again` bleibt wahr, der Archiveintrag bleibt unberührt.
+`recovery_0562/worker.py` legt für die zweite historische Fixturebibliothek
+vor dem Crash auch `General` und `Batch Correction` an. Der reale
+Metadatenprojektionstest mit zwei SIGKILLs besteht bis zum Ende.
+Artefakt **13050924946**, GitHub- und unabhängig geprüfter SHA256
+`861f500dc3d1f98568ac6a46e798a291a92e6322d5589d930f93046d6f1bc7d0`.
+
+Zielgerichtete Linux-Nachprüfung auf **9d934a2dac883f2f39c81aed74ce9e182c7a19b0**:
+GitHub Actions **41227115670 SUCCESS, 2/2 PASS, 0 FAIL/ERROR/SKIP**.
+Zwei B01-Verhaltensverträge prüfen jetzt statt veralteter mutierender GET-Hooks
+einen aktiven Inventory-Writer gegenüber rein lesenden GETs sowie zwei
+parallele Ereignis-Leseabfragen. Erwartet wird HTTP 200 bei überprüften,
+unveränderten Medienbytes, Schlüssel-Datenbankzuständen und privaten
+F14-JSON-Belegen. Kein Produktionscode geändert. Artefakt **13052108489**,
+GitHub- und unabhängig geprüfter SHA256
+`1d75aaad3cee8dabf877b66c051f94b0801e1e9601fec22e0cf2e0b075370184`.
+
+**Vier zuvor rote Originalnodes** (RC9 technical_control, 0562 metadata
+projection, zwei B01-Fälle) sind jetzt gezielt grün, zusätzlich der positive
+RC9-legacy_roots-Kontrollfall. Dies ist KEINE vollständige Backendabnahme;
+`BACKEND-FIX-STATUS.json` bleibt zunächst das historische Inventar, dessen
+breite Statussynchronisierung noch aussteht. Die restlichen Recovery-/Restore-/
+Recheck-Fehler sind separat zu untersuchen. Die weiteren B01-Altverträge wurden
+hier nicht als erfolgreich nachgewiesen. Keine Tags, Images, main oder TrueNAS
+verändert; **Pre.5 nicht veröffentlichen**.

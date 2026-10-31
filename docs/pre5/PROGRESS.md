@@ -233,3 +233,28 @@ teilweise veraltete GET-Konflikterwartungen und F15/17-SQL-/Metadata-Verträge.
 Keine Anwendungscodereparatur genehmigt oder ausgeführt. Die vollständigen 147
 und die finale Backend-/Frontend-/Container-Matrix bleiben offen.
 **v1.0.0-pre.5 bleibt gesperrt.**
+
+## 31.10.2026 – gerichtete Fixture- und Read-only-Vertragsabnahme
+
+- **41226912195 / cc4cbe47**: 3/3 PASS, 0 ERROR/SKIP. Der technische
+  Registry-Seed erstellt absichtlich keinen Hauptkatalog; die bisherige RC9-
+  Erwartung `catalog_unavailable==0` war deshalb falsch, obwohl
+  `can_setup_again` und die unveränderten Archivbytes korrekt waren.
+  Die zweite alte 0562-Fixture hatte vor SIGKILL `General` und
+  `Batch Correction` nicht angelegt; Vorbelegung nun im Worker-Test,
+  Original-Zwei-Abbrüche-/Recovery-Vertrag besteht. QA-/Testdateien allein.
+  Artefakt13050924946 SHA256
+  `861f500dc3d1f98568ac6a46e798a291a92e6322d5589d930f93046d6f1bc7d0`.
+- **41227115670 / 9d934a2d**: 2/2 PASS, 0 ERROR/SKIP.
+  Zwei B01-Altverträge wurden nicht einfach abgeschwächt: Sie beweisen
+  lesende GETs unter aktivem Inventory-Writer bzw. bei zwei gleichzeitigen
+  Leseabfragen, inklusive unveränderter privater F14-Nachweise, Medienbytes
+  und geprüfter Datenbankwerte. Die alte GET-409-Annahme und der
+  tote Kompatibilitäts-Link-Hook werden dadurch durch direktes Verhalten
+  ersetzt. Artefakt13052108489 SHA256
+  `1d75aaad3cee8dabf877b66c051f94b0801e1e9601fec22e0cf2e0b075370184`.
+- Beide ZIPs nach Download unabhängig gehasht und alle fünf JUnit-Testcases
+  geprüft; keine Anwendungscodeänderung. Vier ursprünglich rote Nodes bestehen
+  jetzt, RC9-legacy_roots als zusätzliche positive Kontrolle.
+- Weitere B01-Lock- und fachliche Recovery-Fälle sind NICHT hiermit abgenommen.
+  Letzte breite Matrix bleibt rot; Pre.5-Veröffentlichung gesperrt.

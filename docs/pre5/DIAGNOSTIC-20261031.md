@@ -153,3 +153,30 @@ Damit sind pauschale Aussagen, dass jede Recoverysperre defekt sei, widerlegt.
   TrueNAS/NFSv4-ACL, reale SD/USB, echtes DNG1.7-/RAF-Schreiben sind
   damit nicht als zusätzlich bestanden behauptet.
 
+
+## 31.10.2026 – abgegrenzte Fixture-/historische Read-Only-Korrekturen
+
+Die diagnostischen Hypothesen wurden an **fünf** gezielt isolierten Fällen
+mit unverändertem Anwendungscode geprüft:
+
+| Ursache | Änderung nur am Test | GitHub / Ergebnis |
+|---|---|---|
+| RC9-Ersteinrichtung: synthetische Registry enthält absichtlich keine Hauptdatenbank | In beiden Varianten `catalog_unavailable` erwarten, `can_setup_again` und Archivbild weiterhin prüfen | 41226912195, 2 PASS |
+| RC0562 Metadatenprojektion: zweiter Legacy-Workspace ohne `General`/`Batch Correction` | Die beiden Unterordner vor Crash/Testsnapshot explizit anlegen | 41226912195, 1 PASS |
+| B01 GET mit aktiver Inventar-Reservation: historisch `409` erwartet | Tatsächlich rein lesendes GET und unveränderte F14-JSON-Bytes, Medien und überprüfte SQL-Zustände nachweisen | 41227115670, 1 PASS |
+| B01 Parallel-GET: Hook auf mutierende `_ensure_compatibility_link` war unerreichbar | Zwei echte parallele GETs mit Pause in der gelesenen Ereignisabfrage prüfen, F14- und Mediennachweise unverändert | 41227115670, 1 PASS |
+
+**4 zuvor fehlgeschlagene Originalnodes jetzt PASS; 1 weiterer bereits
+positiver RC9-Kontrollfall PASS.** Beide ZIP-Artefakte nach Download auf die
+von GitHub gemeldete SHA256 geprüft und JUnit 5/5 ohne Fehler/Skip gelesen:
+- 41226912195 / Artefakt 13050924946 / Commit cc4cbe47:
+  `861f500dc3d1f98568ac6a46e798a291a92e6322d5589d930f93046d6f1bc7d0`
+- 41227115670 / Artefakt 13052108489 / Commit 9d934a2d:
+  `1d75aaad3cee8dabf877b66c051f94b0801e1e9601fec22e0cf2e0b075370184`
+
+Diese Änderungen betreffen ausschließlich Tests/QA-Workflow, nicht die
+Sicherheitsregeln. Insbesondere bleibt offen, ob andere historische B01-Tests
+(aktive Trash-/Parallel-Schreiblocks) erwartungsseitig veraltet oder produktiv
+fehlerhaft sind; kein automatischer `409`-zu-`200`-Ersatz ohne getrennten
+Gegenbeweis. Andere 117er-Fehlergruppen nicht global als behoben markieren.
+Release weiterhin gesperrt.
