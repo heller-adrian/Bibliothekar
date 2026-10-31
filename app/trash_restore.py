@@ -565,5 +565,54 @@ def recover_trash_restores(workspace_root: Path, *, allowed_databases: set[Path]
                 if not data.get("operation_id"):
                     validate_active_roots()
                     journal.unlink(); _sync_dir(journal.parent)
+                elif journal.exists():
+                    # The old restore may have committed every known source,
+                    # while its outer import worker died before recording the
+                    # stage-to-known_restored handoff. Never infer completion
+                    # from a hash alone: require exact DB and audit receipts.
+                    updated,_,_,finished=_load_restore(journal,workspace_root,_databases(allowed_databases))
+                    if updated.get('state')=='completed':
+                        _finish_verified_known_restore_handoff(journal,updated,finished,root,central,workspace_root)
             recovered += 1
     return recovered
+
+
+def _finish_verified_known_restore_handoff(journal, data, plans, root, central, workspace):
+    """Finish only a fully published *known-only* queued trash restore.
+
+    This is a journal-state repair of the already committed original action,
+    never permission to adopt unknown bytes or a guessed file identity.
+    """
+    from app.trash_selective import _atomic_json, _sync_dir
+    from app.trash_import import stage_parent
+    if not data.get('operation_id') or data.get('operation_id')!=journal.stem:
+        raise TrashError('Restore-Abschluss besitzt keine gebundene Auftragskennung.')
+    request=stage_parent(workspace)/(journal.stem+'.json')
+    if request.is_symlink() or not request.is_file():
+        raise TrashError('Restore-Auftragsjournal fehlt oder ist nicht eindeutig.')
+    item=json.loads(request.read_text())
+    selected=sorted(plan['relative'] for plan in plans)
+    if (item.get('job_id')!=journal.stem or item.get('schema_version')!=2
+        or item.get('status') not in {'staged','known_restored'}
+        or item.get('files')!=[]
+        or sorted(item.get('known_paths') or [])!=selected
+        or sorted(item.get('relative_paths') or [])!=selected
+        or not selected or len(selected)!=len(set(selected))):
+        raise TrashError('Restore-Abschluss widerspricht der gesicherten Originalauswahl.')
+    _preflight_restore(plans,root,central)
+    for plan in plans:
+        for database,row in plan['rows']:
+            with database_connection(database) as conn:
+                current=conn.execute('SELECT current_root_kind,current_relative_path FROM files WHERE id=?',(row['id'],)).fetchone()
+                history=conn.execute("SELECT COUNT(*) FROM audit_log WHERE job_id=? AND action='trash_file_restored' AND entity_id=?",
+                    (row['job_id'],str(row['id']))).fetchone()[0]
+                if (current is None or tuple(current)!=('shared_workspace',plan['target_relative'])
+                    or history!=1):
+                    raise TrashError('Restore-Abschluss ohne genau einen unveränderten Katalog-/Auditbeleg.')
+    if item['status']=='staged':
+        _atomic_json(request,{**item,'status':'known_restored','known_restored_count':len(plans)})
+    elif item.get('known_restored_count')!=len(plans):
+        raise TrashError('Restore-Abschlusszähler wurde verändert.')
+    validate_active_roots()
+    journal.unlink()
+    _sync_dir(journal.parent)
