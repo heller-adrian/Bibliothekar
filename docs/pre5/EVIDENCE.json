@@ -69,7 +69,7 @@
       "fourteen_iPhone_JPEGs"
     ]
   },
-  "latest_application_candidate": "96d538fac1a6c7fa42785e821dbc20cad505b07c",
+  "latest_application_candidate": "d05c61890205f5c0722883ebb3a7eb984c761d45",
   "additional_target_acceptance": {
     "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
     "run": 41119010880,
@@ -105,7 +105,7 @@
     "original_NAS_first_inventory_exception": "NOT_ESTABLISHED",
     "four_thousand_and_iPhone": "NOT_RUN"
   },
-  "pending_run": 41123293238,
+  "pending_run": 41191231150,
   "migration_fix_target_acceptance": {
     "source": "83b11dad16626c01460562caec8dd530ad4bbd42",
     "run": 41121252978,
@@ -128,5 +128,38 @@
     "cause": "historical seed checks layout before creating declared catalogue/registry",
     "fix_commit": "08cee415a6a5c5a926825048c253891216cfd12b",
     "fix_recheck": "PENDING"
+  },
+  "general_202_probe": {
+    "run": 41190356694,
+    "source": "cefeb5cb147fe75c42f3d0cbf2124ea4610fbfc9",
+    "artifact_id": 13038543693,
+    "sha256": "54ab44c0d4716e0fe94baa5ab31e73b440b6ce5f2b7a563b2b7d570debfda6fc",
+    "downloaded_archive_digest_verified": true,
+    "terminal": "completed",
+    "verified_destination_hash": true,
+    "restart": "READY",
+    "restart_writes_allowed": true,
+    "source_families_before_after": [
+      47,
+      48
+    ],
+    "source_members_before_after": [
+      90,
+      91
+    ],
+    "original_evidence_preserved": true,
+    "archive_bytes_preserved": true,
+    "accepted_as_success": false
+  },
+  "general_history_fix_targets": {
+    "source": "d05c61890205f5c0722883ebb3a7eb984c761d45",
+    "run": 41191231150,
+    "new_targets": 56,
+    "focused": 80,
+    "failed": 0,
+    "skipped": 0,
+    "artifact_id": 13038996100,
+    "sha256": "1646e5873ac0d6ff235f4be8d2f93915ca3a6e3367246007ca20753819406f3e",
+    "downloaded_archive_digest_verified": true
   }
 }

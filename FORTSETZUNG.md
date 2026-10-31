@@ -1,3 +1,48 @@
+# Aktuell – 31.10.2026: General-202 bis Endzustand untersucht
+
+Branch `codex/pre5-operation-recovery`. Anwendungskandidat:
+`d05c61890205f5c0722883ebb3a7eb984c761d45`.
+**Zuerst Lauf 41191231150 über gh api mit Cache-Control: no-cache lesen.**
+Neue Zielstufe 56 PASS und fokussiert 80 PASS (0 FAIL/SKIP). Container läuft;
+erst nach dessen SUCCESS startet die gesamte Backend-Matrix. Keine neuen Runs
+blind starten, keine Veröffentlichung vor vollständiger Abnahme.
+
+Die ursprüngliche Annahme „bekannte Datei muss 409 liefern“ wurde ausdrücklich
+nicht einfach auf 202 geändert. Probe `cefeb5cb` / Lauf 41190356694 führte den
+angenommenen General-Auftrag vollständig aus: completed/organized_verified,
+Ergebnis-JPEG mit richtigem SHA am neuen 14:30-Tagespfad, Neustart READY und
+writes_allowed=true, keine offene F14-Reservation. Originale Belege und Archive
+blieben erhalten. Trotzdem wurden eine neue Quellenfamilie (47→48) und ein neues
+Medium/Mitglied (90→91) angelegt. Ursache: der alte General-Guard liest nur noch
+vorhandene Dateien; nach den zwei bestätigenden Verlustscans fehlt die Kamera-
+JPEG-Zeile, obwohl ihre unveränderliche Herkunft in der Registry weiter besteht.
+Dies ist eine echte Herkunfts-Aufnahmelücke, kein falscher asynchroner Jobstatus.
+
+Korrektur: `app/metadata_origin_admission.py` qualifiziert Registry/Katalogpfade
+und liest sie query_only. Unveränderliche Quellenmitgliedschaften plus vorhandene
+Katalog-Hashes bilden positive Kamerahistorie; abgeschlossene Korrekturketten aller
+registrierten Bibliotheken werden linear verfolgt. Das verweigert ausschließlich
+implizite neue Herkunft in General. Keine Änderung an retained-copy-Duplikatlogik,
+keine automatische Merge-/Löschmigration älterer fehlerhaft angenommener Importe.
+Neue wirkliche General-Dateien bleiben HTTP202/Worker-importierbar. Sieben neue
+Tests: beide Bibliotheken, ein/zwei Korrekturen nach echter Katalogverlustbestätigung,
+positive neue Datei, fehlende/kaputte Registry. Alle sieben in den 56 Zieltests PASS.
+DE/EN-Meldung nennt erhaltene Herkunft und noch nicht unterstützte Kopienvariante.
+
+Prüfnachweise:
+- Probe-Container: Artefakt 13038543693, SHA256
+  54ab44c0d4716e0fe94baa5ab31e73b440b6ce5f2b7a563b2b7d570debfda6fc.
+- Neuer Zieljob: Artefakt 13038996100, SHA256
+  1646e5873ac0d6ff235f4be8d2f93915ca3a6e3367246007ca20753819406f3e.
+Beide ZIPs erneut heruntergeladen und gegen GitHub-Digest geprüft.
+Scratch: `/private/tmp/bibliothekar-pre5-evidence/41190356694-container` und
+`41191231150-targets`. Probebericht `pre5-manual-changes.json` enthält vollständige
+Vorher/Nachher/Neustart-Kataloge, Herkunft, Hashes und den echten endgültigen Job.
+Aktuelles Fünf-Stunden-Fenster startete bei 0%, Woche28%; zuletzt 23% / Woche31%.
+Checkpoint weiterhin rechtzeitig ab70%. Kein NAS-Zugriff. qa/rc14.zip nicht stage'n.
+
+--- Vorherige Chronologie ---
+
 # Aktueller Einstieg – pre.5, 30.10.2026, aktueller Checkpoint
 
 - Branch: `codex/pre5-operation-recovery`.
