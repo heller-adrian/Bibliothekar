@@ -58,7 +58,7 @@ jobs:
           if test -f "$QA_WORK/import-diagnostic/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/import-diagnostic/f14-qa/targets/results/result.xml" "$QA_WORK/import-diagnostic.xml"; fi
           exit "$RESULT"
       - name: Isolated recovery contracts for backup restore and SD recheck
-        if: contains(github.event.head_commit.message, '[pre5-recovery]')
+        if: contains(github.event.head_commit.message, '[pre5-recovery]') || contains(github.event.head_commit.message, '[pre5-full]')
         run: |
           set -euo pipefail
           mkdir "$QA_WORK/recovery-contracts"
