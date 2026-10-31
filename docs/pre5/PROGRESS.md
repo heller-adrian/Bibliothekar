@@ -214,3 +214,22 @@ Nodes stehen 147 noch ohne erneute gezielte Abnahme; die bestehende
 `BACKEND-FIX-STATUS.json`-Inventur wurde durch diese Mini-Runde nicht
 automatisch aktualisiert. Vor einem Release sind aktuelle vollständige
 Backend-, Frontend-, Browser- und Container-Evidenzen Pflicht.
+
+## 31.10.2026 – vollständige Diagnoseprotokollierung (Freigabe: Diagnose, nicht Reparatur)
+
+QA-only-Commit a00c51a7 schloss den Artefakt-Uploadpfad und ergänzte eine
+sequentielle, voneinander unabhängige 24-Fall-Stichprobe über zwölf offene
+Kategorien. GitHub [41226158077] komplett ausgeführt: **4 PASS, 20 FAIL,
+0 ERROR/SKIP, 0 fehlende XML-Fälle**. Drei Gruppen: 3/9, 1/7, 0/8 PASS.
+Vollständiges Archiv 13051308412, verifizierter ZIP-SHA256
+98cc15f4a128b2edf1e3723e7d1c0974f23cc0d9998ce9065f13c6459131ad9b.
+Details mit Einzelteststatus, tatsächlichen Stacktrace-Symptomen und nächsten
+Prüfgrenzen in `docs/pre5/DIAGNOSTIC-20261031.md`.
+
+Die 20 roten Stichproben zeigen: F14-Operation-Recovery-Gates, echte
+Jobzustands-/Restore-Journal-Probleme, eine fehlende General/Batch-Fixture,
+teilweise veraltete GET-Konflikterwartungen und F15/17-SQL-/Metadata-Verträge.
+**Dies sind vorläufige Fehlergruppen, keine 20 unabhängigen Produktfehler.**
+Keine Anwendungscodereparatur genehmigt oder ausgeführt. Die vollständigen 147
+und die finale Backend-/Frontend-/Container-Matrix bleiben offen.
+**v1.0.0-pre.5 bleibt gesperrt.**

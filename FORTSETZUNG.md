@@ -210,3 +210,21 @@ vollständig verifizierte, an die neue Quelle gebundene Akzeptanz darf daraus
 kein Tag/Registry-Image/Release erstellt werden. Bis dahin keinerlei Änderung an
 main, bisherigen Tags, latest oder TrueNAS.
 
+
+## Diagnose 31.10.2026 – vollständige Belege gesichert
+
+[41226158077](https://github.com/heller-adrian/Bibliothekar/actions/runs/41226158077)
+auf QA-Commit `a00c51a7` (Anwendungscode unverändert `ff11f88b`):
+24 gezielt ausgewählte Originalnodes aus zwölf offenen Fehlergruppen,
+**4 PASS/20 FAIL/0 ERROR/0 SKIP**; JUnit-Abdeckung exakt 24/24.
+Komplettarchiv **13051308412** inklusive vollständigem `stdout.log` und
+`result.xml` pro Gruppe; SHA256
+`98cc15f4a128b2edf1e3723e7d1c0974f23cc0d9998ce9065f13c6459131ad9b`
+nach Download verifiziert. Vorheriger fehlgeschlagener 147er-Lauf
+41222826726 bleibt 30/147 PASS und hatte unvollständigen Artefaktpfad.
+Detaillierter Bericht jetzt `docs/pre5/DIAGNOSTIC-20261031.md`.
+
+**Weiterer Auftrag nötig für Anwendungsreparaturen.** Keine Änderungen an
+Produktcode, Branch `main`, Tags, GHCR, `latest` oder TrueNAS. Release blockiert.
+Nicht ungezielt die 147 oder Vollmatrix wiederholen, bevor Ursachen gruppiert
+und mit positiven/negativen Gegenbeweisen korrigiert wurden.
