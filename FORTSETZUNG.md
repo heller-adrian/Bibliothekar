@@ -309,3 +309,48 @@ abgenommen. Keine Veroeffentlichung; main, Tags, GHCR und TrueNAS unberuehrt.
 Naechste sicherheitskritische Phase: Restore-F14- und Journal-Recovery
 isoliert pruefen/reparieren; danach SD-Recheck-Worker/Queue und Import.
 Erst dann aktueller voller Backend-Test und weitere Release-Gates.
+
+## 31.10.2026 – fortgesetzte Pre.5-Crash-Recovery, Abnahme noch ausstehend
+
+Auf Nutzerfreigabe wurden nacheinander Restore, SD-Recheck und Import
+unter unveraenderten F14-Schutzprinzipien repariert. Anwendungspatches:
+- ec476e06 / 5b2ac06 / 26c5cf49 / 12e9a1e6: abgesicherter Abschluss
+  eines direkten bzw. bereits SQL-/Audit-verifizierten Restore-Journals,
+  exakte bekannte Quellmenge und keine fremden Staging-Dateien.
+- ed8845ab / 5b2ac06: originale F14-trash-Restore-Reservation wird
+  bei exakt passendem, registriertem, unveraendertem Journal unter
+  qualifizierter Recovery-Freigabe fortgesetzt; kein allg. Bypass.
+- ad39ce07 / 0582e8ca: verwaiste *lesende* SD-Pruefung nur nach
+  tatsaechlichem jobs.operation='sd_recheck', Source-/Root-/DB-
+  Identitaetskontrolle und atomarem Child-Handoff sicher als
+  neu zu hashender Check qualifiziert; echter folder_import behält F14.
+- fe82b6f0: urspruenglicher verwaister, mit import_recovery.qualify
+  nachgewiesener folder_import wird bei Startup ausschliesslich in
+  state='interrupted' markiert, ohne Dateien, Herkunftsjournal oder
+  F14-Reservation zu entfernen. Aufruf in operation_health.
+- 7565ab06 / dc00ddc1: historische negative Restore-Tests duerfen
+  zwar einen lebenden READ-Server sehen, verlangen bei offenem
+  ungeklaertem Restore jedoch nachweislich writes_allowed=False
+  und unveraenderte originale F14-trash-Reservation samt Bytes.
+
+Nachweise:
+- 41230227562 auf 12e9a1e6: 9 PASS / 1 FAIL (Import-Status).
+- 41230840038 auf 0582e8ca: letzter Import-Crashtest 1 PASS.
+- 41230912187 auf c080e9a2: 12 PASS / 3 FAIL, dabei alle
+  zehn urspruenglich roten Crash-Faelle PASS; die drei roten
+  Sicherheitsgegenproben hatten nur einen veralteten erwarteten
+  Prozess-Exitcode. Echte F14-Schreibsperren und unveraenderte
+  Fremdbytes sind aus vollstaendigen Restart-Logs nachgewiesen.
+- JETZT PENDING: 41231315552 auf dc00ddc1: zehn Originalfaelle
+  plus fuenf Manipulations-/Kollisions-Gegenproben, alle mit
+  expliziter Pruefung der echten F14-Schreibsperre.
+- Redundanter historischer QA-Run 41231036891 belegt aktuell
+  denselben selbstgehosteten Linux-Runner. Er ist KEINE
+  Release-Abnahme. Neuer Run startet nach Freigabe des Runners.
+- Artefaktsicherung repariert: vollstaendige original-unretested
+  JUnit-Resultate werden beim nachfolgenden pre5-full-Lauf archiviert.
+
+Release-Gate: PRE.5 NICHT FREIGEGEBEN. Die 15er-Sicherheitsabnahme
+steht noch aus; der neue 147er-Originalcheck, alle 8 Backendpartitionen,
+Frontend und Container wurden auf dem neuen Source-Stand nicht abgenommen.
+Kein main/tag/GHCR/TrueNAS veraendert. Bei roten Resultaten nicht publishen.
