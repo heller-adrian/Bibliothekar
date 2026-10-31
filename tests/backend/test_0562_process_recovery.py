@@ -537,7 +537,15 @@ def test_0562_restore_preserves_ambiguous_evidence(tmp_path,tamper):
         replacement.write_bytes(db.read_bytes());os.replace(replacement,db)
     digest=hash_file(target)
     for n in (1,2,3):
-        assert invoke(case,'startup','none',evidence/f'restart{n}')['returncode']!=0
+        restart=invoke(case,'startup','none',evidence/f'restart{n}')
+        if restart['returncode']==0:
+            op=(restart.get('result') or {}).get('result',{}).get('operation_health') or {}
+            assert op.get('writes_allowed') is False,restart
+            assert any(not lease.get('live') and lease.get('qualified')
+                       and lease.get('kind')=='trash'
+                       for lease in op.get('reservations',[])),restart
+        else:
+            assert restart['returncode']!=0,restart
         assert hash_file(target)==digest
         assert (case/'workspace/Papierkorb/B.JPG').exists()
         assert list(case.rglob('.trash-restores/*.json'))

@@ -32,7 +32,20 @@ def journal(case):return next(case.rglob('.trash-restores/*.json'))
 def starts(case,ev,blocked=False,label='restart'):
     states=[]
     for n in (1,2,3):
-        record=r.invoke(case,'startup','none',ev/f'{label}{n}');assert (record['returncode']!=0)==blocked,record
+        record=r.invoke(case,'startup','none',ev/f'{label}{n}')
+        if blocked and record['returncode']==0:
+            # RC14 can remain operational for protected READ requests. A
+            # blocked unsafe restore must retain its actual original F14
+            # writer fence, regardless of the web process exit status.
+            op=(record.get('result') or {}).get('result',{}).get('operation_health') or {}
+            assert op.get('writes_allowed') is False,record
+            assert any(not lease.get('live') and lease.get('qualified')
+                       and lease.get('kind')=='trash'
+                       for lease in op.get('reservations',[])),record
+        elif blocked:
+            assert record['returncode']!=0,record
+        else:
+            assert record['returncode']==0,record
         state=r.snapshot(case,ev/f'after-{label}{n}.json');r.checks_sql(state);states.append(state)
     assert r.business_rows(states[0])==r.business_rows(states[1])==r.business_rows(states[2])
     return states[-1]
