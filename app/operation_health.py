@@ -198,6 +198,15 @@ def recover_known_before_startup(workspace,registry,logs,*,database=None):
     """Unknown intents never permit ordinary migrations/backfill as recovery."""
     from app.observation_recovery import recover
     recover(workspace)
+    if database is not None:
+        # Only a uniquely identified abandoned original import may change its
+        # SQL status to interrupted. Proof is checked against the actual
+        # published/staged media first; F14 and the source journal stay intact.
+        pending=[r for r in inspect(workspace)['reservations'] if not r['live']]
+        if (len(pending)==1 and pending[0].get('kind')=='import'
+            and pending[0].get('ids',{}).get('function')=='app.main.process_claimed_job'):
+            from app.import_recovery import pending_reservations
+            pending_reservations(database,registry,workspace,logs)
     from app.domain_recovery import replay
     if replay(workspace,registry,database=database):
         return

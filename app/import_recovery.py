@@ -241,7 +241,26 @@ def pending_reservations(database, registry, workspace, logs):
                 path.unlink();_sync(parent)
                 accepted.add(str(path));continue
             if proof['job']['state'] not in {'failed','interrupted'}:
-                raise PipelineError('import_recovery_worker_not_terminal: '+str(path))
+                from app.operation_health import _RECOVERING
+                from app.database import utc_now_iso
+                # A crashed original import retains its F14 media fence and
+                # move journal. Its exact qualified staged bytes allow ONLY a
+                # history-state correction, not resumption or cleanup.
+                if (not _RECOVERING.get()
+                    or proof['job']['state'] not in {'copying','verifying',
+                        'backup_verified','analyzing_metadata','organizing'}):
+                    raise PipelineError('import_recovery_worker_not_terminal: '+str(path))
+                with database_connection(Path(database)) as connection:
+                    connection.execute('BEGIN IMMEDIATE')
+                    changed=connection.execute(
+                        "UPDATE jobs SET state='interrupted',stage='interrupted_after_restart',"
+                        "progress_message=?,error_message=?,updated_at=?,finished_at=? "
+                        "WHERE id=? AND operation='folder_import' AND state=?",
+                        ('Abgebrochener Import benötigt Prüfung des originalen Journals.',
+                         'Unvollständige Veröffentlichung; ursprüngliche F14-Reservation bleibt gesperrt.',
+                         utc_now_iso(),utc_now_iso(),ids['job_id'],proof['job']['state'])).rowcount
+                    if changed!=1:
+                        raise PipelineError('import_recovery_job_state_changed: '+str(path))
             accepted.add(str(path))
     return accepted
 
