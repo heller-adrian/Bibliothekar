@@ -237,3 +237,141 @@ def try_entry(function,workspace,*,allowed_databases=None):
     if function.endswith('recover_trash_deletions'):
         return {'recovered_paths':sorted({p for _,result in results for p in result['recovered_paths']})}
     return sum(result for _,result in results)
+
+
+class _BackupRecoveryPending(Exception):
+    """A verified retry was attempted, but the original operation is not finished."""
+    def __init__(self,result):
+        self.result=result
+
+
+def try_backup_entry(workspace, *, database, registry, central_root):
+    """Resume exactly one orphaned BA-02 delete under its ORIGINAL F14 lease.
+
+    A new recovery lease is forbidden: all authorization here belongs to the
+    unchanged old record, its registered owner and its exact durable journal.
+    Invalid/foreign bytes and journals remain fenced. This narrow entry does
+    not grant normal writers or unrelated pending operations any rights.
+    """
+    from app import operation_health as health, root_operations as ro
+    from app.storage_anchors import check_active
+    from app.storage_config import storage_paths, load_storage_settings
+    from app.managed_storage_health import require_pinned_storage
+    from app.database_diagnostics import inspect as inspect_database
+    from app.backup_management import (
+        recover_backup_deletions, _deletion_paths, _read_journal,
+        _validate_backup_job_id,
+    )
+    from app.operation_health import read_connection
+    from contextlib import closing
+
+    root=Path(workspace).absolute()
+    database=Path(database).absolute()
+    registry=Path(registry).absolute()
+    central_root=Path(central_root).absolute()
+    status=health.inspect(root)
+    dead=[item for item in status['reservations'] if not item['live']]
+    if len(dead)!=1 or dead[0].get('kind')!='backup' or dead[0].get('ids',{}).get('function')!='app.backup_management.delete_backup':
+        return None
+    if any(item['live'] for item in status['reservations']) or status['issues']:
+        raise health.DomainStartupError('backup_recovery_other_active_effects')
+    item=dead[0]
+    if not item['qualified']:
+        raise health.DomainStartupError('backup_recovery_unqualified_original_lease')
+    require_pinned_storage(root)
+    parent=ro._control_location(root)
+    state=ro._state(parent,root)
+    check_active(root,parent)
+    if central_root!=storage_paths(root)['backup_root'].absolute():
+        raise health.DomainStartupError('backup_recovery_noncanonical_central_root')
+    record=ro._read(Path(item['path']))
+    expected_ids={'function':'app.backup_management.delete_backup','job_id':record.get('ids',{}).get('job_id')}
+    if (record.get('ids')!=expected_ids or record.get('kind')!='backup'
+        or record.get('library')!='main' or record.get('shared') is not True
+        or record.get('database')!=str(database)
+        or record.get('workspace')!=str(root)
+        or record.get('generation')!=[state.get('generation'),state.get('libraries',{}).get('main',0)]
+        or set(record)-{'format','reservation_id','shared','workspace','library','generation','bindings','database','kind','ids','effect_resources'}
+        or hashlib.sha256(json.dumps(record,sort_keys=True).encode()).hexdigest()!=item['record_sha256']):
+        raise health.DomainStartupError('backup_recovery_original_lease_changed')
+    try:
+        job_id=_validate_backup_job_id(expected_ids['job_id'])
+    except Exception as error:
+        raise health.DomainStartupError('backup_recovery_invalid_job_identity') from error
+    with closing(read_connection(registry)) as connection:
+        rows=[dict(row) for row in connection.execute(
+            'SELECT library_id,database_path,workspace_root,work_root,archive_root,is_main,is_registered FROM libraries')]
+    main=[row for row in rows if row['library_id']=='main' and row['is_main'] and row['is_registered']]
+    if (len(main)!=1 or Path(main[0]['database_path']).absolute()!=database
+        or Path(main[0]['workspace_root']).absolute()!=root):
+        raise health.DomainStartupError('backup_recovery_registry_owner_changed')
+    for path,kind in ((registry,'registry'),(database,'catalogue')):
+        diagnosis=inspect_database(path,kind=kind)
+        if not diagnosis['consistent'] or not diagnosis['schema_current']:
+            raise health.DomainStartupError('backup_recovery_database_not_qualified')
+    required={str(root),str(central_root),str(Path(main[0]['work_root'])),str(Path(main[0]['archive_root'])),
+              *(str(root/name) for name in load_storage_settings(workspace_root=root).values())}
+    if (not required <= set(record['bindings'])
+        or any(value is None or state['bindings'].get(key)!=value for key,value in record['bindings'].items())):
+        raise health.DomainStartupError('backup_recovery_bindings_changed')
+    ro._check(record['bindings'])
+    journal,_stage=_deletion_paths(central_root,job_id)
+    directory=journal.parent
+    if (directory.is_symlink() or not directory.is_dir()
+        or sorted(path.name for path in directory.iterdir())!=[journal.name]):
+        raise health.DomainStartupError('backup_recovery_journal_scope_changed')
+    try:
+        manifest=_read_journal(journal,central_root)
+    except Exception as error:
+        raise health.DomainStartupError('backup_recovery_invalid_journal') from error
+    if (manifest.get('root_reservation')!=record
+        or manifest.get('job_id')!=job_id
+        or manifest.get('main_database')!=str(database)
+        or manifest.get('registry_database')!=str(registry)):
+        raise health.DomainStartupError('backup_recovery_journal_not_bound_to_original_lease')
+
+    # An intent fences other processes even while the orphan's kernel lock is
+    # temporarily held live. Both retry scope and approval are call-local.
+    intent=parent/('domain-recovery-intent-'+record['reservation_id']+'.json')
+    planned={'format':1,'reservation':record,'phase':'qualified_recovery_not_finished'}
+    previous=ro._read(intent,None)
+    if previous is not None and previous!=planned:
+        raise health.DomainStartupError('backup_recovery_intent_conflict')
+    if previous is None:ro._write(intent,planned)
+    with health.qualified_retry(root,{item['path']}):
+        token=_APPROVED.set(record)
+        try:
+            try:
+                with ro.reserve(root,library_id=record['library'],database=database,
+                                kind=record['kind'],ids=record['ids'],
+                                paths=[Path(p) for p in record['bindings']],
+                                expected_generation=record['generation'],_recovery_record=record):
+                    # A second read inside the F14 lock defeats changed-journal
+                    # races between qualification and the destructive handler.
+                    if _read_journal(journal,central_root).get('root_reservation')!=record:
+                        raise health.DomainStartupError('backup_recovery_journal_changed_under_lock')
+                    result=recover_backup_deletions.__wrapped__(database,registry,central_root)
+                    if (result['blocked'] or result['errors']
+                        or result['completed']+result['rolled_back']!=1
+                        or journal.exists() or journal.is_symlink()):
+                        raise _BackupRecoveryPending(result)
+                    ro._check(record['bindings'])
+                    check_active(root,parent)
+                    receipt=parent/('domain-recovery-'+record['reservation_id']+'.json')
+                    disposition='audited_backup_'+('completed' if result['completed']==1 else 'rolled_back')
+                    old=ro._read(receipt,None)
+                    if old is not None and (old.get('reservation')!=record or old.get('disposition')!=disposition):
+                        raise health.DomainStartupError('backup_recovery_receipt_conflict')
+                    if old is None:
+                        ro._write(receipt,{'format':1,'reservation':record,
+                                          'disposition':disposition,
+                                          'handler':'app.backup_management.recover_backup_deletions',
+                                          'result':result})
+            except _BackupRecoveryPending as blocked:
+                # Absolutely no F14 completion receipt was written. The lease,
+                # original journal and unowned bytes stay protected.
+                return blocked.result
+        finally:
+            _APPROVED.reset(token)
+        health.finish_qualified_retry(root)
+    return result
