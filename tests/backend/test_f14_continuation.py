@@ -176,7 +176,7 @@ def test_f14_exception_retains_unproven_reservation(fixture):
             raise RuntimeError('synthetic interrupted operation')
     parent=ro._control_location(ws)
     assert len(list(parent.glob('operation-*.json')))==1
-    with pytest.raises(ro.RootOperationError,match='ungeklärten'):
+    with pytest.raises(ro.RootOperationError,match='operation_recovery_required'):
         with ro.mutate(ws,databases=dbs):pytest.fail('unknown operation silently discarded')
     with ro.reserve(ws,library_id='main',paths=[ws],database=dbs[0],kind='unknown-operation'):pass
     assert not list(parent.glob('operation-*.json'))
@@ -272,7 +272,7 @@ def test_f14_orphan_shared_reservation_blocks_other_library_after_sigkill(fixtur
     original=records[0].read_bytes();assert json.loads(original)['shared'] is True
     for n in range(3):
         recovery.invoke(case,'startup','none',ev/('shared-orphan-start-'+str(n)))
-        with pytest.raises(LibraryRegistryError,match='ungeklärten'):
+        with pytest.raises(LibraryRegistryError,match='operation_recovery_required'):
             update_library_paths(reg,'second',work_root=new)
         assert records[0].read_bytes()==original
         assert (ws/'Arbeitsbereiche/main/original.JPG').read_bytes()==b'synthetic-main'

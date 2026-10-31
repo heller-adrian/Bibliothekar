@@ -33,7 +33,10 @@ def test_empty_explicit_reset_is_offered_but_not_automatically_rebound(empty_res
     case,ws,db,reg,parent,old=empty_reset
     status=inspect_storage(ws,database=db)
     assert not status['ready'] and not status['can_initialize']
-    assert all(f['status']=='identity_changed' for f in status['folders'])
+    roots=[f for f in status['folders'] if f['key'] in ENGLISH_STORAGE_DEFAULTS]
+    children=[f for f in status['folders'] if f['key'] in {'metadata_general','metadata_multiple'}]
+    assert len(roots)==4 and all(f['status']=='identity_changed' for f in roots)
+    assert len(children)==2 and all(f['status']=='missing' and f['identity_evidence']=='not_observed' for f in children)
     assert status.get('can_setup_again') is True
     assert ro._read(parent/'state.json')==old
 

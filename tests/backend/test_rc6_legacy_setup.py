@@ -22,7 +22,10 @@ def test_historical_missing_intent_offers_confirmed_setup(legacy,monkeypatch):
     case,ws,db,reg,parent,old=legacy;monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(case/'archive'))
     health=inspect_storage(ws,database=db)
     assert not health['ready'] and not health['can_initialize']
-    assert all(row['status']=='missing' and row['identity_evidence']=='previously_observed' for row in health['folders'])
+    roots=[row for row in health['folders'] if row['key'] in ENGLISH_STORAGE_DEFAULTS]
+    children=[row for row in health['folders'] if row['key'] in {'metadata_general','metadata_multiple'}]
+    assert len(roots)==4 and all(row['status']=='missing' and row['identity_evidence']=='previously_observed' for row in roots)
+    assert len(children)==2 and all(row['status']=='missing' and row['identity_evidence']=='not_observed' for row in children)
     assert health.get('can_setup_again'),health
     assert ro._read(parent/'state.json')==old
     result=setup_child(case,case/'reset','api-reset');assert result['error'] is None and result['ready'] and result['onboarding'],result

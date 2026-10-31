@@ -1,5 +1,6 @@
 [
   "tests/backend/test_pre5_sqlite_authorization.py",
+  "tests/backend/test_pre5_statement_authorization.py",
   "tests/backend/test_pre5_domain_recovery.py",
   "tests/backend/test_rc11_bootstrap.py",
   "tests/backend/test_rc4_practice.py::test_automatic_protocol_failure_sigkill_and_startup",
@@ -35,5 +36,12 @@
   "tests/backend/test_0561_recovery.py::test_trash_recovery_can_itself_be_interrupted",
   "tests/backend/test_0561_recovery.py::test_partial_commit_restores_cascade_and_set_null_preserves_other_edits",
   "tests/backend/test_0561_recovery.py::test_trash_recovery_refuses_ambiguous_state_and_keeps_evidence",
-  "tests/backend/test_0561_recovery.py::test_recovery_waits_for_live_deletion"
+  "tests/backend/test_0561_recovery.py::test_recovery_waits_for_live_deletion",
+  "tests/backend/test_rc6_legacy_setup.py",
+  "tests/backend/test_rc5_practice_followup.py::test_empty_explicit_reset_is_offered_but_not_automatically_rebound",
+  "tests/backend/test_0500_http_owner_auth.py",
+  "tests/backend/test_f14_continuation.py::test_f14_exception_retains_unproven_reservation",
+  "tests/backend/test_f14_continuation.py::test_f14_orphan_shared_reservation_blocks_other_library_after_sigkill",
+  "tests/backend/test_f14_fixed_storage.py::test_f14_existing_names_never_migrate",
+  "tests/backend/test_wave1_integration.py"
 ]

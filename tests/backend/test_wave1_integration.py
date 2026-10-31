@@ -19,6 +19,11 @@ def test_registered_import_preserves_both_security_contracts(tmp_path,monkeypatc
     config=case/'settings.json';config.write_text(json.dumps({'storage':{**names,'processing_buffer_percent':0,'safety_reserve_gib':0}}))
     for k,v in {'KAMERA_WORKSPACE':ws,'KAMERA_CONFIG':config,'KAMERA_REGISTRY_DATABASE':reg}.items():monkeypatch.setenv(k,str(v))
     for name in names.values():(ws/name).mkdir()
+    if legacy:
+        initialize_library_registry(reg)
+        from app.managed_directory_names import directory_name
+        metadata=storage_paths(ws)['metadata_root']
+        for kind in ('metadata_general','metadata_multiple'):(metadata/directory_name(metadata,kind)).mkdir()
     ensure_workspace_layout(ws);initialize_database(db);initialize_library_registry(reg);ensure_library_identity(db,'main')
     work=ws/names['workspaces_directory_name']/'Photos';work.mkdir()
     register_library(reg,library_id='main',display_name='Synthetic',database_path=db,workspace_root=ws,work_root=work,archive_root=archive,is_main=True)

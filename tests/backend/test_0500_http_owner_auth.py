@@ -172,19 +172,24 @@ def test_0500_login_cross_site_and_rate_limit(secure_client, monkeypatch):
     assert _login(secure_client, "very-long-local-secret-123456789").status_code == 429
 
 
-def test_0500_real_app_routes_are_behind_auth(monkeypatch):
+def test_0500_real_app_routes_are_behind_auth(monkeypatch,tmp_path):
     monkeypatch.delenv("BIBLIOTHEKAR_AUTH_TEST_BYPASS", raising=False)
     monkeypatch.setenv("BIBLIOTHEKAR_ADMIN_PASSWORD", "temporary-internal-test-secret-1234567")
-    from app.main import app
+    from app import main
+    app=main.app
+    monkeypatch.setattr(main,'WORKSPACE_PATH',tmp_path/'not-initialized-workspace')
+    monkeypatch.setattr(main,'DATABASE_FILE',tmp_path/'not-initialized.sqlite3')
     # Do not run the application's startup hooks in an auth-only test;
     # no database, config, import paths or background worker may be touched.
     client = TestClient(app, follow_redirects=False)
     try:
-        assert client.get("/healthz").status_code == 200
+        response=client.get('/healthz')
+        assert response.status_code==503 and response.json()=={'status':'unavailable'}
         assert client.get("/api/health").status_code == 401
         assert client.get("/api/jobs").status_code == 401
         assert client.post("/api/libraries", json={"display_name": "Unauthorized"}).status_code == 401
         assert client.delete("/api/jobs/unused/events/unused").status_code == 401
+        assert not list(tmp_path.iterdir()),'Auth/readiness probes created application state'
     finally:
         client.close()
 

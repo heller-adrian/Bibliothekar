@@ -117,11 +117,15 @@ def inspect(workspace):
 
 
 def require_write(workspace,*,candidate=None):
+    return _require_write(workspace,candidate=candidate,observe=lambda:inspect(workspace))
+
+
+def _require_write(workspace,*,candidate,observe):
     from app.root_operations import RootOperationError
     if _RECOVERING.get():return
     if _READ_ONLY.get():
         raise RootOperationError('operation_read_only_request: writes are paused')
-    status=inspect(workspace)
+    status=observe()
     # Explicitly qualified retry capabilities are bound to unchanged records.
     retry=dict(_RETRIES.get())
     dead=[r for r in status['reservations'] if not r['live']]
@@ -348,7 +352,9 @@ def _guard_workspace_connection(connection, workspace, *, library=None, registry
                 # lease, when present, supplies the narrower proven footprint.
                 if candidate is None and registry:
                     candidate={'_resources':{'central_stock'}}
-                require_write(workspace, candidate=candidate)
+                from app.sqlite_authorization import observe
+                _require_write(workspace,candidate=candidate,
+                               observe=lambda:observe(connection,lambda:inspect(workspace)))
             except RootOperationError:return sqlite3.SQLITE_DENY
         return sqlite3.SQLITE_OK
     connection.set_authorizer(authorize)

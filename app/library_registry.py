@@ -190,7 +190,8 @@ def _connect(path: Path) -> sqlite3.Connection:
     if read_only():
         return read_connection(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path, timeout=30, cached_statements=0)
+    from app.sqlite_authorization import Connection
+    connection = sqlite3.connect(path, timeout=30, cached_statements=0, factory=Connection)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA journal_mode = WAL")

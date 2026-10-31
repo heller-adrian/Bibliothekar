@@ -374,9 +374,12 @@ def inspect_storage(workspace, *, database=None):
         present={row['path'] for row in result.get('folders',[])}
         for issue in structural:
             if (issue.get('key') in {'metadata_general','metadata_multiple'} or str(issue.get('key','')).startswith('library_work_root:')) and issue['path'] not in present:
-                result['folders'].append({'key':issue['key'],'name':Path(issue['path']).name,'path':issue['path'],'status':issue['code'],'expected_identity':issue.get('expected_identity')})
+                expected=issue.get('expected_identity')
+                result['folders'].append({'key':issue['key'],'name':Path(issue['path']).name,'path':issue['path'],'status':issue['code'],'expected_identity':expected,
+                    'identity_evidence':'previously_observed' if expected is not None else 'not_observed'})
         if structural:
             result['issues'].extend(structural);result.update(ready=False,can_initialize=False)
+        result['issues']=list({(i['code'],i['path']):i for i in result['issues']}.values())
         return describe(result)
     except Exception as error:
         text=str(error); pieces=text.split(': ',2)

@@ -63,3 +63,30 @@ die produktive SQLite-Schreibbarriere bleibt bestehen. Die alte Zwei-Katalog-
 Fixture registriert ihre zweite Bibliothek vor Operationsbeginn ordnungsgemäß.
 Automatischer Neustart nach API-Abschluss nur bei vorhandener alter Startup-
 Diagnose; normale laufende Worker erhalten keine erneute Vollinitialisierung.
+
+41215816086 ist der absichtlich getrennte Zweifall-Profillauf auf2ad5023e
+(App=4a24b257), FAIL unter unveränderten90/300s-Grenzen. Artefakt13047948572,
+SHA256 f5c51c12f6e625dd165d0c83c0258abb58bbc4b7758aea081423555609d37b3c
+verifiziert.3892-Dateien:31574 require_write/inspect-Aufrufe,174,778s davon;
+376,810s inklusive qualifiziertem Rollback nach der Deadline.100-Dateien:
+5469 require_write-Aufrufe/62,497s bei88,750s Profilzeit, initialer Import
+überschreitet mit Restablauf die90s-Grenze. Profiling beeinflusst Zeiten;
+Callcounts und dominante Wiederholung sind nachgewiesen, kein neuer PASS.
+
+Gezielte SQL-Korrektur: Verbindung/Cursor teilen nur den Evidence-Snapshot
+innerhalb eines execute-Aufrufs. Jeder neue execute beginnt frisch; Skripte und
+executemany behalten ungekürzte Prüfungen. Jede Aktion wertet weiterhin ihren
+Tabellen-/Trigger-Wirkungsbereich und aktuelle Read-only-/Recovery-Kontexte aus;
+keine zwischengespeicherte pauschale Schreibfreigabe. Sieben neue Positiv-/Negativ-
+Verträge prüfen Verbindung/Cursor, Katalog/Registry, frischen Orphan zwischen
+Statements, Orphan innerhalb eines SQL-Skripts und zusätzlichen Metadaten-Trigger.
+
+Weitere belegte Darstellung-/Fixturefehler: identische Katalogfehler werden auch
+nach zusätzlichem Strukturcheck dedupliziert; abgeleitete General/Batch-Anker
+weisen ehrlich previously_observed oder not_observed aus. Alte Fixtureasserts
+unterscheiden jetzt4 historische Rollen und2 nie gebundene Pflichtkinder.
+Legacy-Namens-/Wave1-Fixtures legen die behauptete vollständige technische
+Struktur vor Beginn an. Auth-only ohne Storage verlangt öffentliche503-Readiness
+bei weiterhin401 für private Routen und keinerlei neu angelegten Appdaten.
+Zwei Wortlautasserts prüfen den tatsächlichen präzisen Recovery-Fehlercode.
+Neue Linuxergebnisse für diese Änderungen weiterhin PENDING; keine Vollmatrix.

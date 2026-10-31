@@ -87,6 +87,10 @@ def test_f14_existing_names_never_migrate(tmp_path,monkeypatch,variant):
     if variant=='custom':names['trash_directory_name']='My Old Trash';config.write_text(json.dumps({'storage':names}))
     monkeypatch.setenv('KAMERA_WORKSPACE',str(ws));monkeypatch.setenv('KAMERA_CONFIG',str(config));monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(tmp_path/'registry.sqlite3'))
     for name in names.values():(ws/name).mkdir();(ws/name/'original.bin').write_bytes(b'synthetic-legacy')
+    initialize_library_registry(tmp_path/'registry.sqlite3')
+    from app.managed_directory_names import directory_name
+    metadata=storage_paths(ws)['metadata_root']
+    for kind in ('metadata_general','metadata_multiple'):(metadata/directory_name(metadata,kind)).mkdir()
     before=stable(tmp_path);ensure_workspace_layout(ws)
     assert load_storage_settings()==names
     assert all((ws/name/'original.bin').read_bytes()==b'synthetic-legacy' for name in names.values())
