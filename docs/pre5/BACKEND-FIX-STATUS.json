@@ -1,7 +1,7 @@
 {
   "baseline_run": 41194643144,
   "baseline_failed_nodes": 240,
-  "status": "PARTIAL_FOCUSED_ACCEPTANCE_RECOVERY_CONTRACTS_RED_FINAL_MATRIX_PENDING",
+  "status": "BACKEND_NOT_ACCEPTED_FOCUSED_RECOVERY_RED_FULL_MATRIX_NOT_RUN",
   "latest_focused_outcomes_of_original_failures": {
     "tests/backend/test_rc11_bootstrap.py::test_real_template_requires_explicit_review_and_preserves_original_bytes": {
       "run": 41217778080,
@@ -497,12 +497,62 @@
       "run": 41227607033,
       "outcome": "PASS",
       "group": "read_view_and_contention_contract"
+    },
+    "tests/backend/test_0500_backup_delete_recovery.py::test_0500_staging_crash_before_main_commit_rolls_back": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "backup_recovery_admission"
+    },
+    "tests/backend/test_0500_backup_delete_recovery.py::test_0500_after_main_commit_crash_completes_purge": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "backup_recovery_admission"
+    },
+    "tests/backend/test_0500_backup_delete_recovery.py::test_0500_tampered_staged_file_is_never_deleted": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "backup_recovery_admission"
+    },
+    "tests/backend/test_r1_restore_recovery.py::test_r1_batch_collision_after_first_move_stays_blocked": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "restore_recovery_and_scope"
+    },
+    "tests/backend/test_r1_restore_recovery.py::test_r1_direct_restore_commits_resume_once[r1.completed]": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "restore_recovery_and_scope"
+    },
+    "tests/backend/test_0562_process_recovery.py::test_0562_restore_recovery_two_progressive_sigkills": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "startup_domain_recovery_not_reached"
+    },
+    "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[after_handoff]": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "worker_resume_queued_or_verifying"
+    },
+    "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[hash]": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "worker_resume_queued_or_verifying"
+    },
+    "tests/backend/test_rc5_practice_followup.py::test_folder_actual_sigkill_atomic_handoff_and_three_restarts[after_handoff]": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "worker_resume_queued_or_verifying"
+    },
+    "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[bytes]": {
+      "run": 41227720942,
+      "outcome": "FAIL",
+      "group": "startup_domain_recovery_not_reached"
     }
   },
   "counts": {
     "PASS": 99,
-    "FAIL": 0
+    "FAIL": 10
   },
-  "note": "Last focused PASS per original baseline failure, source-specific; 99/240 recently tested PASS, 141 still without a focused outcome in this index. Separate broad 147-case run 41222826726 was 30 PASS/117 FAIL. Recovery focused 41227720942 was 0 PASS/10 FAIL; those 10 remain unaccepted, even where the earlier inventory had no focused outcome. B01 whole file 41227607033 10 PASS. No full current-backend release acceptance. Never infer release-ready from this partial per-node inventory.",
-  "not_retested": 141
+  "note": "Disjoint latest focused outcomes for all 240 initial failures: 99 PASS, 10 FAIL (original crash/recovery contracts reproduced on 41227720942), 131 without individually catalogued subsequent focused outcome. Broader original-147 run 41222826726 found 30 PASS/117 FAIL, without complete per-node artifact, and is not treated as resolved. Source-specific results, not full-backend release acceptance. App code ff11f88b remains unchanged. Repro 10/10 recovery FAIL blocks acceptance; B01 whole file 41227607033 10/10 PASS.",
+  "not_retested": 131
 }
