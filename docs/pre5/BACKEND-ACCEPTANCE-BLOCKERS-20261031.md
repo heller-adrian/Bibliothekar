@@ -36,3 +36,14 @@
 5. Danach je Gruppe gerichtete positive und negative Tests, erst bei Grün aktueller vollständiger Backend-F8-Partitionslauf einschließlich aller neu und historisch bestehenden Nodes, Frontend und Container, vollständige Artefaktprüfung und gesonderte Release-Freigabe.
 
 **Nur Test-/QA-/Dokumentationsänderungen in dieser Gesprächsphase; Anwendungscode blieb auf `ff11f88b8116bae5b0d39f824b1eef828d39e659`. Keine Veröffentlichung.**
+
+### Nachtrag: BA-02-F14-Backup-Problem geschlossen
+
+Mit Commits d89a32d5, d77a8f11 und c1115ac7 wurde der originale
+Backup-Loesch-Retry streng an die vorherige F14-Reservation gebunden.
+Die komplette BA-02-Testdatei: 11/11 PASS (GitHub 41228704454).
+Artefakt 13052677866, SHA256:
+c0ad58ad281568871a6c34058e18986f68c5a069250d93be49385ca2d732dafa.
+Die acht BA-02-Nodes des urspruenglichen Fehler-Inventars sind gruen.
+Alle nicht zu Backup gehoerenden sieben Fehler aus dem 10er-Run
+41228354107 bleiben rot. Volle Backendabnahme und Release weiter GESPERRT.

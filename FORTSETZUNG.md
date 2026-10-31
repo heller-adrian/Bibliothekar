@@ -273,3 +273,39 @@ verändert; **Pre.5 nicht veröffentlichen**.
   - 0562 Import-Discard 1/1 FAIL: Auftrag bleibt `organizing` statt `interrupted` nach schützend abgelehnter fremder Byte-Manipulation.
 - Die 10 Fehlerfälle sind echte **Release-Blocker**, nicht zehn unabhängig bewiesene Ursachen. Nicht mit angepassten Erwartungen schönfärben. Insbesondere `app/domain_recovery.py` hat für Backup kein dem ursprünglichen `delete_backup`-Record entsprechendes qualifiziertes F14-Reentry. Änderungen hier erfordern neue positive und negative Byte-/Registry-/Root-/Reservationstests und eigenen freigegebenen Sicherheits-Patch.
 - **Full backend wurde absichtlich nicht gestartet**, weil die vorgeschalteten Original-Crash-Verträge ROT sind. Frontend-/Container-Neuabnahme ebenfalls ausstehend. Kein Release, keine Images/Tags und keinerlei Änderung an `main` oder TrueNAS. **App-Code weiterhin ff11f88b**.
+
+## 31.10.2026 – Freigegebene BA-02-Reparatur: vollstaendige Backup-Testdatei GRUEN
+
+Anwendungscode auf Entwicklungsbranch repariert: d89a32d5 (app/domain_recovery.py)
+und d77a8f11 (app/root_operations.py), anschliessend QA/Negativtests
+c1115ac7. try_backup_entry verwendet nur die urspruengliche orphaned
+F14-Reservation von app.backup_management.delete_backup und prueft
+Bibliotheksregistrierung, Hauptdatenbank, Journalzuordnung, Job-ID,
+Generation, Root-Identitaeten und Original-Reservationsinhalt. Der
+eigentliche Recovery-Handler arbeitet innerhalb dieser Original-Reservation.
+Ein blockierter Recovery-Versuch loescht weder Journal noch F14-Nachweis;
+neue oder fremde Journalbelege autorisieren nie eine Loeschung.
+
+PRUEFUNG: GitHub Actions 41228704454 auf c1115ac7: 11 von 11 PASS,
+0 FAIL/ERROR/SKIP in gesamter tests/backend/test_0500_backup_delete_recovery.py.
+Dies beinhaltet alle acht urspruenglich roten BA-02-Faelle, Multi-Library,
+staged foreign file, unknown empty subdirectory, tampered bytes,
+Crash vor/nach DB-Commit sowie zwei neue Negativtests (gefaelschte
+Reservation-ID und zusaetzliches fremdes Journal) mit nachfolgender
+positiver Wiederaufnahme bei unveraenderten Originalbelegen.
+Unabhaengig heruntergeladenes ZIP-Artefakt 13052677866:
+SHA256 c0ad58ad281568871a6c34058e18986f68c5a069250d93be49385ca2d732dafa.
+JUnit 11 Faelle vollstaendig geprueft.
+
+Zusaetzlicher gezielter 10er-Run 41228354107 auf d77a8f11:
+3 Backup PASS, 7 andere Originalfaelle FAIL. Diese sieben verbleiben
+als konkrete Release-Blocker: 3 Restore, 3 SD-Recheck, 1 Import-Discard.
+BACKEND-FIX-STATUS.json aktuell 107 PASS / 7 FAIL / 126 ohne einzeln
+katalogisierten neueren Nachweis (von urspruenglich 240 FAIL-Nodes).
+BA-02-Pruefung ist ein Teilnachweis, KEINE komplette Backend-Abnahme.
+Vollmatrix, Frontend und Container wurden NICHT auf aktuellem Code
+abgenommen. Keine Veroeffentlichung; main, Tags, GHCR und TrueNAS unberuehrt.
+
+Naechste sicherheitskritische Phase: Restore-F14- und Journal-Recovery
+isoliert pruefen/reparieren; danach SD-Recheck-Worker/Queue und Import.
+Erst dann aktueller voller Backend-Test und weitere Release-Gates.
