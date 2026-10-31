@@ -14,3 +14,13 @@ bleiben verpflichtend. Ein vorbereiteter Wiederaufnahmebeleg hält auch während
 der laufenden Wiederaufnahme fremde Schreiber aus ihrem Wirkungsbereich fern.
 Konfigurationsdiagnose muss ihren konkreten Fehler vor erneuter Ankerauflösung
 behalten. Keine volle Matrix und keine Veröffentlichung gestartet.
+
+Der nächste Fokus ergänzt die25 als ambient_registry_fixture_context erfassten
+Nodes und die vollständige O2-Grenzprüfung. Der guarded Linux-Harness erstellt
+seine explizit konfigurierte, bisher fehlende leere technische Installation vor
+pytest in einem eigenen bewachten Prozess. Beleg enthält null Bibliotheken,
+Jobs/Dateien und intakte Schemas. Keine produktive Missing-DB-Prüfung geändert.
+O2 vergleicht sämtliche vorbestehenden privaten JSON-Bytes vor/nach Ablehnung
+und verlangt weiterhin keine neuen Operationsnachweise. Die frühere Annahme,
+dass keinerlei JSON existieren dürfe, widersprach der bereits angelegten state.json.
+Byte-/Inode-/Katalog-/Generations- und echte SIGKILL-Grenzen bleiben geprüft.

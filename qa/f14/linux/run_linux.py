@@ -18,6 +18,10 @@ paths={'KAMERA_CONFIG':'settings.json','KAMERA_WORKSPACE':'workspace','KAMERA_DA
 for k,v in paths.items():
  p=scratch/'bootstrap'/v;(p.parent if k.endswith(('CONFIG','DATABASE')) else p).mkdir(parents=True,exist_ok=True);env[k]=str(p)
 env.update(PYTHONDONTWRITEBYTECODE='1',PYTEST_DISABLE_PLUGIN_AUTOLOAD='1',PYTHONPATH=os.pathsep.join(map(str,[source,tools,original])),AUDIT_SOURCE=str(source),AUDIT_OUTPUT=str(output),AUDIT_SCRATCH=str(scratch),AUDIT_LABEL=label,KAMERA_SOURCE_HELPER_ENABLED='false',KAMERA_SOURCE_HELPER_URL='http://127.0.0.1:1',BIBLIOTHEKAR_ADMIN_PASSWORD='synthetic-f14-ci-password',BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE='de')
+with (output/'bootstrap.log').open('w') as log:
+ result=subprocess.run([sys.executable,str(tools/'bootstrap.py')],cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=60)
+if result.returncode:
+ print((output/'bootstrap.log').read_text());raise SystemExit(result.returncode)
 args=[sys.executable,str(tools/'runner.py'),'-q','-p','no:cacheprovider','--import-mode=importlib','-o','addopts=','--basetemp',str(scratch/'pytest'),'--junitxml',str(output/'result.xml'),'-p','finite_execution']
 if mode=='targets' and 'RC13_PARTITION' in env:args+=['-p','qa.rc13.partition']
 if mode=='backend':args+=[str(source/'tests/backend')]

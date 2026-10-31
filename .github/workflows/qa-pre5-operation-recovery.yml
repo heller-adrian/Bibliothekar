@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir "$QA_WORK/authorization"
-          printf '%s\n' '["tests/backend/test_pre5_sqlite_authorization.py", "tests/backend/test_pre5_domain_recovery.py", "tests/backend/test_rc11_bootstrap.py", "tests/backend/test_rc4_practice.py::test_automatic_protocol_failure_sigkill_and_startup", "tests/backend/test_rc4_private_retention.py::test_private_retention_real_sigkill_and_three_independent_restarts", "tests/backend/test_rc4_trash_failure.py::test_sigkill_error_completion_and_three_independent_restarts"]' > "$QA_WORK/backend-focus-targets.json"
+          cp qa/pre5/backend_focus.json "$QA_WORK/backend-focus-targets.json"
           set +e
           RUNNER_TEMP="$QA_WORK/authorization" "$QA_WORK/venv/bin/python" qa/f14/linux/run_linux.py "$PWD" targets "$QA_WORK/backend-focus-targets.json" 2>&1 | tee "$QA_WORK/backend-focus.log"
           RESULT=${PIPESTATUS[0]}

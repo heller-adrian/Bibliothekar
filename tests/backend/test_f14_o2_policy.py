@@ -32,6 +32,7 @@ def snapshot(case,path):
 @pytest.mark.parametrize('entry',['api','helper'])
 def test_f14_o2_unattested_physical_rename_has_no_effect(fixture,key,entry):
     case,ws,reg,dbs,ev=fixture
+    control_before={p.name:p.read_bytes() for p in ro._control_location(ws).glob('*.json')}
     before=snapshot(case,ev/'before.json');generation=ro.generation(ws,'main')
     call=main.api_set_storage_paths if entry=='api' else main._set_storage_paths
     for attempt in range(3):
@@ -40,7 +41,8 @@ def test_f14_o2_unattested_physical_rename_has_no_effect(fixture,key,entry):
         assert 'nicht mehr änderbar' in error.value.detail
         assert snapshot(case,ev/f'after-{attempt}.json')==before
     assert ro.generation(ws,'main')==generation
-    assert not list(ro._control_location(ws).glob('*.json'))
+    assert {p.name:p.read_bytes() for p in ro._control_location(ws).glob('*.json')}==control_before
+    assert not list(ro._control_location(ws).glob('operation-*.json'))
 
 
 def test_f14_o2_noop_and_manual_image_edits_remain_possible(fixture):
@@ -96,12 +98,14 @@ def test_f14_o2_external_same_uid_replacement_never_mutates_foreign_entry(fixtur
 def test_f14_o2_sigkill_and_three_real_lifecycle_starts_preserve_state(fixture,boundary,monkeypatch):
     from tests.backend import test_0562_process_recovery as recovery
     case,ws,reg,dbs,ev=fixture;before=snapshot(case,ev/'before-kill.json')
+    control_before={p.name:p.read_bytes() for p in ro._control_location(ws).glob('*.json')}
     p,control,log=run_worker(case,ev,boundary)
     try:
         os.killpg(p.pid,signal.SIGKILL);assert p.wait(timeout=15)==-9
     finally:log.close()
     assert snapshot(case,ev/'after-kill.json')==before
-    assert not list(ro._control_location(ws).glob('*.json'))
+    assert {p.name:p.read_bytes() for p in ro._control_location(ws).glob('*.json')}==control_before
+    assert not list(ro._control_location(ws).glob('operation-*.json'))
     for key,value in dict(AUDIT_SCRATCH=str(case.parent),AUDIT_SOURCE=str(Path(__file__).resolve().parents[2]),AUDIT_OUTPUT=str(ev),AUDIT_LABEL='f14-o2-lifecycle').items():monkeypatch.setenv(key,value)
     for restart in range(3):
         result=recovery.invoke(case,'startup','none',ev/f'start-{restart}')
