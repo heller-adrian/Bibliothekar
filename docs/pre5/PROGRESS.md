@@ -371,3 +371,37 @@ Letzte Einzelwerte der ursprünglichen240 Fehler über verschiedene Commits:
 41261700576 aufe9061f41 wartet als kumulierter nächster Fokuslauf.
 Noch keine volle147er-Wiederholung, keine Backendmatrix/Frontend/Container auf
 finalem Quellstand. BACKEND NOT ACCEPTED; keine Veröffentlichung.
+
+## 01.11.2026 – aktuelle Fortsetzung: neun Originalfehler bestanden
+
+- Ausgangslauf 41261700576 auf e9061f41 vollständig ausgewertet: 115/124 PASS, neun FAIL, kein ERROR/SKIP. Artefakt13066567306 SHA256 35192296609f1f83c5f99e887b3ccef2ecd82efef9412b9e885a8bd38bdccb8f. Der ältere Lauf41261174452 ist abgeschlossen (90 PASS/13 FAIL), kein aktiver Lauf mehr.
+- a554f3190c385c1245ff6fa0c9fdb92a687b653c: sieben belegte Config-Fixtures korrigiert, Restore-Konflikt vor Bestandsabgleich über originale Domain-Recovery qualifiziert, Vier-Ordner-Test mit realem Bootstrap und zwei Starts abgesichert. Produktiv-Konfiguration wird weiterhin niemals stillschweigend ersetzt.
+- Linux41298781380 SUCCESS: exakt neun Originalfälle PASS, keine FAIL/ERROR/SKIP. Artefakt13080103179 SHA256 74d81033faef54571be199dd602d55bce2443f735a415c1f22518b82db252be1.
+- d09550b9a9cc5291789e3f6e150737abf564a9a3: General-Fixture bindet Registry vor der originalen Crash-Operation und prüft deren originalen F14-Abschluss. 15 zusätzliche negative/positive Config-, Restore- und Read-only-Verträge. Lauf41299144678 prüft diesen Stand mit bisheriger124er-Nachbargruppe; Ergebnis noch auszuwerten.
+- Uncommittierter nächster Schritt: originale finished-Receipts vor dem Admission-Fence unter vollständigem Workspace-Ausschluss prüfen und crashfest archivieren; acht Gegenproben einschließlich SQL-Status ohne Proof und noch vorhandenem Backup-Journal. Noch KEIN Linuxnachweis für diese Änderung.
+- Kumulierte individuelle Nachweise aus verschiedenen Commits: 221/240 PASS,19 offen; dies ist KEINE Gesamt-Abnahme. Ursprüngliche58:39 inzwischen gezielt PASS,19 noch frisch zu prüfen.
+- Nächster Schritt: Ergebnis41299144678 auswerten; dann eng begrenzten Receipt-Fix sowie exakte58 Originalnodes prüfen. Keine Veröffentlichung. BACKEND NOT ACCEPTED.
+
+## 01.11.2026 – Nine-Gate und Nachbarn unabhängig grün; Original58 erneut geprüft
+
+- a554f319:9/9 PASS, Run41298781380, Artefakt13080103179 SHA256 `74d81033faef54571be199dd602d55bce2443f735a415c1f22518b82db252be1`.
+- d09550b9:139/139 PASS, Run41299144678, Artefakt13081018854 SHA256 `96fda1bf4e42be129d3ef9f859ff5ad42ff82f280ec60e2b93ebdf1aa568c39b`. Enthält komplette BA-02/B01 und7+8 SQLite-Verträge.
+- 077ded86:49/66 PASS,17 FAIL,0 ERROR/SKIP; Run41300378200. Original58:41 PASS/17 FAIL; neue8 Finished-Receipt-Fälle vollständig PASS. Artefakt13082250797 SHA256 `1e30759c9888b42d6dc0958931dcfe15293fd84c68c15376d0b8da0a4d9fd757`.
+- Alle genannten ZIPs unabhängig heruntergeladen/gehasht, eindeutige JUnit-Nodes und komplette rote Childlogs ausgewertet.
+- bcf729e1 /41301247703 läuft mit frühen Import-/SD-/Sperr-Korrekturen. Neuer kumulierter QA-Stand fb2412c0 bereits eingereiht; Ergebnis noch nicht nachgewiesen.
+- Neue Library-Recovery ausschließlich mit vor dem Austausch erhobener Originalnonce-/Inodeautorität. Keine nachträgliche Zertifizierung historischer unbekannter Kopien.
+- Nachgewiesener neuer Restore-Orphan nach erfolgreichem Vorgänger-Replay durch Auswahlpreflight vor F14 behoben; Executorprüfungen bleiben. Neue Fälle PENDING.
+- Die17 jüngsten roten Fälle sind im JSON einzeln dokumentiert; implementiert/ungetestet bleibt getrennt von tatsächlich bestanden.
+- Bekannte unimplementierte Restursachen: Multiple-/Reintegration-Originalreplay und unregistrierter Low-Level-Cancel/Retry mit unbekanntem Callback. Keine generische Freigabe.
+- Vollständige147er-/8-Partitions-/Frontend-/Containerabnahme auf finalem Source noch ausstehend. **BACKEND NOT ACCEPTED.**
+- Vollständig reproduzierbare aktuelle Fortsetzungsanleitung steht am Anfang der FORTSETZUNG.md.
+
+## 01.11.2026 – Nachlauf41301247703 vollständig ausgewertet
+
+Source `bcf729e163665772a5ccfb79448bf8820011336d`: **74 PASS /15 FAIL /0 ERROR/SKIP von89**. Artefakt13081824373 SHA256 `dde02d89ec8c5899b57e0d3fe47f55f6eb0bb127e0f09373d81b91a31fe1d0bd`, unabhängig heruntergeladen/verifiziert. Alle15 exakten kritischen Originalnodes PASS; vollständige BA-02(11), B01(10), Statement-Authorization(7), SQLite-Authorization(8), F14-Backup-Abschluss(4), neue8 Finished-Receipt- und5 SD-Gegenproben PASS. Vier frühere Prozess-Exit-Negativfälle bestehen mit tatsächlicher SQL/F14-Schreibablehnung.
+
+Die15 roten Fälle enthalten12 alte Nodes und3 neue Import-Statusfälle. Quelle des neuen Produktfehlers: `root_operations._identity` akzeptiert ausschließlich Verzeichnisse, wurde aber für die SQLite-Datei verwendet. `5025a5ba` ersetzt dies durch eine eigenständige reguläre Datei-/O_NOFOLLOW-/nlink1-/Inode-Qualifikation mit erneutem Check vor SQL-Commit; fünf zusätzliche Dateityp-Gegenproben. Noch kein Linux-PASS für diesen Fix.
+
+`40f7bba8` bindet den prospektiven Library-Swap-Proof zusätzlich an DB-Inode und interne Bibliotheksidentität. Identische fremde Ersatzinodes und ein ersetzter Katalog können nicht nachträglich als eigener Bestand übernommen werden. Zwei zusätzliche negative Fälle. Alle neuen Library-Fälle bleiben bis zu ihren Linuxartefakten PENDING. Historische Library-Zustände ohne vorher vorhandenen Ownershipbeleg bleiben ausdrücklich geschützt.
+
+Kumulierte Einzelwerte der ursprünglichen240:228 PASS/12 FAIL; ursprüngliche58:46 PASS/12 FAIL, über verschiedene Commits. KEINE finale Abnahme.41303055310 auf fb2412c0 läuft bereits; keine Vollmatrix/Veröffentlichung.

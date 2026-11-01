@@ -1,3 +1,95 @@
+# Aktueller Fortsetzungsstand – 01.11.2026, neue gezielte Backend-Reparatur
+
+**PRE.5 NOCH NICHT ABNAHMEFÄHIG – VERÖFFENTLICHUNG GESPERRT.**
+Branch `codex/pre5-operation-recovery`. Neuer QA-Stand `fb2412c0` (vollständige SHA per `git rev-parse fb2412c0`).
+Letzter Anwendungscode-Commit `40f7bba8` (enthält den Datei-Identitätsfix `5025a5ba` und ursprüngliche Library-DB-/Inodeautorität).
+Nachfolgende Dokumentationscommits ändern keinen Anwendungscode.
+Keine Tags/Releases/GHCR/latest/main/TrueNAS geändert. Untracked `qa/rc14.zip` niemals stagen.
+
+## Unmittelbarer nächster Schritt
+
+1. Lauf **41301247703** auf `bcf729e163665772a5ccfb79448bf8820011336d` ist FAILURE und bereits vollständig ausgewertet:74 PASS/15 FAIL/0 ERROR/SKIP von89.
+   Alle15 kritischen Originalnodes,8 Finish-Proofs,5 SD-Gegenproben,7+8 Authorization,10 B01,11 BA-02,4 Backup-Abschlüsse PASS.
+   Von15 FAIL sind12 historische Originalfälle und3 neue Import-Statusfälle. Gemeinsamer nachgewiesener Produktfehler: directory-only `ro._identity` für reguläre SQLite-Datei; in5025a5ba korrigiert, noch PENDING.
+   Artefakt13081824373 SHA256 `dde02d89ec8c5899b57e0d3fe47f55f6eb0bb127e0f09373d81b91a31fe1d0bd`.
+2. Der Nachfolger **41303055310** auf **fb2412c03be2dc5f88dd715695ad8b98206618a0** läuft bereits.
+   Er enthält alle58 Original-Nodes plus neue Finish-/SD-/Import-/Library-/Restore-Gegenproben, volle BA-02/B01 und beide Authorization-Dateien.
+   Nicht durch einen neuen Push ersetzen, solange er PENDING ist. Keine parallele Vollmatrix.
+3. Artefakt einmal herunterladen, API-SHA256 prüfen, XML/alle roten Child-/Restart-Logs unabhängig lesen.
+4. Erst nach sicheren gezielten Reparaturen alle58, dann147, dann vollständige Matrix auf fester SHA starten.
+
+## In dieser Runde unabhängig verifizierte Linuxnachweise
+
+- **41261700576** / e9061f41:115 PASS /9 FAIL /0 ERROR/SKIP. Artefakt13066567306,
+  SHA256 `35192296609f1f83c5f99e887b3ccef2ecd82efef9412b9e885a8bd38bdccb8f`.
+- **41298781380** / a554f319:9/9 ursprüngliche aktuelle Fehler PASS,0 FAIL/ERROR/SKIP. Artefakt13080103179,
+  SHA256 `74d81033faef54571be199dd602d55bce2443f735a415c1f22518b82db252be1`.
+- **41299144678** / d09550b9:139/139 PASS,0 FAIL/ERROR/SKIP. Artefakt13081018854,
+  SHA256 `96fda1bf4e42be129d3ef9f859ff5ad42ff82f280ec60e2b93ebdf1aa568c39b`.
+  Enthält ursprüngliche124 Nachbarn und15 neue Config-/Anker-/Restore-/Read-only-Verträge.
+  Darin7 Statement-Authorization,8 SQLite-Authorization,10 B01,11 BA-02 und4 F14-Backup-Abschlussfälle PASS.
+  Stärkerer General-Test prüft die ursprüngliche Kontrollautorität/Nonce; Registry existiert vor dem ursprünglichen Crash.
+- **41300378200** / 077ded86:49 PASS /17 FAIL /0 ERROR/SKIP von66.
+  Exakte58 Originalfehler:41 PASS /17 FAIL. Alle8 neuen Finished-Receipt-Gegenproben PASS,
+  einschließlich fehlender/falscher Proofs, geänderter Generation/Bindings, SQL-Endstatus ohne Receipt und noch vorhandenem Backup-Journal.
+  Auch ursprünglicher Finished-Receipt-SIGKILL-Fall und F14-Runtime-Reconcile jetzt PASS.
+  Artefakt13082250797, SHA256 `1e30759c9888b42d6dc0958931dcfe15293fd84c68c15376d0b8da0a4d9fd757`.
+- Kumulierte letzte Einzelwerte der ursprünglichen240 Nodes:228 PASS /12 FAIL über verschiedene Commits. Original58 nun kumuliert46 PASS/12 FAIL.
+  KEINE finale Gesamtabnahme. Alle ZIPs/XML/Childlogs unter `/private/tmp/bibliothekar-pre5-evidence/<RUN>-targets*`.
+
+## Änderungen und Beweisgrenzen
+
+- a554f319/d09550b9: sieben nachgewiesene Config-/Namespace-Fixtures korrekt vor ursprünglicher Operation bereitstellen;
+  fehlende echte Konfiguration bleibt gesperrt. Vier-Ordner-Erwartung mit echtem Bootstrap/zwei Starts und negativen Root-Gegenproben abgesichert.
+  Restore-Konflikt unter derselben physischen Sperre vor Inventory-Zulassung durch Original-Replay qualifizieren; Journal und fremdes Ziel bleiben erhalten.
+- 077ded86/fd6bdcd8: dauerhaft vorhandenen originalen Finished-Receipt vor Mutationszulassung prüfen,
+  Originalnonce/Generation/Bindings und Typed-Receipt unter exklusivem Workspace-Lock; Originalproof plus permanentes Receipt erhalten.
+  Später zusätzliche Mount-/Anker-Revalidierung. Kein SQL-Status-/Journal-Abwesenheitsabschluss.
+- fc459bc9: nur nachgewiesene abgestürzte **read-only SD-Checks** vor erneuter Rootvalidierung neben lebendem Check qualifizieren;
+  normale Importe, falsche Quellen/Generationen/SQL-Handoffs bleiben gesperrt. Linuxnachweis in41301247703: SD-Check und5 Gegenproben PASS.
+- 0aeccead: frühe Folder-Import-Abbrüche ohne Move-Journal ausschließlich im historischen SQL-Status dokumentieren.
+  Private Originalnonce-/DB-Identitäts-Statusreceipt und Audit; keine Dateiänderung, kein F14-Abschluss, keine Retry-Freigabe.
+  Originale Teilkopien/Quellen/Claims bleiben erhalten.41301247703 zeigt den Fehler im dafür neu verwendeten Datei-Identitätshelfer; in5025a5ba durch O_NOFOLLOW-Regular-File-/nlink1-/Inode-Prüfung ersetzt. Positive/negative Wiederholung ausstehend.
+- fd6bdcd8: vier alte Negativtests verlangen jetzt sicheren lesbaren Start **plus echte abgewiesene SQLite- und F14-Schreibprobe**
+  in frischem Prozess; Originalrecord/Fremdbytes bleiben unverändert. Alle vier Originalfälle in41301247703 PASS. Kein bloßer HTTP-/Exitcode-Tausch.
+- 43d240e1/6de941e3: genau ein pre-commit Library-Swap kann den vorhandenen Rollback unter Originalnonce ausführen,
+  nur mit vor dem ersten Originalaustausch geschriebenem `metadata-swap-ownership-<journal>.json`:
+  vollständiger Originalrecord, Journal, Quell-/Incoming-/Work-Inodes. Private Wiederaufnahmeplanung überlebt Journalcleanup.
+  Zusätzliche Inodeprüfung innerhalb des Rückbaus vor jedem relevanten Austausch/Unlink.
+  Identische fremde Ersatzinodes, Hardlinks/Symlinks, fremde Workbytes, falsche Task-/DB-/Rootbelege und fehlender alter Ownershipproof bleiben gesperrt.
+  Alte Library-Zustände ohne diesen **prospektiven** Nachweis werden nicht nachträglich zertifiziert. Keine native TrueNAS-Freigabe.
+  Neue15 Fälle mit echten SIGKILLs/Negativproben auf fb2412c0 PENDING. Danach zusätzliche DB-Inode-/interne Owner-Gegenproben und aktuelle17 Library-Fälle auf40f7bba8 noch zu prüfen.
+- ba50824d: Test-Lifespan wartet nur bei tatsächlich zugelassenem asynchronem Trash-Import auf Terminalstatus.
+  300ms allein stoppten den normalen Worker vor dessen2s-Retry am temporären Startup-Fence. Ungeklärte Vorgänge werden nicht disponiert.
+  Neue externe Bibliotheks-Fixture: fremde DB vor dem Konflikt erzeugen, normale Registrierung weiterhin abweisen,
+  tatsächliche externe Registry-Manipulation nur über isoliertes `external_edit` nachbilden.
+- 10b1c252: aus vollständigem zweiten Prozesslog nachgewiesen: wartender Restore beendet Originalowner korrekt,
+  danach fehlt A zu Recht; die neue abgewiesene Auswahl erzeugte aber einen neuen F14-Orphan.
+  Jetzt vollständige neue Auswahlprüfung unter Trash-Lock vor F14; Executor wiederholt die Prüfung.
+  Test prüft Originalreceipt, eindeutigen katalogbelegten Zielort/Hash, genau ein Audit je DB, drei Neustarts und KEINEN neuen Record.
+  Fünf neue Negativ-/Iteratorfälle; noch PENDING.
+
+## Noch nicht gelöste Ursachen / keine Vorwegnahme der nächsten Ergebnisse
+
+1. `test_other_metadata_modes_sigkill[multiple_metadata]`: originaler Multiple-Swap bisher ohne eindeutig an F14 gebundenen prospektiven Mitgliedschafts-/Inodebeleg.
+2. `...[reintegrate]`: alter F14-Schlüssel enthält keine family_id; bestehender Retry-Qualifier erlaubt bewusst keinen geratenen automatischen Replay.
+3. `test_cancelled_import_can_retry_without_source_loss`: unregistrierter Low-Level-Aufruf mit beliebigem Metadata-Callback und database=None
+   hält nach Abbruch seinen unbekannten gemeinsamen F14-Wirkungsbereich. Eine neue Job-ID ist keine Fortsetzung.
+   Kein pauschales Freigeben implementiert. Tatsächlichen registrierten API-Abbruch/Review/Retry zuerst nachweisen,
+   dann historischen Test begründet berichtigen oder originalen qualifizierten Staging-Abschluss ergänzen.
+4. Alle aktuellen neuen Reparaturen zunächst anhand ausstehender Artefakte prüfen. Nicht voraussetzen, dass sie PASS sind. Insbesondere neue Library-Recovery und tatsächliche asynchrone Restore-Wiederaufnahme in41303055310.
+5. Enger Folgelauf auf40f7bba8 (noch einzureihen) muss den regulären DB-Dateihelfer, fünf echte frühe SIGKILL-Originale, native Library-Inode-/DB-Autorität sowie F15/F17/F18 nachweisen. Kein Vollmatrixlauf.
+5. Pflichtabnahme147/147,15/15 auf FINALER SHA, acht disjunkte Backendpartitionen, Frontend/Browser, reale Supervisor-/Containerabnahme,
+   90 Dateien,4000 Familien,14 iPhone-JPEGs und Archiv-Bytegleichheit auf finalem Source fehlen weiterhin.
+
+Lokale py_compile-/AST-Importprüfung, Actionlint und diff-check PASS; dies sind KEINE Linux-Funktionstests.
+Lokales Docker ist nicht vorhanden. Native TrueNAS/NFSv4, physische SD/USB, echte DNG1.7-Schreibprüfung NOT_RUN.
+Keine ExifTool-Abschwächung; kein `-m`, kein DNG-Upgrade.
+
+---
+
+## Frühere chronologische Aufzeichnungen (Statusangaben darin sind historisch)
+
 # Aktueller Fortsetzungsstand – 01.11.2026, Reparatur der letzten58 Backendfälle
 
 **BACKEND NOT ACCEPTED. Pre.5 noch nicht abnahmefähig – Veröffentlichung gesperrt.**
@@ -520,3 +612,13 @@ Kein main/tag/GHCR/TrueNAS veraendert. Bei roten Resultaten nicht publishen.
 - **Freigabestatus: NICHT ABGENOMMEN, PRE.5 NICHT RELEASED.**
   Bis zum endgueltigen Resultat der vollständigen Matrix weder Publish
   noch main/TrueNAS/GHCR/Tag veraendern.
+
+## 01.11.2026 – aktuelle Fortsetzung: neun Originalfehler bestanden
+
+- Ausgangslauf 41261700576 auf e9061f41 vollständig ausgewertet: 115/124 PASS, neun FAIL, kein ERROR/SKIP. Artefakt13066567306 SHA256 35192296609f1f83c5f99e887b3ccef2ecd82efef9412b9e885a8bd38bdccb8f. Der ältere Lauf41261174452 ist abgeschlossen (90 PASS/13 FAIL), kein aktiver Lauf mehr.
+- a554f3190c385c1245ff6fa0c9fdb92a687b653c: sieben belegte Config-Fixtures korrigiert, Restore-Konflikt vor Bestandsabgleich über originale Domain-Recovery qualifiziert, Vier-Ordner-Test mit realem Bootstrap und zwei Starts abgesichert. Produktiv-Konfiguration wird weiterhin niemals stillschweigend ersetzt.
+- Linux41298781380 SUCCESS: exakt neun Originalfälle PASS, keine FAIL/ERROR/SKIP. Artefakt13080103179 SHA256 74d81033faef54571be199dd602d55bce2443f735a415c1f22518b82db252be1.
+- d09550b9a9cc5291789e3f6e150737abf564a9a3: General-Fixture bindet Registry vor der originalen Crash-Operation und prüft deren originalen F14-Abschluss. 15 zusätzliche negative/positive Config-, Restore- und Read-only-Verträge. Lauf41299144678 prüft diesen Stand mit bisheriger124er-Nachbargruppe; Ergebnis noch auszuwerten.
+- Uncommittierter nächster Schritt: originale finished-Receipts vor dem Admission-Fence unter vollständigem Workspace-Ausschluss prüfen und crashfest archivieren; acht Gegenproben einschließlich SQL-Status ohne Proof und noch vorhandenem Backup-Journal. Noch KEIN Linuxnachweis für diese Änderung.
+- Kumulierte individuelle Nachweise aus verschiedenen Commits: 221/240 PASS,19 offen; dies ist KEINE Gesamt-Abnahme. Ursprüngliche58:39 inzwischen gezielt PASS,19 noch frisch zu prüfen.
+- Nächster Schritt: Ergebnis41299144678 auswerten; dann eng begrenzten Receipt-Fix sowie exakte58 Originalnodes prüfen. Keine Veröffentlichung. BACKEND NOT ACCEPTED.

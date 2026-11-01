@@ -158,3 +158,100 @@ Ungeklärte Bereiche insbesondere: Metadata library/multiple/reintegration-Recov
 
 
 Nächste verbindliche Schritte: zunächst beide laufenden gezielten Ergebnisse einschließlich vollständiger XML-/Childlogs kryptografisch sichern und alle roten Fälle bewerten. Den noch offenen Vier-Ordner-Setupfall nicht allein auf eine neue Erwartung umstellen. Erst nach abgearbeiteten Zielgruppen die vollständigen147 und15 sowie BA-02/B01 auf festem Commit; danach volle acht Partitionen, Frontend/Browser und Supervisor-Container. Native TrueNAS-, SD-/USB- und echte DNG1.7-Abnahme nicht durchgeführt. Veröffentlichung weiterhin gesperrt.
+
+## 01.11.2026 – aktuelle Fortsetzung: neun Originalfehler bestanden
+
+- Ausgangslauf 41261700576 auf e9061f41 vollständig ausgewertet: 115/124 PASS, neun FAIL, kein ERROR/SKIP. Artefakt13066567306 SHA256 35192296609f1f83c5f99e887b3ccef2ecd82efef9412b9e885a8bd38bdccb8f. Der ältere Lauf41261174452 ist abgeschlossen (90 PASS/13 FAIL), kein aktiver Lauf mehr.
+- a554f3190c385c1245ff6fa0c9fdb92a687b653c: sieben belegte Config-Fixtures korrigiert, Restore-Konflikt vor Bestandsabgleich über originale Domain-Recovery qualifiziert, Vier-Ordner-Test mit realem Bootstrap und zwei Starts abgesichert. Produktiv-Konfiguration wird weiterhin niemals stillschweigend ersetzt.
+- Linux41298781380 SUCCESS: exakt neun Originalfälle PASS, keine FAIL/ERROR/SKIP. Artefakt13080103179 SHA256 74d81033faef54571be199dd602d55bce2443f735a415c1f22518b82db252be1.
+- d09550b9a9cc5291789e3f6e150737abf564a9a3: General-Fixture bindet Registry vor der originalen Crash-Operation und prüft deren originalen F14-Abschluss. 15 zusätzliche negative/positive Config-, Restore- und Read-only-Verträge. Lauf41299144678 prüft diesen Stand mit bisheriger124er-Nachbargruppe; Ergebnis noch auszuwerten.
+- Uncommittierter nächster Schritt: originale finished-Receipts vor dem Admission-Fence unter vollständigem Workspace-Ausschluss prüfen und crashfest archivieren; acht Gegenproben einschließlich SQL-Status ohne Proof und noch vorhandenem Backup-Journal. Noch KEIN Linuxnachweis für diese Änderung.
+- Kumulierte individuelle Nachweise aus verschiedenen Commits: 221/240 PASS,19 offen; dies ist KEINE Gesamt-Abnahme. Ursprüngliche58:39 inzwischen gezielt PASS,19 noch frisch zu prüfen.
+- Nächster Schritt: Ergebnis41299144678 auswerten; dann eng begrenzten Receipt-Fix sowie exakte58 Originalnodes prüfen. Keine Veröffentlichung. BACKEND NOT ACCEPTED.
+
+## 01.11.2026 – Nine-Gate und Nachbarn unabhängig grün; Original58 erneut geprüft
+
+- a554f319:9/9 PASS, Run41298781380, Artefakt13080103179 SHA256 `74d81033faef54571be199dd602d55bce2443f735a415c1f22518b82db252be1`.
+- d09550b9:139/139 PASS, Run41299144678, Artefakt13081018854 SHA256 `96fda1bf4e42be129d3ef9f859ff5ad42ff82f280ec60e2b93ebdf1aa568c39b`. Enthält komplette BA-02/B01 und7+8 SQLite-Verträge.
+- 077ded86:49/66 PASS,17 FAIL,0 ERROR/SKIP; Run41300378200. Original58:41 PASS/17 FAIL; neue8 Finished-Receipt-Fälle vollständig PASS. Artefakt13082250797 SHA256 `1e30759c9888b42d6dc0958931dcfe15293fd84c68c15376d0b8da0a4d9fd757`.
+- Alle genannten ZIPs unabhängig heruntergeladen/gehasht, eindeutige JUnit-Nodes und komplette rote Childlogs ausgewertet.
+- bcf729e1 /41301247703 läuft mit frühen Import-/SD-/Sperr-Korrekturen. Neuer kumulierter QA-Stand fb2412c0 bereits eingereiht; Ergebnis noch nicht nachgewiesen.
+- Neue Library-Recovery ausschließlich mit vor dem Austausch erhobener Originalnonce-/Inodeautorität. Keine nachträgliche Zertifizierung historischer unbekannter Kopien.
+- Nachgewiesener neuer Restore-Orphan nach erfolgreichem Vorgänger-Replay durch Auswahlpreflight vor F14 behoben; Executorprüfungen bleiben. Neue Fälle PENDING.
+- Die17 jüngsten roten Fälle sind im JSON einzeln dokumentiert; implementiert/ungetestet bleibt getrennt von tatsächlich bestanden.
+- Bekannte unimplementierte Restursachen: Multiple-/Reintegration-Originalreplay und unregistrierter Low-Level-Cancel/Retry mit unbekanntem Callback. Keine generische Freigabe.
+- Vollständige147er-/8-Partitions-/Frontend-/Containerabnahme auf finalem Source noch ausstehend. **BACKEND NOT ACCEPTED.**
+- Vollständig reproduzierbare aktuelle Fortsetzungsanleitung steht am Anfang der FORTSETZUNG.md.
+
+### Aktuelle58 Einzelresultate auf077ded86 (Run41300378200)
+
+| Originalnode | Linuxresultat | Aktueller Umsetzungsnachweis |
+|---|---|---|
+| `tests/backend/test_0561_audit_regressions.py::test_P202b_F1_journal_write_error_must_leave_recovery_evidence` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0561_recovery.py::test_startup_recovers_general_swap_before_onboarding_worker` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_0562_metadata_preparation_keeps_unknown_file` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_0562_process_recovery.py::test_multilibrary_projection_sigkill[multi.source_family1]` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill[library_metadata]` | FAIL | PENDING |
+| `tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill[multiple_metadata]` | FAIL | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill[reintegrate]` | FAIL | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_recovery_keeps_foreign_bytes_after_sigkill[metadata-meta.swap]` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_0562_process_recovery.py::test_recovery_keeps_foreign_bytes_after_sigkill[trash-trash.db1]` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.before_copy]` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.copy_chunk]` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.copy_verify]` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.hash_chunk]` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.before_db]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.db]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.move1]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.move2]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[sort-sort.before_db]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[sort-sort.move1]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[sort-sort.move2]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_recovery_sigkill[reconcile-reconcile.move2]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_process_recovery.py::test_sort_recovery_sigkill[sort-sort.move2]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_recovery_guards.py::test_startup_recovers_registered_databases_only[False]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_0562_recovery_guards.py::test_startup_recovers_registered_databases_only[True]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_f11_trash_reservation.py::test_f11_legacy_delete_reservation_conflict_preserves_evidence` | FAIL | PENDING_41301247703 |
+| `tests/backend/test_f11_trash_reservation.py::test_f11_original_boundary_and_restore` | FAIL | PENDING |
+| `tests/backend/test_f14_backup_completion.py::test_f14_backup_rollback_receipt_survives_real_sigkill[before-receipt]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_f14_backup_completion.py::test_f14_backup_rollback_receipt_survives_real_sigkill[journal-removed]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_f14_backup_completion.py::test_f14_backup_rollback_receipt_survives_real_sigkill[receipt]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_f14_continuation.py::test_f14_finished_receipt_survives_repeated_sigkill` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_f14_fixed_storage.py::test_f14_four_empty_directories_are_not_a_startup_mount_certificate` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_f14_fixed_storage.py::test_f14_metadata_recovery_existing_assertions_with_complete_storage_fixture` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_f14_runtime.py::test_f14_real_worker_rejects_rename_then_allows_completion[reconcile-reconcile.move1]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_active]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_pending]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f17_current]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f18_false]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f18_true]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[different]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[directory]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[hardlink]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[same]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[symlink]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_identical_foreign_target_excluded_from_reconcile` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_independent_file_remains_usable[delete]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_independent_file_remains_usable[restore]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_independent_library_and_provenance` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_parallel_operation_boundary[restore_B]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_two_restore_processes_after_owner_sigkill` | FAIL | PENDING |
+| `tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[new_library_origin]` | FAIL | PENDING |
+| `tests/backend/test_rc1_sd_reimport.py::test_cancelled_import_can_retry_without_source_loss` | FAIL | Quellstand 077ded86 |
+| `tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[direct-failed]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[direct-interrupted]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[direct-missing-job]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-failed]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-interrupted]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-missing-job]` | PASS | Quellstand 077ded86 |
+| `tests/backend/test_rc6_handoff.py::test_two_real_process_checks_sigkill_and_three_restarts[True]` | FAIL | PENDING_41301247703 |
+
+## 01.11.2026 – Nachlauf41301247703 vollständig ausgewertet
+
+Source `bcf729e163665772a5ccfb79448bf8820011336d`: **74 PASS /15 FAIL /0 ERROR/SKIP von89**. Artefakt13081824373 SHA256 `dde02d89ec8c5899b57e0d3fe47f55f6eb0bb127e0f09373d81b91a31fe1d0bd`, unabhängig heruntergeladen/verifiziert. Alle15 exakten kritischen Originalnodes PASS; vollständige BA-02(11), B01(10), Statement-Authorization(7), SQLite-Authorization(8), F14-Backup-Abschluss(4), neue8 Finished-Receipt- und5 SD-Gegenproben PASS. Vier frühere Prozess-Exit-Negativfälle bestehen mit tatsächlicher SQL/F14-Schreibablehnung.
+
+Die15 roten Fälle enthalten12 alte Nodes und3 neue Import-Statusfälle. Quelle des neuen Produktfehlers: `root_operations._identity` akzeptiert ausschließlich Verzeichnisse, wurde aber für die SQLite-Datei verwendet. `5025a5ba` ersetzt dies durch eine eigenständige reguläre Datei-/O_NOFOLLOW-/nlink1-/Inode-Qualifikation mit erneutem Check vor SQL-Commit; fünf zusätzliche Dateityp-Gegenproben. Noch kein Linux-PASS für diesen Fix.
+
+`40f7bba8` bindet den prospektiven Library-Swap-Proof zusätzlich an DB-Inode und interne Bibliotheksidentität. Identische fremde Ersatzinodes und ein ersetzter Katalog können nicht nachträglich als eigener Bestand übernommen werden. Zwei zusätzliche negative Fälle. Alle neuen Library-Fälle bleiben bis zu ihren Linuxartefakten PENDING. Historische Library-Zustände ohne vorher vorhandenen Ownershipbeleg bleiben ausdrücklich geschützt.
+
+Kumulierte Einzelwerte der ursprünglichen240:228 PASS/12 FAIL; ursprüngliche58:46 PASS/12 FAIL, über verschiedene Commits. KEINE finale Abnahme.41303055310 auf fb2412c0 läuft bereits; keine Vollmatrix/Veröffentlichung.

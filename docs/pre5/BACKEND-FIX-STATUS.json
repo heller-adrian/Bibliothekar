@@ -354,29 +354,34 @@
       "group": "f14_initial_state_contract"
     },
     "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[stage]": {
-      "run": 41217778080,
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "trash_recovery_and_scope"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[first_db]": {
-      "run": 41217778080,
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "trash_recovery_and_scope"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[last_db]": {
-      "run": 41217778080,
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "trash_recovery_and_scope"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[committed]": {
-      "run": 41217778080,
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "trash_recovery_and_scope"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary[cleanup]": {
-      "run": 41217778080,
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "trash_recovery_and_scope"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_0561_recovery.py::test_trash_recovery_can_itself_be_interrupted[catalogue]": {
       "run": 41217778080,
@@ -481,148 +486,148 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_rc1_b01.py::test_b01_live_inventory_conflict_is_bounded_and_visible": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_rc1_b01.py::test_b01_compatibility_request_collision": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_rc1_b01.py::test_b01_parallel_edit_structure": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_rc1_b01.py::test_b01_live_trash_operation_is_not_waited_on_indefinitely": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_staging_crash_before_main_commit_rolls_back": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_after_main_commit_crash_completes_purge": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_tampered_staged_file_is_never_deleted": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_batch_collision_after_first_move_stays_blocked": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_direct_restore_commits_resume_once[r1.completed]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_restore_recovery_two_progressive_sigkills": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[after_handoff]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[hash]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_rc5_practice_followup.py::test_folder_actual_sigkill_atomic_handoff_and_three_restarts[after_handoff]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[bytes]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_interrupted_rollback_keeps_journal_and_bytes": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_mid_purge_crash_recovery_is_idempotent": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_multilibrary_crash_after_secondary_delete_restores_projection": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_unknown_empty_subdirectory_blocks_deletion": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0500_backup_delete_recovery.py::test_0500_unknown_stage_file_blocks_destructive_purge": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_partial_commit_foreign_target_requires_global_block": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[source_bytes]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_restore_preserves_ambiguous_evidence[bytes]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[same_bytes_new_inode]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[symlink]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0414_patch_regressions.py::test_0414_planned_save_uses_fast_post_write_refresh_only": {
       "run": 41231600475,
@@ -637,16 +642,16 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_0561_audit_regressions.py::test_P202b_F1_journal_write_error_must_leave_recovery_evidence": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0561_recovery.py::test_committed_journal_sync_failure_retains_original_until_retry": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "original_147_complete_recheck"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_0561_recovery.py::test_partial_commit_restores_real_family_and_file_assignments": {
       "run": 41231600475,
@@ -655,10 +660,10 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_0561_recovery.py::test_startup_recovers_general_swap_before_onboarding_worker": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
-      "outcome": "FAIL",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0561_recovery.py::test_trash_recovery_handles_dual_copy_stage_boundary[link]": {
       "run": 41231600475,
@@ -679,10 +684,10 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_metadata_preparation_keeps_unknown_file": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_0562_restore_preserves_ambiguous_evidence[database]": {
       "run": 41231600475,
@@ -715,28 +720,28 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_0562_process_recovery.py::test_multilibrary_projection_sigkill[multi.source_family1]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill[library_metadata]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill[multiple_metadata]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill[reintegrate]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_projection_recovery_sigkill": {
       "run": 41231600475,
@@ -745,16 +750,16 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_0562_process_recovery.py::test_recovery_keeps_foreign_bytes_after_sigkill[metadata-meta.swap]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_recovery_keeps_foreign_bytes_after_sigkill[trash-trash.db1]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.before_complete]": {
       "run": 41231600475,
@@ -763,28 +768,28 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.before_copy]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.copy_chunk]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.copy_verify]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.hash_chunk]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.in_tx]": {
       "run": 41231600475,
@@ -811,58 +816,58 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.before_db]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.db]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.move1]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.move2]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[sort-sort.before_db]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[sort-sort.move1]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[sort-sort.move2]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_recovery_sigkill[reconcile-reconcile.move2]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_sort_recovery_sigkill[sort-sort.move2]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_process_recovery.py::test_trash_recovery_sigkill[trash.recover_cleanup]": {
       "run": 41231600475,
@@ -919,16 +924,16 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_0562_recovery_guards.py::test_startup_recovers_registered_databases_only[False]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_0562_recovery_guards.py::test_startup_recovers_registered_databases_only[True]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_f11_trash_reservation.py::test_f11_full_empty_recovery_killed_twice[trash.recover_cleanup]": {
       "run": 41231600475,
@@ -985,16 +990,16 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_f11_trash_reservation.py::test_f11_legacy_delete_reservation_conflict_preserves_evidence": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_f11_trash_reservation.py::test_f11_original_boundary_and_restore": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_f11_trash_reservation.py::test_f11_two_concurrent_requests[empty]": {
       "run": 41231600475,
@@ -1003,106 +1008,106 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_f14_backup_completion.py::test_f14_backup_rollback_receipt_survives_real_sigkill[before-receipt]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_f14_backup_completion.py::test_f14_backup_rollback_receipt_survives_real_sigkill[journal-removed]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_f14_backup_completion.py::test_f14_backup_rollback_receipt_survives_real_sigkill[receipt]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_f14_continuation.py::test_f14_finished_receipt_survives_repeated_sigkill": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_f14_fixed_storage.py::test_f14_four_empty_directories_are_not_a_startup_mount_certificate": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_f14_fixed_storage.py::test_f14_metadata_recovery_existing_assertions_with_complete_storage_fixture": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
-      "outcome": "FAIL",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_f14_runtime.py::test_f14_real_worker_rejects_rename_then_allows_completion[reconcile-reconcile.move1]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_active]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
-      "outcome": "FAIL",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_pending]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
-      "outcome": "FAIL",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f17_current]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
-      "outcome": "FAIL",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f18_false]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f18_true]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[different]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[directory]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[hardlink]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[same]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_collision_and_three_full_starts[symlink]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_collision_sigkill[r1.before_conflict]": {
       "run": 41231600475,
@@ -1141,28 +1146,28 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_identical_foreign_target_excluded_from_reconcile": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_independent_file_remains_usable[delete]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_independent_file_remains_usable[restore]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_independent_library_and_provenance": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_legacy_collision_and_unowned_identical_target": {
       "run": 41231600475,
@@ -1189,10 +1194,10 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_parallel_operation_boundary[restore_B]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_recovery_sigkill_twice[r1.before_conflict]": {
       "run": 41231600475,
@@ -1219,16 +1224,16 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_two_restore_processes_after_owner_sigkill": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[catalogue]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[database_inode]": {
       "run": 41231600475,
@@ -1243,28 +1248,28 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[family]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[missing_original]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[new_library_origin]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_r1_restore_recovery.py::test_r1_unsafe_invariant_blocks_global_start[source_inode]": {
-      "run": 41260399276,
-      "source": "bd168d53c1b0431bcdac5fd6e8606aacbb18fed1",
+      "run": 41299144678,
+      "source": "d09550b9a9cc5291789e3f6e150737abf564a9a3",
       "outcome": "PASS",
-      "group": "metadata_admission_and_restore_critical_gate"
+      "group": "current_startup_restore_and_neighbor_contracts"
     },
     "tests/backend/test_rc14_import.py::test_rc13_staged_zero_published_resume_preserves_origin[3892]": {
       "run": 41231600475,
@@ -1273,46 +1278,46 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_rc1_sd_reimport.py::test_cancelled_import_can_retry_without_source_loss": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
       "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[direct-failed]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[direct-interrupted]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[direct-missing-job]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-failed]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-interrupted]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-missing-job]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41300378200,
+      "source": "077ded864d6c0f8bc99d1dd69307c35f88987092",
+      "outcome": "PASS",
+      "group": "exact_original58_plus_durable_finish_contracts"
     },
     "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[handoff]": {
       "run": 41231600475,
@@ -1339,10 +1344,10 @@
       "group": "original_147_complete_recheck"
     },
     "tests/backend/test_rc6_handoff.py::test_two_real_process_checks_sigkill_and_three_restarts[True]": {
-      "run": 41231600475,
-      "source": "7838a7062565b712a4f24fa481967d46df173d45",
-      "outcome": "FAIL",
-      "group": "original_147_complete_recheck"
+      "run": 41301247703,
+      "source": "bcf729e163665772a5ccfb79448bf8820011336d",
+      "outcome": "PASS",
+      "group": "early_import_sd_and_actual_write_fence_contracts"
     },
     "tests/backend/test_rc9_setup_separation.py::test_populated_unregistered_archive_allows_first_library_setup[legacy_roots]": {
       "run": 41231600475,
@@ -1352,10 +1357,9 @@
     }
   },
   "counts": {
-    "PASS": 189,
-    "FAIL": 51,
-    "SKIP": 0
+    "PASS": 228,
+    "FAIL": 12
   },
-  "note": "Latest individually observed, source-specific results from different commits: 189 PASS /51 FAIL among original 240. Not final-code acceptance. 41260399276:26/33; original F18 cases PASS; seven current failures need explicit fixture corrections and requalification. Latest sort/admission/journal changes still pending. Full QA and publication remain gated.",
+  "note": "Latest individual outcomes across multiple explicitly bound commits; not final-source full acceptance.",
   "not_retested": 0
 }
