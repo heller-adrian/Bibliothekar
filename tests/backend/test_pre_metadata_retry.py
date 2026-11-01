@@ -52,5 +52,16 @@ def test_rc14_retry_scope_retains_original_intent(tmp_path,monkeypatch,fault):
     elif fault:
         with pytest.raises(ro.RootOperationError):pending_reservations(ws,tmp_path/'registry')
     else:assert pending_reservations(ws,tmp_path/'registry')=={str(operation)}
+    if fault is None:
+        # The RC14 key lacks family_id. A qualified check must not become a
+        # license to start a different F14 mutation before the orphan is retired.
+        from app.operation_health import qualified_retry
+        with qualified_retry(ws,{str(operation)}):
+            with pytest.raises(ro.RootOperationError,match='retry_original_reservation_identity_required'):
+                with ro.reserve(ws,library_id='main',database=db,kind='metadata',
+                                ids={'function':'app.metadata_correction.reintegrate_library_metadata_family',
+                                     'family_id':str(family)},
+                                paths=[ws,*[ws/n for n in load_storage_settings(workspace_root=ws).values()]]):
+                    pytest.fail('An unrelated file mutation was admitted')
     assert operation.read_bytes()==before and (parent/'state.json').read_bytes()==state_before
     if fault=='missing_database':assert not db.exists()

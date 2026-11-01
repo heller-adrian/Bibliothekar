@@ -133,7 +133,17 @@ def _require_write(workspace,*,candidate,observe):
     # Explicitly qualified retry capabilities are bound to unchanged records.
     retry=dict(_RETRIES.get())
     dead=[r for r in status['reservations'] if not r['live']]
-    if retry and dead and not any(i.get('phase')=='recovery_in_progress' for i in status['issues']) and all(r['qualified'] and retry.get(r['path'])==(r.get('reservation_id'),r.get('record_sha256')) for r in dead):return
+    if retry and dead and not any(i.get('phase')=='recovery_in_progress' for i in status['issues']) and all(r['qualified'] and retry.get(r['path'])==(r.get('reservation_id'),r.get('record_sha256')) for r in dead):
+        # A qualified old intent permits admission of its *own* original F14
+        # lease, never creation of an unrelated modern family-scoped lease.
+        # A historic RC14 key lacked family_id; present-day reintegration
+        # must not write 14 new families before detecting that old orphan.
+        if candidate is not None and not all(
+            all(r.get(key)==candidate.get(key) for key in ('kind','library','database','ids'))
+            for r in dead
+        ):
+            raise RootOperationError('retry_original_reservation_identity_required')
+        return
     # In RC14, multiple families share one historical F14 key. The first
     # successful family releases the key. Continue only THIS previously
     # qualified request after reserve() attests that exact F14 release.
