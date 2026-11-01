@@ -234,8 +234,27 @@ def test_cancelled_import_can_retry_without_source_loss(tmp_path):
     with pytest.raises(ImportCancelled):
         run_folder_import_job(source=source,workspace=workspace,pool_probe_path=workspace,log_dir=logs,processing_buffer_percent=0,safety_reserve_gib=0,job_id='CANCELLED',central_stock=True,metadata_callback=after_metadata,cancellation_callback=lambda:cancelled)
     assert p.read_bytes()==before
-    result=run_folder_import_job(source=source,workspace=workspace,pool_probe_path=workspace,log_dir=logs,processing_buffer_percent=0,safety_reserve_gib=0,job_id='RETRY',central_stock=True)
-    assert result['state']=='success' and result['organization']['file_count']==1
+    # This is an unregistered low-level call with a caller-owned metadata
+    # callback. Its original F14 scope has no catalogue or durable journal
+    # proving that the callback did not publish other effects. A NEW job ID is
+    # never authority to retire that original reservation. The supported
+    # registered import/recheck path is separately exercised above.
+    from app.operation_health import inspect as inspect_operations
+    from app.pipeline import PipelineError
+    original = inspect_operations(workspace)['reservations']
+    assert len(original)==1 and not original[0]['live'] and original[0]['qualified']
+    assert original[0]['kind']=='import'
+    assert original[0]['ids']=={
+        'function':'app.folder_import.run_folder_import_job','job_id':'CANCELLED'
+    }
+    reservation_path=Path(original[0]['path'])
+    original_receipt=reservation_path.read_bytes()
+    with pytest.raises(PipelineError,match='operation_recovery_required'):
+        run_folder_import_job(source=source,workspace=workspace,pool_probe_path=workspace,log_dir=logs,processing_buffer_percent=0,safety_reserve_gib=0,job_id='RETRY',central_stock=True)
+    unchanged=inspect_operations(workspace)['reservations']
+    assert len(unchanged)==1 and unchanged[0]['reservation_id']==original[0]['reservation_id']
+    assert unchanged[0]['record_sha256']==original[0]['record_sha256']
+    assert reservation_path.read_bytes()==original_receipt
     assert p.read_bytes()==before
 
 
