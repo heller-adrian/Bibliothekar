@@ -123,7 +123,21 @@ def test_two_real_process_checks_sigkill_and_three_restarts(fixture,monkeypatch,
         job=claim_next_job(dbs[0],operation='folder_import') or claim_next_job(dbs[0],operation='sd_recheck')
         if not job:break
         main.process_claimed_job(job,library_context=context)
-    assert all(get_job(dbs[0],jid)['state']=='completed' for jid in ids)
+    states={jid:get_job(dbs[0],jid) for jid in ids}
+    if not all(job['state']=='completed' for job in states.values()):
+        # Keep the concurrency invariant intact. Report the persisted jobs and
+        # actual independent worker/restart evidence rather than only False.
+        with database_connection(dbs[0]) as c:
+            jobs=[{k:dict(row).get(k) for k in
+                   ('id','operation','state','stage','error_message','result_json')
+                   if k in dict(row)}
+                  for row in c.execute("SELECT * FROM jobs ORDER BY created_at,id")]
+        logs={str(path.relative_to(evidence)):path.read_text(errors='replace')[-6000:]
+              for path in sorted(evidence.rglob('log'))}
+        pytest.fail("Two-process handoff did not complete after three restarts: "+
+                    repr({'parents':{k:{a:v.get(a) for a in ('operation','state','stage','result')}
+                                         for k,v in states.items()},
+                          'jobs':jobs,'worker_logs':logs}))
     assert main.api_import_history()['total']==1
     with database_connection(dbs[0]) as c:
         assert c.execute("SELECT COUNT(*) FROM jobs WHERE operation='folder_import'").fetchone()[0]==1
