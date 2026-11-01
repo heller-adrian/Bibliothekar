@@ -99,6 +99,7 @@ def test_0340_preview_applies_constant_offset_to_every_file(
     assert len(preview["preview_fingerprint"]) == 64
 
 
+@pytest.mark.usefixtures('isolated_registered_metadata_config')
 def test_0340_preview_does_not_write_and_apply_writes_all_files(
     tmp_path: Path,
     monkeypatch,

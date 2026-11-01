@@ -147,6 +147,7 @@ def test_0532_staged_and_inflight_sources_cannot_be_deleted(tmp_path,monkeypatch
 
 
 
+@pytest.mark.usefixtures('isolated_registered_metadata_config')
 def test_0532_actual_claimed_worker_finishes_trash_restore(tmp_path,monkeypatch):
     """Contract that failed in 0.53.1: queue -> main worker -> real SSD bytes."""
     from app import main

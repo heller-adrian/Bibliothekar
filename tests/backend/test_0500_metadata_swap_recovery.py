@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures('isolated_registered_metadata_config')
+
 from app.database import database_connection, initialize_database
 from app.metadata_correction import apply_metadata_correction
 from app.metadata_swap_recovery import recover_metadata_swaps, assert_no_pending_swaps

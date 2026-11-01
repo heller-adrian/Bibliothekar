@@ -6,6 +6,8 @@ import hashlib
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures('isolated_registered_metadata_config')
+
 from app import main
 from app.backup_management import backup_deletion_status, delete_backup
 from app.database import (

@@ -204,6 +204,7 @@ def test_b03_verifier_rejects_conflicting_written_xmp(tmp_path):
     assert p.read_bytes()==before
 
 
+@pytest.mark.usefixtures('isolated_registered_metadata_config')
 def test_b03_library_real_write_then_explicit_reintegration(tmp_path):
     import app.metadata_correction as m
     from app.storage_config import storage_paths
