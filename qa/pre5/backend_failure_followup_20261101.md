@@ -7,3 +7,7 @@ Exactly 19 *observed*, distinct failed pytest nodes are pinned in `qa/pre5/backe
 The revised test harness now sets up the required real synthetic registry, library identity, and F14 root-control baseline before registered metadata operations. The code-side missing-database guard remains fail-closed. Historical R14/RC14 crashes with missing prospective ownership evidence remain blocked: a green local fixture is not authorization to resume old unproven mutations.
 
 The full Pre.5 workflow must first run these exact 19 nodes in an isolated F14 Linux harness and stop on any failure. Only then proceed to the 147-node historical gate, complete backend partitions, frontend, and container. A **release requires all stages green**, including the immutable historical 14-iPhone-JPEG migration contract. Do not publish or tag based on targeted success.
+
+## Full acceptance after targeted recovery success
+
+GitHub Actions 41351503688 (commit 3d2a9acbce7774cab607ee9f89854068fc5d77b1) passed the isolated 15 recovery contracts and 7 RC14 key/lease checks. Its backend, frontend, container and 19-node full regression gate were skipped. Trigger the full Pre.5 acceptance on this exact source state without relaxing negative migration tests. This checkpoint authorizes tests only; it is not a release signoff.
