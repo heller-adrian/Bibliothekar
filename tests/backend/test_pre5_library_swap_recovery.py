@@ -1,0 +1,56 @@
+"""Original library swap, interrupted replay, and untouched conflicting evidence."""
+from pathlib import Path
+import json,os
+import pytest
+from tests.backend import test_0562_process_recovery as recovery
+from tests.backend.test_0562_process_recovery import isolated_process_environment
+from tests.backend.external_sql import external_edit
+
+
+def operations(case):
+    return {str(p):p.read_bytes() for p in case.rglob('operation-*.json')}
+
+
+@pytest.mark.parametrize('boundary',['meta.recover_original','meta.recover_task','library.before-outcome','library.outcome'])
+def test_library_original_rollback_survives_recovery_sigkill(tmp_path,boundary):
+    evidence,case,data=recovery.new_case(tmp_path,'library_metadata','library-recovery-'+boundary)
+    recovery.invoke(case,'operate','meta.backup',evidence/'kill',kill=True)
+    original=operations(case);assert len(original)==1
+    record=json.loads(next(iter(original.values())))
+    for n in range(1 if boundary=='library.outcome' else 2):
+        recovery.invoke(case,'startup',boundary,evidence/('replay-kill'+str(n)),kill=True)
+    recovery.three_restarts(case,evidence)
+    assert not operations(case) and not list(case.rglob('.swap-journals/*.json'))
+    source=Path(data['source']);assert recovery.hash_file(source)==data['expected'][source.name]
+    receipt,=case.rglob('library-metadata-outcome-'+record['reservation_id']+'.json')
+    proof=json.loads(receipt.read_text());assert proof['reservation']==record
+    assert proof['disposition']=='verified_original_library_swap_rolled_back'
+    assert recovery.invoke(case,'retry','none',evidence/'retry')['returncode']==0
+
+
+@pytest.mark.parametrize('fault',['foreign_source','foreign_backup','foreign_incoming','foreign_work','missing_backup','hardlink','task','generation'])
+def test_library_swap_unknown_evidence_keeps_original_fence(tmp_path,fault):
+    evidence,case,data=recovery.new_case(tmp_path,'library_metadata','library-blocked-'+fault)
+    recovery.invoke(case,'operate','meta.backup',evidence/'kill',kill=True)
+    original=operations(case);assert len(original)==1
+    journal,=case.rglob('.swap-journals/*.json');swap=json.loads(journal.read_text());item=swap['files'][0]
+    if fault.startswith('foreign_'):
+        role=fault.removeprefix('foreign_')
+        if role=='work':
+            target=journal.parent.parent/'.work'/data['task']/'unknown.JPG'
+        else:target=Path(item[role if role!='source' else 'source'])
+        target.write_bytes(b'foreign bytes must remain untouched')
+    elif fault=='missing_backup':Path(item['backup']).rename(case/'retained-original-backup.JPG')
+    elif fault=='hardlink':os.link(item['incoming'],case/'retained-hardlink.JPG')
+    elif fault=='task':
+        with external_edit(Path(data['db']),fixture_root=case) as c:
+            c.execute("UPDATE metadata_corrections SET proposed_datetime='2026-12-30T12:00:00'")
+    else:
+        state=Path(next(iter(original))).parent/'state.json'
+        value=json.loads(state.read_text());value['generation']+=1;state.write_text(json.dumps(value))
+    retained={str(p):p.read_bytes() for p in case.rglob('*') if p.is_file() and p.suffix.upper() in {'.JPG','.XMP'}}
+    for n in range(2):
+        result=recovery.invoke(case,'startup','none',evidence/('restart'+str(n)))
+        recovery.assert_preserved_write_fence(case,evidence/('probe'+str(n)),result,'metadata')
+        assert operations(case)==original and journal.exists()
+        assert all(Path(p).read_bytes()==raw for p,raw in retained.items())

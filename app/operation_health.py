@@ -236,6 +236,8 @@ def recover_known_before_startup(workspace,registry,logs,*,database=None):
                 raise DomainStartupError('technical_startup_reservation_not_qualified')
             ro._check(record['bindings'])
             return record
+    from app.metadata_library_recovery import recover as recover_library_metadata
+    if recover_library_metadata(workspace):return
     known={'app.metadata_correction.execute_metadata_correction','app.metadata_correction.apply_metadata_correction'}
     if not all(r['qualified'] and r.get('kind')=='metadata' and r.get('ids',{}).get('function') in known for r in dead):
         raise DomainStartupError('unresolved_operation_scope: safe read views remain available; '+str(dead))
