@@ -66,8 +66,9 @@ def test_startup_recovers_registered_databases_only(tmp_path,monkeypatch,registe
             c.execute("UPDATE libraries SET is_registered=0,is_active=0 WHERE library_id='removed'")
     for key,value in dict(DATABASE_FILE=db,REGISTRY_DATABASE_FILE=registry,WORKSPACE_PATH=workspace,
                           CONFIG_PATH=tmp_path/'settings.json',LOG_PATH=tmp_path/'logs',
-                          WORKER_THREAD=SimpleNamespace(is_alive=lambda:True)).items():
+                          WORKER_THREAD=None).items():
         monkeypatch.setattr(main,key,value)
+    monkeypatch.setattr(main,'Thread',lambda **kw:SimpleNamespace(start=lambda:None,is_alive=lambda:False,join=lambda timeout=None:None))
     monkeypatch.setattr(main,'start_cancel_worker',lambda:None)
     monkeypatch.setattr(main,'start_release_worker',lambda:None)
     main.startup_database()

@@ -121,9 +121,10 @@ def test_rejected_batch_does_not_orphan_the_active_writer(tmp_path,monkeypatch,j
     metadata_root=storage_paths(ws)['metadata_root']
     assert not list((metadata_root/'.swap-journals').glob('*.json'))
     batch_root=mc.metadata_area_paths(area='multiple',workspace_root=ws,library_id='main',create=False)['root']
-    for filename in ('A.JPG','B.JPG'):
+    # Batch correction preserves the original one-second spacing.
+    for filename,expected in {'A.JPG':'2026-10-01T12:34:56','B.JPG':'2026-10-01T12:34:57'}.items():
         assert mc.verify_metadata_datetime(batch_root/filename,
-                                           '2026-10-01T12:34:56')['matching_tags']
+                                           expected)['matching_tags']
     for number in (1,2):
         restarted=invoke(case,'startup','none',evidence/('restart'+str(number)))
         assert restarted['returncode']==0,restarted

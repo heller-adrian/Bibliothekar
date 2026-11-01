@@ -17,6 +17,9 @@ def complete_metadata_workspace(monkeypatch):
             for name in ('SD Card Backups','Library Workspaces','Metadata Correction','Trash'):
                 p=ws/name
                 if not p.exists():p.mkdir();created.append(str(p))
+            for name in ('General','Batch Correction'):
+                p=ws/'Metadata Correction'/name
+                if not p.exists():p.mkdir();created.append(str(p))
             (Path(command[5])/'fixture-completion.json').write_text(json.dumps({'phase':'after seed, before operation','created':created}))
         return child
     monkeypatch.setattr(subprocess,'Popen',launch)

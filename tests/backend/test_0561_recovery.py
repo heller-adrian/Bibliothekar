@@ -420,8 +420,11 @@ def test_startup_recovers_general_swap_before_onboarding_worker(tmp_path, monkey
         with pytest.raises(Interrupted): mc.apply_metadata_correction(db, task['id'], workspace_root=workspace, library_id='main')
     reg = tmp_path/'registry.sqlite3'; initialize_library_registry(reg)
     for key,value in {'WORKSPACE_PATH':workspace, 'DATABASE_FILE':db, 'REGISTRY_DATABASE_FILE':reg,
-        'CONFIG_PATH':tmp_path/'settings.json', 'WORKER_THREAD':SimpleNamespace(is_alive=lambda:True)}.items():
+        'CONFIG_PATH':tmp_path/'settings.json', 'WORKER_THREAD':None}.items():
         monkeypatch.setattr(main,key,value)
+    # This unit checks recovery-before-worker ordering; no real background
+    # worker exists. Give subsequently created workers their actual interface.
+    monkeypatch.setattr(main,'Thread',lambda **kw:SimpleNamespace(start=lambda:None,is_alive=lambda:False,join=lambda timeout=None:None))
     checks = []
     def worker_start():
         checks.append(source.read_bytes() == original and mc.get_metadata_correction(db, task['id'])['status'] == 'blocked')
