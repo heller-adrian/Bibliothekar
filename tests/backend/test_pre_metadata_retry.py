@@ -37,6 +37,7 @@ def test_rc14_retry_scope_retains_original_intent(tmp_path,monkeypatch,fault):
     assert owner and owner['library_id']=='main'
     work=Path(owner['work_root']);archive=Path(owner['archive_root'])
     registry=tmp_path/'bibliothekar-global.sqlite3'
+    assert registry.is_file()
     for path in [work,archive]:
         state['bindings'][str(path)]=ro._identity(path);record['bindings'][str(path)]=ro._identity(path)
     ro._write(parent/'state.json',state)
