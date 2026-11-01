@@ -208,8 +208,8 @@ def test_b03_library_real_write_then_explicit_reintegration(tmp_path):
     import app.metadata_correction as m
     from app.storage_config import storage_paths
     from tests.backend.test_0331_patch import _insert_undated_family
-    ws=tmp_path/'workspace';ws.mkdir();ensure_workspace_layout(ws)
-    db=tmp_path/'db.sqlite3';initialize_database(db)
+    from tests.backend.registered_metadata_fixture import registered_metadata_fixture
+    db,ws,_registry=registered_metadata_fixture(tmp_path)
     paths=storage_paths(ws)
     source=paths['backup_root']/'Ohne_Datum/IMG_0001.JPG'
     source.parent.mkdir(parents=True,exist_ok=True)
