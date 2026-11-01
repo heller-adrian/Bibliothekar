@@ -67,7 +67,8 @@ jobs:
           RESULT=${PIPESTATUS[0]}
           set -e
           if test -f "$QA_WORK/recovery-contracts/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/recovery-contracts/f14-qa/targets/results/result.xml" "$QA_WORK/recovery-contracts.xml"; fi
-          exit "$RESULT"
+          if test "$RESULT" -ne 0; then exit "$RESULT"; fi
+          PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" -m pytest -q tests/backend/test_pre_metadata_retry.py --junitxml="$QA_WORK/rc14-legacy-key.xml"
       - name: Verify two concurrent read-only event inspection contracts
         if: contains(github.event.head_commit.message, '[pre5-read-contracts]')
         run: |
