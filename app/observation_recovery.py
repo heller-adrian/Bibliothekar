@@ -74,7 +74,7 @@ def read_snapshot(function,database,workspace):
             'adopted_file_count':0,'exact_file_count':tracked,'ambiguous_file_count':0}
 
 
-def recover(workspace):
+def recover(workspace, *, sd_checks_only=False):
     from app import operation_health, root_operations as ro
     from app.storage_bootstrap import key_for
     root = Path(workspace).absolute()
@@ -103,6 +103,9 @@ def recover(workspace):
                     pass  # Unknown provenance is never sufficient to retire a lease.
             if is_check:
                 _retire_original_readonly_sd_recheck(root,parent,item)
+                recovered.append({'reservation_id':item['reservation_id'],'disposition':'qualified_readonly_sd_check'})
+            continue
+        if sd_checks_only:
             continue
         if FUNCTIONS.get(item.get('ids', {}).get('function')) != item.get('kind'):
             continue

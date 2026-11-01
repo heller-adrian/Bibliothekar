@@ -14,7 +14,7 @@ import uuid
 from app.database import database_connection, get_job, utc_now_iso, update_job_progress
 from app.pipeline import PipelineError, source_manifest
 from app.source_reimport import retained_origins
-from app.root_operations import validate_active_roots
+from app.root_operations import validate_active_roots, RootOperationError
 
 OPERATION = 'sd_recheck'
 ACTIVE = ('queued','copying','verifying','backup_verified','analyzing_metadata','organizing','interrupted')
@@ -117,7 +117,18 @@ def _import_epoch(connection):
 def run(database, registry, job, *, source_root, origins, signature, stop=lambda:False):
     jid=job['id'];source=Path(job['source_path']);bound=job['result'];folder=bool(bound.get('source_root_key'))
     def check():
-        validate_active_roots()
+        try:
+            validate_active_roots()
+        except RootOperationError:
+            # Another read-only check can die while this source is hashing.
+            # Qualify only that audited check's original lease; never relax
+            # admission for a folder import or any unknown media operation.
+            from app.root_operations import _registered
+            from app.observation_recovery import recover
+            owner=_registered(database)
+            if owner is None:raise
+            recover(owner['workspace_root'],sd_checks_only=True)
+            validate_active_roots()
         if stop(): raise InterruptedError('SD-Sicherungsprüfung unterbrochen; Neustart prüft vollständig neu.')
         if (str(source_root)!=bound['source_root'] or identity(source_root)!=bound['root_identity']
                 or identity(source)!=bound['source_identity']
