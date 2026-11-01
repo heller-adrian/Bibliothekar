@@ -82,11 +82,20 @@ def preserved(data,ws,target,kind='different'):
 
 @pytest.mark.parametrize('kind',['different','same','hardlink','symlink','directory'])
 def test_r1_collision_and_three_full_starts(tmp_path,monkeypatch,kind):
+    from app import root_operations as ro
     case,ev,data,ws=seed(tmp_path,monkeypatch);source=ws/'Papierkorb/A.JPG';ident=tr._identity(source)
     target=collision(data,ws,monkeypatch,kind);before=tr._identity(target);record=journal(case);raw=record.read_bytes()
+    operation,=ro._control_location(ws).glob('operation-*.json');original=ro._read(operation)
     assert json.loads(raw)['state']=='conflict';r.snapshot(case,ev/'after-conflict.json')
     starts(case,ev);preserved(data,ws,target,kind)
     assert tr._identity(source)==ident and tr._identity(target)==before and record.read_bytes()==raw
+    assert not operation.exists()
+    receipt=ro._read(operation.parent/('domain-recovery-'+original['reservation_id']+'.json'))
+    assert receipt['reservation']==original
+    assert receipt['disposition']=='verified_restore_conflict_isolated_paths_remain_reserved'
+    assert receipt['isolated_conflicts'][0]['reserved_sources']==['A.JPG']
+    with pytest.raises(TrashError):tr.assert_restore_paths_available(ws,['A.JPG'])
+    tr.assert_restore_paths_available(ws,['B.JPG'])
     conflicts=main.api_trash_inventory()['restore_conflicts'];assert len(conflicts)==1 and conflicts[0]['operation_id']==record.stem
     assert 'Ungeklärte Wiederherstellung; Details prüfen.' in main.TRASH_HTML
     assert 'Unresolved restore; review details.' in main.TRASH_HTML and 'status.textContent+=' in main.TRASH_HTML

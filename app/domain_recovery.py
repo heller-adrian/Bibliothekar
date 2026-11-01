@@ -204,13 +204,32 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
                             if function.endswith('delete_selected_trash_files') and journals:
                                 if len(journals)!=1 or sorted(i['path'] for i in trash_fd.read_json(journals[0])['files'])!=json.loads(record['ids']['relative_paths']):
                                     raise health.DomainStartupError('domain_recovery_delete_selection_mismatch')
-                        result=handler.__wrapped__(root,allowed_databases=registered)
-                        deletion=handler.__name__=='recover_trash_deletions'
-                        domain=storage_paths(root)['metadata_root']/('.trash-deletions' if deletion else '.trash-restores')
-                        pattern='DELETE_*.json' if deletion else '*.json'
-                        if list(domain.glob(pattern)):
-                            raise health.DomainStartupError('domain_recovery_journal_still_pending: '+str(domain))
-                        disposition='audited_recovery_returned_no_pending_journal'
+                        from app.trash_selective import _operation_lock
+                        with _operation_lock(root):
+                            result=handler.__wrapped__(root,allowed_databases=registered)
+                            deletion=handler.__name__=='recover_trash_deletions'
+                            domain=storage_paths(root)['metadata_root']/('.trash-deletions' if deletion else '.trash-restores')
+                            pattern='DELETE_*.json' if deletion else '*.json'
+                            pending=list(domain.glob(pattern));isolated=[]
+                            if pending and not deletion:
+                                from app.trash_restore import _load_restore,_conflict_invariants
+                                for journal in pending:
+                                    data,trash,_,plans=_load_restore(journal,root,sorted(registered))
+                                    if data['state']!='conflict':
+                                        raise health.DomainStartupError('domain_recovery_journal_still_pending: '+str(journal))
+                                    # A conflict is a terminal ISOLATION, not a
+                                    # successful restore. Recheck every original,
+                                    # identity, catalogue and unclaimed target
+                                    # under the same trash exclusion lock.
+                                    _conflict_invariants(data,plans,trash,sorted(registered),existing=True)
+                                    isolated.append({'journal':str(journal),
+                                        'sha256':hashlib.sha256(journal.read_bytes()).hexdigest(),
+                                        'reserved_sources':[p['relative'] for p in plans],
+                                        'reserved_targets':[p['target_relative'] for p in plans]})
+                            elif pending:
+                                raise health.DomainStartupError('domain_recovery_journal_still_pending: '+str(domain))
+                            disposition=('verified_restore_conflict_isolated_paths_remain_reserved' if isolated
+                                         else 'audited_recovery_returned_no_pending_journal')
                     ro._check(record['bindings']);check_active(root,parent)
                     receipt=parent/('domain-recovery-'+record['reservation_id']+'.json')
                     old=ro._read(receipt,None)
@@ -220,7 +239,8 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
                     else:
                         ro._write(receipt,{'format':1,'reservation':record,
                             'disposition':disposition,
-                            'handler':function,'result':result})
+                            'handler':function,'result':result,
+                            **({'isolated_conflicts':isolated} if not failure_finish and isolated else {})})
                     if outcomes is not None:outcomes.append((dispatch[function].__module__+'.'+dispatch[function].__name__,result))
             finally:_APPROVED.reset(token)
         health.finish_qualified_retry(root)
