@@ -23,6 +23,7 @@ def completed_but_not_unlinked(fixture,monkeypatch,kind='verified-synthetic-fini
     operation,=ro._control_location(ws).glob('operation-*.json');record=ro._read(operation)
     proof=operation.parent/('finished-'+record['reservation_id']+'.json')
     assert ro._receipt_completed(record)
+    (ev/'f14-proof.json').write_text(json.dumps({'original':record,'finished':ro._read(proof)},indent=2))
     return operation,record,proof
 
 
