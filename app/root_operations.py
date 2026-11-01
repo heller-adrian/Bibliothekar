@@ -935,8 +935,66 @@ def _require_coordinated_topology(root, databases):
             raise RootOperationError('Stammänderung bei mehreren Workspace-Namensräumen ist derzeit nicht sicher koordiniert und bleibt gesperrt.')
 
 
+def retire_finished_operations(workspace):
+    """Retire only an exact durable finish, never a terminal SQL status.
+
+    A crash after publishing finished-<nonce> must not strand its already
+    verified operation behind the admission fence that precedes mutate().
+    Whole-workspace exclusion, fresh generation/root checks and an immutable
+    retirement receipt preserve the original record across repeated crashes.
+    Startup/bootstrap completion retains its own separate protocol.
+    """
+    from app.operation_health import read_only
+    if read_only() or _ACTIVE.get() or _MUTATION.get() is not None:return
+    root=Path(workspace).absolute();parent=_control_location(root)
+    candidates=[]
+    for path in parent.glob('operation-*.json'):
+        record=_read(path,{})
+        nonce=record.get('reservation_id')
+        if (record.get('kind')!='startup' and isinstance(nonce,str) and len(nonce)==32
+            and all(c in '0123456789abcdef' for c in nonce)
+            and (parent/('finished-'+nonce+'.json')).is_file()):
+            candidates.append(path)
+    if not candidates:return
+    from app.managed_storage_health import require_pinned_storage
+    from app.storage_bootstrap import key_for
+    require_pinned_storage(root)
+    with _lock(parent/'workspace.lock',exclusive=True),_lock(parent/'shared.lock',exclusive=True),_lock(parent/'state.lock',exclusive=True,wait=True):
+        _assert_startable(parent);state=_state(parent,root)
+        for path in candidates:
+            with _lock(path.with_suffix('.lock'),exclusive=True):
+                record=_read(path,None)
+                if record is None:continue  # An owner finished before exclusion.
+                if (record.get('format')!=1 or record.get('workspace')!=str(root)
+                    or not isinstance(record.get('library'),str) or not isinstance(record.get('ids'),dict)
+                    or record.get('kind')=='startup' or not isinstance(record.get('bindings'),dict)
+                    or path.name!='operation-'+key_for(record)+'.json'
+                    or record.get('generation')!=[state['generation'],state.get('libraries',{}).get(record['library'],0)]
+                    or record['bindings'].get(str(root))!=state.get('workspace')
+                    or any(value is None or state.get('bindings',{}).get(name)!=value for name,value in record['bindings'].items())):
+                    raise RootOperationError('Finished reservation no longer matches its original authority: '+str(path))
+                _check(record['bindings'])
+                if not _receipt_completed(record):
+                    # In particular a verified backup receipt can precede
+                    # journal cleanup. Its domain recovery still owns that
+                    # unfinished phase; preserve it and let that handler run.
+                    continue
+                proof=_read(parent/('finished-'+record['reservation_id']+'.json'))
+                receipt=parent/('completed-'+key_for(record)+'-'+hashlib.sha256(json.dumps(record['generation']).encode()).hexdigest()+'.json')
+                material={'reservation':record,'receipt':'domain_completed','finished_receipt':proof}
+                old=_read(receipt,None)
+                legacy={'reservation':record,'receipt':'domain_completed'}
+                if old is not None and old not in (material,legacy):
+                    raise RootOperationError('Original retirement receipt conflicts: '+str(receipt))
+                if old is None:_write(receipt,material)
+                # Keep both original durable proofs. Another crash may occur
+                # on either side of this unlink; the next pass is idempotent.
+                _check(record['bindings']);path.unlink();_sync(parent)
+
+
 @contextmanager
 def mutate(workspace, *, library_id=None, databases=(), changed_paths=None, rollback_check=None, expected_generation=None, precondition=None, details=None, wait_seconds=0, staging_precondition=None):
+    retire_finished_operations(workspace)
     from app.operation_health import require_write
     require_write(workspace)
     from app.managed_storage_health import require_pinned_storage
