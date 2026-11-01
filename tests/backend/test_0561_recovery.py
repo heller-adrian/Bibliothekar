@@ -411,6 +411,9 @@ def test_startup_recovers_general_swap_before_onboarding_worker(tmp_path, monkey
     # An interrupted established operation has its original configuration.
     # Publish it before the first media intent; startup must not manufacture it.
     (tmp_path/'settings.json').write_text('{}')
+    reg=tmp_path/'registry.sqlite3'
+    monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(reg))
+    initialize_library_registry(reg)
     db, workspace, source, original, task = general_case(tmp_path, monkeypatch)
     for required_root in storage_paths(workspace).values():
         required_root.mkdir(exist_ok=True)
@@ -418,10 +421,16 @@ def test_startup_recovers_general_swap_before_onboarding_worker(tmp_path, monkey
     metadata_root=storage_paths(workspace)['metadata_root']
     for role in ('metadata_general','metadata_multiple'):
         (metadata_root/directory_name(metadata_root,role)).mkdir(exist_ok=True)
+    from app.library_registry import adopt_main_library
+    from app import root_operations as ro
+    work=storage_paths(workspace)['workspaces_root']/'main';work.mkdir()
+    archive=tmp_path/'archive';archive.mkdir()
+    adopt_main_library(reg,database_path=db,workspace_root=workspace,work_root=work,archive_root=archive)
     with monkeypatch.context() as m:
         m.setattr(mc, '_complete_task', lambda *a, **k: (_ for _ in ()).throw(Interrupted()))
         with pytest.raises(Interrupted): mc.apply_metadata_correction(db, task['id'], workspace_root=workspace, library_id='main')
-    reg = tmp_path/'registry.sqlite3'; initialize_library_registry(reg)
+    operation,=ro._control_location(workspace).glob('operation-*.json')
+    original_reservation=ro._read(operation)
     for key,value in {'WORKSPACE_PATH':workspace, 'DATABASE_FILE':db, 'REGISTRY_DATABASE_FILE':reg,
         'CONFIG_PATH':tmp_path/'settings.json', 'WORKER_THREAD':None}.items():
         monkeypatch.setattr(main,key,value)
@@ -436,6 +445,10 @@ def test_startup_recovers_general_swap_before_onboarding_worker(tmp_path, monkey
     main.startup_database()
     assert main.DATABASE_INITIALIZATION_ERROR is None,main.DATABASE_INITIALIZATION_ERROR
     assert checks == [True]
+    assert ro._control_location(workspace)==operation.parent
+    assert not operation.exists(),'Startup abandoned rather than completed the original namespace/nonce'
+    outcome=ro._read(operation.parent/('metadata-outcome-'+original_reservation['reservation_id']+'.json'))
+    assert outcome['reservation']==original_reservation
     assert not list((storage_paths(workspace)['metadata_root']/'.swap-journals').glob('*.json'))
 
 
