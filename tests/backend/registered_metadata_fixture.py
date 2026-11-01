@@ -25,6 +25,14 @@ def registered_metadata_fixture(tmp_path, *, workspace=None, database=None):
     # Preserve real German legacy roots BEFORE layout and F14 registration.
     for name in LEGACY_STORAGE_DEFAULTS.values():
         (root/name).mkdir(exist_ok=True)
+    # Register the historical internal metadata children as well. Merely
+    # creating Metadatenkorrektur makes ensure_workspace_layout pick newly
+    # named English subfolders, so legacy snapshots otherwise reference a
+    # missing Mehrfachkorrektur directory. They must exist BEFORE F14 pins
+    # directory identities or the library is adopted.
+    metadata=root/LEGACY_STORAGE_DEFAULTS["metadata_directory_name"]
+    for name in ("Allgemein","Mehrfachkorrektur"):
+        (metadata/name).mkdir(exist_ok=True)
     layout=ensure_workspace_layout(root)
     work=layout.get("work_root")
     if work is None:
