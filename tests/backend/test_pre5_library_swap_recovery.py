@@ -29,7 +29,7 @@ def test_library_original_rollback_survives_recovery_sigkill(tmp_path,boundary):
     assert recovery.invoke(case,'retry','none',evidence/'retry')['returncode']==0
 
 
-@pytest.mark.parametrize('fault',['foreign_source','foreign_backup','foreign_incoming','foreign_work','missing_backup','hardlink','task','generation','same_backup_new_inode','same_work_new_inode','missing_native_proof'])
+@pytest.mark.parametrize('fault',['foreign_source','foreign_backup','foreign_incoming','foreign_work','missing_backup','hardlink','task','generation','same_backup_new_inode','same_work_new_inode','missing_native_proof','database_inode','database_owner'])
 def test_library_swap_unknown_evidence_keeps_original_fence(tmp_path,fault):
     evidence,case,data=recovery.new_case(tmp_path,'library_metadata','library-blocked-'+fault)
     recovery.invoke(case,'operate','meta.backup',evidence/'kill',kill=True)
@@ -53,6 +53,16 @@ def test_library_swap_unknown_evidence_keeps_original_fence(tmp_path,fault):
         replacement=target.with_suffix('.foreign-copy');replacement.write_bytes(target.read_bytes());replacement.replace(target)
     elif fault=='missing_native_proof':
         native,=case.rglob('metadata-swap-ownership-*.json');native.rename(case/'retained-uncertified-ownership.json')
+    elif fault=='database_inode':
+        import sqlite3
+        database=Path(data['db']);copy=database.with_suffix('.copy')
+        from contextlib import closing
+        with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)) as source,closing(sqlite3.connect(copy)) as destination:
+            source.backup(destination)
+        copy.replace(database)
+    elif fault=='database_owner':
+        with external_edit(Path(data['db']),fixture_root=case) as c:
+            c.execute("UPDATE library_identity SET library_id='different-synthetic-owner'")
     elif fault=='task':
         with external_edit(Path(data['db']),fixture_root=case) as c:
             c.execute("UPDATE metadata_corrections SET proposed_datetime='2026-12-30T12:00:00'")

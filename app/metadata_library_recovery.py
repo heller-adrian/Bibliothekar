@@ -47,7 +47,9 @@ def bind_prepared_swap(metadata,journal,data):
         own(item['source'],item['before_sha']);own(item['incoming'],item['after_sha'])
         member=members[item['file_id']]
         own(Path(metadata)/'.work'/data['task_id']/_safe_relative(member['original_relative_path']),item['after_sha'])
-    proof={'format':1,'reservation':plain,'swap':data,'owned_identities':identities}
+    from app.import_recovery import _catalogue_identity
+    proof={'format':1,'reservation':plain,'swap':data,'owned_identities':identities,
+           'database_identity':_catalogue_identity(data['database'])}
     path=parent/('metadata-swap-ownership-'+data['id']+'.json')
     old=ro._read(path,None)
     if old is not None and old!=proof:refuse('native_proof_changed')
@@ -90,6 +92,8 @@ def qualify(record,owner,parent,metadata):
     if (not ownership or ownership.get('format')!=1 or ownership.get('reservation')!=record
         or ownership.get('swap')!=data or not isinstance(ownership.get('owned_identities'),dict)):
         refuse('original_prospective_ownership_missing_or_changed')
+    from app.import_recovery import _catalogue_identity
+    if ownership.get('database_identity')!=_catalogue_identity(database):refuse('original_catalogue_identity_changed')
     owned=ownership['owned_identities']
     central=storage_paths(Path(owner['workspace_root']))['backup_root'].absolute()
     if (data['kind']!='library' or data['state']!='prepared' or data['database']!=str(database)
@@ -100,6 +104,8 @@ def qualify(record,owner,parent,metadata):
     if len(by_id)!=len(members) or {i['file_id'] for i in data['files']}!=set(by_id) or len(data['files'])!=len(members):
         refuse('incomplete_original_family')
     with closing(health.read_connection(database)) as c:
+        internal=c.execute('SELECT library_id FROM library_identity WHERE singleton=1').fetchone()
+        if internal is None or internal['library_id']!=owner['library_id']:refuse('internal_catalogue_owner_changed')
         family=c.execute('SELECT * FROM file_families WHERE id=?',(data['family_id'],)).fetchone()
         current=[dict(r) for r in c.execute('SELECT * FROM files WHERE family_id=?',(data['family_id'],))]
     if (family is None or family['job_id']!=frozen.get('job_id') or family['family_key']!=frozen.get('family_key')
