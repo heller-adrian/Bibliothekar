@@ -91,6 +91,19 @@ jobs:
           set -e
           if test -f "$QA_WORK/fixture/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/fixture/f14-qa/targets/results/result.xml" "$QA_WORK/backend-fixture.xml"; fi
           exit "$RESULT"
+      - name: Reproduce all nineteen previously failed backend nodes before full suites
+        if: contains(github.event.head_commit.message, '[pre5-full]') || contains(github.event.head_commit.message, '[pre5-19]')
+        run: |
+          set -euo pipefail
+          mkdir "$QA_WORK/backend-nineteen"
+          set +e
+          RUNNER_TEMP="$QA_WORK/backend-nineteen" "$QA_WORK/venv/bin/python" qa/f14/linux/run_linux.py "$PWD" targets qa/pre5/backend_19_previous_failures.json 2>&1 | tee "$QA_WORK/backend-19.log"
+          RESULT=${PIPESTATUS[0]}
+          set -e
+          if test -f "$QA_WORK/backend-nineteen/f14-qa/targets/results/result.xml"; then
+            cp "$QA_WORK/backend-nineteen/f14-qa/targets/results/result.xml" "$QA_WORK/backend-19.xml"
+          fi
+          exit "$RESULT"
       - name: Check all 147 original backend failures not covered by previous focused evidence
         if: contains(github.event.head_commit.message, '[pre5-full]')
         run: |
