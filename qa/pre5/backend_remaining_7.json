@@ -1,0 +1,9 @@
+[
+  "tests/backend/test_0562_process_recovery.py::test_0562_metadata_projection_recovery_two_sigkills",
+  "tests/backend/test_0562_process_recovery.py::test_metadata_projection_partial_commit_sigkill",
+  "tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill[library_metadata]",
+  "tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill[reintegrate]",
+  "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_active]",
+  "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f15_pending]",
+  "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_metadata_safety_contract[f17_current]"
+]
