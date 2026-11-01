@@ -8,6 +8,7 @@ requires its complete retained-copy proof and preserves the failed job.
 from contextvars import ContextVar
 from pathlib import Path
 import hashlib,json
+from app.sort_recovery_proof import FUNCTIONS as SORT_FUNCTIONS
 
 _APPROVED=ContextVar('qualified_domain_recovery',default=None)
 DELETE_FUNCTIONS={'app.trash_selective.delete_selected_trash_files','app.trash.empty_trash_filesystem'}
@@ -19,6 +20,7 @@ def handlers():
     from app.trash_selective import recover_trash_deletions
     from app.trash_restore import recover_trash_restores
     from app.trash_failure import finalize_failure,rescue_failure
+    from app.sort_apply import recover_interrupted_sort_runs
     return {
         'app.trash_selective.recover_trash_deletions':recover_trash_deletions,
         'app.trash_restore.recover_trash_restores':recover_trash_restores,
@@ -26,6 +28,7 @@ def handlers():
         'app.trash_failure.finalize_failure':finalize_failure,
         'app.trash_failure.rescue_failure':rescue_failure,
         **{name:recover_trash_deletions for name in DELETE_FUNCTIONS},
+        **{name:recover_interrupted_sort_runs for name in SORT_FUNCTIONS},
     }
 
 
@@ -45,10 +48,12 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
     dead=[r for r in status['reservations'] if not r['live']]
     failures={'app.trash_failure.finalize_failure','app.trash_failure.rescue_failure'}
     if not dead or not all(r['qualified'] and r['ids'].get('function') in dispatch
-            and r['kind']==('trash' if r['ids']['function'] in failures
+            and r['kind']==('sort' if r['ids']['function'] in SORT_FUNCTIONS else 'trash' if r['ids']['function'] in failures
                            or r['ids']['function'] in DELETE_FUNCTIONS
                            or r['ids']['function']==ORIGINAL_TRASH_RESTORE else 'recovery') for r in dead):
         return False
+    if len(dead)!=1 and any(r['ids']['function'] in SORT_FUNCTIONS for r in dead):
+        return False  # No combined media replay without a cross-domain proof.
     if not confirmed_rescue and any(r['ids']['function']=='app.trash_failure.rescue_failure' for r in dead):
         return False  # Never infer or renew a user's explicit rescue decision.
     if any(r['live'] for r in status['reservations']):
@@ -83,7 +88,8 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
     for item in dead:
         path=Path(item['path']);record=ro._read(path)
         failure_finish=record['ids']['function'] in failures
-        owner=owners.get(record.get('database')) if failure_finish else None
+        sort_replay=record['ids']['function'] in SORT_FUNCTIONS
+        owner=owners.get(record.get('database')) if failure_finish or sort_replay else None
         expected_ids={'function':record['ids']['function']}
         expected_roots=set(required)
         if record['ids']['function']==ORIGINAL_TRASH_RESTORE:
@@ -131,7 +137,14 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
             except (KeyError,TypeError,ValueError) as error:
                 raise health.DomainStartupError('domain_recovery_selection_invalid') from error
             expected_ids['relative_paths']=record['ids']['relative_paths']
-        if failure_finish:
+        if sort_replay:
+            from app.sort_recovery_proof import qualify
+            if not owner or owner['library_id']!=record['library']:
+                raise health.DomainStartupError('sort_recovery_library_owner_mismatch')
+            expected_ids['run_id']=record['ids'].get('run_id')
+            expected_roots.update((owner['work_root'],owner['archive_root']))
+            qualify(Path(record['database']),root,owner,expected_ids['run_id'])
+        elif failure_finish:
             job=record['ids'].get('job_id')
             if (not isinstance(job,str) or not job or '/' in job or '\\' in job or '\x00' in job
                     or not owner or owner['library_id']!=record['library']):
@@ -142,7 +155,7 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
             raise health.DomainStartupError('domain_recovery_shared_owner_mismatch')
         if (hashlib.sha256(json.dumps(record,sort_keys=True).encode()).hexdigest()!=item['record_sha256']
             or set(record)-{'format','reservation_id','shared','workspace','library','generation','bindings','database','kind','ids','effect_resources'}
-            or record.get('shared') is not True
+            or record.get('shared') is not (False if sort_replay else True)
             or record.get('ids')!=expected_ids
             or record.get('generation')!=[state['generation'],state.get('libraries',{}).get(record['library'],0)]
             or not expected_roots<=record['bindings'].keys()
@@ -177,7 +190,22 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
                         expected_generation=record['generation'],_recovery_record=record):
                     function=record['ids']['function']
                     failure_finish=function in failures
-                    if failure_finish:
+                    sort_replay=function in SORT_FUNCTIONS
+                    isolated=[]
+                    if sort_replay:
+                        from app.sort_recovery_proof import qualify
+                        from app.database import database_connection
+                        owner=owners[record['database']];run_id=record['ids']['run_id']
+                        before,plan_hash=qualify(Path(record['database']),root,owner,run_id)
+                        with database_connection(Path(record['database'])) as connection:
+                            connection.execute("UPDATE sort_runs SET status='interrupted' WHERE id=? AND status IN ('queued','verifying','moving','finalizing','rolling_back')",(run_id,))
+                        result=dispatch[function].__wrapped__(Path(record['database']),run_id=run_id,strict_endpoints=True)
+                        after,after_hash=qualify(Path(record['database']),root,owner,run_id,finished=True)
+                        if result['blocked'] or after!=before or after_hash!=plan_hash:
+                            raise health.DomainStartupError('sort_recovery_unverified_rollback')
+                        disposition='verified_original_sort_rolled_back'
+                        result={**result,'plan_sha256':plan_hash,'proof':after}
+                    elif failure_finish:
                         from app.trash_failure import validate_finalized
                         from app.database import get_job
                         before=get_job(Path(record['database']),record['ids']['job_id'])

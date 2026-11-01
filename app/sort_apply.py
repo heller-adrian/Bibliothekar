@@ -286,7 +286,8 @@ def _verify_recovery_copy(path: Path, expected_size: int, expected_sha256: str) 
 
 
 @protect(workspace_arg='None', database_arg='database_path', kind='recovery', error_type=SortApplyError)
-def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
+def recover_interrupted_sort_runs(database_path: Path, *, run_id: str | None = None,
+                                strict_endpoints: bool = False) -> dict[str, int]:
     """Safely roll interrupted sort/reconcile runs back to their DB IST paths.
 
     SQLite path finalization and the run status are committed atomically. Thus a
@@ -299,8 +300,8 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
         runs = [
             dict(row) for row in connection.execute(
                 """SELECT * FROM sort_runs
-                   WHERE status='interrupted'
-                   ORDER BY created_at,id"""
+                   WHERE status='interrupted' AND (? IS NULL OR id=?)
+                   ORDER BY created_at,id""", (run_id,run_id)
             ).fetchall()
         ]
 
@@ -388,6 +389,8 @@ def recover_interrupted_sort_runs(database_path: Path) -> dict[str, int]:
                     )
                     _verify_recovery_copy(source, expected_size, expected_sha)
                 elif source_exists and destination_exists:
+                    if strict_endpoints:
+                        raise SortApplyError('Quelle und Ziel existieren gleichzeitig; fremde Kopien bleiben erhalten: '+str(source))
                     _rollback_one(
                         source,
                         destination,

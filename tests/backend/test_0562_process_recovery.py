@@ -238,6 +238,47 @@ def test_sort_recovery_sigkill(tmp_path,kind,boundary):
     assert business_rows(restarts[0][1])==business_rows(restarts[2][1])
 
 
+@pytest.mark.parametrize('fault',['foreign_bytes','missing','duplicate','hardlink','catalogue','generation'])
+def test_original_sort_recovery_retains_ambiguous_effects(tmp_path,fault):
+    """An original nonce is not permission to infer file or catalogue ownership."""
+    case=tmp_path/'case';case.mkdir();evidence=tmp_path/'sort-negative'
+    seeded=invoke(case,'seed','sort',evidence/'seed')
+    assert seeded['returncode']==0,seeded
+    data=json.loads((case/'case.json').read_text())
+    killed=invoke(case,'operate','sort.move1',evidence/'kill',kill=True)
+    assert killed['returncode']==-9
+    moved=[item for item in data['plan']['files'] if not Path(item['source_absolute_path']).exists()
+           and Path(item['destination_absolute_path']).exists()]
+    assert len(moved)==1,moved
+    item=moved[0];source=Path(item['source_absolute_path']);target=Path(item['destination_absolute_path'])
+    control=next(case.rglob('operation-*.json'))
+    original=json.loads(control.read_text())
+    if fault=='foreign_bytes':target.write_bytes(b'foreign-must-survive')
+    elif fault=='missing':target.unlink()
+    elif fault=='duplicate':source.parent.mkdir(parents=True,exist_ok=True);source.write_bytes(target.read_bytes())
+    elif fault=='hardlink':os.link(target,case/'foreign-hardlink')
+    elif fault=='catalogue':
+        with sqlite3.connect(data['db']) as connection:
+            connection.execute("UPDATE files SET sha256_current=? WHERE id=?",('a'*64,item['file_id']))
+    elif fault=='generation':
+        state=control.parent/'state.json';saved=json.loads(state.read_text());saved['generation']+=1
+        state.write_text(json.dumps(saved));state.chmod(0o600)
+    before=snapshot(case,evidence/'before-recovery.json')
+    for number in (1,2):
+        restarted=invoke(case,'startup','none',evidence/('restart'+str(number)))
+        assert restarted['returncode']==0,restarted
+        status=restarted['result']['operation_health']
+        assert status['writes_allowed'] is False,status
+        assert any(r['reservation_id']==original['reservation_id'] and not r['live'] for r in status['reservations'])
+        assert json.loads(control.read_text())==original
+        after=snapshot(case,evidence/('after-restart'+str(number)+'.json'))
+        for path in (source,target,case/'foreign-hardlink'):
+            rel=str(path.relative_to(case))
+            old=next((f for f in before['files'] if f['path']==rel),None)
+            new=next((f for f in after['files'] if f['path']==rel),None)
+            assert old==new,(old,new)
+
+
 IMPORT=['import.before_copy','import.copy_chunk','import.hash_chunk','import.copy_verify','import.move1','import.move2','import.paths','import.before_complete','import.complete','import.in_tx']
 @pytest.mark.parametrize('boundary',IMPORT)
 def test_sd_import_sigkill(tmp_path,boundary):

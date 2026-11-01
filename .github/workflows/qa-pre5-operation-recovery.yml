@@ -164,6 +164,7 @@ jobs:
             ${{ env.QA_WORK }}/authorization/f14-qa/targets/scratch/pytest/**/restart*.log
             ${{ env.QA_WORK }}/authorization/f14-qa/targets/scratch/pytest/**/result.json
             ${{ env.QA_WORK }}/authorization/f14-qa/targets/scratch/pytest/**/execution.json
+            ${{ env.QA_WORK }}/authorization/f14-qa/targets/scratch/pytest/**/stdout.log
             ${{ env.QA_WORK }}/diagnostics-evidence/
             ${{ env.QA_WORK }}/fixture/f14-qa/targets/results/
             ${{ env.QA_WORK }}/read-contracts/f14-qa/targets/results/
