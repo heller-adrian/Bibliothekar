@@ -498,6 +498,42 @@ def test_other_metadata_modes_sigkill(tmp_path,kind):
     snapshot(case,evidence/'after-retry.json')
 
 
+
+@pytest.mark.parametrize('kind,backup_marker',[
+    ('multiple_metadata','.multiple-before-'),
+    ('reintegrate','.reintegrate-before-'),
+])
+def test_scoped_metadata_recovery_refuses_identical_foreign_backup_inode(tmp_path,kind,backup_marker):
+    """Even byte-identical foreign replacements cannot borrow old F14 ownership.
+
+    Keep the actual old backup in an unclaimed location so its original inode
+    remains allocated. A byte-identical replacement then has a DISTINCT inode.
+    Three startups must preserve both, the real pending F14 lease and a denied
+    SQLite/filesystem writer, without attempting automatic adoption.
+    """
+    evidence=OUT/os.environ['AUDIT_LABEL']/('foreign-metadata-backup-'+kind)
+    evidence.mkdir(parents=True,exist_ok=True)
+    case=tmp_path/'case';case.mkdir()
+    seeded=invoke(case,'seed',kind,evidence/'seed')
+    assert seeded['returncode']==0,seeded
+    killed=invoke(case,'operate','meta.backup',evidence/'kill',kill=True)
+    assert killed['returncode']==-signal.SIGKILL,killed
+    backups=[p for p in case.rglob('*') if p.is_file() and backup_marker in p.name]
+    assert backups,kind
+    original=backups[0]
+    held=original.with_name(original.name+'.externally-retained')
+    original.rename(held)
+    original.write_bytes(held.read_bytes())
+    assert (original.stat().st_dev,original.stat().st_ino)!=(held.stat().st_dev,held.stat().st_ino)
+    digest=hash_file(original)
+    for n in range(1,4):
+        started=invoke(case,'startup','none',evidence/f'restart{n}')
+        assert_preserved_write_fence(case,evidence/f'fence{n}',started,'metadata')
+        assert hash_file(original)==digest and hash_file(held)==digest
+    final=snapshot(case,evidence/'after-three-restarts.json')
+    checks_sql(final)
+    assert any('.swap-journals/' in p['path'] for p in final['files'])
+
 def test_known_restore_without_crash_control(tmp_path):
     evidence=OUT/os.environ['AUDIT_LABEL']/'known-restore-control';evidence.mkdir(parents=True)
     case=tmp_path/'case';case.mkdir()

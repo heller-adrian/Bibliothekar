@@ -54,5 +54,7 @@
   "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-failed]",
   "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-interrupted]",
   "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection[http-missing-job]",
-  "tests/backend/test_rc6_handoff.py::test_two_real_process_checks_sigkill_and_three_restarts[True]"
+  "tests/backend/test_rc6_handoff.py::test_two_real_process_checks_sigkill_and_three_restarts[True]",
+  "tests/backend/test_0562_process_recovery.py::test_scoped_metadata_recovery_refuses_identical_foreign_backup_inode[multiple_metadata-.multiple-before-]",
+  "tests/backend/test_0562_process_recovery.py::test_scoped_metadata_recovery_refuses_identical_foreign_backup_inode[reintegrate-.reintegrate-before-]"
 ]
