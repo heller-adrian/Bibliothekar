@@ -27,3 +27,7 @@ Full run 41356769073 passed 15 recovery tests, 7 original RC14-key checks and 19
 Historical F16/F20 **original** worker was restored byte-for-byte to its previous blob (sha256 manifest enforcement remains authoritative). The fixture helper now recognizes its already provisioned nested `case/fixture` installation and creates precisely the originally intended historic `Arbeitsbereich` and parent `archive` *before* first F14 control. This prevents a later test-only adoption from switching an already pinned binding. The mutable 0562 worker instead uses the existing original registered owner.
 
 Seven observed nodes are pinned in `backend_remaining_7.json`; rerun them without relaxing original fail-closed safety requirements. These tests are diagnostics, not a migration/release waiver.
+
+## Follow-up to seven-node gate
+
+Run 41362934864: four actual SIGKILL tests passed. Three immutable F15/F17 cases failed because two independent registries claimed the same nested synthetic workspace; the application correctly rejected that configuration. The historical nested fixture now creates and uses `fixture/registry.sqlite3` as its **sole** registry from the first F14 baseline; both the untouched F16/F20 original worker and the mutable 0562 worker use that exact registry. No registry or safety checks are bypassed.
