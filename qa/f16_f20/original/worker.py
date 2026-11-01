@@ -20,8 +20,8 @@ if (case/'case.json').exists():
     database_parent=Path(locations['db']).parent
     os.environ['KAMERA_DATABASE_DIR']=str(database_parent)
     os.environ['KAMERA_WORKSPACE']=locations['workspace']
-    os.environ['KAMERA_REGISTRY_DATABASE']=str(locations.get('registry',database_parent/'registry.sqlite3'))
-    os.environ['KAMERA_CONFIG']=str(locations.get('config',database_parent/'settings.json'))
+    os.environ['KAMERA_REGISTRY_DATABASE']=str(database_parent/'registry.sqlite3')
+    os.environ['KAMERA_CONFIG']=str(database_parent/'settings.json')
 
 from app import main
 from app.database import initialize_database,database_connection,create_job,claim_next_job,get_job
@@ -123,14 +123,11 @@ def seed(kind):
                     member.update(size_bytes=size,source_size_bytes=size,sha256_original=digest,sha256_current=digest)
                 c.execute('UPDATE metadata_corrections SET source_size_bytes=?,source_sha256=?,detected_json=? WHERE id=?',(size,digest,json.dumps(detected),task))
                 c.execute("UPDATE jobs SET state='completed',stage='organized_verified',operation='folder_import'")
+            (ws/'Arbeitsbereich').mkdir(exist_ok=True)
             (temp/'settings.json').write_text((case/'settings.json').read_text())
-            # _seed_library already established a registered owner, real F14
-            # control and pinned work/archive roots. Never adopt its database
-            # into a second registry using different paths after that point.
-            data.update(db=str(db),workspace=str(ws),source=str(src),task=task,
-                        family=fid,job='JOB',
-                        registry=str(temp/'bibliothekar-global.sqlite3'),
-                        config=str(temp/'settings.json'))
+            initialize_library_registry(temp/'registry.sqlite3')
+            adopt_main_library(temp/'registry.sqlite3',database_path=db,workspace_root=ws,work_root=ws/'Arbeitsbereich',archive_root=case/'archive')
+            data.update(db=str(db),workspace=str(ws),source=str(src),task=task,family=fid,job='JOB')
             data['expected']={src.name:digest}
             if kind=='metadata_projection':
                 from app.global_stock import project_import_job
@@ -139,7 +136,7 @@ def seed(kind):
                     target=temp/f'second{number}.sqlite3';initialize_database(target);ensure_library_identity(target,f'second{number}')
                     work=ws/'Arbeitsbereiche'/f'second{number}';work.mkdir(parents=True,exist_ok=True)
                     target_archive=case/f'projection-archive{number}';target_archive.mkdir()
-                    register_library(temp/'bibliothekar-global.sqlite3',library_id=f'second{number}',display_name=f'second{number}',database_path=target,workspace_root=ws,work_root=work,archive_root=target_archive)
+                    register_library(temp/'registry.sqlite3',library_id=f'second{number}',display_name=f'second{number}',database_path=target,workspace_root=ws,work_root=work,archive_root=target_archive)
                     project_import_job(db,target,'JOB');data['databases'].append(str(target))
         else:
             root=mc.metadata_area_paths(area='multiple',workspace_root=WS,library_id='main')['root']
@@ -229,13 +226,12 @@ def seed(kind):
 def configure_fixture(data):
     global DB,WS,REG
     DB=Path(data['db']);WS=Path(data['workspace'])
-    REG=Path(data.get('registry',DB.parent/'registry.sqlite3'))
+    REG=DB.parent/'registry.sqlite3'
     if DB!=main.DATABASE_FILE:
         # Only environment globals for the established nested fixture, not
         # a replacement recovery routine or changed application source.
         main.DATABASE_FILE=DB;main.DATABASE_DIRECTORY=DB.parent;main.WORKSPACE_PATH=WS;main.REGISTRY_DATABASE_FILE=REG
-        config=Path(data.get('config',DB.parent/'settings.json'))
-        os.environ['KAMERA_CONFIG']=str(config);main.CONFIG_PATH=config
+        os.environ['KAMERA_CONFIG']=str(DB.parent/'settings.json');main.CONFIG_PATH=DB.parent/'settings.json'
 
 
 def instrument(kind):
