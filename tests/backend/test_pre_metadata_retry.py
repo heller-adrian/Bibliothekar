@@ -32,7 +32,11 @@ def test_rc14_retry_scope_retains_original_intent(tmp_path,monkeypatch,fault):
             mc.verify_metadata_datetime(source,stamp[:19])
     parent=ro._control_location(ws);operation=next(parent.glob('operation-*.json'))
     state=ro._read(parent/'state.json');record=ro._read(operation)
-    work=ws/'work';archive=tmp_path/'archive';work.mkdir();archive.mkdir()
+    # Use the actual registered work/archive roots, not invented substitutes.
+    owner=ro._registered(db)
+    assert owner and owner['library_id']=='main'
+    work=Path(owner['work_root']);archive=Path(owner['archive_root'])
+    registry=tmp_path/'bibliothekar-global.sqlite3'
     for path in [work,archive]:
         state['bindings'][str(path)]=ro._identity(path);record['bindings'][str(path)]=ro._identity(path)
     ro._write(parent/'state.json',state)
@@ -43,17 +47,13 @@ def test_rc14_retry_scope_retains_original_intent(tmp_path,monkeypatch,fault):
     if fault=='hash':source.write_bytes(b'changed')
     if fault=='journal':
         directory=mc.storage_paths(ws)['metadata_root']/'.swap-journals';directory.mkdir(exist_ok=True);(directory/'unknown.json').write_text('{}')
-    import app.library_registry
-    monkeypatch.setattr(app.library_registry,'list_libraries',lambda *a,**k:[{'library_id':'main','workspace_root':str(ws),'database_path':str(db),'work_root':str(work),'archive_root':str(archive)}])
-    # The function imported the binding; patch this exact test dependency too.
-    import app.metadata_reintegration_recovery as recovery
-    monkeypatch.setattr(recovery,'list_libraries',app.library_registry.list_libraries)
+    # Inspect the actual test registry, including the original RC14 key.
     if fault=='missing_database':db.unlink()
     before=operation.read_bytes();state_before=(parent/'state.json').read_bytes()
-    if fault=='unknown_function':assert pending_reservations(ws,tmp_path/'registry')==set()
+    if fault=='unknown_function':assert pending_reservations(ws,registry)==set()
     elif fault:
-        with pytest.raises(ro.RootOperationError):pending_reservations(ws,tmp_path/'registry')
-    else:assert pending_reservations(ws,tmp_path/'registry')=={str(operation)}
+        with pytest.raises(ro.RootOperationError):pending_reservations(ws,registry)
+    else:assert pending_reservations(ws,registry)=={str(operation)}
     if fault is None:
         # The RC14 key lacks family_id. A qualified check must not become a
         # license to start a different F14 mutation before the orphan is retired.
