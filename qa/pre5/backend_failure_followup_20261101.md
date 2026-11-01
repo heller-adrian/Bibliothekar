@@ -19,3 +19,11 @@ On commit 568a2065f892f1006ff78a46cecbd0fae53093ac, GitHub Actions run 413565540
 The last independent failure was a normal F14 writer releasing its durable operation while another process iterated a stale `operation-*.json` glob result. `operation_health.inspect` now skips an enumerated entry ONLY if the file vanished after enumeration; still-present unreadable/symlinked entries remain full write fences. New positive and negative tests in `test_rc6_handoff.py` must be exercised in the full backend. No historical RC14 journal, reservation or failed migration evidence is cleared or relaxed.
 
 Next: all 147 historical nodes, all backend partitions, complete frontend and immutable-container historical migration. Release remains blocked until independently green.
+
+## Original 147 gate: seven historically protected metadata cases
+
+Full run 41356769073 passed 15 recovery tests, 7 original RC14-key checks and 19 pinned previously failing backend nodes, then stopped on 7/147 historical backend cases. Four SIGKILL cases could not seed a registered nested metadata fixture because the legacy probe attempted a second registry adoption under different roots. Three immutable F15/F17 wrapper cases were also blocked at seed.
+
+Historical F16/F20 **original** worker was restored byte-for-byte to its previous blob (sha256 manifest enforcement remains authoritative). The fixture helper now recognizes its already provisioned nested `case/fixture` installation and creates precisely the originally intended historic `Arbeitsbereich` and parent `archive` *before* first F14 control. This prevents a later test-only adoption from switching an already pinned binding. The mutable 0562 worker instead uses the existing original registered owner.
+
+Seven observed nodes are pinned in `backend_remaining_7.json`; rerun them without relaxing original fail-closed safety requirements. These tests are diagnostics, not a migration/release waiver.
