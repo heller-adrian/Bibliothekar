@@ -5,13 +5,29 @@ private proof written BEFORE the first rename can authorize an inode-pinned
 rollback. Ambiguous, committed, foreign or legacy states stay write-fenced.
 """
 from pathlib import Path
-from contextlib import closing
+from contextlib import closing,contextmanager
+from contextvars import ContextVar
 from threading import get_ident
 import hashlib
 import os
 import stat
 
 from app import root_operations as ro, operation_health as health
+
+_APPROVED=ContextVar('scoped_original_metadata_retry',default=None)
+
+
+@contextmanager
+def _allow_exact_original(record):
+    """Capability is synchronous and tied to the existing full F14 record."""
+    token=_APPROVED.set(record)
+    try:yield
+    finally:_APPROVED.reset(token)
+
+
+def approved(record):
+    return record is not None and _APPROVED.get()==record
+
 
 FUNCTIONS={
     "multiple": "app.metadata_correction.apply_multiple_metadata_correction",
@@ -221,7 +237,7 @@ def recover(workspace):
         if old is None:
             ro._write(intent,expected)
         with health.qualified_retry(workspace,{dead[0]["path"]}):
-            with ro.reserve(workspace,library_id=record["library"],database=record["database"],
+            with _allow_exact_original(record), ro.reserve(workspace,library_id=record["library"],database=record["database"],
                             kind="metadata",ids=record["ids"],paths=[Path(p) for p in record["bindings"]],
                             expected_generation=record["generation"],_recovery_record=record):
                 again,saved,identities=_qualify(record,owner,parent,metadata)

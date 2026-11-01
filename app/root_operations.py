@@ -591,7 +591,13 @@ def reserve(workspace, *, library_id='shared', paths=(), database=None, kind='op
         technical_retry=kind=='startup' and ids==_TECHNICAL_STARTUP_IDS
         from app.domain_recovery import approved
         domain_retry=approved(_recovery_record)
-        if not (metadata_retry or technical_retry or domain_retry):
+        from app.metadata_scoped_recovery import approved as scoped_metadata_approved
+        scoped_retry=(kind=='metadata'
+                      and (ids or {}).get('function') in {
+                          'app.metadata_correction.apply_multiple_metadata_correction',
+                          'app.metadata_correction.reintegrate_library_metadata_family'}
+                      and scoped_metadata_approved(_recovery_record))
+        if not (metadata_retry or technical_retry or domain_retry or scoped_retry):
             raise RootOperationError('Fachliche Wiederaufnahme ist nicht für diesen Auftrag freigegeben.')
     nested = next((r for r in _ACTIVE.get() if r['workspace']==str(root) and r['library']==library_id), None)
     if nested:
