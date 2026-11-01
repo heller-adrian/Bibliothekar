@@ -1,3 +1,15 @@
+# Fortsetzung 01.11.2026 – 147er-Originalgate: Runner-Timeout statt rotem Test
+
+**PRE.5 WEITERHIN NICHT FREIGEGEBEN.** Entwicklungsbranch `codex/pre5-operation-recovery`.
+
+- **GitHub 41310767537**, Source `098243f6`: **94/94 PASS**. Alle 58 ursprünglich roten exakten Testnodes und 36 zusätzliche Sicherheitsverträge bestanden, inklusive originaler Multiple-/Reintegration-Crash-Rollbacks und bytegleicher fremder Inodes.
+- **GitHub 41314670549**, Source `e7dae42d`, [pre5-full]: 15/15 Crash-/Restore-Gate PASS, anschließend 147er Originalgate nach **2400s Subprozess-Timeout** abgebrochen, kein Final-JUnit. Archiv 13088047945, unabhängig geprüfter SHA256 `eabab11507f50be5c78b612d105fb6395ca18a1d9d540f06650659ba2599edee`. Aus originalem `stdout.log`: **116/147 bis zum Abbruch durchlaufen, keine bis dahin gemeldeten FAIL**; die restlichen 31 waren noch nicht geprüft. Dies ist ein Infrastruktur-Timeout, kein 147/147-PASS und kein nachgewiesener Anwendungsfehler.
+- **QA-only Commit `0c6be7c9c77d27fa2c912f5bf32c983beb11ffe0`**: `qa/f14/linux/run_linux.py` verlängert ausschließlich bei exakt `backend_unretested.json` die Subprozessfrist von 2400 auf **5400 Sekunden**, alle anderen Modi und einzelne Testwatchdogs unverändert. `.github/workflows/qa-pre5-operation-recovery.yml`: Reproductions-Job-Timeout von 45 auf **105 Minuten** verlängert. Bei erneutem Timeout explizit unvollständiges `exit.json`, niemals PASS. Keine Anwendungscode-/Fixture-/Testerwartungsänderung.
+- **Aktueller Voll-Abnahmelauf [41318676170](https://github.com/heller-adrian/Bibliothekar/actions/runs/41318676170)** auf `0c6be7c9` wurde gestartet und beim letzten Abruf ausgeführt. Währenddessen **keine erneute Workflow-/Codeänderung**. Er muss das vollständige 147er-Gate (147/147), danach die isolierten Container-/Frontend-/Browser-Verträge und alle acht disjunkten Backendpartitionen auf genau dieser SHA prüfen. Alle Artefakte/JUnit- und Node-Coverage unabhängig auswerten. Bei echtem Rot nur den belegten Fehler reparieren, niemals F14-/SQLite-/Dateieigentumsmechanismen lockern.
+- Alte `docs/pre5/release/ACCEPTANCE.json` bleibt PENDING, Build SHA historisch. Kein Tag, Release, GHCR, `latest`, `main` oder TrueNAS / NAS verändern. Release erst nach vollständiger Abnahme und gesonderter Benutzerfreigabe.
+
+---
+
 # Fortsetzung 01.11.2026 – 94/94 fokussierte Linux-Verträge grün, vollständige PRE.5-Abnahme gestartet
 
 **PRE.5 WEITERHIN GESPERRT. KEIN RELEASE.** Branch `codex/pre5-operation-recovery`; Anwendungscode seit `098243f642de7559a4983857affde3f1c17875c9` unverändert.
