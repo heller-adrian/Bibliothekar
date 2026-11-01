@@ -32,6 +32,17 @@ def _foundation(tmp_path: Path):
     archive.mkdir()
     layout = ensure_workspace_layout(workspace)
     initialize_database(database)
+    # Establish the same F14 state that a real installation retains before
+    # registration; do not bootstrap it after registration as if it were lost.
+    from unittest.mock import patch
+    import os
+    from app.root_operations import reserve
+    from app.storage_config import storage_paths
+    with patch.dict(os.environ,{"KAMERA_REGISTRY_DATABASE":str(registry)}):
+        with reserve(workspace,library_id="main",database=database,kind="startup",
+                     ids={"function":"tests.backend.test_0400_import_backup_controls._foundation"},
+                     paths=[workspace,Path(layout["work_root"]),archive,*storage_paths(workspace).values()]):
+            pass
     initialize_library_registry(registry)
     adopt_main_library(
         registry,

@@ -87,7 +87,11 @@ def bind_prepared_swap(metadata,journal,data):
     from app.metadata_abort_recovery import _binding, _owner, _plain
     from app.import_recovery import _catalogue_identity
     from app.storage_config import storage_paths
-    owner=_owner(record.get("database"))
+    # A multiple-folder operation may have no database in an unregistered
+    # fixture. Missing registry ownership must fail closed with a domain error,
+    # never an incidental Path(None) TypeError.
+    database=record.get("database")
+    owner=_owner(database) if database is not None else None
     if not owner or owner["library_id"]!=record["library"]:
         _refuse("registered_owner_missing")
     plain=_plain(record)

@@ -18,6 +18,7 @@ from app.metadata_correction import apply_metadata_correction
 from app.metadata_swap_recovery import recover_metadata_swaps, assert_no_pending_swaps
 from app.storage_config import storage_paths
 from tests.backend.test_0331_patch import _insert_undated_family
+from tests.backend.registered_metadata_fixture import registered_metadata_fixture
 
 PROPOSED = "2026-07-20T14:15:30"
 OLD = b"synthetic-camera-original"
@@ -28,13 +29,11 @@ def _hash(value: bytes) -> str:
 
 
 def _seed_library(tmp_path, *, two_files=False):
-    db = tmp_path / "kamera.sqlite3"
-    ws = tmp_path / "workspace"
+    db,ws,_registry = registered_metadata_fixture(tmp_path)
     root = ws / "SD-Kartensicherungen"
     source = root / "Ohne_Datum" / "IMG_0001.JPG"
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(OLD)
-    initialize_database(db)
     family_id, fid = _insert_undated_family(db, payload=OLD)
     with database_connection(db) as conn:
         conn.execute(
@@ -195,8 +194,8 @@ def test_0500_normal_library_metadata_correction_finishes_without_journal(tmp_pa
 
 
 def _seed_multiple(tmp_path):
-    root=tmp_path/"Metadatenkorrektur"/"Mehrfachkorrektur"
-    root.mkdir(parents=True,exist_ok=True)
+    _db,ws,_registry=registered_metadata_fixture(tmp_path)
+    root=ws/"Metadatenkorrektur"/"Mehrfachkorrektur"
     (root/"A.JPG").write_bytes(b"photo")
     (root/"B.MP4").write_bytes(b"video")
     return root
@@ -249,9 +248,10 @@ m.apply_multiple_metadata_correction(
 ])
 def test_0500_multiple_correction_recovers_at_all_commit_boundaries(tmp_path,mode):
     root=_seed_multiple(tmp_path)
-    db=tmp_path/"unused.sqlite3"
-    _child(db,tmp_path,_child_multiple(mode))
-    metadata_root=storage_paths(tmp_path)["metadata_root"]
+    ws=root.parent.parent
+    db=tmp_path/"kamera.sqlite3"
+    _child(db,ws,_child_multiple(mode))
+    metadata_root=storage_paths(ws)["metadata_root"]
     result=recover_metadata_swaps(metadata_root,allowed_databases=set())
     assert result["blocked"]==0,result
     if mode=="after_journal_commit":

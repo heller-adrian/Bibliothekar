@@ -17,6 +17,7 @@ from app.metadata_correction import (
 )
 from app.metadata_correction_ui import METADATA_CORRECTION_HTML
 from app.workspace_layout import ensure_workspace_layout
+from tests.backend.registered_metadata_fixture import registered_metadata_fixture
 
 
 def _fake_multiple_analysis(root: Path, include_other: bool = False) -> dict:
@@ -102,8 +103,9 @@ def test_0340_preview_does_not_write_and_apply_writes_all_files(
     tmp_path: Path,
     monkeypatch,
 ):
-    root = tmp_path / "Metadatenkorrektur" / "Mehrfachkorrektur"
-    root.mkdir(parents=True)
+    _db,workspace,registry=registered_metadata_fixture(tmp_path)
+    monkeypatch.setenv("KAMERA_REGISTRY_DATABASE",str(registry))
+    root = workspace / "Metadatenkorrektur" / "Mehrfachkorrektur"
     first = root / "A.JPG"
     second = root / "B.MP4"
     first.write_bytes(b"photo")
@@ -128,7 +130,7 @@ def test_0340_preview_does_not_write_and_apply_writes_all_files(
     )
 
     preview = preview_multiple_metadata_correction(
-        workspace_root=tmp_path,
+        workspace_root=workspace,
         library_id="main",
         reference_relative_path="A.JPG",
         proposed_datetime="2026-07-21T12:30:00",
@@ -138,7 +140,7 @@ def test_0340_preview_does_not_write_and_apply_writes_all_files(
     assert second.read_bytes() == b"video"
 
     result = apply_multiple_metadata_correction(
-        workspace_root=tmp_path,
+        workspace_root=workspace,
         library_id="main",
         reference_relative_path="A.JPG",
         proposed_datetime="2026-07-21T12:30:00",
