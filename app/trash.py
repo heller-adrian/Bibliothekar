@@ -55,8 +55,7 @@ def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True
                                 except (health.DomainStartupError,ro.RootOperationError) as error:
                                     raise TrashError(str(error)) from error
                         from app.trash_restore import assert_restore_paths_available
-                        assert_restore_paths_available(workspace,arguments.get('relative_paths'),
-                                                       exclude=arguments.get('operation_id'))
+                        assert_restore_paths_available(workspace,arguments.get('relative_paths'))
                 return function(*args, **kwargs)
         return locked
     return decorate

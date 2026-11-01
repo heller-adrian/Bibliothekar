@@ -43,7 +43,10 @@ _WRITER_HELD = ContextVar('metadata_writer_held', default=frozenset())
 @contextmanager
 def _metadata_writer(workspace_root: Path):
     from app.metadata_swap_recovery import metadata_write_guard, MetadataSwapRecoveryError
-    key = str(Path(workspace_root).absolute())
+    from threading import get_ident
+    # Contexts may be copied into another worker. Only the very same thread
+    # and process can reenter its currently held physical lock.
+    key = (str(Path(workspace_root).absolute()), os.getpid(), get_ident())
     if key in _WRITER_HELD.get():
         validate_active_roots()
         yield

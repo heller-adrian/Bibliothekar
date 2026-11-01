@@ -50,6 +50,22 @@ def test_independent_metadata_areas_remain_usable(tmp_path):
         with metadata_write_guard(b):pass
 
 
+def test_copied_context_cannot_inherit_physical_writer_ownership(tmp_path):
+    import contextvars,threading
+    from app.metadata_correction import _metadata_writer
+    workspace=tmp_path/'workspace';workspace.mkdir();result=[]
+    def contender():
+        try:
+            with _metadata_writer(workspace):result.append('UNSAFE')
+        except MetadataCorrectionError:result.append('blocked')
+    with _metadata_writer(workspace):
+        with _metadata_writer(workspace):pass  # Exact owning thread reentry.
+        copied=contextvars.copy_context()
+        thread=threading.Thread(target=lambda:copied.run(contender));thread.start();thread.join(5)
+        assert not thread.is_alive() and result==['blocked']
+    with _metadata_writer(workspace):pass  # Ownership was actually released.
+
+
 def test_task_claim_is_atomic_without_changing_completed_or_writing(tmp_path):
     db=tmp_path/'claims.sqlite3'
     with database_connection(db) as c:
