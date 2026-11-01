@@ -1091,5 +1091,19 @@
       "independently_verified": true,
       "new_import_file_identity_failure": "Directory-only root identity used for regular SQLite file; corrected in5025a5ba, pending Linux verification."
     }
+  ],
+  "pending_evidence": [
+    {
+      "run": 41303055310,
+      "source": "fb2412c03be2dc5f88dd715695ad8b98206618a0",
+      "last_status": "in_progress",
+      "scope": "exact58 plus original finish, SD, import, prospective library, restore, BA02 B01 SQL contracts; predates regular-catalogue identity fix"
+    },
+    {
+      "run": 41303789143,
+      "source": "7045766e1a94d4b053c1867dbd613cb8177176c9",
+      "last_status": "pending",
+      "scope": "catalogue descriptor fix; actual early import SIGKILL; prospective original library inode, database and physical writer authority; F15 F17 F18"
+    }
   ]
 }

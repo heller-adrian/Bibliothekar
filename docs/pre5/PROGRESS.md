@@ -405,3 +405,9 @@ Die15 roten Fälle enthalten12 alte Nodes und3 neue Import-Statusfälle. Quelle 
 `40f7bba8` bindet den prospektiven Library-Swap-Proof zusätzlich an DB-Inode und interne Bibliotheksidentität. Identische fremde Ersatzinodes und ein ersetzter Katalog können nicht nachträglich als eigener Bestand übernommen werden. Zwei zusätzliche negative Fälle. Alle neuen Library-Fälle bleiben bis zu ihren Linuxartefakten PENDING. Historische Library-Zustände ohne vorher vorhandenen Ownershipbeleg bleiben ausdrücklich geschützt.
 
 Kumulierte Einzelwerte der ursprünglichen240:228 PASS/12 FAIL; ursprüngliche58:46 PASS/12 FAIL, über verschiedene Commits. KEINE finale Abnahme.41303055310 auf fb2412c0 läuft bereits; keine Vollmatrix/Veröffentlichung.
+
+## Gesicherter Fortsetzungsstand / gezielte Nachläufe
+
+Aktueller QA-Source `7045766e1a94d4b053c1867dbd613cb8177176c9`, letzter Anwendungscode `4e0e35527d95e58fafd77f13fc209105396c40fe`. Zusätzliche native Library-Autorität verlangt den tatsächlich gehaltenen PID-/Thread-Schreibkontext; kopierte Kontexte liefern keine Autorität. Alle Änderungen sind auf dem Entwicklungsbranch gesichert.
+
+Zuerst41303055310 (fb2412c0; zuletzt RUNNING), danach41303789143 (7045766e; zuletzt PENDING) auswerten. Der zweite prüft den korrigierten DB-Dateihelfer und neue prospektive Library-/DB-/Inode-Grenzen samt F15/F17/F18. Keine weiteren Läufe anstoßen, solange diese ausstehen. Noch keine vollständige Backend-/Browser-/Containerabnahme auf finalem Anwendungscode. **BACKEND NOT ACCEPTED – Veröffentlichung gesperrt.**

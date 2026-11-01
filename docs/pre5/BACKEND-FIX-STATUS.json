@@ -1361,5 +1361,10 @@
     "FAIL": 12
   },
   "note": "Latest individual outcomes across multiple explicitly bound commits; not final-source full acceptance.",
-  "not_retested": 0
+  "not_retested": 0,
+  "pending_source": "7045766e1a94d4b053c1867dbd613cb8177176c9",
+  "pending_runs": [
+    41303055310,
+    41303789143
+  ]
 }

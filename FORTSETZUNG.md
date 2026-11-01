@@ -1,8 +1,8 @@
 # Aktueller Fortsetzungsstand – 01.11.2026, neue gezielte Backend-Reparatur
 
 **PRE.5 NOCH NICHT ABNAHMEFÄHIG – VERÖFFENTLICHUNG GESPERRT.**
-Branch `codex/pre5-operation-recovery`. Neuer QA-Stand `fb2412c0` (vollständige SHA per `git rev-parse fb2412c0`).
-Letzter Anwendungscode-Commit `40f7bba8` (enthält den Datei-Identitätsfix `5025a5ba` und ursprüngliche Library-DB-/Inodeautorität).
+Branch `codex/pre5-operation-recovery`. Neuer enger QA-Stand `7045766e1a94d4b053c1867dbd613cb8177176c9`; vorheriger58er-/Nachbarstand `fb2412c03be2dc5f88dd715695ad8b98206618a0`.
+Letzter Anwendungscode-Commit `4e0e35527d95e58fafd77f13fc209105396c40fe` (enthält `5025a5ba`, `40f7bba8` sowie Bindung an echten PID/Thread der physischen Metadatensperre).
 Nachfolgende Dokumentationscommits ändern keinen Anwendungscode.
 Keine Tags/Releases/GHCR/latest/main/TrueNAS geändert. Untracked `qa/rc14.zip` niemals stagen.
 
@@ -12,10 +12,11 @@ Keine Tags/Releases/GHCR/latest/main/TrueNAS geändert. Untracked `qa/rc14.zip` 
    Alle15 kritischen Originalnodes,8 Finish-Proofs,5 SD-Gegenproben,7+8 Authorization,10 B01,11 BA-02,4 Backup-Abschlüsse PASS.
    Von15 FAIL sind12 historische Originalfälle und3 neue Import-Statusfälle. Gemeinsamer nachgewiesener Produktfehler: directory-only `ro._identity` für reguläre SQLite-Datei; in5025a5ba korrigiert, noch PENDING.
    Artefakt13081824373 SHA256 `dde02d89ec8c5899b57e0d3fe47f55f6eb0bb127e0f09373d81b91a31fe1d0bd`.
-2. Der Nachfolger **41303055310** auf **fb2412c03be2dc5f88dd715695ad8b98206618a0** läuft bereits.
+2. ZUERST den laufenden **41303055310** auf **fb2412c03be2dc5f88dd715695ad8b98206618a0** auswerten.
    Er enthält alle58 Original-Nodes plus neue Finish-/SD-/Import-/Library-/Restore-Gegenproben, volle BA-02/B01 und beide Authorization-Dateien.
    Nicht durch einen neuen Push ersetzen, solange er PENDING ist. Keine parallele Vollmatrix.
-3. Artefakt einmal herunterladen, API-SHA256 prüfen, XML/alle roten Child-/Restart-Logs unabhängig lesen.
+3. Danach **41303789143** auf **7045766e1a94d4b053c1867dbd613cb8177176c9**, zuletzt PENDING hinter41303055310. Er prüft den korrigierten regulären DB-Dateihelfer, fünf echte frühe SIGKILL-Nodes, Original-Library-Rollback, die aktuellen17 Library-/Ownership-Fälle und volle F15/F17/F18.
+   Artefakt jeweils einmal herunterladen, API-SHA256 prüfen, XML/alle roten Child-/Restart-Logs unabhängig lesen.
 4. Erst nach sicheren gezielten Reparaturen alle58, dann147, dann vollständige Matrix auf fester SHA starten.
 
 ## In dieser Runde unabhängig verifizierte Linuxnachweise
@@ -78,13 +79,24 @@ Keine Tags/Releases/GHCR/latest/main/TrueNAS geändert. Untracked `qa/rc14.zip` 
    Kein pauschales Freigeben implementiert. Tatsächlichen registrierten API-Abbruch/Review/Retry zuerst nachweisen,
    dann historischen Test begründet berichtigen oder originalen qualifizierten Staging-Abschluss ergänzen.
 4. Alle aktuellen neuen Reparaturen zunächst anhand ausstehender Artefakte prüfen. Nicht voraussetzen, dass sie PASS sind. Insbesondere neue Library-Recovery und tatsächliche asynchrone Restore-Wiederaufnahme in41303055310.
-5. Enger Folgelauf auf40f7bba8 (noch einzureihen) muss den regulären DB-Dateihelfer, fünf echte frühe SIGKILL-Originale, native Library-Inode-/DB-Autorität sowie F15/F17/F18 nachweisen. Kein Vollmatrixlauf.
-5. Pflichtabnahme147/147,15/15 auf FINALER SHA, acht disjunkte Backendpartitionen, Frontend/Browser, reale Supervisor-/Containerabnahme,
+5. Enger Folgelauf41303789143 auf7045766e muss den regulären DB-Dateihelfer, fünf echte frühe SIGKILL-Originale, native Library-Inode-/DB-Autorität sowie F15/F17/F18 nachweisen. Kein Vollmatrixlauf.
+6. Pflichtabnahme147/147,15/15 auf FINALER SHA, acht disjunkte Backendpartitionen, Frontend/Browser, reale Supervisor-/Containerabnahme,
    90 Dateien,4000 Familien,14 iPhone-JPEGs und Archiv-Bytegleichheit auf finalem Source fehlen weiterhin.
 
 Lokale py_compile-/AST-Importprüfung, Actionlint und diff-check PASS; dies sind KEINE Linux-Funktionstests.
 Lokales Docker ist nicht vorhanden. Native TrueNAS/NFSv4, physische SD/USB, echte DNG1.7-Schreibprüfung NOT_RUN.
 Keine ExifTool-Abschwächung; kein `-m`, kein DNG-Upgrade.
+
+
+## Geordneter Budget-Checkpoint dieser Runde
+
+- Letzte Limitanzeige83% des Fünfstundenfensters,78% Woche. Keine weitere größere Implementierung begonnen.
+- Sämtlicher Source liegt committet/gepusht auf dem Entwicklungsbranch; Dokumentationsnachtrag enthält keine Laufzeitänderung.
+-41303055310 läuft und41303789143 wartet bereits dahinter. Keine weiteren Runs starten/ersetzen, keine Polling-Schleife.
+-41303055310 verwendet noch den fehlerhaften alten DB-Dateihelfer. Dessen roten Importstatusfälle sind durch5025a5ba korrigiert, aber erst41303789143 kann sie nachweisen.
+- Nach neuen Ergebnissen zuerst echte Regressionen/neue Fixturefehler stabilisieren. Multiple/Reintegration und unregistrierter Callback-Cancel bleiben bekannte unimplementierte Ursachen; keine Freigabe aus fehlendem Journal/SQL-Endstatus.
+- Original58 Node-IDs und Baseline-Trace-Digests exakt unverändert gegen20b56a97 geprüft; qa/f16_f20/original unverändert; qa/rc14.zip nicht versioniert.
+- Lokale py_compile-/Import-AST-/Actionlint-/diff-Prüfungen PASS. KEINE macOS-Funktionsprüfung und keine Behauptung einer finalen Linux-/Container-Abnahme.
 
 ---
 
