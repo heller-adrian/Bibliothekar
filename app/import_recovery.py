@@ -197,6 +197,67 @@ def finish_published_envelopes(database, registry, workspace, logs):
             retain_completed_evidence(database,registry,workspace,logs,child.name)
 
 
+
+def _record_unpublished_interruption(database, parent, path, record):
+    """History bookkeeping only; missing publication proof NEVER releases F14.
+
+    Early copy/hash/metadata crashes have no move journal yet. Their exact
+    abandoned worker can be labelled interrupted without certifying any copied
+    media, adopting a family, granting retry or deleting its original lease.
+    """
+    from app.operation_health import _RECOVERING,read_connection
+    from app import root_operations as ro
+    from app.database_diagnostics import inspect as inspect_database
+    from contextlib import closing
+    if not _RECOVERING.get():return False
+    database=Path(database).absolute();diagnosis=inspect_database(database)
+    if not diagnosis['consistent'] or not diagnosis['schema_current']:
+        raise PipelineError('import_interruption_database_not_qualified')
+    identity=ro._identity(database)
+    if identity is None:raise PipelineError('import_interruption_database_missing')
+    with closing(read_connection(database)) as connection:
+        owner=connection.execute('SELECT library_id FROM library_identity WHERE singleton=1').fetchone()
+        row=connection.execute('SELECT * FROM jobs WHERE id=?',(record['ids']['job_id'],)).fetchone()
+    if owner is None or owner['library_id']!='main' or row is None or row['operation']!='folder_import':
+        raise PipelineError('import_interruption_original_job_not_qualified')
+    active={'copying','verifying','backup_verified','analyzing_metadata','organizing'}
+    receipt=parent/('import-interruption-status-'+record['reservation_id']+'.json')
+    planned={'format':1,'reservation':record,'database_identity':identity,
+             'disposition':'interrupted_status_only_media_outcome_unknown',
+             'media_completion_verified':False,'original_state':row['state']}
+    old=ro._read(receipt,None)
+    if old is not None:
+        comparison={**planned,'original_state':old.get('original_state')}
+        if old!=comparison or old.get('original_state') not in active:
+            raise PipelineError('import_interruption_status_receipt_changed')
+    elif row['state'] not in active:
+        raise PipelineError('import_interruption_original_job_not_active')
+    if row['state']=='interrupted' and old is not None:return True
+    if row['state'] not in active:raise PipelineError('import_interruption_job_state_changed')
+    if old is None:ro._write(receipt,planned)
+    ro._check(record['bindings'])
+    if ro._read(path)!=record or ro._identity(database)!=identity:
+        raise PipelineError('import_interruption_original_authority_changed')
+    from app.database import utc_now_iso
+    now=utc_now_iso()
+    with database_connection(database) as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        if ro._read(path)!=record or ro._identity(database)!=identity:
+            raise PipelineError('import_interruption_original_authority_changed')
+        changed=connection.execute(
+            "UPDATE jobs SET state='interrupted',stage='interrupted_after_restart',"
+            "progress_message=?,error_message=?,updated_at=?,finished_at=? "
+            "WHERE id=? AND operation='folder_import' AND state=?",
+            ('Import interrupted before verifiable publication; retained copies need review.',
+             'Publication outcome unverified; original F14 reservation remains protected.',
+             now,now,record['ids']['job_id'],row['state'])).rowcount
+        if changed!=1:raise PipelineError('import_interruption_job_state_changed')
+        connection.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) "
+                           "VALUES (?,'import_interrupted_unverified','operation',?,?,?)",
+                           (record['ids']['job_id'],record['reservation_id'],json.dumps(old or planned,sort_keys=True),now))
+    return True
+
+
 def pending_reservations(database, registry, workspace, logs):
     """Recognize only our exact dead worker; leave its reservation untouched.
 
@@ -234,6 +295,13 @@ def pending_reservations(database, registry, workspace, logs):
             if not bindings or any(i is None or state.get('bindings',{}).get(p)!=i for p,i in bindings.items()):
                 raise PipelineError('import_recovery_bindings_changed: '+str(path))
             _check(bindings)
+            relative(ids['job_id'])
+            candidates=[storage_paths(Path(workspace))['backup_root']/'.incoming'/ids['job_id']/'move-journal.json',
+                        Path(logs)/'backups'/ids['job_id']/'move-journal.json']
+            if not any(os.path.lexists(candidate) for candidate in candidates):
+                if _record_unpublished_interruption(database,parent,path,record):
+                    # Deliberately NOT accepted as a qualified media retry.
+                    continue
             proof=qualify(database,registry,workspace,logs,ids['job_id'])
             if proof['job']['state']=='completed' and proof['staged_file_count']==0:
                 _write(parent/('import-completed-'+nonce+'.json'),
