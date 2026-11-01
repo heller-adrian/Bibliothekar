@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import uuid
 
 from app.database import database_connection
@@ -141,6 +142,9 @@ def create_swap_journal(
     }
     _validate(journal, data, metadata_root)
     _atomic_json(journal, data, new=preparation is None)
+    if kind=='library':
+        from app.metadata_library_recovery import bind_prepared_swap
+        bind_prepared_swap(metadata_root,journal,data)
     return journal
 
 
@@ -347,13 +351,29 @@ def _preflight_rollback(data: dict[str, Any]) -> None:
             raise MetadataSwapRecoveryError("Metadaten-Zwischendatei wurde verändert.")
 
 
-def _rollback(data: dict[str, Any]) -> None:
+def _rollback(data: dict[str, Any], *, owned_identities=None) -> None:
+    def check_owned(item):
+        if owned_identities is None:return
+        source_identity=tuple(owned_identities.get(item['source'],[]))
+        incoming_identity=tuple(owned_identities.get(item['incoming'],[]))
+        if len(source_identity)!=2 or len(incoming_identity)!=2:
+            raise MetadataSwapRecoveryError('Originale Metadaten-Dateiidentität fehlt.')
+        for name in ('source','backup','incoming'):
+            path=Path(item[name])
+            if not os.path.lexists(path):continue
+            info=path.lstat()
+            allowed={source_identity,incoming_identity} if name=='source' else {source_identity if name=='backup' else incoming_identity}
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1
+                or path.resolve()!=path or (info.st_dev,info.st_ino) not in allowed):
+                raise MetadataSwapRecoveryError('Originale Metadaten-Dateiidentität geändert: '+str(path))
+    for item in data['files']:check_owned(item)
     _preflight_rollback(data)
     for item in reversed(data["files"]):
         source, backup, incoming = [Path(item[k]) for k in ("source", "backup", "incoming")]
         destination = Path(item["destination"]) if item.get("destination") else None
         if backup.exists():
             validate_active_roots()
+            check_owned(item)
             os.replace(backup, source)
             _sync_dir(source.parent)
         if destination and destination.exists():
@@ -363,6 +383,7 @@ def _rollback(data: dict[str, Any]) -> None:
             _sync_dir(destination.parent)
         if incoming.exists():
             validate_active_roots()
+            check_owned(item)
             incoming.unlink()
             _sync_dir(incoming.parent)
 
@@ -396,6 +417,7 @@ def _finish(data: dict[str, Any]) -> None:
 def recover_swap_journal(
     metadata_root: Path, journal: Path, *,
     allowed_databases: set[Path] | None = None,
+    owned_identities: dict[str, list[int]] | None = None,
 ) -> str:
     data = _load(journal, metadata_root)
     db = str(data.get("database") or "")
@@ -416,6 +438,8 @@ def recover_swap_journal(
         _sync_dir(journal.parent)
         return "rolled_back"
     decision = _database_state(data)
+    if owned_identities is not None and (data['kind']!='library' or decision!='prepared'):
+        raise MetadataSwapRecoveryError('Originale Dateiidentitäten gelten nur für den qualifizierten Library-Rückbau.')
     if data["state"] == "committed" and decision != "committed":
         raise MetadataSwapRecoveryError("Metadatenjournal und SQLite-Commit widersprechen sich.")
     if decision == "committed":
@@ -434,7 +458,8 @@ def recover_swap_journal(
                 )
         disposition = "completed"
     else:
-        _rollback(data)
+        if owned_identities is None:_rollback(data)
+        else:_rollback(data,owned_identities=owned_identities)
         if data["kind"] in {"library", "general"} and data.get("task_id"):
             from app.metadata_correction import _mark_task_blocked
             _mark_task_blocked(

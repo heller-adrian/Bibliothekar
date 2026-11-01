@@ -15,6 +15,45 @@ FUNCTION='app.metadata_correction.apply_metadata_correction'
 def refuse(reason):raise health.DomainStartupError('library_metadata_recovery_'+reason)
 
 
+
+def bind_prepared_swap(metadata,journal,data):
+    """Prospective ownership only: never bless an already orphaned old swap."""
+    if data['kind']!='library':return
+    record=next((r for r in reversed(ro._ACTIVE.get())
+                 if r['kind']=='metadata' and r['ids'].get('function')==FUNCTION
+                 and r.get('database')==data.get('database')),None)
+    if record is None:return  # Legacy unregistered callers keep their old fence.
+    if record.get('_resumed'):refuse('cannot_retroactively_certify_old_swap')
+    from app.metadata_abort_recovery import _owner,_binding,_plain,_task_rows
+    owner=_owner(data['database'])
+    if not owner:return
+    plain=_plain(record);parent,_=_binding(plain,owner)
+    tasks=_task_rows(data['database'],'id=?',(data['task_id'],))
+    if len(tasks)!=1 or tasks[0]['area']!='library':refuse('native_task_mismatch')
+    frozen=json.loads(tasks[0]['detected_json'])
+    members={m.get('file_id',m.get('id')):m for m in frozen.get('members',[])}
+    identities={}
+    from app.metadata_correction import _safe_relative
+    def own(path,digest):
+        path=Path(path);before=path.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink!=1 or path.resolve()!=path:
+            refuse('native_file_not_exclusive')
+        measured=hashlib.sha256(path.read_bytes()).hexdigest();after=path.lstat()
+        fields=lambda v:(v.st_dev,v.st_ino,v.st_size,v.st_mtime_ns,v.st_ctime_ns)
+        if fields(before)!=fields(after) or measured!=digest:refuse('native_file_changed')
+        identities[str(path)]=[before.st_dev,before.st_ino]
+    for item in data['files']:
+        if item['file_id'] not in members:refuse('native_family_mismatch')
+        own(item['source'],item['before_sha']);own(item['incoming'],item['after_sha'])
+        member=members[item['file_id']]
+        own(Path(metadata)/'.work'/data['task_id']/_safe_relative(member['original_relative_path']),item['after_sha'])
+    proof={'format':1,'reservation':plain,'swap':data,'owned_identities':identities}
+    path=parent/('metadata-swap-ownership-'+data['id']+'.json')
+    old=ro._read(path,None)
+    if old is not None and old!=proof:refuse('native_proof_changed')
+    if old is None:ro._write(path,proof)
+
+
 def qualify(record,owner,parent,metadata):
     from app.metadata_abort_recovery import _binding,_task_rows
     from app.metadata_swap_recovery import _validate,_database_state,_preflight_rollback
@@ -47,6 +86,11 @@ def qualify(record,owner,parent,metadata):
         if journals and (journals!=[journal] or load(journal)!=data):refuse('journal_changed_after_plan')
         stable={k:v for k,v in task.items() if k not in {'status','updated_at','error_message'}}
         if prior.get('task')!=stable:refuse('frozen_task_changed')
+    ownership=ro._read(parent/('metadata-swap-ownership-'+data['id']+'.json'),None)
+    if (not ownership or ownership.get('format')!=1 or ownership.get('reservation')!=record
+        or ownership.get('swap')!=data or not isinstance(ownership.get('owned_identities'),dict)):
+        refuse('original_prospective_ownership_missing_or_changed')
+    owned=ownership['owned_identities']
     central=storage_paths(Path(owner['workspace_root']))['backup_root'].absolute()
     if (data['kind']!='library' or data['state']!='prepared' or data['database']!=str(database)
         or data['task_id']!=task_id or data['family_id']!=frozen.get('family_id')
@@ -77,6 +121,10 @@ def qualify(record,owner,parent,metadata):
                 info=path.lstat()
                 if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or path.resolve()!=path:
                     refuse('unsafe_file_identity: '+str(path))
+                possible=({tuple(owned.get(item['source'],[])),tuple(owned.get(item['incoming'],[]))}
+                          if name=='source' else {tuple(owned.get(item['source'] if name=='backup' else item['incoming'],[]))})
+                if (info.st_dev,info.st_ino) not in possible:
+                    refuse('original_file_identity_changed: '+str(path))
         # The old library executor owns its auxiliary corrected work copy;
         # retain it, but never qualify an injected copy as disposable work.
     if work.exists() or work.is_symlink():
@@ -86,7 +134,8 @@ def qualify(record,owner,parent,metadata):
             if path.is_dir():
                 if not any(p.is_relative_to(path) for p in expected_work):refuse('unknown_work_directory')
             elif (path not in expected_work or not path.is_file() or path.stat().st_nlink!=1
-                  or hashlib.sha256(path.read_bytes()).hexdigest()!=expected_work[path]):
+                  or hashlib.sha256(path.read_bytes()).hexdigest()!=expected_work[path]
+                  or [path.stat().st_dev,path.stat().st_ino]!=owned.get(str(path))):
                 refuse('unknown_work_bytes')
     if _database_state(data)!='prepared':refuse('commit_requires_separate_proof')
     _preflight_rollback(data)
@@ -133,7 +182,9 @@ def recover(workspace):
                 journal,confirmed=qualify(record,owner,parent,metadata)
                 if confirmed!=plan:refuse('plan_changed_under_original_lock')
                 if journal.exists():
-                    if recover_swap_journal(metadata,journal,allowed_databases={Path(record['database'])})!='rolled_back':
+                    ownership=ro._read(parent/('metadata-swap-ownership-'+plan['swap']['id']+'.json'))
+                    if recover_swap_journal(metadata,journal,allowed_databases={Path(record['database'])},
+                                            owned_identities=ownership['owned_identities'])!='rolled_back':
                         refuse('unexpected_outcome')
                 qualify(record,owner,parent,metadata)
                 receipt=parent/('library-metadata-outcome-'+record['reservation_id']+'.json')
