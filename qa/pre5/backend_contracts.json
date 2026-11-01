@@ -44,5 +44,6 @@
   "tests/backend/test_rc4_acceptance_regressions.py::test_reservation_is_rechecked_after_delete_journal_before_staging",
   "tests/backend/test_0561_audit_regressions.py::test_P202b_F1_journal_write_error_must_leave_recovery_evidence",
   "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary",
-  "tests/backend/test_0561_recovery.py::test_committed_journal_sync_failure_retains_original_until_retry"
+  "tests/backend/test_0561_recovery.py::test_committed_journal_sync_failure_retains_original_until_retry",
+  "tests/backend/test_f14_fixed_storage.py::test_f14_four_empty_directories_are_not_a_startup_mount_certificate"
 ]

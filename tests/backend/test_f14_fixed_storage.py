@@ -305,7 +305,7 @@ def test_f14_four_empty_directories_are_not_a_startup_mount_certificate(tmp_path
     monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(archive))
     before=stable(case)
     result=inspect_storage(ws,database=private/'main.sqlite3')
-    assert result['ready'] and result['can_initialize']
+    assert result['ready'] and result['can_initialize'],result
     assert result['mount_evidence']=='administrator_responsibility'
     assert stable(case)==before
 
