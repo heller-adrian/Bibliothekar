@@ -38,5 +38,8 @@
   "tests/backend/test_metadata_consistency_f15_f17_f18.py::test_copied_context_cannot_inherit_physical_writer_ownership",
   "tests/backend/test_pre5_statement_authorization.py",
   "tests/backend/test_pre5_sqlite_authorization.py",
-  "tests/backend/test_rc1_b01.py"
+  "tests/backend/test_rc1_b01.py",
+  "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection",
+  "tests/backend/test_rc4_acceptance_regressions.py::test_active_restore_rejects_independent_http_and_physical_deletion",
+  "tests/backend/test_rc4_acceptance_regressions.py::test_reservation_is_rechecked_after_delete_journal_before_staging"
 ]

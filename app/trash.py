@@ -56,6 +56,17 @@ def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True
                                     raise TrashError(str(error)) from error
                         from app.trash_restore import assert_restore_paths_available
                         assert_restore_paths_available(workspace,arguments.get('relative_paths'))
+                        if function.__name__ in {'delete_selected_trash_files','empty_trash_filesystem'}:
+                            from app.trash_import import protected_trash_paths
+                            from app.trash_failure import assert_no_active_restore
+                            databases=arguments.get('databases',_EMPTY_DATABASES.get())
+                            if databases is not None and not isinstance(databases,(list,tuple,set,frozenset)):
+                                databases=None  # Do not consume a caller's iterator.
+                            assert_no_active_restore(workspace,databases)
+                            reserved=protected_trash_paths(None,workspace)
+                            selection=arguments.get('relative_paths')
+                            if reserved and (selection is None or reserved.intersection(selection)):
+                                raise TrashError('Ausgewählte Dateien gehören zu einer Wiederherstellungsreservierung.')
                 return function(*args, **kwargs)
         return locked
     return decorate
