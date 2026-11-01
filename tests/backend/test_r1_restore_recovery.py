@@ -185,14 +185,11 @@ def test_r1_owned_receipt_sigkill(tmp_path,monkeypatch):
 
 @pytest.mark.parametrize('tamper',['source_bytes','source_inode','database_inode','catalogue','family','missing_original','empty_plan_rows','new_library_origin'])
 def test_r1_unsafe_invariant_blocks_global_start(tmp_path,monkeypatch,tamper):
-    case,ev,data,ws=seed(tmp_path,monkeypatch);target=collision(data,ws,monkeypatch);source=ws/'Papierkorb/A.JPG'
-    if tamper=='source_bytes':source.write_bytes(b'changed-source')
-    elif tamper=='source_inode':p=source.with_suffix('.new');p.write_bytes(source.read_bytes());os.replace(p,source)
-    elif tamper=='database_inode':p=data['dbs'][1].with_suffix('.new');p.write_bytes(data['dbs'][1].read_bytes());os.replace(p,data['dbs'][1])
-    elif tamper=='missing_original':source.rename(case/'explicit-test-moved-original.JPG')
-    elif tamper=='empty_plan_rows':
-        path=journal(case);record=json.loads(path.read_text());record['plans'][0]['rows']=[];path.write_text(json.dumps(record))
-    elif tamper=='new_library_origin':
+    case,ev,data,ws=seed(tmp_path,monkeypatch)
+    if tamper=='new_library_origin':
+        # Build the disposable foreign catalogue BEFORE the old lease exists.
+        # A normal registration afterwards must be rejected by admission; the
+        # counterprobe then models an explicit external registry alteration.
         from tests.backend.test_0440_trash import _file
         db=case/'new-library.sqlite3';initialize_database(db);ensure_library_identity(db,'new')
         for job in ('J','K'):create_job(db,job_id=job,kind='sd_import',trigger_type='approved_sd',operation='folder_import',source_path=str(case/'other-card'))
@@ -200,7 +197,24 @@ def test_r1_unsafe_invariant_blocks_global_start(tmp_path,monkeypatch,tamper):
         with database_connection(db) as c:
             c.execute("UPDATE files SET current_root_kind='trash',job_id='K'");c.execute("UPDATE file_families SET job_id='K'");c.execute("DELETE FROM jobs WHERE id='J'");c.execute("UPDATE jobs SET state='completed',stage='organized_verified'")
         work=ws/'Arbeitsbereiche/new';work.mkdir(parents=True);archive=case/'new-archive';archive.mkdir()
-        register_library(case/'registry.sqlite3',library_id='new',display_name='New',database_path=db,workspace_root=ws,work_root=work,archive_root=archive)
+    target=collision(data,ws,monkeypatch);source=ws/'Papierkorb/A.JPG'
+    if tamper=='source_bytes':source.write_bytes(b'changed-source')
+    elif tamper=='source_inode':p=source.with_suffix('.new');p.write_bytes(source.read_bytes());os.replace(p,source)
+    elif tamper=='database_inode':p=data['dbs'][1].with_suffix('.new');p.write_bytes(data['dbs'][1].read_bytes());os.replace(p,data['dbs'][1])
+    elif tamper=='missing_original':source.rename(case/'explicit-test-moved-original.JPG')
+    elif tamper=='empty_plan_rows':
+        path=journal(case);record=json.loads(path.read_text());record['plans'][0]['rows']=[];path.write_text(json.dumps(record))
+    elif tamper=='new_library_origin':
+        from app.library_registry import LibraryRegistryError
+        original={str(p):p.read_bytes() for p in case.rglob('operation-*.json')}
+        with pytest.raises(LibraryRegistryError):
+            register_library(case/'registry.sqlite3',library_id='new',display_name='New',database_path=db,workspace_root=ws,work_root=work,archive_root=archive)
+        assert {str(p):p.read_bytes() for p in case.rglob('operation-*.json')}==original
+        with external_edit(case/'registry.sqlite3',fixture_root=case) as c:
+            row=dict(c.execute("SELECT * FROM libraries WHERE library_id='main'").fetchone())
+            row.update(library_id='new',display_name='New',database_path=str(db),work_root=str(work),archive_root=str(archive),is_main=0)
+            names=list(row)
+            c.execute('INSERT INTO libraries ('+','.join(names)+') VALUES ('+','.join('?' for _ in names)+')',[row[n] for n in names])
 
     else:
         with external_edit(data['dbs'][1],fixture_root=case) as c:

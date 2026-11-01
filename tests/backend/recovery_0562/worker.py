@@ -1,6 +1,6 @@
 """External SIGKILL probe; repository sources are imported read-only."""
 from guards import *
-import asyncio, hashlib, importlib, signal, traceback
+import asyncio, hashlib, importlib, signal, traceback, time
 
 case=Path(sys.argv[1]);action=sys.argv[2];boundary=sys.argv[3];control=Path(sys.argv[4])
 # These are generated test paths, never persisted project configuration.
@@ -291,6 +291,10 @@ def instrument(kind):
         hook(ms,'mark_swap_committed','meta.committed')
         hook(ms,'_finish','meta.cleanup')
         hook(ms,'_rollback','meta.recover_original')
+        if kind=='library_metadata':
+            import app.metadata_library_recovery as library_recovery
+            hook(library_recovery.ro,'_write','library.before-outcome',when='before',predicate=lambda p,v:p.name.startswith('library-metadata-outcome-'))
+            hook(library_recovery.ro,'_write','library.outcome',predicate=lambda p,v:p.name.startswith('library-metadata-outcome-'))
         hook(ms,'_recover_preparation','meta.preparation_cleanup')
         hook(ms,'create_preparation_journal','meta.preparation_owned')
         hook(mc,'_mark_task_blocked','meta.recover_task')
@@ -466,6 +470,20 @@ def startup():
         async with main.app.router.lifespan_context(main.app):
             await asyncio.sleep(.3)
             if main.DATABASE_INITIALIZATION_ERROR:raise RuntimeError('Startup: '+str(main.DATABASE_INITIALIZATION_ERROR))
+            # A queued restore is asynchronous. The worker's first claim can
+            # correctly meet the startup admission fence and retry two seconds
+            # later. A 300-ms lifespan must not masquerade as a failed restore.
+            # Wait only for actually admitted trash imports; unresolved F14
+            # effects keep their fence and are never scheduled by this adapter.
+            from app.operation_health import inspect as operation_status
+            end=time.monotonic()+8
+            while operation_status(WS)['writes_allowed']:
+                with database_connection(DB) as connection:
+                    active=connection.execute("SELECT 1 FROM jobs WHERE operation='trash_import' "
+                        "AND state IN ('queued','copying','verifying','backup_verified','analyzing_metadata','organizing') LIMIT 1").fetchone()
+                if active is None:break
+                if time.monotonic()>=end:raise AssertionError('Admitted asynchronous trash import did not reach a terminal state')
+                await asyncio.sleep(.05)
     asyncio.run(lifecycle())
     from app.operation_health import inspect as operation_status
     return {'storage_state':main.api_storage_health()['state'],'operation_health':operation_status(WS)}
