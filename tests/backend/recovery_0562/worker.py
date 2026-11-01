@@ -21,7 +21,7 @@ if (case/'case.json').exists():
     os.environ['KAMERA_DATABASE_DIR']=str(database_parent)
     os.environ['KAMERA_WORKSPACE']=locations['workspace']
     os.environ['KAMERA_REGISTRY_DATABASE']=str(locations.get('registry',database_parent/'registry.sqlite3'))
-    os.environ['KAMERA_CONFIG']=str(database_parent/'settings.json')
+    os.environ['KAMERA_CONFIG']=str(locations.get('config',database_parent/'settings.json'))
 
 from app import main
 from app.database import initialize_database,database_connection,create_job,claim_next_job,get_job
@@ -257,12 +257,13 @@ def seed(kind):
 def configure_fixture(data):
     global DB,WS,REG
     DB=Path(data['db']);WS=Path(data['workspace'])
-    REG=DB.parent/'registry.sqlite3'
+    REG=Path(data.get('registry',DB.parent/'registry.sqlite3'))
     if DB!=main.DATABASE_FILE:
         # Only environment globals for the established nested fixture, not
         # a replacement recovery routine or changed application source.
         main.DATABASE_FILE=DB;main.DATABASE_DIRECTORY=DB.parent;main.WORKSPACE_PATH=WS;main.REGISTRY_DATABASE_FILE=REG
-        os.environ['KAMERA_CONFIG']=str(DB.parent/'settings.json');main.CONFIG_PATH=DB.parent/'settings.json'
+        config=Path(data.get('config',DB.parent/'settings.json'))
+        os.environ['KAMERA_CONFIG']=str(config);main.CONFIG_PATH=config
 
 
 def instrument(kind):

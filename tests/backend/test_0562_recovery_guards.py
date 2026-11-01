@@ -52,6 +52,7 @@ def test_startup_recovers_registered_databases_only(tmp_path,monkeypatch,registe
     monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(tmp_path/'database/bibliothekar-global.sqlite3'))
     monkeypatch.setenv('KAMERA_WORKSPACE',str(tmp_path/'workspace'))
     monkeypatch.setenv('KAMERA_CONFIG',str(tmp_path/'settings.json'))
+    (tmp_path/'settings.json').write_text('{}')
     db,registry,workspace=_foundation(tmp_path)
     monkeypatch.setenv("KAMERA_REGISTRY_DATABASE",str(registry))
     monkeypatch.setenv("KAMERA_WORKSPACE",str(workspace))
@@ -72,6 +73,12 @@ def test_startup_recovers_registered_databases_only(tmp_path,monkeypatch,registe
     monkeypatch.setattr(main,'start_cancel_worker',lambda:None)
     monkeypatch.setattr(main,'start_release_worker',lambda:None)
     main.startup_database()
-    if registered:assert 'Registrierte Bibliotheksdatenbank fehlt' in str(main.DATABASE_INITIALIZATION_ERROR)
-    else:assert main.DATABASE_INITIALIZATION_ERROR is None
+    if registered:
+        # The structural preflight must reject this *before* migrations or
+        # recovery run. Assert exact role/path instead of obsolete wording.
+        from app.managed_storage_health import inspect_storage
+        health=inspect_storage(workspace,database=db)
+        assert main.DATABASE_INITIALIZATION_ERROR is not None
+        assert not health['ready'] and any(i['code']=='catalog_unavailable' and i['path']==str(missing) for i in health['issues']),health
+    else:assert main.DATABASE_INITIALIZATION_ERROR is None,main.DATABASE_INITIALIZATION_ERROR
     assert not missing.exists()

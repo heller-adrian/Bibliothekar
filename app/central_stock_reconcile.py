@@ -20,7 +20,7 @@ from app.free_stock_layout import (
     released_origin_directory,
 )
 from app.storage_config import storage_paths
-from app.trash import reconcile_trash_inventory
+from app.trash import reconcile_trash_inventory, serialized_trash_operation
 
 
 SENTINEL_NAME = ".bibliothekar-central-stock-v1"
@@ -329,6 +329,7 @@ def _pending_sort_inventory(connection, expected_count):
             'deleted_file_count': 0, 'misplaced_file_count': 0}
 
 
+@serialized_trash_operation('workspace_root',qualify_restore=True)
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='inventory', error_type=RuntimeError, durable=False)
 def reconcile_central_free_stock(
     database_path: Path,

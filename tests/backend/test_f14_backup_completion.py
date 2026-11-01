@@ -36,12 +36,13 @@ def test_f14_backup_rollback_receipt_survives_real_sigkill(tmp_path,monkeypatch,
     (tmp_path/'database').mkdir()
     monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(tmp_path/'database/bibliothekar-global.sqlite3'))
     monkeypatch.setenv('KAMERA_CONFIG',str(tmp_path/'settings.json'))
+    (tmp_path/'settings.json').write_text('{}')
     db,registry,root,original,family=_seed(tmp_path)
     monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(registry))
     monkeypatch.setenv('KAMERA_CONFIG',str(tmp_path/'settings.json'))
     ev=tmp_path/'completion-evidence';ev.mkdir()
     expected=hashlib.sha256(original.read_bytes()).hexdigest();inode=original.stat().st_ino
-    data={'db':str(db),'registry':str(registry),'central':str(root),'job':'IMPORT_0400'}
+    data={'db':str(db),'registry':str(registry),'config':str(tmp_path/'settings.json'),'central':str(root),'job':'IMPORT_0400'}
     (tmp_path/'backup-case.json').write_text(json.dumps(data))
     (tmp_path/'case.json').write_text(json.dumps({**data,'workspace':str(root.parent),'kind':'trash','databases':[str(db)],'expected':{'source':expected}}))
     snapshot(tmp_path,ev/'before.json')

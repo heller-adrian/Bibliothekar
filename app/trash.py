@@ -30,7 +30,7 @@ class TrashError(RuntimeError):
 
 
 def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True,
-                               admit_restore: bool = False):
+                               admit_restore: bool = False, qualify_restore: bool = False):
     """All reservation, inventory and worker mutations share the existing lock."""
     def decorate(function):
         parameters = signature(function)
@@ -38,13 +38,19 @@ def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True
         def locked(*args, **kwargs):
             arguments = parameters.bind(*args, **kwargs).arguments
             workspace = arguments[workspace_argument]
+            if qualify_restore and not admit_restore:
+                from app.operation_health import read_only
+                if read_only():
+                    # Protected display snapshots neither replay a domain
+                    # writer nor wait behind its physical trash lock.
+                    return function(*args, **kwargs)
             from app.trash_selective import _operation_lock
             with _operation_lock(workspace, blocking=blocking):
-                if admit_restore:
+                if admit_restore or qualify_restore:
                     from app import root_operations as ro,operation_health as health
                     # Serialize admission BEFORE publishing a new media intent.
                     # Never replace or enlarge an executing outer worker lease.
-                    if not any(r['workspace']==str(Path(workspace).absolute()) for r in ro._ACTIVE.get()):
+                    if not health.read_only() and not any(r['workspace']==str(Path(workspace).absolute()) for r in ro._ACTIVE.get()):
                         pending=[r for r in health.inspect(workspace)['reservations'] if not r['live']]
                         if pending and all(r['qualified'] and r['kind']=='trash' and
                                 r['ids'].get('function')=='app.trash_restore.restore_trash_files' for r in pending):
@@ -54,9 +60,10 @@ def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True
                                 try:replay(workspace,registry,database=None)
                                 except (health.DomainStartupError,ro.RootOperationError) as error:
                                     raise TrashError(str(error)) from error
-                        from app.trash_restore import assert_restore_paths_available
-                        assert_restore_paths_available(workspace,arguments.get('relative_paths'))
-                        if function.__name__ in {'delete_selected_trash_files','empty_trash_filesystem'}:
+                        if admit_restore:
+                            from app.trash_restore import assert_restore_paths_available
+                            assert_restore_paths_available(workspace,arguments.get('relative_paths'))
+                        if admit_restore and function.__name__ in {'delete_selected_trash_files','empty_trash_filesystem'}:
                             from app.trash_import import protected_trash_paths
                             from app.trash_failure import assert_no_active_restore
                             databases=arguments.get('databases',_EMPTY_DATABASES.get())

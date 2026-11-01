@@ -408,6 +408,9 @@ def test_trash_stage_and_return_cross_mount_fallback(tmp_path, monkeypatch):
 
 def test_startup_recovers_general_swap_before_onboarding_worker(tmp_path, monkeypatch):
     from types import SimpleNamespace
+    # An interrupted established operation has its original configuration.
+    # Publish it before the first media intent; startup must not manufacture it.
+    (tmp_path/'settings.json').write_text('{}')
     db, workspace, source, original, task = general_case(tmp_path, monkeypatch)
     for required_root in storage_paths(workspace).values():
         required_root.mkdir(exist_ok=True)
@@ -431,7 +434,7 @@ def test_startup_recovers_general_swap_before_onboarding_worker(tmp_path, monkey
     monkeypatch.setattr(main,'start_cancel_worker',worker_start)
     monkeypatch.setattr(main,'start_release_worker',lambda:None)
     main.startup_database()
-    assert main.DATABASE_INITIALIZATION_ERROR is None
+    assert main.DATABASE_INITIALIZATION_ERROR is None,main.DATABASE_INITIALIZATION_ERROR
     assert checks == [True]
     assert not list((storage_paths(workspace)['metadata_root']/'.swap-journals').glob('*.json'))
 

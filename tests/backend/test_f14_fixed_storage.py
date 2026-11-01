@@ -305,9 +305,20 @@ def test_f14_four_empty_directories_are_not_a_startup_mount_certificate(tmp_path
     monkeypatch.setenv('KAMERA_ARCHIVE_ROOT',str(archive))
     before=stable(case)
     result=inspect_storage(ws,database=private/'main.sqlite3')
-    assert result['ready'] and result['can_initialize'],result
+    # Empty folders permit technical bootstrap, not operational readiness.
+    # describe() deliberately exposes only READY after bootstrap completion.
+    assert not result['ready'] and result['can_initialize'] and result['can_setup_again'],result
+    assert result['state']=='UNAVAILABLE' and result['setup_phase']=='not_started',result
     assert result['mount_evidence']=='administrator_responsibility'
     assert stable(case)==before
+    for number in (1,2):
+        boot=child(case,tmp_path/('empty-roots-boot-'+str(number)))
+        assert boot['error'] is None,boot
+        status=inspect_storage(ws,database=private/'main.sqlite3')
+        assert status['ready'] and not status['can_initialize'],status
+        assert (ws/'Metadata Correction/General').is_dir()
+        assert (ws/'Metadata Correction/Batch Correction').is_dir()
+    assert not list((private/'.bibliothekar-root-control').rglob('operation-*.json'))
 
 
 @pytest.mark.parametrize('used',[False,True])
