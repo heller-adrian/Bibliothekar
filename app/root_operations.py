@@ -825,6 +825,8 @@ def protect(*, workspace_arg=None, database_arg='database_path', kind='operation
                 elif context:result.extend([context.work_root,context.archive_root])
                 return result
             ids={k:str(a[k]) for k in ['job_id','event_id','run_id','batch_id','cr_id','correction_id','operation_id','root_kind','area','relative_path','reference_relative_path','expected_preview_fingerprint'] if a.get(k) is not None}
+            if fn.__module__+'.'+fn.__qualname__=='app.metadata_correction.reintegrate_library_metadata_family':
+                ids['family_id']=str(a['family_id'])
             ids['function']=fn.__module__+'.'+fn.__qualname__
             if a.get('relative_paths') is not None:ids['relative_paths']=json.dumps(sorted(map(str,a['relative_paths'])))
             if isinstance(a.get('job'),dict):ids['job_id']=str(a['job']['id'])

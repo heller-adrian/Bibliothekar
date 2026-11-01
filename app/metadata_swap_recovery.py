@@ -145,6 +145,9 @@ def create_swap_journal(
     if kind=='library':
         from app.metadata_library_recovery import bind_prepared_swap
         bind_prepared_swap(metadata_root,journal,data)
+    elif kind in {'multiple','reintegrate'}:
+        from app.metadata_scoped_recovery import bind_prepared_swap
+        bind_prepared_swap(metadata_root,journal,data)
     return journal
 
 
@@ -366,7 +369,14 @@ def _rollback(data: dict[str, Any], *, owned_identities=None) -> None:
             if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1
                 or path.resolve()!=path or (info.st_dev,info.st_ino) not in allowed):
                 raise MetadataSwapRecoveryError('Originale Metadaten-Dateiidentität geändert: '+str(path))
-    for item in data['files']:check_owned(item)
+    for item in data['files']:
+        check_owned(item)
+        if owned_identities is not None and item.get('destination') and os.path.lexists(item['destination']):
+            path=Path(item['destination']);info=path.lstat()
+            original=tuple(owned_identities.get(item['incoming'],[]))
+            if (len(original)!=2 or not stat.S_ISREG(info.st_mode) or info.st_nlink!=1
+                or path.resolve()!=path or (info.st_dev,info.st_ino)!=original):
+                raise MetadataSwapRecoveryError('Reintegration destination has foreign identity: '+str(path))
     _preflight_rollback(data)
     for item in reversed(data["files"]):
         source, backup, incoming = [Path(item[k]) for k in ("source", "backup", "incoming")]
@@ -438,7 +448,7 @@ def recover_swap_journal(
         _sync_dir(journal.parent)
         return "rolled_back"
     decision = _database_state(data)
-    if owned_identities is not None and (data['kind']!='library' or decision!='prepared'):
+    if owned_identities is not None and (data['kind'] not in {'library','multiple','reintegrate'} or decision!='prepared'):
         raise MetadataSwapRecoveryError('Originale Dateiidentitäten gelten nur für den qualifizierten Library-Rückbau.')
     if data["state"] == "committed" and decision != "committed":
         raise MetadataSwapRecoveryError("Metadatenjournal und SQLite-Commit widersprechen sich.")
