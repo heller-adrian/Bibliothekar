@@ -29,6 +29,52 @@ _RECOVERY_LOCK = threading.RLock()
 _HELD_LOCKS = threading.local()
 
 
+def _assert_missing_state_is_not_registered(workspace: Path) -> None:
+    """Never bootstrap a lost F14 state for an already registered workspace.
+
+    The check belongs under the original workspace/shared/state locks, before
+    publishing any replacement identity. A different workspace registered in
+    the same registry is NOT an authority for this workspace. SQLite is read
+    only; missing/corrupt/unverifiable registries cannot authorize a reset.
+    """
+    import sqlite3
+    from contextlib import closing
+    from app.private_storage_security import qualify_existing
+
+    root = Path(os.path.abspath(workspace))
+    configured = os.environ.get('KAMERA_REGISTRY_DATABASE')
+    candidates = [root.parent / 'registry.sqlite3',
+                  root.parent / 'bibliothekar-global.sqlite3']
+    if configured:
+        candidates.insert(0, Path(configured))
+    for candidate in dict.fromkeys(candidates):
+        if not candidate.is_file():
+            continue
+        try:
+            qualify_existing(candidate)
+            with closing(sqlite3.connect(candidate.absolute().as_uri() + '?mode=ro',
+                                         uri=True, timeout=5)) as connection:
+                connection.execute('PRAGMA query_only=ON')
+                connection.execute('BEGIN')
+                try:
+                    rows = connection.execute(
+                        'SELECT COALESCE(is_registered,1) FROM libraries WHERE workspace_root=?',
+                        (str(root),)).fetchall()
+                except sqlite3.OperationalError as error:
+                    if 'no such table' in str(error):
+                        continue
+                    if 'no such column: is_registered' not in str(error):
+                        raise
+                    rows = connection.execute(
+                        'SELECT 1 FROM libraries WHERE workspace_root=?',
+                        (str(root),)).fetchall()
+            if any(bool(row[0]) for row in rows):
+                raise TrashError('registered_installation_missing_control_state: ' + str(root))
+        except sqlite3.Error as error:
+            raise TrashError('registry_unverifiable_for_control_bootstrap: ' +
+                             str(candidate)) from error
+
+
 @contextmanager
 def _operation_lock(workspace: Path, *, blocking: bool = True):
     # Inventory recovery must not roll back a live deletion. flock also covers
@@ -46,6 +92,7 @@ def _operation_lock(workspace: Path, *, blocking: bool = True):
             with _lock(control/'workspace.lock', exclusive=True), _lock(control/'shared.lock', exclusive=True), _lock(control/'state.lock', exclusive=True, wait=True):
                 state = _read(control/'state.json', {})
                 if not state:
+                    _assert_missing_state_is_not_registered(workspace)
                     from app.storage_bootstrap import assert_no_orphan_legacy_lock
                     assert_no_orphan_legacy_lock(workspace)
                     state = {'format':2,'workspace':_identity(workspace),'generation':0,'libraries':{},'bindings':{str(Path(workspace).absolute()):_identity(workspace)}}

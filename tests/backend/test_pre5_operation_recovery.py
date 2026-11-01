@@ -504,6 +504,43 @@ def test_transient_scan_never_recreates_lost_registered_control_state(ready):
     assert not state.exists()
 
 
+def test_trash_lock_never_recreates_lost_registered_control_state(ready):
+    """A direct trash lease must not invent a lost registered F14 root state."""
+    from app.trash_selective import _operation_lock
+    _,ws,_,dbs,_=ready
+    control=ro._control_location(ws)
+    original=control/'state.json'
+    retained=control/'state-retained-outside-control.json'
+    old_bytes=original.read_bytes()
+    original.rename(retained)
+    for _ in range(3):
+        with pytest.raises((RuntimeError,ro.RootOperationError),
+                           match='registered_installation_missing_control_state'):
+            with _operation_lock(ws):
+                pytest.fail('lost registered identity was adopted')
+        assert not original.exists()
+        assert retained.read_bytes()==old_bytes
+    with pytest.raises((RuntimeError,ro.RootOperationError)):
+        reconcile_central_free_stock(dbs[0],ws,library_id='main')
+    assert not original.exists()
+
+
+def test_unregistered_unclaimed_workspace_may_start_its_own_private_lock(ready):
+    """A registry for a DIFFERENT workspace must not imply ownership."""
+    from app.trash_selective import _operation_lock
+    case,ws,_,_,_=ready
+    other=case/'fresh-unregistered-workspace'
+    other.mkdir()
+    assert other!=ws
+    control=ro._control_location(other)
+    assert not (control/'state.json').exists()
+    with _operation_lock(other):
+        state=ro._read(control/'state.json')
+        assert state['workspace']==ro._identity(other)
+        assert state['generation']==0
+    assert (control/'state.json').is_file()
+
+
 def test_empty_but_identity_pinned_stock_is_not_a_missing_mount(ready):
     _,ws,_,dbs,_=ready
     db=dbs[0];root=storage_paths(ws)['backup_root']
