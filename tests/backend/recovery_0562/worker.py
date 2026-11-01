@@ -154,7 +154,7 @@ def seed(kind):
             # into a second registry using different paths after that point.
             data.update(db=str(db),workspace=str(ws),source=str(src),task=task,
                         family=fid,job='JOB',
-                        registry=str(temp/'bibliothekar-global.sqlite3'),
+                        registry=str(temp/'registry.sqlite3'),
                         config=str(temp/'settings.json'))
             data['expected']={src.name:digest}
             if kind=='metadata_projection':
@@ -164,7 +164,7 @@ def seed(kind):
                     target=temp/f'second{number}.sqlite3';initialize_database(target);ensure_library_identity(target,f'second{number}')
                     work=ws/'Arbeitsbereiche'/f'second{number}';work.mkdir(parents=True,exist_ok=True)
                     target_archive=case/f'projection-archive{number}';target_archive.mkdir()
-                    register_library(temp/'bibliothekar-global.sqlite3',library_id=f'second{number}',display_name=f'second{number}',database_path=target,workspace_root=ws,work_root=work,archive_root=target_archive)
+                    register_library(temp/'registry.sqlite3',library_id=f'second{number}',display_name=f'second{number}',database_path=target,workspace_root=ws,work_root=work,archive_root=target_archive)
                     project_import_job(db,target,'JOB');data['databases'].append(str(target))
         else:
             root=mc.metadata_area_paths(area='multiple',workspace_root=WS,library_id='main')['root']
