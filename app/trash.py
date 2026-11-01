@@ -36,7 +36,8 @@ def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True
         parameters = signature(function)
         @wraps(function)
         def locked(*args, **kwargs):
-            arguments = parameters.bind(*args, **kwargs).arguments
+            bound = parameters.bind(*args, **kwargs)
+            arguments = bound.arguments
             workspace = arguments[workspace_argument]
             if qualify_restore and not admit_restore:
                 from app.operation_health import read_only
@@ -63,6 +64,12 @@ def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True
                         if admit_restore:
                             from app.trash_restore import assert_restore_paths_available
                             assert_restore_paths_available(workspace,arguments.get('relative_paths'))
+                            if function.__module__=='app.trash_restore' and function.__name__=='restore_trash_files':
+                                from app.managed_storage_health import require_pinned_storage
+                                from app.trash_restore import preflight_new_restore
+                                require_pinned_storage(workspace)
+                                arguments['database_paths']=preflight_new_restore(arguments['database_paths'],workspace,
+                                    relative_paths=arguments.get('relative_paths'),operation_id=arguments.get('operation_id'))
                         if admit_restore and function.__name__ in {'delete_selected_trash_files','empty_trash_filesystem'}:
                             from app.trash_import import protected_trash_paths
                             from app.trash_failure import assert_no_active_restore
@@ -74,7 +81,7 @@ def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True
                             selection=arguments.get('relative_paths')
                             if reserved and (selection is None or reserved.intersection(selection)):
                                 raise TrashError('Ausgewählte Dateien gehören zu einer Wiederherstellungsreservierung.')
-                return function(*args, **kwargs)
+                return function(*bound.args, **bound.kwargs)
         return locked
     return decorate
 

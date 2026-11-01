@@ -373,11 +373,22 @@ def test_r1_two_restore_processes_after_owner_sigkill(tmp_path,monkeypatch):
     try:
         owner,control=spawn('owner','r1.receipt');ready(owner,control/'checkpoint.json')
         second,second_control=spawn('second','r1.wait_lock');ready(second,second_control/'attempt.json');assert second.poll() is None
-        r.snapshot(case,ev/'second-process-waits.json');os.killpg(owner.pid,signal.SIGKILL);owner.wait(timeout=5);assert owner.returncode==-signal.SIGKILL
+        r.snapshot(case,ev/'second-process-waits.json')
+        original_path,=case.rglob('operation-*.json');original=json.loads(original_path.read_text())
+        os.killpg(owner.pid,signal.SIGKILL);owner.wait(timeout=5);assert owner.returncode==-signal.SIGKILL
         second.wait(timeout=10);assert second.returncode!=0
         (ev/'process-results.json').write_text(json.dumps({'owner_pid':owner.pid,'owner_returncode':owner.returncode,'second_pid':second.pid,'second_returncode':second.returncode,'different_processes':owner.pid!=second.pid}))
-        assert digest(ws/'Papierkorb/A.JPG')==data['expected']['A.JPG'];state=starts(case,ev)
+        # The second process may safely qualify and finish the original
+        # owner before rejecting its now-missing selection. That rejection
+        # must not publish a new orphaned F14 lease.
+        assert not (ws/'Papierkorb/A.JPG').exists() and not list(case.rglob('operation-*.json'))
+        receipt,=case.rglob('domain-recovery-'+original['reservation_id']+'.json')
+        assert json.loads(receipt.read_text())['reservation']==original
+        state=starts(case,ev)
         for db in ('kamera.sqlite3','second1.sqlite3'):
+            rows=[x for x in r.db_rows(state,'files',db) if x['original_filename']=='A.JPG']
+            assert len(rows)==1 and rows[0]['current_root_kind']=='shared_workspace'
+            assert digest(ws/'SD-Kartensicherungen'/rows[0]['current_relative_path'])==data['expected']['A.JPG']
             assert len([x for x in r.db_rows(state,'audit_log',db) if x['action']=='trash_file_restored'])==1
     finally:
         for p in processes:

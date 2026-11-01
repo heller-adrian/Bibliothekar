@@ -402,6 +402,25 @@ def _rollback_restore(plans, root, central):
                 _move_checked(plan["target"], plan["source"], plan["sha256"])
 
 
+
+def preflight_new_restore(database_paths,workspace_root,*,relative_paths=None,operation_id=None):
+    """Under the physical trash lock, refuse invalid NEW work before F14.
+
+    Domain replay still resumes its exact original journal/nonce. The executor
+    repeats its normal validation after admission; no ownership is cached here.
+    """
+    databases=_databases(database_paths)
+    from app.trash_import import protected_trash_paths
+    reserved=protected_trash_paths(None,workspace_root,ignore_job_id=operation_id)
+    selected={_relative(p).as_posix() for p in relative_paths} if relative_paths is not None else reserved
+    if reserved.intersection(selected):
+        raise TrashError('Dateien gehören bereits zu einem anderen Wiederherstellungsauftrag.')
+    journal=_restore_journal(workspace_root,operation_id) if operation_id is not None else None
+    if journal is None or not journal.exists():
+        _plan_restore(databases,workspace_root,relative_paths=relative_paths)
+    return databases
+
+
 @serialized_trash_operation('workspace_root', admit_restore=True)
 @protect(workspace_arg='workspace_root', database_arg='None', kind='trash', error_type=TrashError)
 def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
