@@ -198,6 +198,23 @@ def finish_published_envelopes(database, registry, workspace, logs):
 
 
 
+
+def _catalogue_identity(database):
+    """A catalogue is a single regular file, never a directory/root identity."""
+    path=Path(database).absolute()
+    try:
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        try:
+            info=os.fstat(fd);named=path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or path.resolve()!=path
+                or (info.st_dev,info.st_ino)!=(named.st_dev,named.st_ino)):
+                raise PipelineError('import_interruption_database_identity_invalid: '+str(path))
+            return [info.st_dev,info.st_ino]
+        finally:os.close(fd)
+    except OSError as error:
+        raise PipelineError('import_interruption_database_identity_unavailable: '+str(path)) from error
+
+
 def _record_unpublished_interruption(database, parent, path, record):
     """History bookkeeping only; missing publication proof NEVER releases F14.
 
@@ -213,7 +230,7 @@ def _record_unpublished_interruption(database, parent, path, record):
     database=Path(database).absolute();diagnosis=inspect_database(database)
     if not diagnosis['consistent'] or not diagnosis['schema_current']:
         raise PipelineError('import_interruption_database_not_qualified')
-    identity=ro._identity(database)
+    identity=_catalogue_identity(database)
     if identity is None:raise PipelineError('import_interruption_database_missing')
     with closing(read_connection(database)) as connection:
         owner=connection.execute('SELECT library_id FROM library_identity WHERE singleton=1').fetchone()
@@ -236,13 +253,13 @@ def _record_unpublished_interruption(database, parent, path, record):
     if row['state'] not in active:raise PipelineError('import_interruption_job_state_changed')
     if old is None:ro._write(receipt,planned)
     ro._check(record['bindings'])
-    if ro._read(path)!=record or ro._identity(database)!=identity:
+    if ro._read(path)!=record or _catalogue_identity(database)!=identity:
         raise PipelineError('import_interruption_original_authority_changed')
     from app.database import utc_now_iso
     now=utc_now_iso()
     with database_connection(database) as connection:
         connection.execute('BEGIN IMMEDIATE')
-        if ro._read(path)!=record or ro._identity(database)!=identity:
+        if ro._read(path)!=record or _catalogue_identity(database)!=identity:
             raise PipelineError('import_interruption_original_authority_changed')
         changed=connection.execute(
             "UPDATE jobs SET state='interrupted',stage='interrupted_after_restart',"
@@ -255,6 +272,8 @@ def _record_unpublished_interruption(database, parent, path, record):
         connection.execute("INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) "
                            "VALUES (?,'import_interrupted_unverified','operation',?,?,?)",
                            (record['ids']['job_id'],record['reservation_id'],json.dumps(old or planned,sort_keys=True),now))
+        if _catalogue_identity(database)!=identity or ro._read(path)!=record:
+            raise PipelineError('import_interruption_original_authority_changed')
     return True
 
 

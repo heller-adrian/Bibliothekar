@@ -59,3 +59,19 @@ def test_unpublished_status_rejects_unqualified_original(fixture,monkeypatch,fau
     with health.read_session(),database_connection(db) as c:
         assert c.execute("SELECT state FROM jobs WHERE id='EARLY'").fetchone()[0]==('completed' if fault=='terminal' else 'copying')
         assert not c.execute("SELECT 1 FROM audit_log WHERE action='import_interrupted_unverified'").fetchall()
+
+
+@pytest.mark.parametrize('kind',['regular','symlink','hardlink','directory','missing'])
+def test_catalogue_identity_uses_a_single_regular_descriptor(tmp_path,kind):
+    from app.import_recovery import _catalogue_identity
+    import os
+    path=tmp_path/'catalogue.bin'
+    if kind=='directory':path.mkdir()
+    elif kind!='missing':
+        path.write_bytes(b'synthetic identity fixture, not a database authority')
+        if kind=='symlink':
+            retained=tmp_path/'retained.bin';path.rename(retained);path.symlink_to(retained)
+        elif kind=='hardlink':os.link(path,tmp_path/'retained-hardlink.bin')
+    if kind=='regular':assert _catalogue_identity(path)==[path.stat().st_dev,path.stat().st_ino]
+    else:
+        with pytest.raises(PipelineError):_catalogue_identity(path)
