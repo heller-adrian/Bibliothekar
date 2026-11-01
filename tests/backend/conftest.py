@@ -59,3 +59,13 @@ def isolated_web_runtime(monkeypatch):
         yield
     finally:
         stop_workers()
+
+
+@pytest.fixture
+def isolated_registered_metadata_config(tmp_path,monkeypatch):
+    """Give a registered synthetic workspace a real private config path."""
+    config=tmp_path/'config'/'settings.json'
+    config.parent.mkdir(parents=True,exist_ok=True)
+    config.write_text('{}\n',encoding='utf-8')
+    monkeypatch.setenv('KAMERA_CONFIG',str(config))
+    return config

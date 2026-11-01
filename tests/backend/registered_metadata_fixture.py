@@ -11,7 +11,7 @@ import os
 from app.database import initialize_database
 from app.library_registry import initialize_library_registry, adopt_main_library
 from app.root_operations import reserve
-from app.storage_config import storage_paths
+from app.storage_config import storage_paths, LEGACY_STORAGE_DEFAULTS
 from app.workspace_layout import ensure_workspace_layout
 
 
@@ -22,6 +22,9 @@ def registered_metadata_fixture(tmp_path, *, workspace=None, database=None):
     archive=Path(tmp_path)/"archive"
     root.mkdir(parents=True, exist_ok=True)
     archive.mkdir(exist_ok=True)
+    # Preserve real German legacy roots BEFORE layout and F14 registration.
+    for name in LEGACY_STORAGE_DEFAULTS.values():
+        (root/name).mkdir(exist_ok=True)
     layout=ensure_workspace_layout(root)
     work=layout.get("work_root")
     if work is None:

@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 import pytest
+
+pytestmark = pytest.mark.usefixtures('isolated_registered_metadata_config')
 from tests.backend.test_pre_metadata import real_family
 from tests.backend.legacy_storage_fixture import provision_legacy_storage
 from app import metadata_correction as mc,root_operations as ro

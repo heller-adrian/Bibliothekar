@@ -2,6 +2,8 @@
 from pathlib import Path
 import hashlib,json,subprocess
 import pytest
+
+pytestmark = pytest.mark.usefixtures('isolated_registered_metadata_config')
 from PIL import Image
 from app import metadata_correction as mc
 from app.database import database_connection
