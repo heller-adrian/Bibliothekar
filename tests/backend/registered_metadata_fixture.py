@@ -19,9 +19,21 @@ def registered_metadata_fixture(tmp_path, *, workspace=None, database=None):
     root=Path(workspace) if workspace is not None else Path(tmp_path)/"workspace"
     db=Path(database) if database is not None else Path(tmp_path)/"kamera.sqlite3"
     registry=Path(tmp_path)/"bibliothekar-global.sqlite3"
-    archive=Path(tmp_path)/"archive"
+    # The immutable historical SIGKILL workers construct a nested
+    # case/fixture workspace and later adopt it with the already-existing
+    # case/archive and the historical case/fixture/workspace/Arbeitsbereich.
+    # Materialize those exact paths BEFORE their first F14 control baseline.
+    # Ordinary tests still use their own isolated archive and workspaces root.
+    case=Path(tmp_path).parent
+    historical=(Path(tmp_path).name=="fixture"
+                and (case/"registry.sqlite3").is_file()
+                and (case/"settings.json").is_file()
+                and (case/"archive").is_dir())
+    archive=case/"archive" if historical else Path(tmp_path)/"archive"
     root.mkdir(parents=True, exist_ok=True)
     archive.mkdir(exist_ok=True)
+    if historical:
+        (root/"Arbeitsbereich").mkdir(exist_ok=True)
     # Preserve real German legacy roots BEFORE layout and F14 registration.
     for name in LEGACY_STORAGE_DEFAULTS.values():
         (root/name).mkdir(exist_ok=True)
