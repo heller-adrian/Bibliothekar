@@ -25,6 +25,14 @@ def fixture(tmp_path,monkeypatch):
     from app.managed_directory_names import directory_name
     for kind in ('metadata_general','metadata_multiple'):
         (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
+    # This fixture models an established two-library installation. F14 must
+    # already have an original root-control baseline before the registry
+    # declares the workspace registered. Test-only bootstrap is isolated in
+    # tmp_path and never creates a replacement for lost registered control.
+    with ro.reserve(ws,library_id='main',kind='startup',
+                    ids={'function':'tests.backend.test_f14_root_operations.fixture'},
+                    paths=[ws,*storage_paths(ws).values()]):
+        pass
     initialize_library_registry(reg)
     dbs=[]
     for lid in ['main','second']:
