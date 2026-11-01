@@ -48,7 +48,7 @@ def _snapshot(db,kind,family):
         return None
     with closing(health.read_connection(db)) as c:
         rows=[dict(x) for x in c.execute(
-            "SELECT id,job_id,family_id,current_relative_path,sha256_current "
+            "SELECT id,job_id,family_id,current_relative_path,sha256_current,sha256_original "
             "FROM files WHERE family_id=? ORDER BY id",(int(family),))]
         owner=c.execute("SELECT library_id FROM library_identity WHERE singleton=1").fetchone()
     if not rows or owner is None:
@@ -104,11 +104,14 @@ def bind_prepared_swap(metadata,journal,data):
             if key in item and os.path.lexists(item[key]):
                 _refuse("prepublication_endpoint_already_occupied")
     db_snapshot=_snapshot(record["database"],kind,data.get("family_id"))
-    if db_snapshot and (db_snapshot["owner"]!=owner["library_id"]
-        or {x["id"] for x in db_snapshot["rows"]}!={x["file_id"] for x in data["files"]}
-        or any(next(x for x in db_snapshot["rows"] if x["id"]==i["file_id"])["sha256_current"]!=i["before_sha"]
-               for i in data["files"])):
-        _refuse("original_database_membership_mismatch")
+    if db_snapshot:
+        by_id={row["id"]:row for row in db_snapshot["rows"]}
+        if (db_snapshot["owner"]!=owner["library_id"]
+            or set(by_id)!={i["file_id"] for i in data["files"]}
+            or any((by_id[i["file_id"]]["sha256_current"]
+                    or by_id[i["file_id"]]["sha256_original"])!=i["before_sha"]
+                   for i in data["files"])):
+            _refuse("original_database_membership_mismatch")
     proof={"format":1,"reservation":plain,"journal":str(journal),"swap":data,
            "owned":owned,"catalogue":_catalogue_identity(record["database"]),
            "snapshot":db_snapshot}
