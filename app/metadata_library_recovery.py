@@ -27,6 +27,12 @@ def bind_prepared_swap(metadata,journal,data):
     from app.metadata_abort_recovery import _owner,_binding,_plain,_task_rows
     owner=_owner(data['database'])
     if not owner:return
+    from app.metadata_correction import _WRITER_HELD
+    from threading import get_ident
+    if not any(pid==os.getpid() and thread==get_ident()
+               and ro.canonical_workspace(Path(root))==Path(record['workspace'])
+               for root,pid,thread in _WRITER_HELD.get()):
+        refuse('native_swap_requires_original_physical_writer')
     plain=_plain(record);parent,_=_binding(plain,owner)
     tasks=_task_rows(data['database'],'id=?',(data['task_id'],))
     if len(tasks)!=1 or tasks[0]['area']!='library':refuse('native_task_mismatch')
