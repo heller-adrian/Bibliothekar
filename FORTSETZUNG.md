@@ -1,3 +1,22 @@
+# Fortsetzung 01.11.2026 – aktualisierter Reparaturstand nach den grünen 45 Fällen
+
+**PRE.5 NICHT ABGENOMMEN. KEIN RELEASE.** Arbeitsbranch `codex/pre5-operation-recovery`.
+
+Unabhängig geprüft: GitHub Actions **41303789143** auf `7045766e1a94d4b053c1867dbd613cb8177176c9`: **45 PASS / 0 FAIL**, ausschließlich gezielte Verträge. Artifact 13082652653, API SHA256 `c720d453004e32ed2eab88e6384b625f96f9b05574d236d9a7d71e805ec71fec`. Der vorherige größere Lauf **41303055310** auf `fb2412c0` ist **121 PASS / 11 FAIL** (acht historische und drei neue Fälle, noch vor dem regulären DB-Datei-Identitätsfix). Der neuere 45er-Nachlauf hat u.a. die vier Original-SD-Import-Crashgrenzen, den Multilibrary-Projektionsfall und drei neue Statusverträge grün qualifiziert. Dies ist keine vollständige Backendabnahme.
+
+Auf dem Entwicklungsbranch seitdem **implementiert, NICHT Linux-verifiziert**:
+- `9e6bbd4` und `1e464e9`: historischer unregistrierter Low-Level-Cancel mit beliebigem Callback darf unter neuer Job-ID die originale F14-Reservation gerade NICHT umgehen. Originalnonce, Originalbeleg, Quellbytes und echte verweigerte neue Schreiboperation werden geprüft; regulär registrierte API-Import- und Recheckwege haben eigene Positivverträge. Original-Test-ID beibehalten.
+- `f59d7405`: `app/metadata_scoped_recovery.py` (neu) sowie `root_operations.py`, `metadata_swap_recovery.py` und `operation_health.py`: für exakt eine ursprünglich F14-gebundene Multiple- oder Reintegration-Precommit-Operation wird vor der ersten Umbenennung ein privater Eigentumsbeleg mit vollständigem Journal, Originalreservation, DB-Inode, Dateiinodes, Hashes und bei Reintegration originaler Dateifamilien-/SQL-Mitgliedschaft geschrieben. Ein Rollback darf nur den ursprünglichen validierten F14-Schlüssel fortsetzen. Keine generische Freigabe und keine nachträgliche Zertifizierung historisch beweisloser Fälle.
+- `76c355bd`: zwei neue echte SIGKILL-/Mehrfachneustart-Gegenproben. Sie ersetzen exakt eine Original-Sicherheitskopie durch bytegleichen **fremden Inode** und verlangen drei Starts lang Original-F14-Schreibsperre, erhaltene Bytes sowie abgewiesene SQL-/Dateischreibversuche.
+- `9b8a2877`: Reintegration speichert rohe `sha256_current`- und `sha256_original`-SQL-Werte und nutzt zur Bindung denselben wirksamen Fallback wie der originale Reintegrations-Executor.
+Diese Änderungen sind sicherheitskritisch. **Vor bestandenem Linux-Test keinerlei Annahme über ihre Korrektheit.**
+
+Nachprüfungen: **41306238349** (älterer HEAD `f57b89bd`, alle58 ursprünglichen Nodes) lief beim letzten Abruf noch; der auf dem aktuellen Anwendungscode wartende **41307568578** (Quellstand `9b8a2877`, positive und negative neue Fälle + ursprüngliche 58) ist das entscheidende nächste Gate. GitHub-Concurrency ersetzt ältere wartende Runs; deren `cancelled` ist kein Testergebnis. Bei Rot aus XML/Childlogs konkret beheben; insbesondere F14-Origin, physische Metadaten-Sperre, Datenbankidentität, vorab gespeicherte Proofs, fehlende Journalzustände und identische Fremdinodes prüfen. Kein Safety-Bypass.
+
+Erst wenn diese 58 Originalfälle plus Gegenproben grün sind: ursprüngliche147er-Gruppe und15er-Crash-Verträge, vollständige BA-02/B01 und SQLite-Verträge, anschließend acht disjunkte Backendpartitionen, Frontend/Browser und isolierte Container-/Supervisor-Tests auf **derselben finalen Commit-SHA**. Danach `docs/pre5/release/ACCEPTANCE.json` und den vorbereiteten Publisher nur anhand der aktuellen Belege aktualisieren. Keinerlei Main-/Tag-/GHCR-/latest-/TrueNAS-/Produktivänderung vor vollständiger Abnahme und expliziter Freigabe.
+
+---
+
 # Aktueller Fortsetzungsstand – 01.11.2026, neue gezielte Backend-Reparatur
 
 **PRE.5 NOCH NICHT ABNAHMEFÄHIG – VERÖFFENTLICHUNG GESPERRT.**

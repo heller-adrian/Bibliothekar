@@ -1,3 +1,7 @@
+## Aktualisierung 01.11.2026 – neueste Patches noch PENDING
+
+Für die aktuelle Arbeit nach dem Codex-Abschluss gilt die eindeutige neue Spitze in `FORTSETZUNG.md`. Die Linux-Läufe 41306238349 und 41307568578 sind nicht als PASS gewertet, solange JUnit und SHA nicht vorliegen. Implementiert wurden ausschließlich eng gebundene, prospective Multiple-/Reintegration-Rollbacks und ein historisch nötiger Negativtest für unqualifizierten Import-Retry. Alte Eigentumsbeweise werden nicht erfunden. Pre.5 bleibt gesperrt.
+
 # Pre.5 Backend-Reparatur – 01.11.2026
 
 **BACKEND NOT ACCEPTED**
