@@ -31,6 +31,11 @@ def test_f14_backup_rollback_receipt_survives_real_sigkill(tmp_path,monkeypatch,
     import json,os,signal,subprocess,sys,time
     from pathlib import Path
     from tests.backend import test_0562_process_recovery as recovery
+    # Fix the instance namespace before ensure_workspace_layout publishes F14
+    # evidence. Changing it only after seed falsely simulates lost control data.
+    (tmp_path/'database').mkdir()
+    monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(tmp_path/'database/bibliothekar-global.sqlite3'))
+    monkeypatch.setenv('KAMERA_CONFIG',str(tmp_path/'settings.json'))
     db,registry,root,original,family=_seed(tmp_path)
     monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(registry))
     monkeypatch.setenv('KAMERA_CONFIG',str(tmp_path/'settings.json'))

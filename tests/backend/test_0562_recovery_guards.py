@@ -48,6 +48,10 @@ def test_startup_recovers_registered_databases_only(tmp_path,monkeypatch,registe
     from app import main
     from app.library_registry import register_library,unregister_library
     from tests.backend.test_0400_import_backup_controls import _foundation
+    (tmp_path/'database').mkdir()
+    monkeypatch.setenv('KAMERA_REGISTRY_DATABASE',str(tmp_path/'database/bibliothekar-global.sqlite3'))
+    monkeypatch.setenv('KAMERA_WORKSPACE',str(tmp_path/'workspace'))
+    monkeypatch.setenv('KAMERA_CONFIG',str(tmp_path/'settings.json'))
     db,registry,workspace=_foundation(tmp_path)
     monkeypatch.setenv("KAMERA_REGISTRY_DATABASE",str(registry))
     monkeypatch.setenv("KAMERA_WORKSPACE",str(workspace))

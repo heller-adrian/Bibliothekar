@@ -29,15 +29,34 @@ class TrashError(RuntimeError):
     pass
 
 
-def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True):
+def serialized_trash_operation(workspace_argument: str, *, blocking: bool = True,
+                               admit_restore: bool = False):
     """All reservation, inventory and worker mutations share the existing lock."""
     def decorate(function):
         parameters = signature(function)
         @wraps(function)
         def locked(*args, **kwargs):
-            workspace = parameters.bind(*args, **kwargs).arguments[workspace_argument]
+            arguments = parameters.bind(*args, **kwargs).arguments
+            workspace = arguments[workspace_argument]
             from app.trash_selective import _operation_lock
             with _operation_lock(workspace, blocking=blocking):
+                if admit_restore:
+                    from app import root_operations as ro,operation_health as health
+                    # Serialize admission BEFORE publishing a new media intent.
+                    # Never replace or enlarge an executing outer worker lease.
+                    if not any(r['workspace']==str(Path(workspace).absolute()) for r in ro._ACTIVE.get()):
+                        pending=[r for r in health.inspect(workspace)['reservations'] if not r['live']]
+                        if pending and all(r['qualified'] and r['kind']=='trash' and
+                                r['ids'].get('function')=='app.trash_restore.restore_trash_files' for r in pending):
+                            from app.domain_recovery import replay
+                            registry=os.environ.get('KAMERA_REGISTRY_DATABASE')
+                            if registry:
+                                try:replay(workspace,registry,database=None)
+                                except (health.DomainStartupError,ro.RootOperationError) as error:
+                                    raise TrashError(str(error)) from error
+                        from app.trash_restore import assert_restore_paths_available
+                        assert_restore_paths_available(workspace,arguments.get('relative_paths'),
+                                                       exclude=arguments.get('operation_id'))
                 return function(*args, **kwargs)
         return locked
     return decorate
@@ -467,8 +486,8 @@ def _remove_tree_without_following_links(path: Path) -> None:
             os.close(fd)
 
 
+@serialized_trash_operation("workspace_root", admit_restore=True)
 @protect(workspace_arg='workspace_root', database_arg='None', kind='trash', error_type=TrashError)
-@serialized_trash_operation("workspace_root")
 def empty_trash_filesystem(workspace_root: Path) -> dict[str, int]:
     from app.trash_restore import assert_restore_paths_available
     assert_restore_paths_available(workspace_root)

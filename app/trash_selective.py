@@ -21,7 +21,7 @@ from typing import Iterable
 from app.database import database_connection
 from app.storage_config import storage_paths
 from app import trash_fd
-from app.trash import TrashError, _physical_entries, _sha256_file, trash_root
+from app.trash import TrashError, _physical_entries, _sha256_file, trash_root, serialized_trash_operation
 from app.trash_restore import _relative, _source, _ensure_target_parent
 
 
@@ -430,6 +430,7 @@ def _purge_selected(db: Path, paths: list[str]) -> None:
         connection.commit()
 
 
+@serialized_trash_operation('workspace', admit_restore=True)
 @protect(workspace_arg='workspace', database_arg='None', kind='trash', error_type=TrashError)
 def delete_selected_trash_files(
     databases: Iterable[Path],

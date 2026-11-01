@@ -23,7 +23,7 @@ from typing import Any, Iterable
 from app.database import database_connection
 from app.free_stock_layout import FreeStockLayoutError, canonical_free_directory
 from app.storage_config import storage_paths
-from app.trash import TrashError, _physical_entries, _sha256_file, reconcile_trash_inventory
+from app.trash import TrashError, _physical_entries, _sha256_file, reconcile_trash_inventory, serialized_trash_operation
 
 
 _MOVE_RECEIPT = ContextVar('restore_move_receipt', default=None)
@@ -402,6 +402,7 @@ def _rollback_restore(plans, root, central):
                 _move_checked(plan["target"], plan["source"], plan["sha256"])
 
 
+@serialized_trash_operation('workspace_root', admit_restore=True)
 @protect(workspace_arg='workspace_root', database_arg='None', kind='trash', error_type=TrashError)
 def restore_trash_files(database_paths: Iterable[Path], workspace_root: Path, *,
                         relative_paths: list[str] | None = None,

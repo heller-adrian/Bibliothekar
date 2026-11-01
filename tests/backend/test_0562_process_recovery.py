@@ -267,7 +267,7 @@ def test_original_sort_recovery_retains_ambiguous_effects(tmp_path,fault):
     for number in (1,2):
         restarted=invoke(case,'startup','none',evidence/('restart'+str(number)))
         assert restarted['returncode']==0,restarted
-        status=restarted['result']['operation_health']
+        status=restarted['result']['result']['operation_health']
         assert status['writes_allowed'] is False,status
         assert any(r['reservation_id']==original['reservation_id'] and not r['live'] for r in status['reservations'])
         assert json.loads(control.read_text())==original
