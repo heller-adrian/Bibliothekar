@@ -41,5 +41,8 @@
   "tests/backend/test_rc1_b01.py",
   "tests/backend/test_rc4_acceptance_regressions.py::test_inactive_reservation_only_blocks_its_own_selection",
   "tests/backend/test_rc4_acceptance_regressions.py::test_active_restore_rejects_independent_http_and_physical_deletion",
-  "tests/backend/test_rc4_acceptance_regressions.py::test_reservation_is_rechecked_after_delete_journal_before_staging"
+  "tests/backend/test_rc4_acceptance_regressions.py::test_reservation_is_rechecked_after_delete_journal_before_staging",
+  "tests/backend/test_0561_audit_regressions.py::test_P202b_F1_journal_write_error_must_leave_recovery_evidence",
+  "tests/backend/test_0561_recovery.py::test_trash_restart_at_each_durable_boundary",
+  "tests/backend/test_0561_recovery.py::test_committed_journal_sync_failure_retains_original_until_retry"
 ]

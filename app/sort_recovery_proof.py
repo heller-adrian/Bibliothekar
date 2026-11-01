@@ -19,6 +19,8 @@ def qualify(database,workspace,owner,run_id,*,finished=False):
     if not isinstance(run_id,str) or not run_id or '/' in run_id or '\\' in run_id:
         refuse('invalid_run_identity')
     with closing(read_connection(Path(database))) as connection:
+        identity=connection.execute('SELECT library_id FROM library_identity WHERE singleton=1').fetchone()
+        if identity is None or identity['library_id']!=owner['library_id']:refuse('catalogue_library_identity_mismatch')
         row=connection.execute('SELECT * FROM sort_runs WHERE id=?',(run_id,)).fetchone()
         if row is None:refuse('missing_run')
         run=dict(row)

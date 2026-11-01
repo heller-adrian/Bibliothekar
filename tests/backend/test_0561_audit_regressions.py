@@ -101,7 +101,15 @@ def test_P202b_F1_journal_write_error_must_leave_recovery_evidence(tmp_path,monk
     monkeypatch.setattr(ts,'_atomic_json',fail_committed)
     capture('P202b-before',tmp_path)
     with pytest.raises(OSError):ts.delete_selected_trash_files([db],workspace,['A.JPG'])
+    from app import root_operations as ro
+    operation,=ro._control_location(workspace).glob('operation-*.json')
+    original=ro._read(operation)
+    retained=list((storage_paths(workspace)['metadata_root']/'.trash-deletions').glob('DELETE_*.json'))
+    assert len(retained)==1 and json.loads(retained[0].read_text())['state']=='prepared'
+    assert (Path(paths['trash_root'])/'A.JPG').read_bytes()==payload
     recovery=ts.recover_trash_deletions(workspace)
+    assert not operation.exists()
+    assert ro._read(operation.parent/('domain-recovery-'+original['reservation_id']+'.json'))['reservation']==original
     capture('P202b-after',tmp_path,recovery=recovery)
     parent=storage_paths(workspace)['metadata_root']/'.trash-deletions'
     assert (Path(paths['trash_root'])/'A.JPG').exists() or list(parent.glob('DELETE_*.json')), 'F1: neither restored source nor discoverable journal; staged original orphaned'

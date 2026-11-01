@@ -292,7 +292,7 @@ def recover_trash_deletions(workspace: Path, *, allowed_databases: Iterable[Path
         return _recover_trash_deletions(workspace, allowed_databases=allowed_databases)
 
 
-def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict:
+def _recover_trash_deletions(workspace: Path, *, allowed_databases=None, retain_journals: bool = False) -> dict:
     parent = _parent(workspace)
     root = trash_root(workspace)
     recovered = []
@@ -354,8 +354,9 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
                     _sync_dir(path.parent)
             _remove_empty_staging(staged)
             validate_active_roots()
-            trash_fd.unlink(journal)
-            _sync_dir(parent)
+            if not retain_journals:
+                trash_fd.unlink(journal)
+                _sync_dir(parent)
             continue
         for database in databases:
             _restore_catalogue(database, ident)
@@ -370,8 +371,9 @@ def _recover_trash_deletions(workspace: Path, *, allowed_databases=None) -> dict
                 recovered.append(rel.as_posix())
         _remove_empty_staging(staged)
         validate_active_roots()
-        trash_fd.unlink(journal)
-        _sync_dir(parent)
+        if not retain_journals:
+            trash_fd.unlink(journal)
+            _sync_dir(parent)
     return {"recovered_paths":recovered}
 
 
@@ -516,7 +518,10 @@ def _delete_selected_trash_files(databases, workspace, relative_paths) -> dict:
         # The journal enables safe restoration on the next operation, including
         # a process crash; never discard the staged originals in this branch.
         try:
-            _recover_trash_deletions(workspace, allowed_databases=databases)
+            # The outer original F14 lease still reports failure. Retain the
+            # journal even after verified rollback for exact-lease recovery;
+            # journal absence alone is never completion authority.
+            _recover_trash_deletions(workspace, allowed_databases=databases,retain_journals=True)
         except Exception as recovery_error:
             raise TrashError("Löschung unterbrochen; Originale und Journal bleiben zur Wiederherstellung erhalten: "
                              + str(recovery_error)) from recovery_error
