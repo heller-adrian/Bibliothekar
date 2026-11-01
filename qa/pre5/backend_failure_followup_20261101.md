@@ -11,3 +11,11 @@ The full Pre.5 workflow must first run these exact 19 nodes in an isolated F14 L
 ## Full acceptance after targeted recovery success
 
 GitHub Actions 41351503688 (commit 3d2a9acbce7774cab607ee9f89854068fc5d77b1) passed the isolated 15 recovery contracts and 7 RC14 key/lease checks. Its backend, frontend, container and 19-node full regression gate were skipped. Trigger the full Pre.5 acceptance on this exact source state without relaxing negative migration tests. This checkpoint authorizes tests only; it is not a release signoff.
+
+## Closed initial 19-node gate; full-suite retest
+
+On commit 568a2065f892f1006ff78a46cecbd0fae53093ac, GitHub Actions run 41356554010 passed the entire explicitly pinned 19-node backend regression gate, including the former real-process overlap failure. This does NOT establish full backend or migration acceptance.
+
+The last independent failure was a normal F14 writer releasing its durable operation while another process iterated a stale `operation-*.json` glob result. `operation_health.inspect` now skips an enumerated entry ONLY if the file vanished after enumeration; still-present unreadable/symlinked entries remain full write fences. New positive and negative tests in `test_rc6_handoff.py` must be exercised in the full backend. No historical RC14 journal, reservation or failed migration evidence is cleared or relaxed.
+
+Next: all 147 historical nodes, all backend partitions, complete frontend and immutable-container historical migration. Release remains blocked until independently green.
