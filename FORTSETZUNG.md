@@ -1,3 +1,20 @@
+# Fortschritt 01.11.2026 – 92/94 gezielte Tests, exakter F14-Replay-Eintritt repariert
+
+**PRE.5 NICHT FREIGEGEBEN.** Working branch `codex/pre5-operation-recovery`. Alle neuen Änderungen ausschließlich im Entwicklungsbranch, nicht in `main`, Tags, GHCR, TrueNAS, NAS oder Produktivmedien.
+
+**Unabhängig verifizierter Linux-Lauf [41307568578](https://github.com/heller-adrian/Bibliothekar/actions/runs/41307568578)** auf Source `9b8a28772f2f638557032d5962ae7d5ee658b347`:
+- **92 PASS, 2 FAIL, 0 ERROR/SKIP**, alle ausgewählten 94 eindeutigen Nodes; originale Import-Retry-Negativprobe und zwei neue SIGKILL-/bytegleiche-Fremdinode-Kollisionstests **PASS**.
+- Rote Originalnodes: `test_other_metadata_modes_sigkill[multiple_metadata]`, `test_other_metadata_modes_sigkill[reintegrate]`.
+- Artefakt 13084941902, GitHub SHA256 `9a221c714a57fa19d581fe0d910d24fc10aa0d10fbf0d88397b715a8f5e3087d`; ZIP lokal heruntergeladen, SHA256 unabhängig gleich, Original-JUnit und drei vollständige Child-Neustartprotokolle ausgewertet.
+- Beide roten Fälle sind derselbe konkrete Produktfehler: Exakter, prospektiv nachgewiesener neuer Metadaten-Recovery-Handler erreicht `ro.reserve(...,_recovery_record=original)`, dessen F14-Zulassung jedoch nur bisherige General-/Technical-/Domain-Handler kennt; `Fachliche Wiederaufnahme ist nicht für diesen Auftrag freigegeben.` Alle drei Neustarts behalten daher Original-F14-Fence und Bytes, aber Original wird nicht zurückgerollt.
+- Vorläufer [41306238349](https://github.com/heller-adrian/Bibliothekar/actions/runs/41306238349) auf `f57b89bd`: 89 PASS, 3 FAIL (die beiden Metadatenfälle und der zu diesem Zeitpunkt noch nicht korrigierte unregistrierte Import-Retry).
+
+**Gezielter Fix [098243f6](https://github.com/heller-adrian/Bibliothekar/commit/098243f642de7559a4983857affde3f1c17875c9) [pre5-contracts]**: fügt ausschließlich für die beiden erwarteten Originalfunktionen `apply_multiple_metadata_correction` und `reintegrate_library_metadata_family` einen synchronen ContextVar-Capability-Eintritt hinzu; Vergleich des unveränderten gesamten F14-Records, während `qualified_retry` genau dessen alte Reservation bindet. Die Capabilities werden `finally` zurückgesetzt. Keine anderen F14-Handler, kein generelles Freischalten von Schreiboperationen. **LINUX-NACHWEIS PENDING: Workflow 41310767537**, Source `098243f6`; bei Rot exakte JUnit-/Restartlogs auswerten, nicht Behauptungen über Recovery anpassen.
+
+**Unmittelbar danach** (nur bei grünem 94er-Lauf): vollständige Altgruppe147, kritische15, BA-02/B01/Authorization und abschließend acht disjunkte Backendpartitionen, Frontend/Browser, isolierter Container-/Supervisor-/90-/4000-/iPhone-Nachweis auf identischem Source mit `[pre5-full]`. Bis zu sämtlichen grünen Release-Gates kein Pre.5-Publish. Publisher/ACCEPTANCE.json noch nicht aktuell.
+
+---
+
 # Fortsetzung 01.11.2026 – aktualisierter Reparaturstand nach den grünen 45 Fällen
 
 **PRE.5 NICHT ABGENOMMEN. KEIN RELEASE.** Arbeitsbranch `codex/pre5-operation-recovery`.
