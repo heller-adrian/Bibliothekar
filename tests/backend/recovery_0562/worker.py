@@ -146,13 +146,16 @@ def seed(kind):
                     member.update(size_bytes=size,source_size_bytes=size,sha256_original=digest,sha256_current=digest)
                 c.execute('UPDATE metadata_corrections SET source_size_bytes=?,source_sha256=?,detected_json=? WHERE id=?',(size,digest,json.dumps(detected),task))
                 c.execute("UPDATE jobs SET state='completed',stage='organized_verified',operation='folder_import'")
-            (ws/'Arbeitsbereich').mkdir(exist_ok=True)
-            fixture_settings=json.loads((case/'settings.json').read_text())
+fixture_settings=json.loads((case/'settings.json').read_text())
             fixture_settings.setdefault('storage',{}).update(LEGACY_STORAGE_DEFAULTS)
             (temp/'settings.json').write_text(json.dumps(fixture_settings))
-            initialize_library_registry(temp/'registry.sqlite3')
-            adopt_main_library(temp/'registry.sqlite3',database_path=db,workspace_root=ws,work_root=ws/'Arbeitsbereich',archive_root=case/'archive')
-            data.update(db=str(db),workspace=str(ws),source=str(src),task=task,family=fid,job='JOB')
+            # _seed_library already established a registered owner, real F14
+            # control and pinned work/archive roots. Never adopt its database
+            # into a second registry using different paths after that point.
+            data.update(db=str(db),workspace=str(ws),source=str(src),task=task,
+                        family=fid,job='JOB',
+                        registry=str(temp/'bibliothekar-global.sqlite3'),
+                        config=str(temp/'settings.json'))
             data['expected']={src.name:digest}
             if kind=='metadata_projection':
                 from app.global_stock import project_import_job
@@ -161,7 +164,7 @@ def seed(kind):
                     target=temp/f'second{number}.sqlite3';initialize_database(target);ensure_library_identity(target,f'second{number}')
                     work=ws/'Arbeitsbereiche'/f'second{number}';work.mkdir(parents=True,exist_ok=True)
                     target_archive=case/f'projection-archive{number}';target_archive.mkdir()
-                    register_library(temp/'registry.sqlite3',library_id=f'second{number}',display_name=f'second{number}',database_path=target,workspace_root=ws,work_root=work,archive_root=target_archive)
+                    register_library(temp/'bibliothekar-global.sqlite3',library_id=f'second{number}',display_name=f'second{number}',database_path=target,workspace_root=ws,work_root=work,archive_root=target_archive)
                     project_import_job(db,target,'JOB');data['databases'].append(str(target))
         else:
             root=mc.metadata_area_paths(area='multiple',workspace_root=WS,library_id='main')['root']
