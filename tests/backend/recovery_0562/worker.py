@@ -146,7 +146,7 @@ def seed(kind):
                     member.update(size_bytes=size,source_size_bytes=size,sha256_original=digest,sha256_current=digest)
                 c.execute('UPDATE metadata_corrections SET source_size_bytes=?,source_sha256=?,detected_json=? WHERE id=?',(size,digest,json.dumps(detected),task))
                 c.execute("UPDATE jobs SET state='completed',stage='organized_verified',operation='folder_import'")
-fixture_settings=json.loads((case/'settings.json').read_text())
+            fixture_settings=json.loads((case/'settings.json').read_text())
             fixture_settings.setdefault('storage',{}).update(LEGACY_STORAGE_DEFAULTS)
             (temp/'settings.json').write_text(json.dumps(fixture_settings))
             # _seed_library already established a registered owner, real F14
