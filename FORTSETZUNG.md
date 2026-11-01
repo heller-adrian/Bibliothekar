@@ -1,3 +1,139 @@
+# Aktueller Fortsetzungsstand – 01.11.2026, Reparatur der letzten58 Backendfälle
+
+**BACKEND NOT ACCEPTED. Pre.5 noch nicht abnahmefähig – Veröffentlichung gesperrt.**
+Branch: `codex/pre5-operation-recovery`.
+Letzter QA-/Source-Commit: `e9061f41376519a63e429440a78df8e8de5cf387`.
+Letzter Anwendungscode-Commit: `c06294e581e7c2e0a1721a637bc69f3924d10bcb`.
+Nachfolgender Sicherungscommit ändert ausschließlich diese QA-Dokumentation.
+Keine Tags/Releases/GHCR/latest/main/TrueNAS geändert. `qa/rc14.zip` ist ein
+vorbestehendes untracked Benutzerartefakt und darf nicht mitcommittet werden.
+
+## Zuerst die bereits gestarteten Läufe auswerten
+
+1. **41261174452** auf `5ffa9175f737a1781e399d47988eca3cb6dfcc1f` war zuletzt RUNNING.
+2. **41261700576** auf `e9061f41376519a63e429440a78df8e8de5cf387` war zuletzt PENDING.
+   Er enthält kumulierte Reparaturen,47 Selektoren mit ursprünglichen15
+   Crash-/Manipulations-Nodes, Restore-/Sort-/Metadatenfällen, voller BA-02,
+   voller B01 und SQLite-Statement-/Schema-Authorization.
+   Dieser `[pre5-contracts]`-Lauf führt keine Vollmatrix/Frontend/Container aus.
+   Nicht parallel weitere umfangreiche Läufe starten; keine aktive Warteschleife.
+   GitHub ersetzt ältere pending Runs automatisch; cancelled Zwischenläufe sind
+   KEINE Testnachweise. Falls der neueste Run noch wartet, laufenden Job beachten.
+
+GitHub-CLI:
+`GH_CONFIG_DIR=/private/tmp/bibliothekar-gh-device GH_BROWSER=true GH_DEBUG= GODEBUG=http2client=0 /private/tmp/bibliothekar-gh-cli/gh`
+Direkte `api repos/heller-adrian/Bibliothekar/actions/runs/<ID>` mit
+`-H 'Cache-Control: no-cache'` verwenden; ältere `gh run view`-Caches waren stale.
+Token nie ausgeben. Neue Artefakte einmal laden, SHA256 gegen API-Digest prüfen,
+XML und alle Child-/Restart-Logs bewerten; bereits gesicherte ZIPs nicht neu laden.
+
+## Nachgewiesene Ergebnisse und verfügbare Belege
+
+- Voller Original147-Check auf7838a706, Run41231600475:89 PASS /58 FAIL.
+  Alle58 exakten Nodes vollständig in `docs/pre5/BACKEND-REPAIR-58-20261101.json`,
+  Bericht `.md`; Originaltrace-Digests bleiben erhalten.
+  Artefakt13055435531 SHA256
+  `9a0b633c2e7650265419f683f1a32aba4280113118e9ced51e173b91cce23260`.
+  Benutzer-ZIP250/250 Dateien bytegleich damit.
+- **41260071820**, Source4682b22a: **24 PASS /0 FAIL/ERROR/SKIP**.
+  Alle15 ursprünglichen kritischen Nodes plus Restore-Kollisions-/Negativfälle.
+  Artefakt13064419670 SHA256
+  `b40faee8dd967452de7221d03a30cc1bdf536a157db650e2bd64675d896c7ba3`.
+- **41260399276**, Sourcebd168d53: **26 PASS /7 FAIL /0 ERROR/SKIP**.
+  F18 false/true PASS. F15 SQL-/Projektionsablauf und F14-Ablehnungsassertionen
+  bestehen; Neustart scheitert an fehlenden General/Batch-Fixture-Unterordnern.
+  F17 gleicher Fixture-Grund. Zwei General-Fixtures erreichen jetzt Worker-
+  Quieszenz, ihr bisheriger Fake hatte keine join-Methode. Zwei NEUE Batchtests
+  erwarteten fälschlich gleiche Zeit für A/B; echte Korrektur hält1s-Abstand.
+  Diese belegten Test-/Fixture-Probleme sind inf91865d2 korrigiert, noch pending.
+  Artefakt13065735420 SHA256
+  `8857f69740ff2017992562bc97dac56d9ae1ebe8735a851500687ff85be0ca9c`.
+- Lokale Syntaxprüfung aller geänderten Pythondateien, Actionlint und
+  `git diff --check` PASS. Lokale macOS-Syntax ist KEIN Linux-Funktionsnachweis.
+- Quelleübergreifende letzte Einzelwerte der ursprünglichen240 roten Nodes:
+  **189 PASS /51 FAIL**,0 unbekannt. Verschiedene Commits: NICHT final akzeptiert.
+  Unter den Original58 sind7 gezielt PASS,27 Fix/Fixture-Korrekturen pending,
+  24 noch OPEN. Die spätere Linuxauswertung muss diese Angaben aktualisieren.
+
+Alle ZIPs/extrahierten Original- und Childlogs:
+`/private/tmp/bibliothekar-pre5-evidence/41231600475-targets*`
+`/private/tmp/bibliothekar-pre5-evidence/41260071820-targets*`
+`/private/tmp/bibliothekar-pre5-evidence/41260399276-targets*`
+Lokale `failures.json` im letzten Ordner enthält alle sieben vollständigen
+Fehler; Baseline `failures-58.json` im ersten Ordner alle Originaltraces.
+
+## Implementierte gemeinsame Reparaturen, noch nicht alle abgenommen
+
+- 4682b22a: bestehende Restore-Konflikte erneut vollständig unter Trash-Lock
+  qualifizieren; Original-F14-Abschluss/Receipt, Journal/Fehler/A-Pfade behalten.
+- bd168d53: physische Metadatensperre und read-only Task-/Projektionszulassung
+  vor neuer F14-Reservation; executorinterne Sicherheitsprüfungen bleiben.
+- efd1dbdf: genau ein originaler camera-only Pre-Commit-Sortierlauf kann
+  bestehende Rollback-Recovery unter ORIGINALnonce verwenden. Neue
+  `app/sort_recovery_proof.py` prüft Registry, Bibliotheksidentität, DBschema,
+  Generationen, alle Bindings, Run/Job/Event, Pfade, Hash/Größe und Endpunkte.
+  Exakter run_id statt beliebiger anderer Runs; dauerhafter Originalbeleg.
+  Assets, bereits committete Ergebnisse, doppelte Endpunkte, Fremdbytes,
+  Hardlinks und ungebundene Wurzeln bleiben gesperrt. Sechs negative neue Fälle.
+- 68364546/969e591d: Trash-Lock umfasst auch F14-Zulassung. Passender originaler
+  Restore darf nur über den vollständigen Qualifier abgeschlossen werden.
+  Erst danach unabhängige Auswahl zulassen; reservierte/aktive Auswahl schon
+  VOR neuem Intent ablehnen. Wiederholte Prüfung nach Journalanlage bleibt.
+  RC4-sechs-Fall-Ursache war ein vom ersten abgewiesenen DELETE selbst erzeugter
+  F14-Record, nicht pauschal ein terminaler Restore-Job.
+- 5ffa9175: reentrante Metadata-Sperre an Workspace+PID+Thread binden; kopierte
+  ContextVars verleihen keinem anderen Thread die physische Sperre.
+- f91865d2: General/Batch-Voraussetzungen der historischen Fixtures vor Operation,
+  vollständiger Fake-Thread und korrekte1s-Batch-Erwartung. Immutable Original-
+  QA-Sources/Integritätsmanifeste unterqa/f16_f20/original unverändert.
+- c06294e5: Exception-Rückbau einer Trash-Löschung behält sein geprüftes Journal
+  bis zum regulären Abschluss der originalen F14-Lease; verstärkter F1-Test.
+- e9061f41: ungeklärter Vier-Ordner-Test gibt vollständigen inspect_storage-
+  Befund aus. Noch KEINE geänderte Erwartung/pauschale Produktlockerung.
+
+## Nächste Fehlergruppen nach tatsächlichen neuen Resultaten
+
+Zuerst alle roten neuen Sort-/Restore-/Sperr-Gegenproben aus den zwei Läufen
+abgleichen. Bereits abgenommene Backup/Restore/SD-Checks dürfen nicht regressieren.
+Insbesondere prüfen: neue `_sort_recovery_proof`-Bedingungen gegen tatsächliche
+Run-Daten und Eigentumsrollen; keine Lockerung nur wegen eines roten Tests.
+
+Danach übrige OPEN-Nodes aus dem58er-Inventar:
+- frühe Imports ohne gültigen Publikationsbeleg haben noch aktiven SQLstatus;
+  Medien und ursprüngliche F14-Lease bleiben geschützt. Statuskorrektur ist
+  keine Freigabe/Resume-Autorität und braucht eine eigene genaue Qualifikation.
+- Originale Library-/Multiple-/Reintegration-Metadata-Journale sind noch nicht
+  durchgängig mit ihrem originalen F14-Key verbunden; keinen Pfad raten.
+- historische Exception-Leases ohne Journal/Receipt nicht aus Abwesenheit
+  freigeben. Neue Korrektur verhindert weitere Belegverluste, qualifiziert
+  einen tatsächlich beleglosen Altfall nicht rückwirkend.
+- F14-Continuation mit vorhandenem finished-Receipt trifft noch auf frühe
+  Write-Admission; nur unveränderliche exakte Receipts, niemals SQLstatus allein.
+- R1 zwei Prozesse nach owner-SIGKILL sowie malicious new_library_origin-Fixture
+  noch nicht abschließend qualifiziert. Fremde Herkunft darf nur als explizite
+  isolierte Angriff-Fixture erzeugt werden; produktive SQL-Guards bleiben aktiv.
+- F11/0562 alte nonzero-Startup-Annahmen nur dann ändern, wenn echte F14-
+  Schreibsperre und unveränderte Original-/Fremdbytes vollständig bewiesen sind.
+- Vier-Ordner-/Setupfall: vollständige neue Diagnose lesen, keine voreilige
+  Annahme über Fixture vs Produkt. Echte neue Installation muss funktionieren.
+- RC6 parallele SD-Rechecks: vom anderen abgestürzten READ-Recheck stammender
+  Record kann die lebende Operation fencing; zuerst echte Originalprovenienz
+  qualifizieren, niemals generisch live/dead ignorieren.
+
+## Noch ausstehende Pflichtabnahme / Kontingent
+
+Erst nach grünen Gruppen147/147 +15/15 + volle BA-02/B01 auf festem Commit,
+dann acht disjunkte Backendpartitionen und Frontend/Browser/realer Supervisor-
+Container. Testzahlen, Node-IDs, Commit-SHAs und Artefakte unabhängig prüfen.
+Kein solcher vollständiger Nachlauf ist jetzt gestartet; keine Veröffentlichung.
+
+Kontingent diese Runde: Start0%/57% (5h/Woche), letzter Abruf49%/65%.
+Geplante8 weitere Wochenpunkte erreicht; Zwischenstand geordnet sichern.
+Bei Fortsetzung neue Limits lesen, nur nötige targeted Korrekturen, keine
+Warteschleifen. Alte Veröffentlichungen/Produktivdaten bleiben unangetastet.
+
+---
+
 # Bibliothekar pre.5 – Fortsetzung, 31.10.2026
 
 ## Aktueller Stand – gezielter Legacy-Setupfehler behoben

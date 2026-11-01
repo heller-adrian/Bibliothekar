@@ -336,3 +336,38 @@ Erst dann aktueller voller Backend-Test und weitere Release-Gates.
 - **Freigabestatus: NICHT ABGENOMMEN, PRE.5 NICHT RELEASED.**
   Bis zum endgueltigen Resultat der vollständigen Matrix weder Publish
   noch main/TrueNAS/GHCR/Tag veraendern.
+
+## 01.11.2026 – vollständiges 58er-Inventar und gemeinsame Ursachen
+
+Alle58 Original-Nodes aus dem verifizierten Run41231600475 einzeln erfasst;
+Benutzerpaket250/250 Dateien bytegleich zum GitHub-Artefakt13055435531.
+Vollständiger Bericht: BACKEND-REPAIR-58-20261101.md/.json.
+
+- 4682b22a: verifizierter Restore-Konflikt darf Originallease abschließen,
+  während sein Konfliktjournal Auswahl und Ziel weiterhin reserviert.
+  Run41260071820:24/24 PASS, inkl. aller15 kritischen Original-Nodes.
+  Artefakt13064419670 SHA256 b40faee8dd967452de7221d03a30cc1bdf536a157db650e2bd64675d896c7ba3.
+- bd168d53: Metadaten-Ablehnung vor dauerhafter F14-Zulassung.
+  Run41260399276:26/33 PASS. F18 beide PASS; F15 SQL-/Projektion behoben,
+  sieben Testfehler verbleiben (belegte Fixture-Anker, Worker-Interface,
+  Ein-Sekunden-Delta neuer Batch-Gegenprobe). Artefakt13065735420 SHA256
+  8857f69740ff2017992562bc97dac56d9ae1ebe8735a851500687ff85be0ca9c.
+- efd1dbdf: begrenzter Original-Sortier-Replay mit eigenem vollständigen
+  Registry-/Run-/Root-/Hashnachweis. Assets/committete/mehrdeutige Zustände
+  bleiben gesperrt. Sechs neue Negativfälle; Linuxnachweis noch PENDING.
+- 68364546/969e591d: bekannte Restore-Konflikte kontrolliert vor unabhängiger
+  neuer Trash-Operation qualifizieren; reservierte DELETE-Auswahl vor
+  Intent-Publikation ablehnen; Prüfung vor tatsächlichem Staging bleibt.
+- 5ffa9175: reentranten Metadaten-Lock zusätzlich an PID/Thread binden;
+  kopierter Context darf keinen fremden Eigentümer simulieren. SQLite-
+  Statement-/Schema-Authorization und B01 im gezielten Folgemanifest.
+- f91865d2: ausschließlich belegte Fixture-/Batch-Erwartungen korrigiert.
+- c06294e5: geprüfter Exception-Rückbau behält Löschjournal bis zum Abschluss
+  der originalen F14-Lease. Keine Freigabe aus Journal-Abwesenheit.
+- e9061f41: vollständige Diagnose des ungeklärten leeren Vier-Ordner-Falls.
+
+Letzte Einzelwerte der ursprünglichen240 Fehler über verschiedene Commits:
+189 PASS /51 FAIL. KEINE finale Abnahme. Aktuell41261174452 läuft auf5ffa9175;
+41261700576 aufe9061f41 wartet als kumulierter nächster Fokuslauf.
+Noch keine volle147er-Wiederholung, keine Backendmatrix/Frontend/Container auf
+finalem Quellstand. BACKEND NOT ACCEPTED; keine Veröffentlichung.
