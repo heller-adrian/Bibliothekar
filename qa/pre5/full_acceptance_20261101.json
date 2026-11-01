@@ -1,0 +1,12 @@
+{
+  "purpose": "Non-executable provenance marker to trigger existing [pre5-full] workflow after successful focused F14 contracts",
+  "application_source_sha": "098243f642de7559a4983857affde3f1c17875c9",
+  "focused_run": 41310767537,
+  "focused_artifact": 13085628338,
+  "focused_artifact_sha256": "0ce6089b91259152a22b2f5126b55e9e86764a8a3422f79d31cf94a26718652d",
+  "focused_unique_nodes": 94,
+  "original_58_passed": 58,
+  "additional_36_passed": 36,
+  "foreign_inode_negative_tests_passed": 2,
+  "release_authorized": false
+}
