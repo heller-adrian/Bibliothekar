@@ -18,7 +18,6 @@ from app.workspace_layout import ensure_workspace_layout
 def registered_metadata_fixture(tmp_path, *, workspace=None, database=None):
     root=Path(workspace) if workspace is not None else Path(tmp_path)/"workspace"
     db=Path(database) if database is not None else Path(tmp_path)/"kamera.sqlite3"
-    registry=Path(tmp_path)/"bibliothekar-global.sqlite3"
     # The immutable historical SIGKILL workers construct a nested
     # case/fixture workspace and later adopt it with the already-existing
     # case/archive and the historical case/fixture/workspace/Arbeitsbereich.
@@ -29,6 +28,10 @@ def registered_metadata_fixture(tmp_path, *, workspace=None, database=None):
                 and (case/"registry.sqlite3").is_file()
                 and (case/"settings.json").is_file()
                 and (case/"archive").is_dir())
+    # An immutable historical worker will initialize/adopt the same
+    # fixture/registry.sqlite3 again. Never create a second registered
+    # catalogue for one workspace: F14 forbids competing registry authorities.
+    registry=Path(tmp_path)/("registry.sqlite3" if historical else "bibliothekar-global.sqlite3")
     archive=case/"archive" if historical else Path(tmp_path)/"archive"
     root.mkdir(parents=True, exist_ok=True)
     archive.mkdir(exist_ok=True)
