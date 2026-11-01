@@ -961,6 +961,8 @@ def retire_finished_operations(workspace):
     require_pinned_storage(root)
     with _lock(parent/'workspace.lock',exclusive=True),_lock(parent/'shared.lock',exclusive=True),_lock(parent/'state.lock',exclusive=True,wait=True):
         _assert_startable(parent);state=_state(parent,root)
+        from app.storage_anchors import check_active
+        check_active(root,parent)
         for path in candidates:
             with _lock(path.with_suffix('.lock'),exclusive=True):
                 record=_read(path,None)
@@ -989,7 +991,8 @@ def retire_finished_operations(workspace):
                 if old is None:_write(receipt,material)
                 # Keep both original durable proofs. Another crash may occur
                 # on either side of this unlink; the next pass is idempotent.
-                _check(record['bindings']);path.unlink();_sync(parent)
+                _check(record['bindings']);check_active(root,parent)
+                path.unlink();_sync(parent)
 
 
 @contextmanager

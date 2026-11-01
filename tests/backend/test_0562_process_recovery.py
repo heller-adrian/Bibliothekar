@@ -62,6 +62,21 @@ def invoke(case,action,boundary,control,*,kill=False):
     return record
 
 
+
+def assert_preserved_write_fence(case,evidence,record,kind):
+    # A safe read-only web start is allowed. The original writer fence and
+    # its actual enforcement remain mandatory regardless of process status.
+    if record['returncode']==0:
+        status=(record.get('result') or {}).get('result',{}).get('operation_health') or {}
+        assert status.get('writes_allowed') is False,record
+        assert any(r.get('qualified') and not r.get('live') and r.get('kind')==kind
+                   for r in status.get('reservations',[])),record
+    probe=invoke(case,'fence_probe','none',evidence/'actual-writer-probe')
+    assert probe['returncode']==0,probe
+    assert probe['result']['result']=={'original_reservations_unchanged':True,
+                                     'filesystem_denied':True,'sqlite_denied':True}
+
+
 def snapshot(case,dest):
     files=[];databases={};documents={}
     for p in sorted(case.rglob('*')):
@@ -451,7 +466,7 @@ def test_recovery_keeps_foreign_bytes_after_sigkill(tmp_path,kind,boundary):
     target.write_bytes(b'synthetic-foreign-content');snapshot(case,evidence/'after-synthetic-tamper.json')
     for n in (1,2,3):
         record=invoke(case,'startup','none',evidence/f'restart{n}')
-        assert record['returncode']!=0,record
+        assert_preserved_write_fence(case,evidence/f'probe{n}',record,kind)
         snapshot(case,evidence/f'after-restart{n}.json')
         assert target.read_bytes()==b'synthetic-foreign-content'
         assert list(case.rglob('DELETE_*.json')) if kind=='trash' else list(case.rglob('.swap-journals/*.json'))
@@ -649,7 +664,8 @@ def test_0562_metadata_preparation_keeps_unknown_file(tmp_path):
     replacement=staged.with_suffix('.replacement');replacement.write_bytes(staged.read_bytes());os.replace(replacement,staged)
     digest=hash_file(staged)
     for n in (1,2,3):
-        assert invoke(case,'startup','none',evidence/f'restart{n}')['returncode']!=0
+        record=invoke(case,'startup','none',evidence/f'restart{n}')
+        assert_preserved_write_fence(case,evidence/f'probe{n}',record,'metadata')
         assert hash_file(staged)==digest and hash_file(source)==data['expected'][source.name]
         assert list(case.rglob('.swap-journals/*.json'))
 

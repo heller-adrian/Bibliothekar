@@ -307,7 +307,7 @@ def test_f11_legacy_delete_reservation_conflict_preserves_evidence(tmp_path,monk
     assert list(case.rglob('DELETE_*.json'))
     for n in (1,2,3):
         record=recovery.invoke(case,'startup','none',ev/f'blocked-restart{n}')
-        assert record['returncode']!=0 and 'Wiederherstellungsreservierung' in str(record.get('result'))
+        recovery.assert_preserved_write_fence(case,ev/f'probe{n}',record,'trash')
         state=recovery.snapshot(case,ev/f'after-blocked-restart{n}.json');recovery.checks_sql(state)
         assert recovery.business_rows(before)==recovery.business_rows(state)
         assert list(case.rglob('DELETE_*.json')) and list(case.rglob(owner+'.json'))

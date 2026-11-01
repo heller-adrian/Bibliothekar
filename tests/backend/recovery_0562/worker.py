@@ -521,6 +521,31 @@ try:
         if boundary.startswith('r1.') or action in {'r1_conflict','r1_owned'}:r1_instrument()
         if boundary in {'import.copy_chunk','import.hash_chunk','import.in_tx','restore.db1'}:sys.settrace(trace_probe)
         if action=='startup':result=startup()
+        elif action=='fence_probe':
+            # No media mutation and no SQL row change: prove that the real
+            # admission/authorizer rejects the threatened resource in a fresh
+            # process, without relying only on a display status or HTTP code.
+            from app import root_operations as ro
+            import sqlite3
+            parent=ro._control_location(WS)
+            before={p.name:p.read_bytes() for p in parent.glob('operation-*.json')}
+            fs_denied=sql_denied=False
+            try:
+                with ro.reserve(WS,library_id='main',database=DB,paths=[WS],
+                                kind='qa-conflicting-write-probe'):
+                    pass
+            except ro.RootOperationError:fs_denied=True
+            table='metadata_corrections' if data['kind']=='metadata' else 'files'
+            try:
+                with database_connection(DB) as connection:
+                    connection.execute('UPDATE '+table+' SET id=id WHERE 0')
+            except sqlite3.DatabaseError as error:
+                if getattr(error,'sqlite_errorcode',None)!=sqlite3.SQLITE_AUTH:raise
+                sql_denied=True
+            after={p.name:p.read_bytes() for p in parent.glob('operation-*.json')}
+            assert before and before==after, 'A rejected writer changed the original F14 evidence'
+            assert fs_denied and sql_denied, (fs_denied,sql_denied)
+            result={'original_reservations_unchanged':True,'filesystem_denied':True,'sqlite_denied':True}
         elif action=='verify_archive':
             from app.archive_transfer import verify_event_archive
             result=verify_event_archive(DB,case/'archive',data['job'],data['event'],workspace_path=WS)
