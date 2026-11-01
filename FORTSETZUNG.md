@@ -1,3 +1,16 @@
+# Fortsetzung 01.11.2026 – neuer Chat: CI-Entkopplung und vorgezogener Sicherheitsabbruch
+
+**Pre.5 weiterhin BLOCKED; KEIN RELEASE.** Root-Verzeichnis, App-Daten, Produktiv-NAS, main, Tags und GHCR unverändert.
+
+- Die historische Containerabnahme **41324273937** scheiterte beim RC14→Pre.5-Reintegrations-Upgrade mit HTTP 409 `retry_has_unresolved_reservations`. Die 4000-Familien-Prüfung war vorher erfolgreich. `reproductions` und `frontend` waren grün; `backend` wurde bislang wegen des Container-Fehlers übersprungen.
+- Der RC14-F14-Intent besitzt nur `ids.function`, aber keinen `family_id` und keinen vor dem Crash erzeugten `metadata-scoped-ownership`-Beleg. Deshalb **nicht** die originale Reservierung löschen, nicht als abgeschlossen fingieren und nicht nachträglich Inode-Eigentumsbeweise erzeugen.
+- **CI-Patch** Commit `16e94fec65ba4b8550d466e1af4e38a56a9a0574`: Backend-Abnahme hängt nur noch von `reproductions` ab, nicht mehr vom Container; neuer Tag `[pre5-backend]` für unabhängige, isolierte Backend-Prüfung. Lauf **41331175415** wurde gestartet und war beim Schreiben dieser Zeilen noch nicht abgeschlossen. Ein Container-Fail bleibt ein Workflow-Fail, wird nicht ignoriert.
+- **Sicherheits-Patch** Commit `16474d93db2e79b58f4d046e1792f21c716b882e`: `operation_health._require_write` erlaubt einer qualifizierten alten Reservation nicht länger, unter diesem Retry-Kontext **eine neue, anders identifizierte F14-Reservation** anzulegen. Das verhindert, dass 14 moderne Familienoperationen vor der erst am API-Ende stattfindenden Alt-Intent-Prüfung durchgeführt werden. Legacy-Reintegrations-Funktionalität bleibt bewusst nicht freigegeben, solange der ursprüngliche Eigentumsbeleg fehlt.
+- **Testintegration** Commit `fb0e328df0d17b7c92c0d4cc9958afb69f0449df`: negativer Regressionstest für die abweichende F14-ID, plus CI-Integration `tests/backend/test_pre_metadata_retry.py` im isolierten Recovery-Lauf. GitHub Actions **41331460438** ausgelöst, Ergebnis beim Eintrag noch offen.
+- **WICHTIG:** Weder die rote RC14-Upgrade-Erwartung `HTTP 200` noch Sicherheitsbelege wurden weichgezeichnet. Der Legacy-Retry ist **weiter ungelöst**. Die bisherigen Änderungen verhindern einen gefährlichen partiellen Schreibversuch und ermöglichen unabhängige Backend-Evidenz; sie sind noch kein funktionaler Abschluss. Vor einer Freigabe sind eine tatsächlich beweisbare Lösung des historischen Falls, die erfolgreiche 14-JPEG-Containerabnahme und ein kompletter `[pre5-full]`-Lauf einschließlich aller Backendpartitionen erforderlich.
+
+---
+
 # Fortsetzung 01.11.2026 – Vollabnahme 41324273937 rot: unbelegter RC14-Metadaten-Retry bleibt F14-gesperrt
 
 **PRE.5 NICHT FREIGEGEBEN. KEIN RELEASE.** Ausschließlich `codex/pre5-operation-recovery`; main, Tags, Releases, GHCR/latest, TrueNAS und Produktivdaten unverändert.
