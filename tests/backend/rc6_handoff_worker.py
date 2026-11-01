@@ -14,6 +14,18 @@ main.MAIN_LIBRARY_CONTEXT=context;main.LOG_PATH=case/'logs';main.REMOVABLE_ROOT=
 main.CONFIG_PATH=case/'settings.json';main.WORKER_STOP.clear()
 sr.read_only=lambda path:True  # Explicit synthetic mount model, no real mounts.
 
+# Keep the real write authorization intact. If a competing process changes
+# admission, preserve its exact reason (sqlite only reports "not authorized").
+import app.operation_health as _health
+_previous_require=_health._require_write
+def _diagnose_authorization(*args,**kwargs):
+    try:
+        return _previous_require(*args,**kwargs)
+    except Exception as error:
+        print("RC6 F14 authorization rejection: "+repr(error),file=sys.stderr,flush=True)
+        raise
+_health._require_write=_diagnose_authorization
+
 def pause():
     (evidence/'reached').write_text(point)
     while True:time.sleep(.05)
