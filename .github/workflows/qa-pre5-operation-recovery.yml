@@ -12,7 +12,7 @@ concurrency:
 jobs:
   reproductions:
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
-    timeout-minutes: 45
+    timeout-minutes: 105
     defaults:
       run:
         shell: bash

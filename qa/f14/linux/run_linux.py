@@ -32,7 +32,21 @@ elif mode=='targets':
 else:args+=['-p','complete_historical_fixture']+[str(original/n) for n in selections]
 (output/'command.json').write_text(json.dumps({'argv':args,'source':str(source),'paths':{k:env[k] for k in paths},'original_sha256':manifest,'TMPDIR':env['TMPDIR'],'AUDIT_SCRATCH':env['AUDIT_SCRATCH']},indent=2))
 with (output/'stdout.log').open('w') as log:
- result=subprocess.run(args,cwd=source,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=3600 if mode=='backend' else 2400)
+ # The full Pre.5 historical gate reached 116/147 nodes in 2400s,
+ # then the wrapper killed pytest without a final JUnit. Only this exact
+ # 147-case manifest gets a longer deadline; every per-test watchdog is intact.
+ pre5_historical_gate=(mode=='targets' and len(sys.argv)>3
+                        and Path(sys.argv[3]).name=='backend_unretested.json')
+ limit=5400 if pre5_historical_gate else (3600 if mode=='backend' else 2400)
+ try:
+  result=subprocess.run(args,cwd=source,env=env,stdout=log,
+                        stderr=subprocess.STDOUT,timeout=limit)
+ except subprocess.TimeoutExpired:
+  # Partial output can be diagnostic evidence, never a passing test result.
+  (output/'exit.json').write_text(json.dumps({
+   'returncode':None,'mode':mode,'timed_out':True,
+   'timeout_seconds':limit,'result_complete':False}))
+  raise
 print((output/'stdout.log').read_text()[-5000:])
 (output/'exit.json').write_text(json.dumps({'returncode':result.returncode,'mode':mode,'historical_raw_result':mode not in {'backend','targets'}}))
 if mode in {'backend','targets'}:raise SystemExit(result.returncode)
