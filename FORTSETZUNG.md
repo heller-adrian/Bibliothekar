@@ -1,3 +1,15 @@
+# Fortsetzung 01.11.2026 – 6/6 F14-Control-State-Fokus grün; erneute Vollabnahme ausgelöst
+
+**PRE.5 NICHT FREIGEGEBEN.** Ausschließlich Branch `codex/pre5-operation-recovery`; keine Veröffentlichung und keine Änderungen an main, Tags, Releases, GHCR/latest, TrueNAS oder Produktivdaten.
+
+- **Gezielter GitHub-Lauf [41324096651](https://github.com/heller-adrian/Bibliothekar/actions/runs/41324096651)** auf `7d8e31ead36d27f3e70e3e0a7b0c38185c52c6f1`: `reproductions` SUCCESS, Runner meldet **6 passed / 0 failed / 0 skipped**, Laufzeit 43.53 Sekunden. Das sechs IDs umfassende `qa/pre5/backend_fixture.json` enthält zwei originale Setup-Fälle, einen 0562-Metadaten-SIGKILL-Fall und drei F14-State-Loss-/unregistrierter-Workspace-Verträge. Container, Frontend und Backend sind in diesem fokussierten Lauf absichtlich SKIPPED und damit **nicht** abgenommen.
+- **Artefakt 13090312050** (`pre5-reproductions-1`), API-Digest und Upload-Log übereinstimmend `sha256:4cf8f4ffa1fb471d25a1d6bb4502c5926378db3308332e143b87568aa3100713`. Download erfolgreich angefordert. **Unabhängiger lokaler ZIP-SHA256-Vergleich, vollständige JUnit-Node-Auswertung und einzelne Child-/Restartlogs noch nicht nachgeprüft:** Container-/Python-Laufzeit wiederholt nicht verfügbar. Dies ist eine offene **Beleggrenze**, kein behaupteter unabhängiger Audit-PASS. Vor endgültiger Freigabe zwingend nachholen.
+- **Letzter Sicherheitsfix:** `app.trash_selective._operation_lock` kontrolliert vor dem Neuanlegen verlorener `state.json` unter bestehenden F14-Locks die registrierte Workspace-Zuordnung aus SQLite nur lesend. Registrierte Installation mit fehlendem Kontrollzustand bleibt blockiert; eine fremde Registrierung ist kein Besitzbeleg. Die ursprünglichen Datei-/F14-/DB-/Journal- und Inode-Sperren dürfen nicht gelockert werden.
+- **Vollabnahme bereits von anderem parallelen QA-Akteur ausgelöst:** QA-only Trigger-Commit [`537c7350`](https://github.com/heller-adrian/Bibliothekar/commit/537c735030be53a92ab6868d4d8f97f61b736368) mit `[pre5-full]`, nur `qa/pre5/full_acceptance_20261101.json` verändert; Anwendungscode seit `7d8e31ea` unverändert. **Keinen zweiten Trigger-Commit erzeugen.** GitHub-Run-ID der neuen Vollmatrix ist in diesem Zugriff noch nicht bestätigt. Die Original-147er-, 15er-Recovery-, 60er-Pre.5-, acht Backendpartitions-, Frontend/Browser-, Container/Supervisor-, 90-Medien-, 4000-Familien- und 14-iPhone-Fälle müssen auf exakt dem Trigger-Quellstand anhand vollständiger XML, Childlogs, ZIP-Digests und eindeutiger Node-Abdeckung unabhängig geprüft werden.
+- Fehlende Artefakte, Skips, Timeouts, unvollständige Nodeabdeckung oder rote Tests bleiben Release-Blocker. Kein automatisches Entsperren und keine abgeschwächten Testerwartungen. Dokumentation wird als `FORTSETZUNG.md`-only-Commit geführt; der Workflow ignoriert diesen Pfad, damit der bereits ausgelöste Quellstand unverändert geprüft wird.
+
+---
+
 # Fortsetzung 01.11.2026 – 147er-Originalgate: Runner-Timeout statt rotem Test
 
 **PRE.5 WEITERHIN NICHT FREIGEGEBEN.** Entwicklungsbranch `codex/pre5-operation-recovery`.
