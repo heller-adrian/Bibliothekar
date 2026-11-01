@@ -205,6 +205,10 @@ def seed(kind):
             db,ws,plan,run=_seed_reconcile(temp)
             # The nested historical fixture also needs all established roots.
             for root in storage_paths(ws).values():root.mkdir(exist_ok=True)
+            from app.managed_directory_names import directory_name
+            metadata_root=storage_paths(ws)['metadata_root']
+            for role in ('metadata_general','metadata_multiple'):
+                (metadata_root/directory_name(metadata_root,role)).mkdir(exist_ok=True)
             # Keep actual fixture paths; startup uses the same db via directory env.
             data.update(db=str(db),workspace=str(ws),job=run['job_id'],plan=plan,run=run['id'])
             (case/'fixture'/'settings.json').write_text((case/'settings.json').read_text())

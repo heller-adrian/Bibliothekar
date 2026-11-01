@@ -411,6 +411,10 @@ def test_startup_recovers_general_swap_before_onboarding_worker(tmp_path, monkey
     db, workspace, source, original, task = general_case(tmp_path, monkeypatch)
     for required_root in storage_paths(workspace).values():
         required_root.mkdir(exist_ok=True)
+    from app.managed_directory_names import directory_name
+    metadata_root=storage_paths(workspace)['metadata_root']
+    for role in ('metadata_general','metadata_multiple'):
+        (metadata_root/directory_name(metadata_root,role)).mkdir(exist_ok=True)
     with monkeypatch.context() as m:
         m.setattr(mc, '_complete_task', lambda *a, **k: (_ for _ in ()).throw(Interrupted()))
         with pytest.raises(Interrupted): mc.apply_metadata_correction(db, task['id'], workspace_root=workspace, library_id='main')

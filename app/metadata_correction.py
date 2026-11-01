@@ -6,6 +6,7 @@ from app.metadata_general_handoff import correction as _general_handoff
 
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import wraps
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,12 +37,24 @@ class MetadataCorrectionError(RuntimeError):
     pass
 
 
+_WRITER_HELD = ContextVar('metadata_writer_held', default=frozenset())
+
+
 @contextmanager
 def _metadata_writer(workspace_root: Path):
     from app.metadata_swap_recovery import metadata_write_guard, MetadataSwapRecoveryError
+    key = str(Path(workspace_root).absolute())
+    if key in _WRITER_HELD.get():
+        validate_active_roots()
+        yield
+        return
     try:
         with metadata_write_guard(storage_paths(workspace_root)["metadata_root"]):
-            yield
+            token = _WRITER_HELD.set(_WRITER_HELD.get() | {key})
+            try:
+                yield
+            finally:
+                _WRITER_HELD.reset(token)
     except MetadataSwapRecoveryError as error:
         raise MetadataCorrectionError(str(error)) from error
 
@@ -51,6 +64,27 @@ def _exclusive_metadata_write(function):
     def guarded(*args, **kwargs):
         with _metadata_writer(kwargs["workspace_root"]):
             return function(*args, **kwargs)
+    return guarded
+
+
+def _ready_metadata_task(function):
+    """Refuse an unwritable task before creating any durable media intent.
+
+    The outer physical writer lock excludes correction/projection races. The
+    executor repeats these checks inside its original, fully bound F14 lease;
+    this read-only admission check never authorizes recovery or media writes.
+    """
+    import inspect
+    signature = inspect.signature(function)
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs)
+        database = bound.arguments['database_path']
+        task = get_metadata_correction(database, bound.arguments['correction_id'])
+        if str(task['status']) not in {'prepared', 'blocked'}:
+            raise MetadataCorrectionError('Der Metadatenauftrag ist nicht zum Schreiben bereit.')
+        _assert_family_projection_finished(database, task)
+        return function(*args, **kwargs)
     return guarded
 
 
@@ -898,8 +932,8 @@ def preview_multiple_metadata_correction(
     }
 
 
-@protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 @_exclusive_metadata_write
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def apply_multiple_metadata_correction(
     *,
     workspace_root: Path,
@@ -2052,8 +2086,8 @@ def _reintegration_capture(database_path, family_id, rows, stored, *, job_id, fa
     return next(iter(matches),stored)
 
 
-@protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 @_exclusive_metadata_write
+@protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def reintegrate_library_metadata_family(
     database_path: Path,
     *,
@@ -2438,6 +2472,8 @@ def reintegrate_library_metadata_family(
 
 @deliver_verified_error
 @_general_handoff
+@_exclusive_metadata_write
+@_ready_metadata_task
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def apply_metadata_correction(
     database_path: Path,
@@ -2481,6 +2517,7 @@ def apply_metadata_correction(
 
 @deliver_verified_error
 @_general_handoff
+@_exclusive_metadata_write
 @protect(workspace_arg='workspace_root', database_arg='database_path', kind='metadata', error_type=MetadataCorrectionError)
 def execute_metadata_correction(
     database_path: Path,
