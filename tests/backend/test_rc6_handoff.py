@@ -144,3 +144,41 @@ def test_two_real_process_checks_sigkill_and_three_restarts(fixture,monkeypatch,
         assert c.execute('SELECT COUNT(*) FROM files').fetchone()[0]==1
         assert c.execute('PRAGMA integrity_check').fetchone()[0]=='ok' and not c.execute('PRAGMA foreign_key_check').fetchall()
     assert photo.read_bytes()==(other/photo.name).read_bytes()
+
+
+def test_f14_completed_operation_vanishing_after_glob_does_not_create_orphan(fixture,monkeypatch):
+    """A stale directory iterator must not manufacture a dead F14 lease."""
+    from pathlib import Path
+    import os
+    from app import root_operations as ro, operation_health as health
+    _case,workspace,_reg,_dbs,_ev=fixture
+    parent=ro._control_location(workspace)
+    vanished=parent/('operation-'+'0'*64+'.json')
+    assert not os.path.lexists(vanished)
+    original_glob=Path.glob
+    def completed_between_list_and_read(self,pattern):
+        yield from original_glob(self,pattern)
+        if self==parent and pattern=='operation-*.json':
+            yield vanished
+    monkeypatch.setattr(Path,'glob',completed_between_list_and_read)
+    status=health.inspect(workspace)
+    assert status['writes_allowed'],status
+    assert status['reservations']==[],status
+
+
+def test_f14_existing_unreadable_operation_still_fences_every_write(fixture,monkeypatch):
+    """Missing content in an existing reservation is never a vanished entry."""
+    from app import root_operations as ro, operation_health as health
+    _case,workspace,_reg,dbs,_ev=fixture
+    with ro.reserve(workspace,library_id='main',database=dbs[0],kind='import',
+                    ids={'function':'tests.backend.test_rc6_handoff.unreadable_guard'}):
+        path=ro._ACTIVE.get()[-1]['_path']
+        assert path.is_file()
+        original_read=ro._read
+        with monkeypatch.context() as scope:
+            scope.setattr(ro,'_read',lambda name,*a,**k:
+                None if str(name)==str(path) else original_read(name,*a,**k))
+            status=health.inspect(workspace)
+            assert not status['writes_allowed'],status
+            assert len(status['reservations'])==1,status
+            assert not status['reservations'][0]['qualified'],status
