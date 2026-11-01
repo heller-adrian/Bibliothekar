@@ -1,6 +1,6 @@
 {
   "purpose": "Non-executable provenance marker to trigger existing [pre5-full] workflow after successful focused F14 contracts",
-  "application_source_sha": "098243f642de7559a4983857affde3f1c17875c9",
+  "application_source_sha": "7d8e31ead36d27f3e70e3e0a7b0c38185c52c6f1",
   "focused_run": 41310767537,
   "focused_artifact": 13085628338,
   "focused_artifact_sha256": "0ce6089b91259152a22b2f5126b55e9e86764a8a3422f79d31cf94a26718652d",
@@ -8,5 +8,15 @@
   "original_58_passed": 58,
   "additional_36_passed": 36,
   "foreign_inode_negative_tests_passed": 2,
-  "release_authorized": false
+  "release_authorized": false,
+  "control_integrity_patch_sha": "7d8e31ead36d27f3e70e3e0a7b0c38185c52c6f1",
+  "control_integrity_focused_run": 41324096651,
+  "control_integrity_focused_passed": 6,
+  "control_integrity_artifact": 13090312050,
+  "control_integrity_artifact_sha256": "4cf8f4ffa1fb471d25a1d6bb4502c5926378db3308332e143b87568aa3100713",
+  "historical_147_last_complete_pass_run": 41318676170,
+  "historical_147_last_complete_pass_count": 147,
+  "historical_147_last_complete_pass_source": "0c6be7c9c77d27fa2c912f5bf32c983beb11ffe0",
+  "historical_147_requires_recheck_on_this_source": true,
+  "full_matrix_verification": "PENDING"
 }
