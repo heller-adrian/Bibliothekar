@@ -224,6 +224,11 @@ def test_actual_hash_change_with_same_fast_signature_is_imported(fixture,monkeyp
 
 
 def test_cancelled_import_can_retry_without_source_loss(tmp_path):
+    """An unregistered arbitrary callback cannot grant a second job ownership.
+
+    A registered API reimport has separate positive lifecycle tests. Without a
+    catalogue, the original F14 intent remains the required negative fence.
+    """
     from app.folder_import import ImportCancelled
     source=tmp_path/'source';source.mkdir();p=source/'A.JPG';Image.new('RGB',(8,8),'blue').save(p)
     workspace=tmp_path/'workspace';workspace.mkdir();logs=tmp_path/'logs';logs.mkdir()
