@@ -31,3 +31,11 @@ Seven observed nodes are pinned in `backend_remaining_7.json`; rerun them withou
 ## Follow-up to seven-node gate
 
 Run 41362934864: four actual SIGKILL tests passed. Three immutable F15/F17 cases failed because two independent registries claimed the same nested synthetic workspace; the application correctly rejected that configuration. The historical nested fixture now creates and uses `fixture/registry.sqlite3` as its **sole** registry from the first F14 baseline; both the untouched F16/F20 original worker and the mutable 0562 worker use that exact registry. No registry or safety checks are bypassed.
+
+## November 2 full-suite findings and metadata preflight fix
+
+Full workflow 41363591064: all 15 recovery contracts, 7 scoped-key tests, 19 previous backend failures, 7 additional historical cases, and 147 originally failing backend nodes passed; frontend also passed. The independent container RC14 14-iPhone-JPEG historic reintegration remains legitimately blocked because the original prospective ownership proof is absent (HTTP 409 retry_original_reservation_identity_required); do not fabricate ownership or silently lift the old F14 lease.
+
+The complete backend suite had separate failures, largely BA-12 legacy direct recovery attempts and one catalog-missing and one F11 restart case. The 8 concrete observed nodes are pinned in backend_full_new_failures.json. A targeted run 41421171252 showed a real ordering bug: a generic metadata swap rollback moved original bytes before a *later* SQLite authorizer refused to mark the job blocked. The application now checks F14 admission before the first filesystem side effect in recover_swap_journal. The negative test preserves the source file and journal byte-for-byte on refusal; original-prospective domain recovery is a separate positive path.
+
+The release remains BLOCKED and cannot be declared complete based on these focused checks.
