@@ -214,7 +214,7 @@ def _qualify(record,owner,parent,metadata):
     return journal,data,owned
 
 
-def recover(workspace):
+def recover(workspace, *, allow_legacy_prejournal=False):
     from app.metadata_abort_recovery import _owner,_binding
     from app.metadata_swap_recovery import metadata_write_guard,recover_swap_journal
     from app.storage_config import storage_paths
@@ -243,6 +243,8 @@ def recover(workspace):
         except health.DomainStartupError as error:
             if str(error)!="scoped_metadata_recovery_original_prospective_proof_missing":
                 raise
+            if not allow_legacy_prejournal:
+                raise  # Startup MUST preserve the original historical reservation.
             from app.metadata_legacy_rc14_recovery import qualify as qualify_legacy
             legacy=qualify_legacy(record,owner,parent,metadata)
             journal=data=owned=None
