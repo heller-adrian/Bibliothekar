@@ -9,13 +9,13 @@ from unittest.mock import patch
 import os
 
 from app.database import initialize_database
-from app.library_registry import initialize_library_registry, adopt_main_library
+from app.library_registry import initialize_library_registry, adopt_main_library, ensure_library_identity, register_library
 from app.root_operations import reserve
 from app.storage_config import storage_paths, LEGACY_STORAGE_DEFAULTS
 from app.workspace_layout import ensure_workspace_layout
 
 
-def registered_metadata_fixture(tmp_path, *, workspace=None, database=None):
+def registered_metadata_fixture(tmp_path, *, workspace=None, database=None, library_id="main"):
     root=Path(workspace) if workspace is not None else Path(tmp_path)/"workspace"
     db=Path(database) if database is not None else Path(tmp_path)/"kamera.sqlite3"
     # The immutable historical SIGKILL workers construct a nested
@@ -57,11 +57,21 @@ def registered_metadata_fixture(tmp_path, *, workspace=None, database=None):
     # The temporary registry authority is applied before the original control
     # baseline is created, but no registered row exists yet.
     with patch.dict(os.environ,{"KAMERA_REGISTRY_DATABASE":str(registry)}):
-        with reserve(root,library_id="main",database=db,kind="startup",
+        with reserve(root,library_id=library_id,database=db,kind="startup",
                      ids={"function":"tests.backend.registered_metadata_fixture.bootstrap"},
                      paths=[root,Path(work),archive,*storage_paths(root).values()]):
             pass
         initialize_library_registry(registry)
-        adopt_main_library(registry,database_path=db,workspace_root=root,
-                           work_root=Path(work),archive_root=archive)
+        if library_id == "main":
+            adopt_main_library(registry,database_path=db,workspace_root=root,
+                               work_root=Path(work),archive_root=archive)
+        else:
+            # Secondary libraries are not aliases of main. Their actual
+            # catalogue identity and root bindings must agree BEFORE F14
+            # grants any metadata operation on their behalf.
+            ensure_library_identity(db,library_id)
+            register_library(registry,library_id=library_id,
+                             display_name="Kamera",database_path=db,
+                             workspace_root=root,work_root=Path(work),
+                             archive_root=archive,is_main=False)
     return db,root,registry
