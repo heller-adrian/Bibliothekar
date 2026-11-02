@@ -1,0 +1,7 @@
+[
+  "tests/backend/test_pre_metadata_retry.py",
+  "tests/backend/test_rc14_legacy_prejournal_verifier.py",
+  "tests/backend/test_0562_process_recovery.py::test_other_metadata_modes_sigkill",
+  "tests/backend/test_0562_process_recovery.py::test_scoped_metadata_recovery_refuses_identical_foreign_backup_inode",
+  "tests/backend/test_pre5_statement_authorization.py"
+]

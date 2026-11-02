@@ -1,10 +1,137 @@
 {
-  "status": "PENDING",
-  "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
-  "documentation": "PENDING",
-  "run": 41194643144,
-  "artifacts": {},
-  "pytest": {},
-  "frontend": {},
-  "backend_nodes": 0
+  "status": "LINUX_ACCEPTED_NOT_RELEASED",
+  "source": "b4c3a397843567bfe09b35e82c51d0009d0a71bf",
+  "documentation": "76288cfb7c4867d450a19e44b1a4bfd6d989d803",
+  "run": 41509736127,
+  "coverage_mode": "reviewed_source_delta_with_final_image_gates",
+  "backend_source": "18c01fe6730eb4c102c9085eb648325eda2b6622",
+  "backend_nodes": 2579,
+  "artifacts": {
+    "backend": {
+      "id": 13161196865,
+      "name": "pre5-full-backend-1",
+      "digest": "sha256:f20f0230381f1b33e9d1d4ea6e23caddfa7208cb152d4eb07d096d552c990b52",
+      "run": 41457182080,
+      "source": "18c01fe6730eb4c102c9085eb648325eda2b6622",
+      "job": "backend",
+      "required_steps": [
+        "Isolated runtime and all disjoint backend partitions"
+      ],
+      "run_conclusion": "success"
+    },
+    "backend_targets": {
+      "id": 13147917797,
+      "name": "pre5-reproductions-1",
+      "digest": "sha256:c871b79ae5e4bfbaa70ca02a23848a583f95a38f530e61da74e8198defee26f8",
+      "run": 41457182080,
+      "source": "18c01fe6730eb4c102c9085eb648325eda2b6622",
+      "job": "reproductions",
+      "required_steps": [
+        "Recheck seven complete-backend metadata crash and secondary-library nodes",
+        "Reproduce all nineteen previously failed backend nodes before full suites"
+      ],
+      "run_conclusion": "success"
+    },
+    "container": {
+      "id": 13173336116,
+      "name": "pre5-container-1",
+      "digest": "sha256:43664622a9ac9f53a92bf25b35113582994b5c4a045bc4e35fae33c1a3789d59",
+      "run": 41508993713,
+      "source": "93bb7da6d43570759b7428683f073a7f7244ddff",
+      "job": "container",
+      "required_steps": [
+        "Real API, supervisor, web termination, container restart and protected reads",
+        "Ninety media files, real events, archive copy and three external moves",
+        "Four thousand families and fourteen iPhone JPEGs"
+      ],
+      "run_conclusion": "success"
+    },
+    "final_targets": {
+      "id": 13172124338,
+      "name": "pre5-reproductions-1",
+      "digest": "sha256:039fac4ea2f1d1bdfd20a6ed2f9c8954c81f7552aa9528b2c4f6b456fe4c0272",
+      "run": 41509736127,
+      "source": "b4c3a397843567bfe09b35e82c51d0009d0a71bf",
+      "job": "reproductions",
+      "required_steps": [
+        "Recheck frozen RC14 negative prejournal and inode contracts",
+        "Isolated Linux reproductions",
+        "Focused provenance and inventory failures"
+      ],
+      "run_conclusion": "success"
+    },
+    "iphone": {
+      "id": 13174051011,
+      "name": "pre5-container-1",
+      "digest": "sha256:35c31acc20361b9e25428f0a79b3318a93008ef5176e3f9d7f53207dd5fc7a40",
+      "run": 41509736127,
+      "source": "b4c3a397843567bfe09b35e82c51d0009d0a71bf",
+      "job": "container",
+      "required_steps": [
+        "Reproduce immutable RC14 fourteen-JPEG upgrade only"
+      ],
+      "run_conclusion": "success"
+    },
+    "frontend": {
+      "id": 13114371602,
+      "name": "pre5-full-frontend-1",
+      "digest": "sha256:8923c9e77123af5a85f294fac44147f140713852977b3d85733d7d1580dfdeec",
+      "run": 41363591064,
+      "source": "da042bc96eb40a383c6ecae2b9ab70fe87e4b1c6",
+      "job": "frontend",
+      "required_steps": [
+        "Real renderers, German English and mobile desktop without network"
+      ],
+      "run_conclusion": "failure"
+    }
+  },
+  "pytest": {
+    "backend_targets": {
+      "pre5": 62,
+      "focused": 82,
+      "backend-19": 19,
+      "full-seven": 7
+    },
+    "final_targets": {
+      "pre5": 62,
+      "focused": 82,
+      "legacy-prejournal": 2
+    }
+  },
+  "frontend": {
+    "rc13": 44,
+    "rc14": 147
+  },
+  "reviewed_backend_delta": {
+    "app/main.py": {
+      "before": "0395dbf4c47f5e938fcc371cdef351a42f6cf1c8",
+      "after": "b8c286ce9cc3f1dcffcd6d37d00140cab82774c3"
+    },
+    "app/metadata_legacy_rc14_recovery.py": {
+      "before": null,
+      "after": "f5a0b952a54b5ed9b4cfd94a1d6d464510b28414"
+    },
+    "app/metadata_scoped_recovery.py": {
+      "before": "7deda45b12e01f0c3c3b3c2098b77998415220fa",
+      "after": "f2ca1fd8337b3481f9a5cfe246f6f5ecb8b93e3e"
+    }
+  },
+  "reviewed_container_delta": {
+    "app/metadata_legacy_rc14_recovery.py": {
+      "before": "12947d4afd1ad9a0a63a3bee851905ac18077cf7",
+      "after": "f5a0b952a54b5ed9b4cfd94a1d6d464510b28414"
+    }
+  },
+  "backend_test_delta": [
+    "tests/backend/test_rc14_legacy_prejournal_verifier.py"
+  ],
+  "release_authorized_by_user": true,
+  "limits": {
+    "native_TrueNAS_NFSv4": "NOT_RUN",
+    "physical_SD_USB": "NOT_RUN",
+    "genuine_DNG_1_7_write": "NOT_RUN",
+    "native_RAF_write": "NOT_RUN",
+    "known_origin_metadata_variant_A": "DEFERRED",
+    "independent_loss_finalization": "DEFERRED"
+  }
 }

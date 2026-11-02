@@ -52,6 +52,8 @@ def source_audit():
     assert all(n.startswith('docs/pre5/') or n=='FORTSETZUNG.md'
                for n in c.git('diff','--name-only',BUILD,DOC).splitlines())
     assert c.git('rev-parse',BUILD+':app')==c.git('rev-parse',DOC+':app')
+    from acceptance import audit_source
+    audit_source(APPROVAL)
     changed=c.git('diff','--name-only',DOC,'HEAD').splitlines()
     assert changed and all(n.startswith('docs/pre5/release/') or n=='.github/workflows/publish-pre5.yml'
                            for n in changed),'Unexpected publisher changes'
@@ -100,58 +102,8 @@ def unchanged(work,first=False):
     else:assert snapshot==json.loads((assets/'protected-before.json').read_text()),'Protected release or access changed'
 
 def fetch_evidence(work):
-    work=Path(work);assets=work/'release-assets';assets.mkdir(exist_ok=False)
-    run=c.github(f'repos/{c.REPO}/actions/runs/{QA}')
-    assert run['head_sha']==BUILD and run['status']=='completed' and run['run_attempt']==1 and run['conclusion']=='success'
-    assert run['path']=='.github/workflows/qa-pre5-operation-recovery.yml'
-    jobs=c.github(f'repos/{c.REPO}/actions/runs/{QA}/jobs?per_page=100')['jobs']
-    assert len(jobs)==4 and {j['name'] for j in jobs}=={'reproductions','container','frontend','backend'}
-    for job in jobs:
-        assert job['status']=='completed' and job['conclusion']=='success'
-        assert {'self-hosted','Linux','X64','bibliothekar-safe'}<=set(job['labels'])
-        assert all(step['conclusion']=='success' or (step['name']=='Structural, historical metadata and F14 regressions' and step['conclusion']=='skipped') for step in job['steps'] if step['name']!='Complete job')
-    accepted=json.loads(c.git('show',DOC+':docs/pre5/EVIDENCE.json'))
-    assert accepted['tested_commit']==BUILD and accepted['workflow']['run_id']==QA
-    assert set(APPROVAL['artifacts'])=={'targeted','frontend','container','backend'}
-    for key,item in APPROVAL['artifacts'].items():
-        artifact,digest=item['id'],item['digest']
-        meta=c.github(f'repos/{c.REPO}/actions/artifacts/{artifact}')
-        assert not meta['expired'] and meta['digest']==digest and meta['workflow_run']['id']==QA and meta['workflow_run']['head_sha']==BUILD
-        assert accepted['artifacts'][key]['id']==artifact and accepted['artifacts'][key]['digest']==digest
-        raw,_=c.http(f'https://api.github.com/repos/{c.REPO}/actions/artifacts/{artifact}/zip',
-                     {'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-        assert oci.digest(raw)==digest,'Accepted artifact ZIP changed: '+key
-        (assets/('pre5-'+key+'-accepted.zip')).write_bytes(raw)
-        c.safe_extract(raw,work/('accepted-'+key))
-    records={}
-    for name,count in APPROVAL['pytest'].items():
-        cases=list(ET.parse(work/'accepted-targeted'/(name+'.xml')).iter('testcase'))
-        assert len(cases)==count and all(all(t.find(k) is None for k in ('failure','error','skipped')) for t in cases)
-        records[name]=count
-    summary=json.loads((work/'accepted-backend/summary.json').read_text())
-    assert summary['status']=='PASS' and summary['source']==BUILD and summary['complete'] is True
-    assert summary['collected']==summary['selected_once']==APPROVAL['backend_nodes']
-    assert len(summary['parts'])==8
-    seen=set();collected=None
-    for index,part in enumerate(summary['parts']):
-        assert part['partition']==index and part['returncode']==0
-        manifest=json.loads((work/'accepted-backend'/str(index)/'rc13-partition.json').read_text())
-        if collected is None:collected=manifest['all_nodes']
-        assert collected==manifest['all_nodes'] and not seen.intersection(manifest['selected_nodes'])
-        seen.update(manifest['selected_nodes'])
-        cases=list(ET.parse(work/'accepted-backend'/str(index)/'f14-qa/targets/results/result.xml').iter('testcase'))
-        assert len(cases)==len(manifest['selected_nodes'])==part['selected']
-        assert all(all(t.find(k) is None for k in ('failure','error','skipped')) for t in cases)
-        assert part['results']=={'tests':len(cases),'failures':0,'errors':0,'skipped':0}
-    assert seen==set(collected) and len(seen)==APPROVAL['backend_nodes']
-    front=work/'accepted-frontend'
-    for name,count in APPROVAL['frontend'].items():
-        value=json.loads((front/name/'results.json').read_text())
-        assert value['status']=='PASS' and len(value['cases'])==count and all(row['status']=='PASS' for row in value['cases'])
-    qualify_runtime_folder(work/'accepted-container',BUILD)
-    c.dump(assets/'pre5-accepted-run.json',run)
-    c.dump(assets/'verified-accepted-QA.json',{'status':'PASS','source':BUILD,'run':QA,'pytest':records,
-        'backend_nodes':len(seen),'artifacts':APPROVAL['artifacts'],'native_truenas':'NOT_RUN'})
+    from acceptance import fetch
+    fetch(work,APPROVAL,qualify_runtime_folder)
 
 
 def qualify_runtime(stock,iphone,pre3,pre4,browser):
@@ -213,13 +165,15 @@ def prepare(work):
         shutil.copyfile(Path('docs/pre5')/name,assets/name)
     shutil.copyfile('qa/pre3/read_only_diagnosis.py',assets/'read_only_diagnosis.py')
     (assets/'QA-SOURCE-DIFF.patch').write_bytes(subprocess.check_output(['git','diff',BUILD,DOC,'--','app','tests','qa','Dockerfile','requirements.txt','requirements-rc.constraints.txt']))
+    c.dump(assets/'ACCEPTANCE.json',APPROVAL)
     for name in ('REPORT.md','EVIDENCE.json','ARCHITECTURE.md'):
         (assets/('development-'+name)).write_text(c.git('show',DOC+':docs/pre5/'+name)+'\n')
     for name in ('Dockerfile','requirements.txt','requirements-rc.constraints.txt','compose.removable.yaml','compose.nas-source.yaml'):
         (assets/name).write_bytes(subprocess.check_output(['git','show',BUILD+':'+name]))
     (assets/'compose.pre5.yaml').write_text(c.git('show',BUILD+':compose.example.yaml')+'\n')
     c.dump(assets/'SOURCE-IDENTITY.json',{'accepted_hotfix':HOTFIX,'versioned_build_source':BUILD,'documentation':DOC,
-        'publisher':os.environ['GITHUB_SHA'],'version':VERSION,'application_difference_from_QA':'none; version already tested',
+        'publisher':os.environ['GITHUB_SHA'],'version':VERSION,'application_difference_from_final_QA':'none; version already tested',
+        'backend_source':APPROVAL['backend_source'],'backend_delta':APPROVAL['reviewed_backend_delta'],
         'native_truenas_nfs4':'NOT_RUN','physical_sd_usb':'NOT_RUN','DNG_1_7':'NOT_RUN','actual_nas_f14':'NOT_VERIFIED'})
     if local.returncode==0:
         info=verify_image(work,IMAGE)
@@ -269,9 +223,21 @@ def runtime(work):
     c.dump(work/'runtime-passed.json',{'status':'PASS','build':BUILD})
 
 
+def delta(work):
+    from acceptance import passing_xml
+    work=Path(work);folder=work/'delta/f14-qa/targets/results'
+    count=passing_xml(folder/'result.xml',21)
+    assert json.loads((folder/'exit.json').read_text())['returncode']==0
+    shutil.copyfile(folder/'result.xml',work/'release-assets/release-delta-tests.xml')
+    c.dump(work/'delta-passed.json',{'status':'PASS','build':BUILD,'tests':count})
+    c.dump(work/'release-assets/release-delta-tests.json',{'status':'PASS','build':BUILD,'tests':count,
+        'selectors':json.loads(Path(__file__).with_name('DELTA-TESTS.json').read_text())})
+
+
 def reserve(work):
     context();source_audit();free();unchanged(work)
     assert json.loads((Path(work)/'runtime-passed.json').read_text())=={'status':'PASS','build':BUILD}
+    assert json.loads((Path(work)/'delta-passed.json').read_text())['build']==BUILD
     verify_image(work,IMAGE)
     assert c.github('repos/'+c.REPO+'/branches/'+c.parse.quote(BRANCH,safe=''))['commit']['sha']==os.environ['GITHUB_SHA']
     result=c.github('repos/'+c.REPO+'/git/refs',payload={'ref':'refs/tags/'+TAG,'sha':BUILD})
@@ -323,7 +289,7 @@ def post(work,digest):
 
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('command',choices=['audit','prepare','verify-image','runtime','reserve','finish','release-guard','post'])
+    ap=argparse.ArgumentParser();ap.add_argument('command',choices=['audit','prepare','verify-image','runtime','delta','reserve','finish','release-guard','post'])
     ap.add_argument('--work',type=Path);ap.add_argument('--ref');ap.add_argument('--digest');a=ap.parse_args()
     if a.command=='audit':source_audit()
     elif a.command=='verify-image':verify_image(a.work,a.ref)

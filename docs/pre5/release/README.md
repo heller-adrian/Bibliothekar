@@ -1,21 +1,9 @@
-# pre.5 – Veröffentlichungsvorbereitung
+# Pre.5 – einmaliger, versionsgebundener Publisher
 
-**Nicht ausführungsbereit:** `ACCEPTANCE.json` steht auf `PENDING`.
-Kein Tag, Image oder Release wurde durch diese Vorbereitung erzeugt.
+Freigegeben ist ausschließlich b4c3a397843567bfe09b35e82c51d0009d0a71bf. Der explizit autorisierte Push der neuen Workflowdatei auf codex/publish-1.0.0-pre.5 startet den Publisher ohne Registrierung auf main. Der Stable-Publisher und frühere Prereleases werden nicht verändert.
 
-Vor Verwendung müssen der finale erfolgreiche Linux-Lauf, sämtliche vier
-Artefakt-IDs und ZIP-Digests, JUnit-Zahlen, vollständige disjunkte Backend-Coverage
-und die abschließende Dokumentationsidentität fest gebunden sein.
-`source_audit()` verweigert alle anderen Zustände vor externen Schreibvorgängen.
+ACCEPTANCE.json bindet die tatsächlich verschiedenen QA-Quellstände, Einzeljobs und ZIP-Digests. Die2579 Backendnodes, alle acht Partitionen und die147/15 Originalnodes werden unabhängig per JUnit/Node-Identität verifiziert. Nach der Backendabnahme dürfen nur die drei exakt gehashten RC14-Recovery-Dateien abweichen; Tests nur um die zwei final geprüften Original-RC14-Negativfälle. UI-Exports/Renderer bleiben bytegleich zur akzeptierten191er-Browserprüfung. Der ältere insgesamt rote Frontendlauf wird ausschließlich als erfolgreicher Frontend-Einzeljob anerkannt.
 
-Grundlage ist der erfolgreich verwendete pre.4-Publisher. Der pre.5-Pfad baut
-ausschließlich den vollständig abgenommenen Commit einschließlich der bereits
-getesteten Versionskennung. OCI-Index-, Deskriptor-, Konfigurations-, Docker-ID-
-und Byteprüfungen sowie tatsächlicher Digest-Pull und unabhängiger Download aller
-Release-Anlagen bleiben Pflicht. Alle früheren Prereleases einschließlich pre.4,
-Repository-/Paketstatus, stabile Kennzeichnungen und `latest` werden verglichen.
-Nach einem unklaren Teilzustand ist kein automatischer Wiederholungsversuch erlaubt.
+Vor Tag/Push/Release müssen die21 betroffenen alten/neuen F14-, Metadaten- und SQLite-Negativtests auf dem tatsächlichen Finalcode sowie alle sechs Container-/Supervisor-/90-/4000-/14-iPhone-Abläufe auf dem tatsächlich gebauten Image bestehen. Eingebettete Dateien/Modi, OCI-Index/Plattform/Config/Provenance und tatsächlicher Digest-Pull werden geprüft. Danach Release-Anlagen erneut herunterladen und alle Digests vergleichen.
 
-Vor dem ersten externen Schreibvorgang werden außerdem die Laufzeit-/Container-
-Gates auf dem tatsächlich gebauten Release-Image erneut geprüft. Die vollständige
-fachlich unveränderte Backendmatrix wird nicht allein für den Publisher wiederholt.
+Paket-Rechte, Privatsphäre, alte Releases, Tags, Images, latest und Stable bleiben durch Vorher-/Nachher-Snapshots geschützt. Fehlende Rechte führen zum Abbruch. Nach einem Teilzustand kein automatisches Wiederholen oder Löschen.
