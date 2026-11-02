@@ -39,3 +39,9 @@ Full workflow 41363591064: all 15 recovery contracts, 7 scoped-key tests, 19 pre
 The complete backend suite had separate failures, largely BA-12 legacy direct recovery attempts and one catalog-missing and one F11 restart case. The 8 concrete observed nodes are pinned in backend_full_new_failures.json. A targeted run 41421171252 showed a real ordering bug: a generic metadata swap rollback moved original bytes before a *later* SQLite authorizer refused to mark the job blocked. The application now checks F14 admission before the first filesystem side effect in recover_swap_journal. The negative test preserves the source file and journal byte-for-byte on refusal; original-prospective domain recovery is a separate positive path.
 
 The release remains BLOCKED and cannot be declared complete based on these focused checks.
+
+## 2026-11-02 follow-up: fail-closed ordering fixed and eight-node gate green
+
+The prior eight-node diagnostic (run 41421171252) exposed a genuine safety defect, not just a stale test: generic metadata rollback could mutate a backup/original *before* SQLite later denied marking its task blocked. In `app/metadata_swap_recovery.py`, `recover_swap_journal` now calls the original F14 scope-aware `require_write` before any rollback, commit cleanup, or SQL effects. The corresponding test asserts the source directory remains byte-for-byte identical on refusal, while separately qualifying an original recorded library ownership proof for the legitimate precommit rollback.
+
+Run 41421582444's exact eight-node regression gate passed; a broader focused backend check also proceeds. The independent original RC14 container owner-proof blocker remains open. The next backend-only full suite checks whether this early admission check affects any unrelated functionality; it does not waive the separate RC14 container release blocker.
