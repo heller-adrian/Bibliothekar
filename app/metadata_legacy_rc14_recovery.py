@@ -79,7 +79,7 @@ def _rc14_original_preflight_refused(path, stored):
         if name not in {"DateTimeOriginal","CreateDate","ModifyDate","CreationDate"}:
             continue
         raw_text=str(raw)
-        if str(tag).startswith("EXIF:") and not re.search(r"(?:Z|[+-]\\d{2}:\\d{2})$",raw_text):
+        if str(tag).startswith("EXIF:") and not re.search(r"(?:Z|[+-]\d{2}:\d{2})$",raw_text):
             raw_text+=offsets.get(coupled.get(name,""),"")
         parsed=parse_exiftool_datetime(raw_text)
         if parsed is None:
