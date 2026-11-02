@@ -40,6 +40,7 @@ def qualify(record, owner, parent, metadata):
     from app.import_recovery import _catalogue_identity
     from app.metadata_correction import (
         MetadataCorrectionError, metadata_area_paths, verify_metadata_datetime,
+        _reintegration_capture,
     )
     from app.metadata_swap_recovery import _journal_dir
     from app.storage_config import storage_paths
@@ -59,6 +60,11 @@ def qualify(record, owner, parent, metadata):
     # A pre-verification refusal normally leaves it absent altogether.
     if directory.is_dir() and any(directory.iterdir()):
         _refuse("journal_exists_or_unsafe")
+    # Refuse any abandoned staged original/unknown work, even if the central
+    # catalogue happens to remain consistent.
+    work=Path(metadata)/".reintegrate"
+    if work.is_symlink() or (work.exists() and (not work.is_dir() or any(work.iterdir()))):
+        _refuse("unrecovered_reintegration_work")
     # A separate missing prospective proof is not reinterpreted as ownership.
     if any(parent.glob("metadata-scoped-ownership-*.json")):
         _refuse("other_original_swap_proof_exists")
@@ -82,6 +88,8 @@ def qualify(record, owner, parent, metadata):
         tasks=[dict(row) for row in c.execute(
             "SELECT status,detected_json,verification_json,proposed_datetime "
             "FROM metadata_corrections WHERE area='library'")]
+        if any(t["status"]=="writing" for t in tasks):
+            _refuse("other_writing_task_unresolved")
         members={family["id"]:[dict(x) for x in c.execute(
             "SELECT id,job_id,current_relative_path,size_bytes,sha256_current,sha256_original,"
             "review_status,metadata_write_status,selected_capture_time "
@@ -112,6 +120,18 @@ def qualify(record, owner, parent, metadata):
         if len(matches)!=1:
             _refuse("completed_receipt_missing_or_ambiguous")
         v=matches[0]
+        # The existing RC14 offset recovery derives the full timestamp only
+        # from the exact completed correction receipt, never from current EXIF
+        # alone. Both positive and negative verification must hold.
+        try:
+            proposed=_reintegration_capture(
+                db,family["id"],[{**x,"file_id":x["id"]} for x in rows],
+                stored,job_id=family["job_id"],family_key=family["family_key"],
+                tasks=tasks)
+        except (MetadataCorrectionError,ValueError,TypeError,KeyError):
+            _refuse("signed_original_timestamp_unverified")
+        if proposed==stored:
+            _refuse("signed_original_offset_missing")
         receipt_members=v.get("members")
         if not isinstance(receipt_members,list) or len(receipt_members)!=len(rows):
             _refuse("receipt_membership_changed")
@@ -133,6 +153,12 @@ def qualify(record, owner, parent, metadata):
                 or rec.get("output_relative_path")!=str(relative)):
                 _refuse("completed_receipt_file_changed")
             original=_file_identity(path,sha,int(row["size_bytes"]))
+            try:
+                verified=verify_metadata_datetime(path,proposed)
+            except (MetadataCorrectionError,ValueError,TypeError):
+                _refuse("corrected_signed_timestamp_not_verified")
+            if not verified.get("matching_tags"):
+                _refuse("corrected_signed_timestamp_not_verified")
             # In RC14 this verification occurs before copy/staging, journal
             # creation, SQL updates, or any original-file rename. If it
             # succeeds for ANY candidate, the legacy lease may represent a
