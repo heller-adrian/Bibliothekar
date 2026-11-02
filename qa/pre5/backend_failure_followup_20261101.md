@@ -53,3 +53,7 @@ Run 41422089815 stopped at the pinned 19-node gate with 8 legacy direct replay f
 ## 2026-11-02 strict exception assertions
 
 The originally failing 19-node gate completed successfully in run 41425816512 on commit 7e4c943f832c57dfa03f2d5fb824a773fcf88b1a. As a separate strengthening step the updated BA-12 tests now demand the exact F14 `DomainStartupError` code for committed-or-ambiguous swaps and a typed `MetadataSwapRecoveryError` for the still-pending durable journal, not a broad `Exception`. Run the gate again before any longer acceptance test.
+
+## 2026-11-02 strict original refusal codes
+
+Run 41426283357: 16/19 targeted backend cases passed; the other three failed only because an overly narrow test regex demanded `scoped_metadata_recovery_committed_or_ambiguous_effects`. Actual fail-closed reasons were `scoped_metadata_recovery_original_sql_membership_changed` in two reintegration committed-crash cases and `scoped_metadata_recovery_foreign_or_modified_swap_journal` in one completed batch case. Preserve the precise safety denials, unmodified file/journal assertions, and typed DomainStartupError; do not touch application safety or any immutable historical QA. Recheck all 19.
