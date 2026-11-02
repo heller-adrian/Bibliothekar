@@ -44,7 +44,12 @@ def restart(case,ev):
     for n in range(1,4):
         record=recovery.invoke(case,'startup','none',ev/f'restart{n}')
         state=recovery.snapshot(case,ev/f'after-restart{n}.json')
-        recovery.checks_sql(state);assert record['returncode']==0,record
+        recovery.checks_sql(state)
+        assert record['returncode']==0, {
+            **record,
+            'startup_log':(ev/f'restart{n}'/'process.log').read_text(errors='replace')[-9000:],
+            'startup_result':(ev/f'restart{n}'/'result.json').read_text(errors='replace')[-9000:] if (ev/f'restart{n}'/'result.json').exists() else None,
+        }
         states.append(state)
     assert recovery.business_rows(states[0])==recovery.business_rows(states[1])==recovery.business_rows(states[2])
     return states[-1]
