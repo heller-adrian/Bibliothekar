@@ -206,11 +206,20 @@ def test_recovery_waits_for_live_deletion(tmp_path, monkeypatch):
     assert not (Path(paths['trash_root'])/'A.JPG').exists()
 
 
-def general_case(tmp_path, monkeypatch):
+def general_case(tmp_path, monkeypatch, *, registered=False):
     from PIL import Image
     workspace = tmp_path/'workspace'; workspace.mkdir()
     monkeypatch.setenv('KAMERA_CONFIG', str(tmp_path/'settings.json'))
-    db = tmp_path/'catalogue.sqlite3'; initialize_database(db)
+    db = tmp_path/'catalogue.sqlite3'
+    if registered:
+        # A real F14 owner must exist BEFORE the first metadata intent.
+        # Never register an invented owner after an orphaned journal exists.
+        from tests.backend.registered_metadata_fixture import registered_metadata_fixture
+        db, workspace, registry = registered_metadata_fixture(
+            tmp_path, workspace=workspace, database=db)
+        monkeypatch.setenv('KAMERA_REGISTRY_DATABASE', str(registry))
+    else:
+        initialize_database(db)
     root = mc.metadata_area_paths(area='general', workspace_root=workspace, library_id='main')['root']
     source = root/'synthetic.JPG'; Image.new('RGB', (16,16), (51,102,153)).save(source)
     original = source.read_bytes()
@@ -222,7 +231,7 @@ def general_case(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('boundary', ['backup', 'swap', 'db_commit', 'journal_commit', 'cleanup'])
 def test_general_metadata_restart_boundaries(tmp_path, monkeypatch, boundary):
-    db, workspace, source, original, task = general_case(tmp_path, monkeypatch)
+    db, workspace, source, original, task = general_case(tmp_path, monkeypatch, registered=True)
     with monkeypatch.context() as m:
         if boundary in ('backup', 'swap'):
             real = mc.os.replace
@@ -252,9 +261,24 @@ def test_general_metadata_restart_boundaries(tmp_path, monkeypatch, boundary):
         with pytest.raises(Interrupted):
             mc.apply_metadata_correction(db, task['id'], workspace_root=workspace, library_id='main')
     metadata = storage_paths(workspace)['metadata_root']
-    result = ms.recover_metadata_swaps(metadata, allowed_databases={db})
-    assert result['blocked'] == 0
-    assert ms.recover_metadata_swaps(metadata, allowed_databases={db})['blocked'] == 0
+    journal = next((metadata/'.swap-journals').glob('*.json'))
+    previous_journal = journal.read_bytes()
+    before = source.read_bytes() if source.exists() else None
+    # Generic readers must NOT bypass the dead original F14 reservation.
+    refused = ms.recover_metadata_swaps(metadata, allowed_databases={db})
+    assert refused['blocked'] == 1 and refused['rolled_back'] == refused['completed'] == 0, refused
+    assert journal.read_bytes() == previous_journal
+    assert (source.read_bytes() if source.exists() else None) == before
+
+    # The registered owner's original startup/domain path qualifies the
+    # durable task, performs any permissible physical rollback/cleanup and
+    # completes the original reservation without synthetic owner invention.
+    from app.metadata_abort_recovery import recover_general_outcomes
+    registry = Path(os.environ['KAMERA_REGISTRY_DATABASE'])
+    outcome = recover_general_outcomes(workspace, registry, physical=True)
+    assert len(outcome) == 1, outcome
+    assert not journal.exists()
+    assert recover_general_outcomes(workspace, registry, physical=True) == []
     current = mc.get_metadata_correction(db, task['id'])
     if boundary in ('backup', 'swap'):
         assert source.read_bytes() == original and current['status'] == 'blocked'
@@ -264,20 +288,28 @@ def test_general_metadata_restart_boundaries(tmp_path, monkeypatch, boundary):
 
 
 def test_general_metadata_recovery_interrupted_after_original_return(tmp_path, monkeypatch):
-    db, workspace, source, original, task = general_case(tmp_path, monkeypatch)
+    db, workspace, source, original, task = general_case(tmp_path, monkeypatch, registered=True)
     with monkeypatch.context() as m:
         m.setattr(mc, '_complete_task', lambda *a, **k: (_ for _ in ()).throw(Interrupted()))
         with pytest.raises(Interrupted): mc.apply_metadata_correction(db, task['id'], workspace_root=workspace, library_id='main')
     metadata = storage_paths(workspace)['metadata_root']
+    journal = next((metadata/'.swap-journals').glob('*.json'))
+    from app.metadata_abort_recovery import recover_general_outcomes
+    registry = Path(os.environ['KAMERA_REGISTRY_DATABASE'])
     with monkeypatch.context() as m:
         real = ms._rollback
-        def stop(*a):
-            real(*a)
+        def stop(*a, **kw):
+            real(*a, **kw)
             raise Interrupted()
         m.setattr(ms, '_rollback', stop)
-        with pytest.raises(Interrupted): ms.recover_metadata_swaps(metadata, allowed_databases={db})
+        with pytest.raises(Interrupted):
+            recover_general_outcomes(workspace, registry, physical=True)
     assert source.read_bytes() == original
-    assert ms.recover_metadata_swaps(metadata, allowed_databases={db})['rolled_back'] == 1
+    assert journal.exists(), 'An interruption cannot erase the original journal.'
+    outcome = recover_general_outcomes(workspace, registry, physical=True)
+    assert len(outcome) == 1, outcome
+    assert not journal.exists()
+    assert recover_general_outcomes(workspace, registry, physical=True) == []
     mc.apply_metadata_correction(db, task['id'], workspace_root=workspace, library_id='main')
     assert mc.get_metadata_correction(db, task['id'])['status'] == 'completed'
 
