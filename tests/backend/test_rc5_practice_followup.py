@@ -353,10 +353,19 @@ def test_missing_other_registered_catalog_never_means_no_duplicates(fixture,monk
     case,ws,reg,dbs,source,context=setup_live_import(fixture,monkeypatch);queue_and_run(dbs[0],context)
     monkeypatch.setattr(main,'IMPORT_ROOT',source.parent.parent)
     main.api_run_folder_import({'source_root_key':'saved','source_relative_path':'CARD','source_mode':'folder'})
+    original=source.read_bytes()
     dbs[1].rename(case/'preserved-second.sqlite3')
-    job=claim_next_job(dbs[0]);main.process_claimed_job(job,library_context=context)
-    assert get_job(dbs[0],job['id'])['state']=='failed' and claim_next_job(dbs[0]) is None
-    assert source.exists() and main.api_import_history()['total']==1
+    # The newer F14 catalogue-authority guard rejects the entire write
+    # operation before any import is attempted. A missing registered catalogue
+    # is NOT an empty catalogue, even if its last import was a duplicate.
+    with pytest.raises(ro.RootOperationError,match='catalog_unavailable'):
+        job=claim_next_job(dbs[0])
+        if job is not None:
+            main.process_claimed_job(job,library_context=context)
+    assert source.is_file() and source.read_bytes()==original
+    with database_connection(dbs[0]) as c:
+        assert c.execute("SELECT COUNT(*) FROM jobs WHERE operation='folder_import' AND state='completed'").fetchone()[0]==1
+        assert c.execute("PRAGMA integrity_check").fetchone()[0]=='ok'
 
 
 def test_same_process_warning_to_confirmed_setup_api(empty_reset):
