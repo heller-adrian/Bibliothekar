@@ -1,0 +1,9 @@
+[
+  "tests/backend/test_0561_recovery.py::test_general_metadata_restart_boundaries[backup]",
+  "tests/backend/test_0561_recovery.py::test_general_metadata_restart_boundaries[swap]",
+  "tests/backend/test_0561_recovery.py::test_general_metadata_restart_boundaries[db_commit]",
+  "tests/backend/test_0561_recovery.py::test_general_metadata_restart_boundaries[journal_commit]",
+  "tests/backend/test_0561_recovery.py::test_general_metadata_restart_boundaries[cleanup]",
+  "tests/backend/test_0561_recovery.py::test_general_metadata_recovery_interrupted_after_original_return",
+  "tests/backend/test_0331_patch.py::test_0331_library_correction_stays_undated_until_explicit_reintegration"
+]
