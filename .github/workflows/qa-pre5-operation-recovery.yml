@@ -232,7 +232,7 @@ jobs:
 
   container:
     needs: reproductions
-    if: contains(github.event.head_commit.message, '[pre5-container]') || contains(github.event.head_commit.message, '[pre5-full]')
+    if: contains(github.event.head_commit.message, '[pre5-container]') || contains(github.event.head_commit.message, '[pre5-full]') || contains(github.event.head_commit.message, '[pre5-iphone]')
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 35
     defaults:
@@ -275,24 +275,33 @@ jobs:
           docker pull "$RC14_IMAGE"
           docker image inspect "$IMAGE" > "$QA_WORK/candidate-image.json"
       - name: Isolated Chromium tooling
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
         run: |
           set -euo pipefail
           npm install --prefix "$QA_WORK/browser-tools" playwright@1.62.1
           printf 'NODE_PATH=%s/browser-tools/node_modules\n' "$QA_WORK" >> "$GITHUB_ENV"
       - name: Real API, supervisor, web termination, container restart and protected reads
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
         run: |
           set -euo pipefail
           RUNNER_TEMP="$QA_WORK" python3 qa/pre5/container.py 2>&1 | tee "$QA_WORK/container.log"
           RUNNER_TEMP="$QA_WORK" python3 qa/pre4/container.py 2>&1 | tee "$QA_WORK/pre4-container.log"
           RUNNER_TEMP="$QA_WORK" python3 qa/pre4/historical_container.py 2>&1 | tee "$QA_WORK/historical-container.log"
       - name: Ninety media files, real events, archive copy and three external moves
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
         run: |
           set -euo pipefail
           RUNNER_TEMP="$QA_WORK" python3 qa/pre5/manual_changes_container.py 2>&1 | tee "$QA_WORK/manual-changes.log"
       - name: Four thousand families and fourteen iPhone JPEGs
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
         run: |
           set -euo pipefail
           RUNNER_TEMP="$QA_WORK" python3 qa/pre/startup_container.py 2>&1 | tee "$QA_WORK/startup.log"
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py 2>&1 | tee "$QA_WORK/iphone.log"
+      - name: Reproduce immutable RC14 fourteen-JPEG upgrade only
+        if: contains(github.event.head_commit.message, '[pre5-iphone]')
+        run: |
+          set -euo pipefail
           RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py 2>&1 | tee "$QA_WORK/iphone.log"
       - name: Preserve evidence
         if: always() && env.QA_WORK != ''
