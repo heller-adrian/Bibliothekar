@@ -232,7 +232,20 @@ def recover(workspace):
     parent,_=_binding(record,owner)
     metadata=storage_paths(Path(workspace))["metadata_root"]
     with metadata_write_guard(metadata):
-        journal,data,owned=_qualify(record,owner,parent,metadata)
+        # The immutable RC14 release used a family-less F14 reintegration
+        # reservation and did not write prospective swap ownership. Its
+        # original EXIF verification could fail BEFORE any swap journal. Do
+        # not manufacture a prospective proof: accept only a separate,
+        # retrospectively verified *negative* prejournal result.
+        legacy=None
+        try:
+            journal,data,owned=_qualify(record,owner,parent,metadata)
+        except health.DomainStartupError as error:
+            if str(error)!="scoped_metadata_recovery_original_prospective_proof_missing":
+                raise
+            from app.metadata_legacy_rc14_recovery import qualify as qualify_legacy
+            legacy=qualify_legacy(record,owner,parent,metadata)
+            journal=data=owned=None
         intent=parent/("domain-recovery-intent-"+record["reservation_id"]+".json")
         expected={"format":1,"reservation":record,"phase":"qualified_recovery_not_finished"}
         old=ro._read(intent,None)
@@ -244,20 +257,29 @@ def recover(workspace):
             with _allow_exact_original(record), ro.reserve(workspace,library_id=record["library"],database=record["database"],
                             kind="metadata",ids=record["ids"],paths=[Path(p) for p in record["bindings"]],
                             expected_generation=record["generation"],_recovery_record=record):
-                again,saved,identities=_qualify(record,owner,parent,metadata)
-                if again!=journal or saved!=data or identities!=owned:
-                    _refuse("original_plan_changed_under_lock")
-                if journal.exists():
-                    outcome=recover_swap_journal(metadata,journal,
-                               allowed_databases={Path(record["database"])},
-                               owned_identities=owned)
-                    if outcome!="rolled_back":
-                        _refuse("unverified_rollback")
-                _qualify(record,owner,parent,metadata)
+                if legacy is not None:
+                    from app.metadata_legacy_rc14_recovery import qualify as qualify_legacy
+                    if qualify_legacy(record,owner,parent,metadata)!=legacy:
+                        _refuse("legacy_negative_proof_changed_under_lock")
+                else:
+                    again,saved,identities=_qualify(record,owner,parent,metadata)
+                    if again!=journal or saved!=data or identities!=owned:
+                        _refuse("original_plan_changed_under_lock")
+                    if journal.exists():
+                        outcome=recover_swap_journal(metadata,journal,
+                                   allowed_databases={Path(record["database"])},
+                                   owned_identities=owned)
+                        if outcome!="rolled_back":
+                            _refuse("unverified_rollback")
+                    _qualify(record,owner,parent,metadata)
                 ro._check(record["bindings"]);check_active(workspace,parent)
                 path=parent/("metadata-scoped-outcome-"+record["reservation_id"]+".json")
-                outcome={"format":1,"reservation":record,
-                         "journal":str(journal),"disposition":"original_precommit_rollback_verified"}
+                outcome=({"format":1,"reservation":record,
+                          "disposition":"verified_legacy_prejournal_no_effect",
+                          "negative_evidence":legacy}
+                         if legacy is not None else
+                         {"format":1,"reservation":record,
+                          "journal":str(journal),"disposition":"original_precommit_rollback_verified"})
                 old=ro._read(path,None)
                 if old is not None and old!=outcome:
                     _refuse("durable_outcome_changed")
