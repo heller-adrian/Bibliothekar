@@ -91,6 +91,17 @@ jobs:
           set -e
           if test -f "$QA_WORK/fixture/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/fixture/f14-qa/targets/results/result.xml" "$QA_WORK/backend-fixture.xml"; fi
           exit "$RESULT"
+      - name: Recheck seven complete-backend metadata crash and secondary-library nodes
+        if: contains(github.event.head_commit.message, '[pre5-full-seven]')
+        run: |
+          set -euo pipefail
+          mkdir "$QA_WORK/full-seven"
+          set +e
+          RUNNER_TEMP="$QA_WORK/full-seven" "$QA_WORK/venv/bin/python" qa/f14/linux/run_linux.py "$PWD" targets qa/pre5/backend_full_seven_20261102.json 2>&1 | tee "$QA_WORK/full-seven.log"
+          RESULT=${PIPESTATUS[0]}
+          set -e
+          if test -f "$QA_WORK/full-seven/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/full-seven/f14-qa/targets/results/result.xml" "$QA_WORK/full-seven.xml"; fi
+          exit "$RESULT"
       - name: Reproduce all nineteen previously failed backend nodes before full suites
         if: contains(github.event.head_commit.message, '[pre5-full]') || contains(github.event.head_commit.message, '[pre5-19]')
         run: |
