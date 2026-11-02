@@ -134,28 +134,39 @@ def test_0500_library_swap_restart_is_safe_at_three_crash_boundaries(tmp_path,mo
     root=storage_paths(ws)["metadata_root"]
     journals=list((root/".swap-journals").glob("*.json"))
     assert len(journals)==1
-    before=source.read_bytes() if source.exists() else None
-    state=recover_metadata_swaps(root,allowed_databases={db})
-    assert state["blocked"]==0,state
-    assert len(list((root/".swap-journals").glob("*.json")))==0
-    with database_connection(db) as conn:
-        task=conn.execute("SELECT status FROM metadata_corrections WHERE id=?",(task_id,)).fetchone()
-        row=conn.execute("SELECT selected_capture_time FROM file_families WHERE id=?",(family_id,)).fetchone()
-        assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+    before={p.name:p.read_bytes() for p in source.parent.iterdir() if p.is_file()}
+    # A bare journal reader has no authority to write alongside the orphan
+    # F14 operation. It must not silently clean up bytes or the original key.
+    refused=recover_metadata_swaps(root,allowed_databases={db})
+    assert refused["blocked"]==1 and refused["completed"]==refused["rolled_back"]==0,refused
+    assert journals[0].is_file()
+    assert {p.name:p.read_bytes() for p in source.parent.iterdir() if p.is_file()}==before
     if mode in {"after_backup","after_first_replacement","after_second_backup"}:
-        assert state["rolled_back"]==1
+        # The registered library's ORIGINAL prospective ownership record,
+        # not a synthetic post-crash authorization, must qualify the rollback.
+        from app.metadata_library_recovery import recover
+        assert recover(ws) is True
+        assert not journals[0].exists()
+        with database_connection(db) as conn:
+            task=conn.execute("SELECT status FROM metadata_corrections WHERE id=?",(task_id,)).fetchone()
+            row=conn.execute("SELECT selected_capture_time FROM file_families WHERE id=?",(family_id,)).fetchone()
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
         assert source.read_bytes()==OLD
         assert source.with_suffix(".XMP").read_bytes()==b"synthetic-sidecar"
-        assert task["status"]=="blocked"
-        assert row["selected_capture_time"] is None
+        assert task["status"]=="blocked" and row["selected_capture_time"] is None
+        assert_no_pending_swaps(root)
     else:
-        assert state["completed"]==1
-        assert source.read_bytes()==OLD+b"|corrected"
-        assert source.with_suffix(".XMP").read_bytes()==b"synthetic-sidecar|corrected"
-        assert task["status"]=="completed"
-        assert row["selected_capture_time"]==PROPOSED
-    assert recover_metadata_swaps(root,allowed_databases={db})["completed"]==0
-    assert_no_pending_swaps(root)
+        # A DB-committed orphan has no permissible precommit rollback. The
+        # completed bytes and original journal must remain untouched; an
+        # explicit owner-qualified commit recovery is a separate contract.
+        with database_connection(db) as conn:
+            task=conn.execute("SELECT status FROM metadata_corrections WHERE id=?",(task_id,)).fetchone()
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+        assert task["status"] in {"writing","completed"}
+        assert journals[0].is_file()
+        assert {p.name:p.read_bytes() for p in source.parent.iterdir() if p.is_file()}==before
+        with pytest.raises(Exception):
+            assert_no_pending_swaps(root)
 
 
 def test_0500_modified_source_blocks_metadata_recovery_without_destroying_bytes(tmp_path):
@@ -178,7 +189,9 @@ def test_0500_unauthorized_db_in_journal_is_blocked(tmp_path):
     state=recover_metadata_swaps(root,allowed_databases=set())
     assert state["blocked"]==1
     assert not source.exists()
-    assert recover_metadata_swaps(root,allowed_databases={db})["rolled_back"]==1
+    from app.metadata_library_recovery import recover
+    assert recover(ws) is True
+    assert source.read_bytes()==OLD
 
 
 def test_0500_normal_library_metadata_correction_finishes_without_journal(tmp_path,monkeypatch):
