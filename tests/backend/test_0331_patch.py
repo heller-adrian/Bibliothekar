@@ -190,6 +190,10 @@ def test_0331_library_correction_stays_undated_until_explicit_reintegration(
     payload = b"camera-payload"
     source.write_bytes(payload)
 
+    # Install the original synthetic configuration before F14 first pins
+    # its inode and before any library/metadata registration.
+    (tmp_path / "settings.json").write_text("{}")
+    monkeypatch.setenv("KAMERA_CONFIG", str(tmp_path / "settings.json"))
     # The historical regression used an unregistered "library-a" and then
     # expected a real metadata reintegration. F14 must establish its owner
     # BEFORE the first metadata intent; never spoof a library after failure.
