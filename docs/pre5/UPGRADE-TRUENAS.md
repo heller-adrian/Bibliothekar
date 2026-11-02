@@ -1,8 +1,6 @@
-# pre.5: Vorbereitung der späteren TrueNAS-Abnahme
+# Bibliothekar pre.5 – Upgrade und praktische TrueNAS-Abnahme
 
-**Entwicklungsstand. Noch kein freigegebenes pre.5-Image.** Erst das veröffentlichte,
-vollständig geprüfte Image einschließlich Digest aus den Release-Nachweisen
-verwenden. Dieses Dokument erteilt keine vorzeitige Installationsfreigabe.
+**Prerelease, native TrueNAS-Abnahme noch offen.** Verwende das im Release veröffentlichte `IMAGE-DIGEST.txt`. Bestehende Installation erhalten; kein Clean Slate.
 
 ## Bestehende App aktualisieren
 
@@ -13,6 +11,7 @@ verwenden. Dieses Dokument erteilt keine vorzeitige Installationsfreigabe.
 2. In TrueNAS dieselbe Custom App bearbeiten. Nur die neue Imageversion bzw.
    den verifizierten Digest eintragen. Bestehende Appdata-/Workspace-Mounts,
    Bibliotheken, Passwort, UID/GID 568 und die bisherigen Gerätefunktionen erhalten.
+   Repository: `ghcr.io/heller-adrian/bibliothekar`, Tag: `1.0.0-pre.5`. Wenn die TrueNAS-Oberfläche eine vollständige Imagereferenz oder einen Digest erlaubt, verwende stattdessen die genaue `ghcr.io/heller-adrian/bibliothekar@sha256:…`-Zeile aus `IMAGE-DIGEST.txt`. Nach dem Deployment unter Image-Details den tatsächlichen Digest damit vergleichen.
    Archive und externe Importquellen weiterhin Read Only einbinden. Keine zweite
    Instanz mit denselben schreibbaren Mounts starten.
 3. App starten und anmelden. Die bekannten, exakt qualifizierbaren historischen
@@ -24,7 +23,8 @@ verwenden. Dieses Dokument erteilt keine vorzeitige Installationsfreigabe.
    `READY`. Eine fehlende einzelne Arbeitsdatei darf diesen Status nicht ändern.
    Eine fachliche Warnung kann dennoch eine konkrete Datei oder einen tatsächlich
    gemeinsamen Wirkungsbereich schützen.
-5. Bei einem echten Mount-/Anker-/Datenbankfehler muss `UNAVAILABLE` bestehen bleiben.
+5. Bei einer ursprünglichen RC14-Reintegrationsreservation kann die Oberfläche zunächst sichere Lesezugriffe und eine geschützte fachliche Operation anzeigen. Starte die gewünschte Reintegration ausdrücklich über die angemeldete Oberfläche. Nur wenn die alten Belege den vollständig vor dem ersten Dateiaustausch gescheiterten Vorgang beweisen, wird seine Originalreservation regulär mit dauerhaftem Nachweis abgeschlossen. Bei fehlendem Nachweis bleibt der Vorgang geschützt; keine manuelle Reservation-/SQLite-Reparatur.
+6. Bei einem echten Mount-/Anker-/Datenbankfehler muss `UNAVAILABLE` bestehen bleiben.
    Ursprünglichen Mount/Ordner wieder bereitstellen und erneut prüfen. Keine
    neu angelegten leeren Verzeichnisse als vermeintliche Originale verwenden.
 

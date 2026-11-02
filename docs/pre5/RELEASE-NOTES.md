@@ -1,10 +1,13 @@
-# Bibliothekar v1.0.0-pre.5 – Entwurf
+# Bibliothekar v1.0.0-pre.5
 
-**Entwicklungskandidat, noch nicht veröffentlicht.** Die vollständige Linux-Abnahme
-und die Integritätsprüfung des Release-Images sind zwingende Freigabebedingungen.
+**Prerelease für die anschließende praktische TrueNAS-Abnahme.** Keine stabile 1.0.0.
+Anwendungscode: `b4c3a397843567bfe09b35e82c51d0009d0a71bf`. Die Quellenidentität, die Linux-Prüfkette und das konkrete Release-Image werden vor Veröffentlichung verifiziert.
 
 ## Korrekturen
 
+- Historische RC14-Reintegration der 14 korrigierten iPhone-JPEGs mit `+13:00`: Die ursprüngliche F14-Reservation bleibt beim Start erhalten. Erst ein authentifizierter, ausdrücklicher Reintegrationsauftrag darf einen vollständig qualifizierten, nachweislich vor dem ersten Austausch abgebrochenen RC14-Vorgang abschließen. Der dauerhafte Nachweis erhält die Originalreservation. Kein nachträglicher Eigentumsbeleg und keine Freigabe aus bloßer Journal-Abwesenheit.
+- Die historische RC14-EXIF-Prüfung wird exakt einschließlich ihrer Offset- und ungültigen Sekundärtag-Semantik ausgewertet. Geänderte Dateien, fremde Inodes, Hardlinks, Symlinks und widersprüchliche Belege bleiben geschützt.
+- Originale F14-Abschlussbelege werden nach einem Crash zuverlässig unter erneuter Root-/Generationsprüfung abgeschlossen. Abgewiesene neue Restore-Auswahlen erzeugen keine zusätzliche verwaiste Reservation. Unterbrochene reine SD-Prüfungen werden von tatsächlichen Medienänderungen unterschieden.
 - Workspace-GETs und Thumbnail-GETs fordern keine schreibende Dateioperation an.
   Persistente Vorschaubilder werden durch Importworker erzeugt; Cache-Misses
   werden lesend im Speicher gerendert. Sichere Katalogansichten

@@ -1,3 +1,25 @@
+# Pre.5 – Veröffentlichungsprüfkette 02.11.2026
+
+Freigegebener Anwendungscode: `b4c3a397843567bfe09b35e82c51d0009d0a71bf`.
+
+| Stufe | Unabhängig verifiziertes Ergebnis | Tatsächlicher Quellstand |
+|---|---|---|
+| Vollständiges Backend | [41457182080](https://github.com/heller-adrian/Bibliothekar/actions/runs/41457182080):2579 PASS,0 FAIL/ERROR/SKIP; acht disjunkte Partitionen und exakte JUnit-Nodegleichheit |18c01fe6730eb4c102c9085eb648325eda2b6622|
+| Vollständige Containerabnahme |[41508993713](https://github.com/heller-adrian/Bibliothekar/actions/runs/41508993713): API, Supervisor, Neustarts, Browser,90 Dateien,4000 Familien und14 iPhone-JPEGs PASS |93bb7da6d43570759b7428683f073a7f7244ddff|
+| Finale Original-RC14-Migration |[41509736127](https://github.com/heller-adrian/Bibliothekar/actions/runs/41509736127):14 JPEGs, Originalreservation bis POST erhalten, Herkunft/RO-Archive unverändert PASS |b4c3a397843567bfe09b35e82c51d0009d0a71bf|
+| Finale Ziel-/Negativtests |41509736127:62 Pre.5-,82 fokussierte und2 unabhängige RC14-Negativfälle PASS; Gruppen überschneiden sich |b4c3a397843567bfe09b35e82c51d0009d0a71bf|
+| Vollständiges Frontend |Frontendjob von41363591064 SUCCESS:44 RC13-/147 RC14-Fälle; damaliger Gesamtlauf war wegen später separat behobener Backend-/Containerfehler FAILURE |da042bc96eb40a383c6ecae2b9ab70fe87e4b1c6|
+
+Die2579 Backendtests wurden ausdrücklich nicht auf dem späteren Finalcommit ausgeführt. Die Anwendung unterscheidet sich danach nur in `main.py`, `metadata_scoped_recovery.py` und der neuen `metadata_legacy_rc14_recovery.py`; Datenbankschemata, Abhängigkeiten und Containerkonfiguration sind unverändert. Diese begrenzte Änderung ist durch finale Zieltests und die Original-RC14-Containerprüfung abgedeckt. Der Publisher führt zusätzlich die betroffenen alten F14-Retry-/Scoped-Recovery- und SQL-Negativverträge auf dem eingefrorenen Finalcode sowie die komplette Laufzeitabnahme auf dem tatsächlich gebauten Release-Image aus. Ohne deren PASS wird kein Tag/Image/Release geschrieben. Eine erneute mehrstündige Vollmatrix ist bei dieser dokumentierten Quellgleichheits-/Deltaqualifikation nicht erforderlich.
+
+Alle akzeptierten ZIPs wurden erneut gegen die GitHub-SHA256-Digests geprüft. Die unveränderlichen Artefakte und ihre tatsächlichen Quell-Commits werden in `release/ACCEPTANCE.json` gebunden; erfolgreiche Einzeljobs aus einem roten älteren Gesamtlauf sind dort ausdrücklich als solche gekennzeichnet, niemals als grüner Gesamtlauf.
+
+NOT_RUN: native TrueNAS/NFSv4, physische SD/USB, echte DNG1.7- und native RAF-Schreibunterstützung. DEFERRED: bekannte-Aufnahme-Variante A und eigenständiges Verlustabschlussmodell. Keine DNG-Warnunterdrückung, kein `-m`.
+
+Die vollständige Image-, OCI-, Pull- und Release-Artefakt-Verifikation ergänzt der veröffentlichte Prüfbericht. Die folgenden Abschnitte bleiben als historische Entwicklungschronik erhalten.
+
+---
+
 # pre.5 – Zwischenbericht der isolierten Linux-Abnahme
 
 **Keine Freigabe durch Testergebnisse, nicht veröffentlicht.**

@@ -1,5 +1,5 @@
 {
-  "status": "BACKEND_FAILURES_UNRESOLVED_NOT_RELEASED",
+  "status": "PINNED_QA_CHAIN_VERIFIED_RELEASE_IMAGE_PENDING",
   "branch": "codex/pre5-operation-recovery",
   "base_tag": "v1.0.0-pre.4",
   "accepted_target_source": "c548e308d795f459ff854fb6a5843431fb71eef1",
@@ -478,5 +478,8 @@
     "contracts_sha256": "fd574cf0f4af6709218f426cb42729f49ab52dc97f37c8a5503a9f61e9372ef6",
     "contracts_archive_digest_verified": true
   },
-  "current_round_scope": "ONLY_UNKNOWN_CONTROL_EVIDENCE_NO_PUBLICATION"
+  "current_round_scope": "ONLY_UNKNOWN_CONTROL_EVIDENCE_NO_PUBLICATION",
+  "historical_status_before_release_preparation": "BACKEND_FAILURES_UNRESOLVED_NOT_RELEASED",
+  "release_candidate_source": "b4c3a397843567bfe09b35e82c51d0009d0a71bf",
+  "release_acceptance_manifest": "release/ACCEPTANCE.json"
 }

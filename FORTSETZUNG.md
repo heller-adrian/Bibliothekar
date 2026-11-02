@@ -1,3 +1,11 @@
+# 02.11.2026 – ausdrücklich autorisierte Veröffentlichung von Pre.5
+
+Freigegebener Anwendungscode `b4c3a397843567bfe09b35e82c51d0009d0a71bf`, exakt Remote-Entwicklungs-HEAD. Publisher-Zweig `codex/publish-1.0.0-pre.5`; keine Änderungen an main, TrueNAS oder Anwendungscode.2579 Backendnodes aus41457182080 unabhängig per SHA256, allen acht Partitionsmanifesten und JUnit-IDs als PASS geprüft. Kompletter Container41508993713 und finale RC14-/Negativ-Abnahme41509736127 erfolgreich und ZIPs unabhängig verifiziert. Details und ausdrücklich unterschiedliche Source-SHAs stehen in docs/pre5/TEST-REPORT.md.
+
+Release noch nicht geschrieben. Vor dem ersten externen Schreibvorgang muss der aktualisierte Publisher die Artefakte und dokumentierte Source-Deltaqualifikation, finale betroffene Regressionen, das konkrete Image und die gesamten Laufzeit-/Containerfälle bestehen. Lokal fehlt dem Gerätetoken read:packages (HTTP403); diese zwingende Paket-/Sichtbarkeitsprüfung erfolgt mit dem vorgesehenen Runner-GITHUB_TOKEN vor Veröffentlichung. Bei dort fehlender Berechtigung stoppen, keine Rechte ändern. Alte historische Fortsetzungen unten bleiben unverändert als Chronik.
+
+---
+
 # Fortsetzung 02.11.2026 – vollständiger Lauf 41363591064: Original-147er grün, Container-RC14 und Backendmatrix weiter rot
 
 **PRE.5 BLOCKED; KEINE FREIGABE, KEIN RELEASE.** Nur `codex/pre5-operation-recovery`; keine Änderung an main, Tags, Releases, GHCR/latest, TrueNAS oder Produktivdaten.
