@@ -411,3 +411,8 @@ Kumulierte Einzelwerte der ursprünglichen240:228 PASS/12 FAIL; ursprüngliche58
 Aktueller QA-Source `7045766e1a94d4b053c1867dbd613cb8177176c9`, letzter Anwendungscode `4e0e35527d95e58fafd77f13fc209105396c40fe`. Zusätzliche native Library-Autorität verlangt den tatsächlich gehaltenen PID-/Thread-Schreibkontext; kopierte Kontexte liefern keine Autorität. Alle Änderungen sind auf dem Entwicklungsbranch gesichert.
 
 Zuerst41303055310 (fb2412c0; zuletzt RUNNING), danach41303789143 (7045766e; zuletzt PENDING) auswerten. Der zweite prüft den korrigierten DB-Dateihelfer und neue prospektive Library-/DB-/Inode-Grenzen samt F15/F17/F18. Keine weiteren Läufe anstoßen, solange diese ausstehen. Noch keine vollständige Backend-/Browser-/Containerabnahme auf finalem Anwendungscode. **BACKEND NOT ACCEPTED – Veröffentlichung gesperrt.**
+
+
+## 02.11.2026 – Veröffentlichung: kontrollierter Teilzustand
+
+Run41515697003: Source/QA, 21 Delta-Verträge, finale Container-/Browser-/90-/4000-/14-iPhone-Abnahme und echter Digest-Pull/OCI PASS. Git-Tag b4c3 und GHCR-Digest3c36813f… bestehen. GitHub-Anlagenupload scheiterte an leerer QA-SOURCE-DIFF.patch HTTP400; Release anschließend per Tag/ID404. Kein Retry oder Überschreiben. Details und unabhängige Artefakt-Prüfsummen in release/PARTIAL-PUBLICATION-20261102.md/.json. Native TrueNAS-Abnahme weiter offen.

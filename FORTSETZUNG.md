@@ -1,3 +1,11 @@
+# 02.11.2026 – Pre.5-Publisher nach Image-Push sicher angehalten
+
+**PARTIAL_PUBLICATION_BLOCKED.** Lauf `41515697003` FAILURE: alle Source-/QA-/21 Delta-/sechs Container-/Digest-Pull-/OCI-Prüfungen PASS, aber GitHub-Upload der null Byte großen `QA-SOURCE-DIFF.patch` HTTP400 Bad Content-Length. Tag `v1.0.0-pre.5` zeigt exakt auf `b4c3a397843567bfe09b35e82c51d0009d0a71bf`. Bereits gepushtes Image: `ghcr.io/heller-adrian/bibliothekar@sha256:3c36813f69a3e743d703dc573f1f1359c6c059e9f6183a2e73c756e8a2805d60`. GitHub-Release per Tag und temporärer ID431924706 nicht vorhanden (404). **Kein erneuter Build/Push/Tag und kein blinder Workflow-Rerun.**
+
+Vollständiger gesicherter Zustand und nächste Schritte: `docs/pre5/release/PARTIAL-PUBLICATION-20261102.md` und JSON daneben. Original-Artefakt13175578019 unabhängig SHA256-geprüft: `e2296cdbfcca63bf8c9b5bbd3e23e84edf123ae4727efbbf556d5b14c3348200`; alle70 vorbereiteten Datei-Prüfsummen stimmen. Frühere Releases/Images/latest und private Repo-Sichtbarkeit nach Fehler lesend unverändert bestätigt. Publisher-Branch `codex/publish-1.0.0-pre.5`, Lauf-Commit `cf8702290f3170250aa134d80d52b52472d7c413`; aktuelle Dokumentation folgt als eigener Commit. Benutzer verlangte bei zwingendem Fehler Halt. Ein kontrollierter reiner Abschlussmodus ist noch nicht implementiert/ausgeführt.
+
+---
+
 # 02.11.2026 – ausdrücklich autorisierte Veröffentlichung von Pre.5
 
 Freigegebener Anwendungscode `b4c3a397843567bfe09b35e82c51d0009d0a71bf`, exakt Remote-Entwicklungs-HEAD. Publisher-Zweig `codex/publish-1.0.0-pre.5`; keine Änderungen an main, TrueNAS oder Anwendungscode.2579 Backendnodes aus41457182080 unabhängig per SHA256, allen acht Partitionsmanifesten und JUnit-IDs als PASS geprüft. Kompletter Container41508993713 und finale RC14-/Negativ-Abnahme41509736127 erfolgreich und ZIPs unabhängig verifiziert. Details und ausdrücklich unterschiedliche Source-SHAs stehen in docs/pre5/TEST-REPORT.md.

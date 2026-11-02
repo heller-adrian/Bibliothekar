@@ -1,0 +1,22 @@
+{
+  "application_commit": "b4c3a397843567bfe09b35e82c51d0009d0a71bf",
+  "evidence_artifact": 13175578019,
+  "evidence_artifact_sha256": "sha256:e2296cdbfcca63bf8c9b5bbd3e23e84edf123ae4727efbbf556d5b14c3348200",
+  "failure": "gh release create: HTTP 400 Bad Content-Length uploading zero-byte QA-SOURCE-DIFF.patch; no release found afterward",
+  "image_digest": "sha256:3c36813f69a3e743d703dc573f1f1359c6c059e9f6183a2e73c756e8a2805d60",
+  "package_visibility_after_upload_failure": "NOT_REQUERIED_local_token_missing_read_packages",
+  "package_visibility_at_runner_guard": "public",
+  "prepared_assets_including_checksum": 71,
+  "prepared_files_checksum_verified": 70,
+  "protected_releases_and_latest_rechecked": true,
+  "release_api_ids_checked": [
+    431924706
+  ],
+  "release_present": false,
+  "repository_private": true,
+  "run": 41515697003,
+  "run_commit": "cf8702290f3170250aa134d80d52b52472d7c413",
+  "status": "PARTIAL_PUBLICATION_BLOCKED",
+  "tag": "v1.0.0-pre.5",
+  "tag_and_registry_rechecked": true
+}
