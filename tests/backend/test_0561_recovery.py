@@ -212,6 +212,9 @@ def general_case(tmp_path, monkeypatch, *, registered=False):
     monkeypatch.setenv('KAMERA_CONFIG', str(tmp_path/'settings.json'))
     db = tmp_path/'catalogue.sqlite3'
     if registered:
+        # A real installed configuration must exist BEFORE F14 pins its
+        # initial configuration inode. Never synthesize it during recovery.
+        (tmp_path/'settings.json').write_text('{}')
         # A real F14 owner must exist BEFORE the first metadata intent.
         # Never register an invented owner after an orphaned journal exists.
         from tests.backend.registered_metadata_fixture import registered_metadata_fixture
