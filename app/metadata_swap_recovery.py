@@ -430,6 +430,15 @@ def recover_swap_journal(
     owned_identities: dict[str, list[int]] | None = None,
 ) -> str:
     data = _load(journal, metadata_root)
+    # Fail BEFORE any file rename/unlink if F14 has an unresolved writer.
+    # Previously _rollback() could restore an original before its later
+    # _mark_task_blocked() SQLite write was denied, leaving partial effects.
+    # This uses the existing scope-aware admission and never grants an orphan
+    # retry. Domain recovery must already own the original qualified lease.
+    from app.operation_health import require_write
+    from app.operation_scopes import current
+    workspace = Path(metadata_root).absolute().parent
+    require_write(workspace,candidate=current(str(workspace)))
     db = str(data.get("database") or "")
     if db and allowed_databases is not None:
         approved = {str(Path(p).resolve(strict=False)) for p in allowed_databases}
