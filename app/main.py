@@ -492,6 +492,22 @@ def _root_request(fn):
                     if operation_health.inspect(context.workspace_root)['issues']:
                         startup_database()
                     return {**restored,'inventory':api_trash_inventory()}
+            # An RC14 family-less metadata reservation may be proven to have
+            # failed before its very first file swap. Never retire it at
+            # startup or from a GET: only this authenticated explicit POST may
+            # request the exact original negative prejournal qualification.
+            # A successful domain receipt is followed by normal startup,
+            # so no subsequent family runs under the historical global key.
+            if fn.__name__=='api_reintegrate_metadata_families':
+                from app.metadata_scoped_recovery import recover as recover_scoped_metadata
+                from app.operation_health import DomainStartupError
+                try:
+                    settled=recover_scoped_metadata(
+                        context.workspace_root, allow_legacy_prejournal=True)
+                except DomainStartupError as error:
+                    raise RootOperationError(str(error)) from error
+                if settled:
+                    startup_database()
             retry=nullcontext()
             accepted=set()
             if not operation_health.inspect(context.workspace_root)['writes_allowed']:
