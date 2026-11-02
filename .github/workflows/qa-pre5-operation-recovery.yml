@@ -305,7 +305,9 @@ jobs:
     needs: reproductions
     if: contains(github.event.head_commit.message, '[pre5-full]') || contains(github.event.head_commit.message, '[pre5-backend]')
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
-    timeout-minutes: 150
+    # Eight isolated partitions take >150 minutes on the real safe runner.
+    # Let the final partition finish rather than cancel valid node coverage.
+    timeout-minutes: 240
     defaults:
       run:
         shell: bash
@@ -332,7 +334,18 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: pre5-full-backend-${{ github.run_attempt }}
-          path: ${{ env.QA_WORK }}/pre5-full-backend
+          # SQLite -shm/-wal files are transient and may disappear between
+          # upload-artifact's directory walk and stat(), causing ENOENT.
+          # Preserve durable per-partition JUnit, collection manifests and
+          # process diagnostics, never race active SQLite sidecars.
+          path: |
+            ${{ env.QA_WORK }}/pre5-full-backend/summary.json
+            ${{ env.QA_WORK }}/pre5-full-backend/*/rc13-partition.json
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/results/result.xml
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/process.log
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/restart*.log
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/result.json
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/execution.json
           retention-days: 30
   frontend:
     needs: reproductions
