@@ -190,7 +190,15 @@ def test_0331_library_correction_stays_undated_until_explicit_reintegration(
     payload = b"camera-payload"
     source.write_bytes(payload)
 
-    initialize_database(database)
+    # The historical regression used an unregistered "library-a" and then
+    # expected a real metadata reintegration. F14 must establish its owner
+    # BEFORE the first metadata intent; never spoof a library after failure.
+    from tests.backend.registered_metadata_fixture import registered_metadata_fixture
+    db, verified_workspace, registry = registered_metadata_fixture(
+        tmp_path, workspace=workspace, database=database, library_id="library-a")
+    assert db == database and verified_workspace == workspace
+    monkeypatch.setenv("KAMERA_REGISTRY_DATABASE", str(registry))
+    monkeypatch.setenv("KAMERA_CONFIG", str(tmp_path / "settings.json"))
     family_id, file_id = _insert_undated_family(
         database,
         payload=payload,
