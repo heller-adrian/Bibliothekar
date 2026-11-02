@@ -49,3 +49,7 @@ Run 41421582444's exact eight-node regression gate passed; a broader focused bac
 ## 2026-11-02: regression contract update after F14 pre-mutation authorization
 
 Run 41422089815 stopped at the pinned 19-node gate with 8 legacy direct replay failures, all in multiple/reintegration metadata swaps, after 11 passes. The new F14 admission guard correctly refused these generic unowned journal replays. The tests now assert (a) generic replay leaves original bytes and journal unchanged, (b) the qualified original prospective F14 recovery handles precommit cases, and (c) already committed ambiguous cases stay fenced. This changes neither the historical immutable QA nor app safety. Re-run 19 targeted nodes before any complete backend pass.
+
+## 2026-11-02 strict exception assertions
+
+The originally failing 19-node gate completed successfully in run 41425816512 on commit 7e4c943f832c57dfa03f2d5fb824a773fcf88b1a. As a separate strengthening step the updated BA-12 tests now demand the exact F14 `DomainStartupError` code for committed-or-ambiguous swaps and a typed `MetadataSwapRecoveryError` for the still-pending durable journal, not a broad `Exception`. Run the gate again before any longer acceptance test.
