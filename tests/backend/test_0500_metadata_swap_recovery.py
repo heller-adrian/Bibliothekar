@@ -290,7 +290,7 @@ def test_0500_multiple_correction_recovers_at_all_commit_boundaries(tmp_path,mod
         # and journal must remain, never be dismissed as cleanup debris.
         from app.metadata_scoped_recovery import recover
         from app.operation_health import DomainStartupError
-        with pytest.raises(DomainStartupError,match="scoped_metadata_recovery_committed_or_ambiguous_effects"):
+        with pytest.raises(DomainStartupError,match="scoped_metadata_recovery_foreign_or_modified_swap_journal"):
             recover(ws)
         assert bytes_before_after()==before and journals[0].read_bytes()==record
         with pytest.raises(MetadataSwapRecoveryError,match="unterbrochene"):
@@ -386,7 +386,7 @@ def test_0500_reintegration_survives_swap_and_db_commit_crashes(tmp_path,mode):
     else:
         from app.metadata_scoped_recovery import recover
         from app.operation_health import DomainStartupError
-        with pytest.raises(DomainStartupError,match="scoped_metadata_recovery_committed_or_ambiguous_effects"):
+        with pytest.raises(DomainStartupError,match="scoped_metadata_recovery_original_sql_membership_changed"):
             recover(ws)
         assert file_bytes()==before and journals[0].read_bytes()==journal_bytes
         with database_connection(db) as conn:
