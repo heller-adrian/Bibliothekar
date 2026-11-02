@@ -416,3 +416,8 @@ Zuerst41303055310 (fb2412c0; zuletzt RUNNING), danach41303789143 (7045766e; zule
 ## 02.11.2026 – Veröffentlichung: kontrollierter Teilzustand
 
 Run41515697003: Source/QA, 21 Delta-Verträge, finale Container-/Browser-/90-/4000-/14-iPhone-Abnahme und echter Digest-Pull/OCI PASS. Git-Tag b4c3 und GHCR-Digest3c36813f… bestehen. GitHub-Anlagenupload scheiterte an leerer QA-SOURCE-DIFF.patch HTTP400; Release anschließend per Tag/ID404. Kein Retry oder Überschreiben. Details und unabhängige Artefakt-Prüfsummen in release/PARTIAL-PUBLICATION-20261102.md/.json. Native TrueNAS-Abnahme weiter offen.
+
+
+## 02.11.2026 – Pre.5 Veröffentlichung vollständig
+
+Abschluss41520516048 SUCCESS auf12ef4338d20481a55016b0f74f31a6458bd20355. Vorhandener Tag b4c3 und Image3c36813f… unverändert; kein Build/Push/Tag-Schreiben. Release431942748 ist Prerelease, kein Draft/latest. Alle73 Anlagen unabhängig erneut heruntergeladen und SHA256-geprüft; Original-QA unverändert erhalten. Dokumentation: release/COMPLETED-PUBLICATION-20261102.md/.json. Native TrueNAS- und Hardwareabnahme weiterhin NOT_RUN.

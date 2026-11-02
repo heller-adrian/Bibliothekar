@@ -1,3 +1,11 @@
+# 02.11.2026 – Pre.5 vollständig veröffentlicht und unabhängig verifiziert
+
+**PUBLISHED_AND_INDEPENDENTLY_VERIFIED.** GitHub-Prerelease `v1.0.0-pre.5`: https://github.com/heller-adrian/Bibliothekar/releases/tag/v1.0.0-pre.5, ID431942748. Abschlusslauf41520516048 **SUCCESS**, Abschlusscode12ef4338d20481a55016b0f74f31a6458bd20355. Vorhandener Tag weiterhin b4c3a397843567bfe09b35e82c51d0009d0a71bf; Image weiterhin `ghcr.io/heller-adrian/bibliothekar@sha256:3c36813f69a3e743d703dc573f1f1359c6c059e9f6183a2e73c756e8a2805d60`. Kein neuer Build/Push/Tag.73 Anlagen nach Veröffentlichung im Runner und unabhängig lokal vollständig heruntergeladen, Bytes/API-Digests und72 SHA256SUMS-Einträge PASS. Originalartefakt samt leerem Diff unverändert als ZIP beigelegt; Nichtleer-Erklärung ersetzt nur den separaten Diff-Anhang. Alte Releases/latest und Sichtbarkeiten unverändert.
+
+Vollständiger Abschlussbericht: docs/pre5/release/COMPLETED-PUBLICATION-20261102.md/.json. Vorheriger Teilzustand bleibt unten und in PARTIAL-PUBLICATION-20261102.* unverändert historisch dokumentiert. Native TrueNAS-/Hardwareabnahme bleibt offen. Nächster Schritt: praktische TrueNAS-Abnahme anhand der Release-Anleitung; keine laufenden Test-/Releasejobs oder offenen Publisherfehler.
+
+---
+
 # 02.11.2026 – Pre.5-Publisher nach Image-Push sicher angehalten
 
 **PARTIAL_PUBLICATION_BLOCKED.** Lauf `41515697003` FAILURE: alle Source-/QA-/21 Delta-/sechs Container-/Digest-Pull-/OCI-Prüfungen PASS, aber GitHub-Upload der null Byte großen `QA-SOURCE-DIFF.patch` HTTP400 Bad Content-Length. Tag `v1.0.0-pre.5` zeigt exakt auf `b4c3a397843567bfe09b35e82c51d0009d0a71bf`. Bereits gepushtes Image: `ghcr.io/heller-adrian/bibliothekar@sha256:3c36813f69a3e743d703dc573f1f1359c6c059e9f6183a2e73c756e8a2805d60`. GitHub-Release per Tag und temporärer ID431924706 nicht vorhanden (404). **Kein erneuter Build/Push/Tag und kein blinder Workflow-Rerun.**
