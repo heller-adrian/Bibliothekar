@@ -17,7 +17,7 @@ pytestmark = pytest.mark.usefixtures('isolated_registered_metadata_config')
 
 from app.database import database_connection, initialize_database
 from app.metadata_correction import apply_metadata_correction
-from app.metadata_swap_recovery import recover_metadata_swaps, assert_no_pending_swaps
+from app.metadata_swap_recovery import recover_metadata_swaps, assert_no_pending_swaps, MetadataSwapRecoveryError
 from app.storage_config import storage_paths
 from tests.backend.test_0331_patch import _insert_undated_family
 from tests.backend.registered_metadata_fixture import registered_metadata_fixture
@@ -289,10 +289,11 @@ def test_0500_multiple_correction_recovers_at_all_commit_boundaries(tmp_path,mod
         # Without a different exact original outcome proof the old F14 lease
         # and journal must remain, never be dismissed as cleanup debris.
         from app.metadata_scoped_recovery import recover
-        with pytest.raises(Exception):
+        from app.operation_health import DomainStartupError
+        with pytest.raises(DomainStartupError,match="scoped_metadata_recovery_committed_or_ambiguous_effects"):
             recover(ws)
         assert bytes_before_after()==before and journals[0].read_bytes()==record
-        with pytest.raises(Exception):
+        with pytest.raises(MetadataSwapRecoveryError,match="unterbrochene"):
             assert_no_pending_swaps(metadata_root)
 
 
@@ -384,10 +385,11 @@ def test_0500_reintegration_survives_swap_and_db_commit_crashes(tmp_path,mode):
         assert file["current_relative_path"]=="Ohne_Datum/IMG_0001.JPG"
     else:
         from app.metadata_scoped_recovery import recover
-        with pytest.raises(Exception):
+        from app.operation_health import DomainStartupError
+        with pytest.raises(DomainStartupError,match="scoped_metadata_recovery_committed_or_ambiguous_effects"):
             recover(ws)
         assert file_bytes()==before and journals[0].read_bytes()==journal_bytes
         with database_connection(db) as conn:
             assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
-        with pytest.raises(Exception):
+        with pytest.raises(MetadataSwapRecoveryError,match="unterbrochene"):
             assert_no_pending_swaps(metadata_root)
