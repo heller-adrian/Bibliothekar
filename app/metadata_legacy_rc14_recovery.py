@@ -53,8 +53,11 @@ def qualify(record, owner, parent, metadata):
     if record.get("library")!=owner.get("library_id"):
         _refuse("owner_changed")
     directory=_journal_dir(metadata)
-    if (directory.is_symlink() or not directory.is_dir()
-        or any(directory.iterdir())):
+    if directory.is_symlink() or (os.path.lexists(directory) and not directory.is_dir()):
+        _refuse("journal_exists_or_unsafe")
+    # RC14 creates this directory only when it has a physical swap plan.
+    # A pre-verification refusal normally leaves it absent altogether.
+    if directory.is_dir() and any(directory.iterdir()):
         _refuse("journal_exists_or_unsafe")
     # A separate missing prospective proof is not reinterpreted as ownership.
     if any(parent.glob("metadata-scoped-ownership-*.json")):
