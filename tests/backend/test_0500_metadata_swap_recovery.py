@@ -267,17 +267,33 @@ def test_0500_multiple_correction_recovers_at_all_commit_boundaries(tmp_path,mod
     db=tmp_path/"kamera.sqlite3"
     _child(db,ws,_child_multiple(mode))
     metadata_root=storage_paths(ws)["metadata_root"]
+    journals=list((metadata_root/".swap-journals").glob("*.json"))
+    assert len(journals)==1
+    # Generic journal replay must not mutate the interrupted F14 owner's files.
+    def bytes_before_after():
+        return {str(p):p.read_bytes() for p in root.iterdir() if p.is_file()}
+    before=bytes_before_after()
+    record=journals[0].read_bytes()
     result=recover_metadata_swaps(metadata_root,allowed_databases=set())
-    assert result["blocked"]==0,result
-    if mode=="after_journal_commit":
-        assert result["completed"]==1
-        assert b"2026-07-21T12:30:00" in (root/"A.JPG").read_bytes()
-        assert b"2026-07-21T12:35:30" in (root/"B.MP4").read_bytes()
-    else:
-        assert result["rolled_back"]==1
+    assert result["blocked"]==1 and result["rolled_back"]==result["completed"]==0,result
+    assert bytes_before_after()==before and journals[0].read_bytes()==record
+    if mode in {"after_backup","after_first_replacement","after_second_backup","after_all_swaps"}:
+        from app.metadata_scoped_recovery import recover
+        assert recover(ws) is True
         assert (root/"A.JPG").read_bytes()==b"photo"
         assert (root/"B.MP4").read_bytes()==b"video"
-    assert recover_metadata_swaps(metadata_root)["completed"]==0
+        assert not journals[0].exists()
+        assert_no_pending_swaps(metadata_root)
+    else:
+        # A database-committed result cannot be rolled back as precommit.
+        # Without a different exact original outcome proof the old F14 lease
+        # and journal must remain, never be dismissed as cleanup debris.
+        from app.metadata_scoped_recovery import recover
+        with pytest.raises(Exception):
+            recover(ws)
+        assert bytes_before_after()==before and journals[0].read_bytes()==record
+        with pytest.raises(Exception):
+            assert_no_pending_swaps(metadata_root)
 
 
 def _seed_reintegration(tmp_path):
@@ -346,19 +362,32 @@ def test_0500_reintegration_survives_swap_and_db_commit_crashes(tmp_path,mode):
     db,ws,source,family_id=_seed_reintegration(tmp_path)
     _child(db,ws,_child_reintegrate(mode,family_id))
     metadata_root=storage_paths(ws)["metadata_root"]
-    result=recover_metadata_swaps(metadata_root,allowed_databases={db})
-    assert result["blocked"]==0,result
+    journals=list((metadata_root/".swap-journals").glob("*.json"))
+    assert len(journals)==1
     destination=ws/"SD-Kartensicherungen"/"2026/2026-07-20/20260720_141530_Test.JPG"
-    with database_connection(db) as conn:
-        file=conn.execute("SELECT current_relative_path FROM files WHERE family_id=?",(family_id,)).fetchone()
-        assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+    def file_bytes():
+        return {str(p):p.read_bytes() for p in (source, destination)
+                if p.is_file()}
+    before=file_bytes()
+    journal_bytes=journals[0].read_bytes()
+    refused=recover_metadata_swaps(metadata_root,allowed_databases={db})
+    assert refused["blocked"]==1 and refused["completed"]==refused["rolled_back"]==0,refused
+    assert file_bytes()==before and journals[0].read_bytes()==journal_bytes
     if mode in {"after_backup","after_incoming","after_destination"}:
-        assert result["rolled_back"]==1
-        assert source.read_bytes()==OLD
-        assert not destination.exists()
+        from app.metadata_scoped_recovery import recover
+        assert recover(ws) is True
+        assert source.read_bytes()==OLD and not destination.exists()
+        assert not journals[0].exists()
+        with database_connection(db) as conn:
+            file=conn.execute("SELECT current_relative_path FROM files WHERE family_id=?",(family_id,)).fetchone()
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
         assert file["current_relative_path"]=="Ohne_Datum/IMG_0001.JPG"
     else:
-        assert result["completed"]==1
-        assert not source.exists()
-        assert destination.read_bytes()==OLD+b"|normalized"
-        assert file["current_relative_path"]=="2026/2026-07-20/20260720_141530_Test.JPG"
+        from app.metadata_scoped_recovery import recover
+        with pytest.raises(Exception):
+            recover(ws)
+        assert file_bytes()==before and journals[0].read_bytes()==journal_bytes
+        with database_connection(db) as conn:
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+        with pytest.raises(Exception):
+            assert_no_pending_swaps(metadata_root)
