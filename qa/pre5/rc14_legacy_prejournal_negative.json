@@ -1,0 +1,4 @@
+[
+  "tests/backend/test_rc14_legacy_prejournal_verifier.py::test_rc14_first_check_distinguishes_actual_old_offset_failure",
+  "tests/backend/test_rc14_legacy_prejournal_verifier.py::test_rc14_negative_proof_refuses_foreign_media_and_unreliable_exiftool"
+]
