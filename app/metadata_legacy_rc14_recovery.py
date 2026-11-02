@@ -35,6 +35,64 @@ def _file_identity(path, expected_sha, expected_size):
     return (a.st_dev,a.st_ino,digest)
 
 
+def _rc14_original_preflight_refused(path, stored):
+    """Evaluate exactly RC14's originally released pre-staging EXIF check.
+
+    The current verification is intentionally stricter (invalid dates are
+    mismatches). A retrospective *negative* certificate cannot rely on that
+    extra strictness: a date ignored by RC14 must remain ignored here too.
+    """
+    from datetime import datetime
+    import re
+    import subprocess
+    from app.metadata import LOCAL_TIMEZONE, parse_exiftool_datetime, classify_media
+
+    command=[
+        "exiftool","-json","-G0:1","-a","-s",
+        "-DateTimeOriginal","-CreateDate","-ModifyDate","-CreationDate",
+        "-OffsetTimeOriginal","-OffsetTimeDigitized","-OffsetTime",str(path),
+    ]
+    result=subprocess.run(command,check=False,capture_output=True,text=True)
+    if result.returncode not in {0,1}:
+        _refuse("original_exiftool_unavailable")
+    try:
+        data=json.loads(result.stdout)
+    except json.JSONDecodeError:
+        _refuse("original_exiftool_invalid_json")
+    if not data or not isinstance(data[0],dict):
+        _refuse("original_exiftool_no_metadata")
+    expected_second=stored[:19]
+    expected_time=datetime.fromisoformat(stored)
+    if expected_time.tzinfo is None:
+        expected_time=expected_time.replace(tzinfo=LOCAL_TIMEZONE)
+    offsets={str(key).rsplit(":",1)[-1]:str(value)
+             for key,value in data[0].items() if str(key).startswith("EXIF:")}
+    coupled={"DateTimeOriginal":"OffsetTimeOriginal",
+             "CreateDate":"OffsetTimeDigitized","ModifyDate":"OffsetTime"}
+    matches=0
+    mismatches=0
+    video=classify_media(path)=="video"
+    for tag,raw in data[0].items():
+        if tag=="SourceFile" or raw is None:
+            continue
+        name=str(tag).rsplit(":",1)[-1]
+        if name not in {"DateTimeOriginal","CreateDate","ModifyDate","CreationDate"}:
+            continue
+        raw_text=str(raw)
+        if str(tag).startswith("EXIF:") and not re.search(r"(?:Z|[+-]\\d{2}:\\d{2})$",raw_text):
+            raw_text+=offsets.get(coupled.get(name,""),"")
+        parsed=parse_exiftool_datetime(raw_text)
+        if parsed is None:
+            continue  # Precisely RC14's original invalid-date behavior.
+        if (parsed.replace(tzinfo=None).isoformat(timespec="seconds")[:19]==expected_second
+            if video else parsed==expected_time):
+            matches+=1
+        else:
+            mismatches+=1
+    # Exact RC14 failure predicate, prior to its first copy/rename/journal.
+    return not matches or (bool(mismatches) and not video)
+
+
 def qualify(record, owner, parent, metadata):
     from app.metadata_abort_recovery import _binding
     from app.import_recovery import _catalogue_identity
@@ -163,14 +221,10 @@ def qualify(record, owner, parent, metadata):
             # creation, SQL updates, or any original-file rename. If it
             # succeeds for ANY candidate, the legacy lease may represent a
             # later state, so the unscoped orphan must remain fenced.
-            try:
-                verify_metadata_datetime(path,stored)
-            except MetadataCorrectionError as error:
-                if not str(error).startswith(
-                    "Die geschriebenen Aufnahmeinformationen konnten nicht bestätigt werden."):
-                    _refuse("unexpected_original_preflight_failure")
-            else:
+            if not _rc14_original_preflight_refused(path,stored):
                 _refuse("original_preflight_could_have_passed")
+            if _file_identity(path,sha,int(row["size_bytes"]))!=original:
+                _refuse("source_changed_during_original_preflight")
             proof.append([str(path),*original])
     if catalogue!=_catalogue_identity(db):
         _refuse("catalogue_identity_changed")
