@@ -1,0 +1,50 @@
+name: Complete existing Bibliothekar v1.0.0-pre.5 release only
+on:
+  push:
+    branches: [codex/complete-1.0.0-pre.5]
+    paths: ['.github/workflows/complete-pre5.yml']
+permissions:
+  contents: write
+  packages: read
+  actions: read
+concurrency:
+  group: bibliothekar-v1.0.0-pre.5-publication
+  cancel-in-progress: false
+jobs:
+  complete-pre5:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/complete-1.0.0-pre.5' && github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre5-complete-${{ github.run_id }}-${{ github.run_attempt }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      APPROVE_COMPLETE: COMPLETE v1.0.0-pre.5
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONOPTIMIZE: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre5-complete-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Qualify immutable original evidence and complete only missing prerelease
+        run: |
+          set -euo pipefail
+          umask 077
+          WORK="$(mktemp -d /tmp/bibliothekar-pre5-complete.XXXXXXXX)"
+          printf 'WORK=%s\n' "$WORK" >> "$GITHUB_ENV"
+          export WORK
+          python3 docs/pre5/release/complete.py
+      - name: Preserve completion evidence including failure state
+        if: always() && env.WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre5-completion-evidence
+          retention-days: 30
+          path: |
+            ${{ env.WORK }}/completed-assets/
+            ${{ env.WORK }}/completion-result.json
+            ${{ env.WORK }}/created-draft.json
