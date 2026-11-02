@@ -91,6 +91,17 @@ jobs:
           set -e
           if test -f "$QA_WORK/fixture/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/fixture/f14-qa/targets/results/result.xml" "$QA_WORK/backend-fixture.xml"; fi
           exit "$RESULT"
+      - name: Recheck frozen RC14 negative prejournal and inode contracts
+        if: contains(github.event.head_commit.message, '[pre5-legacy]')
+        run: |
+          set -euo pipefail
+          mkdir "$QA_WORK/legacy-prejournal"
+          set +e
+          RUNNER_TEMP="$QA_WORK/legacy-prejournal" "$QA_WORK/venv/bin/python" qa/f14/linux/run_linux.py "$PWD" targets qa/pre5/rc14_legacy_prejournal_negative.json 2>&1 | tee "$QA_WORK/legacy-prejournal.log"
+          RESULT=${PIPESTATUS[0]}
+          set -e
+          if test -f "$QA_WORK/legacy-prejournal/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/legacy-prejournal/f14-qa/targets/results/result.xml" "$QA_WORK/legacy-prejournal.xml"; fi
+          exit "$RESULT"
       - name: Recheck seven complete-backend metadata crash and secondary-library nodes
         if: contains(github.event.head_commit.message, '[pre5-full-seven]')
         run: |
