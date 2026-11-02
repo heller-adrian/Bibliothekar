@@ -115,6 +115,17 @@ jobs:
           set -e
           if test -f "$QA_WORK/historical-seven/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/historical-seven/f14-qa/targets/results/result.xml" "$QA_WORK/backend-seven.xml"; fi
           exit "$RESULT"
+      - name: Reproduce eight remaining full-backend contract failures
+        if: contains(github.event.head_commit.message, '[pre5-backend-cases]')
+        run: |
+          set -euo pipefail
+          mkdir "$QA_WORK/backend-new-eight"
+          set +e
+          RUNNER_TEMP="$QA_WORK/backend-new-eight" "$QA_WORK/venv/bin/python" qa/f14/linux/run_linux.py "$PWD" targets qa/pre5/backend_full_new_failures.json 2>&1 | tee "$QA_WORK/backend-new-eight.log"
+          RESULT=${PIPESTATUS[0]}
+          set -e
+          if test -f "$QA_WORK/backend-new-eight/f14-qa/targets/results/result.xml"; then cp "$QA_WORK/backend-new-eight/f14-qa/targets/results/result.xml" "$QA_WORK/backend-new-eight.xml"; fi
+          exit "$RESULT"
       - name: Check all 147 original backend failures not covered by previous focused evidence
         if: contains(github.event.head_commit.message, '[pre5-full]')
         run: |
