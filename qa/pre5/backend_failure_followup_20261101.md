@@ -57,3 +57,7 @@ The originally failing 19-node gate completed successfully in run 41425816512 on
 ## 2026-11-02 strict original refusal codes
 
 Run 41426283357: 16/19 targeted backend cases passed; the other three failed only because an overly narrow test regex demanded `scoped_metadata_recovery_committed_or_ambiguous_effects`. Actual fail-closed reasons were `scoped_metadata_recovery_original_sql_membership_changed` in two reintegration committed-crash cases and `scoped_metadata_recovery_foreign_or_modified_swap_journal` in one completed batch case. Preserve the precise safety denials, unmodified file/journal assertions, and typed DomainStartupError; do not touch application safety or any immutable historical QA. Recheck all 19.
+
+## Nov 2: exact three typed refusal codes fixed
+
+Run 41426283357 failed only three strict test regexes, 16/19 passed. The app correctly refused unsafe committed metadata retries, but two reintegration cases used `scoped_metadata_recovery_original_sql_membership_changed` and the multiple case used `scoped_metadata_recovery_foreign_or_modified_swap_journal`, rather than the incorrectly hardcoded `scoped_metadata_recovery_committed_or_ambiguous_effects`. The test now asserts the observed exact typed denial while preserving file/journal unchanged and no app changes. Run 41427081196 subsequently passed all 19 pinned backend nodes. Launch isolated full backend partitions before revisiting the independently unresolved historical RC14 container migration.
