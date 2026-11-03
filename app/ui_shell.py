@@ -5045,6 +5045,7 @@ BIBLIOTHEKAR_JS = r"""
     if(field==="title") {
       const titles={
         placement_conflict:"File assigned to the wrong location",
+        filename_rename:"Filename changed outside Bibliothekar",
         archive_transfer_candidate:"Potential archive transfer detected",
         missing_file:"File missing from inventory",
         external_event_deleted:"Event folder deleted externally"
@@ -5053,6 +5054,11 @@ BIBLIOTHEKAR_JS = r"""
     }
     const observed=String(details.observed_relative_path||row.relative_path||"");
     const expected=String(details.expected_relative_path||"");
+    if(kind==="filename_rename"){
+      return "A known file was renamed externally. Confirm whether to accept the filename or restore it."
+        +(expected ? " Previous: "+expected+"." : "")
+        +(observed ? " Current: "+observed+"." : "");
+    }
     if(kind==="placement_conflict"){
       return "This file is in a location inconsistent with its event assignment."
         +(observed ? " Actual: "+observed+"." : "")
@@ -5083,6 +5089,20 @@ BIBLIOTHEKAR_JS = r"""
         bkEscapeNotice(row.details.event_id) +
         '">Archiv prüfen</button>'
       ) : "";
+      const renameButtons = required && row.kind === "filename_rename"
+        ? (row.root_kind === "shared_workspace"
+          ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">' +
+            '<button type="button" class="bk-positive-action" data-bk-rename-accept="' +
+               bkEscapeNotice(row.id) + '">' +
+               bk0511NoticeLanguage("Umbenennung übernehmen","Accept rename") + '</button>' +
+            '<button type="button" data-bk-rename-undo="' + bkEscapeNotice(row.id) + '">' +
+               bk0511NoticeLanguage("Rückgängig machen","Undo rename") + '</button></div>'
+          : '<p style="margin-top:8px;color:var(--bk-muted)">' +
+            bk0511NoticeLanguage(
+              "Archiv schreibgeschützt: bitte Dateinamen manuell korrigieren und Bestand erneut prüfen.",
+              "Archive is read-only: correct the filename manually, then rescan."
+            ) + '</p>')
+        : "";
       return (
         '<div style="padding:10px 0;border-bottom:1px solid var(--bk-line)">' +
         '<strong style="display:block">' +
@@ -5099,6 +5119,7 @@ BIBLIOTHEKAR_JS = r"""
         (archiveButton
           ? '<div style="margin-top:8px">' + archiveButton + '</div>'
           : '') +
+        renameButtons +
         '</div>'
       );
     }).join("");
@@ -5181,6 +5202,35 @@ BIBLIOTHEKAR_JS = r"""
         )
         : ""
     );
+
+    // File renames stay unresolved until the user chooses one of these two
+    // explicit actions. Neither the inventory scan nor acknowledgement adopts.
+    for (const control of externalChangeList.querySelectorAll(
+      "[data-bk-rename-accept], [data-bk-rename-undo]"
+    )) {
+      control.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        const accept = button.hasAttribute("data-bk-rename-accept");
+        const noticeId = button.getAttribute(
+          accept ? "data-bk-rename-accept" : "data-bk-rename-undo"
+        );
+        button.disabled = true;
+        try {
+          const endpoint = accept ? "accept-rename" : "repair";
+          const response = await fetch(
+            "/api/external-change-notices/" + encodeURIComponent(noticeId) + "/" + endpoint,
+            {method:"POST"}
+          );
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.detail || "Dateiumbenennung konnte nicht geprüft werden.");
+          await refreshTasks();
+          await bkRenderExternalChanges({forceRequired:true});
+        } catch (error) {
+          button.disabled = false;
+          externalChangeLead.textContent = String(error.message || error);
+        }
+      });
+    }
 
     const forcedRepair = displayedRequired.some(
       row => Boolean(row.details?.force_repair)
