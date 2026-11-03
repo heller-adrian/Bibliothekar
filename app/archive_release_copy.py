@@ -47,43 +47,78 @@ def create_archive_release_copies(
     copied_rows: list[tuple[str, int, int, str]] = []
     results: list[dict[str, Any]] = []
 
-    try:
-        for row in rows:
-            expected_size = int(row.get("expected_size_bytes") or 0)
-            expected_sha = str(row.get("expected_sha256") or "").strip()
-            if not expected_sha:
-                raise ArchiveReleaseStockError(
-                    "Gespeicherte SHA-256-Summe einer freigewordenen Archivdatei fehlt."
-                )
+    def refused(code: str, detail: str) -> dict[str, Any]:
+        """A proven read-only precondition failure is NOT an interrupted write.
 
-            source = _safe_archive_path(archive_root, row.get("old_path"))
+        Return normally from the durable root operation so no orphan lease is
+        created for an expected collision or an archive source discrepancy.
+        """
+        return {
+            "complete": False, "copied_file_count": 0,
+            "file_count": len(rows), "status": "needs_review",
+            "error_code": code, "message": detail,
+            "files": [],
+        }
+
+    # Phase 1: preflight the WHOLE frozen set before writing a single byte.
+    # Idempotent retries are allowed ONLY for paths already recorded as
+    # verified by this exact change request. A merely byte-identical foreign
+    # file does not prove ownership and must not become a cleanup candidate.
+    inspected: list[tuple[dict[str, Any], Path, Path, int, str, bool]] = []
+    for row in rows:
+        expected_size = int(row.get("expected_size_bytes") or 0)
+        expected_sha = str(row.get("expected_sha256") or "").strip()
+        if not expected_sha:
+            return refused("archive_release_missing_sha256", "A saved source SHA-256 is missing.")
+        release_rel = str(row.get("workspace_release_path") or "").strip()
+        if not release_rel:
+            return refused("archive_release_path_missing", "The SSD return path has not been prepared.")
+        source = _safe_archive_path(archive_root, row.get("old_path"))
+        target = _safe_workspace_path(workspace_path, release_rel)
+        recorded = str(row.get("verification_status") or "") in {"release_copy_verified", "verified"}
+        if target.exists() or target.is_symlink():
+            if (not recorded or not target.is_file() or target.is_symlink()
+                    or (expected_size and int(target.stat().st_size) != expected_size)
+                    or _sha256_file(target) != expected_sha):
+                return refused(
+                    "archive_release_target_exists",
+                    "The SSD return path is occupied or has no verified ownership: " + release_rel,
+                )
+        elif recorded:
+            return refused(
+                "archive_release_verified_copy_missing",
+                "A previously verified SSD copy is missing: " + release_rel,
+            )
+        if not recorded or source.exists():
             if not source.is_file() or source.is_symlink():
-                raise ArchiveReleaseStockError(
-                    "Das geplante Archivoriginal ist nicht mehr als reguläre Datei vorhanden: "
-                    + str(row.get("old_path") or "")
+                return refused(
+                    "archive_release_source_missing",
+                    "The planned archive original is missing: " + str(row.get("old_path") or ""),
                 )
-            source_size = int(source.stat().st_size)
-            if expected_size and source_size != expected_size:
-                raise ArchiveReleaseStockError(
-                    "Das Archivoriginal hat seit der Planung eine andere Dateigröße: "
-                    + str(row.get("old_path") or "")
+            if ((expected_size and int(source.stat().st_size) != expected_size)
+                    or _sha256_file(source) != expected_sha):
+                return refused(
+                    "archive_release_source_mismatch",
+                    "The planned archive original has changed: " + str(row.get("old_path") or ""),
                 )
-            if _sha256_file(source) != expected_sha:
-                raise ArchiveReleaseStockError(
-                    "Das Archivoriginal hat sich seit der Planung verändert: "
-                    + str(row.get("old_path") or "")
-                )
+        inspected.append((row, source, target, expected_size, expected_sha, recorded))
 
-            release_rel = str(row.get("workspace_release_path") or "").strip()
-            if not release_rel:
-                raise ArchiveReleaseStockError(
-                    "Der SSD-Rückkehrpfad wurde noch nicht vorbereitet."
-                )
-            target = _safe_workspace_path(workspace_path, release_rel)
-            if target.exists() or target.is_symlink():
-                raise ArchiveReleaseStockError(
-                    "Am SSD-Rückkehrpfad existiert bereits ein Eintrag: " + release_rel
-                )
+    try:
+        for row, source, target, expected_size, expected_sha, recorded in inspected:
+            if recorded:
+                results.append({
+                    "review_kind": row["review_kind"], "id": int(row["id"]),
+                    "family_id": row.get("family_id"),
+                    "old_path": row.get("old_path"),
+                    "workspace_release_path": row.get("workspace_release_path"),
+                    "status": "release_copy_verified",
+                })
+                continue
+            # A target could appear after preflight. This is a race / unknown
+            # owner, not authority to overwrite it; the durable lease stays
+            # unresolved unless the original operation can prove rollback.
+
+            release_rel = str(row["workspace_release_path"])
             validate_active_roots()
             target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -148,8 +183,8 @@ def create_archive_release_copies(
 
     return {
         "complete": True,
-        "copied_file_count": len(results),
+        "copied_file_count": len(copied_rows),
         "verified_file_count": len(results),
-        "file_count": len(results),
+        "file_count": len(rows),
         "files": results,
     }
