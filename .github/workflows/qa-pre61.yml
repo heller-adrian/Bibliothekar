@@ -30,6 +30,7 @@ jobs:
           "$WORK/venv/bin/python" -m compileall -q app
           "$WORK/venv/bin/python" -m pytest -q \
             tests/backend/test_pre61_millisecond_burst.py \
+            tests/backend/test_pre61_manual_rename.py \
             tests/backend/test_pre6_truenas_acceptance.py \
             tests/backend/test_0501_external_event_deletion.py \
             2>&1 | tee "$WORK/pytest.log"
