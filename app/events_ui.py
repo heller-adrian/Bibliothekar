@@ -5661,10 +5661,10 @@ EVENTS_HTML = r"""<!doctype html>
            </div>` : "";
       const preview=`
         <div class="card">
-          <strong>Erkannte Änderungen</strong>
+          <strong>${bk0511EventLabel("Erkannte Änderungen","Detected changes")}</strong>
           ${changeDetails}
         </div>
-        ${blockers.length?`<div class="error-box" style="margin-top:12px"><strong>Diese Änderung kann noch nicht übernommen werden.</strong>${blockers.map(x=>`<div style="margin-top:6px">${escapeHtml(x)}</div>`).join("")}</div>`:""}
+        ${blockers.length?`<div class="error-box" style="margin-top:12px"><strong>${bk0511EventLabel("Diese Änderung kann noch nicht übernommen werden.","This change cannot be accepted yet.")}</strong>${blockers.map(x=>`<div style="margin-top:6px">${escapeHtml(x)}</div>`).join("")}</div>`:""}
         ${change.root_kind==="camera_archive"?guidedChoice:""}
         ${inputControl}`;
             const bindGuidedEdit=()=>{
