@@ -1,3 +1,13 @@
+## 1.0.0 – Erste stabile Veröffentlichung
+
+- Stabile Version aus dem praktisch abgenommenen Stand `1.0.0-pre.7.2`, ohne neue Foto- oder Archivfunktionen.
+- Sichere Kamera-/SD-Karten-Sicherungen, Dateifamilien, Metadatenkorrektur, Ereigniszuordnung, gemeinsamer Arbeitsbereich und kontrollierte Archivierung.
+- Manuelle Dateiumbenennungen und Änderungen angewendeter beziehungsweise archivierter Ereignisse lassen sich mit ausdrücklichem Übernehmen/Rückgängigmachen behandeln.
+- Archivänderungsassistent mit geprüfter Schrittfolge, Wiederanlauf-/Recovery-Prüfungen und read-only Archivgrenzen.
+- Der Name manuell umbenannter „Ohne Ereignis“-Sammlungen bleibt auch bei späterer Archivplanung maßgeblich; der Kopierknopf hat einen browsergeeigneten Fallback.
+- Die separate optionale SD-/USB-Geräteintegration benötigt weiterhin erhöhte Containerrechte; die standardmäßige Ordner-/NAS-Quellen-Variante nicht.
+- Öffentlichkeitsorientierte README und reproduzierbares TrueNAS-Compose-Beispiel aktualisiert. Aufnahme in den offiziellen TrueNAS-Katalog steht noch aus.
+
 ## 1.0.0-rc.13 – Quellenhistorie und korrigierte Bedienoberfläche (28.10.2026)
 
 - Bestätigte Einzeldateiverluste ändern die ursprüngliche Quellfamilie nicht.
