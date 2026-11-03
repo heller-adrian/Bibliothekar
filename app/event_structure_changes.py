@@ -1419,6 +1419,11 @@ def detect_event_structure_change(
                 str(prior.get("signature") or "") == snapshot["signature"]
                 and prior.get("semantic_change_candidates") == snapshot.get("semantic_change_candidates")
             ):
+                # Navigation is not a physical operation. Preserve the user's
+                # explicit Accept/Undo decision across subsequent inventories
+                # as long as this is still the same observed change.
+                if prior.get("review_mode") in {"accept", "undo"}:
+                    snapshot["review_mode"] = prior["review_mode"]
                 # The already accepted physical IST path replaces files.current_relative_path.
                 # Never erase the first captured original locations on a second scan.
                 for fid, previous_path in (prior.get("restore_original_paths") or {}).items():
