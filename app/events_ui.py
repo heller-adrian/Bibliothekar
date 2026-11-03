@@ -5924,6 +5924,75 @@ EVENTS_HTML = r"""<!doctype html>
           });
         });
       };
+      // pre.7.2: Trusted user click, real modal focus, truthful result labels.
+      // Returned values distinguish a resolved modern write from a legacy
+      // execCommand request, which cannot prove the OS clipboard contents.
+      async function bkPre72CopyArchiveName({text,dialog,feedback,manual,manualField}){
+        const name=String(text||"");
+        if(!name) return "empty";
+        if(manual) manual.hidden=true;
+        if(feedback) feedback.textContent="";
+        if(window.isSecureContext && navigator.clipboard?.writeText){
+          try{
+            // Invoke synchronously in the click's user-activation turn.
+            await navigator.clipboard.writeText(name);
+            if(feedback) feedback.textContent=bk0511EventLabel(
+              "In Zwischenablage kopiert.","Copied to clipboard."
+            );
+            return "modern-confirmed";
+          }catch(_){
+            // Browsers may deny clipboard permissions even over HTTPS.
+            // We continue to the safe fallback without asserting success.
+          }
+        }
+        // Browser fallback: the old pre.7.1 field was attached to body,
+        // OUTSIDE the showModal() top-layer dialog and therefore inert.
+        // Add this temporary editable textarea to the LIVE modal instead.
+        let requested=false;
+        if(dialog?.open && dialog.contains(feedback)){
+          const field=document.createElement("textarea");
+          field.value=name;
+          field.setAttribute("aria-hidden","true");
+          field.style.cssText="position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;z-index:-1";
+          dialog.appendChild(field);
+          try{
+            field.focus({preventScroll:true});
+            field.select();
+            field.setSelectionRange(0,field.value.length);
+            if(document.activeElement===field
+                && field.selectionStart===0
+                && field.selectionEnd===name.length){
+              requested=Boolean(document.execCommand("copy"));
+            }
+          }catch(_){
+            requested=false;
+          }finally{
+            field.remove();
+          }
+        }
+        if(requested){
+          // execCommand(true) is NOT evidence that Windows/macOS actually
+          // accepted the clipboard data. Never show "Copied" here.
+          if(feedback) feedback.textContent=bk0511EventLabel(
+            "Kopierbefehl gesendet. Bitte durch Einfügen prüfen.",
+            "Copy requested. Paste to confirm."
+          );
+          return "legacy-unverified";
+        }
+        if(manual) manual.hidden=false;
+        if(manualField){
+          try{
+            manualField.focus({preventScroll:true});
+            manualField.select();
+            manualField.setSelectionRange(0,name.length);
+          }catch(_){}
+        }
+        if(feedback) feedback.textContent=bk0511EventLabel(
+          "Automatisches Kopieren nicht möglich. Bitte den markierten Namen manuell kopieren.",
+          "Automatic copy unavailable. Please copy the selected name manually."
+        );
+        return "manual";
+      }
       if(archiveMode==="undo"){
         const originalRoot=(d.root_rename||{}).old_folder||"";
         const originalRootPath=(d.root_rename||{}).old_path||"";
@@ -5958,9 +6027,16 @@ EVENTS_HTML = r"""<!doctype html>
             ${originalRoot?`<div style="margin:10px 0"><strong>${bk0511EventLabel(
               "Ursprünglicher Ordnername","Original folder name")}</strong>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                <code id="structure-archive-original-name">${escapeHtml(originalRoot)}</code>
+                <code id="structure-archive-original-name" style="user-select:text;-webkit-user-select:text">${escapeHtml(originalRoot)}</code>
                 <button type="button" class="plan-button" style="padding:4px 9px;min-height:28px;font-size:.82rem" id="structure-archive-copy-name">${bk0511EventLabel("Kopieren","Copy")}</button>
-                <span id="structure-archive-copy-feedback" aria-live="polite" class="muted"></span>
+                <span id="structure-archive-copy-feedback" role="status" aria-live="polite" class="muted"></span>
+              </div>
+              <div id="structure-archive-manual-copy" hidden style="margin-top:9px">
+                <label for="structure-archive-manual-copy-field" class="muted">${bk0511EventLabel("Zum manuellen Kopieren den Namen markieren:","Select the name to copy manually:")}</label>
+                <input id="structure-archive-manual-copy-field" type="text" readonly
+                  autocorrect="off" spellcheck="false" autocomplete="off"
+                  value="${escapeHtml(originalRoot)}"
+                  style="box-sizing:border-box;display:block;max-width:100%;width:min(100%,26rem);margin-top:4px;padding:8px;user-select:text;-webkit-user-select:text"/>
               </div></div>`:""}
             ${list}
             ${(d.directory_removed||[]).length?`<p>${bk0511EventLabel(
@@ -5980,29 +6056,15 @@ EVENTS_HTML = r"""<!doctype html>
         attachArchiveMode();
         document.getElementById("structure-archive-copy-name")?.addEventListener("click",async()=>{
           const feedback=document.getElementById("structure-archive-copy-feedback");
-          let copied=false;
-          // Firefox/macOS: use the synchronous, user-gesture-bound fallback
-          // before crossing an await boundary. Never disable the Copy button.
-          const field=document.createElement("textarea");
-          field.value=originalRoot;
-          field.setAttribute("readonly","");
-          field.setAttribute("aria-hidden","true");
-          field.style.cssText="position:fixed;left:-10000px;top:0;opacity:0";
-          document.body.appendChild(field);
-          try{
-            field.focus();
-            field.select();
-            field.setSelectionRange(0,field.value.length);
-            copied=Boolean(document.execCommand("copy"));
-          }catch(_){}
-          finally{field.remove();}
-          if(!copied && navigator.clipboard?.writeText){
-            try{await navigator.clipboard.writeText(originalRoot);copied=true;}catch(_){}
-          }
-          if(feedback) feedback.textContent=copied
-            ? bk0511EventLabel("In Zwischenablage kopiert.","Copied to clipboard.")
-            : bk0511EventLabel("Kopieren nicht möglich. Bitte den Namen direkt markieren.",
-              "Copy failed. Please select the name manually.");
+          const manual=document.getElementById("structure-archive-manual-copy");
+          const manualField=document.getElementById("structure-archive-manual-copy-field");
+          await bkPre72CopyArchiveName({
+            text:originalRoot,
+            dialog:structureChangeDialog,
+            feedback,
+            manual,
+            manualField,
+          });
         });
         document.getElementById("structure-archive-undo-verify")?.addEventListener("click",async(event)=>{
           const button=event.currentTarget;
