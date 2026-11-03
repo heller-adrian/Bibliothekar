@@ -1732,6 +1732,9 @@ def build_event_sort_plan(
             blockers.append({
                 "code": "target_exists",
                 "file_id": file_id,
+                "source_relative_path": str(source_relative),
+                "destination_relative_path": str(destination_relative),
+                "duplicate_content_verified": False,
                 "message": (
                     "Am Ziel existiert bereits ein anderer Eintrag: "
                     + str(destination_relative)
@@ -2622,8 +2625,15 @@ def build_event_sort_plan(
     duplicate_destinations.sort(key=lambda paths: paths[0].casefold())
 
     for paths in duplicate_destinations:
+        conflicting = [entry for entry in [*entries, *asset_entries]
+                       if str(entry['destination_relative_path']).casefold() == paths[0].casefold()]
         blockers.append({
             "code": "duplicate_destination",
+            "sources": [{k: entry.get(k) for k in (
+                'file_id', 'family_id', 'source_relative_path', 'destination_relative_path',
+                'stored_sha256', 'expected_size_bytes', 'sha256_verified_now')}
+                for entry in conflicting],
+            "duplicate_content_verified": False,
             "message": (
                 "Mehrere Quelldateien würden denselben Zielpfad verwenden "
                 "(Groß-/Kleinschreibung zählt auf dem NAS nicht als Unterschied): "
