@@ -29,7 +29,7 @@ jobs:
           WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-stable100.XXXXXXXX")"
           echo "WORK=$WORK" >> "$GITHUB_ENV"
           python3 -m venv "$WORK/venv"
-          "$WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
+          "$WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2
           "$WORK/venv/bin/python" - <<'PY'
           from app import __version__
           assert __version__ == "1.0.0", __version__
