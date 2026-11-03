@@ -3091,7 +3091,7 @@ def _event_payload_with_folder_layout(
                 now=datetime.now(timezone.utc).isoformat(),
             )
             event_row = connection.execute(
-                """SELECT folder_naming_json,folder_name,event_kind,name
+                """SELECT folder_naming_json,folder_name,event_kind,name,start_datetime
                    FROM events WHERE id=?""",
                 (event_id,),
             ).fetchone()
@@ -3136,6 +3136,13 @@ def _event_payload_with_folder_layout(
                 naming = naming_from_library_settings(
                     current_library_context().settings
                 )
+            if event_row is not None and str(event_row["event_kind"] or "") == "no_event":
+                from app.event_naming import protect_existing_no_event_folder
+                naming = protect_existing_no_event_folder(
+                    folder_name=event_row["folder_name"],
+                    month_key=str(event_row["start_datetime"] or "")[:7],
+                    naming=naming,
+                )
         else:
             state = get_global_event_folder_layout(connection)
             naming = naming_from_library_settings(
@@ -3169,12 +3176,21 @@ def _naming_snapshot_from_event_context(context: dict[str, Any]) -> dict[str, An
         ):
             result["subevent_prefix_mode"] = "legacy_datetime_range"
             result["subevent_prefix_enabled"] = True
-        return result
-    return legacy_naming_for_existing_event(
-        event_kind=event.get("event_kind"),
-        folder_name=event.get("folder_name"),
-        event_name=event.get("name"),
-    )
+        naming = result
+    else:
+        naming = legacy_naming_for_existing_event(
+            event_kind=event.get("event_kind"),
+            folder_name=event.get("folder_name"),
+            event_name=event.get("name"),
+        )
+    if str(event.get("event_kind") or "") == "no_event":
+        from app.event_naming import protect_existing_no_event_folder
+        naming = protect_existing_no_event_folder(
+            folder_name=event.get("folder_name"),
+            month_key=str(event.get("start_datetime") or "")[:7],
+            naming=naming,
+        )
+    return naming
 
 
 def _canonical_membership_preflight(
