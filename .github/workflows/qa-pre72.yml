@@ -53,8 +53,8 @@ jobs:
             tests/backend/test_0191_no_event_unified.py \
             tests/backend/test_0194_no_event_segment_patch.py \
             tests/backend/test_0271_archive_assistant.py \
-            tests/backend/test_pre72_archive_wizard_recovery.py \
-            tests/backend/test_pre72_orphan_recovery_integration.py \
+            tests/backend/test_pre71_archive_wizard_recovery.py \
+            tests/backend/test_pre71_orphan_recovery_integration.py \
             tests/backend/test_0271_archive_release_stock.py \
             tests/backend/test_0477_release_copy_discard.py \
             tests/backend/test_pre62_rename_structure.py \
