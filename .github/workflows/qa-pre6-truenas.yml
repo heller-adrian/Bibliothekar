@@ -5,6 +5,7 @@ on:
     paths-ignore: ['docs/**', 'FORTSETZUNG.md']
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: bibliothekar-pre6-targeted
   cancel-in-progress: false
@@ -27,27 +28,28 @@ jobs:
           set -euo pipefail
           WORK="$(mktemp -d /tmp/bibliothekar-pre6.XXXXXXXX)"
           printf 'WORK=%s\n' "$WORK" >> "$GITHUB_ENV"
+          export WORK
           python3 -m venv "$WORK/venv"
           "$WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
-          set +e
-          RUNNER_TEMP="$WORK" "$WORK/venv/bin/python" qa/f14/linux/run_linux.py "$PWD" targets qa/pre6/targets.json 2>&1 | tee "$WORK/targeted.log"
-          RESULT=${PIPESTATUS[0]}
-          set -e
-          exit "$RESULT"
+          GH_TOKEN="${{ secrets.GITHUB_TOKEN }}" "$WORK/venv/bin/python" qa/pre6/reuse_backend.py 2>&1 | tee "$WORK/targeted.log"
       - name: Actual UI functions in offline Chromium German English and mobile desktop
         run: |
           set -euo pipefail
           export KAMERA_CONFIG="$WORK/settings.json" KAMERA_WORKSPACE="$WORK/workspace" KAMERA_DATABASE_DIR="$WORK/database" KAMERA_REGISTRY_DATABASE="$WORK/registry.sqlite3" PYTHONPATH="$PWD"
           "$WORK/venv/bin/python" qa/pre6/export_ui.py "$WORK/ui.json"
           npm install --prefix "$WORK/browser-tools" playwright@1.62.1
-          PLAYWRIGHT_MODULE="$WORK/browser-tools/node_modules/playwright" node qa/pre6/browser.cjs "$WORK/ui.json" "$WORK/browser" 2>&1 | tee "$WORK/browser.log"
+          mkdir "$WORK/browser"
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,size=256m,mode=1777 \
+            -v "$PWD/qa:/qa:ro" -v "$WORK:/evidence" \
+            -e NODE_PATH=/evidence/browser-tools/node_modules -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            mcr.microsoft.com/playwright:v1.62.1-noble \
+            node /qa/pre6/browser.cjs /evidence/ui.json /evidence/browser 2>&1 | tee "$WORK/browser.log"
       - name: Unpublished image and existing real supervisor correction admission restart and fences
         run: |
           set -euo pipefail
           IMAGE="bibliothekar-pre6-qa:${GITHUB_RUN_ID}"
           docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE" . 2>&1 | tee "$WORK/build.log"
-          mkdir "$WORK/runtime"
-          IMAGE="$IMAGE" RUNNER_TEMP="$WORK/runtime" python3 qa/pre5/container.py 2>&1 | tee "$WORK/container.log"
+          IMAGE="$IMAGE" RUNNER_TEMP="$WORK" python3 qa/pre5/container.py 2>&1 | tee "$WORK/container.log"
       - name: Preserve exact source and complete targeted evidence
         if: always() && env.WORK != ''
         run: |
@@ -70,5 +72,9 @@ jobs:
             ${{ env.WORK }}/*.log
             ${{ env.WORK }}/f14-qa/targets/results/
             ${{ env.WORK }}/browser/
-            ${{ env.WORK }}/runtime/*.json
-            ${{ env.WORK }}/runtime/*.log
+            ${{ env.WORK }}/BACKEND-EVIDENCE.json
+            ${{ env.WORK }}/accepted-backend.zip
+            ${{ env.WORK }}/accepted-backend/f14-qa/targets/results/
+            ${{ env.WORK }}/pre5-live.json
+            ${{ env.WORK }}/pre5-live.log
+            ${{ env.WORK }}/pre5-browser/
