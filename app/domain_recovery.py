@@ -53,7 +53,7 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
     dead=[r for r in status['reservations'] if not r['live']]
     failures={'app.trash_failure.finalize_failure','app.trash_failure.rescue_failure'}
     if not dead or not all(r['qualified'] and r['ids'].get('function') in dispatch
-            and r['kind']==('sort' if r['ids']['function'] in SORT_FUNCTIONS else 'trash' if r['ids']['function'] in failures
+            and r['kind']==('archive' if r['ids']['function']==ARCHIVE_COPY else 'sort' if r['ids']['function'] in SORT_FUNCTIONS else 'trash' if r['ids']['function'] in failures
                            or r['ids']['function'] in DELETE_FUNCTIONS
                            or r['ids']['function']==ORIGINAL_TRASH_RESTORE else 'recovery') for r in dead):
         return False
