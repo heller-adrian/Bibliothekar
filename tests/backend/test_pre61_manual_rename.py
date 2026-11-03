@@ -19,18 +19,11 @@ def setup_renamed_file(tmp_path, monkeypatch):
     db, ws, central, event, _ = seed_collection(tmp_path, monkeypatch)
     work = shared_work_root(ws)
     with database_connection(db) as c:
+        # seed_collection creates 8 applied files first, then 16 free ones.
         row = c.execute(
             "SELECT id,current_relative_path FROM files "
-            "WHERE current_relative_path LIKE '%Test%' "
-            "ORDER BY id LIMIT 1"
+            "WHERE current_root_kind='shared_workspace' ORDER BY id LIMIT 1"
         ).fetchone()
-        if row is None:
-            row = c.execute(
-                "SELECT id,current_relative_path FROM files "
-                "WHERE current_root_kind='shared_workspace' "
-                "AND current_relative_path LIKE '%/All/%' "
-                "ORDER BY id LIMIT 1"
-            ).fetchone()
         assert row, "Applied event must contain a known camera file"
         file_id = int(row["id"])
         old_rel = str(row["current_relative_path"])
@@ -70,8 +63,7 @@ def test_manual_rename_requires_explicit_accept_and_survives_scans(tmp_path, mon
         assert new.is_file() and not old.exists()
         state = run_inventory(db, ws, archive)
 
-    with database_connection(db) as c:
-        assert any(t["kind"] == "placement_conflicts" for t in list_global_tasks(db))
+    assert any(t["kind"] == "placement_conflicts" for t in list_global_tasks(db))
     result = accept_external_filename_rename(
         db, state["required"][0]["id"], library_work_root=work
     )
