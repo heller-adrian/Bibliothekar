@@ -58,3 +58,26 @@ Artefakt13197748512, SHA256 `aaac1c8b9ca0fce75553514929b8260e60b7fe83dd558bf192b
 Die vorangehenden roten Läufe bleiben als solche erhalten. Nach zwei anfänglichen fehlenden Diagnosefeldern waren weitere Abbrüche ausschließlich QA-Einbindung: fehlende libatk auf dem Runner (durch vorhandenen isolierten Playwright-Container ersetzt), fehlender PRE4_IMAGE-Eingang und veralteter Summary-Selektor. Keine Sicherheitsbedingungen entfernt. Keine Änderung am Runner-System oder seinen Rechten.
 
 **Ergebnis: gezielte Linux-Abnahme erfolgreich; noch keine vollständige Freigabe einer neuen Version.** Ausstehend sind ein vollständiger zusätzlicher HTTP-/Containerablauf genau für die neue No-Event-Erweiterung (inklusive JPEG/RAF/XMP-Familien), die vier realen NAS-Kollisionsinhalte und die native manuelle Nachabnahme von D7/E4/E6/UX. Die gesamte Backendmatrix sowie4000-Dateien-/14-iPhone-Gesamtmigration wurden für diese begrenzte Korrektur nicht erneut ausgeführt. Das ist keine Behauptung eines stabilen1.0.0-Standes. Empfehlung: Entwicklungskandidat Pre.6, Veröffentlichung nur nach gesonderter Freigabe.
+
+
+## Ergänzung 03.11.2026 – vollständige authentifizierte No-Event-HTTP-/Container-Abnahme
+
+**Ergebnis: PASS** – GitHub Actions [41612018382](https://github.com/heller-adrian/Bibliothekar/actions/runs/41612018382), Commit `cbb80e5a288052cfcff1da655e43d1e264f50fdb`. Der Anwendungscode ist unverändert gegenüber dem bereits gezielt abgenommenen Pre.6-Kandidaten; hinzugekommen sind ausschließlich `qa/pre6/no_event_http_container.py` und die isolierte Workflow-Einbindung mit Commitmarker `[pre6-http]`. Das Release-/Produktivimage wurde nicht verändert oder veröffentlicht.
+
+Der isolierte Container baut das tatsächliche Anwendungsimage lokal und startet das vollständige Supervisor-/HTTP-System mit Anmeldung, CSRF und einem ausschließlich internen Docker-Netz. Aus synthetischen NAS-Ordnerquellen werden zunächst **8 JPG-Familien** über die echte Folder-Import-API importiert, als No-Event-Ereignis angelegt und ausdrücklich angewendet. Anschließend werden **16 neue Familien mit 18 Medien** aus einem zweiten Herkunftsauftrag importiert: 16 echte, mit ExifTool datierte JPEGs, ein TIFF-basiertes synthetisches RAF und eine XMP-Begleitdatei zur letzten Familie. Eine native echte Fujifilm-RAF wird **nicht** behauptet.
+
+Die Erweiterung erfolgt ausschließlich über den authentifizierten `/api/jobs/{job_id}/no-event/assign-existing`-POST. Erfolgsnachweise:
+
+- Gespeicherte geplante Erweiterung ohne physische Dateiverschiebung
+- Zwei unabhängige vollständige `/api/workspace/summary?physical_refresh=true`-Prüfungen: keine falschen externen Verschiebungswarnungen; dieselben Quellen-/Katalog-/SHA256-Werte
+- `/api/events/{event_id}/reconcile-plan?verify_sha256=true` bereit und blockerfrei; ausdrücklich bestätigter `/api/events/{event_id}/reconcile`-POST
+- 18 von 18 Medien korrekt verschoben, vollständige Hashprüfung im tatsächlichen Zielbestand, erfolgreiches SQLite-Integrity-Check und abgeschlossenes Mutationsjournal
+- Zwei echte Container-Neustarts nach dem Anwenden, anschließend erneute vollständige physische Inventur und Hashprüfung
+- Beide gemounteten readonly-Testarchive byteidentisch
+- Keine Manipulation historischer QA-Fixtures, Pre.5-Tag, GHCR oder produktiver NAS-Daten
+
+Im Joblog: `{"status":"PASS","checks":{"old_no_event_applied_via_authenticated_http":"PASS","save_is_plan_not_physical_move":"PASS","two_physical_inventories_no_false_external_moves":"PASS","apply_18_files_16_families_two_restarts_hashes_archive_ro":"PASS"}}`.
+
+Nachweisartefakt `pre6-targeted-evidence`, ID `13219526702`, von GitHub ausgewiesener Digest `sha256:b9e4df508c2e09f5adfd42f5d87d6266b6a98b5b0c737f6fd687fee11740e15b` (Download-/ZIP-Unabhängigkeitsprüfung in diesem Durchlauf **nicht separat behauptet**).
+
+**Aktuelle Restpunkte:** Die vier tatsächlichen NAS-Zielkonflikte sind noch nicht anhand ihrer realen Bytes und Herkunftsbelege aufgelöst; native E6-Umbenennung, D7-/E4-/UX-Nachabnahme auf einem künftig installierten Pre.6-Image und die optionalen NFSv4-/Privilege-Tests bleiben offen. Das ist kein automatischer Release- oder Stable-1.0.0-Freigabebeschluss.
