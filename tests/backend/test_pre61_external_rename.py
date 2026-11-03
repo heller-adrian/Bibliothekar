@@ -134,3 +134,84 @@ def test_central_stock_rename_accepts_without_event_mutation(tmp_path, monkeypat
             "SELECT current_relative_path FROM files"
         ).fetchone()[0].endswith("/incorrect.JPG")
         assert c.execute("SELECT revision FROM events").fetchone()[0] == 1
+
+
+
+def test_real_applied_event_rename_creates_task_then_accepts(tmp_path, monkeypatch):
+    from tests.backend.test_pre6_truenas_acceptance import seed_collection
+    from app.database import database_connection, list_global_tasks
+    from app.workspace_layout import shared_work_root
+    from app.live_inventory import refresh_live_event_inventories
+    from app.event_structure_changes import detect_all_event_structure_changes
+    from app.external_changes import list_external_change_state
+
+    db, ws, central, event, _ = seed_collection(tmp_path, monkeypatch)
+    with database_connection(db) as c:
+        row = c.execute(
+            "SELECT id,current_relative_path FROM files "
+            "WHERE original_filename='OLD0.JPG'"
+        ).fetchone()
+        file_id, expected = int(row["id"]), str(row["current_relative_path"])
+    root = shared_work_root(ws)
+    old_file = root / expected
+    new_file = old_file.with_name("manually-renamed.JPG")
+    before = old_file.read_bytes()
+    old_file.rename(new_file)
+
+    refresh_live_event_inventories(db, ws, tmp_path / "unused-archive")
+    detect_all_event_structure_changes(db, ws)
+    notices = [
+        n for n in list_external_change_state(db)["required"]
+        if n["kind"] == "file_rename" and int(n["file_id"]) == file_id
+    ]
+    assert len(notices) == 1
+    assert any(t["kind"] == "placement_conflicts" for t in list_global_tasks(db))
+    with database_connection(db) as c:
+        assert c.execute(
+            "SELECT current_relative_path FROM files WHERE id=?", (file_id,)
+        ).fetchone()[0] == expected
+    external_changes.accept_external_file_rename(
+        db, notices[0]["id"], library_work_root=root
+    )
+    with database_connection(db) as c:
+        assert c.execute(
+            "SELECT current_relative_path FROM files WHERE id=?", (file_id,)
+        ).fetchone()[0].endswith("manually-renamed.JPG")
+        assert c.execute(
+            "SELECT status FROM external_change_notices WHERE id=?",
+            (notices[0]["id"],)
+        ).fetchone()[0] == "resolved"
+    assert new_file.read_bytes() == before
+
+
+def test_real_central_stock_rename_creates_task_then_undoes(tmp_path, monkeypatch):
+    from tests.backend.test_pre6_truenas_acceptance import seed_collection
+    from app.database import database_connection
+    from app.workspace_layout import shared_work_root
+    from app.central_stock_reconcile import reconcile_central_free_stock
+    from app.external_changes import list_external_change_state
+
+    db, ws, central, event, incoming = seed_collection(tmp_path, monkeypatch)
+    _, file_id, rel = incoming[0]
+    original = central / rel
+    renamed = original.with_name("renamed-free.JPG")
+    content = original.read_bytes()
+    original.rename(renamed)
+    result = reconcile_central_free_stock(db, ws, library_id="main")
+    assert result["misplaced_file_count"] == 1
+    notices = [
+        notice for notice in list_external_change_state(db)["required"]
+        if notice["kind"] == "file_rename"
+        and int(notice["file_id"]) == file_id
+    ]
+    assert len(notices) == 1
+    external_changes.repair_external_notice(
+        db, notices[0]["id"],
+        central_root=central, library_work_root=shared_work_root(ws),
+    )
+    assert original.read_bytes() == content
+    assert not renamed.exists()
+    with database_connection(db) as c:
+        assert c.execute(
+            "SELECT current_relative_path FROM files WHERE id=?", (file_id,)
+        ).fetchone()[0] == rel

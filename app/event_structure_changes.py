@@ -1251,7 +1251,12 @@ def detect_event_structure_change(
                 title="Datei manuell umbenannt",
                 detail=(
                     f"Alter Pfad: „{previous}“. Neuer Pfad: „{observed}“. "
-                    "Bitte die Umbenennung ausdrücklich übernehmen oder rückgängig machen."
+                    + (
+                        "Das Archiv bleibt schreibgeschützt. Bitte den Namen "
+                        "im Archiv manuell rückgängig machen und danach erneut prüfen."
+                        if root_kind == "camera_archive"
+                        else "Bitte die Umbenennung ausdrücklich übernehmen oder rückgängig machen."
+                    )
                 ),
                 job_id=str(file_row["job_id"]),
                 event_id=event_id,

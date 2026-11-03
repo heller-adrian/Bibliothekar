@@ -37,3 +37,11 @@ EXIF-Untersekunden sowie Annahme, verweigerte Annahme und Archiv-RO.
 
 **Freigabestatus:** Entwicklungsstand; keine GHCR-Veröffentlichung, kein
 Release, keine NAS-Änderung. Native UI-/TrueNAS-Abnahme noch ausstehend.
+
+### Native Abnahme noch erforderlich
+
+Offen bleibt insbesondere der nachträgliche Import einer zweiten Aufnahme,
+wenn die erste aus dieser Sekunde bereits archiviert ist. Die laufende App
+verändert dann keinen fremden Archivnamen; eine kontrollierte Archiv-Nachpflege
+ist vor einer strikten „alle Burst-Mitglieder haben drei Stellen“-Garantie
+notwendig. Dafür wird kein stilles Überschreiben zugelassen.

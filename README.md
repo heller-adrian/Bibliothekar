@@ -1,6 +1,6 @@
 # Bibliothekar
 
-> Entwicklungskandidat **1.0.0-pre.5**, ausgehend vom veröffentlichten pre.4. Abnahme läuft.
+> Entwicklungskandidat **1.0.0-pre.6.1** auf Branch `codex/pre6.1-milliseconds-file-renames`, ausgehend von Pre.6. Noch keine Veröffentlichung; technische und native Abnahme läuft.
 > Noch nicht veröffentlicht. [Prüfbericht](docs/pre/TEST-REPORT.md),
 > [RC14-Upgrade](docs/pre/UPGRADE-RC14.md), [TrueNAS-Abnahme](docs/pre/TRUENAS-TEST.md).
 > Native TrueNAS-/Hardwareabnahme steht aus; Freigabe erfolgt separat.
@@ -9,7 +9,7 @@ Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraau
 
 Aktuelle stabile Veröffentlichung: **0.40.3**
 
-Entwicklungsversion: **1.0.0-pre.5** – noch nicht veröffentlicht.
+Entwicklungsversion: **1.0.0-pre.6.1** – noch nicht veröffentlicht.
 
 Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
 
