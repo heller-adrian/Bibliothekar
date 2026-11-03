@@ -4809,8 +4809,18 @@ EVENTS_HTML = r"""<!doctype html>
         // even when a user reopens the instructions for the first tab.
         const preparePending = assistant.preparation_required &&
           String(cr.status) === "aenderbar_vorschlagen";
-        const maxUnlockedIndex = preparePending ? 0 : sequence.length - 1;
-        if (sequence.indexOf(phase) > maxUnlockedIndex) phase = "prepare";
+        // Viewed step and actual operation completion are separate.
+        const manualGateKey="bk-pre71-manual-confirmed:"+crId;
+        const manualConfirmed=sessionStorage.getItem(manualGateKey)==="1";
+        const releaseReady=!Boolean(releaseStock.required) ||
+          String(releaseStock.stage||"")==="complete";
+        const verifyUnlocked=!preparePending &&
+          (!finderNeeded || (manualConfirmed && releaseReady));
+        const maxUnlockedIndex=preparePending ? 0
+          : verifyUnlocked ? sequence.length-1
+          : Math.max(0,sequence.indexOf("finder"));
+        if(sequence.indexOf(phase)>maxUnlockedIndex)
+          phase=finderNeeded ? "finder" : "prepare";
         if (!assistant.preparation_required && phase === "prepare") {
           phase = finderNeeded ? "finder" : "verify";
         }
@@ -4880,7 +4890,7 @@ EVENTS_HTML = r"""<!doctype html>
           html += `<details class="card"><summary><strong>${bk0511EventLabel("Was passiert beim Vorbereiten?","What happens during preparation?")}</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und versucht für eingehende freie Dateien zuerst Hardlinks unter „Später zuordnen“. Sind Hardlinks zwischen den Speicherorten nicht möglich, wird angehalten und du wählst ausdrücklich Kopieren oder Verschieben. Freigewordene Archivdateien aus dem Archiv werden hier noch nicht kopiert; das geschieht erst nach einem eigenen Klick. Die Kamerabibliothek bleibt unverändert.</p></details>`;
           html += `<div id="change-prep-progress" class="change-progress"><div class="muted" data-progress-label>Hilfsbereich wird vorbereitet …</div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
           if (String(cr.status) === "aenderbar_bestaetigt") {
-            html += `<div class="success-text">✓ Hilfsbereich ist bereits vorbereitet.</div><div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepared-next>Weiter</button></div></section>`;
+            html += `<div class="success-text">✓ ${bk0511EventLabel("Hilfsbereich ist bereits vorbereitet.","Staging area is already prepared.")}</div><div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepared-next>${bk0511EventLabel("Zum aktuellen Schritt","Return to current step")}</button></div></section>`;
           } else {
             html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepare>Hilfsbereich vorbereiten</button></div></section>`;
           }
@@ -4979,7 +4989,7 @@ EVENTS_HTML = r"""<!doctype html>
               number += 1;
             }
             html += renderTechnicalDetails();
-            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>${bk0511EventLabel("Finder-Arbeit erledigt · weiter zu Prüfen","Manual work done · continue to verification")}</button></div></section>`;
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>${bk0511EventLabel("Manuelle Arbeit prüfen · weiter","Check manual work · continue")}</button></div></section>`;
           }
         }
 
@@ -5138,7 +5148,7 @@ EVENTS_HTML = r"""<!doctype html>
 
         const preparedNextBtn = changeRequestBody.querySelector("[data-cr-prepared-next]");
         if (preparedNextBtn) preparedNextBtn.addEventListener("click", () => {
-          showChangeRequestDetail(crId, {phase:finderNeeded ? "finder" : "verify"})
+          showChangeRequestDetail(crId, {phase:verifyUnlocked ? "verify" : finderNeeded ? "finder" : "verify"})
             .catch(error => setStatus(error.message, true));
         });
 
@@ -5233,19 +5243,35 @@ EVENTS_HTML = r"""<!doctype html>
 
         const finderDoneBtn = changeRequestBody.querySelector("[data-cr-finder-done]");
         if (finderDoneBtn) finderDoneBtn.addEventListener("click", async () => {
-          finderDoneBtn.disabled = true;
+          finderDoneBtn.disabled=true;
+          finderDoneBtn.classList.add("loading");
           try {
-            if (String(cr.status) === "aenderbar_vorschlagen") {
-              await changeRequestAction(crId, "confirm", {terminal:false});
+            const live=await requestJson(
+              `/api/change-requests/${encodeURIComponent(crId)}/assistant?refresh=true`
+            );
+            if ((live.release_stock?.required && live.release_stock?.stage!=="complete")
+                || (live.operations||[]).some(op=>String(op.state||"")!=="done")) {
+              sessionStorage.removeItem(manualGateKey);
+              await showChangeRequestDetail(crId,{phase:"finder",refreshLive:true});
+              setStatus(bk0511EventLabel(
+                "Noch offene Archivarbeiten erkannt. Bitte nur die angezeigten Schritte erledigen.",
+                "Outstanding archive work detected. Complete only the displayed steps."
+              ),true);
+              return;
             }
-            await showChangeRequestDetail(crId, {phase:"verify"});
-          } catch (error) {
-            finderDoneBtn.disabled = false;
-            setStatus(error.message, true);
+            sessionStorage.setItem(manualGateKey,"1");
+            await showChangeRequestDetail(crId,{phase:"verify",refreshLive:true});
+          } catch(error) {
+            finderDoneBtn.disabled=false;
+            finderDoneBtn.classList.remove("loading");
+            setStatus(String(error?.message||error),true);
           }
         });
 
-        changeRequestBody.querySelector('[data-cr-back]')?.addEventListener('click',()=>showChangeRequestDetail(crId,{phase:'finder',refreshLive:true}));
+        changeRequestBody.querySelector('[data-cr-back]')?.addEventListener('click',()=>{
+          sessionStorage.removeItem(manualGateKey);
+          showChangeRequestDetail(crId,{phase:"finder",refreshLive:true});
+        });
         const verifyBtn = changeRequestBody.querySelector("[data-cr-verify]");
         const archiveBtn = changeRequestBody.querySelector("[data-cr-archive]");
         const failedVerificationBack = changeRequestBody.querySelector("[data-cr-back]");
@@ -5283,7 +5309,8 @@ EVENTS_HTML = r"""<!doctype html>
               data.event_document && String(data.event_document.status || "") !== "verified"
                 ? data.event_document
                 : null;
-            if (failedVerificationBack) failedVerificationBack.hidden = Boolean(data.complete);
+            if (failedVerificationBack) failedVerificationBack.hidden=Boolean(data.complete);
+            if (!data.complete) sessionStorage.removeItem(manualGateKey);
             if (data.complete) {
               verifyBtn.classList.add("success");
               verifyBtn.textContent = "✓ Prüfung erfolgreich";
@@ -5348,6 +5375,7 @@ EVENTS_HTML = r"""<!doctype html>
             verifyBtn.classList.add("danger");
             verifyBtn.textContent = "✕ Prüfung fehlgeschlagen";
             if (failedVerificationBack) failedVerificationBack.hidden = false;
+            sessionStorage.removeItem(manualGateKey);
             if (summary) { summary.className = "danger-text"; summary.textContent = error.message; }
             if (archiveBtn) archiveBtn.disabled = true;
           } finally {
@@ -5387,6 +5415,7 @@ EVENTS_HTML = r"""<!doctype html>
             await new Promise(resolve => setTimeout(resolve, 280));
 
             mandatoryArchiveChangeContext = null;
+            sessionStorage.removeItem(manualGateKey);
             clearChangeTaskFromUrl(crId);
             changeRequestClose.textContent = "Schließen";
             changeRequestClose.classList.remove("danger-button");
