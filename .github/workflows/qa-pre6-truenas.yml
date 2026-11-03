@@ -48,6 +48,8 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="bibliothekar-pre6-qa:${GITHUB_RUN_ID}"
+          export PRE4_IMAGE="ghcr.io/heller-adrian/bibliothekar@sha256:0678dca61f426a01ae724852741bcad6fd7cf45ae3c13df873ed6f14349c4d77"
+          docker pull "$PRE4_IMAGE"
           docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE" . 2>&1 | tee "$WORK/build.log"
           IMAGE="$IMAGE" RUNNER_TEMP="$WORK" python3 qa/pre5/container.py 2>&1 | tee "$WORK/container.log"
       - name: Preserve exact source and complete targeted evidence
