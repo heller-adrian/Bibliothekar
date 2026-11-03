@@ -26,7 +26,6 @@ jobs:
       TAG: "v1.0.0-pre.6.2"
       IMAGE: "ghcr.io/heller-adrian/bibliothekar:1.0.0-pre.6.2"
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      DOCKER_CONFIG: ${{ runner.temp }}/pre62-docker-${{ github.run_id }}
     steps:
       - name: Check out publication documentation without Git credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -41,6 +40,8 @@ jobs:
           for executable in gh git docker python3 tar gzip sha256sum; do command -v "$executable" >/dev/null; done
           WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre62-publish.XXXXXXXX")"
           echo "WORK=$WORK" >> "$GITHUB_ENV"
+          DOCKER_CONFIG="$RUNNER_TEMP/pre62-docker-$GITHUB_RUN_ID"
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
           mkdir -p "$DOCKER_CONFIG"
           chmod 700 "$DOCKER_CONFIG"
           git merge-base --is-ancestor "$SOURCE_SHA" HEAD
