@@ -309,9 +309,59 @@ def build_folder_import_plan(
 
     from app.managed_directory_names import directory_name
     undated_name = directory_name(shared_root, "undated")
+
+    # Read each target directory once: an incremental import must consider
+    # existing media, but may not silently rename existing or archived files.
+    existing_stems_by_directory: dict[str, set[str]] = {}
+    def existing_stems(directory: Path) -> set[str]:
+        key = directory.as_posix()
+        if key not in existing_stems_by_directory:
+            stems: set[str] = set()
+            target = shared_root / directory
+            if target.is_dir() and not target.is_symlink():
+                with os.scandir(target) as children:
+                    for child in children:
+                        if child.is_file(follow_symlinks=False):
+                            stems.add(Path(child.name).stem.casefold())
+            existing_stems_by_directory[key] = stems
+        return existing_stems_by_directory[key]
+
+    def location_for(capture: str) -> Path:
+        value = datetime.fromisoformat(capture)
+        directory = Path(value.strftime("%Y")) / value.strftime("%Y-%m-%d")
+        if destination_directory_callback is not None:
+            resolved = destination_directory_callback(capture[:19])
+            if resolved is not None:
+                directory = Path(resolved)
+                if directory.is_absolute() or ".." in directory.parts:
+                    raise PipelineError(
+                        "Unsicherer kanonischer Zielordner für Import: " + str(directory)
+                    )
+        return directory
+
+    # Counts are per target directory + camera + whole camera-local second.
+    # Different models in the same second are not a naming collision.
+    burst_groups: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for key, source_members in members_by_family.items():
+        family = family_by_key.get(key, {})
+        capture = _family_capture_time(family, source_members)
+        confidence = str(family.get("capture_time_confidence")
+                         or source_members[0].get("capture_time_confidence") or "missing")
+        if not capture or confidence in {"low", "conflict", "missing"}:
+            continue
+        camera = next(
+            (member for member in source_members
+             if member.get("camera_make") or member.get("camera_model")),
+            source_members[0],
+        )
+        _, token = normalize_device_name(camera.get("camera_make"), camera.get("camera_model"))
+        group = (location_for(capture).as_posix().casefold(), capture[:19], token.casefold())
+        burst_groups[group].add(key)
     reserved: set[str] = set()
     plan: list[dict[str, Any]] = []
     review_family_count = 0
+    burst_family_count = 0
+    burst_without_subseconds_count = 0
     device_counts: dict[str, int] = defaultdict(int)
 
     for family_key in sorted(members_by_family):
@@ -385,27 +435,35 @@ def build_folder_import_plan(
             continue
 
         capture = datetime.fromisoformat(str(capture_value))
-        day = capture.strftime("%Y-%m-%d")
-        year = capture.strftime("%Y")
-        base = capture.strftime("%Y%m%d_%H%M%S") + "_" + device_token
-        destination_directory = Path(year) / day
-        if destination_directory_callback is not None:
-            resolved_directory = destination_directory_callback(
-                str(capture_value)[:19]
-            )
-            if resolved_directory is not None:
-                candidate_directory = Path(resolved_directory)
-                if (
-                    candidate_directory.is_absolute()
-                    or ".." in candidate_directory.parts
-                ):
-                    raise PipelineError(
-                        "Unsicherer kanonischer Zielordner für Import: "
-                        + str(candidate_directory)
-                    )
-                destination_directory = candidate_directory
+        stamp = capture.strftime("%Y%m%d_%H%M%S")
+        base = stamp + "_" + device_token
+        destination_directory = location_for(str(capture_value))
+        group = (destination_directory.as_posix().casefold(),
+                 str(capture_value)[:19], device_token.casefold())
+        stems = existing_stems(destination_directory)
+        burst_prefix = re.compile(
+            r"^" + re.escape(stamp) + r"\d{3}_" + re.escape(device_token)
+            + r"(?:_\d{3})?$", flags=re.IGNORECASE,
+        )
+        existing_burst = base.casefold() in stems or any(
+            burst_prefix.fullmatch(stem) for stem in stems
+        )
+        burst = len(burst_groups.get(group, ())) > 1 or existing_burst
+        fractional = re.search(
+            r"\.(\d+)(?=Z|[+-]\d{2}:\d{2}|$)", str(capture_value)
+        )
+        if burst:
+            burst_family_count += 1
+            if fractional:
+                # Exactly three real millisecond digits, not hundredths.
+                base = f"{stamp}{capture.microsecond // 1000:03d}_{device_token}"
+            else:
+                # EXIF lacks a fractional capture time: a clearly marked
+                # sequence fallback, never a fabricated millisecond value.
+                burst_without_subseconds_count += 1
+                base += "_Burst"
 
-        suffix_index = 0
+        suffix_index = 0 if fractional or not burst else 1
         while True:
             family_base = base if suffix_index == 0 else f"{base}_{suffix_index:03d}"
             relative_paths = [
@@ -456,6 +514,8 @@ def build_folder_import_plan(
         "excluded_file_count": len(excluded),
         "family_count": len(members_by_family),
         "review_family_count": review_family_count,
+        "burst_family_count": burst_family_count,
+        "burst_without_subseconds_count": burst_without_subseconds_count,
         "devices": [
             {"name": name, "family_count": count}
             for name, count in sorted(device_counts.items())
