@@ -1860,7 +1860,7 @@ def process_claimed_job(
                         tail = stem[len(stamp) + 4:]
                     else:
                         continue
-                    token = re.sub(r"(?:_Burst)?(?:_\\d{3})?$", "", tail)
+                    token = re.sub(r"(?:_Burst)?(?:_\d{3})?$", "", tail)
                     if token:
                         known_second_tokens.add((observed_time[:19], token.casefold()))
 
