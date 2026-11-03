@@ -4743,8 +4743,8 @@ EVENTS_HTML = r"""<!doctype html>
 
     async function showChangeRequestDetail(crId, options={}) {
       try {
-        changeRequestBody.textContent = "Lade Änderungsauftrag …";
-        changeRequestTitle.textContent = "Archivänderung";
+        changeRequestBody.textContent = bk0511EventLabel("Lade Änderungsauftrag …","Loading change request…");
+        changeRequestTitle.textContent = bk0511EventLabel("Archivänderung","Archive change");
         changeRequestSubtitle.textContent = "";
         const inlineError=document.getElementById("change-request-inline-error");
         if (inlineError) {
@@ -4770,7 +4770,7 @@ EVENTS_HTML = r"""<!doctype html>
         }
         if (options.resume && !active) {
           if (changeRequestDialog.open) changeRequestDialog.close();
-          setStatus("Der frühere Archivänderungsauftrag ist bereits abgeschlossen.", false, true);
+          setStatus(bk0511EventLabel("Der frühere Archivänderungsauftrag ist bereits abgeschlossen.","The previous archive change request has already been completed."), false, true);
           return;
         }
 
@@ -4856,8 +4856,8 @@ EVENTS_HTML = r"""<!doctype html>
               ? `${backupRootLabel}/${releaseTarget}`
               : (row.new_path ? `${archiveRootLabel}/${row.new_path}` : "—");
             const actionText = releaseTarget
-              ? "Freigewordene Archivdatei"
-              : String(row.action || "Änderung");
+              ? bk0511EventLabel("Freigewordene Archivdatei","Released archive file")
+              : String(row.action || bk0511EventLabel("Änderung","Change"));
             detail += `<div class="card" style="padding:9px 10px"><strong>${escapeHtml(actionText)}</strong><div class="muted">${bk0511EventLabel("IST","Actual")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(source)}</code><div class="muted" style="margin-top:5px">${bk0511EventLabel("SOLL","To Be")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(targetText)}</code></div>`;
           }
           detail += `</div></details>`;
@@ -4867,7 +4867,7 @@ EVENTS_HTML = r"""<!doctype html>
         if (phase === "prepare") {
           const prep = assistant.preparation || {};
           const missing = prep.missing_directories || [];
-          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Hilfsbereiche vorbereiten</h3><p class="muted">Die App bereitet nur SSD-Hilfsstrukturen vor. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.</p></div></div>`;
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>${bk0511EventLabel("Hilfsbereiche vorbereiten","Prepare staging areas")}</h3><p class="muted">${bk0511EventLabel("Die App bereitet nur SSD-Hilfsstrukturen vor. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.","Only SSD staging areas are prepared. The camera archive and confirmed database state remain unchanged.")}</p></div></div>`;
           html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} ${bk0511EventLabel("neue Dateien","new files")}</strong> ${bk0511EventLabel("werden vorbereitet unter","will be prepared in")} <code>${escapeHtml(prep.staging_root || assistant.path_labels?.staging_root || "")}</code> · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt. Hardlinks werden bevorzugt; falls Quelle und Ziel auf unterschiedlichen Dateisystemen liegen, fragt Bibliothekar ausdrücklich nach <strong>Kopieren</strong> oder <strong>Verschieben</strong>.`;
           if (Number(prep.release_file_count || 0) > 0) {
             html += `<div style="margin-top:7px"><strong>${Number(prep.release_file_count)} freigewordene Archivdateien</strong>: Die benötigten Zielordner unter <em>Freigewordene Archivdateien</em> werden angelegt. Die Dateien selbst kopiert Bibliothekar erst im nächsten Schritt nach deiner ausdrücklichen Freigabe.</div>`;
@@ -4877,7 +4877,7 @@ EVENTS_HTML = r"""<!doctype html>
             html += `<details style="margin-top:10px"><summary>Fehlende Struktur anzeigen</summary><div style="margin-top:7px">${missing.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
           }
           html += `</div>`;
-          html += `<details class="card"><summary><strong>Was passiert beim Vorbereiten?</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und versucht für eingehende freie Dateien zuerst Hardlinks unter „Später zuordnen“. Sind Hardlinks zwischen den Speicherorten nicht möglich, wird angehalten und du wählst ausdrücklich Kopieren oder Verschieben. Freigewordene Archivdateien aus dem Archiv werden hier noch nicht kopiert; das geschieht erst nach einem eigenen Klick. Die Kamerabibliothek bleibt unverändert.</p></details>`;
+          html += `<details class="card"><summary><strong>${bk0511EventLabel("Was passiert beim Vorbereiten?","What happens during preparation?")}</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und versucht für eingehende freie Dateien zuerst Hardlinks unter „Später zuordnen“. Sind Hardlinks zwischen den Speicherorten nicht möglich, wird angehalten und du wählst ausdrücklich Kopieren oder Verschieben. Freigewordene Archivdateien aus dem Archiv werden hier noch nicht kopiert; das geschieht erst nach einem eigenen Klick. Die Kamerabibliothek bleibt unverändert.</p></details>`;
           html += `<div id="change-prep-progress" class="change-progress"><div class="muted" data-progress-label>Hilfsbereich wird vorbereitet …</div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
           if (String(cr.status) === "aenderbar_bestaetigt") {
             html += `<div class="success-text">✓ Hilfsbereich ist bereits vorbereitet.</div><div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepared-next>Weiter</button></div></section>`;
@@ -4892,7 +4892,7 @@ EVENTS_HTML = r"""<!doctype html>
           const releaseRows = releaseStock.rows || [];
           const releaseSegments = releaseStock.segments || [];
           const liveRefreshAvailable = releaseStage === "complete";
-          html += `<section class="change-pane"><div class="change-pane-heading"><div><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">Finder-Arbeit</h3><button class="bk-help" type="button" aria-label="Hinweis zur Finder-Arbeit" data-help="Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv. „Aktualisieren“ prüft den tatsächlichen Archivbestand und passt VON-Pfade sowie Erledigt-Status an.">?</button></div>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:6px">✓ Aktueller Archivbestand wurde read-only nach Pfad, Größe und SHA-256 geprüft.</p>' : ''}</div>${liveRefreshAvailable ? '<button type="button" class="plan-button change-refresh-button" data-cr-refresh-live>↻ Aktualisieren</button>' : ''}</div>`;
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">${bk0511EventLabel("Finder-Arbeit","Finder work")}</h3><button class="bk-help" type="button" aria-label="Hinweis zur Finder-Arbeit" data-help="Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt. Erst danach folgt die eigentliche Umstrukturierung im Archiv. „Aktualisieren“ prüft den tatsächlichen Archivbestand und passt VON-Pfade sowie Erledigt-Status an.">?</button></div>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:6px">✓ Aktueller Archivbestand wurde read-only nach Pfad, Größe und SHA-256 geprüft.</p>' : ''}</div>${liveRefreshAvailable ? '<button type="button" class="plan-button change-refresh-button" data-cr-refresh-live>↻ Aktualisieren</button>' : ''}</div>`;
 
           if (releaseRequired && (releaseStage === "copy_to_ssd" || releaseStage === "verify_copy")) {
             const copiesReady = releaseStage === "verify_copy";
@@ -4934,11 +4934,11 @@ EVENTS_HTML = r"""<!doctype html>
             if(releaseStock.folder_removal?.qualified) {
               html += `<div class="card"><strong>${bk0511EventLabel("2. Gesamten Ereignisordner entfernen","2. Remove entire event folder")}</strong><p>${bk0511EventLabel("Nach vollständiger Prüfung kannst du diesen gesamten Ereignisordner einschließlich event.json manuell entfernen:","After complete verification, you may manually remove this entire event folder including event.json:")}</p><code style="display:block;overflow-wrap:anywhere">${escapeHtml(releaseStock.folder_removal.path)}</code><p class="muted">${bk0511EventLabel("Die App selbst löscht nichts im schreibgeschützten Archiv. Archivinhalt vor dem Entfernen nicht verändern.","The app does not delete anything from the read-only archive. Do not change the archive contents before removal.")}</p></div>`;
             } else {
-            html += `<div class="card"><strong>2. Bestätigte Archivoriginale entfernen</strong><p class="muted" style="margin-top:5px">Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.</p><details style="margin-top:10px"><summary>${releaseRows.length} Archivpfade anzeigen</summary><div style="margin-top:8px">${releaseRows.map(row => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(archiveRootLabel)}/${escapeHtml(row.old_path || "")}</code>`).join("")}</div></details></div>`;
+            html += `<div class="card"><strong>${bk0511EventLabel("2. Bestätigte Archivoriginale entfernen","2. Remove verified archive originals")}</strong><p class="muted" style="margin-top:5px">Jetzt kannst du ausschließlich die unten aufgeführten Originale manuell aus der Kamerabibliothek entfernen. Die App löscht dort selbst nichts.</p><details style="margin-top:10px"><summary>${releaseRows.length} Archivpfade anzeigen</summary><div style="margin-top:8px">${releaseRows.map(row => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(archiveRootLabel)}/${escapeHtml(row.old_path || "")}</code>`).join("")}</div></details></div>`;
               html += `<p>${bk0511EventLabel("Nur die angezeigten Dateien entfernen. Unbekannte Inhalte im Ereignisordner bleiben geschützt.","Remove only the listed files. Unknown contents of the event folder remain protected.")}</p>`;
             }
             html += `<div id="change-release-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div><div id="change-release-errors" class="danger-text" style="display:none"></div></div>`;
-            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-removal-verify>Entfernung aus dem Archiv prüfen</button></div></section>`;
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-release-removal-verify>${bk0511EventLabel("Entfernung aus dem Archiv prüfen","Verify archive removal")}</button></div></section>`;
           } else {
             let number = 1;
             if (releaseRequired) {
@@ -4946,9 +4946,9 @@ EVENTS_HTML = r"""<!doctype html>
             }
 
             if (targetTree) {
-              const targetTitle = targetStructureDeleted ? "Zielzustand" : "Zielstruktur-Vorschau";
+              const targetTitle = targetStructureDeleted ? bk0511EventLabel("Zielzustand","Target state") : bk0511EventLabel("Zielstruktur-Vorschau","Target structure preview");
               const targetHint = targetStructureDeleted
-                ? "Bei diesem Löschauftrag wird keine neue Archivstruktur aufgebaut."
+                ? bk0511EventLabel("Bei diesem Löschauftrag wird keine neue Archivstruktur aufgebaut.","This deletion request does not create a new archive structure.")
                 : "So soll das bearbeitete Ereignis nach den folgenden Finder-Schritten im Archiv aussehen.";
               html += `<details class="card change-disclosure"><summary><strong>${targetTitle}</strong></summary><p class="muted" style="margin-top:8px">${targetHint}</p><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></details>`;
             }
@@ -4956,9 +4956,9 @@ EVENTS_HTML = r"""<!doctype html>
             for (const operation of assistant.operations || []) {
               const state = String(operation.state || "");
               const stateBadge =
-                state === "done" ? '<span class="badge success">Erledigt</span>'
-                : state === "pending" ? '<span class="badge warning">Ausstehend</span>'
-                : state === "attention" ? '<span class="badge danger">Prüfen</span>'
+                state === "done" ? '<span class="badge success">'+bk0511EventLabel("Erledigt","Done")+'</span>'
+                : state === "pending" ? '<span class="badge warning">'+bk0511EventLabel("Ausstehend","Pending")+'</span>'
+                : state === "attention" ? '<span class="badge danger">'+bk0511EventLabel("Prüfen","Review")+'</span>'
                 : "";
               html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span>${stateBadge}</summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
               if ((operation.sources || []).length) {
@@ -4969,7 +4969,7 @@ EVENTS_HTML = r"""<!doctype html>
               if ((operation.items || []).length && operation.kind !== "remove_directories") {
                 html += `<details><summary>${operation.items.length} Element${operation.items.length===1?"":"e"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name => `<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
               }
-              if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+              if (operation.target) html += `<div class="muted">${bk0511EventLabel("NACH","TO")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
               if ((operation.paths || []).length) {
                 html += `<div class="muted">${bk0511EventLabel("NOCH ZU ENTFERNEN","STILL TO REMOVE")}</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
               } else if (operation.kind === "remove_directories" && state === "done") {
@@ -4979,7 +4979,7 @@ EVENTS_HTML = r"""<!doctype html>
               number += 1;
             }
             html += renderTechnicalDetails();
-            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>Finder-Arbeit erledigt · weiter zu Prüfen</button></div></section>`;
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>${bk0511EventLabel("Finder-Arbeit erledigt · weiter zu Prüfen","Manual work done · continue to verification")}</button></div></section>`;
           }
         }
 
@@ -4992,11 +4992,11 @@ EVENTS_HTML = r"""<!doctype html>
             Array.isArray(reviewRows)
             && reviewRows.length > 0
             && managedReviewRows.every(row => String(row.verification_status || "") === "verified");
-          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Abschließen</h3><p class="muted">So soll die Kamerabibliothek jetzt aussehen. Die Prüfung selbst bleibt vollständig read-only.</p></div></div>`;
-          if (targetTree) html += `<div class="card"><strong>SOLL-Struktur</strong><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></div>`;
-          html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? "✓ Prüfung erfolgreich" : "Prüfen"}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} Dateien bestätigt.` : "Noch nicht geprüft."}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
+          html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>${bk0511EventLabel("Prüfen & Abschließen","Verify and complete")}</h3><p class="muted">${bk0511EventLabel("So soll die Kamerabibliothek jetzt aussehen. Die Prüfung selbst bleibt vollständig read-only.","The archive should now match this layout. Verification is strictly read-only.")}</p></div></div>`;
+          if (targetTree) html += `<div class="card"><strong>${bk0511EventLabel("SOLL-Struktur","Target structure")}</strong><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></div>`;
+          html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? bk0511EventLabel("✓ Prüfung erfolgreich","✓ Verification successful") : bk0511EventLabel("Prüfen","Verify")}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} ${bk0511EventLabel("Dateien bestätigt.","files verified.")}` : bk0511EventLabel("Noch nicht geprüft.","Not verified yet.")}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
           html += renderTechnicalDetails();
-          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>Zur manuellen Arbeit zurück</button><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>Änderung abschließen & SSD freigeben</button></div></section>`;
+          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>${bk0511EventLabel("Zur manuellen Arbeit zurück","Back to manual steps")}</button><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>${bk0511EventLabel("Änderung abschließen & SSD freigeben","Complete change and release SSD")}</button></div></section>`;
         }
 
         changeRequestBody.innerHTML = html;
