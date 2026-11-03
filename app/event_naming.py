@@ -373,6 +373,36 @@ def legacy_naming_for_existing_event(
     return naming
 
 
+def protect_existing_no_event_folder(
+    *,
+    folder_name: Any,
+    month_key: str,
+    naming: Any,
+) -> dict[str, Any]:
+    """Preserve the confirmed physical name of an existing No Event collection.
+
+    A manual root rename updates events.folder_name independently of its
+    historical per-event naming template. If that template would regenerate a
+    different folder, it is stale for this existing event. Never interpret
+    changing time segments as an implicit request to rename its archive.
+    New collections still use the configured library naming template.
+    """
+    folder = _clean_component(folder_name, field="Bestehender Ereignisordner")
+    snapshot = dict(naming) if isinstance(naming, dict) else {}
+    if snapshot.get("mode") == "locked":
+        # The physical DB name is authoritative even if an old lock differs.
+        return {**snapshot, "mode": "locked", "locked_folder_name": folder}
+    try:
+        matches = render_no_event_folder_name(month_key, snapshot) == folder
+    except EventNamingError:
+        matches = False
+    if matches:
+        return snapshot
+    # Preserve the exact user-confirmed name; do not try to infer locale,
+    # punctuation, date prefix, or an implicit month-dependent rename.
+    return {**snapshot, "mode": "locked", "locked_folder_name": folder}
+
+
 def naming_snapshot_for_new_event(naming: Any) -> dict[str, Any]:
     """Return a stable per-event snapshot.
 
