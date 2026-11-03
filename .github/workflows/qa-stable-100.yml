@@ -21,6 +21,7 @@ jobs:
       - name: Checkout exact pre7.2 patch commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          fetch-depth: 0
           persist-credentials: false
           path: stable100-${{ github.run_id }}
       - name: Python, event JavaScript and complete backend regressions
