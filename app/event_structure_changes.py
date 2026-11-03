@@ -1276,16 +1276,64 @@ def detect_event_structure_change(
                 now=now,
             )
 
-        # SQLite bildet den tatsächlich beobachteten Pfad ab. Das fachliche
-        # SOLL bleibt bei falscher Ablage separat in external_change_notices.
-        if moves:
+        # A filename rename is different from moving an unchanged filename
+        # between permitted organization folders. Preserve the previous
+        # catalogue path and require an explicit Accept or Undo action.
+        ordinary_moves = []
+        rename_ids: set[int] = set()
+        for move in moves:
+            file_id = int(move["file_id"])
+            if file_id in conflicts_by_id:
+                continue
+            old_path = str(move["old_path"])
+            new_path = str(move["new_path"])
+            if PurePosixPath(old_path).name == PurePosixPath(new_path).name:
+                ordinary_moves.append(move)
+                continue
+            file_row = connection.execute(
+                """SELECT job_id,size_bytes,
+                          COALESCE(sha256_current,sha256_original,'') AS sha256
+                   FROM files WHERE id=?""", (file_id,),
+            ).fetchone()
+            if file_row is None:
+                continue
+            rename_ids.add(file_id)
+            record_notice(
+                connection,
+                notice_key=f"rename:{file_id}",
+                kind="filename_rename",
+                root_kind=root_kind,
+                title="Dateiname extern geändert",
+                detail=f"Datei wurde von „{old_path}“ in „{new_path}“ umbenannt. Änderung übernehmen oder rückgängig machen.",
+                job_id=str(file_row["job_id"]),
+                event_id=event_id,
+                file_id=file_id,
+                relative_path=new_path,
+                repairable=root_kind == "shared_workspace",
+                action_required=True,
+                group_key="filename_rename",
+                details={
+                    "expected_root_kind": root_kind,
+                    "observed_root_kind": root_kind,
+                    "expected_relative_path": old_path,
+                    "observed_relative_path": new_path,
+                    "size_bytes": int(file_row["size_bytes"] or 0),
+                    "sha256": str(file_row["sha256"] or ""),
+                    "force_repair": True,
+                },
+                now=now,
+            )
+
+        # Ordinary same-filename moves remain automatic, as before. A pending
+        # filename task is intentionally not reflected in files.current_path.
+        if ordinary_moves:
             from app.physical_state import sync_placement_moves
             sync_placement_moves(
                 connection,
                 event,
                 layout_state,
                 root_kind,
-                moves,
+                ordinary_moves,
                 now=now,
             )
 
@@ -1304,16 +1352,18 @@ def detect_event_structure_change(
                 f"placement:{file_id}",
                 now=now,
             )
+        for file_id in observed_file_ids - rename_ids:
+            resolve_notice_key(
+                connection,
+                f"rename:{file_id}",
+                now=now,
+            )
 
         # Nur fachlich falsche Platzierungen werden aus dem normalen
         # Strukturworkflow herausgehalten. Legitime Dateibewegungen, die zu
         # einer echten Ordneränderung gehören (z. B. Ordner umbenannt), bleiben
         # Teil des erkannten Strukturzustands und werden wie bisher übernommen.
-        snapshot["file_moves"] = [
-            move
-            for move in moves
-            if int(move["file_id"]) not in conflicts_by_id
-        ]
+        snapshot["file_moves"] = ordinary_moves
         structural_changed = any((
             snapshot.get("directory_added"),
             snapshot.get("directory_removed"),
@@ -1330,7 +1380,7 @@ def detect_event_structure_change(
             # Pure physical movements within an allowed leaf are accepted
             # without a manual structure task. Queue a durable event.json
             # projection in the same transaction as the observed SQLite paths.
-            if moves and root_kind == "shared_workspace" and not conflicts_by_id:
+            if ordinary_moves and root_kind == "shared_workspace" and not conflicts_by_id:
                 from app.event_document_sync import queue_event_document_sync
                 connection.execute(
                     "UPDATE events SET revision=revision+1,updated_at=?,edited_at=? WHERE id=?",
