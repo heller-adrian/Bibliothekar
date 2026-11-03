@@ -24,6 +24,7 @@ jobs:
           persist-credentials: false
           path: pre6-${{ github.run_id }}
       - name: Isolated runtime and targeted original positive and negative contracts
+        if: ${{ !contains(github.event.head_commit.message, '[pre6-http]') }}
         run: |
           set -euo pipefail
           WORK="$(mktemp -d /tmp/bibliothekar-pre6.XXXXXXXX)"
@@ -33,6 +34,7 @@ jobs:
           "$WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
           GH_TOKEN="${{ secrets.GITHUB_TOKEN }}" "$WORK/venv/bin/python" qa/pre6/reuse_backend.py 2>&1 | tee "$WORK/targeted.log"
       - name: Actual UI functions in offline Chromium German English and mobile desktop
+        if: ${{ !contains(github.event.head_commit.message, '[pre6-http]') }}
         run: |
           set -euo pipefail
           export KAMERA_CONFIG="$WORK/settings.json" KAMERA_WORKSPACE="$WORK/workspace" KAMERA_DATABASE_DIR="$WORK/database" KAMERA_REGISTRY_DATABASE="$WORK/registry.sqlite3" PYTHONPATH="$PWD"
@@ -45,6 +47,7 @@ jobs:
             mcr.microsoft.com/playwright:v1.62.1-noble \
             node /qa/pre6/browser.cjs /evidence/ui.json /evidence/browser 2>&1 | tee "$WORK/browser.log"
       - name: Unpublished image and existing real supervisor correction admission restart and fences
+        if: ${{ !contains(github.event.head_commit.message, '[pre6-http]') }}
         run: |
           set -euo pipefail
           IMAGE="bibliothekar-pre6-qa:${GITHUB_RUN_ID}"
@@ -52,6 +55,16 @@ jobs:
           docker pull "$PRE4_IMAGE"
           docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE" . 2>&1 | tee "$WORK/build.log"
           IMAGE="$IMAGE" RUNNER_TEMP="$WORK" python3 qa/pre5/container.py 2>&1 | tee "$WORK/container.log"
+      - name: Dedicated full authenticated No Event HTTP and container recovery
+        if: contains(github.event.head_commit.message, '[pre6-http]')
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d /tmp/bibliothekar-pre6-http.XXXXXXXX)"
+          printf 'WORK=%s\n' "$WORK" >> "$GITHUB_ENV"
+          export WORK
+          IMAGE="bibliothekar-pre6-http:${GITHUB_RUN_ID}"
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE" . 2>&1 | tee "$WORK/http-build.log"
+          IMAGE="$IMAGE" RUNNER_TEMP="$WORK" python3 qa/pre6/no_event_http_container.py 2>&1 | tee "$WORK/http-container.log"
       - name: Preserve exact source and complete targeted evidence
         if: always() && env.WORK != ''
         run: |
@@ -78,5 +91,7 @@ jobs:
             ${{ env.WORK }}/accepted-backend.zip
             ${{ env.WORK }}/accepted-backend/f14-qa/targets/results/
             ${{ env.WORK }}/pre5-live.json
+            ${{ env.WORK }}/pre6-no-event-http.json
+            ${{ env.WORK }}/pre6-no-event-http.log
             ${{ env.WORK }}/pre5-live.log
             ${{ env.WORK }}/pre5-browser/
