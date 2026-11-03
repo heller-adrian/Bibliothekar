@@ -5942,7 +5942,8 @@ EVENTS_HTML = r"""<!doctype html>
               "Ursprünglicher Ordnername","Original folder name")}</strong>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <code id="structure-archive-original-name">${escapeHtml(originalRoot)}</code>
-                <button type="button" class="plan-button" id="structure-archive-copy-name">${bk0511EventLabel("Kopieren","Copy")}</button>
+                <button type="button" class="plan-button" style="padding:4px 9px;min-height:28px;font-size:.82rem" id="structure-archive-copy-name">${bk0511EventLabel("Kopieren","Copy")}</button>
+                <span id="structure-archive-copy-feedback" aria-live="polite" class="muted"></span>
               </div></div>`:""}
             ${list}
             ${(d.directory_removed||[]).length?`<p>${bk0511EventLabel(
@@ -5960,23 +5961,31 @@ EVENTS_HTML = r"""<!doctype html>
           </div>
           <div id="structure-archive-undo-feedback" class="error-box" hidden></div>`;
         attachArchiveMode();
-        document.getElementById("structure-archive-copy-name")?.addEventListener("click",async(event)=>{
-          const button=event.currentTarget;
+        document.getElementById("structure-archive-copy-name")?.addEventListener("click",async()=>{
+          const feedback=document.getElementById("structure-archive-copy-feedback");
+          let copied=false;
+          // Firefox/macOS: use the synchronous, user-gesture-bound fallback
+          // before crossing an await boundary. Never disable the Copy button.
+          const field=document.createElement("textarea");
+          field.value=originalRoot;
+          field.setAttribute("readonly","");
+          field.setAttribute("aria-hidden","true");
+          field.style.cssText="position:fixed;left:-10000px;top:0;opacity:0";
+          document.body.appendChild(field);
           try{
-            if(navigator.clipboard?.writeText) await navigator.clipboard.writeText(originalRoot);
-            else {
-              const field=document.createElement("textarea");
-              field.value=originalRoot;
-              field.style.position="fixed";field.style.left="-9999px";
-              document.body.appendChild(field);field.select();
-              if(!document.execCommand("copy")) throw new Error("Clipboard not available");
-              field.remove();
-            }
-            button.textContent=bk0511EventLabel("Kopiert","Copied");
-          }catch(e){
-            const feedback=structureChangeBody.querySelector("#structure-archive-undo-feedback");
-            if(feedback){feedback.hidden=false;feedback.textContent=e.message;}
+            field.focus();
+            field.select();
+            field.setSelectionRange(0,field.value.length);
+            copied=Boolean(document.execCommand("copy"));
+          }catch(_){}
+          finally{field.remove();}
+          if(!copied && navigator.clipboard?.writeText){
+            try{await navigator.clipboard.writeText(originalRoot);copied=true;}catch(_){}
           }
+          if(feedback) feedback.textContent=copied
+            ? bk0511EventLabel("In Zwischenablage kopiert.","Copied to clipboard.")
+            : bk0511EventLabel("Kopieren nicht möglich. Bitte den Namen direkt markieren.",
+              "Copy failed. Please select the name manually.");
         });
         document.getElementById("structure-archive-undo-verify")?.addEventListener("click",async(event)=>{
           const button=event.currentTarget;
