@@ -5772,86 +5772,227 @@ EVENTS_HTML = r"""<!doctype html>
         });
         return;
       }
-      const archiveUndoButton=`<button type="button" id="structure-archive-undo" class="plan-button">${bk0511EventLabel("Änderungen rückgängig machen","Undo changes")}</button>`;
-      const bindArchiveUndo=()=>{
-        document.getElementById("structure-archive-undo")?.addEventListener("click",()=>{
-          const paths=(d.restore_original_paths||{});
-          const observed=d.restore_observed_paths||{};
-          const pairs=Object.entries(paths).map(([id,target])=>
-            escapeHtml(String(observed[id]||""))+" → "+escapeHtml(String(target)));
-          const missing=(d.directory_removed||[]).map(path=>escapeHtml(String(path)));
-          const renamed=[
-            ...(d.root_rename?[String(d.root_rename.new_path||"")+" → "+String(d.root_rename.old_path||"")]:[]),
-            ...(d.child_renames||[]).map(x=>String(x.new_folder)+" → "+String(x.old_folder))
-          ].map(escapeHtml);
-          const instruction=bk0511EventLabel(
-            "Das Archiv ist schreibgeschützt. Verschiebe veränderte Dateien und Ordner manuell an ihre ursprünglichen Orte zurück. Danach die Aufgaben neu prüfen.",
-            "The archive is read-only. Move changed files and folders back to their original locations manually, then refresh Tasks."
-          );
-          structureChangeBody.insertAdjacentHTML("beforeend",
-            '<div class="card" role="status"><strong>'+
-            bk0511EventLabel("Rückgängig-Anleitung","Undo instructions")+
-            '</strong><p>'+instruction+'</p>'+
-            [...renamed,...pairs,...missing].map(line=>'<code style="display:block;overflow-wrap:anywhere">'+line+'</code>').join("")+
-            '</div>');
+      // Archive review is a persisted user choice. It is deliberately NOT
+      // inferred from the currently visible tab or from a prepared event.json.
+      const archiveMode=String(d.review_mode||"");
+      const archiveChoices=`
+        <div class="card" style="margin-top:14px">
+          <strong>${bk0511EventLabel("Wie soll die manuelle Änderung behandelt werden?","How should this manual change be handled?")}</strong>
+          <p class="muted">${bk0511EventLabel(
+            "Wähle zuerst, ob du die Änderung übernehmen oder rückgängig machen möchtest. Die Kameraarchive bleiben schreibgeschützt.",
+            "First choose whether to accept or undo the change. Camera archives remain read-only."
+          )}</p>
+          <div class="edit-actions" style="margin-top:8px">
+            <button type="button" class="plan-button ${archiveMode==="accept"?"bk-positive-action":""}" data-archive-review-mode="accept">
+              ${bk0511EventLabel("Änderungen übernehmen","Accept changes")}
+            </button>
+            <button type="button" class="plan-button ${archiveMode==="undo"?"bk-positive-action":""}" data-archive-review-mode="undo">
+              ${bk0511EventLabel("Änderungen rückgängig machen","Undo changes")}
+            </button>
+          </div>
+          <div id="structure-archive-mode-error" class="error-box" hidden></div>
+        </div>`;
+      const attachArchiveMode=()=>{
+        structureChangeBody.querySelectorAll("[data-archive-review-mode]").forEach(button=>{
+          button.addEventListener("click",async()=>{
+            const mode=button.dataset.archiveReviewMode;
+            if(mode===archiveMode) return;
+            if(mode==="undo" && !(await window.BibliothekarI18n.confirmAsync(
+              bk0511EventLabel(
+                "Zur Rückänderung wechseln? Eine ausschließlich für diesen Auftrag vorbereitete event.json wird nach erneuter Prüfung entfernt. Das Archiv selbst wird nicht verändert.",
+                "Switch to Undo? Any event.json prepared specifically for this task will be verified and removed from staging. The archive itself will not be changed."
+              )
+            ))) return;
+            button.disabled=true;
+            button.setAttribute("aria-busy","true");
+            try{
+              await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/archive-review-mode`,{
+                method:"POST",headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({mode})
+              });
+              await showStructureChange(changeId);
+              await refreshGlobalTasks();
+            }catch(error){
+              const e=structureChangeBody.querySelector("#structure-archive-mode-error");
+              if(e){e.hidden=false;e.textContent=error.message;}
+              button.disabled=false;
+              button.removeAttribute("aria-busy");
+            }
+          });
         });
       };
+      if(archiveMode==="undo"){
+        const originalRoot=(d.root_rename||{}).old_folder||"";
+        const originalRootPath=(d.root_rename||{}).old_path||"";
+        const renamedRoot=(d.root_rename||{}).new_path||"";
+        const instructions=[
+          ...(d.root_rename?[{
+            from:String(renamedRoot),to:String(originalRootPath)
+          }]:[]),
+          ...(d.child_renames||[]).map(item=>({
+            from:String(item.new_folder||""),to:String(item.old_folder||"")
+          })),
+          ...Object.entries(d.restore_original_paths||{}).map(([id,target])=>({
+            from:String((d.restore_observed_paths||{})[id]||""),to:String(target)
+          }))
+        ];
+        const list=instructions.map(item=>`
+          <div style="margin-top:9px">
+            <span class="muted">${bk0511EventLabel("Aktuell:","Current:")}</span>
+            <code style="overflow-wrap:anywhere">${escapeHtml(item.from)}</code>
+            <span> → </span>
+            <span class="muted">${bk0511EventLabel("Wiederherstellen:","Restore:")}</span>
+            <code style="overflow-wrap:anywhere">${escapeHtml(item.to)}</code>
+          </div>`).join("");
+        structureChangeBody.innerHTML=archiveChoices+`
+          <div class="card" style="margin-top:14px">
+            <strong>${bk0511EventLabel("Archiv · Schritt 2 von 2 · Originalzustand wiederherstellen",
+              "Archive · Step 2 of 2 · Restore original state")}</strong>
+            <p>${bk0511EventLabel(
+              "Das Archiv ist schreibgeschützt. Benenne beziehungsweise verschiebe die betroffenen Ordner und Dateien manuell zurück. Verify prüft danach den tatsächlichen Archivbestand und die ursprüngliche event.json.",
+              "The archive is read-only. Restore the original file and folder names/locations manually. Verify then checks the actual archive inventory and original event.json."
+            )}</p>
+            ${originalRoot?`<div style="margin:10px 0"><strong>${bk0511EventLabel(
+              "Ursprünglicher Ordnername","Original folder name")}</strong>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <code id="structure-archive-original-name">${escapeHtml(originalRoot)}</code>
+                <button type="button" class="plan-button" id="structure-archive-copy-name">${bk0511EventLabel("Kopieren","Copy")}</button>
+              </div></div>`:""}
+            ${list}
+            ${(d.directory_removed||[]).length?`<p>${bk0511EventLabel(
+              "Diese ursprünglichen Ordner wiederherstellen:","Restore these original directories:")}</p>
+              ${d.directory_removed.map(path=>`<code style="display:block">${escapeHtml(String(path))}</code>`).join("")}`:""}
+            ${(d.directory_added||[]).length?`<p>${bk0511EventLabel(
+              "Nur die zusätzlich angelegten, jetzt leeren Ordner entfernen:",
+              "Remove newly added directories only if they are now empty:")}</p>
+              ${d.directory_added.map(path=>`<code style="display:block">${escapeHtml(String(path))}</code>`).join("")}`:""}
+          </div>
+          <div class="edit-actions">
+            <button type="button" id="structure-archive-undo-verify" class="plan-button bk-positive-action">
+              ${bk0511EventLabel("Wiederherstellung prüfen","Verify restoration")}
+            </button>
+          </div>
+          <div id="structure-archive-undo-feedback" class="error-box" hidden></div>`;
+        attachArchiveMode();
+        document.getElementById("structure-archive-copy-name")?.addEventListener("click",async(event)=>{
+          const button=event.currentTarget;
+          try{
+            if(navigator.clipboard?.writeText) await navigator.clipboard.writeText(originalRoot);
+            else {
+              const field=document.createElement("textarea");
+              field.value=originalRoot;
+              field.style.position="fixed";field.style.left="-9999px";
+              document.body.appendChild(field);field.select();
+              if(!document.execCommand("copy")) throw new Error("Clipboard not available");
+              field.remove();
+            }
+            button.textContent=bk0511EventLabel("Kopiert","Copied");
+          }catch(e){
+            const feedback=structureChangeBody.querySelector("#structure-archive-undo-feedback");
+            if(feedback){feedback.hidden=false;feedback.textContent=e.message;}
+          }
+        });
+        document.getElementById("structure-archive-undo-verify")?.addEventListener("click",async(event)=>{
+          const button=event.currentTarget;
+          button.disabled=true;button.classList.add("loading");button.setAttribute("aria-busy","true");
+          try{
+            await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/verify-archive-undo`,{method:"POST"});
+            clearStructureTaskFromUrl(changeId);
+            structureChangeDialog.close();
+            await loadEvents({reset:true});
+            await refreshGlobalTasks();
+            setStatus(bk0511EventLabel("Ursprünglicher Archivzustand bestätigt.",
+              "Original archive state verified."),false,true);
+          }catch(error){
+            const feedback=structureChangeBody.querySelector("#structure-archive-undo-feedback");
+            if(feedback){feedback.hidden=false;feedback.textContent=error.message;}
+            button.disabled=false;button.classList.remove("loading");button.removeAttribute("aria-busy");
+          }
+        });
+        return;
+      }
+      if(!archiveMode){
+        structureChangeBody.innerHTML=`
+          <div class="card"><strong>${bk0511EventLabel("Erkannte Änderungen","Detected changes")}</strong>${changeDetails}</div>
+          ${archiveChoices}`;
+        attachArchiveMode();
+        return;
+      }
+      // Accept mode: keep the existing document preparation workflow and
+      // ensure switching tabs or modes never silently approves an operation.
       if(change.status==="prepared"){
         const prepared=friendlyWorkspacePath(d.prepared_event_json_path||"");
-        const target=(String(d.event_name||"") && String(d.status||"")==="archived") ? "im Ereignisordner des Archivs" : "im Archiv";
-        structureChangeBody.innerHTML=preview+`
-          <div class="card" style="margin-top:14px"><strong>Schritt 2 von 2 · event.json ersetzen</strong>
-            <p>Vorbereitet:</p><code style="display:block;white-space:pre-wrap;word-break:break-all">${escapeHtml(prepared)}</code>
-            <p>Ersetze damit die vorhandene <code>event.json</code> ${target}. Andere Archivdateien werden von Bibliothekar nicht verändert.</p>
+        structureChangeBody.innerHTML=archiveChoices+preview+`
+          <div class="card" style="margin-top:14px"><strong>${bk0511EventLabel(
+            "Archiv · Schritt 2 von 2 · event.json ersetzen",
+            "Archive · Step 2 of 2 · Replace event.json")}</strong>
+            <p>${bk0511EventLabel("Vorbereitet:","Prepared:")}</p>
+            <code style="display:block;white-space:pre-wrap;word-break:break-all">${escapeHtml(prepared)}</code>
+            <p>${bk0511EventLabel(
+              "Ersetze damit die vorhandene event.json im Ereignisordner des Archivs. Andere Archivdateien werden von Bibliothekar nicht verändert.",
+              "Replace the existing event.json in the archive event folder with this file. Bibliothekar does not modify any other archive files."
+            )}</p>
           </div>
-          <div class="edit-actions">${archiveUndoButton}<button type="button" id="structure-change-verify" class="plan-button bk-positive-action">Prüfen</button></div>`;
-        bindGuidedEdit(); bindArchiveUndo();
+          <div class="edit-actions"><button type="button" id="structure-change-verify" class="plan-button bk-positive-action">${bk0511EventLabel("Prüfen","Verify")}</button></div>
+          <p id="structure-change-verify-feedback" class="muted" hidden></p>`;
+        bindGuidedEdit();attachArchiveMode();
         document.getElementById("structure-change-verify")?.addEventListener("click",async(event)=>{
           const button=event.currentTarget;
-          button.disabled=true;
-          const oldFeedback=document.getElementById("structure-change-verify-feedback");
-          oldFeedback?.remove();
-          structureChangeBody.insertAdjacentHTML("beforeend",'<p id="structure-change-verify-feedback" class="muted">Archivbestand und event.json werden geprüft …</p>');
+          button.disabled=true;button.classList.add("loading");button.setAttribute("aria-busy","true");
+          const feedback=document.getElementById("structure-change-verify-feedback");
+          if(feedback){feedback.hidden=false;feedback.textContent=bk0511EventLabel(
+            "Archivbestand und event.json werden geprüft …","Verifying archive files and event.json…");}
           try{
             await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/verify-archive`,{method:"POST"});
             clearStructureTaskFromUrl(changeId);
             structureChangeDialog.close();
             await loadEvents({reset:true});
             await refreshGlobalTasks();
-            setStatus("Archivänderung geprüft und in SQLite übernommen.",false,true);
+            setStatus(bk0511EventLabel("Archivänderung geprüft und in SQLite übernommen.",
+              "Archive change verified and recorded in SQLite."),false,true);
           }catch(error){
-            button.disabled=false;
-            const feedback=document.getElementById("structure-change-verify-feedback");
-            if(feedback){
-              feedback.className="error-box";
-              feedback.textContent=error.message;
-            }
-            setStatus(error.message,true);
+            button.disabled=false;button.classList.remove("loading");button.removeAttribute("aria-busy");
+            if(feedback){feedback.className="error-box";feedback.textContent=error.message;}
           }
         });
       }else{
-        structureChangeBody.innerHTML=preview+`
-          <div class="card" style="margin-top:14px"><strong>Archiv · Schritt 1 von 2</strong><p>Bibliothekar erzeugt eine neue event.json unter „Später zuordnen“. Die Kamerabibliothek bleibt read-only.</p></div>
-          <div class="edit-actions">${archiveUndoButton}<button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>event.json vorbereiten</button></div>`;
-        bindGuidedEdit(); bindArchiveUndo();
-        document.getElementById("structure-change-prepare")?.addEventListener("click",async()=>{
+        structureChangeBody.innerHTML=archiveChoices+preview+`
+          <div class="card" style="margin-top:14px"><strong>${bk0511EventLabel(
+            "Archiv · Schritt 1 von 2","Archive · Step 1 of 2")}</strong>
+            <p>${bk0511EventLabel(
+              "Bibliothekar erzeugt eine neue event.json unter „Später zuordnen“. Die Kamerabibliothek bleibt schreibgeschützt.",
+              "Bibliothekar prepares a new event.json under Assign Later. The camera library remains read-only."
+            )}</p></div>
+          <div class="edit-actions">
+            <button type="button" id="structure-change-prepare" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>
+              ${bk0511EventLabel("event.json vorbereiten","Prepare event.json")}
+            </button>
+          </div>`;
+        bindGuidedEdit();attachArchiveMode();
+        document.getElementById("structure-change-prepare")?.addEventListener("click",async(event)=>{
+          const button=event.currentTarget;
           const selectedInputs=chosenStructureInputs();
           const input=selectedInputs.input_path;
           const inputPaths=selectedInputs.input_paths;
           const inlineError=document.getElementById("structure-change-input-error");
-          if(input==="__choose__" || Object.values(inputPaths).includes("__choose__")){
-            if(inlineError){inlineError.textContent="Bitte einen zukünftigen Input-Ordner wählen.";inlineError.hidden=false;}
+          if(input==="__choose__"||Object.values(inputPaths).includes("__choose__")){
+            if(inlineError){inlineError.textContent=bk0511EventLabel(
+              "Bitte einen zukünftigen Input-Ordner wählen.","Choose an input folder.");inlineError.hidden=false;}
             return;
           }
-          if(inlineError) inlineError.hidden=true;
+          if(inlineError)inlineError.hidden=true;
+          button.disabled=true;button.classList.add("loading");button.setAttribute("aria-busy","true");
           try{
             await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/prepare-archive`,{
-              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input,input_paths:inputPaths})
+              method:"POST",headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({input_path:input,input_paths:inputPaths})
             });
             await showStructureChange(changeId);
             await refreshGlobalTasks();
           }catch(error){
             if(inlineError){inlineError.textContent=error.message;inlineError.hidden=false;}
+            else setStatus(error.message,true);
+            button.disabled=false;button.classList.remove("loading");button.removeAttribute("aria-busy");
           }
         });
       }
