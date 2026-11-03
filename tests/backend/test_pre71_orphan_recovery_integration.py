@@ -14,6 +14,7 @@ from app.event_change_apply import confirm_event_change
 from app.library_registry import ensure_library_identity
 from app.storage_config import load_storage_settings, storage_paths
 from tests.backend.test_0271_archive_release_stock import _release_case,_copy_release_rows
+from tests.backend.test_f14_root_operations import fixture
 from tests.backend.test_pre4_operation_separation import ready
 
 
