@@ -748,6 +748,14 @@ def analyze_tree(
             for member in strong_members
         }
 
+        # Camera pairs can share a second while only the RAW stores real
+        # fractional EXIF seconds. Accept one unambiguous fractional value;
+        # differing real fractional values remain an explicit family conflict.
+        if len(strong_times) > 1 and len({v[:19] for v in strong_times}) == 1:
+            precise = {v for v in strong_times if "." in v[:26]}
+            if len(precise) == 1:
+                strong_times = precise
+
         if len(strong_times) == 1:
             family_time = next(
                 iter(strong_times)
