@@ -51,6 +51,7 @@ IdentityCallback = Callable[[str, str], None]
 ImportHistoryCallback = Callable[[list[dict[str, Any]]], None]
 FamilyAdmissionCallback = Callable[[dict[str, Any], dict[str, str], dict[str, int]], dict[str, Any]]
 DestinationDirectoryCallback = Callable[[str], Path | None]
+ExistingSecondCallback = Callable[[str, str], bool]
 CancellationCallback = Callable[[], bool]
 
 
@@ -286,6 +287,7 @@ def build_folder_import_plan(
     analysis: dict[str, Any],
     shared_root: Path,
     destination_directory_callback: DestinationDirectoryCallback | None = None,
+    existing_second_callback: ExistingSecondCallback | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     entry_by_path = {
         str(entry["relative_path"]): entry
@@ -448,7 +450,10 @@ def build_folder_import_plan(
         existing_burst = base.casefold() in stems or any(
             burst_prefix.fullmatch(stem) for stem in stems
         )
-        burst = len(burst_groups.get(group, ())) > 1 or existing_burst
+        catalog_burst = bool(
+            existing_second_callback(str(capture_value)[:19], device_token)
+        ) if existing_second_callback is not None else False
+        burst = len(burst_groups.get(group, ())) > 1 or existing_burst or catalog_burst
         fractional = re.search(
             r"\.(\d+)(?=Z|[+-]\d{2}:\d{2}|$)", str(capture_value)
         )
@@ -754,6 +759,7 @@ def run_folder_import_job(
     import_history_callback: ImportHistoryCallback | None = None,
     family_admission_callback: FamilyAdmissionCallback | None = None,
     destination_directory_callback: DestinationDirectoryCallback | None = None,
+    existing_second_callback: ExistingSecondCallback | None = None,
     work_root: Path | None = None,
     central_stock: bool = False,
     allow_workspace_source: bool = False,
@@ -1077,6 +1083,7 @@ def run_folder_import_job(
             analysis,
             work_root,
             destination_directory_callback=destination_directory_callback,
+            existing_second_callback=existing_second_callback,
         )
         if not plan and not admission.get("blocked_families"):
             raise PipelineError("Die Quelle enthält keine unterstützten Medien.")
