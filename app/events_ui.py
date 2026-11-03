@@ -4187,7 +4187,7 @@ EVENTS_HTML = r"""<!doctype html>
         .catch(error => {
           const inlineError=document.getElementById("change-request-inline-error");
           if (inlineError) {
-            inlineError.textContent=error.message;
+            inlineError.textContent=bkPre71ArchiveError(error);
             inlineError.hidden=false;
           }
         })
@@ -4760,6 +4760,18 @@ EVENTS_HTML = r"""<!doctype html>
     }
 
 
+    function bkPre71ArchiveError(error){
+      const raw=String(error?.message||error||"");
+      if(raw.includes("operation_recovery_required"))
+        return bk0511EventLabel(
+          "Eine unterbrochene Archivoperation muss vor weiteren Änderungen sicher überprüft werden. Keine Originale oder Reservationsdateien löschen.",
+          "An interrupted archive operation requires verified recovery before further changes. Do not delete originals or reservation records."
+        );
+      if(raw.includes("Am SSD-Rückkehrpfad existiert bereits ein Eintrag"))
+        return bk0511EventLabel("Der SSD-Rückkehrpfad ist bereits belegt. Nicht überschreiben.",
+          "The SSD return path is already occupied. Do not overwrite it.");
+      return window.BibliothekarI18n?.t?.(raw)||raw;
+    }
     async function showChangeRequestDetail(crId, options={}) {
       try {
         changeRequestBody.textContent = bk0511EventLabel("Lade Änderungsauftrag …","Loading change request…");
@@ -4897,17 +4909,17 @@ EVENTS_HTML = r"""<!doctype html>
           const prep = assistant.preparation || {};
           const missing = prep.missing_directories || [];
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>${bk0511EventLabel("Hilfsbereiche vorbereiten","Prepare staging areas")}</h3><p class="muted">${bk0511EventLabel("Die App bereitet nur SSD-Hilfsstrukturen vor. Die Kamerabibliothek und der gültige Datenbankzustand bleiben unverändert.","Only SSD staging areas are prepared. The camera archive and confirmed database state remain unchanged.")}</p></div></div>`;
-          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} ${bk0511EventLabel("neue Dateien","new files")}</strong> ${bk0511EventLabel("werden vorbereitet unter","will be prepared in")} <code>${escapeHtml(prep.staging_root || assistant.path_labels?.staging_root || "")}</code> · <strong>${missing.length} fehlende Ordner</strong> werden ergänzt. Hardlinks werden bevorzugt; falls Quelle und Ziel auf unterschiedlichen Dateisystemen liegen, fragt Bibliothekar ausdrücklich nach <strong>Kopieren</strong> oder <strong>Verschieben</strong>.`;
+          html += `<div class="card"><strong>${Number(prep.incoming_file_count || 0)} ${bk0511EventLabel("neue Dateien","new files")}</strong> ${bk0511EventLabel("werden vorbereitet unter","will be prepared in")} <code>${escapeHtml(prep.staging_root || assistant.path_labels?.staging_root || "")}</code> · <strong>${missing.length} ${bk0511EventLabel("fehlende Ordner","missing folders")}</strong> ${bk0511EventLabel("werden ergänzt. Hardlinks werden bevorzugt; bei unterschiedlichen Dateisystemen wird ausdrücklich Kopieren oder Verschieben angeboten.","will be added. Hard links are preferred; cross-filesystem transfers require an explicit Copy or Move choice.")}`;
           if (Number(prep.release_file_count || 0) > 0) {
-            html += `<div style="margin-top:7px"><strong>${Number(prep.release_file_count)} freigewordene Archivdateien</strong>: Die benötigten Zielordner unter <em>Freigewordene Archivdateien</em> werden angelegt. Die Dateien selbst kopiert Bibliothekar erst im nächsten Schritt nach deiner ausdrücklichen Freigabe.</div>`;
+            html += `<div style="margin-top:7px"><strong>${Number(prep.release_file_count)} ${bk0511EventLabel("freigewordene Archivdateien","released archive files")}</strong>: ${bk0511EventLabel("Die Zielordner werden jetzt vorbereitet; die Dateien werden erst im nächsten Schritt nach Freigabe kopiert.","Destination directories are prepared now. Files are copied only in the next step after approval.")}</div>`;
           }
-          if (prep.helper_root) html += `<div class="muted" style="margin-top:7px">Hilfsbereich</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(prep.helper_root)}</code>`;
+          if (prep.helper_root) html += `<div class="muted" style="margin-top:7px">${bk0511EventLabel("Hilfsbereich","Staging area")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(prep.helper_root)}</code>`;
           if (missing.length) {
-            html += `<details style="margin-top:10px"><summary>Fehlende Struktur anzeigen</summary><div style="margin-top:7px">${missing.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
+            html += `<details style="margin-top:10px"><summary>${bk0511EventLabel("Fehlende Struktur anzeigen","Show missing folder structure")}</summary><div style="margin-top:7px">${missing.map(path => `<code style="display:block">${escapeHtml(path)}</code>`).join("")}</div></details>`;
           }
           html += `</div>`;
           html += `<details class="card"><summary><strong>${bk0511EventLabel("Was passiert beim Vorbereiten?","What happens during preparation?")}</strong></summary><p class="muted" style="margin-top:9px">Die App erzeugt ausschließlich benötigte SSD-Ordner und versucht für eingehende freie Dateien zuerst Hardlinks unter „Später zuordnen“. Sind Hardlinks zwischen den Speicherorten nicht möglich, wird angehalten und du wählst ausdrücklich Kopieren oder Verschieben. Freigewordene Archivdateien aus dem Archiv werden hier noch nicht kopiert; das geschieht erst nach einem eigenen Klick. Die Kamerabibliothek bleibt unverändert.</p></details>`;
-          html += `<div id="change-prep-progress" class="change-progress"><div class="muted" data-progress-label>Hilfsbereich wird vorbereitet …</div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
+          html += `<div id="change-prep-progress" class="change-progress"><div class="muted" data-progress-label>${bk0511EventLabel("Hilfsbereich wird vorbereitet …","Preparing staging area…")}</div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div>`;
           if (String(cr.status) === "aenderbar_bestaetigt") {
             html += `<div class="success-text">✓ ${bk0511EventLabel("Hilfsbereich ist bereits vorbereitet.","Staging area is already prepared.")}</div><div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-prepared-next>${bk0511EventLabel("Zum aktuellen Schritt","Return to current step")}</button></div></section>`;
           } else {
@@ -5081,7 +5093,7 @@ EVENTS_HTML = r"""<!doctype html>
           } catch(error) {
             releaseCreateButton.disabled=false;
             if(bar) bar.style.width="100%";
-            if(label) label.textContent="Kopieren fehlgeschlagen.";
+            if(label) label.textContent=bk0511EventLabel("Kopieren fehlgeschlagen.","Copy failed.");
             if(errors){
               errors.style.display="block";
               errors.textContent=error.message;
@@ -5464,7 +5476,12 @@ EVENTS_HTML = r"""<!doctype html>
           }
         });
       } catch (error) {
-        changeRequestBody.textContent = `Fehler: ${error.message}`;
+        changeRequestBody.innerHTML =
+          '<div class="danger-text">'+escapeHtml(bkPre71ArchiveError(error))+'</div>'+
+          '<details class="card" style="margin-top:10px"><summary>'+
+          bk0511EventLabel("Technische Diagnose","Technical diagnostics")+
+          '</summary><code style="display:block;white-space:pre-wrap;overflow-wrap:anywhere">'+
+          escapeHtml(String(error?.message||error))+'</code></details>';
         setStatus(error.message, true);
       }
     }
