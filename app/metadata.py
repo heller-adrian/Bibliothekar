@@ -774,7 +774,7 @@ def analyze_tree(
                 }
                 precise = [
                     raw for raw in strong_times
-                    if re.search(r"T\\d{2}:\\d{2}:\\d{2}\\.\\d+", raw)
+                    if re.search(r"T\d{2}:\d{2}:\d{2}\.\d+", raw)
                 ]
                 precise_instants = {parsed_times[raw] for raw in precise}
                 if len(precise_instants) == 1 and all(
@@ -787,7 +787,7 @@ def analyze_tree(
                     strong_times = {sorted(
                         strong_times,
                         key=lambda raw: (
-                            0 if re.search(r"T\\d{2}:\\d{2}:\\d{2}\\.\\d+", raw) else 1,
+                            0 if re.search(r"T\d{2}:\d{2}:\d{2}\.\d+", raw) else 1,
                             raw,
                         )
                     )[0]}
