@@ -21,7 +21,7 @@ from app.manual_archive_structure_undo import (
 )
 from app.manual_event_undo import undo_manual_applied_change
 from app.workspace_layout import ensure_workspace_layout, shared_work_root
-from tests.backend.test_0263_event_inventory import seed_job, seed_event, seed_family
+from tests.backend.test_0263_event_inventory import NOW, seed_job, seed_event, seed_family
 from tests.backend.test_pre61_manual_rename import setup_renamed_file, run_inventory
 from app.external_changes import (
     acknowledge_external_notices, list_external_change_state,
@@ -48,7 +48,7 @@ def _physical_event(tmp_path, *, archived):
                 "UPDATE files SET current_root_kind='shared_workspace' WHERE id=?",
                 (file_id,),
             )
-        ensure_event_layout_snapshot(conn, "e")
+        ensure_event_layout_snapshot(conn, "e", now=NOW)
     root = archive if archived else shared_work_root(workspace)
     event = root / "2026" / "07-23 - Trip"
     for name in ("Alle", "Sortiert", "Export"):
