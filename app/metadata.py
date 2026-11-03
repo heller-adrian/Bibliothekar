@@ -522,9 +522,13 @@ def build_candidates(
             "tag_name": str(tag_name),
             "raw_value": raw_text,
             "normalized_datetime": (
-                normalize_datetime(parsed)
-                if parsed is not None
-                else None
+                # Preserve a *real* explicitly recorded .000 subsecond. Python's
+                # default isoformat() would silently remove it otherwise.
+                parsed.isoformat(timespec="microseconds")
+                if parsed is not None and re.search(
+                    r"\d{2}:\d{2}:\d{2}\.\d+", raw_text
+                )
+                else normalize_datetime(parsed) if parsed is not None else None
             ),
             "priority": priority,
             "confidence": effective_confidence,
