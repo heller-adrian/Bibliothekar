@@ -11752,8 +11752,6 @@ def index() -> str:
         <span class="bk-copy-warning"><strong>Achtung:</strong> Sicherungen werden als Kopie angelegt und belegen zusätzlichen Speicherplatz.</span>
       </div>
 
-      <p class="muted">Der Import prüft bekannte Dateiinhalte. Die endgültigen Zielpfade und Namenskonflikte werden im konkreten Sortierplan geprüft; gleiche Namen beweisen keine Dublette.</p>
-
       <div id="bk-source-picker" class="bk-source-picker" aria-label="Importquelle wählen">
         <button type="button" class="bk-source-option active" data-source-mode="sd">
           <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><path d="M7 3h8l3 3v15H7z"/><path d="M10 3v5h5V3M10 13h5M10 16h5"/></svg></span>

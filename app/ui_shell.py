@@ -5038,14 +5038,24 @@ BIBLIOTHEKAR_JS = r"""
   function bk0511NoticePresentation(row,field) {
     const source=String(row[field]||"");
     if(document.documentElement.dataset.bkLocale === "de") return source;
+    const kind=String(row.kind||"");
+    const details=row.details||{};
+    // Structured identity is authoritative; legacy diagnostic prose must
+    // never turn a same-folder filename change into a placement error.
+    if(kind==="filename_rename") {
+      if(field==="title") return bk0511NoticeLanguage("Datei umbenannt","File renamed");
+      const oldName=String(details.expected_relative_path||"");
+      const newName=String(details.observed_relative_path||row.relative_path||"");
+      return bk0511NoticeLanguage(
+        "Die Datei wurde im gleichen Ordner umbenannt. Vorher: ","The file was renamed in the same folder. Previous: "
+      )+oldName+bk0511NoticeLanguage(". Jetzt: ",". Current: ")+newName+".";
+    }
     const translated=window.BibliothekarI18n?.t?.(source) || source;
     if(translated !== source) return translated;
-    const details=row.details||{};
-    const kind=String(row.kind||"");
     if(field==="title") {
       const titles={
         placement_conflict:"File assigned to the wrong location",
-        filename_rename:"Filename changed outside Bibliothekar",
+        filename_rename:"File renamed",
         archive_transfer_candidate:"Potential archive transfer detected",
         missing_file:"File missing from inventory",
         external_event_deleted:"Event folder deleted externally"
@@ -5066,7 +5076,7 @@ BIBLIOTHEKAR_JS = r"""
     }
     if(kind==="archive_transfer_candidate")
       return "Camera files have been found in the archive. Verify the archive before completing this event.";
-    return "An external file inventory change was detected. The original diagnostic is available below.";
+    return "An external file inventory change was detected.";
   }
 
   function bkNoticeRows(rows, required) {
@@ -5111,11 +5121,6 @@ BIBLIOTHEKAR_JS = r"""
         '<span style="display:block;color:var(--bk-muted);font-size:.9rem;line-height:1.4;margin-top:3px">' +
         detail +
         '</span>' +
-        (document.documentElement.dataset.bkLocale === "en"
-          ? '<details style="margin-top:5px"><summary>Original technical notice</summary><code style="white-space:pre-wrap;word-break:break-word">'
-            + bkEscapeNotice(row.detail||"")
-            + '</code></details>'
-          : '') +
         (archiveButton
           ? '<div style="margin-top:8px">' + archiveButton + '</div>'
           : '') +
@@ -5175,9 +5180,14 @@ BIBLIOTHEKAR_JS = r"""
       ? bk0511NoticeLanguage("Bibliothekar hat gleichzeitig fachliche Zuordnungsabweichungen und weitere externe Bestandsänderungen erkannt.","Bibliothekar detected both assignment conflicts and other external inventory changes.")
       : displayedRequired.length
         ? (
-          displayedRequired.length === 1
-            ? bk0511NoticeLanguage("Eine Datei liegt an einem fachlich unpassenden Ort. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als Aufgabe offen.","One file is in the wrong location. The actual location was detected; an assignment task remains open.")
-            : bk0511NoticeLanguage(displayedRequired.length + " Dateien liegen an fachlich unpassenden Orten. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als eine Aufgabe offen.",displayedRequired.length + " files are in the wrong locations. The actual state was detected; an assignment task remains open.")
+          displayedRequired.every(row=>row.kind==="filename_rename")
+            ? bk0511NoticeLanguage(
+                "Datei umbenannt. Die Änderung bleibt als Aufgabe offen, bis du sie übernimmst oder rückgängig machst.",
+                "File renamed. The change remains an open task until you accept or undo it."
+              )
+            : displayedRequired.length === 1
+              ? bk0511NoticeLanguage("Eine Datei liegt an einem fachlich unpassenden Ort. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als Aufgabe offen.","One file is in the wrong location. The actual location was detected; an assignment task remains open.")
+              : bk0511NoticeLanguage(displayedRequired.length + " Dateien liegen an fachlich unpassenden Orten. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als eine Aufgabe offen.",displayedRequired.length + " files are in the wrong locations. The actual state was detected; an assignment task remains open.")
         )
         : (
           displayedInfo.length === 1
@@ -5231,7 +5241,7 @@ BIBLIOTHEKAR_JS = r"""
     }
 
     const forcedRepair = displayedRequired.some(
-      row => Boolean(row.details?.force_repair)
+      row => Boolean(row.details?.force_repair) && row.kind !== "filename_rename"
     );
 
     if (displayedRequired.length) {
@@ -5317,13 +5327,24 @@ BIBLIOTHEKAR_JS = r"""
       document.getElementById("bk-external-ignore")?.addEventListener(
         "click",
         async event => {
+          // currentTarget is cleared by DOM after the first await. Capture
+          // it synchronously to prevent a silent TypeError on Confirm.
+          const dismissButton = event.currentTarget;
+          const renameOnly = displayedRequired.length > 0 &&
+            displayedRequired.every(row => row.kind === "filename_rename");
           const ok = await window.BibliothekarI18n.confirmAsync(
-            "Die physische Ablage bleibt damit vorerst bestehen. " +
-            "Die Aufgabe „Dateizuordnung prüfen“ bleibt offen, bis die " +
-            "Dateien wieder fachlich passend liegen. Wirklich ignorieren?"
+            renameOnly
+              ? bk0511NoticeLanguage(
+                "Dialog schließen? Die Dateiumbenennung bleibt unter Aufgaben offen und kann später übernommen oder rückgängig gemacht werden.",
+                "Dismiss this dialog? The rename stays in Tasks and can still be accepted or undone later."
+              )
+              : bk0511NoticeLanguage(
+                "Die physische Ablage bleibt vorerst bestehen. Die Aufgabe bleibt bis zur Korrektur offen. Wirklich ignorieren?",
+                "Keep the current file location for now? The task remains open until the problem is corrected. Dismiss?"
+              )
           );
           if (!ok) return;
-          event.currentTarget.disabled = true;
+          dismissButton.disabled = true;
           bkExternalDismissInFlight = true;
           ++bkExternalNoticeGeneration;
           // Immediate visible response after the user's Confirm. A rejected
@@ -5338,9 +5359,16 @@ BIBLIOTHEKAR_JS = r"""
                 "The notice could not be acknowledged persistently."
               ));
             }
+            // A task deeplink must not force the same acknowledged modal
+            // open again after a page reload. The task itself is preserved.
+            const url = new URL(window.location.href);
+            if(url.searchParams.get("task")==="placement-conflicts"){
+              url.searchParams.delete("task");
+              history.replaceState(null,"",url.pathname+(url.search||"")+url.hash);
+            }
             await refreshTasks();
           } catch (error) {
-            event.currentTarget.disabled = false;
+            dismissButton.disabled = false;
             alert(error.message);
             if(!externalChangeDialog.open) externalChangeDialog.showModal();
           } finally {
@@ -5968,7 +5996,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0-pre.6.2</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0-pre.7</span></p>
   </div>
 </dialog>
 

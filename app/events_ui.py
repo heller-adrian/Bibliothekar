@@ -5696,12 +5696,15 @@ EVENTS_HTML = r"""<!doctype html>
           </div>`;
         bindGuidedEdit();
         document.getElementById("structure-change-undo")?.addEventListener("click",async(event)=>{
+          // DOM currentTarget becomes null once confirmAsync yields.
+          const button=event.currentTarget;
           if(!(await window.BibliothekarI18n.confirmAsync(bk0511EventLabel(
             "Die physische Änderung vollständig rückgängig machen? Vorhandene Dateien werden niemals überschrieben.",
             "Undo the physical event change? Existing files will never be overwritten."
           ))))return;
-          const button=event.currentTarget;
           button.disabled=true;
+          button.classList.add("loading");
+          button.setAttribute("aria-busy","true");
           try{
             await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/undo`,{method:"POST"});
             clearStructureTaskFromUrl(changeId);
@@ -5715,6 +5718,8 @@ EVENTS_HTML = r"""<!doctype html>
             if(inlineError){inlineError.hidden=false;inlineError.textContent=bk0520RestorationError(error.message);}
             else setStatus(bk0520RestorationError(error.message),true);
             button.disabled=false;
+            button.classList.remove("loading");
+            button.removeAttribute("aria-busy");
           }
         });
         document.getElementById("structure-restore-empty")?.addEventListener("click",async(event)=>{
