@@ -438,8 +438,9 @@ def accept_external_filename_rename(
     notice_id: str,
     *,
     library_work_root: Path,
+    central_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Explicitly accept a verified Finder filename change in an applied event.
+    """Accept a verified same-directory filename change in an event or free stock.
 
     Only SQLite and the durable event.json outbox are updated. Never change
     physical bytes; archived events require the separate read-only workflow.
@@ -450,19 +451,22 @@ def accept_external_filename_rename(
     notice = get_external_notice(database_path, notice_id)
     if notice.get("status") != "open" or notice.get("kind") != "filename_rename":
         raise ExternalChangeError("Keine offene Dateiumbenennung zur Übernahme vorhanden.")
-    if notice.get("root_kind") != "shared_workspace" or notice.get("file_id") is None:
+    root_kind = str(notice.get("root_kind") or "")
+    if root_kind not in {"shared_workspace", "central_stock"} or notice.get("file_id") is None:
         raise ExternalChangeError(
             "Archivänderungen sind nicht automatisch übernehmbar. Bitte die Archivprüfung verwenden."
         )
     details = dict(notice.get("details") or {})
-    if (details.get("observed_root_kind") != "shared_workspace"
-            or details.get("expected_root_kind") != "shared_workspace"):
-        raise ExternalChangeError("Umbenennung gehört nicht zum aktiven Arbeitsbereich.")
+    if (details.get("observed_root_kind") != root_kind
+            or details.get("expected_root_kind") != root_kind):
+        raise ExternalChangeError("Umbenennung gehört nicht zum aktiven Speicherbereich.")
     old_rel = _safe_relative(details.get("expected_relative_path"))
     new_rel = _safe_relative(details.get("observed_relative_path"))
     if old_rel.parent != new_rel.parent or old_rel.name == new_rel.name:
         raise ExternalChangeError("Nur eine reine Umbenennung im gleichen Ordner kann übernommen werden.")
-    root = library_work_root.resolve(strict=True)
+    if root_kind == "central_stock" and central_root is None:
+        raise ExternalChangeError("Der zentrale Sicherungsbestand ist nicht verfügbar.")
+    root = (central_root if root_kind == "central_stock" else library_work_root).resolve(strict=True)
     # An external SMB client could replace an observed file with a symlink
     # after the last inventory scan. Check *unresolved* path components before
     # following any of them; an inside-root symlink is also forbidden.
@@ -502,12 +506,14 @@ def accept_external_filename_rename(
                 or current["kind"] != "filename_rename"
                 or current["details_json"] != json.dumps(details, ensure_ascii=False, sort_keys=True)):
             raise ExternalChangeError("Die Umbenennungsaufgabe wurde verändert. Bitte erneut prüfen.")
-        event = connection.execute(
-            "SELECT id,job_id,revision,status FROM events WHERE id=? AND parent_event_id IS NULL",
-            (event_id,),
-        ).fetchone()
-        if event is None or event["status"] != "applied":
-            raise ExternalChangeError("Das Ereignis ist nicht mehr im angewendeten Arbeitsbereich.")
+        event = None
+        if root_kind == "shared_workspace":
+            event = connection.execute(
+                "SELECT id,job_id,revision,status FROM events WHERE id=? AND parent_event_id IS NULL",
+                (event_id,),
+            ).fetchone()
+            if event is None or event["status"] != "applied":
+                raise ExternalChangeError("Das Ereignis ist nicht mehr im angewendeten Arbeitsbereich.")
         # The source has been SHA-verified, and the original DB path must still
         # be the one that produced this notice. A concurrent edit cannot be adopted.
         result = connection.execute(
@@ -519,22 +525,23 @@ def accept_external_filename_rename(
         )
         if result.rowcount != 1:
             raise ExternalChangeError("Dateipfad oder Inhalt in der Datenbank geändert. Bitte neu prüfen.")
-        connection.execute(
-            "UPDATE events SET revision=revision+1,updated_at=?,edited_at=? WHERE id=?",
-            (timestamp, timestamp, event_id),
-        )
-        revision = connection.execute(
-            "SELECT revision FROM events WHERE id=?", (event_id,),
-        ).fetchone()[0]
-        from app.event_document_sync import queue_event_document_sync
-        queue_event_document_sync(
-            connection, str(event["job_id"]), event_id, int(revision), now=timestamp,
-        )
+        if event is not None:
+            connection.execute(
+                "UPDATE events SET revision=revision+1,updated_at=?,edited_at=? WHERE id=?",
+                (timestamp, timestamp, event_id),
+            )
+            revision = connection.execute(
+                "SELECT revision FROM events WHERE id=?", (event_id,),
+            ).fetchone()[0]
+            from app.event_document_sync import queue_event_document_sync
+            queue_event_document_sync(
+                connection, str(event["job_id"]), event_id, int(revision), now=timestamp,
+            )
         resolve_notice_key(connection, f"rename:{file_id}", now=timestamp)
         connection.execute(
             """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
                VALUES (?,'filename_rename_accepted','file',?,?,?)""",
-            (event["job_id"], str(file_id),
+            (event["job_id"] if event is not None else notice.get("job_id"), str(file_id),
              json.dumps({"from": old_rel.as_posix(), "to": new_rel.as_posix()},
                         ensure_ascii=False, sort_keys=True), timestamp),
         )

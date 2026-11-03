@@ -607,6 +607,47 @@ def reconcile_central_free_stock(
                     except FreeStockLayoutError:
                         canonical_dated = ""
 
+                # A same-directory rename in the free daily inventory is
+                # NOT a misplaced photo. Keep the catalogue's original name
+                # until an explicit Accept or Undo under Tasks. The unique
+                # SHA-256 match above establishes physical identity.
+                if (
+                    observed_kind == "central_stock"
+                    and PurePosixPath(observed).parent == PurePosixPath(expected).parent
+                    and PurePosixPath(observed).name != PurePosixPath(expected).name
+                    and not current_is_undated
+                ):
+                    resolve_notice_key(connection, f"placement:{file_id}", now=timestamp)
+                    record_notice(
+                        connection,
+                        notice_key=f"rename:{file_id}",
+                        kind="filename_rename",
+                        root_kind="central_stock",
+                        title="Datei umbenannt",
+                        detail=(
+                            f"Datei wurde im selben Tagesordner von "
+                            f"„{expected}“ in „{observed}“ umbenannt."
+                        ),
+                        job_id=job_id,
+                        file_id=file_id,
+                        relative_path=observed,
+                        repairable=True,
+                        action_required=True,
+                        group_key="filename_rename",
+                        details={
+                            "expected_root_kind": "central_stock",
+                            "observed_root_kind": "central_stock",
+                            "expected_relative_path": expected,
+                            "observed_relative_path": observed,
+                            "size_bytes": expected_size,
+                            "sha256": expected_sha,
+                            "force_repair": False,
+                        },
+                        now=timestamp,
+                    )
+                    misplaced += 1
+                    continue
+
                 # Bewusster Metadaten-Korrekturweg:
                 # Tagesbestand -> Ohne_Datum ist zulässig und wird sofort als
                 # realer Korrekturbestand übernommen. Der umgekehrte manuelle
