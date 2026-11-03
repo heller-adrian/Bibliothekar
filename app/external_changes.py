@@ -439,8 +439,9 @@ def accept_external_file_rename(
     notice_id: str,
     *,
     library_work_root: Path,
+    central_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Explicitly adopt a hash-verified *filename* rename in an applied event.
+    """Explicitly adopt a hash-verified camera filename rename.
 
     No archive writes, no new directory roles, no change to camera bytes.
     The verified filesystem IST is committed only after a human action.
@@ -452,7 +453,7 @@ def accept_external_file_rename(
     notice = get_external_notice(database_path, notice_id)
     if notice.get("status") != "open" or notice.get("kind") != "file_rename":
         raise ExternalChangeError("Kein offener Auftrag für eine Dateiumbenennung.")
-    if notice.get("root_kind") != "shared_workspace":
+    if notice.get("root_kind") not in {"shared_workspace", "central_stock"}:
         raise ExternalChangeError(
             "Archivnamen dürfen nur über den manuellen Archivprüfweg geändert werden."
         )
@@ -464,7 +465,10 @@ def accept_external_file_rename(
             "Nur eine reine Dateiumbenennung kann hier übernommen werden. "
             "Kombinierte Verschiebungen bitte gesondert prüfen."
         )
-    root = library_work_root.resolve(strict=True)
+    is_central = notice.get("root_kind") == "central_stock"
+    if is_central and central_root is None:
+        raise ExternalChangeError("Der zentrale Kamerabestand ist nicht verfügbar.")
+    root = (central_root if is_central else library_work_root).resolve(strict=True)
     old_candidate, new_candidate = root / expected, root / observed
     validate_active_roots()
     if old_candidate.exists() or old_candidate.is_symlink():
@@ -486,7 +490,9 @@ def accept_external_file_rename(
         raise ExternalChangeError(
             "Dateiinhalt oder Größe ist nicht mehr identisch. Erneut prüfen."
         )
-    if notice.get("file_id") is None or not notice.get("event_id"):
+    if notice.get("file_id") is None or (
+        not is_central and not notice.get("event_id")
+    ):
         raise ExternalChangeError("Die eindeutige Dateizuordnung fehlt.")
 
     stamp = _now()
@@ -504,12 +510,16 @@ def accept_external_file_rename(
             raise ExternalChangeError(
                 "Die katalogisierte Datei hat sich verändert. Bitte erneut prüfen."
             )
-        event_id = str(notice["event_id"])
-        event = connection.execute(
-            "SELECT id,job_id,status FROM events WHERE id=?", (event_id,),
-        ).fetchone()
-        if event is None or str(event["status"]) != "applied":
-            raise ExternalChangeError("Das Ereignis ist nicht mehr im anwendbaren Zustand.")
+        event_id = str(notice.get("event_id") or "")
+        event = None
+        if not is_central:
+            event = connection.execute(
+                "SELECT id,job_id,status FROM events WHERE id=?", (event_id,),
+            ).fetchone()
+            if event is None or str(event["status"]) != "applied":
+                raise ExternalChangeError(
+                    "Das Ereignis ist nicht mehr im anwendbaren Zustand."
+                )
         validate_active_roots()
         if sha256_file(source) != expected_sha:
             raise ExternalChangeError("Datei wurde während der Prüfung verändert.")
@@ -518,16 +528,17 @@ def accept_external_file_rename(
                WHERE id=? AND current_relative_path=?""",
             (observed.as_posix(), stamp, file_id, expected.as_posix()),
         )
-        connection.execute(
-            """UPDATE events SET revision=revision+1,updated_at=?,edited_at=?
-               WHERE id=?""", (stamp, stamp, event_id),
-        )
-        revision = connection.execute(
-            "SELECT revision FROM events WHERE id=?", (event_id,),
-        ).fetchone()[0]
-        queue_event_document_sync(
-            connection, str(event["job_id"]), event_id, int(revision), now=stamp
-        )
+        if event is not None:
+            connection.execute(
+                """UPDATE events SET revision=revision+1,updated_at=?,edited_at=?
+                   WHERE id=?""", (stamp, stamp, event_id),
+            )
+            revision = connection.execute(
+                "SELECT revision FROM events WHERE id=?", (event_id,),
+            ).fetchone()[0]
+            queue_event_document_sync(
+                connection, str(event["job_id"]), event_id, int(revision), now=stamp
+            )
         connection.execute(
             """UPDATE external_change_notices
                SET status='resolved',updated_at=?,completed_at=?

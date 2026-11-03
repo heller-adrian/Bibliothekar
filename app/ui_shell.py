@@ -5090,7 +5090,7 @@ BIBLIOTHEKAR_JS = r"""
         '">Archiv prüfen</button>'
       ) : "";
       const renameButtons = required && row.kind === "file_rename"
-        && row.root_kind === "shared_workspace"
+        && ["shared_workspace", "central_stock"].includes(row.root_kind)
         ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">' +
           '<button type="button" class="bk-positive-action" data-bk-rename-action="accept" data-bk-rename-id="' +
           bkEscapeNotice(row.id) + '">' +

@@ -529,6 +529,11 @@ def reconcile_central_free_stock(
                     f"placement:{file_id}",
                     now=timestamp,
                 )
+                resolve_notice_key(
+                    connection,
+                    f"file-rename:{file_id}",
+                    now=timestamp,
+                )
                 continue
 
             central_matches: list[dict[str, Any]] = []
@@ -593,6 +598,43 @@ def reconcile_central_free_stock(
                     current in ("Ohne_Datum", "No Date")
                     or current.startswith(("Ohne_Datum/", "No Date/"))
                 )
+                # A renamed central-stock camera file is an explicit user
+                # decision too. Never silently accept a changed filename just
+                # because the file remains in the same dated/undated folder.
+                if (
+                    observed_kind == "central_stock"
+                    and expected == current
+                    and Path(observed).parent == Path(current).parent
+                    and Path(observed).name != Path(current).name
+                ):
+                    record_notice(
+                        connection,
+                        notice_key=f"file-rename:{file_id}",
+                        kind="file_rename",
+                        root_kind="central_stock",
+                        title="Datei manuell umbenannt",
+                        detail=(
+                            f"Alter Name: „{current}“. Neuer Name: „{observed}“. "
+                            "Bitte ausdrücklich übernehmen oder rückgängig machen."
+                        ),
+                        job_id=job_id,
+                        file_id=file_id,
+                        relative_path=observed,
+                        repairable=True,
+                        action_required=True,
+                        group_key="file_rename",
+                        details={
+                            "expected_root_kind": "central_stock",
+                            "observed_root_kind": "central_stock",
+                            "expected_relative_path": current,
+                            "observed_relative_path": observed,
+                            "size_bytes": expected_size,
+                            "sha256": expected_sha,
+                        },
+                        now=timestamp,
+                    )
+                    misplaced += 1
+                    continue
                 canonical_dated = ""
                 if current_is_undated and str(row.get("selected_capture_time") or ""):
                     try:

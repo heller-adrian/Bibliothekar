@@ -9510,12 +9510,14 @@ def api_accept_external_file_rename(notice_id: str) -> dict[str, Any]:
             current_database_file(),
             notice_id,
             library_work_root=current_library_context().work_root,
+            central_root=storage_paths(WORKSPACE_PATH)["backup_root"],
         )
         refresh_live_event_inventories(
             current_database_file(),
             current_workspace_root(),
             current_archive_root(),
         )
+        reconcile_global_central_stock_state(force=True)
         detect_all_event_structure_changes(
             current_database_file(), current_workspace_root()
         )
