@@ -1633,14 +1633,43 @@ def _apply_confirmed_state(
             "Neuer Ereignisordner",
         )
         previous = connection.execute(
-            "SELECT name,folder_name FROM events WHERE id=?", (row["event_id"],)
+            """SELECT name,folder_name,event_kind,folder_naming_json
+               FROM events WHERE id=?""", (row["event_id"],)
         ).fetchone()
-        connection.execute(
-            """UPDATE events
-               SET folder_name=?,name=?,updated_at=?,edited_at=?
-               WHERE id=? AND parent_event_id IS NULL""",
-            (new_folder, _renamed_display_name(previous, new_folder), now, now, row["event_id"]),
-        )
+        if previous is None:
+            raise EventStructureChangeError("The original event no longer exists.")
+        display_name = _renamed_display_name(previous, new_folder)
+        if str(previous["event_kind"] or "") == "no_event":
+            # A confirmed manual rename is an explicit per-event override.
+            # Persist the new physical name AND its naming snapshot in the
+            # same transaction. A later archived time-segment edit must never
+            # regenerate the former "No Event" name from stale settings.
+            try:
+                old_naming = json.loads(str(previous["folder_naming_json"] or "{}"))
+            except (ValueError, TypeError):
+                old_naming = {}
+            if not isinstance(old_naming, dict):
+                old_naming = {}
+            new_naming = {
+                **old_naming, "mode": "locked",
+                "locked_folder_name": new_folder,
+            }
+            connection.execute(
+                """UPDATE events
+                   SET folder_name=?,name=?,folder_naming_json=?,
+                       updated_at=?,edited_at=?
+                   WHERE id=? AND parent_event_id IS NULL""",
+                (new_folder, display_name,
+                 json.dumps(new_naming, ensure_ascii=False, sort_keys=True),
+                 now, now, row["event_id"]),
+            )
+        else:
+            connection.execute(
+                """UPDATE events
+                   SET folder_name=?,name=?,updated_at=?,edited_at=?
+                   WHERE id=? AND parent_event_id IS NULL""",
+                (new_folder, display_name, now, now, row["event_id"]),
+            )
 
     for child_rename in detected.get("child_renames") or []:
         child_id = str(child_rename.get("child_event_id") or "")
