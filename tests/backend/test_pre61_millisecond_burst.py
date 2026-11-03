@@ -102,3 +102,20 @@ def test_metadata_does_not_fabricate_missing_milliseconds():
     }, "jpeg")
     original = next(c for c in candidates if c["tag_name"] == "EXIF:ExifIFD:DateTimeOriginal")
     assert original["normalized_datetime"] == "2026-07-19T17:11:37+03:00"
+
+
+def test_registered_archived_capture_also_triggers_precise_new_name(tmp_path):
+    entries, analysis = _make(1, start=20)
+    called = []
+    def already_present(second, camera):
+        called.append((second, camera))
+        return second == "2026-07-19T17:11:37" and camera == "Fuji-X-E5"
+    plan, _, summary = build_folder_import_plan(
+        entries, analysis, tmp_path,
+        existing_second_callback=already_present,
+    )
+    assert called
+    assert Path(plan[0]["destination_relative_path"]).name == (
+        "20260719_171137500_Fuji-X-E5.JPG"
+    )
+    assert summary["burst_family_count"] == 1
