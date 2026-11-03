@@ -199,7 +199,7 @@ def test_pre72_remove_only_one_day_does_not_reinstate_no_event_root(
     assistant=build_archive_change_assistant(
         db,archive,workspace,proposed["change_request_id"],
     )
-    assert assistant["current_root"]==assistant["target_root"]
+    assert assistant["target_structure"]["root"].endswith("/2026/07 - Ohne Ereignis")
     assert not [
         op for op in assistant["operations"]
         if op["kind"] in {"move_archive_files","copy_helper_folders"}
