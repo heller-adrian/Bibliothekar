@@ -463,6 +463,15 @@ def accept_external_filename_rename(
     if old_rel.parent != new_rel.parent or old_rel.name == new_rel.name:
         raise ExternalChangeError("Nur eine reine Umbenennung im gleichen Ordner kann übernommen werden.")
     root = library_work_root.resolve(strict=True)
+    # An external SMB client could replace an observed file with a symlink
+    # after the last inventory scan. Check *unresolved* path components before
+    # following any of them; an inside-root symlink is also forbidden.
+    for relative in (old_rel, new_rel):
+        cursor = root
+        for part in relative.parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise ExternalChangeError("Symbolische Links sind bei der Dateiumbenennung unzulässig.")
     old = (root / old_rel).resolve(strict=False)
     new = (root / new_rel).resolve(strict=False)
     try:
@@ -479,6 +488,7 @@ def accept_external_filename_rename(
     if not expected_sha or new.stat().st_size != expected_size or sha256_file(new) != expected_sha:
         raise ExternalChangeError("Die Dateiidentität (Größe/SHA-256) hat sich geändert. Bitte erneut prüfen.")
 
+    validate_active_roots()
     timestamp = _now()
     file_id = int(notice["file_id"])
     event_id = str(notice.get("event_id") or "")
