@@ -5514,7 +5514,7 @@ EVENTS_HTML = r"""<!doctype html>
         return false;
       }
       if (!structureChangeDialog.open) structureChangeDialog.showModal();
-      structureChangeBody.textContent="Änderung wird geladen …";
+      structureChangeBody.textContent=bk0511EventLabel("Änderung wird geladen …","Loading change …");
       const d=change.detected||{};
       structureChangeSubtitle.textContent=(d.status==="archived"?bk0511EventLabel("Archiviert","Archived"):bk0511EventLabel("Angewendet","Applied"))+" · "+String(d.event_name||change.event_id||"");
       const added=d.directory_added||[], removed=d.directory_removed||[], moves=d.file_moves||[];
@@ -5531,17 +5531,17 @@ EVENTS_HTML = r"""<!doctype html>
         : String(d.current_input_path||"");
       const currentKnown=inputOptions.some(path=>String(path)===currentInput);
       const options=(!currentKnown
-        ? ['<option value="__choose__" selected disabled>Bitte Input-Ordner wählen · momentan unbekannt</option>']
+        ? ['<option value="__choose__" selected disabled>'+bk0511EventLabel("Bitte Input-Ordner wählen · momentan unbekannt","Choose an input folder · currently unknown")+'</option>']
         : []
       ).concat(inputOptions.map(path=>{
         const current=String(path)===currentInput;
-        return `<option value="${escapeHtml(path)}" ${current?"selected":""}>${escapeHtml(structurePathLabel(path))}${current?" · momentan Input":""}</option>`;
+        return `<option value="${escapeHtml(path)}" ${current?"selected":""}>${escapeHtml(structurePathLabel(path))}${current?bk0511EventLabel(" · momentan Input"," · current input"):""}</option>`;
       })).join("");
       const blockers=[
-        ...(d.missing_file_ids||[]).map(id=>`Kameraoriginal fehlt · Datei-ID ${id}`),
-        ...(d.duplicate_file_ids||[]).map(id=>`Kameraoriginal mehrfach gefunden · Datei-ID ${id}`),
-        ...(d.unclassified_directories||[]).map(path=>`Strukturpfad nicht eindeutig · ${path}`),
-        ...(d.inconsistent_leaf_layouts?["Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen."]:[]),
+        ...(d.missing_file_ids||[]).map(id=>bk0511EventLabel("Kameraoriginal fehlt · Datei-ID ","Camera original missing · file ID ")+id),
+        ...(d.duplicate_file_ids||[]).map(id=>bk0511EventLabel("Kameraoriginal mehrfach gefunden · Datei-ID ","Camera original found more than once · file ID ")+id),
+        ...(d.unclassified_directories||[]).map(path=>bk0511EventLabel("Strukturpfad nicht eindeutig · ","Ambiguous structure path · ")+path),
+        ...(d.inconsistent_leaf_layouts?[bk0511EventLabel("Unterereignis-/Tagesblätter besitzen unterschiedliche Ordnerstrukturen.","Subevent/day leaves have inconsistent folder structures.")]:[]),
         ...(d.semantic_change_candidates||[]).map(item=>bk0511EventLabel(
           "Unterereignis „"+item.old_folder+"“ ist nicht mehr vorhanden. Die Dateien liegen außerhalb ihrer gültigen Zuordnung. Stelle den ursprünglichen Ordner und seine Dateien wieder her.",
           "Subevent “"+item.old_folder+"” is missing. Its files are outside their assigned area. Restore the original subevent folder and files."
@@ -5558,28 +5558,28 @@ EVENTS_HTML = r"""<!doctype html>
       const changeDetails=(folderChangeCount||moves.length)
         ? `
           ${folderChangeCount?`<details class="card" style="margin:9px 0 0;padding:9px 11px">
-            <summary><strong>Ordneränderungen · ${folderChangeCount}</strong></summary>
+            <summary><strong>${bk0511EventLabel("Ordneränderungen","Folder changes")} · ${folderChangeCount}</strong></summary>
             <div style="display:grid;gap:6px;margin-top:9px">${folderChanges}</div>
           </details>`:""}
           ${moves.length?`<details class="card" style="margin:9px 0 0;padding:9px 11px">
-            <summary><strong>Dateiänderungen · ${moves.length}</strong></summary>
+            <summary><strong>${bk0511EventLabel("Dateiänderungen","File changes")} · ${moves.length}</strong></summary>
             <div style="display:grid;gap:6px;margin-top:9px">${fileChanges}</div>
           </details>`:""}`
-        : '<div class="muted" style="margin-top:9px">Keine Pfadänderungen.</div>';
+        : '<div class="muted" style="margin-top:9px">'+bk0511EventLabel("Keine Pfadänderungen.","No path changes.")+'</div>';
       const leafConfigs=d.leaf_layouts||[];
       const usingLeafInputs=leafConfigs.length>1 || (leafConfigs.length===1 && Boolean(leafConfigs[0].leaf_prefix));
       const savedLeafInputs=d.selected_leaf_input_paths||{};
       const leafSelectors=usingLeafInputs ?
-        '<div class="card" style="margin-top:14px"><strong>Input folders for each event area</strong>'+
-        '<p class="muted">Each event and subevent can have its own input folder.</p>'+
+        '<div class="card" style="margin-top:14px"><strong>'+bk0511EventLabel("Input-Ordner für jeden Ereignisbereich","Input folders for each event area")+'</strong>'+
+        '<p class="muted">'+bk0511EventLabel("Jedes Ereignis und Unterereignis kann einen eigenen Input-Ordner besitzen.","Each event and subevent can have its own input folder.")+'</p>'+
         leafConfigs.map(leaf=>{
           const chosen=String(savedLeafInputs[leaf.leaf_key]||leaf.input_path||"");
           const choices=leaf.structure_enabled?(leaf.input_options||[]):[""];
           const missing=leaf.structure_enabled&&!choices.includes(chosen);
-          const optionsHtml=(missing?'<option value="__choose__" selected disabled>Select input folder</option>':"")+
+          const optionsHtml=(missing?'<option value="__choose__" selected disabled>'+bk0511EventLabel("Input-Ordner wählen","Select input folder")+'</option>':"")+
             choices.map(path=>'<option value="'+escapeHtml(path)+'"'+(path===chosen?' selected':'')+'>'+
-              escapeHtml(path||"Directly in event")+'</option>').join("");
-          return '<label class="edit-field"><span>'+escapeHtml(leaf.leaf_prefix||d.event_name||"Main event")+
+              escapeHtml(path||bk0511EventLabel("Direkt im Ereignis","Directly in event"))+'</option>').join("");
+          return '<label class="edit-field"><span>'+escapeHtml(leaf.leaf_prefix||d.event_name||bk0511EventLabel("Hauptereignis","Main event"))+
             '</span><select data-structure-leaf-key="'+escapeHtml(leaf.leaf_key)+'"'+
             (change.status==="prepared"||blockers.length?' disabled':'')+'>'+optionsHtml+'</select></label>';
         }).join("")+
@@ -5595,11 +5595,11 @@ EVENTS_HTML = r"""<!doctype html>
 
       const inputControl=usingLeafInputs ? leafSelectors : change.status==="prepared"
         ? `<div class="card" style="margin-top:14px">
-            <strong>Input-Ordner</strong>
+            <strong>${bk0511EventLabel("Input-Ordner","Input folder")}</strong>
             <div style="margin-top:6px">${escapeHtml(structurePathLabel(preparedInput))}</div>
-            <div class="muted" style="margin-top:4px">Bereits in der vorbereiteten event.json gespeichert.</div>
+            <div class="muted" style="margin-top:4px">${bk0511EventLabel("Bereits in der vorbereiteten event.json gespeichert.","Already saved in the prepared event.json.")}</div>
           </div>`
-        : `<label class="edit-field" style="margin-top:14px"><span>Welcher Ordner soll zukünftig der Input-Ordner sein?</span>
+        : `<label class="edit-field" style="margin-top:14px"><span>${bk0511EventLabel("Welcher Ordner soll zukünftig der Input-Ordner sein?","Which folder should be the input folder?")}</span>
             <select id="structure-change-input" ${blockers.length?"disabled":""}>${options}</select>
           </label>
           <div id="structure-change-input-error" class="error-box" hidden style="margin-top:10px"></div>`;
@@ -5697,7 +5697,7 @@ EVENTS_HTML = r"""<!doctype html>
         structureChangeBody.innerHTML=preview+`
           <div class="edit-actions">
             <button type="button" id="structure-change-undo" class="plan-button">${bk0511EventLabel("Änderungen rückgängig machen","Undo changes")}</button>
-            <button type="button" id="structure-change-confirm" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>Änderungen übernehmen</button>
+            <button type="button" id="structure-change-confirm" class="plan-button bk-positive-action" ${blockers.length?"disabled":""}>${bk0511EventLabel("Änderungen übernehmen","Accept changes")}</button>
           </div>`;
         bindGuidedEdit();
         document.getElementById("structure-change-undo")?.addEventListener("click",async(event)=>{
@@ -5752,12 +5752,12 @@ EVENTS_HTML = r"""<!doctype html>
           const inputPaths=selectedInputs.input_paths;
           const inlineError=document.getElementById("structure-change-input-error");
           if(input==="__choose__" || Object.values(inputPaths).includes("__choose__")){
-            if(inlineError){inlineError.textContent="Bitte einen zukünftigen Input-Ordner wählen.";inlineError.hidden=false;}
+            if(inlineError){inlineError.textContent=bk0511EventLabel("Bitte einen zukünftigen Input-Ordner wählen.","Choose an input folder.");inlineError.hidden=false;}
             return;
           }
           if(inlineError) inlineError.hidden=true;
           try{
-            structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">event.json und SQLite werden aktualisiert …</p>');
+            structureChangeBody.insertAdjacentHTML("beforeend",'<p class="muted">'+bk0511EventLabel("event.json und SQLite werden aktualisiert …","Updating event.json and SQLite…")+'</p>');
             await requestJson(`/api/event-structure-changes/${encodeURIComponent(changeId)}/confirm-applied`,{
               method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input_path:input,input_paths:inputPaths})
             });
@@ -5765,7 +5765,7 @@ EVENTS_HTML = r"""<!doctype html>
             structureChangeDialog.close();
             await loadEvents({reset:true});
             await refreshGlobalTasks();
-            setStatus("Manuelle Ereignisänderung übernommen. event.json und SQLite sind aktuell.",false,true);
+            setStatus(bk0511EventLabel("Manuelle Ereignisänderung übernommen. event.json und SQLite sind aktuell.","Manual event change accepted. event.json and SQLite are up to date."),false,true);
           }catch(error){
             if(inlineError){inlineError.textContent=error.message;inlineError.hidden=false;}
           }
