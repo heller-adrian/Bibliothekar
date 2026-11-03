@@ -1374,6 +1374,11 @@ def detect_event_structure_change(
             snapshot.get("inconsistent_leaf_layouts"),
             snapshot.get("semantic_change_candidates"),
         ))
+        # Never accept a structural edit that would implicitly absorb a
+        # still-unconfirmed filename change from the same observation.
+        if rename_ids and structural_changed:
+            snapshot["blocked"] = True
+            snapshot["filename_rename_pending_ids"] = sorted(rename_ids)
         snapshot["changed"] = bool(structural_changed)
 
         if not snapshot["changed"]:
