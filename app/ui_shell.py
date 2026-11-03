@@ -5045,6 +5045,7 @@ BIBLIOTHEKAR_JS = r"""
     if(field==="title") {
       const titles={
         placement_conflict:"File assigned to the wrong location",
+        file_rename:"Camera file renamed manually",
         archive_transfer_candidate:"Potential archive transfer detected",
         missing_file:"File missing from inventory",
         external_event_deleted:"Event folder deleted externally"
@@ -5053,6 +5054,11 @@ BIBLIOTHEKAR_JS = r"""
     }
     const observed=String(details.observed_relative_path||row.relative_path||"");
     const expected=String(details.expected_relative_path||"");
+    if(kind==="file_rename"){
+      return "A known camera file was renamed manually. Accept the new filename or undo the change."
+        +(observed ? " New: "+observed+"." : "")
+        +(expected ? " Previous: "+expected+"." : "");
+    }
     if(kind==="placement_conflict"){
       return "This file is in a location inconsistent with its event assignment."
         +(observed ? " Actual: "+observed+"." : "")
@@ -5065,7 +5071,7 @@ BIBLIOTHEKAR_JS = r"""
 
   function bkNoticeRows(rows, required) {
     if (!rows.length) return "";
-    const visible = rows.slice(0, 8);
+    const visible = required ? rows : rows.slice(0, 8);
     const items = visible.map(row => {
       const detail = bkEscapeNotice(bk0511NoticePresentation(row,"detail"));
       const archiveButton = (
@@ -5083,6 +5089,17 @@ BIBLIOTHEKAR_JS = r"""
         bkEscapeNotice(row.details.event_id) +
         '">Archiv prüfen</button>'
       ) : "";
+      const renameButtons = required && row.kind === "file_rename"
+        && row.root_kind === "shared_workspace"
+        ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">' +
+          '<button type="button" class="bk-positive-action" data-bk-rename-action="accept" data-bk-rename-id="' +
+          bkEscapeNotice(row.id) + '">' +
+          bk0511NoticeLanguage('Umbenennung übernehmen','Accept rename') + '</button>' +
+          '<button type="button" data-bk-rename-action="repair" data-bk-rename-id="' +
+          bkEscapeNotice(row.id) + '">' +
+          bk0511NoticeLanguage('Umbenennung rückgängig machen','Undo rename') +
+          '</button></div>'
+        : "";
       return (
         '<div style="padding:10px 0;border-bottom:1px solid var(--bk-line)">' +
         '<strong style="display:block">' +
@@ -5099,6 +5116,7 @@ BIBLIOTHEKAR_JS = r"""
         (archiveButton
           ? '<div style="margin-top:8px">' + archiveButton + '</div>'
           : '') +
+        renameButtons +
         '</div>'
       );
     }).join("");
@@ -5181,6 +5199,31 @@ BIBLIOTHEKAR_JS = r"""
         )
         : ""
     );
+
+    // Explicit per-file decisions. Do not silently accept a filename change.
+    externalChangeList.querySelectorAll("[data-bk-rename-action]").forEach(button => {
+      button.addEventListener("click", async () => {
+        const id = button.getAttribute("data-bk-rename-id");
+        const action = button.getAttribute("data-bk-rename-action");
+        if (!id || !["accept", "repair"].includes(action)) return;
+        button.disabled = true;
+        try {
+          const endpoint = "/api/external-change-notices/" +
+            encodeURIComponent(id) +
+            (action === "accept" ? "/accept-rename" : "/repair");
+          const response = await fetch(endpoint, {method:"POST"});
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.detail || "Die Dateiumbenennung konnte nicht verarbeitet werden.");
+          }
+          await refreshTasks();
+          await bkRenderExternalChanges({forceRequired:true});
+        } catch (error) {
+          alert(error.message);
+          button.disabled = false;
+        }
+      });
+    });
 
     const forcedRepair = displayedRequired.some(
       row => Boolean(row.details?.force_repair)

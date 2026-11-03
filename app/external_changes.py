@@ -433,6 +433,121 @@ def repair_external_notice(
     return get_external_notice(database_path, notice_id)
 
 
+
+def accept_external_file_rename(
+    database_path: Path,
+    notice_id: str,
+    *,
+    library_work_root: Path,
+) -> dict[str, Any]:
+    """Explicitly adopt a hash-verified *filename* rename in an applied event.
+
+    No archive writes, no new directory roles, no change to camera bytes.
+    The verified filesystem IST is committed only after a human action.
+    """
+    from app.root_operations import validate_active_roots
+    from app.event_document_sync import queue_event_document_sync
+    import stat
+
+    notice = get_external_notice(database_path, notice_id)
+    if notice.get("status") != "open" or notice.get("kind") != "file_rename":
+        raise ExternalChangeError("Kein offener Auftrag für eine Dateiumbenennung.")
+    if notice.get("root_kind") != "shared_workspace":
+        raise ExternalChangeError(
+            "Archivnamen dürfen nur über den manuellen Archivprüfweg geändert werden."
+        )
+    details = dict(notice.get("details") or {})
+    expected = _safe_relative(details.get("expected_relative_path"))
+    observed = _safe_relative(details.get("observed_relative_path"))
+    if expected.parent != observed.parent or expected.name == observed.name:
+        raise ExternalChangeError(
+            "Nur eine reine Dateiumbenennung kann hier übernommen werden. "
+            "Kombinierte Verschiebungen bitte gesondert prüfen."
+        )
+    root = library_work_root.resolve(strict=True)
+    old_candidate, new_candidate = root / expected, root / observed
+    validate_active_roots()
+    if old_candidate.exists() or old_candidate.is_symlink():
+        raise ExternalChangeError(
+            "Der ursprüngliche Name ist wieder belegt. Bitte Bestand erneut prüfen."
+        )
+    if new_candidate.is_symlink():
+        raise ExternalChangeError("Symbolische Links sind als Kameradatei unzulässig.")
+    source = new_candidate.resolve(strict=True)
+    if not source.is_relative_to(root) or not stat.S_ISREG(source.stat().st_mode):
+        raise ExternalChangeError("Umbenannte Datei liegt nicht im verwalteten Bestand.")
+    expected_size = int(details.get("size_bytes") or 0)
+    expected_sha = str(details.get("sha256") or "")
+    if (
+        not expected_sha
+        or source.stat().st_size != expected_size
+        or sha256_file(source) != expected_sha
+    ):
+        raise ExternalChangeError(
+            "Dateiinhalt oder Größe ist nicht mehr identisch. Erneut prüfen."
+        )
+    if notice.get("file_id") is None or not notice.get("event_id"):
+        raise ExternalChangeError("Die eindeutige Dateizuordnung fehlt.")
+
+    stamp = _now()
+    with database_connection(database_path) as connection:
+        file_id = int(notice["file_id"])
+        row = connection.execute(
+            """SELECT job_id,current_relative_path,current_root_kind
+               FROM files WHERE id=?""", (file_id,),
+        ).fetchone()
+        if (
+            row is None
+            or str(row["current_relative_path"]) != expected.as_posix()
+            or str(row["current_root_kind"]) != "shared_workspace"
+        ):
+            raise ExternalChangeError(
+                "Die katalogisierte Datei hat sich verändert. Bitte erneut prüfen."
+            )
+        event_id = str(notice["event_id"])
+        event = connection.execute(
+            "SELECT id,job_id,status FROM events WHERE id=?", (event_id,),
+        ).fetchone()
+        if event is None or str(event["status"]) != "applied":
+            raise ExternalChangeError("Das Ereignis ist nicht mehr im anwendbaren Zustand.")
+        validate_active_roots()
+        if sha256_file(source) != expected_sha:
+            raise ExternalChangeError("Datei wurde während der Prüfung verändert.")
+        connection.execute(
+            """UPDATE files SET current_relative_path=?,updated_at=?
+               WHERE id=? AND current_relative_path=?""",
+            (observed.as_posix(), stamp, file_id, expected.as_posix()),
+        )
+        connection.execute(
+            """UPDATE events SET revision=revision+1,updated_at=?,edited_at=?
+               WHERE id=?""", (stamp, stamp, event_id),
+        )
+        revision = connection.execute(
+            "SELECT revision FROM events WHERE id=?", (event_id,),
+        ).fetchone()[0]
+        queue_event_document_sync(
+            connection, str(event["job_id"]), event_id, int(revision), now=stamp
+        )
+        connection.execute(
+            """UPDATE external_change_notices
+               SET status='resolved',updated_at=?,completed_at=?
+               WHERE id=? AND status='open'""",
+            (stamp, stamp, str(notice_id)),
+        )
+        connection.execute(
+            """INSERT INTO audit_log(
+                   job_id,action,entity_type,entity_id,details_json,created_at)
+               VALUES (?,'manual_file_rename_accepted','file',?,?,?)""",
+            (
+                str(row["job_id"]), str(file_id),
+                json.dumps(
+                    {"old": expected.as_posix(), "new": observed.as_posix(),
+                     "sha256": expected_sha}, sort_keys=True,
+                ), stamp,
+            ),
+        )
+    return get_external_notice(database_path, notice_id)
+
 def repair_external_conflicts(
     database_path: Path,
     *,

@@ -1216,6 +1216,62 @@ def detect_event_structure_change(
         }
         moves = list(snapshot.get("file_moves") or [])
 
+        # File renames are not ordinary organization-folder movements. Keep
+        # the last accepted SQLite path until the owner explicitly chooses
+        # "Accept" or "Undo" from the global tasks. This also preserves the
+        # authoritative original location across repeated inventory refreshes.
+        rename_moves = [
+            item for item in moves
+            if PurePosixPath(str(item.get("old_path") or "")).name
+            != PurePosixPath(str(item.get("new_path") or "")).name
+        ]
+        rename_ids: set[int] = set()
+        for item in rename_moves:
+            file_id = int(item["file_id"])
+            if file_id in conflicts_by_id:
+                continue  # A wrong event/leaf remains the stricter placement task.
+            previous = (
+                _open_placement_expected_path(connection, file_id)
+                or str(item.get("old_path") or "")
+            )
+            observed = str(item.get("new_path") or "")
+            file_row = connection.execute(
+                """SELECT job_id,size_bytes,
+                          COALESCE(sha256_current,sha256_original,'') AS sha256
+                   FROM files WHERE id=?""", (file_id,),
+            ).fetchone()
+            if file_row is None or not previous or not observed:
+                continue
+            rename_ids.add(file_id)
+            record_notice(
+                connection,
+                notice_key=f"file-rename:{file_id}",
+                kind="file_rename",
+                root_kind=root_kind,
+                title="Datei manuell umbenannt",
+                detail=(
+                    f"Alter Pfad: „{previous}“. Neuer Pfad: „{observed}“. "
+                    "Bitte die Umbenennung ausdrücklich übernehmen oder rückgängig machen."
+                ),
+                job_id=str(file_row["job_id"]),
+                event_id=event_id,
+                file_id=file_id,
+                relative_path=observed,
+                repairable=root_kind == "shared_workspace",
+                action_required=True,
+                group_key="file_rename",
+                details={
+                    "expected_root_kind": root_kind,
+                    "observed_root_kind": root_kind,
+                    "expected_relative_path": previous,
+                    "observed_relative_path": observed,
+                    "size_bytes": int(file_row["size_bytes"] or 0),
+                    "sha256": str(file_row["sha256"] or ""),
+                    "force_repair": False,
+                },
+                now=now,
+            )
+
         for item in snapshot.get("placement_conflicts") or []:
             file_id = int(item["file_id"])
             observed = str(item.get("new_path") or "")
@@ -1278,14 +1334,18 @@ def detect_event_structure_change(
 
         # SQLite bildet den tatsächlich beobachteten Pfad ab. Das fachliche
         # SOLL bleibt bei falscher Ablage separat in external_change_notices.
-        if moves:
+        ordinary_moves = [
+            move for move in moves
+            if int(move["file_id"]) not in rename_ids
+        ]
+        if ordinary_moves:
             from app.physical_state import sync_placement_moves
             sync_placement_moves(
                 connection,
                 event,
                 layout_state,
                 root_kind,
-                moves,
+                ordinary_moves,
                 now=now,
             )
 
@@ -1302,6 +1362,12 @@ def detect_event_structure_change(
             resolve_notice_key(
                 connection,
                 f"placement:{file_id}",
+                now=now,
+            )
+        for file_id in observed_file_ids - rename_ids:
+            resolve_notice_key(
+                connection,
+                f"file-rename:{file_id}",
                 now=now,
             )
 
@@ -1330,7 +1396,7 @@ def detect_event_structure_change(
             # Pure physical movements within an allowed leaf are accepted
             # without a manual structure task. Queue a durable event.json
             # projection in the same transaction as the observed SQLite paths.
-            if moves and root_kind == "shared_workspace" and not conflicts_by_id:
+            if ordinary_moves and root_kind == "shared_workspace" and not conflicts_by_id:
                 from app.event_document_sync import queue_event_document_sync
                 connection.execute(
                     "UPDATE events SET revision=revision+1,updated_at=?,edited_at=? WHERE id=?",
