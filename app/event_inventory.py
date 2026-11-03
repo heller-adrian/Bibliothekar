@@ -297,19 +297,21 @@ def _asset_kind(
 
 
 _FILENAME_SCHEMA_RE = re.compile(
-    r"(?<!\d)(?P<date>20\d{6})[_-](?P<time>\d{6})(?!\d)"
+    r"(?<!\d)(?P<date>20\d{6})[_-](?P<time>\d{6})(?P<ms>\d{3})?(?!\d)"
 )
 def _filename_schema_capture_time(filename: str) -> str | None:
-    """Read the canonical JJJJMMTT_HHMMSS timestamp from an export name."""
+    """Parse the canonical whole-second or genuine 3-digit millisecond time."""
     match = _FILENAME_SCHEMA_RE.search(Path(str(filename or "")).stem)
     if match is None:
         return None
     value = match.group("date") + match.group("time")
     try:
         parsed = datetime.strptime(value, "%Y%m%d%H%M%S")
+        if match.group("ms") is not None:
+            parsed = parsed.replace(microsecond=int(match.group("ms")) * 1000)
     except ValueError:
         return None
-    return parsed.isoformat(timespec="seconds")
+    return parsed.isoformat(timespec="microseconds" if match.group("ms") is not None else "seconds")
 
 
 def _filename_family_source(
