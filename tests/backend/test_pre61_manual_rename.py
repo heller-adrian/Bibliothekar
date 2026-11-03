@@ -114,3 +114,20 @@ def test_accept_rejects_changed_bytes_and_preserves_task(tmp_path, monkeypatch):
         assert c.execute(
             "SELECT current_relative_path FROM files WHERE id=?", (file_id,)
         ).fetchone()[0] == old_rel
+
+
+def test_accept_rejects_symlink_substitution_even_with_identical_bytes(tmp_path, monkeypatch):
+    db, ws, central, work, event, file_id, old, new, old_rel = (
+        setup_renamed_file(tmp_path, monkeypatch)
+    )
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    notice = run_inventory(db, ws, archive)["required"][0]
+    real = new.with_name("same-content." + new.name)
+    new.rename(real)
+    new.symlink_to(real.name)
+    with pytest.raises(ExternalChangeError, match="Symbolische Links"):
+        accept_external_filename_rename(
+            db, notice["id"], library_work_root=work
+        )
+    assert list_external_change_state(db)["required_count"] == 1
