@@ -1,7 +1,7 @@
 name: Publish verified Bibliothekar 1.0.0-pre.7.1 for TrueNAS
 on:
   push:
-    branches: [codex/pre711-archive-wizard-recovery]
+    branches: [codex/pre71-archive-wizard-recovery]
     paths: [.github/workflows/publish-pre71.yml]
 permissions:
   contents: write
@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/pre711-archive-wizard-recovery'
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/pre71-archive-wizard-recovery'
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
