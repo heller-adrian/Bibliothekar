@@ -47,7 +47,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          pip install -r requirements.txt pytest httpx
+          pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2
           python -m compileall -q app qa
           bash -n qa/archive_e2e/*.sh
           pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
