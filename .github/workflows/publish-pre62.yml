@@ -1,0 +1,173 @@
+name: Publish verified Bibliothekar 1.0.0-pre.6.2
+on:
+  push:
+    branches: [codex/publish-1.0.0-pre.6.2]
+    paths: ['.github/workflows/publish-pre62.yml']
+permissions:
+  contents: write
+  packages: write
+  actions: read
+concurrency:
+  group: bibliothekar-pre62-publish-immutable
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/publish-1.0.0-pre.6.2' && github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 80
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre62-publish-${{ github.run_id }}
+    env:
+      SOURCE_SHA: "5043431ebec80aa442a6630ee860eb21fd4e4593"
+      QA_RUN: "41648282828"
+      VERSION: "1.0.0-pre.6.2"
+      TAG: "v1.0.0-pre.6.2"
+      IMAGE: "ghcr.io/heller-adrian/bibliothekar:1.0.0-pre.6.2"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DOCKER_CONFIG: ${{ runner.temp }}/pre62-docker-${{ github.run_id }}
+    steps:
+      - name: Check out publication documentation without Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre62-publish-${{ github.run_id }}
+      - name: Confirm exact accepted app tree, successful QA evidence and empty release coordinates
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          for executable in gh git docker python3 tar gzip sha256sum; do command -v "$executable" >/dev/null; done
+          WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre62-publish.XXXXXXXX")"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          mkdir -p "$DOCKER_CONFIG"
+          chmod 700 "$DOCKER_CONFIG"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          test "$(git diff --name-only "$SOURCE_SHA" HEAD)" = ".github/workflows/publish-pre62.yml"
+          test "$(git rev-parse "$SOURCE_SHA:app")" = "$(git rev-parse "HEAD:app")"
+          test "$(git rev-parse "$SOURCE_SHA:Dockerfile")" = "$(git rev-parse "HEAD:Dockerfile")"
+          python3 - <<'PY'
+          from app import __version__
+          assert __version__ == "1.0.0-pre.6.2"
+          PY
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.full_name')" = "$GITHUB_REPOSITORY"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" --jq '.head_sha')" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" --jq '.conclusion')" = success
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" --jq '.status')" = completed
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" --jq '.path')" = ".github/workflows/qa-pre62.yml"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" --jq '.run_attempt')" = 1
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN/jobs?per_page=100" --jq '.jobs | length')" = 1
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN/jobs?per_page=100" --jq '.jobs[0].conclusion')" = success
+          test -n "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN/artifacts" --jq '.artifacts[] | select(.name=="pre62-qualification" and .expired==false) | .id')"
+          ensure_absent() {
+            local message
+            if message="$(gh api "$1" 2>&1)"; then
+              echo "A protected tag/release already exists: $1" >&2
+              exit 1
+            fi
+            if [[ "$message" != *"HTTP 404"* ]]; then
+              printf '%s\n' "$message" >&2
+              echo "Cannot prove absent; refusing publish: $1" >&2
+              exit 1
+            fi
+          }
+          ensure_absent "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG"
+          ensure_absent "repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
+          printf "Verified source SHA: %s\nVerified QA run: %s\n" "$SOURCE_SHA" "$QA_RUN" | tee "$WORK/preflight.txt"
+      - name: Build immutable version-only image and retest on isolated HTTP and Docker
+        run: |
+          set -euo pipefail
+          docker build --build-arg SOURCE_REVISION="$SOURCE_SHA" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            -t "$IMAGE" . 2>&1 | tee "$WORK/build.log"
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")" = "$SOURCE_SHA"
+          mkdir -p "$WORK/runtime"
+          GITHUB_SHA="$SOURCE_SHA" IMAGE="$IMAGE" RUNNER_TEMP="$WORK/runtime" \
+            python3 qa/pre6/no_event_http_container.py 2>&1 | tee "$WORK/runtime.log"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          x=json.loads((Path(os.environ["WORK"])/"runtime/pre6-no-event-http.json").read_text())
+          assert x["source"]==os.environ["SOURCE_SHA"]
+          assert x["status"]=="PASS" and x["checks"]
+          assert all(v=="PASS" for v in x["checks"].values())
+          PY
+      - name: Reject reused GHCR tag and publish only 1.0.0-pre.6.2 image
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          # Existing release coordinates are immutable, including orphaned image tags.
+          if docker manifest inspect "$IMAGE" >"$WORK/existing-image.out" 2>"$WORK/existing-image.err"; then
+            echo "Container image tag already exists; refusing overwrite." >&2
+            exit 1
+          fi
+          if ! grep -Eiq 'manifest unknown|not found|name unknown|no such manifest' "$WORK/existing-image.err"; then
+            cat "$WORK/existing-image.err" >&2
+            echo "Cannot prove image tag absent. Refusing publish." >&2
+            exit 1
+          fi
+          docker push "$IMAGE" 2>&1 | tee "$WORK/push.log"
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[a-f0-9]{64}).*/\1/p' "$WORK/push.log" | tail -1)"
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          docker pull "ghcr.io/heller-adrian/bibliothekar@$DIGEST"
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "ghcr.io/heller-adrian/bibliothekar@$DIGEST")" = "$SOURCE_SHA"
+          printf "Published only %s at %s\n" "$IMAGE" "$DIGEST"
+      - name: Create unique immutable prerelease, download and verify all attachments
+        run: |
+          set -euo pipefail
+          ASSETS="$WORK/assets"
+          mkdir -p "$ASSETS"
+          git archive --format=tar --prefix="bibliothekar-$VERSION/" "$SOURCE_SHA" | gzip -n > "$ASSETS/bibliothekar-$VERSION-source.tar.gz"
+          cp docs/pre62/RELEASE-NOTES.md "$ASSETS/RELEASE-NOTES.md"
+          printf 'version=%s\nsource_commit=%s\naccepted_qa_run=%s\nimage=%s\nimage_digest=%s\n' \
+            "$VERSION" "$SOURCE_SHA" "$QA_RUN" "$IMAGE" "$DIGEST" > "$ASSETS/PROVENANCE.txt"
+          (cd "$ASSETS" && sha256sum "bibliothekar-$VERSION-source.tar.gz" RELEASE-NOTES.md PROVENANCE.txt > SHA256SUMS && sha256sum --check SHA256SUMS)
+          # Recheck immutable coordinates just before reserving the new release.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag unexpectedly created before release!" >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" >/dev/null 2>&1; then
+            echo "Release unexpectedly exists!" >&2
+            exit 1
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" --title "$TAG" --prerelease --latest=false \
+            --notes-file "$ASSETS/RELEASE-NOTES.md" "$ASSETS"/*
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.prerelease')" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.draft')" = false
+          mkdir -p "$WORK/downloaded-release"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$WORK/downloaded-release"
+          (cd "$WORK/downloaded-release" && sha256sum --check SHA256SUMS)
+          printf 'Release verified: https://github.com/%s/releases/tag/%s\n' "$GITHUB_REPOSITORY" "$TAG"
+      - name: Preserve release evidence and any partial-state diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre62-publication-evidence
+          retention-days: 30
+          path: |
+            ${{ runner.temp }}/bibliothekar-pre62-publish.*/preflight.txt
+            ${{ runner.temp }}/bibliothekar-pre62-publish.*/build.log
+            ${{ runner.temp }}/bibliothekar-pre62-publish.*/runtime.log
+            ${{ runner.temp }}/bibliothekar-pre62-publish.*/push.log
+            ${{ runner.temp }}/bibliothekar-pre62-publish.*/runtime/pre6-no-event-http.json
+            ${{ runner.temp }}/bibliothekar-pre62-publish.*/assets/PROVENANCE.txt
+            ${{ runner.temp }}/bibliothekar-pre62-publish.*/assets/SHA256SUMS
+      - name: Remove only job-local registry credentials
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          p=Path(os.environ["DOCKER_CONFIG"])
+          tmp=Path(os.environ["RUNNER_TEMP"])
+          assert p.parent==tmp and p.name.startswith("pre62-docker-")
+          if p.is_dir() and not p.is_symlink():
+              shutil.rmtree(p)
+          PY
