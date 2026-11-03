@@ -1,0 +1,64 @@
+name: Pre.7 manual change workflow qualification
+on:
+  push:
+    branches: [codex/pre7-manual-change-workflows]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: bibliothekar-pre7-qa-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  exact-source:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre7-${{ github.run_id }}
+    steps:
+      - name: Checkout exact pre7 commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: pre7-${{ github.run_id }}
+      - name: Python, event JavaScript and focused safety regressions
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre7.XXXXXXXX")"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$WORK/venv"
+          "$WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
+          "$WORK/venv/bin/python" - <<'PY'
+          from app import __version__
+          assert __version__ == "1.0.0-pre.7", __version__
+          PY
+          "$WORK/venv/bin/python" -m compileall -q app
+          "$WORK/venv/bin/python" - <<'PY'
+          from pathlib import Path
+          from app.ui_shell import BIBLIOTHEKAR_JS
+          from app.events_ui import events_page
+          Path("/tmp/bibliothekar-pre7-shell.js").write_text(BIBLIOTHEKAR_JS)
+          PY
+          node --check /tmp/bibliothekar-pre7-shell.js
+          "$WORK/venv/bin/python" -m pytest -q -o addopts='' \
+            tests/backend/test_pre7_manual_change_contracts.py \
+            tests/backend/test_pre62_rename_structure.py \
+            tests/backend/test_pre61_manual_rename.py \
+            tests/backend/test_pre61_millisecond_burst.py \
+            tests/backend/test_pre6_truenas_acceptance.py \
+            tests/backend/test_0509_manual_change_e2e.py \
+            tests/backend/test_0283_structure_simplification.py \
+            2>&1 | tee "$WORK/pytest.log"
+      - name: Preserve evidence for exact commit
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre7-test-evidence
+          retention-days: 30
+          path: ${{ env.WORK }}/pytest.log
+      - name: Report source SHA
+        run: |
+          git rev-parse HEAD
+          git status --porcelain
