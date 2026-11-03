@@ -9441,6 +9441,34 @@ def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.post("/api/event-structure-changes/{change_id}/archive-review-mode", tags=["Ereignisse"])
+@_root_request
+def api_archive_structure_review_mode(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    from app.manual_archive_structure_undo import set_archived_structure_review_mode
+    try:
+        return set_archived_structure_review_mode(
+            current_database_file(), current_workspace_root(),
+            current_library_context().work_root, change_id,
+            str(payload.get("mode") or ""),
+        )
+    except (EventStructureChangeError, OSError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/event-structure-changes/{change_id}/verify-archive-undo", tags=["Ereignisse"])
+@_root_request
+def api_verify_archive_structure_undo(change_id: str) -> dict[str, Any]:
+    from app.manual_archive_structure_undo import verify_archived_structure_undo
+    try:
+        result = verify_archived_structure_undo(
+            current_database_file(), current_archive_root(), change_id,
+        )
+        view_cache.invalidate(current_database_file())
+        return result
+    except (EventStructureChangeError, OSError, ValueError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.get("/api/tasks", tags=["Aufgaben"])
 def api_global_tasks() -> dict[str, Any]:
     from app.inventory_availability import available_families
