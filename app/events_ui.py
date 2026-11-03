@@ -4563,9 +4563,14 @@ EVENTS_HTML = r"""<!doctype html>
       const reversalPathLabels=assistant.path_labels||{};
       const reversalArchiveRoot=String(reversalPathLabels.archive_root||"");
       const reversalWorkRoot=String(reversalPathLabels.work_root||"Arbeitsbereich");
-      const phase = options.phase || String(assistant.phase || "prepare");
-      const logicalOrder = ["prepare","finder","verify"];
-      const currentLogical = logicalOrder.indexOf(phase);
+      const actualPhase=String(assistant.phase||"prepare");
+      const logicalOrder=["prepare","finder","verify"];
+      const lastUnlocked=Math.max(0,logicalOrder.indexOf(actualPhase));
+      const requested=String(options.phase||actualPhase);
+      const phase=logicalOrder.includes(requested)
+        && logicalOrder.indexOf(requested)<=lastUnlocked ? requested : actualPhase;
+      const currentLogical=logicalOrder.indexOf(phase);
+      const historical=phase!==actualPhase;
       const visualSteps = [
         {phase:"verify", number:3, label:bk0511EventLabel("Prüfen & Verwerfen","Verify & discard")},
         {phase:"finder", number:2, label:bk0511EventLabel("Finder-Rückarbeit","Manual Finder restoration")},
@@ -4580,14 +4585,16 @@ EVENTS_HTML = r"""<!doctype html>
           : logical === currentLogical
             ? " active"
             : "";
-        html += `<button type="button" class="change-step${state}" disabled><span class="change-step-number">${step.number}</span><span><strong>${step.label}</strong></span></button>`;
+        html += `<button type="button" class="change-step${state}" data-reversal-step="${step.phase}" ${logical>lastUnlocked?"disabled":""}><span class="change-step-number">${step.number}</span><span><strong>${step.label}</strong></span></button>`;
       }
       html += "</div>";
 
       if (phase === "prepare") {
         html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Rückänderung vorbereiten</h3><p class="muted">Du hast bestätigt, dass die Archivänderung verworfen werden soll. Der ursprüngliche Zustand wird jetzt als eigener Rückweg vorbereitet.</p></div></div>`;
         html += `<div class="card"><strong>Dieser Wiederherstellungsbereich wird erst mit „Rückänderung vorbereiten“ angelegt:</strong><code style="display:block;margin-top:8px;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || bk0511EventLabel("Pfad wird beim Vorbereiten bestimmt","Path is determined during preparation"))}</code><p class="muted" style="margin-top:9px">Vor diesem Schritt muss der angezeigte Ordner noch nicht existieren. Beim Vorbereiten prüft die App den tatsächlichen Archivzustand sowie Größe und SHA-256. Nur Originale, die für den Rückweg wirklich auf SSD benötigt werden, werden dort sicher materialisiert.</p></div>`;
-        html += '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-prepare>Rückänderung vorbereiten</button></div></section>';
+        html += historical
+          ? '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-return>'+bk0511EventLabel("Zum aktuellen Schritt","Return to current step")+'</button></div></section>'
+          : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-prepare>'+bk0511EventLabel("Rückänderung vorbereiten","Prepare restoration")+'</button></div></section>';
       } else if (phase === "finder") {
         html += `<section class="change-pane"><div class="change-pane-heading"><div><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">Finder-Rückarbeit</h3><button class="bk-help" type="button" aria-label="Hinweis zur Finder-Rückarbeit" data-help="Die App prüft den realen Archivzustand read-only. Noch vorhandene Dateien werden an ihren ursprünglichen Ort zurückverschoben; fehlende Originale kommen aus dem vorbereiteten SSD-Rückbestand.">?</button></div>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:6px">✓ Aktueller Archivbestand wurde read-only geprüft.</p>' : ''}</div><button type="button" class="plan-button change-refresh-button" data-reversal-refresh>↻ Aktualisieren</button></div>`;
         html += `<div class="card"><strong>Ursprüngliches Ziel</strong><code style="display:block;margin-top:7px">${escapeHtml(reversalArchiveRoot)}/${escapeHtml(assistant.original_root || "")}</code><div class="muted" style="margin-top:7px">SSD-Rückbestand</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || "")}</code></div>`;
@@ -4604,7 +4611,9 @@ EVENTS_HTML = r"""<!doctype html>
         if (!(assistant.operations || []).length) {
           html += '<div class="card success-text">✓ Der ursprüngliche Finder-Zustand ist bereits wiederhergestellt.</div>';
         }
-        html += '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finder-check>Rückarbeit prüfen · weiter</button></div></section>';
+        html += historical
+          ? '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-return>'+bk0511EventLabel("Zum aktuellen Schritt","Return to current step")+'</button></div></section>'
+          : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finder-check>'+bk0511EventLabel("Rückarbeit prüfen · weiter","Check restoration · continue")+'</button></div></section>';
       } else {
         html += '<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Verwerfen</h3><p class="muted">Der ursprüngliche Archivzustand wird vollständig read-only nach Ordnern, Pfaden, Größen und SHA-256 geprüft.</p></div></div>';
         html += '<div id="reversal-verify-panel" class="card"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" class="plan-button" data-reversal-verify>Rückänderung prüfen</button><span class="muted" data-reversal-summary>Noch nicht geprüft.</span></div><div data-reversal-errors style="display:none;margin-top:10px"></div></div>';
@@ -4613,6 +4622,16 @@ EVENTS_HTML = r"""<!doctype html>
 
       html += '<div class="card" style="margin-top:10px;border-color:var(--bk-danger,#c75050)"><details><summary><strong>Notausstieg bei unmöglicher Rückänderung</strong></summary><p class="muted" style="margin-top:8px">Nur verwenden, wenn die Wiederherstellung unmöglich ist. Der Auftrag wird beendet, aber das Ereignis bleibt gesperrt, bis der Originalbestand gesondert geprüft wurde. Es werden keine Archivdateien verändert oder als geprüft markiert.</p><button type="button" class="plan-button danger-button" data-reversal-force>Abbrechen erzwingen · manuelle Klärung</button></details></div>';
       changeRequestBody.innerHTML = html;
+      for (const button of changeRequestBody.querySelectorAll("[data-reversal-step]")) {
+        button.addEventListener("click",()=>{
+          showArchiveReversalDetail(crId,{phase:button.dataset.reversalStep})
+            .catch(error=>showReversalError(error.message));
+        });
+      }
+      changeRequestBody.querySelector("[data-reversal-return]")?.addEventListener("click",()=>{
+        showArchiveReversalDetail(crId,{phase:actualPhase})
+          .catch(error=>showReversalError(error.message));
+      });
       changeRequestBody.querySelector("[data-reversal-back]")?.addEventListener('click',()=>showArchiveReversalDetail(crId,{phase:'finder',refreshLive:true}).catch(error=>showReversalError(error.message)));
       changeRequestBody.querySelector("[data-reversal-force]")?.addEventListener("click", async event => {
         if (!(await window.BibliothekarI18n.confirmAsync("NOTFALLABBRUCH: Der ursprüngliche Archivbestand ist danach NICHT als wiederhergestellt bestätigt. Das Ereignis bleibt bis zur erneuten Prüfung gesperrt. Fortfahren?"))) return;
