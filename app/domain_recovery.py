@@ -14,6 +14,7 @@ _APPROVED=ContextVar('qualified_domain_recovery',default=None)
 DELETE_FUNCTIONS={'app.trash_selective.delete_selected_trash_files','app.trash.empty_trash_filesystem'}
 RECOVERY_FUNCTIONS={'app.trash_selective.recover_trash_deletions','app.trash_restore.recover_trash_restores'}
 ORIGINAL_TRASH_RESTORE='app.trash_restore.restore_trash_files'
+ARCHIVE_COPY='app.archive_release_copy.create_archive_release_copies'
 
 
 def handlers():
@@ -21,7 +22,11 @@ def handlers():
     from app.trash_restore import recover_trash_restores
     from app.trash_failure import finalize_failure,rescue_failure
     from app.sort_apply import recover_interrupted_sort_runs
+    # Register the original protected archive entry before qualifying its scope.
+    from app.archive_release_copy import create_archive_release_copies
+    from app.archive_release_copy_recovery import recover_archive_release_copy
     return {
+        ARCHIVE_COPY: recover_archive_release_copy,
         'app.trash_selective.recover_trash_deletions':recover_trash_deletions,
         'app.trash_restore.recover_trash_restores':recover_trash_restores,
         ORIGINAL_TRASH_RESTORE:recover_trash_restores,
@@ -52,7 +57,7 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
                            or r['ids']['function'] in DELETE_FUNCTIONS
                            or r['ids']['function']==ORIGINAL_TRASH_RESTORE else 'recovery') for r in dead):
         return False
-    if len(dead)!=1 and any(r['ids']['function'] in SORT_FUNCTIONS for r in dead):
+    if len(dead)!=1 and any(r['ids']['function'] in SORT_FUNCTIONS or r['ids']['function']==ARCHIVE_COPY for r in dead):
         return False  # No combined media replay without a cross-domain proof.
     if not confirmed_rescue and any(r['ids']['function']=='app.trash_failure.rescue_failure' for r in dead):
         return False  # Never infer or renew a user's explicit rescue decision.
@@ -89,7 +94,8 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
         path=Path(item['path']);record=ro._read(path)
         failure_finish=record['ids']['function'] in failures
         sort_replay=record['ids']['function'] in SORT_FUNCTIONS
-        owner=owners.get(record.get('database')) if failure_finish or sort_replay else None
+        archive_copy=record['ids']['function']==ARCHIVE_COPY
+        owner=owners.get(record.get('database')) if failure_finish or sort_replay or archive_copy else None
         expected_ids={'function':record['ids']['function']}
         expected_roots=set(required)
         if record['ids']['function']==ORIGINAL_TRASH_RESTORE:
@@ -144,6 +150,14 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
             expected_ids['run_id']=record['ids'].get('run_id')
             expected_roots.update((owner['work_root'],owner['archive_root']))
             qualify(Path(record['database']),root,owner,expected_ids['run_id'])
+        elif archive_copy:
+            change_id=record['ids'].get('cr_id')
+            if (not isinstance(change_id,str) or not change_id.startswith('cr-')
+                    or not owner or owner['library_id']!=record['library']
+                    or record['kind']!='archive'):
+                raise health.DomainStartupError('archive_release_recovery_owner_mismatch')
+            expected_ids['cr_id']=change_id
+            expected_roots.update((owner['work_root'],owner['archive_root']))
         elif failure_finish:
             job=record['ids'].get('job_id')
             if (not isinstance(job,str) or not job or '/' in job or '\\' in job or '\x00' in job
@@ -155,7 +169,7 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
             raise health.DomainStartupError('domain_recovery_shared_owner_mismatch')
         if (hashlib.sha256(json.dumps(record,sort_keys=True).encode()).hexdigest()!=item['record_sha256']
             or set(record)-{'format','reservation_id','shared','workspace','library','generation','bindings','database','kind','ids','effect_resources'}
-            or record.get('shared') is not (False if sort_replay else True)
+            or record.get('shared') is not (False if sort_replay or archive_copy else True)
             or record.get('ids')!=expected_ids
             or record.get('generation')!=[state['generation'],state.get('libraries',{}).get(record['library'],0)]
             or not expected_roots<=record['bindings'].keys()
@@ -191,8 +205,16 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
                     function=record['ids']['function']
                     failure_finish=function in failures
                     sort_replay=function in SORT_FUNCTIONS
+                    archive_copy=function==ARCHIVE_COPY
                     isolated=[]
-                    if sort_replay:
+                    if archive_copy:
+                        owner=owners[record['database']]
+                        result=dispatch[function](
+                            Path(record['database']),Path(owner['archive_root']),
+                            root,record['ids']['cr_id'],
+                        )
+                        disposition='verified_prior_archive_release_copies_restored_without_media_mutation'
+                    elif sort_replay:
                         from app.sort_recovery_proof import qualify
                         from app.database import database_connection
                         owner=owners[record['database']];run_id=record['ids']['run_id']
