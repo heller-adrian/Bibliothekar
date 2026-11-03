@@ -38,10 +38,15 @@ jobs:
           "$WORK/venv/bin/python" - <<'PY'
           from pathlib import Path
           from app.ui_shell import BIBLIOTHEKAR_JS
-          from app.events_ui import events_page
+          from app.events_ui import EVENTS_HTML
+          import re
+          scripts = re.findall(r'<script[^>]*>(.*?)</script>', EVENTS_HTML, flags=re.S)
+          assert scripts
+          Path('/tmp/bibliothekar-pre7-events.js').write_text('\n'.join(scripts))
           Path("/tmp/bibliothekar-pre7-shell.js").write_text(BIBLIOTHEKAR_JS)
           PY
           node --check /tmp/bibliothekar-pre7-shell.js
+          node --check /tmp/bibliothekar-pre7-events.js
           "$WORK/venv/bin/python" -m pytest -q -o addopts='' \
             tests/backend/test_pre7_manual_change_contracts.py \
             tests/backend/test_pre62_rename_structure.py \
