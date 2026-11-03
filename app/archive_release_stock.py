@@ -519,6 +519,9 @@ def verify_archive_release_removal(
                     status = copy_status
                     message = copy_message
                 elif old_path.exists() or old_path.is_symlink():
+                    # A premature removal check is NOT evidence that the
+                    # already verified SSD copy ceased to exist. Preserve its
+                    # durable progress and return a nonterminal UI problem.
                     status = "archive_source_still_exists"
                     message = "Das bestätigte Archivoriginal ist noch vorhanden."
                 else:
@@ -531,7 +534,14 @@ def verify_archive_release_removal(
                     SET verification_status=?,actual_size_bytes=?,actual_sha256=?,
                         verified_at=?,updated_at=?
                     WHERE id=? AND change_request_id=?""",
-                (status, actual_size, actual_sha, now if status == "verified" else None, now, int(row["id"]), cr_id),
+                (
+                    "release_copy_verified" if status == "archive_source_still_exists"
+                    else status,
+                    actual_size, actual_sha,
+                    (row.get("verified_at") or now) if status == "archive_source_still_exists"
+                    else now if status == "verified" else None,
+                    now, int(row["id"]), cr_id,
+                ),
             )
             results.append({
                 "review_kind": row["review_kind"],
