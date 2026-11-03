@@ -148,3 +148,73 @@ def test_pre7_archive_rejects_mode_switch_without_owned_staging(tmp_path):
         assert conn.execute(
             "SELECT status FROM event_structure_changes WHERE id=?", (change_id,)
         ).fetchone()[0] == "pending"
+
+
+def test_pre7_archive_accept_then_undo_removes_only_owned_staging(tmp_path):
+    from app.event_structure_changes import prepare_archived_structure_change
+
+    db, workspace, archive, original, renamed, change_id = _physical_event(
+        tmp_path, archived=True,
+    )
+    work_root = shared_work_root(workspace)
+    set_archived_structure_review_mode(
+        db, workspace, work_root, change_id, "accept",
+    )
+    prepared = prepare_archived_structure_change(
+        db, workspace, change_id, input_path="Alle",
+        app_version="1.0.0-pre.7", work_root=work_root,
+    )
+    helper = Path(prepared["prepared_event_json_path"])
+    assert helper.is_file()
+    assert renamed.joinpath("event.json").is_file()
+    changed = set_archived_structure_review_mode(
+        db, workspace, work_root, change_id, "undo",
+    )
+    assert changed["status"] == "pending"
+    assert changed["review_mode"] == "undo"
+    assert not helper.exists()
+    # Neither a camera image nor its original event.json was modified by the app.
+    assert renamed.joinpath("Alle", "A.JPG").read_bytes() == b"original-JPG"
+    assert renamed.joinpath("event.json").is_file()
+    with database_connection(db) as conn:
+        row = conn.execute(
+            "SELECT detected_json,status FROM event_structure_changes WHERE id=?",
+            (change_id,),
+        ).fetchone()
+        snapshot = json.loads(row["detected_json"])
+        assert row["status"] == "pending"
+        assert "prepared_event_json_path" not in snapshot
+        assert snapshot["review_mode"] == "undo"
+    renamed.rename(original)
+    assert verify_archived_structure_undo(db, archive, change_id)["status"] == "restored"
+
+
+def test_pre7_archive_staging_must_not_delete_foreign_or_tampered_bytes(tmp_path):
+    from app.event_structure_changes import prepare_archived_structure_change
+
+    db, workspace, _archive, original, renamed, change_id = _physical_event(
+        tmp_path, archived=True,
+    )
+    work_root = shared_work_root(workspace)
+    set_archived_structure_review_mode(
+        db, workspace, work_root, change_id, "accept",
+    )
+    prepared = prepare_archived_structure_change(
+        db, workspace, change_id, input_path="Alle",
+        app_version="1.0.0-pre.7", work_root=work_root,
+    )
+    helper = Path(prepared["prepared_event_json_path"])
+    helper.write_bytes(helper.read_bytes() + b"\\nUNTRUSTED")
+    with pytest.raises(EventStructureChangeError):
+        set_archived_structure_review_mode(
+            db, workspace, work_root, change_id, "undo",
+        )
+    assert helper.read_bytes().endswith(b"\\nUNTRUSTED")
+    with database_connection(db) as conn:
+        row = conn.execute(
+            "SELECT status,detected_json FROM event_structure_changes WHERE id=?",
+            (change_id,),
+        ).fetchone()
+        assert row["status"] == "prepared"
+        assert json.loads(row["detected_json"])["review_mode"] == "accept"
+    assert renamed.is_dir() and not original.exists()
