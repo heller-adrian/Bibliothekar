@@ -18,3 +18,22 @@ vor Veröffentlichung ausdrücklich zu entscheiden.
 
 Dies ist ein Entwicklungskandidat, weder ein freigegebenes Image noch eine Version
 für ein unkontrolliertes Clean Slate.
+
+### Manuelle Dateiumbenennungen
+
+Ein erkannter Wechsel des Dateinamens im angewendeten Bestand wird als
+`file_rename`-Hinweis/echte globale Aufgabe mit altem und neuem Pfad
+angelegt. Der Katalogpfad bleibt bis zur Auswahl unverändert.
+Die Aktionen „Umbenennung übernehmen“ und „Umbenennung rückgängig machen“
+sind einzeln verfügbar. Annahme setzt Dateigröße und SHA-256 voraus und
+stellt event.json über eine dauerhafte Synchronisationsaufgabe nach; die
+Rücknahme verwendet den vorhandenen exklusiven verifizierten Transfer.
+Manuelle Archivänderungen bleiben read-only und können hier nicht direkt
+übernommen werden. Gleichzeitige Umbenennung + Verschiebung wird nicht
+pauschal akzeptiert.
+
+Regressionstest: 40er-Serie, Normalnamen, RAW/JPEG-Paarung, alte Namen,
+EXIF-Untersekunden sowie Annahme, verweigerte Annahme und Archiv-RO.
+
+**Freigabestatus:** Entwicklungsstand; keine GHCR-Veröffentlichung, kein
+Release, keine NAS-Änderung. Native UI-/TrueNAS-Abnahme noch ausstehend.

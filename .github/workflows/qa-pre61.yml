@@ -1,0 +1,28 @@
+name: Pre6.1 millisecond and manual rename regression
+on:
+  push:
+    branches: [codex/pre6.1-milliseconds-file-renames]
+permissions:
+  contents: read
+concurrency:
+  group: bibliothekar-pre61-tests
+  cancel-in-progress: false
+jobs:
+  pre61-focused:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Compile and run pre6.1 focused tests
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q app
+          ENV_PATH="$(mktemp -d /tmp/bibliothekar-pre61.XXXXXXXX)"
+          trap 'rm -rf "$ENV_PATH"' EXIT
+          python3 -m venv "$ENV_PATH/venv"
+          "$ENV_PATH/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest
+          "$ENV_PATH/venv/bin/python" -m pytest -q \
+            tests/backend/test_pre61_millisecond_names.py \
+            tests/backend/test_pre61_external_rename.py
