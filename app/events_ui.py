@@ -4780,10 +4780,13 @@ EVENTS_HTML = r"""<!doctype html>
         const urlStep = new URL(window.location.href).searchParams.get("change_step");
         let phase = options.phase || urlStep || assistant.phase || sequence[0];
         if (!sequence.includes(phase)) phase = sequence[0];
-        if (
-          assistant.preparation_required
-          && String(cr.status) === "aenderbar_vorschlagen"
-        ) phase = "prepare";
+        // The displayed tab is NOT an operation status. A completed
+        // preparation and verified release-copy stage must remain persisted
+        // even when a user reopens the instructions for the first tab.
+        const preparePending = assistant.preparation_required &&
+          String(cr.status) === "aenderbar_vorschlagen";
+        const maxUnlockedIndex = preparePending ? 0 : sequence.length - 1;
+        if (sequence.indexOf(phase) > maxUnlockedIndex) phase = "prepare";
         if (!assistant.preparation_required && phase === "prepare") {
           phase = finderNeeded ? "finder" : "verify";
         }
@@ -4801,7 +4804,9 @@ EVENTS_HTML = r"""<!doctype html>
         let html = `<div class="change-stepper">`;
         sequence.forEach((step, index) => {
           const state = index < currentIndex ? " done" : index === currentIndex ? " active" : "";
-          html += `<button type="button" class="change-step${state}" data-change-step="${step}" ${index > currentIndex ? "disabled" : ""}><span class="change-step-number">${index + 1}</span><span><strong>${labels[step]}</strong></span></button>`;
+          // Navigation is read-only. Unlocked tabs are always revisit-able,
+          // and moving forward never repeats an already confirmed operation.
+          html += `<button type="button" class="change-step${state}" data-change-step="${step}" ${index > maxUnlockedIndex ? "disabled" : ""}><span class="change-step-number">${index + 1}</span><span><strong>${labels[step]}</strong></span></button>`;
         });
         html += `</div>`;
 
