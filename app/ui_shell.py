@@ -4947,6 +4947,12 @@ BIBLIOTHEKAR_JS = r"""
           .replaceAll('"', "&quot;");
 
         const taskEntry = task => {
+          let detail=String(task.detail||"");
+          if(document.documentElement.dataset.bkLocale!=="de" && task.kind==="event_structure_change"){
+            detail=detail.replace("manuelle Ordner-/Dateiänderung erkannt","manual folder/file change detected")
+              .replace("Archiv · event.json ersetzen und prüfen","Archive · replace and verify event.json")
+              .replace("Prüfung erforderlich","review required");
+          }
           return '<a class="bk-task-entry" href="' +
             bkLibraryHref(task.href || "/events")
               .replaceAll("&", "&amp;")
@@ -4954,7 +4960,7 @@ BIBLIOTHEKAR_JS = r"""
             '" style="display:block;padding:10px;border-radius:10px;color:inherit;text-decoration:none"><strong style="display:block">' +
             escTask(task.title || "Aufgabe") +
             '</strong><span style="color:var(--bk-muted);font-size:.9rem">' +
-            escTask(task.detail || "") +
+            escTask(detail) +
             '</span></a>';
         };
 
@@ -5245,16 +5251,21 @@ BIBLIOTHEKAR_JS = r"""
     const forcedRepair = displayedRequired.some(
       row => Boolean(row.details?.force_repair) && row.kind !== "filename_rename"
     );
+    const onlyRenames=displayedRequired.length>0 && !displayedInfo.length
+      && displayedRequired.every(row=>row.kind==="filename_rename");
+    const closeRename=document.getElementById("bk-external-rename-close");
+    if(closeRename) closeRename.hidden=!onlyRenames;
 
     if (displayedRequired.length) {
       const repairable = displayedRequired.some(row => row.repairable);
-      externalChangeActions.innerHTML =
+      externalChangeActions.innerHTML = onlyRenames ? "" : (
         (repairable
           ? '<button type="button" class="bk-positive-action" id="bk-external-repair-all">Änderungen rückgängig machen</button>'
           : '') +
         (!forcedRepair
           ? '<button type="button" id="bk-external-ignore">Ignorieren</button>'
-          : '');
+          : '')
+      );
 
       document.getElementById("bk-external-repair-all")?.addEventListener(
         "click",
@@ -5326,7 +5337,7 @@ BIBLIOTHEKAR_JS = r"""
         }
       );
 
-      document.getElementById("bk-external-ignore")?.addEventListener(
+      (document.getElementById("bk-external-ignore") || (onlyRenames ? closeRename : null))?.addEventListener(
         "click",
         async event => {
           // currentTarget is cleared by DOM after the first await. Capture
@@ -5817,6 +5828,8 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <h2 id="bk-external-change-title">Dateibestand</h2>
         <div id="bk-external-change-lead" style="color:var(--bk-muted);margin-top:5px;line-height:1.45"></div>
       </div>
+      <button type="button" id="bk-external-rename-close" hidden aria-label="Close notice"
+        title="Close notice" style="align-self:flex-start;min-width:30px;min-height:30px">×</button>
     </div>
     <div id="bk-external-change-list" style="margin-top:12px;max-height:min(52vh,520px);overflow:auto"></div>
     <div id="bk-external-change-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"></div>
