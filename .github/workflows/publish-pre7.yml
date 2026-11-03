@@ -1,0 +1,178 @@
+name: Publish verified Bibliothekar 1.0.0-pre.7 for TrueNAS
+on:
+  push:
+    branches: [codex/pre7-manual-change-workflows]
+    paths: [.github/workflows/publish-pre7.yml]
+permissions:
+  contents: write
+  packages: write
+  actions: read
+concurrency:
+  group: bibliothekar-pre7-immutable-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/pre7-manual-change-workflows'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ACCEPTED_SHA: 18d0e1767e373eec85d23adb45aee0c17b464f17
+      ACCEPTED_QA: '41693021239'
+      IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-pre.7
+      TAG: v1.0.0-pre.7
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout publication-only commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Freeze accepted source and reject existing release identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          import os, subprocess
+          changed=set(subprocess.check_output(['git','diff','--name-only',os.environ['ACCEPTED_SHA'],os.environ['GITHUB_SHA']],text=True).splitlines())
+          assert changed=={'.github/workflows/publish-pre7.yml'}, 'Unexpected changes: '+str(changed)
+          PY
+          test "$(git show "$ACCEPTED_SHA:app/__init__.py" | grep '^__version__')" = '__version__ = "1.0.0-pre.7"'
+          for path in git/ref/tags releases/tags; do
+            if gh api "repos/$GITHUB_REPOSITORY/$path/$TAG" >/dev/null 2>"$RUNNER_TEMP/pre7-existing.err"; then
+              echo "Tag or release already exists: refusing overwrite" >&2; exit 1
+            fi
+            if ! grep -q 'HTTP 404' "$RUNNER_TEMP/pre7-existing.err"; then
+              cat "$RUNNER_TEMP/pre7-existing.err" >&2; exit 1
+            fi
+          done
+          WORK="$(mktemp -d "$RUNNER_TEMP/pre7-publication.XXXXXXXX")"
+          printf 'WORK=%s\nSOURCE=%s/source\nASSETS=%s/assets\n' "$WORK" "$WORK" "$WORK" >> "$GITHUB_ENV"
+          mkdir "$WORK/source" "$WORK/assets" "$WORK/qa"
+          git archive "$ACCEPTED_SHA" | tar -x -C "$WORK/source"
+      - name: Require successful identical-source QA and retained evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA" > "$WORK/qa-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA/jobs?per_page=100" > "$WORK/qa-jobs.json"
+          gh run download "$ACCEPTED_QA" --repo "$GITHUB_REPOSITORY" --name pre7-test-evidence --dir "$WORK/qa"
+          python3 - <<'PY'
+          import os,json,re
+          from pathlib import Path
+          root=Path(os.environ['WORK'])
+          run=json.loads((root/'qa-run.json').read_text())
+          jobs=json.loads((root/'qa-jobs.json').read_text())['jobs']
+          assert run['head_sha']==os.environ['ACCEPTED_SHA'] and run['conclusion']=='success' and run['status']=='completed'
+          assert jobs and all(j['conclusion']=='success' for j in jobs)
+          assert re.search(r'\b44 passed\b',(root/'qa/pytest.log').read_text())
+          report=json.loads((root/'qa/pre6-no-event-http.json').read_text())
+          assert report['source']==os.environ['ACCEPTED_SHA'] and report['status']=='PASS'
+          assert report['checks'] and all(x=='PASS' for x in report['checks'].values())
+          assert report['native_truenas']=='NOT_RUN'
+          (root/'assets/QA-SUMMARY.json').write_text(json.dumps({
+            'source':os.environ['ACCEPTED_SHA'],'run':int(os.environ['ACCEPTED_QA']),
+            'regression_tests':44,'isolated_container':'PASS','native_truenas':'NOT_RUN',
+            'checks':report['checks']},indent=2)+'\n')
+          PY
+      - name: Authenticate with GHCR and refuse an occupied pre.7 image tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if docker buildx imagetools inspect "$IMAGE" > "$WORK/exists.out" 2> "$WORK/exists.err"; then
+            echo 'Pre.7 image already exists, refusing overwrite' >&2; exit 1
+          fi
+          if ! grep -Eiq 'manifest unknown|name unknown|not found' "$WORK/exists.err"; then
+            cat "$WORK/exists.err" >&2; exit 1
+          fi
+      - name: Build only accepted source, verify all application hashes and image version
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$ACCEPTED_SHA" -t "$IMAGE" "$SOURCE" | tee "$WORK/image-build.log"
+          docker run --rm --network none --entrypoint python "$IMAGE" -c 'from app import __version__;assert __version__=="1.0.0-pre.7"'
+          test "$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ACCEPTED_SHA"
+          python3 - <<'PY'
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          source=Path(os.environ['SOURCE'])
+          original={p.relative_to(source).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in (source/'app').rglob('*') if p.is_file()}
+          code='from pathlib import Path;import hashlib,json;r=Path("/opt/kamera");print(json.dumps({p.relative_to(r).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file()}))'
+          image=json.loads(subprocess.check_output(['docker','run','--rm','--network','none','--entrypoint','python',os.environ['IMAGE'],'-c',code],text=True))
+          assert original==image,'Mismatch between accepted source and image files'
+          (Path(os.environ['ASSETS'])/'APP-SHA256.json').write_text(json.dumps(original,sort_keys=True,indent=2)+'\n')
+          PY
+          docker image inspect "$IMAGE" --format '{{.Id}}' > "$WORK/image-id"
+      - name: Push ONLY pre.7, verify digest-bound real pull and prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE" | tee "$WORK/image-push.log"
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' "$WORK/image-push.log" | tail -1)"
+          test "$(printf '%s' "$DIGEST" | wc -c)" -eq 71
+          REF="ghcr.io/heller-adrian/bibliothekar@$DIGEST"
+          printf '%s\n' "$REF" > "$ASSETS/IMAGE-DIGEST.txt"
+          docker image rm "$IMAGE"
+          docker pull "$REF" | tee "$WORK/image-pull.log"
+          test "$(docker image inspect "$REF" --format '{{.Id}}')" = "$(cat "$WORK/image-id")"
+          test "$(docker image inspect "$REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ACCEPTED_SHA"
+          docker run --rm --network none --entrypoint python "$REF" -c 'from app import __version__;assert __version__=="1.0.0-pre.7"'
+          git archive --format=tar --prefix=bibliothekar-1.0.0-pre.7/ "$ACCEPTED_SHA" | gzip -n > "$ASSETS/bibliothekar-1.0.0-pre.7-tested-source.tar.gz"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          a=Path(os.environ['ASSETS'])
+          ref=(a/'IMAGE-DIGEST.txt').read_text().strip()
+          compose=(Path(os.environ['SOURCE'])/'compose.example.yaml').read_text()
+          prev='ghcr.io/heller-adrian/bibliothekar:1.0.0-pre.5'
+          assert compose.count(prev)==1
+          (a/'compose.pre7.yaml').write_text(compose.replace(prev,ref))
+          (a/'PROVENANCE.txt').write_text('TESTED_SHA='+os.environ['ACCEPTED_SHA']+'\nPUBLISHER_SHA='+os.environ['GITHUB_SHA']+'\nQA_RUN='+os.environ['ACCEPTED_QA']+'\nIMAGE='+ref+'\n')
+          (a/'RELEASE-NOTES.md').write_text(
+            '# Bibliothekar 1.0.0-pre.7 – TrueNAS-Testversion\n\n'
+            +'Installierbares Image: ghcr.io/heller-adrian/bibliothekar:1.0.0-pre.7\n\n'
+            +'Verifizierter Image-Digest: '+ref+'\n\n'
+            +'Geprüfter Quellstand: '+os.environ['ACCEPTED_SHA']+'\n'
+            +'QA: https://github.com/heller-adrian/Bibliothekar/actions/runs/'+os.environ['ACCEPTED_QA']+'\n\n'
+            +'Änderungen: manuelle Dateiumbenennungen mit offen bleibender Aufgabe nach Dismiss; reparierte Undo-Aktionen und Fortschrittsanzeige; archivierte Strukturänderungen mit ausdrücklichem Accept/Undo und read-only Verifikation; überarbeitete deutsche und englische Dialoge.\n\n'
+            +'Installation als bestehende TrueNAS Custom App: ausschließlich Image-Tag auf 1.0.0-pre.7 ändern. Bestehende Datenbank, Konfiguration, Mounts und insbesondere das schreibgeschützte Kameraarchiv unverändert lassen. Vorher Appdata und Datenbank sichern. Kein Clean Slate erforderlich.\n\n'
+            +'44 Regressionstests sowie isolierter HTTP-/Container-/Neustarttest bestanden. Die native TrueNAS-Bedienabnahme steht aus. Pre.7 ist noch keine stabile Version 1.0.0; frühere Tags und latest bleiben unverändert.\n')
+          PY
+          (cd "$ASSETS" && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd "$ASSETS" && sha256sum --check SHA256SUMS)
+      - name: Atomically reserve immutable source tag, create prerelease and verify assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$ACCEPTED_SHA" > "$WORK/tag.json"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)" = "$ACCEPTED_SHA"
+          gh release create "$TAG" --verify-tag --title "$TAG" --prerelease --latest=false --notes-file "$ASSETS/RELEASE-NOTES.md" "$ASSETS"/*
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$WORK/release.json"
+          python3 - <<'PY'
+          import os,json
+          from pathlib import Path
+          doc=json.loads((Path(os.environ['WORK'])/'release.json').read_text())
+          assert doc['tag_name']==os.environ['TAG'] and doc['prerelease'] and not doc['draft']
+          expected={p.name for p in Path(os.environ['ASSETS']).iterdir() if p.is_file()}
+          actual={a['name'] for a in doc['assets']}
+          assert expected==actual, 'Missing assets: '+str(expected^actual)
+          PY
+          mkdir "$WORK/downloaded"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$WORK/downloaded"
+          (cd "$WORK/downloaded" && sha256sum --check SHA256SUMS)
+          cat "$ASSETS/IMAGE-DIGEST.txt" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain publication diagnostics
+        if: always() && env.WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre7-publication-evidence
+          retention-days: 30
+          path: |
+            ${{ env.WORK }}/assets/
+            ${{ env.WORK }}/image-build.log
+            ${{ env.WORK }}/image-push.log
+            ${{ env.WORK }}/image-pull.log
+            ${{ env.WORK }}/release.json
