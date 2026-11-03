@@ -1,0 +1,78 @@
+name: Pre.6.2 isolated exact-source qualification
+on:
+  push:
+    branches: [codex/pre6-2-final]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: bibliothekar-pre62-qa-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qualification:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre62-${{ github.run_id }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: pre62-${{ github.run_id }}
+      - name: Python and browser-script compilation, plus complete focused regressions
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre62-qa.XXXXXXXX")"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$WORK/venv"
+          "$WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
+          "$WORK/venv/bin/python" - <<'PY'
+          from app import __version__
+          assert __version__ == "1.0.0-pre.6.2", __version__
+          PY
+          "$WORK/venv/bin/python" -m compileall -q app
+          "$WORK/venv/bin/python" -c 'from app.ui_shell import BIBLIOTHEKAR_JS; from pathlib import Path; import sys; Path(sys.argv[1]).write_text(BIBLIOTHEKAR_JS)' "$WORK/shell.js"
+          node --check "$WORK/shell.js"
+          "$WORK/venv/bin/python" -m pytest -q -o addopts='' \
+            tests/backend/test_pre62_rename_structure.py \
+            tests/backend/test_pre61_millisecond_burst.py \
+            tests/backend/test_pre61_manual_rename.py \
+            tests/backend/test_pre61_family_precision.py \
+            tests/backend/test_pre61_export_filename.py \
+            tests/backend/test_pre6_truenas_acceptance.py \
+            tests/backend/test_0501_external_event_deletion.py \
+            2>&1 | tee "$WORK/pytest.log"
+      - name: Real isolated HTTP and container restart acceptance
+        run: |
+          set -euo pipefail
+          IMAGE="bibliothekar-pre62-qa:${{ github.run_id }}"
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE" . 2>&1 | tee "$WORK/image-build.log"
+          IMAGE="$IMAGE" RUNNER_TEMP="$WORK" python3 qa/pre6/no_event_http_container.py 2>&1 | tee "$WORK/http-container.log"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          report=json.loads((Path(os.environ["WORK"])/"pre6-no-event-http.json").read_text())
+          assert report["source"]==os.environ["GITHUB_SHA"]
+          assert report["status"]=="PASS"
+          assert report["checks"] and all(v=="PASS" for v in report["checks"].values())
+          PY
+      - name: Preserve exact-source evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre62-qualification
+          retention-days: 30
+          path: |
+            ${{ runner.temp }}/bibliothekar-pre62-qa.*/pytest.log
+            ${{ runner.temp }}/bibliothekar-pre62-qa.*/image-build.log
+            ${{ runner.temp }}/bibliothekar-pre62-qa.*/http-container.log
+            ${{ runner.temp }}/bibliothekar-pre62-qa.*/pre6-no-event-http.json
+      - name: Report SHA
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          git status --porcelain

@@ -1,4 +1,4 @@
-__version__ = "1.0.0-pre.6.1"
+__version__ = "1.0.0-pre.6.2"
 
 from app.appdata import configure as _configure_appdata
 _configure_appdata()
