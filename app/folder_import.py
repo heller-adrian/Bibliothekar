@@ -272,13 +272,66 @@ def _destination_is_free(
     reserved: set[str],
 ) -> bool:
     for relative in relative_paths:
-        key = relative.as_posix()
+        key = relative.as_posix().casefold()
         if key in reserved:
             return False
         target = shared_root / relative
         if target.exists() or target.is_symlink():
             return False
     return True
+
+
+def _has_real_subseconds(value: str) -> bool:
+    """Only a real parsed fractional timestamp may become a 3-digit time suffix."""
+    return bool(re.search(r"T\d{2}:\d{2}:\d{2}\.\d{1,6}(?:Z|[+-]\d{2}:\d{2})?$", value))
+
+
+def _existing_second_family(
+    root: Path,
+    destination_directory: Path,
+    second_stem: str,
+    device_token: str,
+) -> bool:
+    """Detect prior family names, including earlier millisecond variants."""
+    directory = root / destination_directory
+    if not directory.is_dir():
+        return False
+    pattern = re.compile(
+        rf"{re.escape(second_stem)}(?:\d{{3}})?_{re.escape(device_token)}(?:_\d{{3}})?",
+        re.IGNORECASE,
+    )
+    return any(
+        path.is_file() and pattern.fullmatch(path.stem)
+        for path in directory.iterdir()
+    )
+
+
+def _burst_second_counts(
+    members_by_family: dict[str, list[dict[str, Any]]],
+    family_by_key: dict[str, dict[str, Any]],
+) -> dict[tuple[str, str], int]:
+    """Count distinct import families, not JPEG/RAW/XMP members."""
+    result: dict[tuple[str, str], int] = defaultdict(int)
+    for key, members in members_by_family.items():
+        family = family_by_key.get(key, {})
+        capture = _family_capture_time(family, members)
+        confidence = str(
+            family.get("capture_time_confidence")
+            or members[0].get("capture_time_confidence")
+            or "missing"
+        )
+        if not capture or confidence in {"low", "conflict", "missing"}:
+            continue
+        selected = next(
+            (member for member in members if member.get("camera_make") or member.get("camera_model")),
+            members[0],
+        )
+        _, token = normalize_device_name(
+            selected.get("camera_make"), selected.get("camera_model")
+        )
+        second = datetime.fromisoformat(str(capture)).strftime("%Y%m%d_%H%M%S")
+        result[(second, token.casefold())] += 1
+    return result
 
 
 def build_folder_import_plan(
@@ -306,6 +359,7 @@ def build_folder_import_plan(
     members_by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in files:
         members_by_family[str(record["family_key"])].append(record)
+    burst_second_counts = _burst_second_counts(members_by_family, family_by_key)
 
     from app.managed_directory_names import directory_name
     undated_name = directory_name(shared_root, "undated")
@@ -364,7 +418,7 @@ def build_folder_import_plan(
                         Path(undated_name)
                         / f"{original.stem}_{index:03d}{original.suffix}"
                     )
-                reserved.add(candidate.as_posix())
+                reserved.add(candidate.as_posix().casefold())
                 family_targets.append(candidate)
 
             for member, destination in zip(members, family_targets, strict=True):
@@ -387,7 +441,8 @@ def build_folder_import_plan(
         capture = datetime.fromisoformat(str(capture_value))
         day = capture.strftime("%Y-%m-%d")
         year = capture.strftime("%Y")
-        base = capture.strftime("%Y%m%d_%H%M%S") + "_" + device_token
+        second_stem = capture.strftime("%Y%m%d_%H%M%S")
+        base = second_stem + "_" + device_token
         destination_directory = Path(year) / day
         if destination_directory_callback is not None:
             resolved_directory = destination_directory_callback(
@@ -405,7 +460,22 @@ def build_folder_import_plan(
                     )
                 destination_directory = candidate_directory
 
-        suffix_index = 0
+        # Burst naming: leave an isolated capture unchanged. Only when another
+        # distinct family has this exact camera/second (in this batch or already
+        # in the central stock) use the *real* Exif milliseconds, immediately
+        # after SS. The number is a timestamp, not an invented sequence index.
+        burst = (
+            burst_second_counts[(second_stem, device_token.casefold())] > 1
+            or _existing_second_family(
+                shared_root, destination_directory, second_stem, device_token
+            )
+        )
+        has_fraction = _has_real_subseconds(str(capture_value))
+        if burst and has_fraction:
+            base = f"{second_stem}{capture.microsecond // 1000:03d}_{device_token}"
+        # In the absence of reliable subseconds, preserve existing collision
+        # protection with a visibly non-temporal _NNN fallback.
+        suffix_index = 1 if burst and not has_fraction else 0
         while True:
             family_base = base if suffix_index == 0 else f"{base}_{suffix_index:03d}"
             relative_paths = [
@@ -418,7 +488,7 @@ def build_folder_import_plan(
             suffix_index += 1
 
         for relative in relative_paths:
-            reserved.add(relative.as_posix())
+            reserved.add(relative.as_posix().casefold())
 
         for member, destination in zip(members, relative_paths, strict=True):
             source_relative = str(member["relative_path"])

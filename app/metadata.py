@@ -233,6 +233,8 @@ def run_exiftool(
         "QuickTimeUTC=1",
         "-DateTimeOriginal",
         "-OffsetTimeOriginal",
+        "-SubSecTimeOriginal",
+        "-SubSecTimeDigitized",
         "-CreateDate",
         "-Make",
         "-Model",
@@ -464,6 +466,35 @@ def build_candidates(
             continue
         priority, confidence = rule
         raw_text = str(raw_value).strip()
+
+        # Real Exif subsecond metadata belongs to its photographic timestamp.
+        # Never synthesize a fractional part from FPS, filenames or file mtime.
+        leaf = str(tag_name).rsplit(":", 1)[-1]
+        if str(tag_name).startswith("EXIF:") and leaf in {
+            "DateTimeOriginal", "CreateDate"
+        } and not re.search(r"\d{2}:\d{2}:\d{2}\.\d+", raw_text):
+            fraction_leaf = (
+                "SubSecTimeOriginal" if leaf == "DateTimeOriginal"
+                else "SubSecTimeDigitized"
+            )
+            fraction = next(
+                (
+                    str(value).strip()
+                    for key, value in metadata.items()
+                    if str(key).startswith("EXIF:")
+                    and str(key).endswith(":" + fraction_leaf)
+                    and re.fullmatch(r"\d{1,9}", str(value).strip())
+                ),
+                None,
+            )
+            if fraction is not None:
+                # Insert before a camera-supplied timezone, if present.
+                raw_text = re.sub(
+                    r"(Z|[+-]\d{2}:\d{2})$",
+                    lambda m: "." + fraction + m.group(1),
+                    raw_text,
+                    count=1,
+                ) if re.search(r"(Z|[+-]\d{2}:\d{2})$", raw_text) else raw_text + "." + fraction
 
         if (
             str(tag_name).startswith("EXIF:")
