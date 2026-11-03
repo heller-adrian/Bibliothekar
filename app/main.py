@@ -9407,10 +9407,25 @@ def api_restore_applied_structure(change_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+def _require_explicit_archive_structure_accept(change_id: str) -> None:
+    """Pre.7: never stage or adopt an archived change without Accept choice.
+
+    This gate is at the authenticated write API boundary. Existing internal
+    migration helpers are retained for backwards-compatible regression tests.
+    """
+    change = get_structure_change(current_database_file(), change_id)
+    if (str(change.get("root_kind") or "") == "camera_archive"
+            and str((change.get("detected") or {}).get("review_mode") or "") != "accept"):
+        raise EventStructureChangeError(
+            "Choose Accept Changes before preparing or verifying an archive change."
+        )
+
+
 @app.post("/api/event-structure-changes/{change_id}/prepare-archive", tags=["Ereignisse"])
 @_root_request
 def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
+        _require_explicit_archive_structure_accept(change_id)
         return prepare_archived_structure_change(
             current_database_file(),
             current_workspace_root(),
@@ -9428,6 +9443,7 @@ def api_prepare_archived_structure_change(change_id: str, payload: dict[str, Any
 @_root_request
 def api_verify_archived_structure_change(change_id: str) -> dict[str, Any]:
     try:
+        _require_explicit_archive_structure_accept(change_id)
         result = verify_archived_structure_change(
             current_database_file(),
             current_archive_root(),
