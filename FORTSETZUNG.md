@@ -1,3 +1,13 @@
+# 03.11.2026 – TrueNAS-Abnahme Pre.5 bearbeitet, Pre.6-Entwicklungsbranch
+
+Branch `codex/pre6-truenas-acceptance`, Basis veröffentlichtes Pre.5/b4c3a397843567bfe09b35e82c51d0009d0a71bf. Anwendungscode `d64bfba83af80bfe79dfce80ccfc017cf49aad12`; erfolgreicher vollständiger gezielter QA-Commit `bc997133254ff60ec6151c9023f8e6d5dbde6c32`, Lauf41564118139 SUCCESS.98 ursprüngliche/gezielte Backendtests PASS (gepinnt aus41562234548 mit verifizierter Quellgleichheit),13 Offline- und8 Live-Browserfälle, sechs reale Supervisor-/Recovery-/Archivsicherheitsprüfbereiche PASS. Artefakt13197748512 SHA256aaac1c8b9ca0fce75553514929b8260e60b7fe83dd558bf192b468c2e10cafcc unabhängig heruntergeladen und ausgewertet.
+
+Alle Unterlagen und sieben Bilder gelesen.16 falsche Dateizuordnungswarnungen bei angewendeter No-Event-Erweiterung vor Patch reproduziert; Original-Snapshot trennt nun physische Ablage von neuer Planung. Echte externe Moves bleiben Konflikte. Direktlink zum bestätigungspflichtigen Apply-Plan, leere abgeschlossene geplante0-Familien-Sicherungen aus Auswahl, Diagnose per Statuskarte/Fehler-Autoöffnung, Archiv-Rücksprung unten nur nach Prüfungsfehler, klare DNG-Fehler-/Zeitlabels. Kollisionen bleiben blockiert; Quellidentitäten ergänzt. Vollständiger Bericht und Bildmatrix: docs/pre6/REPORT.md; maschinenlesbare Nachweise LINUX-EVIDENCE.json. Privilegienfrage ausschließlich analysiert: PRIVILEGES-DECISION.md; Compose/Helper unverändert.
+
+Keine Veröffentlichung beauftragt. Keine Tags/Releases/GHCR/main/NAS verändert. Reale vier Kollisionsdateien und16 vollständige NAS-Zeilen weiterhin nicht unabhängig belegt; rein lesende Diagnose in docs/pre6/READ-ONLY-DIAGNOSIS.md. Noch ausstehend: vollständige zusätzliche No-Event-HTTP-/Containerkette mit JPEG/RAF/XMP und nativer manueller D7/E4/E6/UX-Nachtest. Keine Vollmatrix/4000-/14-iPhone-Prüfung neu behaupten. Alle vorherigen roten QA-Runs dokumentiert. Unversionierte qa/rc14.zip weiterhin nicht anfassen/committen. Aktueller Dokumentationscommit folgt diesem QA-Commit ohne Anwendungscodeänderung.
+
+---
+
 # Fortsetzung 02.11.2026 – vollständiger Lauf 41363591064: Original-147er grün, Container-RC14 und Backendmatrix weiter rot
 
 **PRE.5 BLOCKED; KEINE FREIGABE, KEIN RELEASE.** Nur `codex/pre5-operation-recovery`; keine Änderung an main, Tags, Releases, GHCR/latest, TrueNAS oder Produktivdaten.

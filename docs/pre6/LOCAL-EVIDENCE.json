@@ -1,0 +1,13 @@
+{
+  "platform": "macOS synthetic development tests, not Linux acceptance",
+  "baseline_new_tests_failed": 3,
+  "after_new_tests_passed": 10,
+  "browser_cases_passed": 13,
+  "files": {
+    "before.xml": "6fd5338e20b77e45f8c0752e47557dff656312858b3571a3a25d7430802d0263",
+    "before.log": "aae6fba238dd178e95cc936c3ddaf1370f883dae73e3089a9bbf2a1fb8bbad0b",
+    "ten.xml": "3cb3892693c1e6ba6abd00f7a2a7976e4ea26773718463f42ef4ddbd62b01a78",
+    "ten.log": "8a1cb1c652aaa77fbaf1501202c25c7b5928325b82074cda733bfa9112a4bf9b",
+    "browser/results.json": "fb5dccb87ed86adb451cae1f93408e536ddf601f6a8226a6faa1f6807b5a7b3e"
+  }
+}
