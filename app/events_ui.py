@@ -5040,8 +5040,21 @@ EVENTS_HTML = r"""<!doctype html>
           try {
             const result=await requestJson(
               `/api/change-requests/${encodeURIComponent(crId)}/release-copy/create`,
-              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(options.body || {})}
+              {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}
             );
+            if (!result.complete) {
+              releaseCreateButton.disabled=false;
+              if(bar) bar.style.width="100%";
+              if(label) label.textContent=bk0511EventLabel("Kopieren nicht ausgeführt.","Copy not performed.");
+              if(errors){
+                errors.style.display="block";
+                errors.textContent=bk0511EventLabel(
+                  "Der SSD-Zielpfad ist belegt oder die Archivquelle muss geprüft werden. Es wurden keine neuen Dateien angelegt.",
+                  "An SSD return path is occupied or an archive source needs review. No new files were created."
+                )+" ("+String(result.error_code||"needs_review")+")";
+              }
+              return;
+            }
             if(bar) bar.style.width="100%";
             if(label) label.textContent=`${Number(result.verified_file_count||result.copied_file_count||0)} SSD-Kopien wurden angelegt und vollständig geprüft.`;
             await new Promise(resolve=>setTimeout(resolve,180));
@@ -5447,6 +5460,7 @@ EVENTS_HTML = r"""<!doctype html>
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
       if (action === "cancel") {
+        sessionStorage.removeItem("bk-pre71-manual-confirmed:"+crId);
         if (data.reversal_required) {
           await showArchiveReversalDetail(
             crId,
