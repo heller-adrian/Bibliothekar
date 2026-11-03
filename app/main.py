@@ -1815,6 +1815,58 @@ def process_claimed_job(
                 except FreeStockLayoutError:
                     return None
 
+            # Include earlier applied and archived captures, not just current
+            # physical day files. Two imports can share a camera-local second
+            # even if the first photograph has already left the free stock.
+            known_second_tokens: set[tuple[str, str]] = set()
+            registered_databases = {
+                Path(str(row["database_path"]))
+                for row in list_libraries(
+                    REGISTRY_DATABASE_FILE,
+                    active_only=False,
+                    registered_only=True,
+                )
+                if str(row.get("database_path") or "").strip()
+            }
+            registered_databases.add(database_file)
+            for existing_db in sorted(registered_databases):
+                if not existing_db.is_file():
+                    raise RuntimeError(
+                        "Registrierte Bibliotheksdatenbank fehlt: " + str(existing_db)
+                    )
+                with database_connection(existing_db) as con:
+                    known_files = con.execute(
+                        """SELECT current_relative_path,selected_capture_time
+                           FROM files
+                           WHERE job_id<>?
+                             AND current_root_kind IN ('shared_workspace','camera_archive')
+                             AND COALESCE(TRIM(current_relative_path),'')<>''
+                             AND selected_capture_time IS NOT NULL""",
+                        (job_id,),
+                    ).fetchall()
+                for row in known_files:
+                    observed_time = str(row["selected_capture_time"] or "")
+                    try:
+                        stamp = datetime.fromisoformat(observed_time).strftime("%Y%m%d_%H%M%S")
+                    except ValueError:
+                        continue
+                    stem = Path(str(row["current_relative_path"])).stem
+                    if stem.startswith(stamp + "_"):
+                        tail = stem[len(stamp) + 1:]
+                    elif (stem.startswith(stamp)
+                          and len(stem) > len(stamp) + 4
+                          and stem[len(stamp):len(stamp) + 3].isdigit()
+                          and stem[len(stamp) + 3] == "_"):
+                        tail = stem[len(stamp) + 4:]
+                    else:
+                        continue
+                    token = re.sub(r"(?:_Burst)?(?:_\\d{3})?$", "", tail)
+                    if token:
+                        known_second_tokens.add((observed_time[:19], token.casefold()))
+
+            def catalog_has_capture_in_second(capture_second: str, camera_token: str) -> bool:
+                return (capture_second[:19], camera_token.casefold()) in known_second_tokens
+
             if operation == 'folder_import' and (job.get('result') or {}).get('import_recovery') == 'resume':
                 from app.import_recovery import resume
                 result = resume(database_file,REGISTRY_DATABASE_FILE,workspace_path,LOG_PATH,job_id,
@@ -1843,6 +1895,7 @@ def process_claimed_job(
                     import_history_callback=persist_import_history,
                     family_admission_callback=admit_families,
                     destination_directory_callback=central_destination_directory,
+                    existing_second_callback=catalog_has_capture_in_second,
                     work_root=work_root,
                     central_stock=True,
                     allow_workspace_source=managed_metadata_import,
