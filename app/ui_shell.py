@@ -5129,11 +5129,9 @@ BIBLIOTHEKAR_JS = r"""
       '<details style="margin-top:8px"><summary>' +
       (rows.length - visible.length) +
       bk0511NoticeLanguage(' weitere anzeigen',' more notices')+'</summary><div style="margin-top:6px">' +
-      rows.slice(visible.length).map(row => (
-        '<div style="padding:7px 0;color:var(--bk-muted);font-size:.9rem">' +
-        bkEscapeNotice(bk0511NoticePresentation(row,row.detail ? "detail" : "title")) +
-        '</div>'
-      )).join("") +
+      // Keep action controls available for every row, not only the first
+      // eight. Nested chunks still terminate because each consumes 8 items.
+      bkNoticeRows(rows.slice(visible.length), required) +
       '</div></details>'
     );
   }
