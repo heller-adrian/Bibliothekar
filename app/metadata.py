@@ -761,6 +761,39 @@ def analyze_tree(
             for member in strong_members
         }
 
+        # RAF and JPEG from the same original family may expose different
+        # precision: a precise 17:11:37.025 and a seconds-only 17:11:37.
+        # Keep the trustworthy precision instead of misclassifying the entire
+        # family as contradictory. Two *different* precise instants still
+        # require manual review.
+        if len(strong_times) > 1:
+            try:
+                parsed_times = {
+                    raw: datetime.fromisoformat(str(raw))
+                    for raw in strong_times
+                }
+                precise = [
+                    raw for raw in strong_times
+                    if re.search(r"T\\d{2}:\\d{2}:\\d{2}\\.\\d+", raw)
+                ]
+                precise_instants = {parsed_times[raw] for raw in precise}
+                if len(precise_instants) == 1 and all(
+                    parsed_times[raw].replace(microsecond=0)
+                    == parsed_times[precise[0]].replace(microsecond=0)
+                    for raw in strong_times
+                ):
+                    strong_times = {sorted(precise)[0]}
+                elif len(set(parsed_times.values())) == 1:
+                    strong_times = {sorted(
+                        strong_times,
+                        key=lambda raw: (
+                            0 if re.search(r"T\\d{2}:\\d{2}:\\d{2}\\.\\d+", raw) else 1,
+                            raw,
+                        )
+                    )[0]}
+            except (ValueError, TypeError):
+                pass
+
         if len(strong_times) == 1:
             family_time = next(
                 iter(strong_times)
