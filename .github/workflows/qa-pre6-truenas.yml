@@ -1,7 +1,7 @@
 name: Pre6 targeted TrueNAS acceptance corrections
 on:
   push:
-    branches: [codex/pre6-truenas-acceptance]
+    branches: [codex/pre6-truenas-acceptance, codex/pre6-1-millisecond-renames]
     paths-ignore: ['docs/**', 'FORTSETZUNG.md']
 permissions:
   contents: read

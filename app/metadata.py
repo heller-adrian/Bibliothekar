@@ -232,6 +232,8 @@ def run_exiftool(
         "-api",
         "QuickTimeUTC=1",
         "-DateTimeOriginal",
+        "-SubSecTimeOriginal",
+        "-SubSecTimeDigitized",
         "-OffsetTimeOriginal",
         "-CreateDate",
         "-Make",
@@ -464,6 +466,26 @@ def build_candidates(
             continue
         priority, confidence = rule
         raw_text = str(raw_value).strip()
+
+        # EXIF often stores actual fractions in a separate SubSecTime tag.
+        # Preserve them; never derive fractions from filesystem timestamps.
+        leaf = str(tag_name).rsplit(":", 1)[-1]
+        if str(tag_name).startswith("EXIF:") and leaf in {"DateTimeOriginal", "CreateDate"}:
+            subsec = "SubSecTimeOriginal" if leaf == "DateTimeOriginal" else "SubSecTimeDigitized"
+            fraction = next(
+                (str(value).strip().lstrip(".")
+                 for key, value in metadata.items()
+                 if str(key).startswith("EXIF:") and str(key).endswith(":" + subsec)
+                 and value is not None
+                 and re.fullmatch(r"\.?\d{1,6}", str(value).strip())),
+                "",
+            )
+            if fraction and not re.search(r":\d{2}\.\d+(?:Z|[+-]\d{2}:\d{2})?$", raw_text):
+                suffix = re.search(r"(Z|[+-]\d{2}:\d{2})$", raw_text)
+                if suffix:
+                    raw_text = raw_text[:suffix.start()] + "." + fraction + raw_text[suffix.start():]
+                else:
+                    raw_text += "." + fraction
 
         if (
             str(tag_name).startswith("EXIF:")
