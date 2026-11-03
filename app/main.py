@@ -51,6 +51,7 @@ from app.global_stock import (
 from app.central_stock_reconcile import reconcile_central_free_stock
 from app.external_changes import (
     ExternalChangeError,
+    accept_external_filename_rename,
     acknowledge_external_notices,
     dismiss_external_notice,
     list_external_change_state,
@@ -9458,6 +9459,34 @@ def api_repair_all_external_changes() -> dict[str, Any]:
             status_code=409,
             detail=str(error),
         ) from error
+
+
+@app.post(
+    "/api/external-change-notices/{notice_id}/accept-rename",
+    tags=["Aufgaben"],
+)
+@_root_request
+def api_accept_external_filename_rename(
+    notice_id: str,
+) -> dict[str, Any]:
+    try:
+        result = accept_external_filename_rename(
+            current_database_file(),
+            notice_id,
+            library_work_root=current_library_context().work_root,
+        )
+        refresh_live_event_inventories(
+            current_database_file(),
+            current_workspace_root(),
+            current_archive_root(),
+        )
+        detect_all_event_structure_changes(
+            current_database_file(), current_workspace_root()
+        )
+        view_cache.invalidate(current_database_file())
+        return result
+    except (ExternalChangeError, OSError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post(
