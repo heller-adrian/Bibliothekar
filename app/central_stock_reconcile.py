@@ -104,11 +104,49 @@ def _expected_free_relative(
         return current
 
 
+def _pending_no_event_family_ids(connection: Any) -> set[int]:
+    """Assignments added by a saved edit are SOLL until its physical apply.
+
+    Only the original mutation snapshot establishes that the family was free.
+    Existing event members remain subject to the usual misplaced-file check.
+    """
+    incoming: set[int] = set()
+    mutations = connection.execute(
+        """SELECT m.anchor_event_id,m.original_state_json FROM event_mutations m
+           JOIN events e ON e.id=m.anchor_event_id
+           WHERE m.status='pending_apply' AND m.mutation_kind='edit'
+             AND e.status='applied' AND e.event_kind='no_event'
+             AND e.resort_required=1"""
+    ).fetchall()
+    for mutation in mutations:
+        state = json.loads(str(mutation['original_state_json']))
+        old_events = state['events']
+        old_assignments = state['event_assignments']
+        anchor = str(mutation['anchor_event_id'])
+        if not any(str(e['id']) == anchor and e['status'] == 'applied'
+                   and not e.get('parent_event_id') for e in old_events):
+            raise ValueError('pending_event_physical_snapshot_invalid: ' + anchor)
+        old_families = {int(a['family_id']) for a in old_assignments if a.get('family_id') is not None}
+        for assignment in old_assignments:
+            if assignment.get('file_id') is not None:
+                row = connection.execute('SELECT family_id FROM files WHERE id=?', (assignment['file_id'],)).fetchone()
+                if row and row['family_id'] is not None:
+                    old_families.add(int(row['family_id']))
+        current = connection.execute(
+            'SELECT family_id FROM event_assignments WHERE event_id=? AND family_id IS NOT NULL',
+            (anchor,),
+        ).fetchall()
+        incoming.update(int(a['family_id']) for a in current if int(a['family_id']) not in old_families)
+    return incoming
+
+
 def _free_rows(
     connection: Any,
     excluded_family_ids: set[int],
 ) -> list[dict[str, Any]]:
-    params: list[Any] = []
+    pending = _pending_no_event_family_ids(connection)
+    pending_sql = ','.join('?' for _ in pending) or 'NULL'
+    params: list[Any] = sorted(pending)
     excluded_sql = ""
     if excluded_family_ids:
         placeholders = ",".join("?" for _ in excluded_family_ids)
@@ -132,13 +170,13 @@ def _free_rows(
               AND f.current_relative_path NOT LIKE 'Später zuordnen/%'
               AND f.current_relative_path<>'Assign Later'
               AND f.current_relative_path NOT LIKE 'Assign Later/%'
-              AND NOT EXISTS (
+              AND (ff.id IN ({pending_sql}) OR NOT EXISTS (
                   SELECT 1 FROM event_assignments ea
                   JOIN events assigned ON assigned.id=ea.event_id
                   JOIN events root ON root.id=COALESCE(assigned.parent_event_id,assigned.id)
                   WHERE ea.family_id=ff.id
                     AND root.status IN ('applied','archived')
-              )
+              ))
               AND NOT EXISTS (
                   SELECT 1 FROM event_reapply_removed_families r
                   WHERE r.family_id=ff.id
@@ -151,10 +189,7 @@ def _free_rows(
     result: list[dict[str, Any]] = []
     for raw in rows:
         row = dict(raw)
-        row["expected_relative_path"] = _expected_free_relative(
-            connection,
-            row,
-        )
+        row["expected_relative_path"] = _expected_free_relative(connection, row)
         result.append(row)
     return result
 

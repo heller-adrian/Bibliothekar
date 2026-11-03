@@ -4955,7 +4955,7 @@ EVENTS_HTML = r"""<!doctype html>
         }
 
         if (phase === "verify") {
-          html += '<button type="button" class="plan-button" data-cr-back>Zur manuellen Arbeit zurück</button>';
+
           const managedReviewRows = Array.isArray(reviewRows)
             ? reviewRows.filter(row => !Boolean(row.advisory))
             : [];
@@ -4967,7 +4967,7 @@ EVENTS_HTML = r"""<!doctype html>
           if (targetTree) html += `<div class="card"><strong>SOLL-Struktur</strong><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></div>`;
           html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? "✓ Prüfung erfolgreich" : "Prüfen"}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} Dateien bestätigt.` : "Noch nicht geprüft."}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
           html += renderTechnicalDetails();
-          html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>Änderung abschließen & SSD freigeben</button></div></section>`;
+          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>Zur manuellen Arbeit zurück</button><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>Änderung abschließen & SSD freigeben</button></div></section>`;
         }
 
         changeRequestBody.innerHTML = html;
@@ -5219,6 +5219,7 @@ EVENTS_HTML = r"""<!doctype html>
         changeRequestBody.querySelector('[data-cr-back]')?.addEventListener('click',()=>showChangeRequestDetail(crId,{phase:'finder',refreshLive:true}));
         const verifyBtn = changeRequestBody.querySelector("[data-cr-verify]");
         const archiveBtn = changeRequestBody.querySelector("[data-cr-archive]");
+        const failedVerificationBack = changeRequestBody.querySelector("[data-cr-back]");
         if (verifyBtn) verifyBtn.addEventListener("click", async () => {
           const progress = changeRequestBody.querySelector("#change-work-progress");
           const bar = progress?.querySelector(".change-progress-bar");
@@ -5227,6 +5228,7 @@ EVENTS_HTML = r"""<!doctype html>
           const errors = changeRequestBody.querySelector("#change-verify-errors");
           verifyBtn.disabled = true;
           verifyBtn.classList.remove("success", "danger");
+          if (failedVerificationBack) failedVerificationBack.hidden = true;
           verifyBtn.textContent = "Prüfung läuft …";
           progress?.classList.add("active");
           if (bar) bar.style.width = "20%";
@@ -5252,6 +5254,7 @@ EVENTS_HTML = r"""<!doctype html>
               data.event_document && String(data.event_document.status || "") !== "verified"
                 ? data.event_document
                 : null;
+            if (failedVerificationBack) failedVerificationBack.hidden = Boolean(data.complete);
             if (data.complete) {
               verifyBtn.classList.add("success");
               verifyBtn.textContent = "✓ Prüfung erfolgreich";
@@ -5315,6 +5318,7 @@ EVENTS_HTML = r"""<!doctype html>
           } catch (error) {
             verifyBtn.classList.add("danger");
             verifyBtn.textContent = "✕ Prüfung fehlgeschlagen";
+            if (failedVerificationBack) failedVerificationBack.hidden = false;
             if (summary) { summary.className = "danger-text"; summary.textContent = error.message; }
             if (archiveBtn) archiveBtn.disabled = true;
           } finally {

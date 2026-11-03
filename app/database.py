@@ -4826,6 +4826,7 @@ def assign_free_families_to_existing_no_event(
         "status": "assigned",
         "event_id": effective_event_id,
         "canonical_target_event_id": str(target["id"]),
+        "target_job_id": str(target["job_id"]),
         "assigned_family_count": len(selected),
         "family_ids": [fid for fid, _, _ in selected],
         "source_job_ids": source_job_ids,

@@ -1,0 +1,16 @@
+[
+  "tests/backend/test_pre6_truenas_acceptance.py",
+  "tests/backend/test_0411_physical_truth.py",
+  "tests/backend/test_0412_consistency_semantics.py",
+  "tests/backend/test_0260_free_stock.py",
+  "tests/backend/test_03210_patch.py",
+  "tests/backend/test_0167_tasks_and_no_event.py",
+  "tests/backend/test_0191_no_event_unified.py",
+  "tests/backend/test_0192_no_event_blocks.py",
+  "tests/backend/test_0193_no_event_ui_patch.py",
+  "tests/backend/test_0194_no_event_segment_patch.py",
+  "tests/backend/test_pre2_metadata_abort.py",
+  "tests/backend/test_pre5_statement_authorization.py",
+  "tests/backend/test_f14_runtime.py::test_f14_manual_root_replacement_during_sort_preserves_foreign_files",
+  "tests/backend/test_f14_fixed_storage.py::test_f14_new_install_names_ignore_ui_and_legacy_environment"
+]

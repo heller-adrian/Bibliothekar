@@ -8,6 +8,13 @@ from __future__ import annotations
 import json
 
 UI_TRANSLATIONS = {
+  "Verbindung, Integrität und Schema sind bestätigt. Fachliche Vorgänge werden getrennt geprüft.": "Connection, integrity and schema are confirmed. Domain operations are checked separately.",
+  "Die Datenbankprüfung meldet einen Fehler. Ursprüngliche Speicherorte und konsistenten Sicherungsstand prüfen; keine Datenbank zurücksetzen.": "Database checks report an error. Check the original storage locations and a consistent backup; do not reset the database.",
+  "Aufnahmezeit belastbar": "Reliable capture time",
+  "Der Import prüft bekannte Dateiinhalte. Die endgültigen Zielpfade und Namenskonflikte werden im konkreten Sortierplan geprüft; gleiche Namen beweisen keine Dublette.": "Import checks known file contents. Final destination paths and name conflicts are checked in the specific sort plan; matching names do not prove a duplicate.",
+  "Diese DNG-Version wird derzeit nicht sicher zum Schreiben unterstützt. Die Korrektur wurde abgelehnt.": "Safe writing of this DNG version is currently unsupported. The correction was refused.",
+  "Die Metadatenkorrektur ist fehlgeschlagen. Bitte die technischen Details prüfen.": "Metadata correction failed. Please review the technical details.",
+
   "Speicherordner nicht verfügbar": "Storage folder unavailable",
   "Ein benötigter Verwaltungsordner fehlt, wurde verschoben oder ist nicht eindeutig zugänglich.": "A required storage folder is missing, has been moved, or cannot be accessed reliably.",
   "Betroffene Vorgänge sind zum Schutz Ihrer Dateien angehalten.": "Affected operations have been paused to protect your files.",

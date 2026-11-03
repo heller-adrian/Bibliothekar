@@ -11632,7 +11632,7 @@ def index() -> str:
         </div>
       </article>
 
-      <article class="card bk-status-card">
+      <article id="database-status-card" class="card bk-status-card" role="button" tabindex="0" aria-expanded="false" aria-controls="database-diagnosis" style="cursor:pointer">
         <div class="bk-status-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="7.5" ry="3"/><path d="M4.5 5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V5M4.5 11v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/></svg>
         </div>
@@ -11655,11 +11655,12 @@ def index() -> str:
       </article>
     </div>
 
-    <details id="database-diagnosis" class="card" style="font-size:.85rem;margin-bottom:16px;min-width:0">
+    <details id="database-diagnosis" hidden class="card" style="font-size:.85rem;margin-bottom:16px;min-width:0">
       <summary style="white-space:normal;overflow-wrap:anywhere;cursor:pointer">Datenbankdiagnose und Wiederherstellung</summary>
       <p>Die Diagnose verändert keine Daten. Fachliche Konflikte werden getrennt von Verbindungs- und Integritätsfehlern angezeigt.</p>
       <p>Bei einem beschädigten Katalog die App stoppen und einen zusammengehörigen, konsistenten Sicherungsstand von Appdaten und Workspace wiederherstellen. Keine Datenbank neu initialisieren oder F14-Nachweise löschen.</p>
-      <pre id="database-diagnosis-result" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto"></pre>
+      <p id="database-diagnosis-summary" role="status"></p>
+      <details><summary>Technische Details</summary><pre id="database-diagnosis-result" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto"></pre></details>
     </details>
 
     <section class="card import-panel">
@@ -11668,6 +11669,8 @@ def index() -> str:
         <button class="bk-help" type="button" aria-label="Hilfe zur Quellenwahl" data-help="Quelle auswählen und anschließend sicher einlesen. Wähle SD-Karte, externes Laufwerk oder einen Ordner. Achtung: Jede Sicherung wird als vollständige Kopie angelegt; dabei werden Daten in den Arbeitsbestand geschrieben und zusätzlicher Speicherplatz benötigt.">?</button>
         <span class="bk-copy-warning"><strong>Achtung:</strong> Sicherungen werden als Kopie angelegt und belegen zusätzlichen Speicherplatz.</span>
       </div>
+
+      <p class="muted">Der Import prüft bekannte Dateiinhalte. Die endgültigen Zielpfade und Namenskonflikte werden im konkreten Sortierplan geprüft; gleiche Namen beweisen keine Dublette.</p>
 
       <div id="bk-source-picker" class="bk-source-picker" aria-label="Importquelle wählen">
         <button type="button" class="bk-source-option active" data-source-mode="sd">
@@ -12469,12 +12472,32 @@ def index() -> str:
         </article>`;
     }
 
-    document.getElementById('database-diagnosis')?.addEventListener('toggle',async event=>{
-      if (!event.currentTarget.open) return;
+    const databaseDiagnosis = document.getElementById('database-diagnosis');
+    const databaseStatusCard = document.getElementById('database-status-card');
+    function setDatabaseDiagnosis(open) {
+      databaseDiagnosis.hidden = !open;
+      databaseDiagnosis.open = open;
+      databaseStatusCard.setAttribute('aria-expanded', String(open));
+    }
+    databaseStatusCard?.addEventListener('click', () => setDatabaseDiagnosis(!databaseDiagnosis.open));
+    databaseStatusCard?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setDatabaseDiagnosis(!databaseDiagnosis.open);
+      }
+    });
+    databaseDiagnosis?.addEventListener('toggle',async event=>{
+      databaseStatusCard?.setAttribute('aria-expanded', String(event.currentTarget.open));
+      if (!event.currentTarget.open) { event.currentTarget.hidden = true; return; }
       const output=document.getElementById('database-diagnosis-result');
       try {
         const response=await fetch('/api/settings/recovery-diagnostics',{credentials:'same-origin',cache:'no-store'});
         const result=await response.json();
+        const databases=[result.database,result.registry].filter(Boolean);
+        document.getElementById('database-diagnosis-summary').textContent = databases.length
+          && databases.every(db=>db.connected && db.consistent && db.schema_current)
+          ? "Verbindung, Integrität und Schema sind bestätigt. Fachliche Vorgänge werden getrennt geprüft."
+          : "Die Datenbankprüfung meldet einen Fehler. Ursprüngliche Speicherorte und konsistenten Sicherungsstand prüfen; keine Datenbank zurücksetzen.";
         output.textContent=JSON.stringify(result,null,2);
       } catch (error) { output.textContent=String(error.message || error); }
     });
@@ -12545,6 +12568,8 @@ def index() -> str:
 
       const database =
         health.database || {};
+
+      if (!database.initialized || database.error_code || database.error) setDatabaseDiagnosis(true);
 
       document.getElementById(
         "database-status"

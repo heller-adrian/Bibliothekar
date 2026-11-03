@@ -2457,6 +2457,12 @@ WORKSPACE_HTML = r"""<!doctype html>
       }[String(status || "")] || "Planned";
     }
 
+    function selectableBackup(job) {
+      return !(job.state === "completed" && job.workflow_status === "planned"
+        && Number(job.active_family_count) === 0 && Number(job.total_family_count) === 0
+        && !job.error_message);
+    }
+
     function renderBackupFilter() {
       const active = jobs.filter(job => job.workflow_status !== "archived");
       const archived = jobs.filter(job => job.workflow_status === "archived");
@@ -2770,7 +2776,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           const saved = await readWorkspaceSnapshot(cacheKey);
           if(request!==jobsLoadSerial)return;
           if (Array.isArray(saved?.jobs)) {
-            jobs = saved.jobs.filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0));
+            jobs = saved.jobs.filter(selectableBackup).filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0));
             refreshBackupSelection(jobs);
             updateTechnicalAnchor(); renderBackupFilter();
             const ids = [...selectedJobIds];
@@ -2791,6 +2797,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       if(request!==jobsLoadSerial)return;
 
       jobs = (data.jobs || [])
+        .filter(selectableBackup)
         .filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0))
         .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
 
@@ -4801,6 +4808,13 @@ WORKSPACE_HTML = r"""<!doctype html>
           const totalFamilies=Number(result.assigned_family_count||0);
           saveResult.textContent = `Gespeichert: ${result.parent_event.folder_name} · ${totalFamilies} Familien${sourceCount>1?" · sicherungsübergreifend":""}`;
           lastSavedEvent = result.parent_event;
+        }
+
+        if (result?.resort_required && result?.event_id) {
+          selectedDays.clear();
+          eventDialog.close();
+          location.href = `/events?job=${encodeURIComponent(result.target_job_id || jobId)}&task=resort:${encodeURIComponent(result.event_id)}`;
+          return;
         }
 
         if (result?.change_request_id) {

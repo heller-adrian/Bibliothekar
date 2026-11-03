@@ -345,7 +345,7 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
   function fileBadge(file){
     if(state.area==="library"&&file.reintegration_ready)return ["Bereit zum Einsortieren","good"];
     const hint=bestSuggestion(file);
-    if(file.capture_time_confidence==="high")return ["Metadaten sicher","good"];
+    if(file.capture_time_confidence==="high")return ["Aufnahmezeit belastbar","good"];
     if(hint)return ["Vorschlag vorhanden","warn"];
     return ["Prüfung nötig","danger"];
   }
@@ -764,6 +764,13 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       renderTasks();
     }catch(error){if(!quiet)setStatus(error.message,true);}
   }
+  function metadataTaskError(message){
+    const unsupported=/DNG Version [0-9.]+ not yet tested/.test(String(message));
+    const summary=unsupported
+      ? "Diese DNG-Version wird derzeit nicht sicher zum Schreiben unterstützt. Die Korrektur wurde abgelehnt."
+      : "Die Metadatenkorrektur ist fehlgeschlagen. Bitte die technischen Details prüfen.";
+    return '<div class="danger">'+esc(summary)+'</div><details><summary>Technische Details</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(message)+'</pre></details>';
+  }
   function renderTasks(){
     const host=$("meta-open-tasks");
     const tasks=(state.tasks||[]).filter(t=>String(t.area)===state.area);
@@ -772,8 +779,8 @@ main{width:min(1180px,100%);margin:0 auto;padding:18px 30px 70px}
       +tasks.map(t=>'<div class="meta-task">'
       +'<div><strong data-bk-preserve-language>'+esc(t.source_filename)+'</strong></div>'
       +'<div class="muted">'+esc(t.proposed_datetime||"")+'</div>'
-      +(t.error_message?'<div class="danger">'+esc(t.error_message)+'</div>':'')
-      +'<div class="meta-actions" style="margin-top:8px"><button class="primary" data-meta-apply="'+esc(t.id)+'">Jetzt ausführen</button>'
+      +(t.error_message ? metadataTaskError(t.error_message) : '')
+      +'<div class="meta-actions" style="margin-top:8px"><button class="primary" data-meta-apply="'+esc(t.id)+'" '+(/DNG Version [0-9.]+ not yet tested/.test(String(t.error_message||""))?'disabled':'')+'>Jetzt ausführen</button>'
       +'<button data-meta-cancel="'+esc(t.id)+'">Verwerfen</button></div></div>').join("")
       +'</details>';
     host.querySelectorAll("[data-meta-apply]").forEach(b=>b.addEventListener("click",()=>applyTask(b.dataset.metaApply)));
