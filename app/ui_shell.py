@@ -5037,19 +5037,21 @@ BIBLIOTHEKAR_JS = r"""
 
   function bk0511NoticePresentation(row,field) {
     const source=String(row[field]||"");
-    if(document.documentElement.dataset.bkLocale === "de") return source;
     const kind=String(row.kind||"");
     const details=row.details||{};
-    // Structured identity is authoritative; legacy diagnostic prose must
-    // never turn a same-folder filename change into a placement error.
+    // Structured identity is authoritative in BOTH locales. This also
+    // distinguishes a filename change from a genuine placement conflict.
     if(kind==="filename_rename") {
       if(field==="title") return bk0511NoticeLanguage("Datei umbenannt","File renamed");
-      const oldName=String(details.expected_relative_path||"");
-      const newName=String(details.observed_relative_path||row.relative_path||"");
+      const oldPath=String(details.expected_relative_path||"");
+      const newPath=String(details.observed_relative_path||row.relative_path||"");
+      const oldName=oldPath.split("/").pop();
+      const newName=newPath.split("/").pop();
       return bk0511NoticeLanguage(
-        "Die Datei wurde im gleichen Ordner umbenannt. Vorher: ","The file was renamed in the same folder. Previous: "
-      )+oldName+bk0511NoticeLanguage(". Jetzt: ",". Current: ")+newName+".";
+        "Die Datei wurde im gleichen Ordner umbenannt. Alter Dateiname: ","The file was renamed in the same folder. Previous filename: "
+      )+oldName+bk0511NoticeLanguage(". Neuer Dateiname: ",". Current filename: ")+newName+".";
     }
+    if(document.documentElement.dataset.bkLocale === "de") return source;
     const translated=window.BibliothekarI18n?.t?.(source) || source;
     if(translated !== source) return translated;
     if(field==="title") {
