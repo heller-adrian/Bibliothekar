@@ -14,7 +14,7 @@ def _connection(path):
     return connection
 
 
-def _setup(tmp_path, monkeypatch, *, archive=False):
+def _setup(tmp_path, monkeypatch, *, archive=False, central=False):
     from app import root_operations
     monkeypatch.setattr(root_operations, "validate_active_roots", lambda: None)
     monkeypatch.setattr(external_changes, "database_connection", _connection)
@@ -31,7 +31,9 @@ def _setup(tmp_path, monkeypatch, *, archive=False):
     actual = directory / "incorrect.JPG"
     payload = b"original-jpeg-byte-contents"
     actual.write_bytes(payload)
-    root_kind = "camera_archive" if archive else "shared_workspace"
+    root_kind = "camera_archive" if archive else (
+        "central_stock" if central else "shared_workspace"
+    )
     before = "2026/07-19 - Test/All/original.JPG"
     after = "2026/07-19 - Test/All/incorrect.JPG"
     path = tmp_path / "db.sqlite3"
@@ -51,7 +53,9 @@ def _setup(tmp_path, monkeypatch, *, archive=False):
             CREATE TABLE audit_log(job_id TEXT,action TEXT,entity_type TEXT,
                 entity_id TEXT,details_json TEXT,created_at TEXT);
         """)
-        c.execute("INSERT INTO files VALUES(1,'JOB',?,?,'')", (before,root_kind))
+        c.execute("INSERT INTO files VALUES(1,'JOB',?,?,'')", (
+            before, "shared_workspace" if central else root_kind
+        ))
         c.execute("INSERT INTO events VALUES('E','JOB','applied',1,'','')")
         c.execute(
             """INSERT INTO external_change_notices
@@ -115,3 +119,18 @@ def test_recreated_old_name_blocks_adoption(tmp_path, monkeypatch):
             db, "N", library_work_root=root
         )
     assert not queued
+
+
+def test_central_stock_rename_accepts_without_event_mutation(tmp_path, monkeypatch):
+    db, root, actual, queued = _setup(tmp_path, monkeypatch, central=True)
+    result = external_changes.accept_external_file_rename(
+        db, "N", library_work_root=root, central_root=root,
+    )
+    assert result["status"] == "resolved"
+    assert actual.is_file()
+    assert queued == []
+    with _connection(db) as c:
+        assert c.execute(
+            "SELECT current_relative_path FROM files"
+        ).fetchone()[0].endswith("/incorrect.JPG")
+        assert c.execute("SELECT revision FROM events").fetchone()[0] == 1

@@ -96,3 +96,41 @@ def test_exif_subsec_is_merged_before_offset():
         "EXIF:ExifIFD:OffsetTimeOriginal": "+03:00",
     }, "raw")
     assert candidates[0]["normalized_datetime"] == "2026-07-19T17:11:37.025000+03:00"
+
+
+def test_exif_zero_milliseconds_are_not_lost():
+    candidates = build_candidates({
+        "EXIF:ExifIFD:DateTimeOriginal": "2026:07:19 17:11:37",
+        "EXIF:ExifIFD:SubSecTimeOriginal": "000",
+        "EXIF:ExifIFD:OffsetTimeOriginal": "+03:00",
+    }, "raw")
+    assert candidates[0]["normalized_datetime"] == "2026-07-19T17:11:37.000000+03:00"
+
+
+def test_raw_jpeg_mixed_precision_is_one_capture_family(tmp_path, monkeypatch):
+    from app import metadata
+    raf = tmp_path / "DSCF0001.RAF"
+    jpeg = tmp_path / "DSCF0001.JPG"
+    raf.write_bytes(b"synthetic-raf")
+    jpeg.write_bytes(b"synthetic-jpeg")
+    def exif_response(_source_root, **_kwargs):
+        return [
+            {
+                "SourceFile": str(raf),
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:19 17:11:37",
+                "EXIF:ExifIFD:SubSecTimeOriginal": "025",
+                "EXIF:ExifIFD:OffsetTimeOriginal": "+03:00",
+            },
+            {
+                "SourceFile": str(jpeg),
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:19 17:11:37",
+                "EXIF:ExifIFD:OffsetTimeOriginal": "+03:00",
+            },
+        ]
+    monkeypatch.setattr(metadata, "run_exiftool", exif_response)
+    analysis = metadata.analyze_tree(tmp_path)
+    assert len(analysis["families"]) == 1
+    assert analysis["families"][0]["selected_capture_time"] == (
+        "2026-07-19T17:11:37.025000+03:00"
+    )
+    assert analysis["families"][0]["capture_time_confidence"] == "high"
