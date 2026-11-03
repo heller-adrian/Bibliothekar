@@ -334,6 +334,30 @@ EVENTS_HTML = r"""<!doctype html>
       from { transform:translateX(-15%); }
       to { transform:translateX(180%); }
     }
+    /* Pre.7: the Applied Undo/Archive Verify actions need an actual visible
+       progress indicator. Toggling a class without CSS was not sufficient. */
+    #structure-change-dialog .plan-button.loading {
+      position:relative;
+      pointer-events:none;
+    }
+    #structure-change-dialog .plan-button.loading::after {
+      content:"";
+      display:inline-block;
+      width:12px;
+      height:12px;
+      margin-left:9px;
+      vertical-align:middle;
+      border:2px solid currentColor;
+      border-top-color:transparent;
+      border-radius:50%;
+      animation:bk-pre7-spin .75s linear infinite;
+    }
+    @keyframes bk-pre7-spin { to { transform:rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      #structure-change-dialog .plan-button.loading::after {
+        animation-duration:2s;
+      }
+    }
     .badge.danger { color:var(--danger); }
     .change-progress-track {
       height:9px;
