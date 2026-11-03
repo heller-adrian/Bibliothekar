@@ -1,245 +1,84 @@
+<div align="center">
+  <img src="docs/bibliothekar-readme-logo.svg" alt="Bibliothekar logo" width="490">
+  <p><strong>Self-hosted camera photo import, review and archival for TrueNAS</strong></p>
+</div>
+
 # Bibliothekar
 
-> Entwicklungskandidat **1.0.0-pre.5**, ausgehend vom veröffentlichten pre.4. Abnahme läuft.
-> Noch nicht veröffentlicht. [Prüfbericht](docs/pre/TEST-REPORT.md),
-> [RC14-Upgrade](docs/pre/UPGRADE-RC14.md), [TrueNAS-Abnahme](docs/pre/TRUENAS-TEST.md).
-> Native TrueNAS-/Hardwareabnahme steht aus; Freigabe erfolgt separat.
+**Bibliothekar** is a self-hosted web application for moving photographs from camera cards and other folders into a structured, long-term camera library. It emphasizes traceable file operations, preserving original media, keeping associated files together, and leaving decisions about the final archive to the user.
 
-Selbst gehostete Web-App zur sicheren Verarbeitung und Organisation von Kameraaufnahmen auf TrueNAS.
+**Stable version:** 1.0.0 · **Image:** ghcr.io/heller-adrian/bibliothekar:1.0.0 · **License:** [AGPL-3.0](LICENSE)
 
-Aktuelle stabile Veröffentlichung: **0.40.3**
+Bibliothekar can run as a **TrueNAS Custom App** with Docker Compose. It has **not yet been accepted into the official TrueNAS Apps Catalog**; catalog submission and review are separate.
 
-Entwicklungsversion: **1.0.0-pre.5** – noch nicht veröffentlicht.
+## Features
 
-Container für TrueNAS: **`ghcr.io/heller-adrian/bibliothekar:latest`**
+- **Import & Review:** inspect metadata and capture dates from SD-card backups, mounted removable devices or explicitly configured NAS folders.
+- **Safe sourcing:** when the optional device helper is enabled, mount SD cards and USB media **read-only**; back up data before further organization.
+- **File families:** keep related RAW, JPEG and sidecar files together.
+- **Workspace:** assign media to dated events or a configurable **No Event** collection and preview file/folder operations before applying changes.
+- **Metadata correction:** review and correct capture timestamps on verified working copies, including applying a consistent offset to groups.
+- **Controlled archiving:** prepare a camera archive update and verify the actual file structure and event.json. Archive storage normally remains **read-only** to Bibliothekar.
+- **Manual-change review:** detect external filename and event folder changes and handle them explicitly, including Accept/Undo for archived events.
+- **Multiple libraries:** separate library databases and archive roots, with managed shared workspace inventories.
 
-Separater internationaler Testimage-Tag (Veröffentlichung erst nach erfolgreicher QA): **`ghcr.io/heller-adrian/bibliothekar:patch-0.50.7`**
+The UI supports English and German. Bibliothekar is a **file and event management application**, not a photo gallery or an AI sorter.
 
-### Schutz der Web-Oberfläche (BA-03)
+## A typical workflow
 
-Ab dem Entwicklungsstand 0.50.0 ist die Web-Oberfläche einschließlich aller
-Bibliotheks-APIs **passwortgeschützt**. Vor der ersten Anmeldung muss ein
-Administratorpasswort konfiguriert werden; ohne Passwort startet die App
-mit gesperrtem Datenzugriff. Die TrueNAS-Custom-App verwendet bevorzugt eine
-Secret-Datei unter `/config/admin-password`. Alle Einrichtungs- und
-HTTPS-Hinweise: [Web-App- und API-Zugriffsschutz](docs/BA03_HTTP_SECURITY.md).
+1. Attach an SD card or choose a saved backup/NAS source.
+2. Create or review a verified backup; inspect media families and capture dates.
+3. Assign files to events or leave them in **No Event**.
+4. Review the planned folder structure and confirm the workspace operation.
+5. Prepare a long-term archive change and manually perform the explicitly listed archive operations.
+6. Return to Bibliothekar for verification, including the event.json. Unfinished actions remain visible under **Tasks**.
 
+## Installation on TrueNAS
 
-## Updates
+The [Compose example](compose.example.yaml) is a starting point for a TrueNAS **Custom App**. By default, it runs without Docker privileged mode and uses already available storage paths. The optional SD/USB device helper is disabled in the base profile.
 
-Für normale Installationen wird in TrueNAS als Image-Version **`latest`** verwendet. `latest` zeigt ausschließlich auf den zuletzt freigegebenen Stand von `main`.
+Before installing:
 
-Ein Update besteht damit nur noch daraus, in TrueNAS nach einem neuen Image zu suchen bzw. die App zu aktualisieren. Für reproduzierbare Installationen und Rollbacks bleiben zusätzlich feste Versionstags wie `0.40.2` erhalten.
+1. Create dedicated datasets/directories for **app data**, **workspace** and **camera archive**, and ensure the correct filesystem/ACL permissions.
+2. Set BIBLIOTHEKAR_APPDATA_DIR, BIBLIOTHEKAR_WORKSPACE_DIR and BIBLIOTHEKAR_MAIN_LIBRARY_DIR to their existing host paths.
+3. Configure a strong BIBLIOTHEKAR_ADMIN_PASSWORD (at least 16 characters). Limit public access to the web UI.
+4. Keep the archive mapping **read-only**, the workspace and app data **read/write**. Avoid mounting unrelated NAS datasets.
+5. Deploy the Compose configuration and open the web UI on the selected port (default 30044).
+6. Back up app data and the database before updates. Do **not** run two instances against the same SQLite database.
 
-Entwicklungsstände auf `patch/*` werden weiterhin separat als Testimages veröffentlicht, verändern aber **niemals** `latest`.
+For reproducible installs use **ghcr.io/heller-adrian/bibliothekar:1.0.0**. The **ghcr.io/heller-adrian/bibliothekar:latest** tag follows the latest approved stable release. Pin a numbered tag or digest if rollback reproducibility matters.
 
-## Ziel
+### Container paths
 
-Die App unterstützt den Workflow von einer SD-Karte bis zur langfristigen Kamerabibliothek:
+| Container path | Purpose | Access |
+| --- | --- | --- |
+| /appdata | Settings, library databases, application state and recovery journals | Read/write; persistent |
+| /workspace | SD backups, free media, event workspaces, metadata working copies and trash | Read/write; persistent |
+| /main-library | Primary camera archive (other libraries have separate configured archive roots) | **Read-only** |
+| /sources/nas | Optional NAS folder import source | Read-only |
+| /tmp | Temporary runtime files | Disposable tmpfs |
 
-1. SD-Karte oder andere Quelle nur lesend erkennen und sichern
-2. Metadaten prüfen
-3. JPG/RAF-Dateien als Familien zusammenhalten
-4. Aufnahmen Ereignissen oder `Ohne Ereignis` zuordnen
-5. Arbeitsbereich strukturiert aufbauen
-6. Nachträgliche Änderungen und Neu-Zuordnungen sicher behandeln
-7. Archivierung kontrolliert vorbereiten und prüfen
+Use the actual [Compose example](compose.example.yaml) for the authoritative environment variable names and host mappings. Internal paths below /appdata do not require separate host datasets.
 
-Die App verändert die endgültige Kamerabibliothek nicht unkontrolliert.
+### Optional automatic SD-card/USB mounting
 
-## Kernprinzipien
+Direct discovery, read-only mount and safe unmount of attached devices use a dedicated **source-helper process**. The optional [removable-device Compose overlay](compose.removable.yaml) currently enables Docker **privileged mode for the container**. The web process itself drops to UID/GID 568, but the container receives expanded device and mount permissions.
 
-- Originalquellen möglichst nur lesen
-- keine stillen automatischen Moves in die endgültige Bibliothek
-- Dateifamilien zusammenhalten
-- Änderungen nachvollziehbar und prüfbar machen
-- keine doppelten Zuordnungen
-- offene Neu-Zuordnungen vor Abschluss sichtbar halten
-- wiederverwendete SD-Karten inkrementell verarbeiten
+Enable this profile only as an informed administrator on a trusted host. Do not expose the source-helper service on a public port. The standard folder-based import profile does **not** require privileged mode. Fully automatic hardware hotplug under restricted device permissions is not yet qualified for the TrueNAS Apps Catalog.
 
-## TrueNAS Custom App
+## Data safety and operational notes
 
-0.34.0 aktiviert die Mehrfachkorrektur auf der stabilen 0.33.x-
-Metadatenarchitektur. Eine Aufnahme dient als Referenz: Aus ihrer vorhandenen
-Aufnahmezeit und der vom Nutzer eingetragenen tatsächlichen Zeit berechnet
-Bibliothekar einen konstanten Zeitversatz und zeigt vor jeder Änderung eine
-vollständige Alt→Neu-Vorschau für den gesamten verwalteten Ordner. Erst nach
-Bestätigung werden die Dateien über Arbeitskopien mit ExifTool geschrieben und
-erneut verifiziert.
+- Mount original camera media **read-only** wherever supported; keep camera archive mounts read-only in the recommended deployment.
+- Bibliothekar uses SQLite, persistent operation journals and verification checks. **Never delete a recovery reservation merely to bypass a blocked action.**
+- Changes involving the long-term camera archive deliberately require operator verification; the app does not silently modify that read-only mount.
+- TrueNAS permissions, ACLs and selected host paths must be configured by the operator. Bibliothekar does not provision arbitrary host datasets.
+- Device support depends on host Linux, filesystem, device exposure and permissions; unsupported or unverifiable devices are rejected.
+- Use an HTTPS reverse proxy and appropriate network controls before making the web UI available remotely.
 
-### Gemeinsamer Kamera-Arbeitsbereich
+## Source, issues and license
 
-TrueNAS bindet standardmäßig genau **einen** gemeinsamen read-write Host Path
-als `/workspace` ein. Bibliothekar verwaltet darunter standardmäßig:
-
-- `/workspace/SD-Kartensicherungen` – globaler Sicherungs- und freier Kamerabestand
-- `/workspace/Arbeitsbereiche` – Stamm für frei benannte Bibliotheks-Arbeitsbereiche
-- `/workspace/Metadatenkorrektur` – verwalteter Stamm für Metadatenkorrekturen
-- `/workspace/Papierkorb` – verwalteter Papierkorb ohne automatische Löschfrist
-- `/workspace/Metadatenkorrektur/Allgemein` – allgemeine Einzeldatei-Korrektur
-- `/workspace/Metadatenkorrektur/Mehrfachkorrektur` – unabhängige Korrektur zusammengehöriger Aufnahmen mit konstantem Zeitversatz
-
-Ein technischer Bibliotheks-Identifier wie `main` ist **kein**
-Dateisystempfad. Bibliothekar erzeugt daraus weder
-`/workspace/Arbeitsbereiche/main` noch
-`/workspace/Metadatenkorrektur/Bibliothek/main`. Maßgeblich sind immer die
-vom Nutzer gespeicherten Arbeitsbereichs- und Archivpfade.
-
-Die Namen der vier verwalteten Stammordner können unter
-**Einstellungen → Pfade** geändert werden. Eigene TrueNAS-Datasets oder
-Host-Path-Mounts werden von Bibliothekar weder erzeugt noch umgehängt.
-
-### Bibliotheken
-
-Jede Bibliothek besitzt eine eigene SQLite-Datenbank und einen explizit
-gespeicherten Arbeitsbereich. Der Arbeitsbereich kann innerhalb von
-`/workspace/Arbeitsbereiche` oder als eigener RW-Host-Path liegen. Sein Name
-ist frei wählbar; eine Hauptbibliothek muss nicht `main` heißen.
+Application code: [app](app/) · Tests: [tests](tests/) · Qualification: [qa](qa/) · Technical notes: [docs](docs/) · Downloads: [Releases](https://github.com/heller-adrian/Bibliothekar/releases).
 
-Archive werden pro Bibliothek separat als read-only Host Path eingebunden. Das
-Archiv bleibt für Bibliothekar read-only; physische Archivänderungen bleiben
-kontrollierte Nutzeraktionen.
-
-### Ereignisordner und Benennung
-
-Die Ordnerstruktur für neue Ereignisse ist konfigurierbar und wird beim
-Erstellen pro Ereignis eingefroren. Für normale Ereignisse sind optional:
-
-- Jahr im Ordnernamen
-- Uhrzeit im Ordnernamen
-- Von–bis-Darstellung bei mehrtägigen Ereignissen
-
-Sammelordner (intern weiterhin `no_event`) besitzen eine frei wählbare
-sichtbare Bezeichnung, standardmäßig `Ohne Ereignis`. Da sie mehrere
-getrennte Zeitsegmente eines Monats enthalten können, gibt es dort keine
-Von–bis- oder Uhrzeit-Darstellung; optional kann das Jahr vor dem Monat stehen.
-
-Die Einstellungsseite zeigt eine gemeinsame Vorschau für normales Ereignis und
-Sammelordner einschließlich der aktuell gewählten Unterordnerstruktur.
-
-### Metadatenkorrektur 0.34.0
-
-Die Seite **Metadatenkorrektur** besitzt den normalen Bibliothekar-Header und
-einen zweiten Reiterheader mit:
-
-- **Bibliothek** – zeigt den globalen freien `Ohne_Datum`-Bestand als
-  gemeinsame Liste, unabhängig davon, aus welcher Bibliothek der Kameraimport stammt.
-- **Allgemein** – verwendet direkt
-  `/workspace/Metadatenkorrektur/Allgemein`.
-- **Mehrfachkorrektur** – verwendet direkt
-  `/workspace/Metadatenkorrektur/Mehrfachkorrektur` und korrigiert alle
-  enthaltenen unterstützten Mediendateien relativ zu einer Referenzaufnahme.
-
-Für **Allgemein** gibt es keinen Eingang/Ausgang. Ein Klick auf
-**Metadaten ändern** friert den Ausgangszustand ein, arbeitet auf einer
-geprüften Arbeitskopie, schreibt die gewählte Aufnahmezeit mit ExifTool, liest
-die Metadaten erneut und ersetzt die Originaldatei erst nach erfolgreicher
-Verifikation atomar am selben Ort. Sekunden werden vollständig übernommen.
-Offene oder blockierte Korrekturen werden im globalen Aufgabenbereich pro
-Metadaten-Reiter gebündelt statt als eine Aufgabe pro Datei dargestellt.
-
-Bei **Bibliothek** wird eine komplette Ohne-Datum-Dateifamilie eingefroren.
-**Metadaten ändern** schreibt die korrigierte Aufnahmezeit auf Arbeitskopien,
-liest und prüft die Metadaten erneut und ersetzt erst danach die Dateien
-atomar am bisherigen `Ohne_Datum`-Ort. Die Familie bleibt dort sichtbar und
-wird als **Bereit zum Einsortieren** markiert. Erst der getrennte Befehl
-**In Tagesbestand einsortieren** berechnet denselben kanonischen
-Tages-/Zeitbestand wie beim Kameraimport, vergibt den normalen Bibliothekar-
-Dateinamen und verschiebt die geprüfte Familie dorthin. Dateipfade, aktuelle
-SHA-256-Werte und Aufnahmezeiten werden in alle Bibliotheksprojektionen
-gespiegelt; der ursprüngliche Quellfingerprint bleibt erhalten.
+For a public bug report, include the version, environment and reproduction steps, with **redacted** error messages. Do not upload private photos, databases, credentials or device IDs.
 
-Die Bibliotheks-Metadatenkorrektur erzeugt insbesondere **keine** Ordner
-`Bibliothek/main/Eingang/Ausgang`. Leere Überreste dieses 0.33.0-Entwurfs
-dürfen automatisch entfernt werden; enthalten sie Dateien, werden sie niemals
-automatisch gelöscht.
-
-### Mehrfachkorrektur
-
-Der Ordner `/workspace/Metadatenkorrektur/Mehrfachkorrektur` wird beim
-Anwendungsstart automatisch angelegt. Der Workflow ist bewusst unabhängig von
-einer Bibliothek:
-
-1. Dateien in den Ordner legen und **Bestand prüfen**.
-2. Eine Datei als Referenzaufnahme wählen und ihr tatsächliches Datum mit
-   Uhrzeit eintragen.
-3. **Vorschau berechnen** zeigt für jede Datei den bisherigen und den neuen
-   Zeitstempel. Der Abstand zwischen den Aufnahmen bleibt unverändert.
-4. **Anwenden** schreibt die Korrektur sicher in die Dateien; sie bleiben im
-   Ordner und können anschließend auch außerhalb von Bibliothekar verwendet
-   oder verschoben werden.
-5. **Anwenden und in Tagesbestand übernehmen** führt dieselbe geprüfte
-   Korrektur aus und übergibt den Ordner anschließend an den verifizierten
-   zentralen Import. Nach erfolgreicher Übernahme werden nur die tatsächlich
-   importierten Quelldateien aus dem Mehrfachkorrektur-Ordner entfernt; der
-   Ordner selbst bleibt bestehen.
-
-Zwischen Vorschau und Anwendung werden Dateigröße und SHA-256 erneut geprüft.
-Hat sich der Bestand verändert, muss die Vorschau neu berechnet werden.
-
-### Basis-Containerpfade
-
-- `/config` – Anwendungskonfiguration
-- `/database` – Bibliotheksdatenbanken und globale Registry
-- `/logs` – Protokolle
-- `/workspace` – gemeinsamer Kamera-Arbeitsbereich, read-write
-- Bibliotheksarchive – jeweils eigener read-only Host Path
-- optionale externe Bibliotheks-Arbeitsbereiche – eigener read-write Host Path
-- `/sources/nas` – NAS-Quellen, read-only
-- `/sources/removable` – Mountpunkt für Wechselmedien
-- `/tmp` – flüchtiges tmpfs
-
-Der NAS-Ordnerimport benötigt `/sources/nas`, aber keinen zusätzlichen alten Sicherungsquellen-Mount `/sources/import` mehr. Die bisherige Import-API bleibt zur Kompatibilität verfügbar, die alte automatische Quellenauswahl gehört nicht mehr zur Oberfläche.
-
-`compose.example.yaml` enthält die Ein-Container-Vorlage.
-
-## Projektstruktur
-
-- `app/` – Anwendung
-- `tests/` – automatisierte Backend-Tests
-- `tools/` – allgemeine Diagnose- und Hilfswerkzeuge
-- `docs/` – Architektur- und Projektdokumentation
-- `qa/` – Testmatrix, Fixtures und Testlaufberichte
-- `.github/` – CI- und Container-Publishing
-
-## Entwicklungsmodell
-
-Funktionale Regressionen sollen möglichst automatisiert getestet werden.
-
-Drei Ebenen:
-
-1. Unit-/Backend-Tests
-2. automatisierte Integrations- und QA-Tests
-3. manuelle UI-/UX-Endabnahme
-
-## Roadmap
-
-### 0.30
-Bibliotheksfundament mit globaler Registry und getrennten Bibliothekskontexten.
-
-### 0.31
-Mehrere Bibliotheken mit eigener SQLite-Datenbank, eigener Archivzuordnung, globalen Familien-Claims und tab-sicherem Bibliothekskontext.
-
-### 0.32
-Mehrbibliotheks-Lifecycle, zentraler freier Bestand und TrueNAS-/Archiv-Härtung.
-
-### 0.33
-Bibliotheksspezifische Ereignisbenennung sowie sichere Metadatenkorrektur mit
-Dateinamenerkennung, getrennten Bereichen „Bibliothek“/„Allgemein“ und
-verifiziertem Schreibworkflow.
-
-### 1.0.0
-Stabiler Kamera-Kern mit geprüftem Import, sicherer Datei- und Metadatenverarbeitung, Ereignisverwaltung, kontrollierter Archivierung und zuverlässig wiederanlauffähigen Arbeitsabläufen.
-
-### Spätere Erweiterungen
-Optionale Anbindungen an externe Fotoverwaltungssysteme, sofern sie die Kernfunktionen und die Datenhoheit des Nutzers nicht beeinträchtigen.
-
-## Status
-
-Das Projekt befindet sich aktiv in Entwicklung und ist noch nicht für unbegleitete Produktivinstallationen freigegeben.
-
-## Lizenz
-
-Bibliothekar ist freie Open-Source-Software unter der GNU Affero General Public License v3.0.
-
-Siehe [LICENSE](LICENSE).
+Bibliothekar is free software under the **GNU Affero General Public License version 3**. See [LICENSE](LICENSE).
