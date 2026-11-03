@@ -8,7 +8,7 @@ permissions:
   actions: read
 concurrency:
   group: bibliothekar-pre711-qa-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   exact-source:
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
@@ -50,6 +50,7 @@ jobs:
           "$WORK/venv/bin/python" -m pytest -q -o addopts='' \
             tests/backend/test_pre7_manual_change_contracts.py \
             tests/backend/test_pre71_archive_wizard_recovery.py \
+            tests/backend/test_pre71_orphan_recovery_integration.py \
             tests/backend/test_0271_archive_release_stock.py \
             tests/backend/test_0477_release_copy_discard.py \
             tests/backend/test_pre62_rename_structure.py \
