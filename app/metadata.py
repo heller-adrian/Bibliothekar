@@ -751,10 +751,25 @@ def analyze_tree(
         # Camera pairs can share a second while only the RAW stores real
         # fractional EXIF seconds. Accept one unambiguous fractional value;
         # differing real fractional values remain an explicit family conflict.
-        if len(strong_times) > 1 and len({v[:19] for v in strong_times}) == 1:
-            precise = {v for v in strong_times if "." in v[:26]}
-            if len(precise) == 1:
-                strong_times = precise
+        if len(strong_times) > 1:
+            # A JPEG may only record whole seconds while its paired RAW
+            # records actual fractional EXIF seconds. Inherit the unique
+            # precise value, including on high-confidence whole-second files,
+            # only if all camera instants share that UTC second.
+            instants = {
+                datetime.fromisoformat(value).astimezone(timezone.utc)
+                .replace(microsecond=0)
+                for value in strong_times
+            }
+            precise = {value for value in strong_times if "." in value[:26]}
+            if len(instants) == 1 and len(precise) == 1:
+                precise_value = next(iter(precise))
+                for member in strong_members:
+                    if member["selected_capture_time"] != precise_value:
+                        member["selected_capture_time"] = precise_value
+                        member["selected_capture_source"] = "family_subsecond_inheritance"
+                        member["inherited_from_family"] = True
+                strong_times = {precise_value}
 
         if len(strong_times) == 1:
             family_time = next(
