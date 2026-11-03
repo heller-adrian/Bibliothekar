@@ -239,7 +239,7 @@ def acknowledge_external_notices(
     placeholders = ",".join("?" for _ in ids)
     with database_connection(database_path) as connection:
         rows = connection.execute(
-            f"""SELECT id,action_required,details_json FROM external_change_notices
+            f"""SELECT id,kind,action_required,details_json FROM external_change_notices
                 WHERE id IN ({placeholders}) AND status='open'""",
             tuple(ids),
         ).fetchall()
@@ -251,9 +251,12 @@ def acknowledge_external_notices(
             if (
                 int(row["action_required"] or 0)
                 and bool(details.get("force_repair"))
+                and str(row["kind"] or "") != "filename_rename"
             ):
-                # Zwingende Konsistenzfehler dürfen nicht per „Ignorieren“
-                # versteckt werden.
+                # Actual placement/integrity conflicts stay un-dismissible.
+                # A filename_rename is different: Dismiss closes only its
+                # modal and acknowledges the prompt, NEVER the open task.
+                # Size/SHA/path checks still run on Accept or Undo.
                 continue
             if int(row["action_required"] or 0):
                 connection.execute(
