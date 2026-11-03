@@ -218,3 +218,53 @@ def test_pre7_archive_staging_must_not_delete_foreign_or_tampered_bytes(tmp_path
         assert row["status"] == "prepared"
         assert json.loads(row["detected_json"])["review_mode"] == "accept"
     assert renamed.is_dir() and not original.exists()
+
+
+
+def test_pre7_placement_conflicts_remain_non_dismissible(tmp_path):
+    from app.external_changes import record_notice
+
+    db = tmp_path / "catalog.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        record_notice(
+            connection,
+            notice_key="placement:999",
+            kind="placement_conflict",
+            root_kind="shared_workspace",
+            title="Wrong placement",
+            detail="Needs verified physical restoration",
+            action_required=True,
+            repairable=True,
+            details={"force_repair": True},
+        )
+    initial = list_external_change_state(db)
+    assert initial["unseen_required_count"] == 1
+    acknowledge_external_notices(db, [initial["required"][0]["id"]])
+    remaining = list_external_change_state(db)
+    assert remaining["unseen_required_count"] == 1
+    assert remaining["required_count"] == 1
+
+
+def test_pre7_archive_http_accept_gate_rejects_missing_choice(tmp_path, monkeypatch):
+    from app import main
+    from fastapi import HTTPException
+
+    db, workspace, archive, original, renamed, change_id = _physical_event(
+        tmp_path, archived=True,
+    )
+    monkeypatch.setattr(main, "current_database_file", lambda: db)
+    with pytest.raises((HTTPException, ValueError)) as blocked:
+        main._require_explicit_archive_structure_accept(change_id)
+    assert "Accept Changes" in str(blocked.value)
+    with database_connection(db) as connection:
+        row = connection.execute(
+            "SELECT status FROM event_structure_changes WHERE id=?",
+            (change_id,),
+        ).fetchone()
+    assert row["status"] == "pending"
+    assert renamed.is_dir() and not original.exists()
+    set_archived_structure_review_mode(
+        db, workspace, shared_work_root(workspace), change_id, "accept",
+    )
+    main._require_explicit_archive_structure_accept(change_id)
