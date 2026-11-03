@@ -112,6 +112,19 @@ def test_0509_applied_parent_and_child_use_distinct_layouts(tmp_path: Path, monk
     scan_event_inventory(db,work_root,"j","e",root_kind="shared_workspace",persist=True,fast_refresh=False)
     from app.event_structure_changes import detect_all_event_structure_changes
     detect_all_event_structure_changes(db,workspace)
+    # Since Pre.6.1, a manual filename rename is NEVER silently accepted
+    # by a structure scan. The original document remains until explicit Accept.
+    from app.external_changes import list_external_change_state, accept_external_filename_rename
+    from app.event_document_sync import sync_event_document_task
+    original_document=json.loads((event_root/"event.json").read_text())
+    assert not any(
+        row["relative_path"].endswith("/B_renamed.JPG")
+        for row in original_document["files"]
+    )
+    renamed_notice=next(row for row in list_external_change_state(db)["required"]
+                        if row["kind"]=="filename_rename")
+    accept_external_filename_rename(db, renamed_notice["id"], library_work_root=work_root)
+    assert sync_event_document_task(db,workspace,"e")["status"]=="completed"
     updated=json.loads((event_root/"event.json").read_text())
     assert any(
         row["relative_path"].endswith("/B_renamed.JPG")
