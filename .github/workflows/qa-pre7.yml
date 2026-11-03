@@ -56,13 +56,36 @@ jobs:
             tests/backend/test_0509_manual_change_e2e.py \
             tests/backend/test_0283_structure_simplification.py \
             2>&1 | tee "$WORK/pytest.log"
+      - name: Real isolated authenticated container, read-only archives and restart regression
+        run: |
+          set -euo pipefail
+          IMAGE="bibliothekar-pre7-qa:${{ github.run_id }}"
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$IMAGE" . 2>&1 | tee "$WORK/container-build.log"
+          IMAGE="$IMAGE" RUNNER_TEMP="$WORK" \
+            python3 qa/pre6/no_event_http_container.py 2>&1 | tee "$WORK/http-container.log"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          result=json.loads((Path(os.environ["WORK"])/"pre6-no-event-http.json").read_text())
+          assert result["source"] == os.environ["GITHUB_SHA"]
+          assert result["status"] == "PASS"
+          assert result["checks"] and all(v == "PASS" for v in result["checks"].values())
+          assert result["native_truenas"] == "NOT_RUN"
+          PY
       - name: Preserve evidence for exact commit
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: pre7-test-evidence
           retention-days: 30
-          path: ${{ env.WORK }}/pytest.log
+          path: |
+            ${{ env.WORK }}/pytest.log
+            ${{ env.WORK }}/container-build.log
+            ${{ env.WORK }}/http-container.log
+            ${{ env.WORK }}/pre6-no-event-http.json
+            ${{ env.WORK }}/pre6-no-event-http.log
       - name: Report source SHA
         run: |
           git rev-parse HEAD
