@@ -1,0 +1,95 @@
+name: Pre.7.1 archive workflow and recovery qualification
+on:
+  push:
+    branches: [codex/pre71-archive-wizard-recovery]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: bibliothekar-pre711-qa-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  exact-source:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre71-${{ github.run_id }}
+    steps:
+      - name: Checkout exact pre7 commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: pre71-${{ github.run_id }}
+      - name: Python, event JavaScript and focused safety regressions
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre71.XXXXXXXX")"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$WORK/venv"
+          "$WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
+          "$WORK/venv/bin/python" - <<'PY'
+          from app import __version__
+          assert __version__ == "1.0.0-pre.7.1", __version__
+          PY
+          "$WORK/venv/bin/python" -m compileall -q app
+          "$WORK/venv/bin/python" - <<'PY'
+          from pathlib import Path
+          from app.ui_shell import BIBLIOTHEKAR_JS
+          from app.events_ui import EVENTS_HTML
+          import re
+          scripts = re.findall(r'<script[^>]*>(.*?)</script>', EVENTS_HTML, flags=re.S)
+          assert scripts
+          Path('/tmp/bibliothekar-pre711-events.js').write_text('\n'.join(scripts))
+          Path("/tmp/bibliothekar-pre711-shell.js").write_text(BIBLIOTHEKAR_JS)
+          PY
+          node --check /tmp/bibliothekar-pre711-shell.js
+          node --check /tmp/bibliothekar-pre711-events.js
+          "$WORK/venv/bin/python" -m pytest -q -o addopts='' \
+            tests/backend/test_pre7_manual_change_contracts.py \
+            tests/backend/test_pre71_archive_wizard_recovery.py \
+            tests/backend/test_0271_archive_release_stock.py \
+            tests/backend/test_0477_release_copy_discard.py \
+            tests/backend/test_pre62_rename_structure.py \
+            tests/backend/test_pre61_manual_rename.py \
+            tests/backend/test_pre61_millisecond_burst.py \
+            tests/backend/test_pre6_truenas_acceptance.py \
+            tests/backend/test_0509_manual_change_e2e.py \
+            tests/backend/test_0283_structure_simplification.py \
+            2>&1 | tee "$WORK/pytest.log"
+      - name: Real isolated authenticated container, read-only archives and restart regression
+        run: |
+          set -euo pipefail
+          IMAGE="bibliothekar-pre711-qa:${{ github.run_id }}"
+          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$IMAGE" . 2>&1 | tee "$WORK/container-build.log"
+          IMAGE="$IMAGE" RUNNER_TEMP="$WORK" \
+            python3 qa/pre6/no_event_http_container.py 2>&1 | tee "$WORK/http-container.log"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          result=json.loads((Path(os.environ["WORK"])/"pre6-no-event-http.json").read_text())
+          assert result["source"] == os.environ["GITHUB_SHA"]
+          assert result["status"] == "PASS"
+          assert result["checks"] and all(v == "PASS" for v in result["checks"].values())
+          assert result["native_truenas"] == "NOT_RUN"
+          PY
+      - name: Preserve evidence for exact commit
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre71-test-evidence
+          retention-days: 30
+          path: |
+            ${{ env.WORK }}/pytest.log
+            ${{ env.WORK }}/container-build.log
+            ${{ env.WORK }}/http-container.log
+            ${{ env.WORK }}/pre6-no-event-http.json
+            ${{ env.WORK }}/pre6-no-event-http.log
+      - name: Report source SHA
+        run: |
+          git rev-parse HEAD
+          git status --porcelain
