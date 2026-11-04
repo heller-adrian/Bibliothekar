@@ -1,7 +1,7 @@
 name: Bibliothekar 1.0.0 - original Pre.5 full qualification
 on:
   push:
-    branches: [ci/1.0.0-selfhosted-stabilization]
+    branches: [ci/1.0.0-final-qualification]
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,61 +29,99 @@ jobs:
           fi
   backend:
     needs: preflight
-    # Backend evidence must remain observable even when an independent container
-    # migration contract fails. The overall workflow stays red on any failure.
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        partition: [0, 1, 2, 3, 4, 5, 6, 7]
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
-    # Eight isolated partitions take >150 minutes on the real safe runner.
-    # Let the final partition finish rather than cancel valid node coverage.
-    timeout-minutes: 240
+    timeout-minutes: 300
     defaults:
       run:
         shell: bash
-        working-directory: pre5-full-${{ github.run_id }}
+        working-directory: backend-100-${{ matrix.partition }}
+    env:
+      PARTITION: ${{ matrix.partition }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           persist-credentials: false
-          path: pre5-full-${{ github.run_id }}
-      - name: Isolated runtime and all disjoint backend partitions
+          path: backend-100-${{ matrix.partition }}
+      - name: Isolated current-source Python environment
         run: |
           set -euo pipefail
-          # Legacy private-authority tests deliberately audit every ancestor.
-          # The shared runner checkout parent is group-writable. Use an owned
-          # disposable subtree under sticky /tmp; never chmod runner parents.
-          QA_WORK="$(mktemp -d /tmp/bibliothekar-pre5-full.XXXXXXXX)"
-          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          QA_WORK="$(mktemp -d /tmp/bibliothekar-100-backend-$PARTITION.XXXXXXXX)"
+          echo "QA_WORK=$QA_WORK" >> "$GITHUB_ENV"
           python3 -m venv "$QA_WORK/venv"
           "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" RUNNER_TEMP="$QA_WORK" "$QA_WORK/venv/bin/python" qa/pre5/full_backend.py
-      - name: Preserve complete node coverage and all test evidence
+      - name: Execute one complete disjoint backend partition
+        run: |
+          set +e
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" RUNNER_TEMP="$QA_WORK" "$QA_WORK/venv/bin/python" qa/rc13/regression.py "$PARTITION"
+          ret=$?
+          echo "QA_EXIT=$ret" >> "$GITHUB_ENV"
+          exit 0
+      - name: Validate selection manifest and JUnit including failures and skips
+        if: always() && env.QA_WORK != ''
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          from xml.etree import ElementTree as E
+          root=Path(os.environ['QA_WORK']);i=int(os.environ['PARTITION'])
+          mpath=root/'rc13-partition.json'
+          jpath=root/'f14-qa/targets/results/result.xml'
+          result={'partition':i,'source':os.environ['GITHUB_SHA'],'status':'FAIL',
+                  'exit':int(os.environ.get('QA_EXIT','99'))}
+          if mpath.exists():
+              m=json.loads(mpath.read_text())
+              nodes=m['all_nodes'];chosen=m['selected_nodes']
+              result.update(collected=len(nodes),selected=len(chosen))
+              result['coverage_ok']=(m['partition']==i and m['partitions']==8
+                  and len(nodes)==len(set(nodes)) and chosen==sorted(nodes)[i::8])
+          if jpath.exists():
+              xml=E.parse(jpath).getroot()
+              result['junit']={k:sum(int(t.get(k,0)) for t in xml.iter('testsuite'))
+                  for k in ('tests','failures','errors','skipped')}
+          j=result.get('junit',{})
+          if (result['exit']==0 and result.get('coverage_ok') is True
+              and j.get('tests')==result.get('selected')
+              and all(j.get(k,1)==0 for k in ('failures','errors','skipped'))):
+              result['status']='PASS'
+          (root/'partition-summary.json').write_text(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          if result['status']!='PASS':raise SystemExit(1)
+          PY
+      - name: Preserve independent partition evidence
         if: always() && env.QA_WORK != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: pre5-full-backend-${{ github.run_attempt }}
-          # SQLite -shm/-wal files are transient and may disappear between
-          # upload-artifact's directory walk and stat(), causing ENOENT.
-          # Preserve durable per-partition JUnit, collection manifests and
-          # process diagnostics, never race active SQLite sidecars.
+          name: 100-backend-part-${{ matrix.partition }}
           path: |
-            ${{ env.QA_WORK }}/pre5-full-backend/summary.json
-            ${{ env.QA_WORK }}/pre5-full-backend/*/rc13-partition.json
-            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/results/result.xml
-            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/process.log
-            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/restart*.log
-            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/result.json
-            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/execution.json
+            ${{ env.QA_WORK }}/partition-summary.json
+            ${{ env.QA_WORK }}/rc13-partition.json
+            ${{ env.QA_WORK }}/f14-qa/targets/results/result.xml
+            ${{ env.QA_WORK }}/f14-qa/targets/results/stdout.log
+            ${{ env.QA_WORK }}/f14-qa/targets/scratch/pytest/**/process.log
+            ${{ env.QA_WORK }}/f14-qa/targets/scratch/pytest/**/restart*.log
+            ${{ env.QA_WORK }}/f14-qa/targets/scratch/pytest/**/result.json
+            ${{ env.QA_WORK }}/f14-qa/targets/scratch/pytest/**/execution.json
           retention-days: 30
-      - name: Clean only this backend job's disposable scratch after artifact upload
+      - name: Clean only this backend partition's scratch
         if: always() && env.QA_WORK != ''
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           case "$QA_WORK" in
-            /tmp/bibliothekar-pre5-full.*) ;;
-            *) echo '::error::Unsafe backend scratch path'; exit 1 ;;
+            /tmp/bibliothekar-100-backend-$PARTITION.*) ;;
+            *) echo '::error::Unexpected scratch path'; exit 1 ;;
           esac
-          rm -rf -- "$QA_WORK"
+          for attempt in 1 2 3 4 5; do
+            if rm -rf -- "$QA_WORK"; then exit 0; fi
+            sleep 2
+          done
+          echo '::warning::Active child may still be writing to this isolated test scratch.'
 
   container:
     needs: preflight
@@ -239,4 +277,59 @@ jobs:
             "$RUNNER_TEMP"/bibliothekar-pre5-front.*) ;;
             *) echo '::error::Unsafe frontend scratch path'; exit 1 ;;
           esac
+          # Root-owned Chromium output: isolate root cleanup to this exact bind mount.
+          docker run --rm --network none --user 0:0 \
+            -v "$QA_WORK:/test-cleanup" --entrypoint /bin/sh \
+            mcr.microsoft.com/playwright:v1.62.1-noble \
+            -c 'find /test-cleanup -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'
           rm -rf -- "$QA_WORK"
+
+
+  backend-coverage:
+    if: always()
+    needs: [preflight, backend]
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 20
+    steps:
+      - name: Download all eight backend partition evidence sets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: 100-backend-part-*
+          path: ${{ runner.temp }}/bibliothekar-100-coverage-${{ github.run_id }}
+      - name: Enforce exactly once-only coverage on current release source
+        shell: bash
+        env:
+          COVERAGE_ROOT: ${{ runner.temp }}/bibliothekar-100-coverage-${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['COVERAGE_ROOT'])
+          all_manifests=[];all_reports=[]
+          for i in range(8):
+              d=root/f'100-backend-part-{i}'
+              mp=d/'rc13-partition.json';rp=d/'partition-summary.json'
+              if not(mp.exists() and rp.exists()):raise SystemExit(f'Partition {i}: missing evidence')
+              m=json.loads(mp.read_text());r=json.loads(rp.read_text())
+              assert m['partition']==i and m['partitions']==8
+              assert r['partition']==i and r['source']==os.environ['GITHUB_SHA']
+              all_manifests.append(m);all_reports.append(r)
+          collected=all_manifests[0]['all_nodes']
+          assert collected and len(collected)==len(set(collected))
+          assert all(m['all_nodes']==collected for m in all_manifests)
+          selected=[n for m in all_manifests for n in m['selected_nodes']]
+          assert len(selected)==len(collected) and set(selected)==set(collected), 'Missing or duplicate tests'
+          state='PASS' if all(x['status']=='PASS' for x in all_reports) else 'FAIL'
+          data={'source':os.environ['GITHUB_SHA'],'collected':len(collected),
+                'tested_once':len(selected),'parts':all_reports,'status':state}
+          (root/'coverage-summary.json').write_text(json.dumps(data,indent=2))
+          print(json.dumps(data,indent=2))
+          if state!='PASS':raise SystemExit('Unresolved backend failures')
+          PY
+      - name: Upload overall backend coverage result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: 100-backend-coverage-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bibliothekar-100-coverage-${{ github.run_id }}/coverage-summary.json
+          retention-days: 30
