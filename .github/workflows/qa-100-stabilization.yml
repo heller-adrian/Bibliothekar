@@ -11,7 +11,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 5
+    steps:
+      - name: Verify disk headroom and local Docker before expensive tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h / /tmp "$RUNNER_TEMP"
+          free -h
+          docker info --format 'Docker server: {{.ServerVersion}}'
+          available_kib="$(df -Pk /tmp | awk 'END {print $4}')"
+          if (( available_kib < 20 * 1024 * 1024 )); then
+            echo "::error::Runner has less than 20 GiB free in /tmp; refusing a full test run."
+            exit 1
+          fi
   backend:
+    needs: preflight
     # Backend evidence must remain observable even when an independent container
     # migration contract fails. The overall workflow stays red on any failure.
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
@@ -57,8 +74,19 @@ jobs:
             ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/result.json
             ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/execution.json
           retention-days: 30
+      - name: Clean only this backend job's disposable scratch after artifact upload
+        if: always() && env.QA_WORK != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          case "$QA_WORK" in
+            /tmp/bibliothekar-pre5-full.*) ;;
+            *) echo '::error::Unsafe backend scratch path'; exit 1 ;;
+          esac
+          rm -rf -- "$QA_WORK"
 
   container:
+    needs: preflight
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 35
     defaults:
@@ -144,7 +172,27 @@ jobs:
       - name: Remove only this run's temporary registry credentials
         if: always() && env.DOCKER_CONFIG != ''
         run: rm -f "$DOCKER_CONFIG/config.json"
+      - name: Clean only this container job's fixtures and temporary image
+        if: always() && env.QA_WORK != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          case "$QA_WORK" in
+            "$RUNNER_TEMP"/bibliothekar-pre5-container.*) ;;
+            *) echo '::error::Unsafe container scratch path'; exit 1 ;;
+          esac
+          if [[ -n "${IMAGE:-}" ]]; then
+            # Some isolated fixtures are UID 568; clean only this bind mount
+            # from a throwaway root container, never the host or NAS.
+            docker run --rm --network none --user 0:0 \
+              -v "$QA_WORK:/test-cleanup" --entrypoint /bin/sh "$IMAGE" \
+              -c 'find /test-cleanup -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +' \
+              || echo '::warning::Container-owned fixture cleanup incomplete'
+            docker image rm "$IMAGE" || true
+          fi
+          rm -rf -- "$QA_WORK" || echo '::warning::Some container scratch is not owned by runner'
   frontend:
+    needs: preflight
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 20
     defaults:
@@ -182,3 +230,13 @@ jobs:
             ${{ env.QA_WORK }}/rc13
             ${{ env.QA_WORK }}/rc14
           retention-days: 30
+      - name: Clean only this frontend job's disposable scratch after artifact upload
+        if: always() && env.QA_WORK != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          case "$QA_WORK" in
+            "$RUNNER_TEMP"/bibliothekar-pre5-front.*) ;;
+            *) echo '::error::Unsafe frontend scratch path'; exit 1 ;;
+          esac
+          rm -rf -- "$QA_WORK"
