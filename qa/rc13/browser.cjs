@@ -39,7 +39,8 @@ for(const stage of ['prepare','copy_to_ssd','remove_archive','complete','verify'
  const body=await page.locator('#change-request-body').innerText();assert(!body.startsWith('Fehler:'),body);assert(!body.includes('${escapeHtml'),body);
  assert(!body.includes('Kamerabibliothek/')&&!body.includes('SD-Kartensicherungen/'),body);
  if(stage==='complete')assert(body.includes(archive+'/2026/Mein Ereignis'),body);
- if(locale==='en')assert(!/oder|Freigewordene|fehlende Ordner|Die App|Hilfsstrukturen|SSD/.test(body),body);
+ // SSD is the same technical acronym in English and German; it is not an untranslated German UI string.
+  if(locale==='en')assert(!/oder|Freigewordene|fehlende Ordner|Die App|Hilfsstrukturen/.test(body),body);
  await page.screenshot({path:path.join(out,`${locale}-${width}-${stage}.png`)});results.push({locale,width,stage,status:'PASS'});
 }
 for(const phase of ['prepare','finder','verify']){
