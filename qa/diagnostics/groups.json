@@ -1,0 +1,63 @@
+{
+  "source_run": "41868214695",
+  "source_commit": "010d23fc243563aed05e5a865b3ec7166af92659",
+  "notes": "Exact observed failure node IDs; group runs must preserve unchanged assertions. This is diagnostic, NOT complete release coverage.",
+  "groups": {
+    "trash-concurrency": [
+      "tests/backend/test_f11_trash_reservation.py::test_f11_two_concurrent_requests[empty]",
+      "tests/backend/test_f11_trash_reservation.py::test_f11_two_concurrent_requests[restore]"
+    ],
+    "trash-recovery": [
+      "tests/backend/test_f11_trash_reservation.py::test_f11_reservation_sigkill[f11.reserve_committed]",
+      "tests/backend/test_f11_trash_reservation.py::test_f11_reservation_wins[direct-delete]",
+      "tests/backend/test_f11_trash_reservation.py::test_f11_two_process_reservations",
+      "tests/backend/test_f11_trash_reservation.py::test_f11_reservation_wins[direct-restore]",
+      "tests/backend/test_f11_trash_reservation.py::test_f11_reservation_wins[full]",
+      "tests/backend/test_f11_trash_reservation.py::test_f11_reservation_wins[selective]",
+      "tests/backend/test_f11_trash_reservation.py::test_f11_durable_intent_is_not_released_by_job_status[interrupted]",
+      "tests/backend/test_f11_trash_reservation.py::test_f11_original_boundary_and_restore"
+    ],
+    "sd-import": [
+      "tests/backend/test_rc4_sd_recheck.py::test_supplement_real_worker_keeps_original_and_one_child[missing]",
+      "tests/backend/test_rc1_sd_reimport.py::test_confirmed_reimport_uses_real_worker_and_preserves_source[missing]",
+      "tests/backend/test_rc5_practice_followup.py::test_folder_actual_sigkill_atomic_handoff_and_three_restarts[after_handoff]",
+      "tests/backend/test_rc5_practice_followup.py::test_folder_actual_sigkill_atomic_handoff_and_three_restarts[handoff]",
+      "tests/backend/test_rc5_practice_followup.py::test_folder_worker_missing_copy_and_mixed_files",
+      "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[after_handoff]",
+      "tests/backend/test_rc4_sd_recheck.py::test_sigkill_real_startup_and_three_independent_restarts[handoff]",
+      "tests/backend/test_rc5_practice_followup.py::test_hundred_known_files_no_import_and_no_managed_folders"
+    ],
+    "version": [
+      "tests/backend/test_0474_final_cleanup.py::test_0474_version_and_dock_are_single_source_of_truth",
+      "tests/backend/test_0403_web_app_orientation.py::test_0403_version_contract",
+      "tests/backend/test_0505_language_navigation.py::test_0505_startup_language_resolved_before_body_first_paint",
+      "tests/backend/test_0454_ui_polish.py::test_0454_version_and_style_is_loaded",
+      "tests/backend/test_0325_patch.py::test_0325_ui_and_version_contract",
+      "tests/backend/test_0453_ui_refinement.py::test_0453_release_version",
+      "tests/backend/test_0455_import_safety.py::test_0455_version_and_phase_css",
+      "tests/backend/test_0502_english_locale.py::test_0502_login_setup_and_settings_get_localisation",
+      "tests/backend/test_0506_english_pwa_defaults.py::test_0506_nav_shows_feedback_without_network_gate",
+      "tests/backend/test_0300_library_foundation.py::test_0300_worker_and_ui_are_library_foundation_aware",
+      "tests/backend/test_0324_patch.py::test_0324_version_contract",
+      "tests/backend/test_0323_patch.py::test_0323_shell_shows_current_library_and_old_review_route_is_removed",
+      "tests/backend/test_0402_mobile_no_event_range.py::test_0402_version_contract"
+    ],
+    "ui-contract": [
+      "tests/backend/test_0270_transaction_ui.py::test_0271_archive_change_ui_is_compact_three_step_assistant",
+      "tests/backend/test_0281_ui1_patch.py::test_ui1_manual_change_ui_is_compact_and_durable",
+      "tests/backend/test_0412_consistency_semantics.py::test_0412_shell_has_single_consistency_dialog_contract"
+    ],
+    "publish-contract": [
+      "tests/backend/test_0452_cache_history_ui.py::test_0452_patch_publish_requires_explicit_release_request",
+      "tests/backend/test_0402_mobile_no_event_range.py::test_0402_readme_declares_latest_update_channel",
+      "tests/backend/test_0452_cache_history_ui.py::test_0452_github_build_is_manual_for_patch_branches"
+    ],
+    "recovery-consistency": [
+      "tests/backend/test_0561_recovery.py::test_recovery_waits_for_live_deletion",
+      "tests/backend/test_0280_structure_sync.py::test_0414_applied_file_moved_to_wrong_subevent_is_repaired_to_semantic_leaf"
+    ],
+    "large-import": [
+      "tests/backend/test_rc14_import.py::test_rc13_staged_zero_published_resume_preserves_origin[3892]"
+    ]
+  }
+}
