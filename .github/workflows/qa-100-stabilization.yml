@@ -33,8 +33,15 @@ jobs:
           command -v docker
           docker version --format '{{.Server.Version}}'
           test "$(python3 -c "from pathlib import Path; print(Path('app/__init__.py').is_file())")" = True
-          mkdir -p "$RUNNER_TEMP/bibliothekar-ci-${GITHUB_RUN_ID}/evidence"
-          echo "EVIDENCE=$RUNNER_TEMP/bibliothekar-ci-${GITHUB_RUN_ID}/evidence" >> "$GITHUB_ENV"
+          CI_ROOT="$RUNNER_TEMP/bibliothekar-ci-${GITHUB_RUN_ID}"
+          mkdir -p "$CI_ROOT/evidence" "$CI_ROOT/source"
+          # Writable, disposable checkout: some old regressions intentionally write
+          # synthetic snapshots alongside the tests. Never write to the real checkout.
+          cp -a "$GITHUB_WORKSPACE/." "$CI_ROOT/source/"
+          test "$(git -C "$CI_ROOT/source" rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "CI_ROOT=$CI_ROOT" >> "$GITHUB_ENV"
+          echo "CI_SOURCE=$CI_ROOT/source" >> "$GITHUB_ENV"
+          echo "EVIDENCE=$CI_ROOT/evidence" >> "$GITHUB_ENV"
 
       - name: Build nonpublished application image and disposable test image
         shell: bash
@@ -46,12 +53,15 @@ jobs:
             --build-arg BASE_IMAGE="bibliothekar-ci-base:${GITHUB_RUN_ID}" \
             -t "bibliothekar-ci-test:${GITHUB_RUN_ID}" .
           docker run --rm --network none --read-only \
-            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/checkout,readonly" \
-            --mount "type=bind,src=$EVIDENCE,dst=/tmp" \
+            --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,mode=1777,size=2g \
+            --mount "type=bind,src=$CI_SOURCE,dst=/checkout" \
+            --mount "type=bind,src=$EVIDENCE,dst=/evidence" \
             -w /checkout \
+            -e HOME=/tmp \
             -e PYTHONPATH=/checkout \
             "bibliothekar-ci-test:${GITHUB_RUN_ID}" \
-            sh -ec 'command -v exiftool; exiftool -ver; command -v git; python -m pytest --version'
+            sh -ec 'command -v exiftool; exiftool -ver; command -v git; node --version; python -m pytest --version; touch /checkout/.ci-write-test; rm /checkout/.ci-write-test; touch /evidence/.ci-write-test; rm /evidence/.ci-write-test'
 
       - name: Full backend regression with ExifTool in isolated container
         id: regression
@@ -59,9 +69,12 @@ jobs:
         run: |
           set -o pipefail
           docker run --rm --network none --read-only \
-            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/checkout,readonly" \
-            --mount "type=bind,src=$EVIDENCE,dst=/tmp" \
+            --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,mode=1777,size=2g \
+            --mount "type=bind,src=$CI_SOURCE,dst=/checkout" \
+            --mount "type=bind,src=$EVIDENCE,dst=/evidence" \
             -w /checkout \
+            -e HOME=/tmp \
             -e PYTHONPATH=/checkout \
             -e PYTEST_ADDOPTS= \
             -e GIT_CONFIG_COUNT=1 \
@@ -70,7 +83,7 @@ jobs:
             -e BIBLIOTHEKAR_AUTH_TEST_BYPASS=pytest-isolated \
             "bibliothekar-ci-test:${GITHUB_RUN_ID}" \
             python -m pytest -q -o addopts='' \
-              --junitxml=/tmp/backend-junit.xml tests/backend \
+              --junitxml=/evidence/backend-junit.xml tests/backend \
             2>&1 | tee "$EVIDENCE/backend-qa.log"
 
       - name: Independent no-publish integrity record
@@ -81,10 +94,11 @@ jobs:
             echo "Source SHA: $GITHUB_SHA"
             echo "Git ref: $GITHUB_REF"
             echo "Runner: $RUNNER_NAME"
-            echo "No source, production DB, appdata or archive mounts were provided to the test container."
+            echo "Only an ephemeral writable source copy and isolated evidence were mounted."
             echo "No GitHub release or package is published by this workflow."
           } > "$EVIDENCE/qualification.txt"
           git status --porcelain >> "$EVIDENCE/qualification.txt"
+          git -C "$CI_SOURCE" status --porcelain > "$EVIDENCE/test-generated-files.txt"
 
       - name: Save full backend evidence even on failure
         if: always()
