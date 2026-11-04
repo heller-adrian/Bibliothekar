@@ -25,6 +25,7 @@ if result.returncode:
 args=[sys.executable,str(tools/'runner.py'),'-q','-p','no:cacheprovider','--import-mode=importlib','-o','addopts=','--basetemp',str(scratch/'pytest'),'--junitxml',str(output/'result.xml'),'-p','finite_execution']
 if env.get('AUDIT_PROFILE_MATCH'):args+=['-p','profile_execution']
 if mode=='targets' and 'RC13_PARTITION' in env:args+=['-p','qa.rc13.partition']
+if mode=='targets' and env.get('AUDIT_DIAGNOSTIC_NODES_FILE'):args+=['-p','qa.diagnostics.select']
 if mode=='backend':args+=[str(source/'tests/backend')]
 elif mode=='targets':
  chosen=json.loads(Path(sys.argv[3]).read_text());assert chosen and all(n.startswith('tests/backend/') and '..' not in n.split('::')[0].split('/') for n in chosen)
