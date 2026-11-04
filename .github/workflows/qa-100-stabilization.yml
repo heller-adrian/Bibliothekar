@@ -1,115 +1,181 @@
-name: Bibliothekar 1.0.0 isolated self-hosted stabilization
-
+name: Bibliothekar 1.0.0 - original Pre.5 full qualification
 on:
   push:
     branches: [ci/1.0.0-selfhosted-stabilization]
   workflow_dispatch:
-
 permissions:
   contents: read
-
+  packages: read
 concurrency:
   group: bibliothekar-stabilize-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  isolated-regression:
+  backend:
+    # Backend evidence must remain observable even when an independent container
+    # migration contract fails. The overall workflow stays red on any failure.
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    # Eight isolated partitions take >150 minutes on the real safe runner.
+    # Let the final partition finish rather than cancel valid node coverage.
     timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre5-full-${{ github.run_id }}
     steps:
-      - name: Checkout exact stabilization source including historical tags
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Verify runner and source isolation
-        shell: bash
+          path: pre5-full-${{ github.run_id }}
+      - name: Isolated runtime and all disjoint backend partitions
         run: |
           set -euo pipefail
-          test "${RUNNER_ENVIRONMENT:-}" != github-hosted
-          git rev-parse HEAD
-          git tag -l 'v1.0.0-pre.1' | grep -Fx 'v1.0.0-pre.1'
-          command -v docker
-          docker version --format '{{.Server.Version}}'
-          test "$(python3 -c "from pathlib import Path; print(Path('app/__init__.py').is_file())")" = True
-          CI_ROOT="$RUNNER_TEMP/bibliothekar-ci-${GITHUB_RUN_ID}"
-          mkdir -p "$CI_ROOT/evidence" "$CI_ROOT/source"
-          # Writable, disposable checkout: some old regressions intentionally write
-          # synthetic snapshots alongside the tests. Never write to the real checkout.
-          cp -a "$GITHUB_WORKSPACE/." "$CI_ROOT/source/"
-          test "$(git -C "$CI_ROOT/source" rev-parse HEAD)" = "$GITHUB_SHA"
-          echo "CI_ROOT=$CI_ROOT" >> "$GITHUB_ENV"
-          echo "CI_SOURCE=$CI_ROOT/source" >> "$GITHUB_ENV"
-          echo "EVIDENCE=$CI_ROOT/evidence" >> "$GITHUB_ENV"
-
-      - name: Build nonpublished application image and disposable test image
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker build --build-arg SOURCE_REVISION="$GITHUB_SHA" \
-            -t "bibliothekar-ci-base:${GITHUB_RUN_ID}" .
-          docker build -f qa/ci/Dockerfile \
-            --build-arg BASE_IMAGE="bibliothekar-ci-base:${GITHUB_RUN_ID}" \
-            -t "bibliothekar-ci-test:${GITHUB_RUN_ID}" .
-          docker run --rm --network none --read-only \
-            --user "$(id -u):$(id -g)" \
-            --tmpfs /tmp:rw,mode=1777,size=2g \
-            --mount "type=bind,src=$CI_SOURCE,dst=/checkout" \
-            --mount "type=bind,src=$EVIDENCE,dst=/evidence" \
-            -w /checkout \
-            -e HOME=/tmp \
-            -e PYTHONPATH=/checkout \
-            "bibliothekar-ci-test:${GITHUB_RUN_ID}" \
-            sh -ec 'command -v exiftool; exiftool -ver; command -v git; node --version; python -m pytest --version; touch /checkout/.ci-write-test; rm /checkout/.ci-write-test; touch /evidence/.ci-write-test; rm /evidence/.ci-write-test'
-
-      - name: Full backend regression with ExifTool in isolated container
-        id: regression
-        shell: bash
-        run: |
-          set -o pipefail
-          docker run --rm --network none --read-only \
-            --user "$(id -u):$(id -g)" \
-            --tmpfs /tmp:rw,mode=1777,size=2g \
-            --mount "type=bind,src=$CI_SOURCE,dst=/checkout" \
-            --mount "type=bind,src=$EVIDENCE,dst=/evidence" \
-            -w /checkout \
-            -e HOME=/tmp \
-            -e PYTHONPATH=/checkout \
-            -e PYTEST_ADDOPTS= \
-            -e GIT_CONFIG_COUNT=1 \
-            -e GIT_CONFIG_KEY_0=safe.directory \
-            -e GIT_CONFIG_VALUE_0=/checkout \
-            -e BIBLIOTHEKAR_AUTH_TEST_BYPASS=pytest-isolated \
-            "bibliothekar-ci-test:${GITHUB_RUN_ID}" \
-            python -m pytest -q -o addopts='' \
-              --junitxml=/evidence/backend-junit.xml tests/backend \
-            2>&1 | tee "$EVIDENCE/backend-qa.log"
-
-      - name: Independent no-publish integrity record
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "Source SHA: $GITHUB_SHA"
-            echo "Git ref: $GITHUB_REF"
-            echo "Runner: $RUNNER_NAME"
-            echo "Only an ephemeral writable source copy and isolated evidence were mounted."
-            echo "No GitHub release or package is published by this workflow."
-          } > "$EVIDENCE/qualification.txt"
-          git status --porcelain >> "$EVIDENCE/qualification.txt"
-          git -C "$CI_SOURCE" status --porcelain > "$EVIDENCE/test-generated-files.txt"
-
-      - name: Save full backend evidence even on failure
-        if: always()
+          # Legacy private-authority tests deliberately audit every ancestor.
+          # The shared runner checkout parent is group-writable. Use an owned
+          # disposable subtree under sticky /tmp; never chmod runner parents.
+          QA_WORK="$(mktemp -d /tmp/bibliothekar-pre5-full.XXXXXXXX)"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$QA_WORK/venv"
+          "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" RUNNER_TEMP="$QA_WORK" "$QA_WORK/venv/bin/python" qa/pre5/full_backend.py
+      - name: Preserve complete node coverage and all test evidence
+        if: always() && env.QA_WORK != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: bibliothekar-1.0-selfhosted-evidence
-          retention-days: 30
-          path: ${{ env.EVIDENCE }}/
-
-      - name: Remove disposable CI images
-        if: always()
+          name: pre5-full-backend-${{ github.run_attempt }}
+          # SQLite -shm/-wal files are transient and may disappear between
+          # upload-artifact's directory walk and stat(), causing ENOENT.
+          # Preserve durable per-partition JUnit, collection manifests and
+          # process diagnostics, never race active SQLite sidecars.
+          path: |
+            ${{ env.QA_WORK }}/pre5-full-backend/summary.json
+            ${{ env.QA_WORK }}/pre5-full-backend/*/rc13-partition.json
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/results/result.xml
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/process.log
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/restart*.log
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/result.json
+            ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/execution.json
+          retention-days: 30  container:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 35
+    defaults:
+      run:
         shell: bash
+        working-directory: pre5-container-${{ github.run_id }}
+    env:
+      PRE4_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:0678dca61f426a01ae724852741bcad6fd7cf45ae3c13df873ed6f14349c4d77
+      PRE2_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:b9434137951a8f1e40de047bed6e3d8ee3be425e079b92aa6df9ec491c982c13
+      PRE1_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:cbaa863fb6173736bcd43e917de994fadba3d05cc69c1688c618fad21d8a17b8
+      RC14_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:86991ef46f1f29a990b63ea3983b1193adfe378247d1202e41fdfd7e21d44b9b
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: ${{ github.workspace }}/pre5-container-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre5-container-${{ github.run_id }}
+      - name: Isolated container scratch directory
         run: |
-          docker image rm "bibliothekar-ci-test:${GITHUB_RUN_ID}" "bibliothekar-ci-base:${GITHUB_RUN_ID}" || true
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre5-container.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+      - name: Build one isolated candidate and pull immutable historical fixtures
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir "$QA_WORK/docker"
+          export DOCKER_CONFIG="$QA_WORK/docker"
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          IMAGE="bibliothekar-pre5-qa:$GITHUB_RUN_ID"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+          printf 'IMAGE=%s\n' "$IMAGE" >> "$GITHUB_ENV"
+          docker pull "$PRE4_IMAGE"
+          docker pull "$PRE2_IMAGE"
+          docker pull "$PRE1_IMAGE"
+          docker pull "$RC14_IMAGE"
+          docker image inspect "$IMAGE" > "$QA_WORK/candidate-image.json"
+      - name: Isolated Chromium tooling
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
+        run: |
+          set -euo pipefail
+          npm install --prefix "$QA_WORK/browser-tools" playwright@1.62.1
+          printf 'NODE_PATH=%s/browser-tools/node_modules\n' "$QA_WORK" >> "$GITHUB_ENV"
+      - name: Real API, supervisor, web termination, container restart and protected reads
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre5/container.py 2>&1 | tee "$QA_WORK/container.log"
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre4/container.py 2>&1 | tee "$QA_WORK/pre4-container.log"
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre4/historical_container.py 2>&1 | tee "$QA_WORK/historical-container.log"
+      - name: Ninety media files, real events, archive copy and three external moves
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre5/manual_changes_container.py 2>&1 | tee "$QA_WORK/manual-changes.log"
+      - name: Four thousand families and fourteen iPhone JPEGs
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/startup_container.py 2>&1 | tee "$QA_WORK/startup.log"
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py 2>&1 | tee "$QA_WORK/iphone.log"
+      - name: Reproduce immutable RC14 fourteen-JPEG upgrade only
+        if: contains(github.event.head_commit.message, '[pre5-iphone]')
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py 2>&1 | tee "$QA_WORK/iphone.log"
+      - name: Preserve evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre5-container-${{ github.run_attempt }}
+          path: |
+            ${{ env.QA_WORK }}/*.json
+            ${{ env.QA_WORK }}/*.log
+            ${{ env.QA_WORK }}/pre5-browser/*
+            ${{ env.QA_WORK }}/pre4-historical/*.log
+            ${{ env.QA_WORK }}/pre4-browser/*
+          retention-days: 30
+      - name: Remove only this run's temporary registry credentials
+        if: always() && env.DOCKER_CONFIG != ''
+        run: rm -f "$DOCKER_CONFIG/config.json"
+  frontend:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre5-front-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: pre5-front-${{ github.run_id }}
+      - name: Export actual templates and install isolated browser tooling
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre5-front.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$QA_WORK/venv"
+          "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" qa/rc14/export_ui.py "$QA_WORK/bundle.json"
+          npm install --prefix "$QA_WORK/tools" playwright@1.62.1
+      - name: Real renderers, German English and mobile desktop without network
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,size=256m,mode=1777 \
+            -v "$PWD/qa:/qa:ro" -v "$QA_WORK:/evidence" \
+            -e NODE_PATH=/evidence/tools/node_modules -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            mcr.microsoft.com/playwright:v1.62.1-noble \
+            bash -euc 'node /qa/rc13/browser.cjs /evidence/bundle.json /evidence/rc13; node /qa/rc14/browser.cjs /evidence/bundle.json /evidence/rc14'
+      - name: Preserve frontend results
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre5-full-frontend-${{ github.run_attempt }}
+          path: |
+            ${{ env.QA_WORK }}/rc13
+            ${{ env.QA_WORK }}/rc14
+          retention-days: 30
