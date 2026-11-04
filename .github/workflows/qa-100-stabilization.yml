@@ -10,6 +10,7 @@ concurrency:
   group: bibliothekar-stabilize-${{ github.ref }}
   cancel-in-progress: true
 
+jobs:
   backend:
     # Backend evidence must remain observable even when an independent container
     # migration contract fails. The overall workflow stays red on any failure.
@@ -55,7 +56,9 @@ concurrency:
             ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/restart*.log
             ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/result.json
             ${{ env.QA_WORK }}/pre5-full-backend/*/f14-qa/targets/scratch/pytest/**/execution.json
-          retention-days: 30  container:
+          retention-days: 30
+
+  container:
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 35
     defaults:
