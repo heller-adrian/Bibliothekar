@@ -132,13 +132,13 @@ The **1.0.0 milestone** focuses on the stable camera-file workflow. Bibliothekar
 
 ## Project and development
 
-[Source code](app/) · [Automated tests](tests/) · [QA](qa/) · [Technical documentation](docs/) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/heller-adrian/Bibliothekar/releases)
+[Source code](app/) · [Automated tests](tests/) · [QA](qa/) · [Technical documentation](docs/) · [Changelog](CHANGELOG.md) · [Security policy](.github/SECURITY.md) · [Releases](https://github.com/heller-adrian/Bibliothekar/releases)
 
 Development combines backend regression tests, integration tests and hands-on UI and TrueNAS checks. A green workflow alone is not a promise that every possible storage configuration is supported.
 
 ### Reporting problems
 
-Please include the exact version or container digest, relevant TrueNAS information, expected versus actual behavior and reproducible steps. **Remove personal photographs, database contents, passwords, tokens, device identifiers and internal network details** before posting logs or screenshots.
+For suspected vulnerabilities, follow our [private disclosure policy](.github/SECURITY.md), not a public issue. For ordinary bugs, please include the exact version or container digest, relevant TrueNAS information, expected versus actual behavior and reproducible steps. **Remove personal photographs, database contents, passwords, tokens, device identifiers and internal network details** before posting logs or screenshots.
 
 ## Kurz auf Deutsch
 
