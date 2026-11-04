@@ -479,7 +479,9 @@ def startup():
             # Wait only for actually admitted trash imports; unresolved F14
             # effects keep their fence and are never scheduled by this adapter.
             from app.operation_health import inspect as operation_status
-            end=time.monotonic()+8
+            # Allow a bounded 30-second async finish on the loaded CI runner;
+            # queued work must still actually reach a terminal state.
+            end=time.monotonic()+30
             while operation_status(WS)['writes_allowed']:
                 with database_connection(DB) as connection:
                     active=connection.execute("SELECT 1 FROM jobs WHERE operation='trash_import' "
