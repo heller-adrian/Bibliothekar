@@ -34,7 +34,8 @@ def test_0402_mobile_no_event_range_has_one_heading_and_two_full_rows():
 
 def test_0402_readme_declares_latest_update_channel():
     source = Path("README.md").read_text(encoding="utf-8")
-    assert "Aktuelle stabile Veröffentlichung: **" in source
-    assert f'Entwicklungsversion: **{EXPECTED_RELEASE_VERSION}**' in source
+    assert f"**Stable version:** {EXPECTED_RELEASE_VERSION}" in source
+    assert f"ghcr.io/heller-adrian/bibliothekar:{EXPECTED_RELEASE_VERSION}" in source
+    assert "not yet been accepted into the official TrueNAS Apps Catalog" in source
     assert "ghcr.io/heller-adrian/bibliothekar:latest" in source
     assert "latest" in source
