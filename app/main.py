@@ -1827,8 +1827,10 @@ def process_claimed_job(
                 and bool(job.get("duplicate_of_job_id") or
                          (job.get("result") or {}).get("verified_folder_check"))
             )
-            retained_second_shas = set(imported_sha256) if repairing_missing_backup else None
-            known_second_tokens: set[tuple[str, str]] = set()
+            # A captured snapshot here is too early: persist_identity()
+            # refreshes imported_sha256 only after source hashing, inside the
+            # worker. Resolve the verified copy set lazily in the callback.
+            known_second_tokens: dict[tuple[str, str], set[str]] = {}
             registered_databases = {
                 Path(str(row["database_path"]))
                 for row in list_libraries(
@@ -1855,11 +1857,6 @@ def process_claimed_job(
                         (job_id,),
                     ).fetchall()
                 for row in known_files:
-                    if (retained_second_shas is not None
-                        and str(row["sha256_original"] or "") not in retained_second_shas):
-                        # Verified absent from all registered allowed roots:
-                        # historic ownership alone cannot invent a burst.
-                        continue
                     observed_time = str(row["selected_capture_time"] or "")
                     try:
                         stamp = datetime.fromisoformat(observed_time).strftime("%Y%m%d_%H%M%S")
@@ -1877,10 +1874,22 @@ def process_claimed_job(
                         continue
                     token = re.sub(r"(?:_Burst)?(?:_\d{3})?$", "", tail)
                     if token:
-                        known_second_tokens.add((observed_time[:19], token.casefold()))
+                        key = (observed_time[:19], token.casefold())
+                        known_second_tokens.setdefault(key, set()).add(
+                            str(row["sha256_original"] or "")
+                        )
 
             def catalog_has_capture_in_second(capture_second: str, camera_token: str) -> bool:
-                return (capture_second[:19], camera_token.casefold()) in known_second_tokens
+                digests = known_second_tokens.get(
+                    (capture_second[:19], camera_token.casefold()), set()
+                )
+                if repairing_missing_backup:
+                    # Evaluate only after identity_callback refreshed the
+                    # SHA-verified retained copies. A lost copy may be
+                    # re-created at its old name, but an existing copy still
+                    # forces collision-free naming. Never overwrite a path.
+                    return bool(digests.intersection(imported_sha256))
+                return bool(digests)
 
             if operation == 'folder_import' and (job.get('result') or {}).get('import_recovery') == 'resume':
                 from app.import_recovery import resume
