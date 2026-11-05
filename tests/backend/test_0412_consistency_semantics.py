@@ -399,7 +399,7 @@ def test_0412_shell_has_single_consistency_dialog_contract():
     source = Path("app/ui_shell.py").read_text(encoding="utf-8")
     assert 'id="bk-external-change-dialog"' in source
     assert "/api/external-change-notices/repair-all" in source
-    assert "Die Aufgabe „Dateizuordnung prüfen“ bleibt offen" in source
+    assert "Automatisches Rückgängigmachen fehlgeschlagen. Die Aufgabe bleibt offen." in source
     assert "data-bk-notice-repair" not in source
 
 
