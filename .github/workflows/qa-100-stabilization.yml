@@ -1,7 +1,7 @@
 name: Bibliothekar 1.0.0 - final complete release qualification
 on:
   push:
-    branches: [ci/1.0.0-final-full-20261105]
+    branches: [ci/1.0.0-release-full-20261105]
   workflow_dispatch:
 permissions:
   contents: read
