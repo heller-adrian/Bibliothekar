@@ -5,6 +5,7 @@ on:
     branches:
       - main
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
@@ -31,6 +32,150 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Restrict publication to authorized release branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/main) ;;
+            refs/heads/patch/*)
+              # Only a newly added/updated release-request file authorizes patch CI.
+              if [[ "$GITHUB_EVENT_NAME" != "push" ]]; then
+                echo 'Patch publishing requires a push release request.' >&2
+                exit 1
+              fi
+              if ! git diff-tree --root --no-commit-id --diff-filter=AM --name-only -r "$GITHUB_SHA" |
+                  grep -Eq '^\.github/release-requests/[^/]+\.txt        env:
+          BIBLIOTHEKAR_APPDATA_DIR: /tmp/bibliothekar/appdata
+          BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/bibliothekar/workspace
+          BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/bibliothekar/main-library
+          BIBLIOTHEKAR_ADMIN_PASSWORD: release-check-only-not-a-real-secret
+        run: docker compose -f compose.example.yaml config -q
+
+      - name: Install metadata regression dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
+
+      - name: Complete QA before publishing
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2
+          python -m compileall -q app qa
+          bash -n qa/archive_e2e/*.sh
+          pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
+
+      - name: Retain QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-qa
+          path: |
+            /tmp/bibliothekar-qa.xml
+            /tmp/pytest-of-*/pytest-*/0562-evidence
+
+      - name: Read application version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(python - <<'PY'
+          from app import __version__
+          print(__version__)
+          PY
+          )"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Ungültige App-Version: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Reject an existing stable version tag
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null; then
+            echo "Stable version v${VERSION} already exists; refusing to overwrite its image or tag." >&2
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=v${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=patch-${{ github.sha }},enable=${{ startsWith(github.ref, 'refs/heads/patch/') }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push image
+        id: publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Record published digest
+        run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish stable GitHub release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          TAG="v${VERSION}"
+
+          git tag "${TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG}"
+
+          cat > /tmp/release-body.md <<EOF
+          Bibliothekar ${TAG}
+
+          Container:
+          - ghcr.io/${GITHUB_REPOSITORY_OWNER}/bibliothekar:latest
+          - ghcr.io/${GITHUB_REPOSITORY_OWNER}/bibliothekar:${VERSION}
+          - ghcr.io/${GITHUB_REPOSITORY_OWNER}/bibliothekar:${TAG}
+
+          Digest:
+          ${IMAGE_DIGEST}
+
+          Source commit:
+          ${GITHUB_SHA}
+          EOF
+
+          # Published stable releases are immutable; never rewrite an existing tag or release.
+          gh release create "${TAG}" --title "${TAG}" --notes-file /tmp/release-body.md --latest
+
+          echo "Stable release ${TAG} points to ${GITHUB_SHA}."
+; then
+                echo 'No new release request in this commit.' >&2
+                exit 1
+              fi
+              ;;
+            *) echo "Unauthorized release ref: $GITHUB_REF" >&2; exit 1 ;;
+          esac
 
       - name: Validate TrueNAS Custom App compose
         env:
