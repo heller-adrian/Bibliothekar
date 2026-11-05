@@ -1,12 +1,12 @@
-name: Bibliothekar 1.0.0 - targeted backend diagnostics
+name: Bibliothekar 1.0.0 - targeted regression repairs
 
 on:
   push:
-    branches: [ci/1.0.0-targeted-diagnostics]
+    branches: [ci/1.0.0-targeted-diagnostics, fix/1.0.0-targeted-regressions]
   workflow_dispatch:
     inputs:
       group:
-        description: All eight known regression groups or only one
+        description: All five unresolved regression groups or one selected group
         type: choice
         required: true
         default: all
@@ -50,7 +50,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        group: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.group != 'all' && format('["{0}"]', inputs.group) || '["trash-concurrency","trash-recovery","sd-import","version","ui-contract","publish-contract","recovery-consistency","large-import"]') }}
+        group: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.group != 'all' && format('["{0}"]', inputs.group) || '["trash-concurrency","sd-import","ui-contract","publish-contract","recovery-consistency"]') }}
     name: Diagnose ${{ matrix.group }}
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 35
@@ -120,6 +120,7 @@ jobs:
             ${{ env.QA_WORK }}/f14-qa/targets/results/exit.json
             ${{ env.QA_WORK }}/f14-qa/targets/results/diagnostic-selection.json
             ${{ env.QA_WORK }}/f14-qa/targets/results/diagnostic-failures.jsonl
+            ${{ env.QA_WORK }}/f14-qa/targets/results/thread-*.json
             ${{ env.QA_WORK }}/f14-qa/targets/results/targets-results.json
             ${{ env.QA_WORK }}/f14-qa/targets/results/targets-incremental.jsonl
             ${{ env.QA_WORK }}/f14-qa/targets/results/execution-deadlines.json
