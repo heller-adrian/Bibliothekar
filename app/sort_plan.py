@@ -962,7 +962,14 @@ def build_event_sort_plan(
                             connection,
                             capture_value,
                             physical=True,
-                            include_event_ids=(event_id,) if not allow_reapply else (),
+                            # Reapply moves to the NEW saved event definition.
+                            # The old segments remain the source filesystem
+                            # occupancy until the transaction completes, but
+                            # must not block the new free-stock destinations.
+                            # include_event_ids tells the physical layout
+                            # resolver to use the committed SOLL segments for
+                            # this event only; other events remain occupied.
+                            include_event_ids=(event_id,),
                         )
                     )
                 except FreeStockLayoutError as error:
