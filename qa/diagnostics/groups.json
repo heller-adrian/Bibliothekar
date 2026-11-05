@@ -58,6 +58,19 @@
     ],
     "large-import": [
       "tests/backend/test_rc14_import.py::test_rc13_staged_zero_published_resume_preserves_origin[3892]"
+    ],
+    "final-three": [
+      "tests/backend/test_rc5_practice_followup.py::test_hundred_known_files_no_import_and_no_managed_folders",
+      "tests/backend/test_0264_inspector_ui.py::test_version_sources_are_consistent",
+      "tests/backend/test_0204_applied_neutralization.py::test_0260_applied_no_event_shrink_reconciles_removed_family_to_free_stock",
+      "tests/backend/test_0204_applied_neutralization.py::test_no_event_pending_reconcile_uses_old_physical_but_new_target_occupancy",
+      "tests/backend/test_0204_applied_neutralization.py::test_applied_no_event_removed_family_uses_same_no_move_rule",
+      "tests/backend/test_0204_applied_neutralization.py::test_applied_normal_event_removed_family_stays_at_old_path_until_reconcile",
+      "tests/backend/test_0204_applied_neutralization.py::test_cancel_applied_edit_restores_db_without_moving_files",
+      "tests/backend/test_0260_free_stock.py::test_reconcile_shift_renormalizes_cross_job_free_file",
+      "tests/backend/test_0260_free_stock.py::test_library_wide_event_and_no_event_split_one_day",
+      "tests/backend/test_0260_free_stock.py::test_cross_job_reconcile_rolls_back_after_late_destination_collision"
     ]
-  }
+  },
+  "final_three_source_run": "41948031493"
 }
