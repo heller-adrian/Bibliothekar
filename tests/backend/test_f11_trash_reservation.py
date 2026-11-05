@@ -132,7 +132,14 @@ def test_f11_two_concurrent_requests(tmp_path,monkeypatch,kind):
     def request():
         barrier.wait(15)
         return main.api_restore_trash({'relative_paths':['A.JPG']}) if kind=='restore' else empty()
-    a,x=run_thread(request);b,y=run_thread(request);barrier.wait(15);a.join(15);b.join(15)
+    a,x=run_thread(request);b,y=run_thread(request);barrier.wait(15)
+    # Both requests must finish; capture each live stack if the loaded CI VM
+    # is slow or a lock remains held. A longer wait is not a silent PASS.
+    a.join(30);b.join(30)
+    if a.is_alive() or b.is_alive():
+        from tests.backend.thread_evidence import snapshot
+        snapshot("f11-concurrent-"+kind, [a,b],
+                 completed=[(status, str(value)[:500]) for status,value in x+y])
     assert not a.is_alive() and not b.is_alive()
     results=x+y;assert any(r[0]=='ok' for r in results)
     for status,result in results:
