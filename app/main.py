@@ -1818,6 +1818,16 @@ def process_claimed_job(
             # Include earlier applied and archived captures, not just current
             # physical day files. Two imports can share a camera-local second
             # even if the first photograph has already left the free stock.
+            # Confirmed replacement of a missing backup must not treat the
+            # verified-lost historical catalogue row as a physical collision.
+            # refresh_import_origins() has verified present SHA-256 copies.
+            # Ordinary imports still honor the full same-second history.
+            repairing_missing_backup = (
+                operation == "folder_import"
+                and bool(job.get("duplicate_of_job_id") or
+                         (job.get("result") or {}).get("verified_folder_check"))
+            )
+            retained_second_shas = set(imported_sha256) if repairing_missing_backup else None
             known_second_tokens: set[tuple[str, str]] = set()
             registered_databases = {
                 Path(str(row["database_path"]))
@@ -1836,7 +1846,7 @@ def process_claimed_job(
                     )
                 with database_connection(existing_db) as con:
                     known_files = con.execute(
-                        """SELECT current_relative_path,selected_capture_time
+                        """SELECT current_relative_path,selected_capture_time,sha256_original
                            FROM files
                            WHERE job_id<>?
                              AND current_root_kind IN ('shared_workspace','camera_archive')
@@ -1845,6 +1855,11 @@ def process_claimed_job(
                         (job_id,),
                     ).fetchall()
                 for row in known_files:
+                    if (retained_second_shas is not None
+                        and str(row["sha256_original"] or "") not in retained_second_shas):
+                        # Verified absent from all registered allowed roots:
+                        # historic ownership alone cannot invent a burst.
+                        continue
                     observed_time = str(row["selected_capture_time"] or "")
                     try:
                         stamp = datetime.fromisoformat(observed_time).strftime("%Y%m%d_%H%M%S")
