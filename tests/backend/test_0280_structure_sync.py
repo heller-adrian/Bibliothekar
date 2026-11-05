@@ -511,10 +511,11 @@ def test_0414_applied_file_moved_to_wrong_subevent_is_repaired_to_semantic_leaf(
             "SELECT current_relative_path FROM files WHERE id=?",
             (file_id,),
         ).fetchone()
-    # Physical IST may be adopted in SQLite, but the persistent notice retains
-    # the semantic target used by the repair.
+    # The catalogue retains the semantic SOLL location; the observed wrong
+    # physical IST location is retained separately in the durable notice.
+    # Repair must still be exercised below (SHA, destination and notice).
     assert str(current["current_relative_path"]) == (
-        "2026/07-23 - Trip/Tag 2/Alle/A.JPG"
+        "2026/07-23 - Trip/Tag 1/Alle/A.JPG"
     )
 
     repaired = repair_external_conflicts(
