@@ -159,6 +159,9 @@ def test_0452_github_build_is_manual_for_patch_branches():
     assert "'patch/**'" not in qa
     assert "'patch/**'" not in publish
     assert "type=raw,value=patch-" in publish
+    assert "workflow_call:" in publish
+    assert 'git diff-tree --root --no-commit-id --diff-filter=AM' in publish
+    assert "refs/heads/patch/*" in publish
 
 
 def test_0452_patch_publish_requires_explicit_release_request():
@@ -170,6 +173,10 @@ def test_0452_patch_publish_requires_explicit_release_request():
     assert "'patch/**'" in trigger_workflow
     assert "'.github/release-requests/**'" in trigger_workflow
     assert "uses: ./.github/workflows/publish-container.yml" in trigger_workflow
+    assert "type=raw,value=patch-" in main_workflow
+    # Patch builds never overwrite stable release tags or the latest image.
+    assert "enable=${{ github.ref == 'refs/heads/main' }}" in main_workflow
+    assert ".github/release-requests/**" in trigger_workflow
 
 
 def test_0452_import_history_excludes_internal_metadata_jobs(tmp_path, monkeypatch):
