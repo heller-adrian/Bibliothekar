@@ -1,5 +1,9 @@
 <div align="center">
-  <img src="docs/bibliothekar-readme-logo.svg" alt="Bibliothekar logo" width="490">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bibliothekar-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/bibliothekar-logo-light.svg">
+    <img src="docs/assets/bibliothekar-logo-light.svg" alt="Bibliothekar logo" width="490">
+  </picture>
   <p><strong>Self-hosted camera photo import, review and archival for TrueNAS</strong></p>
 </div>
 
