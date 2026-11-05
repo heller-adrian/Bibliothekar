@@ -23,6 +23,11 @@ def pytest_runtest_protocol(item,nextitem):
     # F11 cases include real crash and three independent restart lifecycles.
     if 'test_f11_trash_reservation.py::' in item.nodeid:
         deadline=240
+    # The 100-file already-backed-up integration test probes a real worker
+    # and verifies exact no-op files, hashes, folders and history. CI disk
+    # latency can exceed the generic 90-second single-test budget.
+    if item.nodeid.endswith('test_hundred_known_files_no_import_and_no_managed_folders'):
+        deadline=240
     if item.nodeid.endswith('test_rc13_staged_zero_published_resume_preserves_origin[3892]'):
         deadline=900
     def alarm(*args):
@@ -39,4 +44,4 @@ def pytest_runtest_protocol(item,nextitem):
                     else:p.kill()
                     p.wait(timeout=5)
             except (ProcessLookupError,AttributeError):pass
-        (Path(os.environ['AUDIT_OUTPUT'])/'execution-deadlines.json').write_text(json.dumps({'per_test_seconds':90,'three_lifecycle_reserve_seconds':240,'rc14_3892_files_seconds':900,'timeouts':timeouts,'cleanup':'Tracked child processes remaining at test end are stopped; sessions killed as groups'},indent=2))
+        (Path(os.environ['AUDIT_OUTPUT'])/'execution-deadlines.json').write_text(json.dumps({'per_test_seconds':90,'three_lifecycle_reserve_seconds':240,'rc14_3892_files_seconds':900,'already_backed_up_100_files_seconds':240,'timeouts':timeouts,'cleanup':'Tracked child processes remaining at test end are stopped; sessions killed as groups'},indent=2))
