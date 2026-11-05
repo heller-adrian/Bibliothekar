@@ -1,7 +1,7 @@
-name: Bibliothekar 1.0.0 - original Pre.5 full qualification
+name: Bibliothekar 1.0.0 - final complete release qualification
 on:
   push:
-    branches: [ci/1.0.0-final-qualification]
+    branches: [ci/1.0.0-final-full-20261105]
   workflow_dispatch:
 permissions:
   contents: read
@@ -51,6 +51,14 @@ jobs:
       - name: Isolated current-source Python environment
         run: |
           set -euo pipefail
+          # Re-check the runner before every heavy partition, not only
+          # at the workflow-wide preflight. Never delete old evidence.
+          available_kib="$(df -Pk /tmp | awk 'END {print $4}')"
+          if (( available_kib < 12 * 1024 * 1024 )); then
+            echo "::error::Less than 12 GiB free before partition $PARTITION"
+            exit 1
+          fi
+          df -h / /tmp
           QA_WORK="$(mktemp -d /tmp/bibliothekar-100-backend-$PARTITION.XXXXXXXX)"
           echo "QA_WORK=$QA_WORK" >> "$GITHUB_ENV"
           python3 -m venv "$QA_WORK/venv"
