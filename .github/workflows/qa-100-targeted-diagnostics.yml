@@ -1,25 +1,18 @@
-name: Bibliothekar 1.0.0 - targeted regression repairs
+name: Bibliothekar 1.0.0 - final three focused regression verification
 
 on:
   push:
-    branches: [ci/1.0.0-targeted-diagnostics, fix/1.0.0-targeted-regressions]
+    branches: [fix/1.0.0-final-three]
   workflow_dispatch:
     inputs:
       group:
-        description: All five unresolved regression groups or one selected group
+        description: Only the three final failed cases and seven safety regressions
         type: choice
         required: true
         default: all
         options:
           - all
-          - trash-concurrency
-          - trash-recovery
-          - sd-import
-          - version
-          - ui-contract
-          - publish-contract
-          - recovery-consistency
-          - large-import
+          - final-three
 
 permissions:
   contents: read
@@ -50,7 +43,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        group: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.group != 'all' && format('["{0}"]', inputs.group) || '["trash-concurrency","sd-import","ui-contract","publish-contract","recovery-consistency"]') }}
+        group: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.group != 'all' && format('["{0}"]', inputs.group) || '["final-three"]') }}
     name: Diagnose ${{ matrix.group }}
     runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
     timeout-minutes: 35
